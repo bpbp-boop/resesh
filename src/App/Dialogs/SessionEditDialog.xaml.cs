@@ -64,6 +64,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             else
                 // Editable ComboBox resets Text set before it loads; apply it after.
                 TerminalTypeBox.Loaded += (_, _) => TerminalTypeBox.Text = existing.TerminalType;
+            PersistentToggle.IsOn = existing.Persistent;
             NotesBox.Text = existing.Notes;
         }
 
@@ -88,16 +89,16 @@ public sealed partial class SessionEditDialog : ContentDialog
         PassphraseCheck.Visibility = auth == AuthMethod.PrivateKey ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private async void BrowseKey_Click(object sender, RoutedEventArgs e)
+    // Keeps the key picker's last-used folder separate from other pickers in the app.
+    private static readonly Guid KeyPickerClientId = new("b3f9c1e4-8f6a-4d2b-9c0e-5a7d31e8b246");
+
+    private void BrowseKey_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new Windows.Storage.Pickers.FileOpenPicker();
-        picker.FileTypeFilter.Add("*"); // key files usually have no extension (id_ed25519, id_rsa)
-        WinRT.Interop.InitializeWithWindow.Initialize(
-            picker,
-            Microsoft.UI.Win32Interop.GetWindowFromWindowId(XamlRoot.ContentIslandEnvironment.AppWindowId));
-        var file = await picker.PickSingleFileAsync();
-        if (file is not null)
-            KeyPathBox.Text = file.Path;
+        var hwnd = Microsoft.UI.Win32Interop.GetWindowFromWindowId(XamlRoot.ContentIslandEnvironment.AppWindowId);
+        var sshDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh");
+        var path = Interop.Win32FileDialog.PickFile(hwnd, KeyPickerClientId, sshDir, "Select private key file");
+        if (path is not null)
+            KeyPathBox.Text = path;
     }
 
     private void OnPrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
@@ -131,6 +132,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             PrivateKeyPath = SelectedAuth == AuthMethod.PrivateKey ? KeyPathBox.Text.Trim() : null,
             PassphraseRequired = SelectedAuth == AuthMethod.PrivateKey && PassphraseCheck.IsChecked == true,
             TerminalType = string.IsNullOrWhiteSpace(TerminalTypeBox.Text) ? "xterm-256color" : TerminalTypeBox.Text.Trim(),
+            Persistent = PersistentToggle.IsOn,
             Notes = NotesBox.Text,
             ColorTag = ColorChoices[Math.Max(0, ColorBox.SelectedIndex)].Hex,
             CredentialNeeded = _existing?.CredentialNeeded ?? false,

@@ -139,6 +139,13 @@
                                         </Ellipse.Fill>
                                     </Ellipse>
                                     <FontIcon
+                                        Glyph="&#xE840;"
+                                        FontSize="11"
+                                        VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="Pinned"
+                                        Foreground="{x:Bind HeaderForeground, Mode=OneWay}"
+                                        Visibility="{x:Bind PinIconVisibility, Mode=OneWay}" />
+                                    <FontIcon
                                         Glyph="&#xE72E;"
                                         FontSize="11"
                                         VerticalAlignment="Center"

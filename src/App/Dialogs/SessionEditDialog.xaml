@@ -94,6 +94,15 @@
                     <x:String>linux</x:String>
                 </ComboBox>
 
+                <StackPanel Spacing="4">
+                    <ToggleSwitch x:Name="PersistentToggle" Header="Persistent session" />
+                    <TextBlock
+                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Runs the shell inside tmux on the host, so it survives dropped connections and app restarts — reconnecting resumes right where you left off. Requires tmux on the host."
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
                 <TextBox
                     x:Name="NotesBox"
                     Header="Notes"

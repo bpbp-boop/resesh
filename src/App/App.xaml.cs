@@ -52,7 +52,9 @@ public partial class App : Application
 #if DEBUG
         Sessions.Core.Ssh.SshTerminalSession.TraceHook = message => MainWindow.Trace(message);
 #endif
-        _window = new MainWindow();
-        _window.Activate();
+        var window = new MainWindow();
+        _window = window;
+        window.Activate();
+        window.RestorePinnedSessions();
     }
 }

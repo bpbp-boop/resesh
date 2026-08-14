@@ -36,6 +36,9 @@ public sealed record Session
 
     public string TerminalType { get; init; } = "xterm-256color";
 
+    /// <summary>Run the remote shell inside tmux so it survives disconnects (requires tmux on the host).</summary>
+    public bool Persistent { get; init; }
+
     public string Notes { get; init; } = "";
 
     /// <summary>Optional accent color for the tab, as #RRGGBB. Null = none.</summary>

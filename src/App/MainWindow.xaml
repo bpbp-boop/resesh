@@ -124,6 +124,12 @@
                     DragItemsCompleted="SessionTree_DragItemsCompleted"
                     Expanding="SessionTree_Expanding"
                     Collapsed="SessionTree_Collapsed">
+                    <TreeView.Resources>
+                        <!-- Row height is content (20) + presenter padding + margin; MinHeight alone never binds. -->
+                        <x:Double x:Key="TreeViewItemMinHeight">20</x:Double>
+                        <Thickness x:Key="TreeViewItemPresenterMargin">4,1</Thickness>
+                        <Thickness x:Key="TreeViewItemPresenterPadding">0</Thickness>
+                    </TreeView.Resources>
                     <TreeView.ContextFlyout>
                         <MenuFlyout>
                             <MenuFlyoutItem Text="New Session…" Click="NewSession_Click" />

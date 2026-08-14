@@ -17,10 +17,12 @@ public interface ITabGroupHost
     void MoveToOtherGroup(TabViewModel tab);
     void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex);
     void CloneSession(TabViewModel tab);
+    void TogglePin(TabViewModel tab);
     Task OpenSessionOptionsAsync(TabViewModel tab);
     Task LockSessionAsync(TabViewModel tab);
     void ReconnectTab(TabViewModel tab);
     void DisconnectTab(TabViewModel tab);
+    Task EndRemoteSessionAsync(TabViewModel tab);
 }
 
 public sealed partial class TabGroupView : UserControl
@@ -148,9 +150,9 @@ public sealed partial class TabGroupView : UserControl
         e.Handled = true;
     }
 
-    private MenuFlyoutItem _rename = null!, _resetName = null!, _reconnect = null!, _disconnect = null!,
+    private MenuFlyoutItem _rename = null!, _resetName = null!, _reconnect = null!, _disconnect = null!, _endRemote = null!,
         _close = null!, _closeDisconnected = null!, _closeOthers = null!, _closeRight = null!,
-        _closeGroup = null!, _closeAll = null!, _lock = null!, _clone = null!, _split = null!, _options = null!;
+        _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _options = null!;
 
     private MenuFlyout BuildTabMenu()
     {
@@ -169,6 +171,7 @@ public sealed partial class TabGroupView : UserControl
         _resetName = Item("Reset Name", tab => tab.TitleOverride = null);
         _reconnect = Item("Reconnect", tab => _host.ReconnectTab(tab));
         _disconnect = Item("Disconnect", tab => _host.DisconnectTab(tab));
+        _endRemote = Item("End Remote Session…", tab => _ = _host.EndRemoteSessionAsync(tab));
         _close = Item("Close", tab => _ = _host.RequestCloseTabAsync(tab));
         _close.KeyboardAcceleratorTextOverride = "Ctrl+F4";
         _closeDisconnected = Item("Close Disconnected Tabs", tab =>
@@ -183,6 +186,7 @@ public sealed partial class TabGroupView : UserControl
             _ = _host.RequestCloseManyAsync(Group.Tabs.ToList(), "tab(s) in this group"));
         _closeAll = Item("Close All Tabs", tab =>
             _ = _host.RequestCloseManyAsync(_host.ViewModel.AllTabs.ToList(), "tab(s)"));
+        _pin = Item("Pin Tab", tab => _host.TogglePin(tab));
         _lock = Item("Lock Session…", tab => _ = _host.LockSessionAsync(tab));
         _clone = Item("Clone Session", tab => _host.CloneSession(tab));
         _split = Item("Split Right", tab =>
@@ -200,6 +204,7 @@ public sealed partial class TabGroupView : UserControl
         menu.Items.Add(_resetName);
         menu.Items.Add(_reconnect);
         menu.Items.Add(_disconnect);
+        menu.Items.Add(_endRemote);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_close);
         menu.Items.Add(_closeDisconnected);
@@ -208,6 +213,7 @@ public sealed partial class TabGroupView : UserControl
         menu.Items.Add(_closeGroup);
         menu.Items.Add(_closeAll);
         menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(_pin);
         menu.Items.Add(_lock);
         menu.Items.Add(_clone);
         menu.Items.Add(new MenuFlyoutSeparator());
@@ -222,9 +228,14 @@ public sealed partial class TabGroupView : UserControl
         _resetName.IsEnabled = tab.TitleOverride is not null;
         _reconnect.IsEnabled = tab.State == TabConnectionState.Disconnected;
         _disconnect.IsEnabled = tab.State == TabConnectionState.Connected;
-        _closeDisconnected.IsEnabled = Group.Tabs.Any(t => t.State == TabConnectionState.Disconnected);
-        _closeOthers.IsEnabled = Group.Tabs.Count > 1;
-        _closeRight.IsEnabled = Group.Tabs.IndexOf(tab) < Group.Tabs.Count - 1;
+        // Only persistent sessions have a remote session to end; close/disconnect only detach them.
+        _endRemote.Visibility = tab.Session.Persistent ? Visibility.Visible : Visibility.Collapsed;
+        _endRemote.IsEnabled = tab.Session.Persistent && tab.State == TabConnectionState.Connected;
+        // Bulk closes skip pinned tabs, so they're only offered when an unpinned tab qualifies.
+        _closeDisconnected.IsEnabled = Group.Tabs.Any(t => t.State == TabConnectionState.Disconnected && !t.IsPinned);
+        _closeOthers.IsEnabled = Group.Tabs.Any(t => t != tab && !t.IsPinned);
+        _closeRight.IsEnabled = Group.Tabs.Skip(Group.Tabs.IndexOf(tab) + 1).Any(t => !t.IsPinned);
+        _pin.Text = tab.IsPinned ? "Unpin Tab" : "Pin Tab";
         _lock.IsEnabled = !tab.IsLocked;
         _split.Text = _host.ViewModel.IsSplit ? "Move to Other Group" : "Split Right";
         // Splitting a lone tab would leave an empty group that immediately collapses — pointless.
@@ -253,6 +264,12 @@ public sealed partial class TabGroupView : UserControl
 
     private void Tabs_TabDragStarting(TabView sender, TabViewTabDragStartingEventArgs args)
     {
+        // Pinned tabs stay put at the front of their group.
+        if (args.Item is TabViewModel { IsPinned: true })
+        {
+            args.Cancel = true;
+            return;
+        }
         _draggedTab = args.Item as TabViewModel;
         _dragSource = this;
         args.Data.RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
@@ -286,7 +303,8 @@ public sealed partial class TabGroupView : UserControl
             }
         }
 
-        _host.MoveTabBetweenGroups(tab, Group, index);
+        // Never land in front of the target group's pinned tabs.
+        _host.MoveTabBetweenGroups(tab, Group, Math.Max(index, Group.Tabs.Count(t => t.IsPinned)));
         _draggedTab = null;
         _dragSource = null;
     }

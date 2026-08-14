@@ -98,6 +98,14 @@ public sealed class MainViewModel : ObservableObject
     {
         group ??= FocusedGroup;
         var tab = new TabViewModel(session);
+        if (session.Persistent)
+        {
+            // Lowest unused slot, so a clone gets its own tmux session and a reopened
+            // tab (all others closed) attaches back to the primary.
+            var used = AllTabs.Where(t => t.Session.Id == session.Id).Select(t => t.TmuxSlot).ToHashSet();
+            while (used.Contains(tab.TmuxSlot))
+                tab.TmuxSlot++;
+        }
         tab.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(TabViewModel.State) or nameof(TabViewModel.ConnectionSummary)

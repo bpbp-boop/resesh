@@ -114,7 +114,10 @@ public sealed class TerminalTabView : Grid, IDisposable
 
             var cols = _terminal.Columns;
             var rows = _terminal.Rows;
-            await Task.Run(() => session.Connect(Session, secret, Session.TerminalType, cols, rows));
+            var bootstrap = Session.Persistent
+                ? TmuxPersistence.BootstrapCommand(Session.Id, _tab.TmuxSlot)
+                : null;
+            await Task.Run(() => session.Connect(Session, secret, Session.TerminalType, cols, rows, bootstrap));
 
             _session = session;
             _tab.State = TabConnectionState.Connected;
@@ -196,6 +199,17 @@ public sealed class TerminalTabView : Grid, IDisposable
             copyOnSelect: settings.CopyOnSelect,
             rightClickPaste: settings.RightClickPaste,
             scrollback: settings.Scrollback);
+
+    /// <summary>
+    /// Kills the remote tmux session (persistent sessions only); the attached channel then
+    /// closes on its own, which the normal Closed handler reports as disconnected.
+    /// </summary>
+    public void EndRemoteSession()
+    {
+        var session = _session;
+        if (Session.Persistent && session is not null)
+            _ = Task.Run(() => session.TryRunCommand(TmuxPersistence.KillCommand(Session.Id, _tab.TmuxSlot)));
+    }
 
     /// <summary>Local, user-initiated disconnect: tab stays open showing the notice.</summary>
     public void DisconnectLocal()

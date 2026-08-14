@@ -66,8 +66,13 @@ public sealed class SshTerminalSession : IDisposable
         _knownHosts = knownHosts;
     }
 
-    /// <summary>Connects and opens the shell. Blocking — run on a background thread.</summary>
-    public void Connect(Session session, string? secret, string terminalType, int columns, int rows)
+    /// <summary>
+    /// Connects and opens the shell. Blocking — run on a background thread.
+    /// A non-null <paramref name="bootstrapCommand"/> is typed into the shell as its first
+    /// input (persistent sessions use this to exec into tmux).
+    /// </summary>
+    public void Connect(Session session, string? secret, string terminalType, int columns, int rows,
+        string? bootstrapCommand = null)
     {
         if (_client is not null)
             throw new InvalidOperationException("Session already used; create a new instance per connection.");
@@ -130,6 +135,14 @@ public sealed class SshTerminalSession : IDisposable
 
         _client = client;
         _shell = client.CreateShellStream(terminalType, (uint)columns, (uint)rows, 0, 0, 64 * 1024);
+        if (bootstrapCommand is not null)
+        {
+            // The pty buffers this until the login shell reads stdin; its echo is short-lived
+            // (the persistent-session bootstrap clears the screen as its first action).
+            var bytes = System.Text.Encoding.UTF8.GetBytes(bootstrapCommand + "\n");
+            _shell.Write(bytes, 0, bytes.Length);
+            _shell.Flush();
+        }
         _readerCts = new CancellationTokenSource();
         _readerTask = Task.Run(() => ReadLoop(_shell, _readerCts.Token));
 
@@ -265,6 +278,24 @@ public sealed class SshTerminalSession : IDisposable
 
     public void Resize(int columns, int rows) =>
         ShellStreamResizer.TryResize(_shell, columns, rows);
+
+    /// <summary>Runs a one-off command on its own channel (e.g. tmux kill-session). Blocking.</summary>
+    public bool TryRunCommand(string command)
+    {
+        try
+        {
+            var client = _client;
+            if (client?.IsConnected != true || _disposed)
+                return false;
+            using var cmd = client.CreateCommand(command);
+            cmd.Execute();
+            return cmd.ExitStatus == 0;
+        }
+        catch (Exception e) when (e is SshException or IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>Clean local disconnect: suppresses Closed, per the dispose-order plan.</summary>
     public void Disconnect()

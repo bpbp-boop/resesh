@@ -25,6 +25,13 @@ public sealed class TabViewModel : ObservableObject
         _session = session;
     }
 
+    /// <summary>
+    /// Distinguishes this tab's tmux session when several tabs of the same saved session are
+    /// open (Clone): slot 0 is the primary; clones get their own remote session. Fixed at
+    /// tab creation so Reconnect re-attaches to the same remote session.
+    /// </summary>
+    public int TmuxSlot { get; set; }
+
     public Session Session
     {
         get => _session;
@@ -107,10 +114,10 @@ public sealed class TabViewModel : ObservableObject
 
     public Visibility AccentVisibility => IsActive ? Visibility.Visible : Visibility.Collapsed;
 
-    /// <summary>The × shows on the active tab and on hover; hidden (but space kept) otherwise.</summary>
-    public double CloseOpacity => IsActive || IsPointerOver ? 1.0 : 0.0;
+    /// <summary>The × shows on the active tab and on hover; hidden (but space kept) otherwise. Never on pinned tabs.</summary>
+    public double CloseOpacity => !IsPinned && (IsActive || IsPointerOver) ? 1.0 : 0.0;
 
-    public bool CloseInteractive => IsActive || IsPointerOver;
+    public bool CloseInteractive => !IsPinned && (IsActive || IsPointerOver);
 
     private static bool IsDark =>
         Microsoft.UI.Xaml.Application.Current.RequestedTheme == Microsoft.UI.Xaml.ApplicationTheme.Dark;
@@ -162,6 +169,25 @@ public sealed class TabViewModel : ObservableObject
         TabConnectionState.Connected => "connected",
         _ => "disconnected",
     };
+
+    // ---- Pin state (browser-style: pinned tabs can't be closed without unpinning) ----
+
+    private bool _isPinned;
+
+    public bool IsPinned
+    {
+        get => _isPinned;
+        set
+        {
+            if (SetProperty(ref _isPinned, value))
+            {
+                OnPropertyChanged(nameof(PinIconVisibility));
+                NotifyTabVisuals(); // the × hides while pinned
+            }
+        }
+    }
+
+    public Visibility PinIconVisibility => IsPinned ? Visibility.Visible : Visibility.Collapsed;
 
     // ---- Lock state (per plan: password held in memory only; never persisted) ----
 

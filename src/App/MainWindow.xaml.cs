@@ -84,7 +84,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     }
 
     /// <summary>Opens a tab for the session and starts its terminal + SSH lifecycle.</summary>
-    private void ConnectSession(Session session, TabGroupViewModel? group = null)
+    private TabViewModel ConnectSession(Session session, TabGroupViewModel? group = null)
     {
         var tab = ViewModel.Connect(session, group);
         var view = new TerminalTabView(tab, App.Credentials, App.KnownHosts);
@@ -99,6 +99,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         };
         tab.View = view;
         _groupViews[ViewModel.GroupOf(tab)].AddTerminal(view);
+        return tab;
     }
 
     // ---- ITabGroupHost ----
@@ -112,13 +113,27 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     /// <summary>THE close pathway: X button, Ctrl+F4, context menu, and middle-click all land here.</summary>
     public async Task RequestCloseTabAsync(TabViewModel tab)
     {
-        var detail = tab.State == TabConnectionState.Connected ? " The session is still connected." : "";
+        var detail = tab.State != TabConnectionState.Connected
+            ? ""
+            : tab.Session.Persistent
+                ? " The remote session keeps running (persistent) — connecting again resumes it."
+                : " The session is still connected.";
+        if (tab.IsPinned)
+        {
+            // Pinned tabs need the extra deliberate step; one dialog covers both.
+            if (!await ConfirmAsync("Tab Is Pinned", $"\"{tab.Header}\" is pinned.{detail}", "Unpin and Close"))
+                return;
+            TogglePin(tab);
+            CloseTabCore(tab);
+            return;
+        }
         if (await ConfirmAsync("Close Tab", $"Close \"{tab.Header}\"?{detail}", "Close"))
             CloseTabCore(tab);
     }
 
     public async Task RequestCloseManyAsync(IReadOnlyList<TabViewModel> tabs, string description)
     {
+        tabs = tabs.Where(t => !t.IsPinned).ToList(); // bulk closes never touch pinned tabs
         if (tabs.Count == 0)
             return;
         var connected = tabs.Count(t => t.State == TabConnectionState.Connected);
@@ -213,6 +228,51 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     public void CloneSession(TabViewModel tab) =>
         ConnectSession(tab.Session, ViewModel.GroupOf(tab));
 
+    // ---- pinning (browser-style; pinned session ids persist and reopen on launch) ----
+
+    public void TogglePin(TabViewModel tab)
+    {
+        tab.IsPinned = !tab.IsPinned;
+        if (tab.IsPinned)
+        {
+            // Pinned tabs live at the front of their group, after any already-pinned tabs.
+            var group = ViewModel.GroupOf(tab);
+            var selected = group.SelectedTab;
+            var index = group.Tabs.IndexOf(tab);
+            var target = group.Tabs.Count(t => t.IsPinned) - 1;
+            if (index != target)
+                group.Tabs.Move(index, target);
+            group.SelectedTab = selected; // the move must not steal selection
+        }
+        SavePinnedSessions();
+    }
+
+    private void SavePinnedSessions() =>
+        App.Settings.Save(App.Settings.Current with
+        {
+            PinnedSessionIds = ViewModel.AllTabs.Where(t => t.IsPinned).Select(t => t.Session.Id).Distinct().ToList(),
+        });
+
+    /// <summary>Reopens and reconnects the pinned sessions from the last run; called once at launch.</summary>
+    public void RestorePinnedSessions()
+    {
+        var ids = App.Settings.Current.PinnedSessionIds;
+        if (ids.Count == 0)
+            return;
+        var restored = new List<Guid>();
+        foreach (var id in ids)
+        {
+            if (App.Store.Find(id) is { } session)
+            {
+                ConnectSession(session).IsPinned = true;
+                restored.Add(id);
+            }
+        }
+        // Sessions deleted since the last run drop out of the pinned list.
+        if (restored.Count != ids.Count)
+            App.Settings.Save(App.Settings.Current with { PinnedSessionIds = restored });
+    }
+
     public async Task OpenSessionOptionsAsync(TabViewModel tab)
     {
         var current = App.Store.Find(tab.Session.Id);
@@ -305,6 +365,19 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         if (tab.View is TerminalTabView view && tab.State == TabConnectionState.Connected)
             view.DisconnectLocal();
+    }
+
+    public async Task EndRemoteSessionAsync(TabViewModel tab)
+    {
+        if (tab.View is not TerminalTabView view || tab.State != TabConnectionState.Connected)
+            return;
+        var confirmed = await ConfirmAsync(
+            "End Remote Session",
+            $"End the persistent session for \"{tab.Header}\" on the server? " +
+            "Anything running inside it will be terminated. (Closing the tab merely detaches.)",
+            "End Session");
+        if (confirmed)
+            view.EndRemoteSession();
     }
 
     // ---- settings ----
