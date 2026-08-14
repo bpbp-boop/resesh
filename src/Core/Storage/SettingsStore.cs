@@ -9,6 +9,9 @@ public sealed record AppSettings
     /// <summary>Left group's share of the tab area width when split (0..1); null = never split.</summary>
     public double? SplitterFraction { get; init; }
 
+    /// <summary>Session tree pane width in pixels; null = default.</summary>
+    public double? TreePaneWidth { get; init; }
+
     public string Theme { get; init; } = "dark";
     public string FontFamily { get; init; } = "Cascadia Mono, Consolas, monospace";
     public int FontSize { get; init; } = 14;

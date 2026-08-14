@@ -25,6 +25,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         AttachGroupView(ViewModel.Groups[0], column: 0);
         ViewModel.TreeRebuilt += () =>
         {
+            ClearSelection(); // rebuild recreates every node; stale references would leak
             ScheduleExpansionSync();
             SyncEmptyState();
         };
@@ -32,9 +33,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         SyncEmptyState();
         ApplySettingsToApp();
         RegisterAccelerators();
+        if (App.Settings.Current.TreePaneWidth is { } treeWidth)
+            TreeColumn.Width = new GridLength(Math.Clamp(treeWidth, 180, 800));
         Closed += (_, _) =>
         {
             SaveSplitterFraction();
+            SaveTreePaneWidth();
             ViewModel.CloseAllTabs(); // tear down live SSH sessions without hanging
         };
     }
@@ -390,6 +394,15 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private void Splitter_ManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e) =>
         SaveSplitterFraction();
 
+    private void TreeSplitter_ManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e) =>
+        SaveTreePaneWidth();
+
+    private void SaveTreePaneWidth()
+    {
+        if (TreeColumn.ActualWidth > 0)
+            App.Settings.Save(App.Settings.Current with { TreePaneWidth = TreeColumn.ActualWidth });
+    }
+
     private void SaveSplitterFraction()
     {
         if (!ViewModel.IsSplit)
@@ -459,24 +472,27 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         File.AppendAllText(Path.Combine(dir, "trace.log"), $"[{DateTime.Now:HH:mm:ss.fff}] {message}\n");
     }
 
-    // ---- Search ----
+    // ---- Filter ----
 
-    private void SearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
-    {
-        ViewModel.SearchText = sender.Text;
-        if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
-            sender.ItemsSource = ViewModel.RankedMatches(sender.Text).Take(8).ToList();
-    }
+    private void FilterBox_TextChanged(object sender, TextChangedEventArgs e) =>
+        ViewModel.SearchText = FilterBox.Text;
 
-    private void SearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    private void FilterBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        var target = args.ChosenSuggestion as Session
-            ?? ViewModel.RankedMatches(args.QueryText).FirstOrDefault();
-        if (target is not null)
+        if (e.Key == VirtualKey.Enter)
         {
-            ConnectSession(target);
-            sender.Text = "";
-            ViewModel.SearchText = "";
+            // Enter connects the best match and clears the filter.
+            if (ViewModel.RankedMatches(FilterBox.Text).FirstOrDefault() is { } target)
+            {
+                ConnectSession(target);
+                FilterBox.Text = "";
+            }
+            e.Handled = true;
+        }
+        else if (e.Key == VirtualKey.Escape)
+        {
+            FilterBox.Text = "";
+            e.Handled = true;
         }
     }
 
@@ -553,54 +569,108 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
     }
 
-    // ---- Folder context menu ----
+    // ---- Tree selection (Explorer-style: click, Ctrl+click toggle, Shift+click range) ----
 
-    private async void FolderNewSession_Click(object sender, RoutedEventArgs e)
+    private readonly List<TreeNodeViewModel> _selection = [];
+    private TreeNodeViewModel? _selectionAnchor;
+
+    private static bool IsKeyDown(VirtualKey key) =>
+        Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(key)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+    private void ClearSelection()
     {
-        if (NodeOf(sender) is { } node)
-            await OpenSessionEditorAsync(existing: null, defaultFolder: node.FolderPath);
+        foreach (var node in _selection)
+            node.IsSelected = false;
+        _selection.Clear();
+        _selectionAnchor = null;
     }
 
-    private async void FolderNewFolder_Click(object sender, RoutedEventArgs e)
+    private void SelectOnly(TreeNodeViewModel node)
     {
-        if (NodeOf(sender) is not { } node)
-            return;
-        var name = await PromptAsync("New Folder", $"Folder name (inside {node.FolderPath})", "");
-        if (!string.IsNullOrWhiteSpace(name))
-            ViewModel.CreateFolder(FolderPaths.Combine(node.FolderPath, name));
+        ClearSelection();
+        node.IsSelected = true;
+        _selection.Add(node);
+        _selectionAnchor = node;
     }
 
-    private async void FolderRename_Click(object sender, RoutedEventArgs e)
+    private void ToggleSelection(TreeNodeViewModel node)
     {
-        if (NodeOf(sender) is not { } node)
-            return;
-        var name = await PromptAsync("Rename Folder", "New name", node.Name);
-        if (string.IsNullOrWhiteSpace(name) || name == node.Name)
-            return;
-        var newPath = FolderPaths.Combine(FolderPaths.Parent(node.FolderPath), name);
-        ViewModel.RenameFolder(node.FolderPath, newPath);
+        if (node.IsSelected)
+        {
+            node.IsSelected = false;
+            _selection.Remove(node);
+        }
+        else
+        {
+            node.IsSelected = true;
+            _selection.Add(node);
+        }
+        _selectionAnchor = node;
     }
 
-    private async void FolderDelete_Click(object sender, RoutedEventArgs e)
+    /// <summary>Range select over the flattened visible tree, from the anchor to the clicked node.</summary>
+    private void SelectRangeTo(TreeNodeViewModel node)
     {
-        if (NodeOf(sender) is not { } node)
+        var anchor = _selectionAnchor;
+        var visible = VisibleNodes().ToList();
+        var from = anchor is null ? -1 : visible.IndexOf(anchor);
+        var to = visible.IndexOf(node);
+        if (from < 0 || to < 0)
+        {
+            SelectOnly(node);
             return;
-        var count = ViewModel.CountSessionsUnder(node.FolderPath);
-        var confirmed = await ConfirmAsync(
-            "Delete Folder",
-            count == 0
-                ? $"Delete the folder \"{node.Name}\"?"
-                : $"Delete the folder \"{node.Name}\" and the {count} session(s) inside it? Their saved credentials are removed too.");
-        if (confirmed)
-            ViewModel.DeleteFolder(node.FolderPath);
+        }
+        ClearSelection();
+        _selectionAnchor = anchor; // the anchor survives repeated Shift+clicks, as in Explorer
+        var (lo, hi) = from <= to ? (from, to) : (to, from);
+        for (var i = lo; i <= hi; i++)
+        {
+            visible[i].IsSelected = true;
+            _selection.Add(visible[i]);
+        }
     }
 
-    // ---- Session context menu / interactions ----
-
-    private void SessionConnect_Click(object sender, RoutedEventArgs e)
+    /// <summary>Nodes in display order, skipping children of collapsed folders.</summary>
+    private IEnumerable<TreeNodeViewModel> VisibleNodes()
     {
-        if (NodeOf(sender)?.Session is { } session)
-            ConnectSession(session);
+        static IEnumerable<TreeNodeViewModel> Walk(IEnumerable<TreeNodeViewModel> nodes)
+        {
+            foreach (var node in nodes)
+            {
+                yield return node;
+                if (node.IsFolder && node.IsExpanded)
+                    foreach (var child in Walk(node.Children))
+                        yield return child;
+            }
+        }
+        return Walk(ViewModel.RootNodes);
+    }
+
+    /// <summary>True when the tap landed on the expand/collapse chevron rather than the row content.</summary>
+    private static bool IsChevronHit(object originalSource)
+    {
+        var current = originalSource as DependencyObject;
+        while (current is not null and not TreeViewItem)
+        {
+            if (current is FrameworkElement { Name: "ExpandCollapseChevron" })
+                return true;
+            current = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(current);
+        }
+        return false;
+    }
+
+    private void TreeNode_Tapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (NodeOf(sender) is not { } node || IsChevronHit(e.OriginalSource))
+            return;
+        e.Handled = true; // taps bubble to ancestor folder items; only the innermost row counts
+        if (IsKeyDown(VirtualKey.Shift))
+            SelectRangeTo(node);
+        else if (IsKeyDown(VirtualKey.Control))
+            ToggleSelection(node);
+        else
+            SelectOnly(node);
     }
 
     private void SessionNode_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
@@ -612,21 +682,172 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
     }
 
-    private async void SessionEdit_Click(object sender, RoutedEventArgs e)
+    // ---- Tree context menu (built per selection: session, folder, or multi) ----
+
+    private void TreeNode_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
     {
-        if (NodeOf(sender)?.Session is { } session)
-            await OpenSessionEditorAsync(session, session.FolderPath);
+        if (NodeOf(sender) is not { } node)
+            return;
+        args.Handled = true; // keep the TreeView's background flyout from also opening
+        if (!node.IsSelected)
+            SelectOnly(node); // right-click outside the selection retargets it, as in Explorer
+        if (BuildSelectionMenu() is not { } menu)
+            return;
+        if (args.TryGetPosition(sender, out var point))
+            menu.ShowAt(sender, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Position = point });
+        else
+            menu.ShowAt((FrameworkElement)sender);
     }
 
-    private async void SessionDelete_Click(object sender, RoutedEventArgs e)
+    private MenuFlyout? BuildSelectionMenu()
     {
-        if (NodeOf(sender)?.Session is not { } session)
+        if (_selection.Count == 0)
+            return null;
+        var menu = new MenuFlyout();
+
+        // Single session: the original per-session menu.
+        if (_selection is [{ Session: { } single }])
+        {
+            AddItem(menu, "Connect", () => ConnectSession(single));
+            menu.Items.Add(new MenuFlyoutSeparator());
+            AddItem(menu, "Edit…", async () => await OpenSessionEditorAsync(single, single.FolderPath));
+            AddItem(menu, "Delete", async () => await DeleteSessionAsync(single));
+            return menu;
+        }
+
+        var selection = _selection.ToList(); // snapshot: the live list mutates before Click fires
+        AddItem(menu, "Connect in Tabs", () =>
+        {
+            foreach (var session in SessionsOf(selection))
+                ConnectSession(session);
+        });
+        AddItem(menu, "Connect in Tabs in New Window", () => ConnectInNewWindow(SessionsOf(selection).ToList()));
+        menu.Items.Add(new MenuFlyoutSeparator());
+
+        // Single folder keeps its create/rename items; mixed selections get the shared subset.
+        if (_selection is [{ IsFolder: true } folder])
+        {
+            AddItem(menu, "New Session…", async () => await OpenSessionEditorAsync(existing: null, defaultFolder: folder.FolderPath));
+            AddItem(menu, "New Folder…", async () => await NewSubfolderAsync(folder));
+            menu.Items.Add(new MenuFlyoutSeparator());
+            AddItem(menu, "Rename…", async () => await RenameFolderAsync(folder));
+            AddItem(menu, "Delete", async () => await DeleteFolderAsync(folder));
+        }
+        else
+        {
+            AddItem(menu, "Delete", async () => await DeleteSelectionAsync(selection));
+        }
+        return menu;
+    }
+
+    private static void AddItem(MenuFlyout menu, string text, Action action)
+    {
+        var item = new MenuFlyoutItem { Text = text };
+        item.Click += (_, _) => action();
+        menu.Items.Add(item);
+    }
+
+    /// <summary>All sessions under a folder node, in display order (subfolders first, recursively).</summary>
+    private static IEnumerable<Session> SessionsUnder(TreeNodeViewModel node)
+    {
+        foreach (var child in node.Children)
+        {
+            if (child.Session is { } session)
+                yield return session;
+            else
+                foreach (var nested in SessionsUnder(child))
+                    yield return nested;
+        }
+    }
+
+    /// <summary>Sessions of the selection: selected sessions plus everything under selected folders, deduplicated.</summary>
+    private static IEnumerable<Session> SessionsOf(IEnumerable<TreeNodeViewModel> nodes)
+    {
+        var seen = new HashSet<Guid>();
+        foreach (var node in nodes)
+        {
+            if (node.Session is { } session)
+            {
+                if (seen.Add(session.Id))
+                    yield return session;
+            }
+            else
+            {
+                foreach (var nested in SessionsUnder(node))
+                    if (seen.Add(nested.Id))
+                        yield return nested;
+            }
+        }
+    }
+
+    private void ConnectInNewWindow(IReadOnlyList<Session> sessions)
+    {
+        if (sessions.Count == 0)
             return;
+        var window = new MainWindow();
+        window.Activate();
+        foreach (var session in sessions)
+            window.ConnectSession(session);
+    }
+
+    private async Task NewSubfolderAsync(TreeNodeViewModel folder)
+    {
+        var name = await PromptAsync("New Folder", $"Folder name (inside {folder.FolderPath})", "");
+        if (!string.IsNullOrWhiteSpace(name))
+            ViewModel.CreateFolder(FolderPaths.Combine(folder.FolderPath, name));
+    }
+
+    private async Task RenameFolderAsync(TreeNodeViewModel folder)
+    {
+        var name = await PromptAsync("Rename Folder", "New name", folder.Name);
+        if (string.IsNullOrWhiteSpace(name) || name == folder.Name)
+            return;
+        var newPath = FolderPaths.Combine(FolderPaths.Parent(folder.FolderPath), name);
+        ViewModel.RenameFolder(folder.FolderPath, newPath);
+    }
+
+    private async Task DeleteFolderAsync(TreeNodeViewModel folder)
+    {
+        var count = ViewModel.CountSessionsUnder(folder.FolderPath);
+        var confirmed = await ConfirmAsync(
+            "Delete Folder",
+            count == 0
+                ? $"Delete the folder \"{folder.Name}\"?"
+                : $"Delete the folder \"{folder.Name}\" and the {count} session(s) inside it? Their saved credentials are removed too.");
+        if (confirmed)
+            ViewModel.DeleteFolder(folder.FolderPath);
+    }
+
+    private async Task DeleteSessionAsync(Session session)
+    {
         var confirmed = await ConfirmAsync(
             "Delete Session",
             $"Delete \"{session.Name}\" ({session.Host})? Its saved credential is removed too.");
         if (confirmed)
             ViewModel.DeleteSession(session);
+    }
+
+    private async Task DeleteSelectionAsync(IReadOnlyList<TreeNodeViewModel> items)
+    {
+        var folders = items.Where(n => n.IsFolder).ToList();
+        var sessions = items.Where(n => !n.IsFolder).ToList();
+        var affected = SessionsOf(items).Count();
+
+        var parts = new List<string>();
+        if (folders.Count > 0)
+            parts.Add($"{folders.Count} folder(s)");
+        if (sessions.Count > 0)
+            parts.Add($"{sessions.Count} session(s)");
+        var message = $"Delete {string.Join(" and ", parts)}?"
+            + (affected > 0 ? $" {affected} session(s) will be removed; their saved credentials are removed too." : "");
+        if (!await ConfirmAsync("Delete Selection", message))
+            return;
+
+        // Folders first; sessions already removed with a folder become harmless no-ops.
+        foreach (var folder in folders)
+            ViewModel.DeleteFolder(folder.FolderPath);
+        foreach (var node in sessions)
+            ViewModel.DeleteSession(node.Session!);
     }
 
     // ---- Tree expansion bookkeeping ----

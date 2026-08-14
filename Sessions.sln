@@ -3,6 +3,8 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sessions.App", "src\App\Sessions.App.csproj", "{1CBE3B3F-A0DA-4AA0-89BB-76AA3A9D07BD}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Core", "Core", "{8D626EA8-CB54-BC41-363A-217881BEBA6E}"
@@ -16,8 +18,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sessions.Core.Tests", "tests\Core.Tests\Sessions.Core.Tests.csproj", "{70C51B6E-4A6F-4DA9-BA8F-C6CDAE1D6BE4}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "App", "App", "{547E75E0-49BC-27F6-65D6-DF25CFFB661A}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sessions.App", "src\App\Sessions.App.csproj", "{1CBE3B3F-A0DA-4AA0-89BB-76AA3A9D07BD}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Terminal", "Terminal", "{2ED61D2A-07ED-AFE1-4408-D6610C0DE954}"
 EndProject
