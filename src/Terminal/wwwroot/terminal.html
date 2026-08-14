@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>terminal</title>
+<link rel="stylesheet" href="xterm.css">
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0c0c0c; overflow: hidden; }
+  #term { height: 100%; width: 100%; }
+  .xterm .xterm-viewport { overflow-y: auto; }
+</style>
+<script src="xterm.js"></script>
+<script src="addon-fit.js"></script>
+<script src="addon-web-links.js"></script>
+</head>
+<body>
+<div id="term"></div>
+<script>
+(function () {
+  "use strict";
+
+  const DARK_THEME = {
+    background: "#0c0c0c", foreground: "#cccccc", cursor: "#ffffff",
+    black: "#0c0c0c", red: "#c50f1f", green: "#13a10e", yellow: "#c19c00",
+    blue: "#0037da", magenta: "#881798", cyan: "#3a96dd", white: "#cccccc",
+    brightBlack: "#767676", brightRed: "#e74856", brightGreen: "#16c60c",
+    brightYellow: "#f9f1a5", brightBlue: "#3b78ff", brightMagenta: "#b4009e",
+    brightCyan: "#61d6d6", brightWhite: "#f2f2f2"
+  };
+  const LIGHT_THEME = {
+    background: "#ffffff", foreground: "#383a42", cursor: "#383a42",
+    selectionBackground: "#bfceff",
+    black: "#383a42", red: "#e45649", green: "#50a14f", yellow: "#c18401",
+    blue: "#0184bc", magenta: "#a626a4", cyan: "#0997b3", white: "#fafafa",
+    brightBlack: "#4f525e", brightRed: "#e06c75", brightGreen: "#98c379",
+    brightYellow: "#e5c07b", brightBlue: "#61afef", brightMagenta: "#c678dd",
+    brightCyan: "#56b6c2", brightWhite: "#ffffff"
+  };
+
+  const term = new Terminal({
+    scrollback: 10000,
+    fontFamily: "Cascadia Mono, Consolas, monospace",
+    fontSize: 14,
+    allowProposedApi: true,
+    theme: DARK_THEME
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.loadAddon(new WebLinksAddon.WebLinksAddon());
+
+  let copyOnSelect = true;
+  let rightClickPaste = true;
+  let connected = false;
+
+  const host = window.chrome.webview;
+  const container = document.getElementById("term");
+  term.open(container);
+
+  function b64ToBytes(b64) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+
+  function strToB64(s) {
+    const bytes = new TextEncoder().encode(s);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+
+  // UI -> SSH
+  term.onData(function (data) {
+    if (connected) {
+      host.postMessage({ type: "input", data: strToB64(data) });
+    } else if (data === "\r") {
+      host.postMessage({ type: "reconnect" });
+    }
+  });
+
+  term.onSelectionChange(function () {
+    if (copyOnSelect && term.hasSelection()) {
+      navigator.clipboard.writeText(term.getSelection()).catch(function () {});
+    }
+  });
+
+  container.addEventListener("contextmenu", function (e) {
+    e.preventDefault();
+    if (rightClickPaste) {
+      navigator.clipboard.readText().then(function (text) {
+        if (text && connected) host.postMessage({ type: "input", data: strToB64(text) });
+      }).catch(function () {});
+    }
+  });
+
+  // Ctrl+Shift+C / Ctrl+Shift+V, Ctrl+F4 (close tab — handled by the app shell)
+  term.attachCustomKeyEventHandler(function (e) {
+    if (e.type === "keydown" && e.ctrlKey && !e.shiftKey && e.code === "F4") {
+      host.postMessage({ type: "closeTab" });
+      return false;
+    }
+    if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "Backslash") {
+      host.postMessage({ type: "splitTab" });
+      return false;
+    }
+    if (e.type === "keydown" && e.ctrlKey && e.shiftKey) {
+      if (e.code === "KeyC" && term.hasSelection()) {
+        navigator.clipboard.writeText(term.getSelection()).catch(function () {});
+        return false;
+      }
+      if (e.code === "KeyV") {
+        navigator.clipboard.readText().then(function (text) {
+          if (text && connected) host.postMessage({ type: "input", data: strToB64(text) });
+        }).catch(function () {});
+        return false;
+      }
+    }
+    return true;
+  });
+
+  function reportSize() {
+    host.postMessage({ type: "resize", cols: term.cols, rows: term.rows });
+  }
+
+  let fitPending = null;
+  new ResizeObserver(function () {
+    if (fitPending) clearTimeout(fitPending);
+    fitPending = setTimeout(function () {
+      fitPending = null;
+      fit.fit();
+      reportSize();
+    }, 40);
+  }).observe(container);
+
+  // SSH/host -> UI
+  host.addEventListener("message", function (event) {
+    const msg = event.data;
+    switch (msg.type) {
+      case "output":
+        term.write(b64ToBytes(msg.data));
+        break;
+      case "connected":
+        connected = true;
+        break;
+      case "disconnected":
+        connected = false;
+        term.write("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n");
+        term.write("\x1b[1;33m" + (msg.message || "Disconnected.") + "\x1b[0m Press Enter to reconnect.\r\n");
+        break;
+      case "divider":
+        // Reconnect-in-place: visual separator, scrollback preserved.
+        term.write("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n");
+        break;
+      case "notice":
+        term.write("\x1b[90m" + (msg.message || "") + "\x1b[0m\r\n");
+        break;
+      case "setOptions":
+        if (msg.fontSize) term.options.fontSize = msg.fontSize;
+        if (msg.fontFamily) term.options.fontFamily = msg.fontFamily;
+        if (msg.theme === "light") term.options.theme = LIGHT_THEME;
+        if (msg.theme === "dark") term.options.theme = DARK_THEME;
+        if (typeof msg.copyOnSelect === "boolean") copyOnSelect = msg.copyOnSelect;
+        if (typeof msg.rightClickPaste === "boolean") rightClickPaste = msg.rightClickPaste;
+        if (typeof msg.scrollback === "number") term.options.scrollback = msg.scrollback;
+        document.body.style.background = term.options.theme.background;
+        fit.fit();
+        reportSize();
+        break;
+      case "focus":
+        term.focus();
+        break;
+      case "clear":
+        term.clear();
+        break;
+    }
+  });
+
+  fit.fit();
+  term.focus();
+  host.postMessage({ type: "ready", cols: term.cols, rows: term.rows });
+})();
+</script>
+</body>
+</html>

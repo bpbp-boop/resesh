@@ -1,0 +1,68 @@
+<UserControl
+    x:Class="Sessions.App.Controls.TabGroupView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:Sessions.App.ViewModels">
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Tab strip only; terminals render in TerminalHost so WebView2 gets real space. -->
+        <TabView
+            x:Name="Tabs"
+            Grid.Row="0"
+            TabItemsSource="{x:Bind Group.Tabs}"
+            SelectedItem="{x:Bind Group.SelectedTab, Mode=TwoWay}"
+            SelectionChanged="Tabs_SelectionChanged"
+            IsAddTabButtonVisible="False"
+            TabWidthMode="SizeToContent"
+            CanDragTabs="True"
+            CanReorderTabs="True"
+            TabCloseRequested="Tabs_TabCloseRequested"
+            TabDragStarting="Tabs_TabDragStarting"
+            TabDragCompleted="Tabs_TabDragCompleted"
+            TabStripDragOver="Tabs_TabStripDragOver"
+            TabStripDrop="Tabs_TabStripDrop">
+            <TabView.TabItemTemplate>
+                <DataTemplate x:DataType="vm:TabViewModel">
+                    <TabViewItem IsClosable="True">
+                        <TabViewItem.Header>
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <Rectangle
+                                    Width="3"
+                                    Height="14"
+                                    RadiusX="1.5"
+                                    RadiusY="1.5"
+                                    VerticalAlignment="Center">
+                                    <Rectangle.Fill>
+                                        <SolidColorBrush Color="{x:Bind TagColor}" />
+                                    </Rectangle.Fill>
+                                </Rectangle>
+                                <Ellipse
+                                    Width="8"
+                                    Height="8"
+                                    VerticalAlignment="Center"
+                                    ToolTipService.ToolTip="{x:Bind StateText, Mode=OneWay}">
+                                    <Ellipse.Fill>
+                                        <SolidColorBrush Color="{x:Bind StateColor, Mode=OneWay}" />
+                                    </Ellipse.Fill>
+                                </Ellipse>
+                                <FontIcon
+                                    Glyph="&#xE72E;"
+                                    FontSize="12"
+                                    VerticalAlignment="Center"
+                                    Visibility="{x:Bind LockIconVisibility, Mode=OneWay}" />
+                                <TextBlock Text="{x:Bind Header, Mode=OneWay}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </TabViewItem.Header>
+                    </TabViewItem>
+                </DataTemplate>
+            </TabView.TabItemTemplate>
+        </TabView>
+
+        <Grid x:Name="TerminalHost" Grid.Row="1" />
+    </Grid>
+</UserControl>
