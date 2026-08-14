@@ -4,6 +4,68 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:Sessions.App.ViewModels">
 
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <!-- VS Code-style tab strip: square flush tabs, active tab blends into the
+                 terminal, inactive tabs dimmed. Scoped here so only this TabView changes. -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="TabViewBackground" Color="#181818" />
+                    <SolidColorBrush x:Key="TabViewBorderBrush" Color="#181818" />
+                    <!-- The header DataTemplate paints the whole tab; kill the built-in chrome. -->
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="Transparent" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPressed" Color="Transparent" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="Transparent" />
+                    <SolidColorBrush x:Key="TabViewSelectedItemBorderBrush" Color="Transparent" />
+                    <!-- WinUI's strip has 8px top padding (generic.xaml: TabViewHeaderPadding
+                         0,8,0,0) which shoves tabs down and clips them; VS Code tabs sit flush. -->
+                    <Thickness x:Key="TabViewHeaderPadding">0,0,0,0</Thickness>
+                    <Thickness x:Key="TabViewItemHeaderPadding">0,0,0,0</Thickness>
+                    <x:Double x:Key="TabViewItemMinHeight">35</x:Double>
+                    <x:Double x:Key="TabViewItemHeaderMinHeight">35</x:Double>
+                    <SolidColorBrush x:Key="CodeTabSeparatorBrush" Color="#2B2B2B" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="TabViewBackground" Color="#F3F3F3" />
+                    <SolidColorBrush x:Key="TabViewBorderBrush" Color="#F3F3F3" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="Transparent" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPressed" Color="Transparent" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="Transparent" />
+                    <SolidColorBrush x:Key="TabViewSelectedItemBorderBrush" Color="Transparent" />
+                    <Thickness x:Key="TabViewHeaderPadding">0,0,0,0</Thickness>
+                    <Thickness x:Key="TabViewItemHeaderPadding">0,0,0,0</Thickness>
+                    <x:Double x:Key="TabViewItemMinHeight">35</x:Double>
+                    <x:Double x:Key="TabViewItemHeaderMinHeight">35</x:Double>
+                    <SolidColorBrush x:Key="CodeTabSeparatorBrush" Color="#D8D8D8" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+
+            <!-- Minimal TabViewItem template: no chrome, no insets — the header
+                 DataTemplate paints the entire tab, edge to edge. -->
+            <Style x:Key="CodeTabStyle" TargetType="TabViewItem">
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="TabViewItem">
+                            <ContentPresenter
+                                Content="{TemplateBinding Header}"
+                                ContentTemplate="{TemplateBinding HeaderTemplate}"
+                                HorizontalAlignment="Stretch"
+                                VerticalAlignment="Stretch" />
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -14,6 +76,8 @@
         <TabView
             x:Name="Tabs"
             Grid.Row="0"
+            Height="35"
+            VerticalAlignment="Top"
             TabItemsSource="{x:Bind Group.Tabs}"
             SelectedItem="{x:Bind Group.SelectedTab, Mode=TwoWay}"
             SelectionChanged="Tabs_SelectionChanged"
@@ -28,35 +92,81 @@
             TabStripDrop="Tabs_TabStripDrop">
             <TabView.TabItemTemplate>
                 <DataTemplate x:DataType="vm:TabViewModel">
-                    <TabViewItem IsClosable="True">
+                    <TabViewItem
+                        Style="{StaticResource CodeTabStyle}"
+                        IsClosable="False"
+                        Height="35">
                         <TabViewItem.Header>
-                            <StackPanel Orientation="Horizontal" Spacing="6">
+                            <!-- The tab is painted entirely here: background, VS Code-style top
+                                 accent on the active tab, and a custom close button. -->
+                            <!-- The right border is the VS Code-style 1px divider between tabs. -->
+                            <Grid
+                                Height="35"
+                                Margin="0"
+                                Background="{x:Bind HeaderBackground, Mode=OneWay}"
+                                BorderThickness="0,0,1,0"
+                                BorderBrush="{ThemeResource CodeTabSeparatorBrush}"
+                                PointerEntered="TabHeader_PointerEntered"
+                                PointerExited="TabHeader_PointerExited">
                                 <Rectangle
-                                    Width="3"
-                                    Height="14"
-                                    RadiusX="1.5"
-                                    RadiusY="1.5"
+                                    Height="1"
+                                    Fill="#0078D4"
+                                    VerticalAlignment="Top"
+                                    HorizontalAlignment="Stretch"
+                                    Visibility="{x:Bind AccentVisibility, Mode=OneWay}" />
+                                <StackPanel
+                                    Orientation="Horizontal"
+                                    Spacing="6"
+                                    Margin="10,0,6,0"
                                     VerticalAlignment="Center">
-                                    <Rectangle.Fill>
-                                        <SolidColorBrush Color="{x:Bind TagColor}" />
-                                    </Rectangle.Fill>
-                                </Rectangle>
-                                <Ellipse
-                                    Width="8"
-                                    Height="8"
-                                    VerticalAlignment="Center"
-                                    ToolTipService.ToolTip="{x:Bind StateText, Mode=OneWay}">
-                                    <Ellipse.Fill>
-                                        <SolidColorBrush Color="{x:Bind StateColor, Mode=OneWay}" />
-                                    </Ellipse.Fill>
-                                </Ellipse>
-                                <FontIcon
-                                    Glyph="&#xE72E;"
-                                    FontSize="12"
-                                    VerticalAlignment="Center"
-                                    Visibility="{x:Bind LockIconVisibility, Mode=OneWay}" />
-                                <TextBlock Text="{x:Bind Header, Mode=OneWay}" VerticalAlignment="Center" />
-                            </StackPanel>
+                                    <Rectangle
+                                        Width="3"
+                                        Height="13"
+                                        RadiusX="1.5"
+                                        RadiusY="1.5"
+                                        VerticalAlignment="Center">
+                                        <Rectangle.Fill>
+                                            <SolidColorBrush Color="{x:Bind TagColor}" />
+                                        </Rectangle.Fill>
+                                    </Rectangle>
+                                    <Ellipse
+                                        Width="7"
+                                        Height="7"
+                                        VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="{x:Bind StateText, Mode=OneWay}">
+                                        <Ellipse.Fill>
+                                            <SolidColorBrush Color="{x:Bind StateColor, Mode=OneWay}" />
+                                        </Ellipse.Fill>
+                                    </Ellipse>
+                                    <FontIcon
+                                        Glyph="&#xE72E;"
+                                        FontSize="11"
+                                        VerticalAlignment="Center"
+                                        Foreground="{x:Bind HeaderForeground, Mode=OneWay}"
+                                        Visibility="{x:Bind LockIconVisibility, Mode=OneWay}" />
+                                    <TextBlock
+                                        Text="{x:Bind Header, Mode=OneWay}"
+                                        FontSize="13"
+                                        FontWeight="Normal"
+                                        VerticalAlignment="Center"
+                                        Foreground="{x:Bind HeaderForeground, Mode=OneWay}" />
+                                    <Button
+                                        Click="TabCloseGlyph_Click"
+                                        Padding="3"
+                                        Margin="2,0,0,0"
+                                        Background="Transparent"
+                                        BorderThickness="0"
+                                        CornerRadius="3"
+                                        VerticalAlignment="Center"
+                                        Opacity="{x:Bind CloseOpacity, Mode=OneWay}"
+                                        IsHitTestVisible="{x:Bind CloseInteractive, Mode=OneWay}">
+                                        <FontIcon
+                                            Glyph="&#xE711;"
+                                            FontSize="10"
+                                            Foreground="{x:Bind HeaderForeground, Mode=OneWay}" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
                         </TabViewItem.Header>
                     </TabViewItem>
                 </DataTemplate>

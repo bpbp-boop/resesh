@@ -13,6 +13,16 @@ public sealed class TabGroupViewModel : ObservableObject
     public TabViewModel? SelectedTab
     {
         get => _selectedTab;
-        set => SetProperty(ref _selectedTab, value);
+        set
+        {
+            var previous = _selectedTab;
+            if (SetProperty(ref _selectedTab, value))
+            {
+                if (previous is not null)
+                    previous.IsActive = false;
+                if (value is not null)
+                    value.IsActive = true;
+            }
+        }
     }
 }

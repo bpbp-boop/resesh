@@ -69,6 +69,74 @@ public sealed class TabViewModel : ObservableObject
         }
     }
 
+    // ---- VS Code-style tab visuals (the header content paints the whole tab) ----
+
+    private bool _isActive;
+    private bool _isPointerOver;
+
+    /// <summary>Whether this tab is its group's selected tab; drives the tab visuals.</summary>
+    public bool IsActive
+    {
+        get => _isActive;
+        set
+        {
+            if (SetProperty(ref _isActive, value))
+                NotifyTabVisuals();
+        }
+    }
+
+    /// <summary>Pointer hover, set by the view; reveals the close × and hover tint (VS Code style).</summary>
+    public bool IsPointerOver
+    {
+        get => _isPointerOver;
+        set
+        {
+            if (SetProperty(ref _isPointerOver, value))
+                NotifyTabVisuals();
+        }
+    }
+
+    private void NotifyTabVisuals()
+    {
+        OnPropertyChanged(nameof(AccentVisibility));
+        OnPropertyChanged(nameof(HeaderBackground));
+        OnPropertyChanged(nameof(HeaderForeground));
+        OnPropertyChanged(nameof(CloseOpacity));
+        OnPropertyChanged(nameof(CloseInteractive));
+    }
+
+    public Visibility AccentVisibility => IsActive ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>The × shows on the active tab and on hover; hidden (but space kept) otherwise.</summary>
+    public double CloseOpacity => IsActive || IsPointerOver ? 1.0 : 0.0;
+
+    public bool CloseInteractive => IsActive || IsPointerOver;
+
+    private static bool IsDark =>
+        Microsoft.UI.Xaml.Application.Current.RequestedTheme == Microsoft.UI.Xaml.ApplicationTheme.Dark;
+
+    public Microsoft.UI.Xaml.Media.Brush HeaderBackground
+    {
+        get
+        {
+            // VS Code Dark Modern: inactive tabs share the strip background; the active
+            // tab matches the editor (here: the terminal); hover gets a subtle tint.
+            Windows.UI.Color color;
+            if (IsActive)
+                color = IsDark ? Windows.UI.Color.FromArgb(255, 0x0C, 0x0C, 0x0C) : Windows.UI.Color.FromArgb(255, 0xFF, 0xFF, 0xFF);
+            else if (IsPointerOver)
+                color = IsDark ? Windows.UI.Color.FromArgb(255, 0x20, 0x20, 0x20) : Windows.UI.Color.FromArgb(255, 0xE8, 0xE8, 0xE8);
+            else
+                color = IsDark ? Windows.UI.Color.FromArgb(255, 0x18, 0x18, 0x18) : Windows.UI.Color.FromArgb(255, 0xF3, 0xF3, 0xF3);
+            return new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+        }
+    }
+
+    public Microsoft.UI.Xaml.Media.Brush HeaderForeground => new Microsoft.UI.Xaml.Media.SolidColorBrush(
+        IsActive
+            ? (IsDark ? Windows.UI.Color.FromArgb(255, 0xFF, 0xFF, 0xFF) : Windows.UI.Color.FromArgb(255, 0x33, 0x33, 0x33))
+            : (IsDark ? Windows.UI.Color.FromArgb(255, 0x9D, 0x9D, 0x9D) : Windows.UI.Color.FromArgb(255, 0x61, 0x61, 0x61)));
+
     /// <summary>Tab-strip status dot: green connected, red disconnected, amber connecting.</summary>
     public Windows.UI.Color StateColor => State switch
     {

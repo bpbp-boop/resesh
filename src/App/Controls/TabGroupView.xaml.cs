@@ -88,6 +88,25 @@ public sealed partial class TabGroupView : UserControl
             await _host.RequestCloseTabAsync(tab);
     }
 
+    /// <summary>The custom ×: same confirmed-close pathway as every other close route.</summary>
+    private async void TabCloseGlyph_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is TabViewModel tab)
+            await _host.RequestCloseTabAsync(tab);
+    }
+
+    private void TabHeader_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is TabViewModel tab)
+            tab.IsPointerOver = true;
+    }
+
+    private void TabHeader_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is TabViewModel tab)
+            tab.IsPointerOver = false;
+    }
+
     private static TabViewModel? TabFromOriginalSource(object originalSource)
     {
         for (var d = originalSource as DependencyObject; d is not null; d = VisualTreeHelper.GetParent(d))
