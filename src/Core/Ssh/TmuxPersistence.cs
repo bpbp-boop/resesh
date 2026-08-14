@@ -34,6 +34,15 @@ public static class TmuxPersistence
     /// command when ignorespace already kept it out. Residual gap: zsh with incremental
     /// history but without HIST_IGNORE_SPACE writes the line before the exec.
     /// </summary>
+    /// <summary>
+    /// smcup@/rmcup@ keep tmux off the alternate screen; indn@ stops multi-line scrolls via
+    /// CSI S, which xterm.js discards instead of pushing to scrollback (verified against the
+    /// app's bundle) — without it chunks of output would vanish from native scrollback even
+    /// with the alternate screen disabled. Plain `set -g` (not -ga): the private server has
+    /// no user config to preserve, and overwrite is idempotent across re-asserts.
+    /// </summary>
+    private const string TerminalOverrides = "set -g terminal-overrides '*:smcup@:rmcup@:indn@'";
+
     public static string BootstrapCommand(Guid id, int slot)
     {
         var name = SessionName(id, slot);
@@ -45,15 +54,18 @@ public static class TmuxPersistence
             + $"if {tmux} has-session -t ={name} 2>/dev/null; then "
             // Replay full pane history including the visible screen; the attach that follows
             // repaints the same visible screen in place, so there is no gap and no duplicate.
+            // The overrides are re-asserted before attach so servers created by an older app
+            // version (or with stale options) pick up the current value — the client's tty
+            // capabilities are built at attach time.
             + $"{tmux} capture-pane -e -p -t ={name} -S -; "
-            + $"exec {tmux} attach-session -t ={name}; "
+            + $"exec {tmux} {TerminalOverrides} \\; attach-session -t ={name}; "
             + "else "
             + $"exec {tmux} -f /dev/null start-server \\; "
             + $"set -g history-limit {HistoryLimit} \\; "
             + "set -g status off \\; "
             + "set -g prefix None \\; "
             + "set -s escape-time 25 \\; "
-            + "set -ga terminal-overrides ',*:smcup@:rmcup@' \\; "
+            + $"{TerminalOverrides} \\; "
             + $"new-session -s {name}; "
             + "fi; "
             + "else "

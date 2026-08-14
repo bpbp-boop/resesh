@@ -229,6 +229,10 @@ public sealed class SshTerminalSession : IDisposable
         _ => new SshSessionException(SshFailureKind.Other, ex.Message, ex),
     };
 
+    // Raw-stream trace (DEBUG diagnostics; capped per connection so trace.log stays sane).
+    private int _tracedBytes;
+    private const int TraceCap = 128 * 1024;
+
     private void ReadLoop(ShellStream shell, CancellationToken token)
     {
         var buffer = new byte[32 * 1024];
@@ -246,6 +250,11 @@ public sealed class SshTerminalSession : IDisposable
                         break;
                     continue;
                 }
+                if (TraceHook is not null && _tracedBytes < TraceCap)
+                {
+                    _tracedBytes += read;
+                    TraceHook.Invoke("raw: " + EscapeControls(buffer.AsSpan(0, Math.Min(read, 4096))));
+                }
                 OutputReceived?.Invoke(buffer[..read]);
             }
         }
@@ -259,6 +268,25 @@ public sealed class SshTerminalSession : IDisposable
             TraceHook?.Invoke($"ReadLoop exit: failure={failure?.GetType().Name} {failure?.Message}; clientConnected={_client?.IsConnected}");
             RaiseClosed(failure);
         }
+    }
+
+    private static string EscapeControls(ReadOnlySpan<byte> data)
+    {
+        var sb = new System.Text.StringBuilder(data.Length + 64);
+        foreach (var b in data)
+        {
+            if (b == 0x1b)
+                sb.Append("\\e");
+            else if (b is >= 0x20 and < 0x7f)
+                sb.Append((char)b);
+            else if (b == (byte)'\n')
+                sb.Append("\\n");
+            else if (b == (byte)'\r')
+                sb.Append("\\r");
+            else
+                sb.Append($"\\x{b:x2}");
+        }
+        return sb.ToString();
     }
 
     public void Write(byte[] data)
