@@ -31,6 +31,9 @@ public sealed partial class SessionEditDialog : ContentDialog
         InitializeComponent();
         _existing = existing;
         Title = existing is null ? "New Session" : "Edit Session";
+        PasswordHint.Text = existing is null
+            ? "Stored in Windows Credential Manager"
+            : "Stored in Windows Credential Manager — leave blank to keep the current one";
 
         if (notice is not null)
         {
@@ -54,7 +57,13 @@ public sealed partial class SessionEditDialog : ContentDialog
             AuthBox.SelectedIndex = (int)existing.AuthMethod;
             KeyPathBox.Text = existing.PrivateKeyPath ?? "";
             PassphraseCheck.IsChecked = existing.PassphraseRequired;
-            TerminalTypeBox.Text = existing.TerminalType;
+
+            var terminalIndex = TerminalTypeBox.Items.IndexOf(existing.TerminalType);
+            if (terminalIndex >= 0)
+                TerminalTypeBox.SelectedIndex = terminalIndex;
+            else
+                // Editable ComboBox resets Text set before it loads; apply it after.
+                TerminalTypeBox.Loaded += (_, _) => TerminalTypeBox.Text = existing.TerminalType;
             NotesBox.Text = existing.Notes;
         }
 
@@ -69,14 +78,26 @@ public sealed partial class SessionEditDialog : ContentDialog
     private void UpdateAuthFieldVisibility()
     {
         // SelectionChanged fires mid-InitializeComponent, before later controls exist.
-        if (PasswordBox is null || KeyPathBox is null || PassphraseCheck is null)
+        if (PasswordPanel is null || KeyPathPanel is null || PassphraseCheck is null)
             return;
 
         var auth = SelectedAuth;
-        PasswordBox.Visibility = auth == AuthMethod.None ? Visibility.Collapsed : Visibility.Visible;
+        PasswordPanel.Visibility = auth == AuthMethod.None ? Visibility.Collapsed : Visibility.Visible;
         PasswordBox.Header = auth == AuthMethod.PrivateKey ? "Key passphrase" : "Password";
-        KeyPathBox.Visibility = auth == AuthMethod.PrivateKey ? Visibility.Visible : Visibility.Collapsed;
+        KeyPathPanel.Visibility = auth == AuthMethod.PrivateKey ? Visibility.Visible : Visibility.Collapsed;
         PassphraseCheck.Visibility = auth == AuthMethod.PrivateKey ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void BrowseKey_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new Windows.Storage.Pickers.FileOpenPicker();
+        picker.FileTypeFilter.Add("*"); // key files usually have no extension (id_ed25519, id_rsa)
+        WinRT.Interop.InitializeWithWindow.Initialize(
+            picker,
+            Microsoft.UI.Win32Interop.GetWindowFromWindowId(XamlRoot.ContentIslandEnvironment.AppWindowId));
+        var file = await picker.PickSingleFileAsync();
+        if (file is not null)
+            KeyPathBox.Text = file.Path;
     }
 
     private void OnPrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
