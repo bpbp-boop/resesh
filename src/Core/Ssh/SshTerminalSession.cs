@@ -6,7 +6,9 @@ using Session = Sessions.Core.Models.Session;
 
 namespace Sessions.Core.Ssh;
 
-public sealed record HostKeyInfo(string Host, int Port, string KeyType, string Sha256Fingerprint, HostKeyVerdict Verdict);
+public sealed record HostKeyInfo(
+    string Host, int Port, string KeyType, string Sha256Fingerprint, HostKeyVerdict Verdict,
+    KnownHostEntry? Previous = null);
 
 public enum SshFailureKind
 {
@@ -44,9 +46,10 @@ public sealed class SshTerminalSession : IDisposable
     public event Action<Exception?>? Closed;
 
     /// <summary>
-    /// Called (on the connect thread) when a host key needs a user decision:
-    /// unknown keys only — mismatches hard-fail without consulting this.
-    /// Return true to trust and persist the key.
+    /// Called (on the connect thread) when a host key needs a user decision — an unknown
+    /// key, or a CHANGED key (Verdict = Mismatch, with the previously trusted key in
+    /// <see cref="HostKeyInfo.Previous"/>). Return true to trust and persist the key.
+    /// No handler = deny.
     /// </summary>
     public Func<HostKeyInfo, bool>? HostKeyDecision { get; set; }
 
@@ -100,22 +103,24 @@ public sealed class SshTerminalSession : IDisposable
                 case HostKeyVerdict.Match:
                     e.CanTrust = true;
                     break;
-                case HostKeyVerdict.Mismatch:
-                    // Hard fail, no override in v1.
-                    hostKeyFailure = new SshSessionException(
-                        SshFailureKind.HostKeyMismatch,
-                        $"Host key for {session.Host}:{session.Port} has CHANGED (now {e.HostKeyName} SHA256:{sha256}). " +
-                        "This may indicate a man-in-the-middle attack. Connection refused.");
-                    e.CanTrust = false;
-                    break;
                 default:
-                    var info = new HostKeyInfo(session.Host, session.Port, e.HostKeyName, sha256, verdict);
+                    // Unknown key, or a changed key (the dialog demands typed confirmation
+                    // for the latter). Default-deny when no handler is wired.
+                    var previous = verdict == HostKeyVerdict.Mismatch
+                        ? _knownHosts.Lookup(session.Host, session.Port)
+                        : null;
+                    var info = new HostKeyInfo(session.Host, session.Port, e.HostKeyName, sha256, verdict, previous);
                     var trusted = HostKeyDecision?.Invoke(info) ?? false;
                     if (trusted)
                         _knownHosts.Accept(session.Host, session.Port, e.HostKeyName, sha256);
                     else
-                        hostKeyFailure = new SshSessionException(
-                            SshFailureKind.HostKeyRejected, "Host key was not accepted.");
+                        hostKeyFailure = verdict == HostKeyVerdict.Mismatch
+                            ? new SshSessionException(
+                                SshFailureKind.HostKeyMismatch,
+                                $"Host key for {session.Host}:{session.Port} has CHANGED (now {e.HostKeyName} SHA256:{sha256}). " +
+                                "This may indicate a man-in-the-middle attack. Connection refused.")
+                            : new SshSessionException(
+                                SshFailureKind.HostKeyRejected, "Host key was not accepted.");
                     e.CanTrust = trusted;
                     break;
             }

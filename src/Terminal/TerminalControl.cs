@@ -22,11 +22,15 @@ public sealed class TerminalControl : Grid, IDisposable
     };
 
     private readonly WebView2 _webView = new();
+    private object? _initialOptions;
     private readonly object _outputGate = new();
     private MemoryStream _pendingOutput = new();
     private DispatcherQueueTimer? _flushTimer;
     private bool _pageReady;
     private bool _disposed;
+
+    /// <summary>Debug diagnostics sink (same pattern as SshTerminalSession.TraceHook).</summary>
+    public static Action<string>? TraceHook { get; set; }
 
     public event Action<byte[]>? InputReceived;
     public event Action<int, int>? Resized;
@@ -46,6 +50,9 @@ public sealed class TerminalControl : Grid, IDisposable
 
     public TerminalControl()
     {
+        // WebView2 paints white until terminal.html renders; match its dark
+        // background so opening a tab doesn't flash.
+        _webView.DefaultBackgroundColor = Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0C, 0x0C);
         Children.Add(_webView);
     }
 
@@ -73,6 +80,10 @@ public sealed class TerminalControl : Grid, IDisposable
             wwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
         core.SetVirtualHostNameToFolderMapping(VirtualHost, wwwroot, CoreWebView2HostResourceAccessKind.Allow);
         core.WebMessageReceived += OnWebMessageReceived;
+        // Chromium heuristic-caches virtual-host files (no Cache-Control headers), which can
+        // serve a stale terminal.html/addon after an app update; the assets are local, so a
+        // fresh read costs nothing.
+        await core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache);
         core.Navigate($"https://{VirtualHost}/terminal.html");
     }
 
@@ -96,6 +107,12 @@ public sealed class TerminalControl : Grid, IDisposable
 
             switch (typeProp.GetString())
             {
+                case "init":
+                    // The page waits for these before constructing the terminal, so it is
+                    // born with the right theme/fonts instead of restyling after the fact.
+                    _webView.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(
+                        _initialOptions ?? new { type = "initOptions" }, JsonOptions));
+                    break;
                 case "ready":
                     Columns = root.GetProperty("cols").GetInt32();
                     Rows = root.GetProperty("rows").GetInt32();
@@ -119,6 +136,10 @@ public sealed class TerminalControl : Grid, IDisposable
                     break;
                 case "splitTab":
                     SplitRequested?.Invoke();
+                    break;
+                case "pageError":
+                    if (root.TryGetProperty("message", out var err))
+                        TraceHook?.Invoke($"pageError: {err.GetString()}");
                     break;
             }
         }
@@ -201,15 +222,38 @@ public sealed class TerminalControl : Grid, IDisposable
     /// Callers must also move keyboard focus off the terminal (the lock overlay does).</summary>
     public void SetInputEnabled(bool enabled) => _webView.IsHitTestVisible = enabled;
 
+    /// <summary>Options the page's terminal is constructed with. Must be set before
+    /// <see cref="InitializeAsync"/>; later changes go through <see cref="ApplyOptions"/>.</summary>
+    public void SetInitialOptions(
+        int fontSize, string fontFamily, string theme,
+        bool copyOnSelect, bool rightClickPaste, int scrollback,
+        IReadOnlyList<object>? highlights = null)
+        => _initialOptions = new
+        {
+            type = "initOptions", fontSize, fontFamily, theme, copyOnSelect, rightClickPaste, scrollback, highlights,
+        };
+
     public void ApplyOptions(
         int? fontSize = null, string? fontFamily = null, string? theme = null,
         bool? copyOnSelect = null, bool? rightClickPaste = null, int? scrollback = null)
-        => Post(new { type = "setOptions", fontSize, fontFamily, theme, copyOnSelect, rightClickPaste, scrollback });
+    {
+        TraceHook?.Invoke($"ApplyOptions theme={theme} fontSize={fontSize} pageReady={_pageReady}");
+        Post(new { type = "setOptions", fontSize, fontFamily, theme, copyOnSelect, rightClickPaste, scrollback });
+    }
+
+    /// <summary>Replaces the page's active highlight rule set (enabled rules only,
+    /// already resolved for the session). The page recompiles and rescans the viewport.</summary>
+    public void ApplyHighlights(IReadOnlyList<object> rules) =>
+        Post(new { type = "setHighlights", rules });
 
     private void Post(object message)
     {
         if (_disposed || !_pageReady || _webView.CoreWebView2 is null)
+        {
+            TraceHook?.Invoke(
+                $"Post DROPPED: disposed={_disposed} pageReady={_pageReady} core={(_webView.CoreWebView2 is null ? "null" : "ok")}");
             return;
+        }
         _webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(message, JsonOptions));
     }
 

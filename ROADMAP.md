@@ -6,7 +6,7 @@ spike runs early because it is the only item with real feasibility risk.
 
 ---
 
-## Phase 0 — Foundations (prerequisites, mostly small)
+## Phase 0 — Foundations (prerequisites, mostly small) ✅ shipped 2026-08-14
 
 ### 0.1 Per-session settings overrides
 `AppSettings` is global-only today; per-session highlight toggles (Phase 1) need an override
@@ -26,7 +26,7 @@ update `known_hosts.json` on accept.
 
 ---
 
-## Phase 1 — Keyword highlighting
+## Phase 1 — Keyword highlighting ✅ shipped 2026-08-15
 
 Regex-rule highlighting in the terminal, modeled on netOS-cli's SecureCRT keyword packs
 (<https://github.com/h-lopez/netOS-cli>) but first-class: built-in packs, per-rule toggles,
@@ -116,7 +116,7 @@ On-disk format is already where it should be: `%APPDATA%\Sessions\` (`sessions.j
 rotation. Remaining work:
 
 - **Export archive** (`*.sessionsbackup`, a zip): sessions + folders + settings +
-  known hosts + highlight rules + custom icons. Optional filter (export a folder subtree
+  known hosts + highlight rules + custom icons + workspaces (Phase 8). Optional filter (export a folder subtree
   only). Recordings are excluded (large; they live in their own configurable directory).
 - **Secrets:** Credential Manager entries are machine-bound and never in JSON. Default
   export excludes them; optional "include secrets" encrypts the archive with a
@@ -170,6 +170,43 @@ Per-session icon shown in the tree, tab strip, and title bar (alongside the exis
 **Nice-to-have:** auto-suggest an icon on first connect from the SSH server banner /
 detected OS (e.g. `Cisco-1.25`, `OpenSSH_… Ubuntu`), never overriding a manual choice.
 
+### 6.1 Agent-aware tabs
+
+Keep the session icon above as the stable identity of the saved host, and add a **second,
+separate agent icon** to a tab while an agent CLI is active. The two icons answer different
+questions: the session icon says *where this tab is connected*; the agent icon says *what is
+currently running*. Initial built-in agent identities: Claude Code, Codex, Gemini CLI,
+Pi / oh-my-pi, Grok Build, generic agent, and normal shell.
+
+Agent identity can come from a recognized launch command or terminal title, a per-session
+default, or a manual tab-menu override. Detection must never replace or modify a manually
+selected session icon. Keep the existing connection dot as a third, independent signal for
+SSH health.
+
+**Attention state:** show a small badge on the agent icon for `working`, `needs approval`,
+`needs answer`, `complete`, `failed`, or `idle`. An inactive tab that needs input keeps its
+amber badge until the user sends input or a structured agent event reports that work resumed.
+Selecting an alert focuses the correct tab and terminal. Optional Windows toast, sound, and
+taskbar-count notifications apply only when the tab or app is in the background.
+
+**Detection and adapters:** prefer explicit lifecycle events over terminal-screen guessing.
+Provide small adapters for each supported agent using its hooks, extensions, notification
+events, or terminal notification protocol. Normalize them to one minimal Sessions event
+containing agent identity, attention state, and a short non-sensitive label. Accept OSC 9 and
+BEL as generic fallbacks; pattern matching and quiet-output heuristics are low-confidence only
+and must not claim that input is definitely required.
+
+**Remote and security constraints:** validate the event path through plain SSH and the
+persistent tmux mode. Bind structured events to the originating tab so arbitrary remote output
+cannot impersonate a trusted event. Agent events may change UI state and focus a tab, but must
+never approve a tool call or send input automatically. Do not include prompts, commands, or
+terminal output in desktop notifications by default. Adapter installation on a remote host is
+explicit, previewed, and reversible.
+
+**Later integration:** agents that expose ACP or a similar structured runtime can get richer
+status and controls in a later phase. The first version remains a terminal integration rather
+than turning Sessions into an agent IDE.
+
 ---
 
 ## Phase 7 — Session recording
@@ -189,6 +226,36 @@ Record terminal sessions for replay and audit; absorbs the old "output logging" 
   pause/speed/seek. (Ships after write-side; asciinema tooling covers playback in the interim.)
 - **Caveat to surface in UI:** recordings capture everything echoed to the terminal,
   including secrets a server echoes back — the recording indicator must be obvious.
+
+---
+
+## Phase 8 — Workspaces (saved layouts)
+
+The tmux-resurrect/tmuxinator idea, GUI-native: a **workspace** is a named arrangement of
+open sessions — which sessions, in which tab groups, in what order, which tabs are pinned,
+and which tab is active — reopened with one click ("morning: jump box, both app servers,
+the DB, side by side").
+
+**Model** (`workspaces.json` in `%APPDATA%\Sessions\`, same atomic-write/`.bak` treatment):
+- `Workspace`: id, name, ordered list of groups; each group is an ordered list of
+  `{ sessionId, pinned }` plus the active-tab index. References sessions by id — a
+  workspace is a *layout*, never a copy of session data. Deleted sessions are skipped on
+  open with a note, not an error.
+- Deliberately mirrors what `MainViewModel.Groups` / `TabViewModel` already hold, so
+  capture is a straight serialization of live state ("Save current layout as…").
+
+**UI:**
+- "Save current layout as workspace…" + a workspaces section in the tree (or a title-bar
+  dropdown) listing them; click to open, right-click to rename/update/delete.
+- **Open semantics:** default replaces the current layout (prompting if tabs are open);
+  modifier/context option to open *additively* into the current window. Sessions already
+  connected aren't reconnected — tabs are adopted into position.
+- **Restore on launch:** "Reopen last layout at startup" setting — the always-on companion
+  feature (continuum to resurrect). Persist the live layout on clean exit; pairs especially
+  well with tmux-persistent sessions, which reattach instantly.
+
+**Sequencing note:** lands after the v1 two-group split cap is revisited (or ships with it —
+the model above doesn't assume a cap). Include workspaces in the Phase 4 export archive.
 
 ---
 
@@ -220,17 +287,22 @@ to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
 | 1 | Phase 0 foundations (overrides, search, host-key override) | S–M | Low |
 | 2 | **GSSAPI spike** (parallel with anything) | S | **High — do early** |
 | 3 | Phase 6 session icons | S | Low |
-| 4 | Phase 1 highlighting | M | Low |
-| 5 | Phase 4 export/import | S–M | Low |
-| 6 | Phase 5 connectivity (tunnels → agent → jump hosts) | M–L | Medium |
-| 7 | Phase 3 SFTP pane (+ cwd tracking, SSHFS-Win link) | M–L | Medium |
-| 8 | Phase 7 session recording | M | Low |
-| 9 | Phase 2 GSSAPI productization (path chosen by spike) | M | Depends on spike |
-| 10 | Backlog picks | — | — |
+| 4 | Phase 6.1 agent-aware tabs (identity → attention → adapters) | M | Medium |
+| 5 | Phase 1 highlighting | M | Low |
+| 6 | Phase 4 export/import | S–M | Low |
+| 7 | Phase 5 connectivity (tunnels → agent → jump hosts) | M–L | Medium |
+| 8 | Phase 3 SFTP pane (+ cwd tracking, SSHFS-Win link) | M–L | Medium |
+| 9 | Phase 7 session recording | M | Low |
+| 10 | Phase 8 workspaces (saved layouts) | M | Low |
+| 11 | Phase 2 GSSAPI productization (path chosen by spike) | M | Depends on spike |
+| 12 | Backlog picks | — | — |
 
-Icons slot in early because they're small, self-contained, and touch the same session-editor
-surface Phase 0 reworks anyway. Export/import lands before SFTP because it's small and
-unblocks backing up the growing session tree (and now bundles custom icons). Within
-connectivity, tunnels come first (pure SSH.NET), then agent auth, then jump hosts (which
-build on the tunnel channel code). GSSAPI ships last only because its spike must settle
-the approach first.
+Session icons slot in early because they're small, self-contained, and touch the same
+session-editor surface Phase 0 reworks anyway. Agent-aware tabs follow them so the distinct
+session and agent identities are designed together, and because background attention is more
+valuable than cosmetic terminal highlighting. Export/import lands before SFTP because it's
+small and unblocks backing up the growing session tree (and now bundles custom icons). Within
+connectivity, tunnels come first (pure SSH.NET), then agent auth, then jump hosts (which build
+on the tunnel channel code). Workspaces sits late so the split model has settled, but it's
+independent enough to pull forward if it itches. GSSAPI ships last only because its spike must
+settle the approach first.

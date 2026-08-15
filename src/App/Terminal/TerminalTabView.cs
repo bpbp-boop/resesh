@@ -49,11 +49,16 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.InputReceived += data => _session?.Write(data);
         _terminal.Resized += (cols, rows) => _session?.Resize(cols, rows);
         _terminal.ReconnectRequested += () => DispatcherQueue.TryEnqueue(() => _ = ConnectAsync(isReconnect: true));
+        // The page's terminal is constructed with these (init handshake), so it opens
+        // with the right theme/fonts instead of restyling just after first paint.
+        var initial = App.Settings.Current.WithOverrides(Session.Overrides);
+        _terminal.SetInitialOptions(
+            initial.FontSize, initial.FontFamily, initial.Theme,
+            initial.CopyOnSelect, initial.RightClickPaste, initial.Scrollback,
+            BuildHighlightPayload());
+
         _terminal.Ready += (_, _) => DispatcherQueue.TryEnqueue(() =>
-        {
-            ApplySettings(App.Settings.Current);
-            _ = ConnectAsync(isReconnect: false);
-        });
+            _ = ConnectAsync(isReconnect: false));
         _terminal.CloseTabRequested += () => DispatcherQueue.TryEnqueue(() => CloseRequested?.Invoke());
         _terminal.SplitRequested += () => DispatcherQueue.TryEnqueue(() => SplitRequested?.Invoke());
 
@@ -190,15 +195,35 @@ public sealed class TerminalTabView : Grid, IDisposable
         return tcs.Task.GetAwaiter().GetResult();
     }
 
-    /// <summary>Pushes app settings into the xterm page (fonts, theme, clipboard behavior).</summary>
-    public void ApplySettings(Core.Storage.AppSettings settings) =>
+    /// <summary>Pushes app settings into the xterm page (fonts, theme, clipboard behavior),
+    /// with this session's overrides layered on top.</summary>
+    public void ApplySettings(Core.Storage.AppSettings settings)
+    {
+        var effective = settings.WithOverrides(Session.Overrides);
         _terminal.ApplyOptions(
-            fontSize: settings.FontSize,
-            fontFamily: settings.FontFamily,
-            theme: settings.Theme,
-            copyOnSelect: settings.CopyOnSelect,
-            rightClickPaste: settings.RightClickPaste,
-            scrollback: settings.Scrollback);
+            fontSize: effective.FontSize,
+            fontFamily: effective.FontFamily,
+            theme: effective.Theme,
+            copyOnSelect: effective.CopyOnSelect,
+            rightClickPaste: effective.RightClickPaste,
+            scrollback: effective.Scrollback);
+        _terminal.ApplyHighlights(BuildHighlightPayload());
+    }
+
+    /// <summary>Enabled highlight rules for this session (global state + session deltas),
+    /// shaped for the page's addon.</summary>
+    private IReadOnlyList<object> BuildHighlightPayload() =>
+        App.Highlights.ResolveForSession(Session.Overrides)
+            .Select(r => (object)new
+            {
+                id = r.Id,
+                pattern = r.Pattern,
+                color = r.Color,
+                bold = r.Bold,
+                underline = r.Underline,
+                matchCase = r.MatchCase,
+            })
+            .ToList();
 
     /// <summary>
     /// Kills the remote tmux session (persistent sessions only); the attached channel then

@@ -36,6 +36,7 @@ public sealed class SessionStoreTests : IDisposable
             Notes = "core switch",
             ColorTag = "#FF8800",
             CredentialNeeded = true,
+            Overrides = new TerminalOverrides { Theme = "light", FontSize = 18 },
         };
         NewStore().Add(session);
 

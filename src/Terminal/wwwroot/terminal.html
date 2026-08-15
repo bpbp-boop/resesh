@@ -8,13 +8,47 @@
   html, body { margin: 0; padding: 0; height: 100%; background: #0c0c0c; overflow: hidden; }
   #term { height: 100%; width: 100%; }
   .xterm .xterm-viewport { overflow-y: auto; }
+
+  /* Find bar (Ctrl+Shift+F): VS Code-style floating panel, top-right over the terminal. */
+  #findbar {
+    position: absolute; top: 0; right: 14px; z-index: 10;
+    display: none; align-items: center; gap: 4px;
+    padding: 4px 6px; border-radius: 0 0 6px 6px;
+    background: #252526; border: 1px solid #454545; border-top: none;
+    font-family: "Segoe UI", sans-serif; font-size: 12px; color: #cccccc;
+  }
+  body.light-ui #findbar { background: #f3f3f3; border-color: #c8c8c8; color: #333333; }
+  #findbar input {
+    width: 180px; padding: 3px 6px; border: 1px solid transparent; border-radius: 3px;
+    background: #3c3c3c; color: inherit; font-size: 12px; outline: none;
+  }
+  body.light-ui #findbar input { background: #ffffff; border-color: #c8c8c8; }
+  #findbar input:focus { border-color: #007fd4; }
+  #findbar button {
+    min-width: 22px; height: 22px; padding: 0 3px; border: none; border-radius: 3px;
+    background: transparent; color: inherit; font-size: 11px; cursor: pointer;
+  }
+  #findbar button:hover { background: rgba(128, 128, 128, 0.25); }
+  #findbar button.on { background: #007fd4; color: #ffffff; }
+  #find-count { min-width: 52px; text-align: center; opacity: 0.8; white-space: nowrap; }
 </style>
 <script src="xterm.js"></script>
 <script src="addon-fit.js"></script>
 <script src="addon-web-links.js"></script>
+<script src="addon-search.js"></script>
+<script src="addon-highlight.js"></script>
 </head>
 <body>
 <div id="term"></div>
+<div id="findbar">
+  <input id="find-input" type="text" placeholder="Find" spellcheck="false" autocomplete="off">
+  <span id="find-count"></span>
+  <button id="find-case" title="Match case">Aa</button>
+  <button id="find-regex" title="Use regular expression">.*</button>
+  <button id="find-prev" title="Previous match (Shift+Enter)">&#9650;</button>
+  <button id="find-next" title="Next match (Enter)">&#9660;</button>
+  <button id="find-close" title="Close (Esc)">&#10005;</button>
+</div>
 <script>
 (function () {
   "use strict";
@@ -37,24 +71,16 @@
     brightCyan: "#56b6c2", brightWhite: "#ffffff"
   };
 
-  const term = new Terminal({
-    scrollback: 10000,
-    fontFamily: "Cascadia Mono, Consolas, monospace",
-    fontSize: 14,
-    allowProposedApi: true,
-    theme: DARK_THEME
-  });
-  const fit = new FitAddon.FitAddon();
-  term.loadAddon(fit);
-  term.loadAddon(new WebLinksAddon.WebLinksAddon());
-
-  let copyOnSelect = true;
-  let rightClickPaste = true;
-  let connected = false;
-
   const host = window.chrome.webview;
   const container = document.getElementById("term");
-  term.open(container);
+
+  // Surface page-side failures in the host's trace.log; silent JS errors here have
+  // already cost a debugging session (theme override silently not applying).
+  function pageTrace(message) {
+    try { host.postMessage({ type: "pageError", message: message }); } catch (_) {}
+  }
+  window.__pageTrace = pageTrace; // also used by addon-highlight.js
+  window.addEventListener("error", function (e) { pageTrace("uncaught: " + e.message); });
 
   function b64ToBytes(b64) {
     const bin = atob(b64);
@@ -70,115 +96,263 @@
     return btoa(bin);
   }
 
-  // UI -> SSH
-  term.onData(function (data) {
-    if (connected) {
-      host.postMessage({ type: "input", data: strToB64(data) });
-    } else if (data === "\r") {
-      host.postMessage({ type: "reconnect" });
+  // The terminal is constructed only after the host sends initOptions ("init" handshake
+  // below), so it is born with the right theme/fonts: no dark flash before settings land,
+  // and no reliance on a setOptions push racing the page's first frames.
+  let onMessage = null;
+  host.addEventListener("message", function (event) {
+    const msg = event.data;
+    if (onMessage) {
+      onMessage(msg);
+    } else if (msg.type === "initOptions") {
+      boot(msg);
     }
   });
+  host.postMessage({ type: "init" });
 
-  term.onSelectionChange(function () {
-    if (copyOnSelect && term.hasSelection()) {
-      navigator.clipboard.writeText(term.getSelection()).catch(function () {});
-    }
-  });
+  function boot(init) {
+    const term = new Terminal({
+      scrollback: typeof init.scrollback === "number" ? init.scrollback : 10000,
+      fontFamily: init.fontFamily || "Cascadia Mono, Consolas, monospace",
+      fontSize: init.fontSize || 14,
+      allowProposedApi: true,
+      theme: init.theme === "light" ? LIGHT_THEME : DARK_THEME
+    });
+    const fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.loadAddon(new WebLinksAddon.WebLinksAddon());
+    const search = new SearchAddon.SearchAddon();
+    term.loadAddon(search);
+    const highlighter = new HighlightAddon.HighlightAddon();
+    term.loadAddon(highlighter);
+    if (Array.isArray(init.highlights)) highlighter.setRules(init.highlights);
 
-  container.addEventListener("contextmenu", function (e) {
-    e.preventDefault();
-    if (rightClickPaste) {
-      navigator.clipboard.readText().then(function (text) {
-        if (text && connected) host.postMessage({ type: "input", data: strToB64(text) });
-      }).catch(function () {});
-    }
-  });
+    let copyOnSelect = typeof init.copyOnSelect === "boolean" ? init.copyOnSelect : true;
+    let rightClickPaste = typeof init.rightClickPaste === "boolean" ? init.rightClickPaste : true;
+    let connected = false;
 
-  // Ctrl+Shift+C / Ctrl+Shift+V, Ctrl+F4 (close tab — handled by the app shell)
-  term.attachCustomKeyEventHandler(function (e) {
-    if (e.type === "keydown" && e.ctrlKey && !e.shiftKey && e.code === "F4") {
-      host.postMessage({ type: "closeTab" });
-      return false;
-    }
-    if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "Backslash") {
-      host.postMessage({ type: "splitTab" });
-      return false;
-    }
-    if (e.type === "keydown" && e.ctrlKey && e.shiftKey) {
-      if (e.code === "KeyC" && term.hasSelection()) {
-        navigator.clipboard.writeText(term.getSelection()).catch(function () {});
-        return false;
+    term.open(container);
+    document.body.style.background = term.options.theme.background;
+    document.body.classList.toggle("light-ui", term.options.theme === LIGHT_THEME);
+
+    // UI -> SSH
+    term.onData(function (data) {
+      if (connected) {
+        host.postMessage({ type: "input", data: strToB64(data) });
+      } else if (data === "\r") {
+        host.postMessage({ type: "reconnect" });
       }
-      if (e.code === "KeyV") {
+    });
+
+    term.onSelectionChange(function () {
+      // Find selects each match it lands on; don't let copy-on-select clobber the clipboard.
+      if (copyOnSelect && term.hasSelection() && findbar.style.display !== "flex") {
+        navigator.clipboard.writeText(term.getSelection()).catch(function () {});
+      }
+    });
+
+    container.addEventListener("contextmenu", function (e) {
+      e.preventDefault();
+      if (rightClickPaste) {
         navigator.clipboard.readText().then(function (text) {
           if (text && connected) host.postMessage({ type: "input", data: strToB64(text) });
         }).catch(function () {});
-        return false;
+      }
+    });
+
+    // ---- find bar (Ctrl+Shift+F) ----
+
+    const findbar = document.getElementById("findbar");
+    const findInput = document.getElementById("find-input");
+    const findCount = document.getElementById("find-count");
+    const findCase = document.getElementById("find-case");
+    const findRegex = document.getElementById("find-regex");
+    let findCaseOn = false;
+    let findRegexOn = false;
+
+    function searchOptions(incremental) {
+      return {
+        caseSensitive: findCaseOn,
+        regex: findRegexOn,
+        incremental: !!incremental,
+        decorations: {
+          matchBackground: "#515c6a",
+          matchOverviewRuler: "#515c6a",
+          activeMatchBackground: "#f2cc60",
+          activeMatchColorOverviewRuler: "#f2cc60"
+        }
+      };
+    }
+
+    function runFind(direction, incremental) {
+      const query = findInput.value;
+      if (!query) {
+        search.clearDecorations();
+        findCount.textContent = "";
+        return;
+      }
+      try {
+        if (direction === "prev") search.findPrevious(query, searchOptions(false));
+        else search.findNext(query, searchOptions(incremental));
+      } catch (err) {
+        findCount.textContent = "Bad regex"; // e.g. an unclosed group while typing
       }
     }
-    return true;
-  });
 
-  function reportSize() {
-    host.postMessage({ type: "resize", cols: term.cols, rows: term.rows });
-  }
+    search.onDidChangeResults(function (r) {
+      if (!r || r.resultCount === 0) {
+        findCount.textContent = findInput.value ? "No results" : "";
+      } else if (r.resultCount === undefined || r.resultIndex === -1) {
+        findCount.textContent = "";
+      } else {
+        // The addon stops counting at 1000 matches.
+        const total = r.resultCount >= 1000 ? "999+" : r.resultCount;
+        findCount.textContent = (r.resultIndex + 1) + " of " + total;
+      }
+    });
 
-  let fitPending = null;
-  new ResizeObserver(function () {
-    if (fitPending) clearTimeout(fitPending);
-    fitPending = setTimeout(function () {
-      fitPending = null;
-      fit.fit();
-      reportSize();
-    }, 40);
-  }).observe(container);
+    function openFind() {
+      findbar.style.display = "flex";
+      if (term.hasSelection()) {
+        const sel = term.getSelection().trim();
+        if (sel && sel.indexOf("\n") < 0) findInput.value = sel;
+      }
+      findInput.focus();
+      findInput.select();
+      if (findInput.value) runFind("next", true);
+    }
 
-  // SSH/host -> UI
-  host.addEventListener("message", function (event) {
-    const msg = event.data;
-    switch (msg.type) {
-      case "output":
-        term.write(b64ToBytes(msg.data));
-        break;
-      case "connected":
-        connected = true;
-        break;
-      case "disconnected":
-        connected = false;
-        term.write("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n");
-        term.write("\x1b[1;33m" + (msg.message || "Disconnected.") + "\x1b[0m Press Enter to reconnect.\r\n");
-        break;
-      case "divider":
-        // Reconnect-in-place: visual separator, scrollback preserved.
-        term.write("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n");
-        break;
-      case "notice":
-        term.write("\x1b[90m" + (msg.message || "") + "\x1b[0m\r\n");
-        break;
-      case "setOptions":
-        if (msg.fontSize) term.options.fontSize = msg.fontSize;
-        if (msg.fontFamily) term.options.fontFamily = msg.fontFamily;
-        if (msg.theme === "light") term.options.theme = LIGHT_THEME;
-        if (msg.theme === "dark") term.options.theme = DARK_THEME;
-        if (typeof msg.copyOnSelect === "boolean") copyOnSelect = msg.copyOnSelect;
-        if (typeof msg.rightClickPaste === "boolean") rightClickPaste = msg.rightClickPaste;
-        if (typeof msg.scrollback === "number") term.options.scrollback = msg.scrollback;
-        document.body.style.background = term.options.theme.background;
+    function closeFind() {
+      findbar.style.display = "none";
+      search.clearDecorations();
+      findCount.textContent = "";
+      term.focus();
+    }
+
+    findInput.addEventListener("input", function () { runFind("next", true); });
+    findInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { runFind(e.shiftKey ? "prev" : "next", false); e.preventDefault(); }
+      else if (e.key === "Escape") { closeFind(); e.preventDefault(); }
+    });
+    function bindToggle(button, get, set) {
+      button.addEventListener("click", function () {
+        set(!get());
+        button.classList.toggle("on", get());
+        runFind("next", true);
+        findInput.focus();
+      });
+    }
+    bindToggle(findCase, function () { return findCaseOn; }, function (v) { findCaseOn = v; });
+    bindToggle(findRegex, function () { return findRegexOn; }, function (v) { findRegexOn = v; });
+    document.getElementById("find-prev").addEventListener("click", function () { runFind("prev", false); findInput.focus(); });
+    document.getElementById("find-next").addEventListener("click", function () { runFind("next", false); findInput.focus(); });
+    document.getElementById("find-close").addEventListener("click", closeFind);
+
+    // Ctrl+Shift+C / Ctrl+Shift+V, Ctrl+F4 (close tab — handled by the app shell)
+    term.attachCustomKeyEventHandler(function (e) {
+      if (e.type === "keydown" && e.ctrlKey && !e.shiftKey && e.code === "F4") {
+        host.postMessage({ type: "closeTab" });
+        return false;
+      }
+      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyF") {
+        openFind();
+        return false;
+      }
+      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "Backslash") {
+        host.postMessage({ type: "splitTab" });
+        return false;
+      }
+      if (e.type === "keydown" && e.ctrlKey && e.shiftKey) {
+        if (e.code === "KeyC" && term.hasSelection()) {
+          navigator.clipboard.writeText(term.getSelection()).catch(function () {});
+          return false;
+        }
+        if (e.code === "KeyV") {
+          navigator.clipboard.readText().then(function (text) {
+            if (text && connected) host.postMessage({ type: "input", data: strToB64(text) });
+          }).catch(function () {});
+          return false;
+        }
+      }
+      return true;
+    });
+
+    function reportSize() {
+      host.postMessage({ type: "resize", cols: term.cols, rows: term.rows });
+    }
+
+    let fitPending = null;
+    new ResizeObserver(function () {
+      if (fitPending) clearTimeout(fitPending);
+      fitPending = setTimeout(function () {
+        fitPending = null;
         fit.fit();
         reportSize();
-        break;
-      case "focus":
-        term.focus();
-        break;
-      case "clear":
-        term.clear();
-        break;
-    }
-  });
+      }, 40);
+    }).observe(container);
 
-  fit.fit();
-  term.focus();
-  host.postMessage({ type: "ready", cols: term.cols, rows: term.rows });
+    // SSH/host -> UI
+    // Rolling log of option pushes, inspectable via DevTools/CDP when diagnosing theme issues.
+    window.__msgLog = [];
+    onMessage = function (msg) {
+      if (msg.type === "setOptions") {
+        window.__msgLog.push(JSON.stringify(msg));
+        if (window.__msgLog.length > 50) window.__msgLog.shift();
+      }
+      switch (msg.type) {
+        case "output":
+          term.write(b64ToBytes(msg.data));
+          break;
+        case "connected":
+          connected = true;
+          break;
+        case "disconnected":
+          connected = false;
+          term.write("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n");
+          term.write("\x1b[1;33m" + (msg.message || "Disconnected.") + "\x1b[0m Press Enter to reconnect.\r\n");
+          break;
+        case "divider":
+          // Reconnect-in-place: visual separator, scrollback preserved.
+          term.write("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n");
+          break;
+        case "notice":
+          term.write("\x1b[90m" + (msg.message || "") + "\x1b[0m\r\n");
+          break;
+        case "setOptions":
+          // Live settings changes only — initial options arrive via the init handshake.
+          // Theme first, and layout-affecting setters fenced: a throw must not abort the rest.
+          if (msg.theme === "light") term.options.theme = LIGHT_THEME;
+          if (msg.theme === "dark") term.options.theme = DARK_THEME;
+          if (typeof msg.copyOnSelect === "boolean") copyOnSelect = msg.copyOnSelect;
+          if (typeof msg.rightClickPaste === "boolean") rightClickPaste = msg.rightClickPaste;
+          document.body.style.background = term.options.theme.background;
+          document.body.classList.toggle("light-ui", term.options.theme === LIGHT_THEME);
+          try {
+            if (typeof msg.scrollback === "number") term.options.scrollback = msg.scrollback;
+            if (msg.fontSize) term.options.fontSize = msg.fontSize;
+            if (msg.fontFamily) term.options.fontFamily = msg.fontFamily;
+            fit.fit();
+            reportSize();
+          } catch (err) {
+            pageTrace("setOptions: " + (err && err.message));
+          }
+          break;
+        case "setHighlights":
+          highlighter.setRules(Array.isArray(msg.rules) ? msg.rules : []);
+          break;
+        case "focus":
+          term.focus();
+          break;
+        case "clear":
+          term.clear();
+          break;
+      }
+    };
+
+    fit.fit();
+    term.focus();
+    host.postMessage({ type: "ready", cols: term.cols, rows: term.rows });
+  }
 })();
 </script>
 </body>

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sessions.Core.Models;
 
 namespace Sessions.Core.Storage;
 
@@ -21,6 +22,18 @@ public sealed record AppSettings
     public int Scrollback { get; init; } = 10000;
     public bool CopyOnSelect { get; init; } = true;
     public bool RightClickPaste { get; init; } = true;
+
+    /// <summary>These settings with a session's overrides layered on top (null members inherit).</summary>
+    public AppSettings WithOverrides(TerminalOverrides? overrides) =>
+        overrides is null
+            ? this
+            : this with
+            {
+                Theme = overrides.Theme ?? Theme,
+                FontFamily = overrides.FontFamily ?? FontFamily,
+                FontSize = overrides.FontSize ?? FontSize,
+                Scrollback = overrides.Scrollback ?? Scrollback,
+            };
 }
 
 public sealed class SettingsStore

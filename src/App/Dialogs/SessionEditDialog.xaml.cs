@@ -66,12 +66,34 @@ public sealed partial class SessionEditDialog : ContentDialog
                 TerminalTypeBox.Loaded += (_, _) => TerminalTypeBox.Text = existing.TerminalType;
             PersistentToggle.IsOn = existing.Persistent;
             NotesBox.Text = existing.Notes;
+
+            if (existing.Overrides is { } overrides)
+            {
+                OverrideThemeBox.SelectedIndex = overrides.Theme switch { "dark" => 1, "light" => 2, _ => 0 };
+                OverrideFontFamilyBox.Text = overrides.FontFamily ?? "";
+                if (overrides.FontSize is { } fontSize)
+                    OverrideFontSizeBox.Value = fontSize;
+                if (overrides.Scrollback is { } scrollback)
+                    OverrideScrollbackBox.Value = scrollback;
+            }
         }
 
         UpdateAuthFieldVisibility();
     }
 
     private AuthMethod SelectedAuth => (AuthMethod)Math.Max(0, AuthBox.SelectedIndex);
+
+    private void SectionBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        // Fires during InitializeComponent for the initially-selected item, before the panels exist.
+        if (ConnectionPanel is null || TerminalPanel is null || NotesBox is null)
+            return;
+
+        var selected = sender.SelectedItem;
+        ConnectionPanel.Visibility = selected == ConnectionSection ? Visibility.Visible : Visibility.Collapsed;
+        TerminalPanel.Visibility = selected == TerminalSection ? Visibility.Visible : Visibility.Collapsed;
+        NotesBox.Visibility = selected == NotesSection ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     private void AuthBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
         UpdateAuthFieldVisibility();
@@ -115,11 +137,24 @@ public sealed partial class SessionEditDialog : ContentDialog
         {
             ValidationText.Text = string.Join(" ", errors);
             ValidationText.Visibility = Visibility.Visible;
+            // Every required field lives on the Connection section.
+            SectionBar.SelectedItem = ConnectionSection;
             args.Cancel = true;
             return;
         }
 
         var port = double.IsNaN(PortBox.Value) ? 22 : (int)PortBox.Value;
+        // An all-null overrides object is stored as null so sessions.json stays clean.
+        var overrides = new TerminalOverrides
+        {
+            Theme = OverrideThemeBox.SelectedIndex switch { 1 => "dark", 2 => "light", _ => null },
+            FontFamily = string.IsNullOrWhiteSpace(OverrideFontFamilyBox.Text) ? null : OverrideFontFamilyBox.Text.Trim(),
+            FontSize = double.IsNaN(OverrideFontSizeBox.Value) ? null : (int)OverrideFontSizeBox.Value,
+            Scrollback = double.IsNaN(OverrideScrollbackBox.Value) ? null : (int)OverrideScrollbackBox.Value,
+            // Highlight deltas are edited from the tab's Highlighting menu, not here — carry them through.
+            EnabledRules = _existing?.Overrides?.EnabledRules,
+            DisabledRules = _existing?.Overrides?.DisabledRules,
+        };
         Result = new Session
         {
             Id = _existing?.Id ?? Guid.NewGuid(),
@@ -136,6 +171,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             Notes = NotesBox.Text,
             ColorTag = ColorChoices[Math.Max(0, ColorBox.SelectedIndex)].Hex,
             CredentialNeeded = _existing?.CredentialNeeded ?? false,
+            Overrides = overrides.IsEmpty ? null : overrides,
         };
         Password = PasswordBox.Password.Length > 0 ? PasswordBox.Password : null;
     }

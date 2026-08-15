@@ -159,7 +159,11 @@ public sealed class MainViewModel : ObservableObject
         if (!string.IsNullOrEmpty(password))
             _credentials.Write(session.Id, password);
         foreach (var tab in AllTabs.Where(t => t.Session.Id == session.Id))
+        {
             tab.Session = session;
+            // Appearance overrides take effect immediately; connection fields apply on next connect.
+            (tab.View as Terminal.TerminalTabView)?.ApplySettings(App.Settings.Current);
+        }
         RebuildTree();
     }
 

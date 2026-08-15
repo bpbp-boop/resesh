@@ -13,6 +13,7 @@ public partial class App : Application
     public static ICredentialService Credentials { get; } = new WindowsCredentialService();
     public static KnownHostsStore KnownHosts { get; } = new(KnownHostsStore.DefaultPath);
     public static SettingsStore Settings { get; } = new(SettingsStore.DefaultPath);
+    public static HighlightsStore Highlights { get; } = new(HighlightsStore.DefaultPath);
 
     public App()
     {
@@ -49,8 +50,10 @@ public partial class App : Application
     {
         Store.Load();
         KnownHosts.Load();
+        Highlights.Load();
 #if DEBUG
         Sessions.Core.Ssh.SshTerminalSession.TraceHook = message => MainWindow.Trace(message);
+        Sessions.Terminal.TerminalControl.TraceHook = message => MainWindow.Trace(message);
 #endif
         var window = new MainWindow();
         _window = window;

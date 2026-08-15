@@ -95,3 +95,66 @@ scrollback divider. Caveats found while building it: FxSsh's `DataReceived` runs
 receive pump (big sends must go via a worker task, chunked), and `RsaKey`'s ctor takes the SHA-2
 bit length. Still needing a real Linux host to verify: `top`/`vim` rendering, private-key auth,
 keyboard-interactive fallback.
+
+## 2026-08-14 - Phase 0: per-session overrides, terminal search, host-key override
+- Session gains optional `TerminalOverrides` (theme/font/size/scrollback; null = inherit app
+  setting), resolved via `AppSettings.WithOverrides`. Editor UI is an "Appearance overrides"
+  expander; an all-null overrides object is stored as null to keep sessions.json clean.
+- Initial terminal options now travel via an init handshake: the page posts `init`, the host
+  replies `initOptions`, and only then is the xterm Terminal constructed - born with the right
+  theme/fonts instead of restyled by a `setOptions` push right after load. `setOptions` remains
+  for live settings changes and applies theme before the layout-affecting setters (fenced in
+  try/catch, errors reported via `pageError`).
+- Terminal search: vendored @xterm/addon-search 0.16.0 UMD (compatible with the bundled xterm's
+  decorations API); find bar in terminal.html with case/regex toggles, match counter
+  (`onDidChangeResults`, 999+ cap), Enter/Shift+Enter, Esc. Copy-on-select is suppressed while
+  the find bar is open because the addon selects each active match.
+- Host-key mismatch is no longer a hard fail: `HostKeyDecision` is now consulted for Mismatch
+  too (with the previously trusted key in `HostKeyInfo.Previous`); the dialog shows old/new
+  fingerprints and requires typing the host name to enable "Replace Key and Connect".
+  Default-deny stands when no handler is wired. Verified live: tampered fingerprint ->
+  dialog -> typed confirm -> key replaced -> clean reconnect.
+- WebView2 gotcha (REAL, cost hours): Chromium heuristic-caches virtual-host-mapped files
+  (they carry Last-Modified but no Cache-Control), so a rebuilt terminal.html can be served
+  STALE - the new find bar silently missing while the exe is current. Fix:
+  `Profile.ClearBrowsingDataAsync(DiskCache)` before Navigate (assets are local; re-read is
+  free). Also killed lingering msedgewebview2 processes lock %LOCALAPPDATA%\Sessions\WebView2.
+- Debug diagnostics: TerminalControl.TraceHook mirrors SshTerminalSession's (wired to
+  trace.log); the page reports JS errors via `pageError` messages and keeps a rolling
+  `window.__msgLog` of option pushes.
+- Verification note for the future: judging terminal THEME from downscaled screenshots is
+  unreliable - an entire phantom "theme not applying" hunt came from misread screenshots while
+  DOM state was correct the whole time. Sample pixels (Bitmap.GetPixel) or query the DOM.
+
+## 2026-08-15 - Phase 1: keyword highlighting
+- Rule model/persistence: built-in packs live in code (`BuiltinHighlights`, stable ids) so app
+  updates can fix patterns; highlights.json stores only deviations - global enable/disable
+  deltas plus full custom rules (`HighlightsStore`, same atomic-write/.bak scheme as
+  SessionStore). Per-session state is `EnabledRules`/`DisabledRules` id-deltas on
+  `TerminalOverrides` (never rule copies), resolved as: session delta > global delta > shipped
+  default. Toggled from the tab context menu ("Highlighting" submenu); the session editor
+  carries the deltas through untouched.
+- Rendering (addon-highlight.js, our code, not vendored): scans only viewport rows on
+  onRender - the 16 ms/32 KB stream batch path is untouched - with a per-line text cache so
+  the render feedback loop (decoration paint -> render event -> rescan) settles immediately.
+  Matches capped at 40/row. Alternate buffer (vim/htop) is never scanned: markers only exist
+  in the normal buffer, and highlighting full-screen apps would be wrong anyway. Patterns are
+  written in the .NET/JS-common regex subset: validated host-side in .NET, executed in JS.
+- Decorations API findings (bundled xterm.js, DOM renderer):
+  - `foregroundColor` recolors cells reliably (verified via CDP span inspection).
+  - `backgroundColor` STRIPS ALPHA (`rgba>>8` in the cell resolver) - a translucent tint
+    becomes an opaque block the same color as the foreground, making text invisible. Caught
+    live. Tints/underlines go on the decoration overlay element instead (translucent CSS
+    background / bottom border); overlay divs render at z-index 6 ABOVE the text plane, so
+    translucency is mandatory.
+  - Glyphs cannot be re-weighted through decorations, so a rule's `bold` renders as a 22%
+    background tint of the rule color (kept in the schema for intent + forward compat).
+  - IPv6 regex: compressed (`::`) alternative must precede the uncompressed one or leftmost-
+    first alternation matches only the prefix of compressed addresses ("2001:db8:0:1::1" would
+    highlight as "2001:db8:0:1"); uncompressed form requires 3+ groups so hh:mm:ss timestamps
+    stay unmatched; `(?<![\w:])` keeps C++ `std::name` tokens out.
+- Verified live against the local rig (CDP DOM inspection, per the Phase 0 lesson): all 10
+  default packs color correctly on typed+echoed rows, negative-state tint translucent, 10 MB
+  dump + scrollback scrolling with zero pageErrors, decorations pruned to 0 on non-matching
+  viewport. Not yet exercised live: per-session toggle UI and the custom-rule editor dialog
+  (logic unit-tested; 73 Core tests green).

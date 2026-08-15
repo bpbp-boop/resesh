@@ -412,6 +412,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         };
         var copyOnSelect = new ToggleSwitch { Header = "Copy on select", IsOn = current.CopyOnSelect };
         var rightClickPaste = new ToggleSwitch { Header = "Right-click paste", IsOn = current.RightClickPaste };
+        var highlighting = new Button { Content = "Keyword highlighting…" };
 
         var dialog = new ContentDialog
         {
@@ -423,13 +424,20 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 {
                     Spacing = 12,
                     MinWidth = 380,
-                    Children = { theme, fontFamily, fontSize, scrollback, copyOnSelect, rightClickPaste },
+                    Children = { theme, fontFamily, fontSize, scrollback, copyOnSelect, rightClickPaste, highlighting },
                 },
             },
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = Root.XamlRoot,
+        };
+        // Only one ContentDialog may be open at a time: leave Settings, run the editor.
+        // Highlight changes apply/persist immediately, so abandoning Settings loses nothing.
+        highlighting.Click += async (_, _) =>
+        {
+            dialog.Hide();
+            await Dialogs.HighlightEditorDialog.ShowAsync(Root.XamlRoot, ApplySettingsToApp);
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
             return;

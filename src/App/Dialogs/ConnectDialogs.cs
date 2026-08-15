@@ -27,8 +27,13 @@ public static class ConnectDialogs
             : null;
     }
 
-    /// <summary>First-connect host key confirmation.</summary>
-    public static async Task<bool> ConfirmHostKeyAsync(XamlRoot xamlRoot, HostKeyInfo info)
+    /// <summary>Host key confirmation: first connect, or a changed key (typed confirmation required).</summary>
+    public static Task<bool> ConfirmHostKeyAsync(XamlRoot xamlRoot, HostKeyInfo info) =>
+        info.Verdict == HostKeyVerdict.Mismatch
+            ? ConfirmChangedHostKeyAsync(xamlRoot, info)
+            : ConfirmFirstHostKeyAsync(xamlRoot, info);
+
+    private static async Task<bool> ConfirmFirstHostKeyAsync(XamlRoot xamlRoot, HostKeyInfo info)
     {
         var dialog = new ContentDialog
         {
@@ -59,6 +64,58 @@ public static class ConnectDialogs
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = xamlRoot,
         };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    private static async Task<bool> ConfirmChangedHostKeyAsync(XamlRoot xamlRoot, HostKeyInfo info)
+    {
+        static TextBlock Mono(string text) => new()
+        {
+            Text = text,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+        };
+
+        var confirmBox = new TextBox
+        {
+            Header = $"Type the host name ({info.Host}) to confirm replacing the trusted key",
+            PlaceholderText = info.Host,
+        };
+        var dialog = new ContentDialog
+        {
+            Title = "⚠ Host Key Has Changed",
+            Content = new StackPanel
+            {
+                Spacing = 8,
+                MinWidth = 460,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = $"The host key for {info.Host}:{info.Port} does not match the one previously trusted. " +
+                               "This can mean the server was reinstalled or its key rotated — but it can also mean " +
+                               "a man-in-the-middle attack. Only continue if you can explain the change.",
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                    new TextBlock { Text = "Previously trusted:", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+                    Mono(info.Previous is { } prev
+                        ? $"{prev.KeyType} SHA256:{prev.Sha256}"
+                        : "(unavailable)"),
+                    new TextBlock { Text = "Offered now:", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold },
+                    Mono($"{info.KeyType} SHA256:{info.Sha256Fingerprint}"),
+                    confirmBox,
+                },
+            },
+            PrimaryButtonText = "Replace Key and Connect",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            IsPrimaryButtonEnabled = false,
+            XamlRoot = xamlRoot,
+        };
+        confirmBox.TextChanged += (_, _) =>
+            dialog.IsPrimaryButtonEnabled =
+                string.Equals(confirmBox.Text.Trim(), info.Host, StringComparison.OrdinalIgnoreCase);
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 }

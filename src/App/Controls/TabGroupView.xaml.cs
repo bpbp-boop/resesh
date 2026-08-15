@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Sessions.App.ViewModels;
+using Sessions.Core.Models;
 
 namespace Sessions.App.Controls;
 
@@ -153,6 +154,7 @@ public sealed partial class TabGroupView : UserControl
     private MenuFlyoutItem _rename = null!, _resetName = null!, _reconnect = null!, _disconnect = null!, _endRemote = null!,
         _close = null!, _closeDisconnected = null!, _closeOthers = null!, _closeRight = null!,
         _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _options = null!;
+    private MenuFlyoutSubItem _highlight = null!;
 
     private MenuFlyout BuildTabMenu()
     {
@@ -198,6 +200,7 @@ public sealed partial class TabGroupView : UserControl
         });
         _split.KeyboardAcceleratorTextOverride = "Ctrl+Shift+\\";
         _options = Item("Session Options…", tab => _ = _host.OpenSessionOptionsAsync(tab));
+        _highlight = new MenuFlyoutSubItem { Text = "Highlighting" };
 
         var menu = new MenuFlyout();
         menu.Items.Add(_rename);
@@ -219,6 +222,7 @@ public sealed partial class TabGroupView : UserControl
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_split);
         menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(_highlight);
         menu.Items.Add(_options);
         return menu;
     }
@@ -241,7 +245,76 @@ public sealed partial class TabGroupView : UserControl
         // Splitting a lone tab would leave an empty group that immediately collapses — pointless.
         _split.IsEnabled = _host.ViewModel.IsSplit || Group.Tabs.Count > 1;
         // Session Options is disabled when the saved session was deleted while connected.
-        _options.IsEnabled = _host.ViewModel.RankedMatches("").Any(s => s.Id == tab.Session.Id);
+        var sessionExists = _host.ViewModel.RankedMatches("").Any(s => s.Id == tab.Session.Id);
+        _options.IsEnabled = sessionExists;
+        ConfigureHighlightMenu(tab, sessionExists);
+    }
+
+    /// <summary>Rebuilds the per-session Highlighting submenu: one checkable item per rule
+    /// (checked = effective for this session), plus a reset. Toggles are stored on the
+    /// session as enable/disable deltas against the global state — never copies.</summary>
+    private void ConfigureHighlightMenu(TabViewModel tab, bool sessionExists)
+    {
+        _highlight.Items.Clear();
+        _highlight.IsEnabled = sessionExists; // deltas persist on the saved session
+        if (!sessionExists)
+            return;
+
+        var overrides = tab.Session.Overrides;
+        foreach (var rule in App.Highlights.AllRules)
+        {
+            var effective = overrides?.DisabledRules?.Contains(rule.Id) == true
+                ? false
+                : overrides?.EnabledRules?.Contains(rule.Id) == true || rule.Enabled;
+            var item = new ToggleMenuFlyoutItem { Text = rule.Name, IsChecked = effective };
+            var captured = rule;
+            item.Click += (_, _) =>
+            {
+                if (_menuTab is { } menuTab)
+                    ToggleHighlightRule(menuTab, captured, item.IsChecked);
+            };
+            _highlight.Items.Add(item);
+        }
+
+        _highlight.Items.Add(new MenuFlyoutSeparator());
+        var reset = new MenuFlyoutItem
+        {
+            Text = "Reset to Global Defaults",
+            IsEnabled = (overrides?.EnabledRules?.Count ?? 0) > 0 || (overrides?.DisabledRules?.Count ?? 0) > 0,
+        };
+        reset.Click += (_, _) =>
+        {
+            if (_menuTab is not { } menuTab)
+                return;
+            var current = menuTab.Session.Overrides;
+            if (current is null)
+                return;
+            var cleared = current with { EnabledRules = null, DisabledRules = null };
+            _host.ViewModel.UpdateSession(
+                menuTab.Session with { Overrides = cleared.IsEmpty ? null : cleared }, null);
+        };
+        _highlight.Items.Add(reset);
+    }
+
+    private void ToggleHighlightRule(TabViewModel tab, HighlightRule rule, bool nowEnabled)
+    {
+        var session = tab.Session;
+        var current = session.Overrides ?? new TerminalOverrides();
+        var enabled = new HashSet<string>(current.EnabledRules ?? [], StringComparer.Ordinal);
+        var disabled = new HashSet<string>(current.DisabledRules ?? [], StringComparer.Ordinal);
+        enabled.Remove(rule.Id);
+        disabled.Remove(rule.Id);
+        // rule.Enabled is the effective global state; only deviations are stored.
+        if (nowEnabled != rule.Enabled)
+            (nowEnabled ? enabled : disabled).Add(rule.Id);
+
+        var overrides = current with
+        {
+            EnabledRules = enabled.Count > 0 ? enabled.OrderBy(s => s, StringComparer.Ordinal).ToList() : null,
+            DisabledRules = disabled.Count > 0 ? disabled.OrderBy(s => s, StringComparer.Ordinal).ToList() : null,
+        };
+        _host.ViewModel.UpdateSession(
+            session with { Overrides = overrides.IsEmpty ? null : overrides }, null);
     }
 
     private async Task RenameTabAsync(TabViewModel tab)

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Sessions.Core.Models;
 
 public enum AuthMethod
@@ -5,6 +7,31 @@ public enum AuthMethod
     Password,
     PrivateKey,
     None,
+}
+
+/// <summary>
+/// Per-session terminal appearance overrides. Null members inherit the app-wide
+/// setting, so a default instance is equivalent to no overrides at all.
+/// </summary>
+public sealed record TerminalOverrides
+{
+    public string? Theme { get; init; }
+    public string? FontFamily { get; init; }
+    public int? FontSize { get; init; }
+    public int? Scrollback { get; init; }
+
+    /// <summary>Highlight rules force-enabled for this session (delta against the global
+    /// state, by rule id — never a copy of the rule).</summary>
+    public IReadOnlyList<string>? EnabledRules { get; init; }
+
+    /// <summary>Highlight rules force-disabled for this session (delta, by rule id).</summary>
+    public IReadOnlyList<string>? DisabledRules { get; init; }
+
+    [JsonIgnore]
+    public bool IsEmpty =>
+        Theme is null && FontFamily is null && FontSize is null && Scrollback is null
+        && (EnabledRules is null || EnabledRules.Count == 0)
+        && (DisabledRules is null || DisabledRules.Count == 0);
 }
 
 /// <summary>
@@ -46,4 +73,7 @@ public sealed record Session
 
     /// <summary>Set for imported sessions whose credential has not been captured yet.</summary>
     public bool CredentialNeeded { get; init; }
+
+    /// <summary>Terminal appearance overrides for this session; null = use app settings.</summary>
+    public TerminalOverrides? Overrides { get; init; }
 }

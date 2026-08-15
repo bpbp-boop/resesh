@@ -7,7 +7,7 @@
     DefaultButton="Primary"
     PrimaryButtonClick="OnPrimaryButtonClick">
 
-    <StackPanel Spacing="12">
+    <StackPanel Spacing="12" MinWidth="500">
         <TextBlock
             x:Name="ValidationText"
             Foreground="{ThemeResource SystemFillColorCriticalBrush}"
@@ -16,18 +16,30 @@
 
         <InfoBar x:Name="NoticeBar" IsOpen="False" IsClosable="False" Severity="Informational" />
 
-        <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="560" Padding="0,0,14,0">
-            <StackPanel Spacing="12" MinWidth="380">
-                <TextBox x:Name="NameBox" Header="Name" PlaceholderText="prod-web-01" />
+        <SelectorBar x:Name="SectionBar" SelectionChanged="SectionBar_SelectionChanged">
+            <SelectorBarItem x:Name="ConnectionSection" Text="Connection" IsSelected="True" />
+            <SelectorBarItem x:Name="TerminalSection" Text="Terminal" />
+            <SelectorBarItem x:Name="NotesSection" Text="Notes" />
+        </SelectorBar>
 
-                <ComboBox
-                    x:Name="FolderBox"
-                    Header="Folder"
-                    IsEditable="True"
-                    PlaceholderText="(root) — e.g. Datacenter/Rack 4"
-                    HorizontalAlignment="Stretch" />
+        <Grid Height="420">
+            <StackPanel x:Name="ConnectionPanel" Spacing="12">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="NameBox" Grid.Column="0" Header="Name" PlaceholderText="prod-web-01" />
+                    <ComboBox
+                        x:Name="FolderBox"
+                        Grid.Column="1"
+                        Header="Folder"
+                        IsEditable="True"
+                        PlaceholderText="(root)"
+                        HorizontalAlignment="Stretch" />
+                </Grid>
 
-                <Grid ColumnSpacing="8">
+                <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="120" />
@@ -43,25 +55,26 @@
                         Value="22" />
                 </Grid>
 
-                <TextBox x:Name="UsernameBox" Header="Username" PlaceholderText="admin" />
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="UsernameBox" Grid.Column="0" Header="Username" PlaceholderText="admin" />
+                    <ComboBox
+                        x:Name="AuthBox"
+                        Grid.Column="1"
+                        Header="Authentication"
+                        SelectedIndex="0"
+                        SelectionChanged="AuthBox_SelectionChanged"
+                        HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="Password" />
+                        <ComboBoxItem Content="Private key" />
+                        <ComboBoxItem Content="None" />
+                    </ComboBox>
+                </Grid>
 
-                <ComboBox x:Name="AuthBox" Header="Authentication" SelectedIndex="0" SelectionChanged="AuthBox_SelectionChanged" HorizontalAlignment="Stretch">
-                    <ComboBoxItem Content="Password" />
-                    <ComboBoxItem Content="Private key" />
-                    <ComboBoxItem Content="None" />
-                </ComboBox>
-
-                <StackPanel x:Name="PasswordPanel" Spacing="4">
-                    <PasswordBox x:Name="PasswordBox" Header="Password" />
-                    <TextBlock
-                        x:Name="PasswordHint"
-                        Style="{ThemeResource CaptionTextBlockStyle}"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Stored in Windows Credential Manager"
-                        TextWrapping="Wrap" />
-                </StackPanel>
-
-                <Grid x:Name="KeyPathPanel" ColumnSpacing="8" Visibility="Collapsed">
+                <Grid x:Name="KeyPathPanel" ColumnSpacing="12" Visibility="Collapsed">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -77,22 +90,41 @@
                         VerticalAlignment="Bottom"
                         Click="BrowseKey_Click" />
                 </Grid>
+
+                <StackPanel x:Name="PasswordPanel" Spacing="4">
+                    <PasswordBox x:Name="PasswordBox" Header="Password" />
+                    <TextBlock
+                        x:Name="PasswordHint"
+                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Stored in Windows Credential Manager"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
                 <CheckBox x:Name="PassphraseCheck" Content="Key requires a passphrase" Visibility="Collapsed" />
+            </StackPanel>
 
-                <ComboBox x:Name="ColorBox" Header="Color tag" SelectedIndex="0" HorizontalAlignment="Stretch" />
-
-                <ComboBox
-                    x:Name="TerminalTypeBox"
-                    Header="Terminal type"
-                    IsEditable="True"
-                    SelectedIndex="0"
-                    HorizontalAlignment="Stretch">
-                    <x:String>xterm-256color</x:String>
-                    <x:String>xterm</x:String>
-                    <x:String>vt220</x:String>
-                    <x:String>vt100</x:String>
-                    <x:String>linux</x:String>
-                </ComboBox>
+            <StackPanel x:Name="TerminalPanel" Spacing="12" Visibility="Collapsed">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ComboBox
+                        x:Name="TerminalTypeBox"
+                        Grid.Column="0"
+                        Header="Terminal type"
+                        IsEditable="True"
+                        SelectedIndex="0"
+                        HorizontalAlignment="Stretch">
+                        <x:String>xterm-256color</x:String>
+                        <x:String>xterm</x:String>
+                        <x:String>vt220</x:String>
+                        <x:String>vt100</x:String>
+                        <x:String>linux</x:String>
+                    </ComboBox>
+                    <ComboBox x:Name="ColorBox" Grid.Column="1" Header="Color tag" SelectedIndex="0" HorizontalAlignment="Stretch" />
+                </Grid>
 
                 <StackPanel Spacing="4">
                     <ToggleSwitch x:Name="PersistentToggle" Header="Persistent session" />
@@ -103,13 +135,63 @@
                         TextWrapping="Wrap" />
                 </StackPanel>
 
-                <TextBox
-                    x:Name="NotesBox"
-                    Header="Notes"
-                    AcceptsReturn="True"
-                    TextWrapping="Wrap"
-                    Height="72" />
+                <TextBlock
+                    Style="{ThemeResource BodyStrongTextBlockStyle}"
+                    Text="Appearance overrides"
+                    Margin="0,4,0,0" />
+                <TextBlock
+                    Style="{ThemeResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="Blank fields use the app-wide setting."
+                    Margin="0,-8,0,0"
+                    TextWrapping="Wrap" />
+
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ComboBox x:Name="OverrideThemeBox" Grid.Column="0" Header="Theme" SelectedIndex="0" HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="(app setting)" />
+                        <ComboBoxItem Content="dark" />
+                        <ComboBoxItem Content="light" />
+                    </ComboBox>
+                    <TextBox x:Name="OverrideFontFamilyBox" Grid.Column="1" Header="Terminal font family" PlaceholderText="(app setting)" />
+                </Grid>
+
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <NumberBox
+                        x:Name="OverrideFontSizeBox"
+                        Grid.Column="0"
+                        Header="Font size"
+                        PlaceholderText="(app setting)"
+                        Minimum="8"
+                        Maximum="32"
+                        SpinButtonPlacementMode="Compact" />
+                    <NumberBox
+                        x:Name="OverrideScrollbackBox"
+                        Grid.Column="1"
+                        Header="Scrollback lines"
+                        PlaceholderText="(app setting)"
+                        Minimum="1000"
+                        Maximum="100000"
+                        SmallChange="1000"
+                        SpinButtonPlacementMode="Compact" />
+                </Grid>
             </StackPanel>
-        </ScrollViewer>
+
+            <TextBox
+                x:Name="NotesBox"
+                Header="Notes"
+                AcceptsReturn="True"
+                TextWrapping="Wrap"
+                ScrollViewer.VerticalScrollBarVisibility="Auto"
+                VerticalAlignment="Stretch"
+                Visibility="Collapsed" />
+        </Grid>
     </StackPanel>
 </ContentDialog>
