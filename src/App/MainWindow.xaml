@@ -140,6 +140,9 @@
                         <MenuFlyout>
                             <MenuFlyoutItem Text="New Session…" Click="NewSession_Click" />
                             <MenuFlyoutItem Text="New Folder…" Click="NewFolder_Click" />
+                            <MenuFlyoutSeparator />
+                            <MenuFlyoutItem Text="Expand All" Click="ExpandAll_Click" />
+                            <MenuFlyoutItem Text="Collapse All" Click="CollapseAll_Click" />
                         </MenuFlyout>
                     </TreeView.ContextFlyout>
                 </TreeView>

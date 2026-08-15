@@ -843,6 +843,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         // Single folder keeps its create/rename items; mixed selections get the shared subset.
         if (_selection is [{ IsFolder: true } folder])
         {
+            AddItem(menu, "Expand All", () => SetFolderExpansion(folder, expanded: true));
+            AddItem(menu, "Collapse All", () => SetFolderExpansion(folder, expanded: false));
+            menu.Items.Add(new MenuFlyoutSeparator());
             AddItem(menu, "New Session…", async () => await OpenSessionEditorAsync(existing: null, defaultFolder: folder.FolderPath));
             AddItem(menu, "New Folder…", async () => await NewSubfolderAsync(folder));
             menu.Items.Add(new MenuFlyoutSeparator());
@@ -967,6 +970,24 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     }
 
     // ---- Tree expansion bookkeeping ----
+
+    private void SetFolderExpansion(TreeNodeViewModel folder, bool expanded)
+    {
+        ViewModel.SetExpansionUnder(folder, expanded);
+        ScheduleExpansionSync(); // nested containers realize lazily; push state as they appear
+    }
+
+    private void ExpandAll_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.SetExpansionAll(true);
+        ScheduleExpansionSync();
+    }
+
+    private void CollapseAll_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.SetExpansionAll(false);
+        ScheduleExpansionSync();
+    }
 
     private void SessionTree_Expanding(TreeView sender, TreeViewExpandingEventArgs args)
     {

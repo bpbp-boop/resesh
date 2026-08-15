@@ -223,6 +223,25 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>Expands or collapses a folder and every folder beneath it.</summary>
+    public void SetExpansionUnder(TreeNodeViewModel node, bool expanded)
+    {
+        if (!node.IsFolder)
+            return;
+        node.IsExpanded = expanded;
+        if (!IsSearching)
+            _expansion[node.FolderPath] = expanded;
+        foreach (var child in node.Children)
+            SetExpansionUnder(child, expanded);
+    }
+
+    /// <summary>Expands or collapses every folder in the tree.</summary>
+    public void SetExpansionAll(bool expanded)
+    {
+        foreach (var node in RootNodes)
+            SetExpansionUnder(node, expanded);
+    }
+
     /// <summary>Raised after the tree collections are repopulated so the view can re-apply expansion.</summary>
     public event Action? TreeRebuilt;
 
