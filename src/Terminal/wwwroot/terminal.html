@@ -262,6 +262,10 @@
         host.postMessage({ type: "splitTab" });
         return false;
       }
+      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyE") {
+        host.postMessage({ type: "filePane" });
+        return false;
+      }
       if (e.type === "keydown" && e.ctrlKey && e.shiftKey) {
         if (e.code === "KeyC" && term.hasSelection()) {
           navigator.clipboard.writeText(term.getSelection()).catch(function () {});

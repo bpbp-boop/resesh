@@ -42,6 +42,9 @@ public sealed class TerminalControl : Grid, IDisposable
     /// <summary>Ctrl+Shift+\ pressed inside the terminal page.</summary>
     public event Action? SplitRequested;
 
+    /// <summary>Ctrl+Shift+E pressed inside the terminal page (toggle file pane).</summary>
+    public event Action? FilePaneRequested;
+
     /// <summary>Fires once when the xterm page is loaded and measured (initial cols/rows).</summary>
     public event Action<int, int>? Ready;
 
@@ -136,6 +139,9 @@ public sealed class TerminalControl : Grid, IDisposable
                     break;
                 case "splitTab":
                     SplitRequested?.Invoke();
+                    break;
+                case "filePane":
+                    FilePaneRequested?.Invoke();
                     break;
                 case "pageError":
                     if (root.TryGetProperty("message", out var err))

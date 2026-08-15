@@ -1,10 +1,12 @@
 ﻿using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Sessions.App.Controls;
 using Sessions.App.Dialogs;
 using Sessions.App.ViewModels;
 using Sessions.Core.Credentials;
 using Sessions.Core.Models;
+using Sessions.Core.Sftp;
 using Sessions.Core.Ssh;
 using Sessions.Terminal;
 
@@ -26,6 +28,13 @@ public sealed class TerminalTabView : Grid, IDisposable
     private bool _connecting;
     private bool _disposed;
 
+    // File pane (Phase 3): lives in column 2 behind a splitter; the resolved connect
+    // secret is kept for the tab's lifetime so the SFTP channel never re-prompts.
+    private SftpPaneView? _filePane;
+    private CommunityToolkit.WinUI.Controls.GridSplitter? _paneSplitter;
+    private string? _secret;
+    private const double DefaultFilePaneWidth = 340;
+
     private Session Session => _tab.Session;
 
     /// <summary>Ctrl+F4 inside the terminal; the window routes it to the confirmed-close pathway.</summary>
@@ -42,6 +51,12 @@ public sealed class TerminalTabView : Grid, IDisposable
         _tab = tab;
         _credentials = credentials;
         _knownHosts = knownHosts;
+
+        // Column 0: terminal; column 1: splitter (collapsed); column 2: file pane (width 0
+        // until opened). The lock overlay spans all three.
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0) });
 
         Children.Add(_terminal);
         Children.Add(_spinner);
@@ -61,6 +76,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             _ = ConnectAsync(isReconnect: false));
         _terminal.CloseTabRequested += () => DispatcherQueue.TryEnqueue(() => CloseRequested?.Invoke());
         _terminal.SplitRequested += () => DispatcherQueue.TryEnqueue(() => SplitRequested?.Invoke());
+        _terminal.FilePaneRequested += () => DispatcherQueue.TryEnqueue(ToggleFilePane);
 
         Loaded += async (_, _) =>
         {
@@ -100,6 +116,7 @@ public sealed class TerminalTabView : Grid, IDisposable
                 _terminal.NotifyDisconnected("No credential provided.");
                 return;
             }
+            _secret = secret; // reused by the file pane's SFTP connection
 
             if (isReconnect)
                 _terminal.WriteDivider();
@@ -247,6 +264,148 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.NotifyDisconnected("Disconnected.");
     }
 
+    // ---- file pane (Phase 3) ----
+
+    public bool IsFilePaneOpen => _filePane is not null && ColumnDefinitions[2].Width.Value > 0;
+
+    public void ToggleFilePane()
+    {
+        if (IsFilePaneOpen)
+            HideFilePane();
+        else
+            ShowFilePane();
+    }
+
+    /// <summary>Opens (or reveals) the pane; a non-null <paramref name="initialPath"/> also
+    /// navigates there. A non-null <paramref name="notice"/> is shown in the pane's status
+    /// line once the listing lands (instead of the item count).</summary>
+    public void ShowFilePane(string? initialPath = null, string? notice = null)
+    {
+        if (_disposed)
+            return;
+        if (_filePane is null)
+        {
+            _filePane = new SftpPaneView(() => Session, CreateSftpSessionAsync, OpenInExplorerAsync);
+            _filePane.CloseRequested += HideFilePane;
+            Grid.SetColumn(_filePane, 2);
+            Children.Add(_filePane);
+
+            _paneSplitter = new CommunityToolkit.WinUI.Controls.GridSplitter
+            {
+                Width = 8,
+                ResizeBehavior = CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeBehavior.PreviousAndNext,
+                ResizeDirection = CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns,
+            };
+            Grid.SetColumn(_paneSplitter, 1);
+            Children.Add(_paneSplitter);
+        }
+
+        if (!IsFilePaneOpen)
+        {
+            var width = App.Settings.Current.FilePaneWidth is { } saved and > 100 ? saved : DefaultFilePaneWidth;
+            ColumnDefinitions[2].Width = new GridLength(width);
+        }
+        _paneSplitter!.Visibility = Visibility.Visible;
+        _filePane.Visibility = Visibility.Visible;
+        if (initialPath is not null || _filePane.IsLoaded)
+            _ = _filePane.NavigateAsync(initialPath ?? _filePane.CurrentPath, notice);
+    }
+
+    public void HideFilePane()
+    {
+        if (!IsFilePaneOpen)
+            return;
+        SaveFilePaneWidth();
+        ColumnDefinitions[2].Width = new GridLength(0);
+        _paneSplitter!.Visibility = Visibility.Collapsed;
+        _terminal.FocusTerminal();
+    }
+
+    /// <summary>
+    /// "Open file pane at current folder": persistent (tmux) sessions report their cwd over
+    /// the exec side-channel; plain sessions fall back to the remote home directory. When
+    /// the query fails, the pane says WHY it opened at home instead of failing silently.
+    /// </summary>
+    public async Task OpenFilePaneAtCurrentFolderAsync()
+    {
+        string? path = null;
+        string? failure = null;
+        var session = _session;
+        if (Session.Persistent && session is not null && session.IsConnected)
+        {
+            var result = await Task.Run(() => session.RunCommand(TmuxPersistence.CurrentPathCommand()));
+            if (result is null)
+                failure = "the connection did not accept the query";
+            else if (!result.Success)
+                failure = string.IsNullOrWhiteSpace(result.Error) ? "the tmux query failed" : $"tmux: {result.Error.Trim()}";
+            else
+            {
+                path = TmuxPersistence.ParseCurrentPath(result.Output, Session.Id, _tab.TmuxSlot);
+                if (path is null)
+                    failure = "no matching tmux session in the reply";
+            }
+        }
+        ShowFilePane(path, failure is null ? null : $"Couldn't read the current folder ({failure}) — opened home instead.");
+    }
+
+    private Interop.SshfsMount? _sshfsMount;
+
+    /// <summary>Mount the remote filesystem, then open Explorer on it. Password sessions
+    /// use the sshfs UNC provider (mounted first — Explorer alone can't authenticate a UNC
+    /// argument and silently opens Documents); key sessions spawn sshfs.exe directly with
+    /// the session's key, since the UNC API cannot carry one. Runs on a background thread;
+    /// the pane surfaces failures.</summary>
+    private async Task OpenInExplorerAsync(string remotePath)
+    {
+        var session = Session;
+        string root;
+        if (session.AuthMethod == AuthMethod.PrivateKey)
+        {
+            var mount = _sshfsMount;
+            if (mount is not { IsAlive: true })
+            {
+                mount?.Dispose();
+                mount = await Task.Run(() => Interop.SshfsIntegration.MountWithIdentity(session));
+                _sshfsMount = mount;
+            }
+            root = mount.Root;
+        }
+        else
+        {
+            var password = session.AuthMethod == AuthMethod.Password ? _secret : null;
+            root = await Task.Run(() => Interop.SshfsIntegration.Connect(session, password));
+        }
+        Interop.SshfsIntegration.OpenInExplorer(root, remotePath);
+    }
+
+    /// <summary>Connect factory handed to the pane: reuses the tab's resolved secret
+    /// (prompting only if the tab never connected) and the shared host-key trust.</summary>
+    private async Task<SftpSession> CreateSftpSessionAsync()
+    {
+        var secret = _secret ?? await ResolveSecretAsync();
+        if (secret is null)
+            throw new SshSessionException(SshFailureKind.AuthenticationFailed, "No credential provided.");
+        _secret = secret;
+        var sftp = new SftpSession(_knownHosts);
+        try
+        {
+            await Task.Run(() => sftp.Connect(Session, secret));
+        }
+        catch
+        {
+            sftp.Dispose();
+            throw;
+        }
+        return sftp;
+    }
+
+    private void SaveFilePaneWidth()
+    {
+        var width = ColumnDefinitions[2].Width.Value;
+        if (width > 100 && Math.Abs(width - (App.Settings.Current.FilePaneWidth ?? 0)) > 1)
+            App.Settings.Save(App.Settings.Current with { FilePaneWidth = width });
+    }
+
     // ---- lock overlay (per plan: obscure output, block input, buffer continues) ----
 
     private Button? _lockOverlay;
@@ -282,6 +441,7 @@ public sealed class TerminalTabView : Grid, IDisposable
                 CornerRadius = new CornerRadius(0),
             };
             _lockOverlay.Click += (_, _) => UnlockRequested?.Invoke();
+            Grid.SetColumnSpan(_lockOverlay, 3); // cover the file pane and splitter too
         }
         if (!Children.Contains(_lockOverlay))
             Children.Add(_lockOverlay);
@@ -302,6 +462,12 @@ public sealed class TerminalTabView : Grid, IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        if (IsFilePaneOpen)
+            SaveFilePaneWidth();
+        _filePane?.Dispose();
+        _filePane = null;
+        _sshfsMount?.Dispose(); // killing the sshfs process unmounts the drive
+        _sshfsMount = null;
         // Plan-mandated order: reader â†’ shell â†’ client (inside Disconnect) â†’ WebView2.
         _session?.Disconnect();
         _session = null;

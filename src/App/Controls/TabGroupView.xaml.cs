@@ -24,6 +24,8 @@ public interface ITabGroupHost
     void ReconnectTab(TabViewModel tab);
     void DisconnectTab(TabViewModel tab);
     Task EndRemoteSessionAsync(TabViewModel tab);
+    void ToggleFilePane(TabViewModel tab);
+    Task OpenFilePaneAtCurrentFolderAsync(TabViewModel tab);
 }
 
 public sealed partial class TabGroupView : UserControl
@@ -153,7 +155,8 @@ public sealed partial class TabGroupView : UserControl
 
     private MenuFlyoutItem _rename = null!, _resetName = null!, _reconnect = null!, _disconnect = null!, _endRemote = null!,
         _close = null!, _closeDisconnected = null!, _closeOthers = null!, _closeRight = null!,
-        _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _options = null!;
+        _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _options = null!,
+        _filePane = null!, _filePaneCwd = null!;
     private MenuFlyoutSubItem _highlight = null!;
 
     private MenuFlyout BuildTabMenu()
@@ -174,6 +177,9 @@ public sealed partial class TabGroupView : UserControl
         _reconnect = Item("Reconnect", tab => _host.ReconnectTab(tab));
         _disconnect = Item("Disconnect", tab => _host.DisconnectTab(tab));
         _endRemote = Item("End Remote Session…", tab => _ = _host.EndRemoteSessionAsync(tab));
+        _filePane = Item("File Pane", tab => _host.ToggleFilePane(tab));
+        _filePane.KeyboardAcceleratorTextOverride = "Ctrl+Shift+E";
+        _filePaneCwd = Item("Open File Pane at Current Folder", tab => _ = _host.OpenFilePaneAtCurrentFolderAsync(tab));
         _close = Item("Close", tab => _ = _host.RequestCloseTabAsync(tab));
         _close.KeyboardAcceleratorTextOverride = "Ctrl+F4";
         _closeDisconnected = Item("Close Disconnected Tabs", tab =>
@@ -222,6 +228,9 @@ public sealed partial class TabGroupView : UserControl
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_split);
         menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(_filePane);
+        menu.Items.Add(_filePaneCwd);
+        menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_highlight);
         menu.Items.Add(_options);
         return menu;
@@ -244,6 +253,10 @@ public sealed partial class TabGroupView : UserControl
         _split.Text = _host.ViewModel.IsSplit ? "Move to Other Group" : "Split Right";
         // Splitting a lone tab would leave an empty group that immediately collapses — pointless.
         _split.IsEnabled = _host.ViewModel.IsSplit || Group.Tabs.Count > 1;
+        _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
+        // cwd tracking rides the tmux side-channel; plain sessions would just open at home.
+        _filePaneCwd.Visibility = tab.Session.Persistent ? Visibility.Visible : Visibility.Collapsed;
+        _filePaneCwd.IsEnabled = tab.Session.Persistent && tab.State == TabConnectionState.Connected;
         // Session Options is disabled when the saved session was deleted while connected.
         var sessionExists = _host.ViewModel.RankedMatches("").Any(s => s.Id == tab.Session.Id);
         _options.IsEnabled = sessionExists;

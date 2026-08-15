@@ -78,4 +78,28 @@ public static class TmuxPersistence
 
     public static string KillCommand(Guid id, int slot) =>
         $"tmux -L {Socket} kill-session -t ={SessionName(id, slot)}";
+
+    /// <summary>
+    /// Lists every pane's session/active/cwd (for "open file pane at current folder").
+    /// Deliberately queries the whole server and matches client-side in
+    /// <see cref="ParseCurrentPath"/> — the exec channel has no attached tmux client, and
+    /// avoiding server-side target resolution is one less thing to go wrong remotely.
+    /// </summary>
+    public static string CurrentPathCommand() =>
+        $"tmux -L {Socket} list-panes -a -F '#{{session_name}} #{{pane_active}} #{{pane_current_path}}'";
+
+    /// <summary>The active pane's cwd for this session/slot, or null when absent from the
+    /// <see cref="CurrentPathCommand"/> output. Paths may contain spaces; session names
+    /// (hex-derived) cannot.</summary>
+    public static string? ParseCurrentPath(string output, Guid id, int slot)
+    {
+        var name = SessionName(id, slot);
+        foreach (var line in output.Split('\n'))
+        {
+            var parts = line.Trim().Split(' ', 3);
+            if (parts is [var session, "1", var path] && session == name && path.StartsWith('/'))
+                return path;
+        }
+        return null;
+    }
 }

@@ -25,6 +25,9 @@ public sealed class SshSessionException(SshFailureKind kind, string message, Exc
     public SshFailureKind Kind { get; } = kind;
 }
 
+/// <summary>Outcome of a one-off exec-channel command (see <see cref="SshTerminalSession.RunCommand"/>).</summary>
+public sealed record SshCommandResult(bool Success, string Output, string Error);
+
 /// <summary>
 /// One live SSH shell: SshClient + ShellStream plus a background reader.
 /// All calls are safe from any thread; events fire on background threads.
@@ -82,9 +85,9 @@ public sealed class SshTerminalSession : IDisposable
 
         // Fast pre-flight so unreachable hosts fail in seconds; the real connect then gets a
         // generous timeout because the first-connect host key dialog sits inside the handshake.
-        PreflightTcp(session.Host, session.Port, TimeSpan.FromSeconds(10));
+        SshConnectionFactory.PreflightTcp(session.Host, session.Port, TimeSpan.FromSeconds(10));
 
-        var auth = BuildAuthMethods(session, secret);
+        var auth = SshConnectionFactory.BuildAuthMethods(session, secret);
         var connectionInfo = new ConnectionInfo(session.Host, session.Port, session.Username, auth)
         {
             Timeout = TimeSpan.FromMinutes(2),
@@ -135,7 +138,7 @@ public sealed class SshTerminalSession : IDisposable
             client.Dispose();
             if (hostKeyFailure is not null)
                 throw hostKeyFailure;
-            throw Classify(ex);
+            throw SshConnectionFactory.Classify(ex);
         }
 
         _client = client;
@@ -178,61 +181,6 @@ public sealed class SshTerminalSession : IDisposable
             Closed?.Invoke(failure);
         }
     }
-
-    private static void PreflightTcp(string host, int port, TimeSpan timeout)
-    {
-        using var socket = new System.Net.Sockets.Socket(
-            System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
-        try
-        {
-            if (!socket.ConnectAsync(host, port).Wait(timeout))
-                throw new SshSessionException(
-                    SshFailureKind.HostUnreachable, $"Could not reach {host}:{port} (connection timed out).");
-        }
-        catch (AggregateException e) when (e.InnerException is System.Net.Sockets.SocketException se)
-        {
-            throw new SshSessionException(
-                SshFailureKind.HostUnreachable, $"Could not reach {host}:{port}: {se.Message}", se);
-        }
-    }
-
-    private static AuthenticationMethod[] BuildAuthMethods(Session session, string? secret)
-    {
-        var user = session.Username;
-        switch (session.AuthMethod)
-        {
-            case AuthMethod.Password:
-            {
-                var password = new PasswordAuthenticationMethod(user, secret ?? "");
-                // Some servers demand keyboard-interactive; answer prompts with the same password once.
-                var interactive = new KeyboardInteractiveAuthenticationMethod(user);
-                interactive.AuthenticationPrompt += (_, e) =>
-                {
-                    foreach (var prompt in e.Prompts)
-                        prompt.Response = secret ?? "";
-                };
-                return [password, interactive];
-            }
-            case AuthMethod.PrivateKey:
-            {
-                var keyFile = string.IsNullOrEmpty(secret)
-                    ? new PrivateKeyFile(session.PrivateKeyPath!)
-                    : new PrivateKeyFile(session.PrivateKeyPath!, secret);
-                return [new PrivateKeyAuthenticationMethod(user, keyFile)];
-            }
-            default:
-                return [new NoneAuthenticationMethod(user)];
-        }
-    }
-
-    private static SshSessionException Classify(Exception ex) => ex switch
-    {
-        SshAuthenticationException => new SshSessionException(
-            SshFailureKind.AuthenticationFailed, "Authentication failed — check the username and credential.", ex),
-        SshConnectionException or System.Net.Sockets.SocketException => new SshSessionException(
-            SshFailureKind.HostUnreachable, $"Could not reach the host: {ex.Message}", ex),
-        _ => new SshSessionException(SshFailureKind.Other, ex.Message, ex),
-    };
 
     // Raw-stream trace (DEBUG diagnostics; capped per connection so trace.log stays sane).
     private int _tracedBytes;
@@ -327,6 +275,29 @@ public sealed class SshTerminalSession : IDisposable
         catch (Exception e) when (e is SshException or IOException or ObjectDisposedException or InvalidOperationException)
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Like <see cref="TryRunCommand"/> but captures stdout/stderr so callers can report
+    /// WHY a query failed, not just that it did. Null when the channel is unavailable.
+    /// Blocking; used for the tmux cwd query.
+    /// </summary>
+    public SshCommandResult? RunCommand(string command)
+    {
+        try
+        {
+            var client = _client;
+            if (client?.IsConnected != true || _disposed)
+                return null;
+            using var cmd = client.CreateCommand(command);
+            var output = cmd.Execute();
+            return new SshCommandResult(cmd.ExitStatus == 0, output, cmd.Error);
+        }
+        catch (Exception e) when (e is SshException or IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            TraceHook?.Invoke($"RunCommand failed: {e.Message}");
+            return null;
         }
     }
 

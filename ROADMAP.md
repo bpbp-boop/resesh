@@ -84,7 +84,7 @@ Needs testing against a real AD-joined host — the local `TestSshServer` can't 
 
 ---
 
-## Phase 3 — File transfer & remote browsing
+## Phase 3 — File transfer & remote browsing ✅ shipped 2026-08-15 (pane + SSHFS link verified live; transfers/cwd-tracking pending deeper testing)
 
 SSH.NET already ships `SftpClient`; there is zero transfer code today, so this is greenfield.
 

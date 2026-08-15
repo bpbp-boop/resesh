@@ -79,8 +79,21 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                     SplitRight(tab);
             }
         };
+        // Ctrl+Shift+E: toggle the active tab's file pane (also forwarded by the xterm page).
+        var filePane = new KeyboardAccelerator
+        {
+            Key = VirtualKey.E,
+            Modifiers = VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift,
+        };
+        filePane.Invoked += (_, e) =>
+        {
+            e.Handled = true;
+            if (ViewModel.ActiveTab is { } tab)
+                ToggleFilePane(tab);
+        };
         Root.KeyboardAccelerators.Add(closeTab);
         Root.KeyboardAccelerators.Add(split);
+        Root.KeyboardAccelerators.Add(filePane);
     }
 
     /// <summary>Opens a tab for the session and starts its terminal + SSH lifecycle.</summary>
@@ -378,6 +391,18 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             "End Session");
         if (confirmed)
             view.EndRemoteSession();
+    }
+
+    public void ToggleFilePane(TabViewModel tab)
+    {
+        if (tab.View is TerminalTabView view && !tab.IsLocked)
+            view.ToggleFilePane();
+    }
+
+    public async Task OpenFilePaneAtCurrentFolderAsync(TabViewModel tab)
+    {
+        if (tab.View is TerminalTabView view && !tab.IsLocked)
+            await view.OpenFilePaneAtCurrentFolderAsync();
     }
 
     // ---- settings ----

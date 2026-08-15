@@ -158,3 +158,101 @@ keyboard-interactive fallback.
   dump + scrollback scrolling with zero pageErrors, decorations pruned to 0 on non-matching
   viewport. Not yet exercised live: per-session toggle UI and the custom-rule editor dialog
   (logic unit-tested; 73 Core tests green).
+
+## 2026-08-15 - Phase 3: file transfer & remote browsing (SFTP pane)
+
+- New `Sessions.Core.Sftp`: `SftpSession` wraps SSH.NET's `SftpClient` as a second,
+  independent connection per tab. Shared plumbing was extracted from `SshTerminalSession`
+  into `SshConnectionFactory` (auth methods incl. the keyboard-interactive quirk, failure
+  classification, TCP preflight) rather than duplicated. Auth methods are stateful in
+  SSH.NET, so the factory builds a fresh set per client.
+- Host-key policy for the SFTP channel: trust ONLY on `KnownHostsStore.Check == Match`.
+  Unknown/changed keys fail with a pointer to the terminal path - the user already made
+  that decision once; a second surprise dialog on the file channel would be wrong.
+- The tab caches the resolved connect secret (`TerminalTabView._secret`) so opening the
+  file pane never re-prompts for a password that was typed but not saved.
+- Transfers are cancellable stream copies (64 KB chunks) rather than SSH.NET's
+  `UploadFile`/`DownloadFile` (no cancellation there); partial targets are deleted on
+  cancel. One remote operation at a time per pane - the pane serializes and shows a
+  progress strip (per-file bytes + N-of-M).
+- Pure helpers (`RemotePath`, `UnixPermissions`, `RemoteFileEntry.Sort`) carry the
+  path/permission/collision logic so it unit-tests without a server (TestSshServer speaks
+  neither SFTP nor exec channels; live verification needs a real host). Permission modes
+  use SSH.NET's octal-as-decimal `short` convention (755 = rwxr-xr-x).
+- Pane UI (`SftpPaneView`) is fully code-built (HighlightEditorDialog precedent): composed
+  ListView rows with `Tag` carrying the entry, compact 26px rows, toolbar
+  (up/home/path/refresh/mkdir/upload/close), context menu, Explorer drag-IN via
+  StorageItems. Drag-OUT (temp-file materialization on DragStarting) is deferred -
+  "Download & Open" covers the common case.
+- Layout: `TerminalTabView` grew columns [terminal | splitter | pane]; the lock overlay
+  spans all three. Pane width persists as `AppSettings.FilePaneWidth`. Ctrl+Shift+E
+  toggles - registered BOTH as a window accelerator and forwarded from the xterm page
+  (WebView2 swallows accelerators), same dual-path as Ctrl+F4.
+- Cwd tracking ("Open File Pane at Current Folder", persistent sessions only): new
+  `SshTerminalSession.TryRunCommandForOutput` (TryRunCommand discarded stdout) +
+  `TmuxPersistence.CurrentPathCommand` - `display-message -p -t =<name>
+  '#{pane_current_path}'`; explicit `-t` because an exec channel has no attached tmux
+  client. Plain sessions fall back to home (OSC 7 reporting = future work).
+- SSHFS-Win: detection only (`sshfs-win.exe` under Program Files or the registry key),
+  UNC `\sshfs.r\user@host[!port]\path` launched via explorer.exe. Toolbar button appears
+  only when installed; nothing bundled.
+- 111 Core tests green (38 new). Not yet exercised live: everything SFTP needs a real
+  host - the whole pane, cwd query, and SSHFS link are untested against actual servers.
+- Live-testing fixes (same day): (1) explorer.exe handed an unmounted sshfs UNC cannot
+  authenticate — it silently opens Documents (observed; WinFsp provider + all four
+  sshfs prefixes were registered and running, so it is purely a credential-path issue).
+  Fix: mount first via WNetAddConnection2 (deviceless connection, password from the tab's
+  cached secret — never on a command line; 1219 credential-conflict = already connected =
+  success), THEN launch Explorer; key-auth sessions use \sshfs.kr\ (default-profile key).
+  (2) "Open at current folder" opened home: the cwd query was rebuilt from
+  `display-message -p -t =<name>` to `list-panes -a -F` + client-side matching
+  (ParseCurrentPath, unit-tested) — no server-side target resolution to go wrong — and the
+  fallback now says WHY in the pane status (stderr surfaced via new
+  SshTerminalSession.RunCommand, which replaced TryRunCommandForOutput). Root cause on the
+  droplet not yet confirmed; the status message will name it on the next retest.
+- SSHFS retest root cause (confirmed live on this machine with WNet probes): the error was
+  1203 ERROR_NO_NET_OR_BAD_PATH, and probing showed \sshfs.kr\... returns 1203 while every
+  \sshfs.r\... form mounts fine (error 5 = local sshd auth-refused, i.e. the full chain
+  worked) — this install (SSHFS-Win 3.7.21011 / WinFsp 2.0) registers the .k/.kr launcher
+  services but its network provider never claims those prefixes. So key-auth sessions had
+  picked \sshfs.kr\ and died before reaching sshfs. Fix: Connect() tries prefixes in order
+  (kr -> r for key auth), returns the root that mounted for the Explorer launch, stops
+  falling back on non-1203 errors, and maps 5/1326 ("login refused"; sshfs uses its own
+  %USERPROFILE%\.ssh default key, NOT the session's PrivateKeyPath) and 1203 ("install
+  doesn't accept this prefix") to readable messages.
+- Key-auth sessions and SSHFS (the "why can't it use my key" answer, now designed around):
+  the UNC/WNet mount API only carries user+password, and sshfs-win hard-wires the auth mode
+  per prefix (\sshfs.r\ forces PreferredAuthentications=password; the .k prefixes are the
+  ones this install never claims). No UNC route can use the session's PrivateKeyPath.
+  Fix: key-auth sessions bypass the network provider entirely — spawn the bundled
+  sshfs.exe directly (`user@host:/ X: -f -o IdentityFile=<session key> -o BatchMode=yes
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null` + sshfs-win's
+  Explorer-friendly defaults) on a free drive letter, wait for the drive to appear
+  (20 s), then open Explorer there. The -f process IS the mount: the tab owns an SshfsMount
+  and kills it on dispose to unmount. Host-key checking is off for this channel because the
+  app's own KnownHostsStore already pinned the host via the terminal; ssh's prompt would be
+  unanswerable from a windowless child. Passphrase-protected keys are refused with a clear
+  message (no askpass channel). Windows-style C:/ paths confirmed accepted by the cygwin
+  sshfs via local probes; the full option set was validated against the real binary
+  (each option parses; run reaches the ssh connect stage). Password sessions keep the
+  WNetAddConnection2 UNC route. Live droplet verification still pending.
+- "read: Connection reset by peer" on the direct sshfs mount, root-caused and FIXED
+  (verified live against the droplet — mounted, listed /, clean unmount on kill): sshfs.exe
+  resolves `ssh` from PATH, which in the app's environment finds Windows' native OpenSSH
+  (9.x) instead of the bundled cygwin ssh (8.4). A win32 ssh can't inherit the cygwin
+  socketpair sshfs hands it, the remote sftp-server sees instant EOF and exits 0, and sshfs
+  reports the reset. (sshfs-win's own launcher avoids this via its wrapper; we bypass the
+  wrapper deliberately to control IdentityFile.) Fix: `-o ssh_command=/usr/bin/ssh`
+  (/usr/bin maps to the SSHFS-Win bin dir in cygwin's view). Diagnosis tell: the ssh debug
+  lines in the failure had 9.x-style formatting while bin\ssh.exe is 8.4 — version-skewed
+  debug output means the wrong binary is talking.
+- Same reset AGAIN from the app after the ssh_command fix (worked from PowerShell, failed
+  in-app). Isolated with a /target:winexe probe replicating the app's process context: a
+  CONSOLE-LESS parent that redirects stdout/stderr passes hStdInput=NULL to the child, and
+  cygwin's fd0 init then breaks the sshfs->ssh pipe chain — identical "read: Connection
+  reset by peer" symptom as the wrong-ssh bug. Console-attached shells can't reproduce this
+  (their stdin handle is valid even when closed - both held-open and closed-pipe stdin
+  mounted fine). Fix: RedirectStandardInput=true so the child gets a real pipe handle.
+  Verified: winexe probe fails without it, mounts with it. Lesson: two different root
+  causes shared one symptom; a GUI-app process context (null std handles) must be part of
+  reproducing child-process bugs — console shells lie.
