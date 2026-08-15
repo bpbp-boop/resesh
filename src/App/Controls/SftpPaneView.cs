@@ -81,6 +81,9 @@ public sealed class SftpPaneView : UserControl, IDisposable
         var itemStyle = new Style(typeof(ListViewItem));
         itemStyle.Setters.Add(new Setter(Control.MinHeightProperty, 26d));
         itemStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(8, 1, 8, 1)));
+        // A custom ItemContainerStyle drops the theme default's Stretch — without it each
+        // row grid collapses to its content width and the columns go ragged.
+        itemStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
         _list.ItemContainerStyle = itemStyle;
         _list.RightTapped += List_RightTapped;
         _list.KeyDown += (_, e) =>
@@ -396,7 +399,7 @@ public sealed class SftpPaneView : UserControl, IDisposable
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(104) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(112) });
 
         var icon = new FontIcon
         {
