@@ -71,6 +71,14 @@ public sealed record Session
     /// <summary>Optional accent color for the tab, as #RRGGBB. Null = none.</summary>
     public string? ColorTag { get; init; }
 
+    /// <summary>
+    /// Icon key: a built-in key from <see cref="SessionIcons.BuiltIn"/> ("ubuntu"), or the
+    /// filename of a user icon in %APPDATA%\Sessions\icons\ ("router-lab.png").
+    /// Null = unset (an icon may be auto-suggested on first connect);
+    /// <see cref="SessionIcons.None"/> = explicitly no icon, never suggest.
+    /// </summary>
+    public string? Icon { get; init; }
+
     /// <summary>Set for imported sessions whose credential has not been captured yet.</summary>
     public bool CredentialNeeded { get; init; }
 

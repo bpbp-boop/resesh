@@ -46,6 +46,10 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// <summary>Ctrl+Shift+\ inside the terminal (split right / move to other group).</summary>
     public event Action? SplitRequested;
 
+    /// <summary>Raised (UI thread) when a connect to a session with no icon set identified
+    /// the OS/vendor from the server banner. The window decides whether to persist it.</summary>
+    public event Action<string>? IconSuggested;
+
     public TerminalTabView(TabViewModel tab, ICredentialService credentials, KnownHostsStore knownHosts)
     {
         _tab = tab;
@@ -147,6 +151,11 @@ public sealed class TerminalTabView : Grid, IDisposable
                 new[] { session.Encryption, session.HostKeyFingerprint }.Where(s => !string.IsNullOrEmpty(s)));
             _terminal.NotifyConnected();
             _terminal.FocusTerminal();
+
+            // Icon auto-suggest: only for sessions where the user never chose anything
+            // (null; an explicit "none" also blocks this).
+            if (Session.Icon is null && SessionIcons.SuggestFromBanner(session.ServerBanner) is { } suggestedIcon)
+                IconSuggested?.Invoke(suggestedIcon);
         }
         catch (SshSessionException ex)
         {

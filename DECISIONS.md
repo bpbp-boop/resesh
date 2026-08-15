@@ -256,3 +256,30 @@ keyboard-interactive fallback.
   Verified: winexe probe fails without it, mounts with it. Lesson: two different root
   causes shared one symptom; a GUI-app process context (null std handles) must be part of
   reproducing child-process bugs — console shells lie.
+
+## 2026-08-15 - Phase 6: session icons (base phase; 6.1 agent-aware tabs not started)
+- `Session.Icon` is a string key with three-state semantics: null = unset (auto-suggest may
+  fill it on first connect), `"none"` = explicitly no icon (blocks suggestion forever), else
+  a built-in key ("ubuntu") or a custom-icon filename ("router-lab.png"). The sentinel exists
+  so clearing a suggested icon doesn't just re-suggest it on the next connect — suggestion
+  must never override any manual choice, including "no icon".
+- Assets are badge-style: official brand marks (Simple Icons, CC0) recolored white and composed
+  onto colored rounded squares, so every icon reads on both the dark (#181818) and light
+  (#F3F3F3) tab strips. Direct2D's SvgImageSource handles Simple Icons' SVGO-compacted arc
+  flags fine — verified live in the running app (cisco/debian render correctly in the tree).
+- Exceptions to Simple Icons: **juniper** — the set only has the full "Juniper NETWORKS"
+  logotype (illegible at 16 px) and juniper.net's favicon now serves HPE branding
+  post-acquisition, so it keeps a hand-drawn "J" badge; **arista/vyos/aruba** — not in
+  Simple Icons, their site favicons are composed onto white badges as PNGs (aruba's favicon
+  is HPE's mark, which is correct — the entry is "HPE / Aruba"); **windows** + the generic
+  router/switch/firewall/server glyphs are hand-drawn SVGs.
+- Custom icons: files dropped in `%APPDATA%\Sessions\icons\` appear in the picker, key =
+  filename. Built-in keys contain no dot, custom keys always do, so they can't collide.
+  A session whose custom icon file was deleted round-trips its key through the editor
+  ("(missing)" entry) instead of silently losing it.
+- Auto-suggest maps SSH.NET's `ConnectionInfo.ServerVersion` banner (e.g. "SSH-2.0-OpenSSH_8.9p1
+  Ubuntu-…", "SSH-2.0-Cisco-1.25", MikroTik's "SSH-2.0-ROSSSH") to a key. A bare OpenSSH banner
+  suggests nothing. The window re-checks the *stored* session still has Icon == null before
+  persisting, so a choice made while connecting wins.
+- Title-bar icon (mentioned in the roadmap) deferred: swapping AppWindow.SetIcon per active
+  tab needs runtime SVG→ICO rasterization for marginal value; revisit with 6.1.

@@ -103,6 +103,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var view = new TerminalTabView(tab, App.Credentials, App.KnownHosts);
         view.CloseRequested += () => _ = RequestCloseTabAsync(tab);
         view.UnlockRequested += () => _ = HandleUnlockAsync(tab, view);
+        view.IconSuggested += key =>
+        {
+            // Re-check the stored copy: a manual choice made while connecting must win,
+            // and ad-hoc/deleted sessions (not in the store) are left alone.
+            if (App.Store.Find(tab.Session.Id) is { Icon: null } current)
+                ViewModel.UpdateSession(current with { Icon = key }, null);
+        };
         view.SplitRequested += () =>
         {
             if (ViewModel.IsSplit)

@@ -40,7 +40,13 @@
                                 <SolidColorBrush Color="{x:Bind TagColor}" />
                             </Rectangle.Fill>
                         </Rectangle>
-                        <FontIcon Glyph="&#xE756;" FontSize="14" />
+                        <Image
+                            Source="{x:Bind IconSource}"
+                            Width="16"
+                            Height="16"
+                            VerticalAlignment="Center"
+                            Visibility="{x:Bind IconVisibility}" />
+                        <FontIcon Glyph="&#xE756;" FontSize="14" Visibility="{x:Bind DefaultIconVisibility}" />
                         <TextBlock Text="{x:Bind Name}" />
                         <TextBlock
                             Text="{x:Bind HostSummary}"

@@ -138,6 +138,12 @@
                                             <SolidColorBrush Color="{x:Bind StateColor, Mode=OneWay}" />
                                         </Ellipse.Fill>
                                     </Ellipse>
+                                    <Image
+                                        Source="{x:Bind IconSource, Mode=OneWay}"
+                                        Width="16"
+                                        Height="16"
+                                        VerticalAlignment="Center"
+                                        Visibility="{x:Bind IconVisibility, Mode=OneWay}" />
                                     <FontIcon
                                         Glyph="&#xE840;"
                                         FontSize="11"

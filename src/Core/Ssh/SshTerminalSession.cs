@@ -67,6 +67,10 @@ public sealed class SshTerminalSession : IDisposable
     /// <summary>"keytype SHA256:fingerprint" of the server key seen during connect.</summary>
     public string? HostKeyFingerprint { get; private set; }
 
+    /// <summary>The server's SSH version banner (e.g. "SSH-2.0-OpenSSH_8.9p1 Ubuntu-…"),
+    /// once connected; feeds the icon auto-suggestion.</summary>
+    public string? ServerBanner => _client?.ConnectionInfo?.ServerVersion;
+
     public SshTerminalSession(KnownHostsStore knownHosts)
     {
         _knownHosts = knownHosts;

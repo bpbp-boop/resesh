@@ -153,7 +153,7 @@ store key passphrases in Credential Manager.
 
 ---
 
-## Phase 6 — Session icons
+## Phase 6 — Session icons ✅ base phase shipped 2026-08-15 (6.1 not started; title-bar icon deferred — needs SVG→ICO rasterization)
 
 Per-session icon shown in the tree, tab strip, and title bar (alongside the existing
 `ColorTag` accent). `Icon` field on `Session` (string key), picker in the session editor.

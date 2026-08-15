@@ -53,6 +53,16 @@ public sealed class TreeNodeViewModel : ObservableObject
     /// <summary>Per-session color tag as a renderable color; transparent when unset.</summary>
     public Windows.UI.Color TagColor => ParseColor(Session?.ColorTag);
 
+    /// <summary>Session icon image; null shows the default terminal glyph instead.
+    /// Tree nodes are recreated on every rebuild, so no change notification is needed.</summary>
+    public Microsoft.UI.Xaml.Media.ImageSource? IconSource => App.Icons.GetImage(Session?.Icon);
+
+    public Microsoft.UI.Xaml.Visibility IconVisibility =>
+        IconSource is null ? Microsoft.UI.Xaml.Visibility.Collapsed : Microsoft.UI.Xaml.Visibility.Visible;
+
+    public Microsoft.UI.Xaml.Visibility DefaultIconVisibility =>
+        IconSource is null ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
+
     private static Windows.UI.Color ParseColor(string? hex)
     {
         if (hex is not null && hex.Length == 7 && hex[0] == '#'

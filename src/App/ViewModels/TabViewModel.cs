@@ -41,6 +41,8 @@ public sealed class TabViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(Header));
                 OnPropertyChanged(nameof(Endpoint));
+                OnPropertyChanged(nameof(IconSource));
+                OnPropertyChanged(nameof(IconVisibility));
             }
         }
     }
@@ -160,6 +162,11 @@ public sealed class TabViewModel : ObservableObject
     }
 
     public string Header => TitleOverride ?? Session.Name;
+
+    /// <summary>Session icon for the tab strip; null collapses the Image.</summary>
+    public Microsoft.UI.Xaml.Media.ImageSource? IconSource => App.Icons.GetImage(Session.Icon);
+
+    public Visibility IconVisibility => IconSource is null ? Visibility.Collapsed : Visibility.Visible;
 
     public string Endpoint => $"{Session.Username}@{Session.Host}:{Session.Port}";
 

@@ -48,6 +48,8 @@ public sealed partial class SessionEditDialog : ContentDialog
             ColorBox.Items.Add(name);
         ColorBox.SelectedIndex = Math.Max(0, Array.FindIndex(ColorChoices, c => c.Hex == existing?.ColorTag));
 
+        PopulateIconPicker(existing?.Icon);
+
         if (existing is not null)
         {
             NameBox.Text = existing.Name;
@@ -82,6 +84,40 @@ public sealed partial class SessionEditDialog : ContentDialog
     }
 
     private AuthMethod SelectedAuth => (AuthMethod)Math.Max(0, AuthBox.SelectedIndex);
+
+    // ---- icon picker ----
+
+    /// <summary>Selected icon key: null = auto-detect, SessionIcons.None = explicitly none.</summary>
+    private string? _selectedIcon;
+
+    private void PopulateIconPicker(string? currentKey)
+    {
+        var entries = App.Icons.PickerEntries();
+        // A key whose file has gone missing (deleted custom icon) still round-trips.
+        if (!string.IsNullOrEmpty(currentKey)
+            && !entries.Any(e => string.Equals(e.Key, currentKey, StringComparison.OrdinalIgnoreCase)))
+        {
+            entries.Add(new Icons.IconChoice(currentKey, $"{currentKey} (missing)", null, ""));
+        }
+        IconGrid.ItemsSource = entries;
+        _selectedIcon = string.IsNullOrEmpty(currentKey) ? null : currentKey;
+        UpdateIconButton(entries.First(e => string.Equals(e.Key, _selectedIcon, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private void IconGrid_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        var choice = (Icons.IconChoice)e.ClickedItem;
+        _selectedIcon = choice.Key;
+        UpdateIconButton(choice);
+        IconFlyout.Hide();
+    }
+
+    private void UpdateIconButton(Icons.IconChoice choice)
+    {
+        IconButtonImage.Source = choice.Image;
+        IconButtonImage.Visibility = choice.Image is null ? Visibility.Collapsed : Visibility.Visible;
+        IconButtonText.Text = choice.Key is null ? "Auto-detect" : choice.Name;
+    }
 
     private void SectionBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
@@ -170,6 +206,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             Persistent = PersistentToggle.IsOn,
             Notes = NotesBox.Text,
             ColorTag = ColorChoices[Math.Max(0, ColorBox.SelectedIndex)].Hex,
+            Icon = _selectedIcon,
             CredentialNeeded = _existing?.CredentialNeeded ?? false,
             Overrides = overrides.IsEmpty ? null : overrides,
         };

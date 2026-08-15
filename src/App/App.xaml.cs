@@ -14,6 +14,7 @@ public partial class App : Application
     public static KnownHostsStore KnownHosts { get; } = new(KnownHostsStore.DefaultPath);
     public static SettingsStore Settings { get; } = new(SettingsStore.DefaultPath);
     public static HighlightsStore Highlights { get; } = new(HighlightsStore.DefaultPath);
+    public static Sessions.App.Icons.SessionIconCatalog Icons { get; } = new();
 
     public App()
     {
