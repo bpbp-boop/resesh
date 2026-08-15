@@ -164,7 +164,8 @@ public sealed class TabViewModel : ObservableObject
     public string Header => TitleOverride ?? Session.Name;
 
     /// <summary>Session icon for the tab strip; null collapses the Image.</summary>
-    public Microsoft.UI.Xaml.Media.ImageSource? IconSource => App.Icons.GetImage(Session.Icon);
+    public Microsoft.UI.Xaml.Media.ImageSource? IconSource =>
+        App.Icons.GetImage(Session.Icon, Icons.SessionIconCatalog.ListIconSize);
 
     public Visibility IconVisibility => IconSource is null ? Visibility.Collapsed : Visibility.Visible;
 

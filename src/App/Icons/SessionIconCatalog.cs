@@ -16,30 +16,53 @@ public sealed record IconChoice(string? Key, string Name, ImageSource? Image, st
 /// </summary>
 public sealed class SessionIconCatalog
 {
+    /// <summary>Logical display sizes; must match the Image Width/Height in the XAML that
+    /// shows them, or the exact-size rasterization guarantee is lost.</summary>
+    public const double ListIconSize = 16;
+    public const double PickerTileSize = 24;
+
     private static readonly string[] CustomExtensions = [".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".bmp"];
 
-    private readonly Dictionary<string, ImageSource> _cache = new(StringComparer.OrdinalIgnoreCase);
+    // Cached per (key, physical pixel size): each display surface gets a bitmap rendered at
+    // its exact on-screen size, so the GPU never resamples (its bilinear-only minification
+    // is what caused visible aliasing when one 72 px raster served every surface).
+    private readonly Dictionary<(string Key, int Pixels), ImageSource> _cache = [];
+
+    /// <summary>Supplies the window's XamlRoot.RasterizationScale (e.g. 1.5 at 150% DPI);
+    /// set by the main window. Until it's available, images render at scale 1 and are
+    /// re-rasterized crisply on the next fetch once the real scale is known.</summary>
+    public Func<double>? ScaleProvider { get; set; }
+
+    private int PhysicalPixels(double logicalSize)
+    {
+        var scale = ScaleProvider?.Invoke() ?? 1.0;
+        if (double.IsNaN(scale) || scale <= 0)
+            scale = 1.0;
+        return (int)Math.Ceiling(logicalSize * scale);
+    }
 
     public static string CustomIconsDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sessions", "icons");
 
     private static string BuiltInDirectory => Path.Combine(AppContext.BaseDirectory, "Assets", "SessionIcons");
 
-    /// <summary>The image for an icon key, or null for no/unknown icon (callers fall back
-    /// to the default glyph).</summary>
-    public ImageSource? GetImage(string? key)
+    /// <summary>The image for an icon key rendered for a display size in logical pixels
+    /// (16 in the tree/tab strip, 24 in the picker), or null for no/unknown icon (callers
+    /// fall back to the default glyph).</summary>
+    public ImageSource? GetImage(string? key, double logicalSize)
     {
         if (string.IsNullOrEmpty(key) || key == SessionIcons.None)
             return null;
-        if (_cache.TryGetValue(key, out var cached))
+        var cacheKey = (key.ToLowerInvariant(), PhysicalPixels(logicalSize));
+        if (_cache.TryGetValue(cacheKey, out var cached))
             return cached;
-        var source = Load(key);
+        var source = Load(key, cacheKey.Item2);
         if (source is not null)
-            _cache[key] = source;
+            _cache[cacheKey] = source;
         return source;
     }
 
-    private static ImageSource? Load(string key)
+    private static ImageSource? Load(string key, int pixels)
     {
         try
         {
@@ -49,7 +72,7 @@ public sealed class SessionIconCatalog
                 {
                     var path = Path.Combine(BuiltInDirectory, key + ext);
                     if (File.Exists(path))
-                        return LoadFile(path);
+                        return LoadFile(path, pixels);
                 }
                 return null;
             }
@@ -57,7 +80,7 @@ public sealed class SessionIconCatalog
             // Custom keys are bare filenames; GetFileName guards against path segments.
             var file = Path.Combine(CustomIconsDirectory, Path.GetFileName(key));
             if (File.Exists(file) && CustomExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
-                return LoadFile(file);
+                return LoadFile(file, pixels);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or UriFormatException)
         {
@@ -65,11 +88,12 @@ public sealed class SessionIconCatalog
         return null;
     }
 
-    private static ImageSource LoadFile(string path) =>
+    private static ImageSource LoadFile(string path, int pixels) =>
         Path.GetExtension(path).Equals(".svg", StringComparison.OrdinalIgnoreCase)
-            // Rasterize above display size (16-36px) so downscaling stays crisp.
-            ? new SvgImageSource(new Uri(path)) { RasterizePixelWidth = 72, RasterizePixelHeight = 72 }
-            : new BitmapImage(new Uri(path)) { DecodePixelWidth = 72 };
+            // SVG rasterizes directly at target resolution; PNG downscales in WIC's
+            // high-quality Fant scaler at decode time. Neither is resampled at draw.
+            ? new SvgImageSource(new Uri(path)) { RasterizePixelWidth = pixels, RasterizePixelHeight = pixels }
+            : new BitmapImage(new Uri(path)) { DecodePixelWidth = pixels };
 
     /// <summary>
     /// Everything the picker offers: Auto-detect, No icon, the built-in packs, then custom
@@ -85,7 +109,7 @@ public sealed class SessionIconCatalog
         };
 
         foreach (var info in SessionIcons.BuiltIn)
-            entries.Add(new IconChoice(info.Key, info.Name, GetImage(info.Key)));
+            entries.Add(new IconChoice(info.Key, info.Name, GetImage(info.Key, PickerTileSize)));
 
         try
         {
@@ -96,8 +120,9 @@ public sealed class SessionIconCatalog
                     if (!CustomExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
                         continue;
                     var key = Path.GetFileName(file);
-                    _cache.Remove(key);
-                    entries.Add(new IconChoice(key, Path.GetFileNameWithoutExtension(file), GetImage(key)));
+                    foreach (var stale in _cache.Keys.Where(k => k.Key.Equals(key, StringComparison.OrdinalIgnoreCase)).ToList())
+                        _cache.Remove(stale);
+                    entries.Add(new IconChoice(key, Path.GetFileNameWithoutExtension(file), GetImage(key, PickerTileSize)));
                 }
             }
         }

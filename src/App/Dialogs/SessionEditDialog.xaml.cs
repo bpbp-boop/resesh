@@ -114,8 +114,10 @@ public sealed partial class SessionEditDialog : ContentDialog
 
     private void UpdateIconButton(Icons.IconChoice choice)
     {
-        IconButtonImage.Source = choice.Image;
-        IconButtonImage.Visibility = choice.Image is null ? Visibility.Collapsed : Visibility.Visible;
+        // The button shows the icon at 16, not the picker-tile 24 — fetch its own size.
+        var image = App.Icons.GetImage(choice.Key, Icons.SessionIconCatalog.ListIconSize);
+        IconButtonImage.Source = image;
+        IconButtonImage.Visibility = image is null ? Visibility.Collapsed : Visibility.Visible;
         IconButtonText.Text = choice.Key is null ? "Auto-detect" : choice.Name;
     }
 

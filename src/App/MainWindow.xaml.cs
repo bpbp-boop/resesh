@@ -22,6 +22,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ViewModel = new MainViewModel(App.Store, App.Credentials);
         InitializeComponent();
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
+        // Lets the icon catalog rasterize at true device pixels (XamlRoot is null until
+        // the content loads; the catalog falls back to scale 1 and re-renders on demand).
+        App.Icons.ScaleProvider = () => Root.XamlRoot?.RasterizationScale ?? 1.0;
         AttachGroupView(ViewModel.Groups[0], column: 0);
         ViewModel.TreeRebuilt += () =>
         {

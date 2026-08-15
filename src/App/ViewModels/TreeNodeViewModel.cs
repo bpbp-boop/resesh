@@ -55,7 +55,8 @@ public sealed class TreeNodeViewModel : ObservableObject
 
     /// <summary>Session icon image; null shows the default terminal glyph instead.
     /// Tree nodes are recreated on every rebuild, so no change notification is needed.</summary>
-    public Microsoft.UI.Xaml.Media.ImageSource? IconSource => App.Icons.GetImage(Session?.Icon);
+    public Microsoft.UI.Xaml.Media.ImageSource? IconSource =>
+        App.Icons.GetImage(Session?.Icon, Icons.SessionIconCatalog.ListIconSize);
 
     public Microsoft.UI.Xaml.Visibility IconVisibility =>
         IconSource is null ? Microsoft.UI.Xaml.Visibility.Collapsed : Microsoft.UI.Xaml.Visibility.Visible;
