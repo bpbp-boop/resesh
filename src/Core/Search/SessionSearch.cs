@@ -19,7 +19,8 @@ public static class SessionSearch
             || Contains(session.Host, term)
             || Contains(session.Username, term)
             || Contains(session.FolderPath, term)
-            || Contains(session.Notes, term));
+            || Contains(session.Notes, term)
+            || Contains(session.Local?.Executable, term));
     }
 
     public static IReadOnlyList<Session> Filter(IEnumerable<Session> sessions, string? query) =>

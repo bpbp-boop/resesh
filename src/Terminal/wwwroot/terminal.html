@@ -323,6 +323,10 @@
         host.postMessage({ type: "filePane" });
         return false;
       }
+      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyT") {
+        host.postMessage({ type: "newLocalTab" });
+        return false;
+      }
       if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyM") {
         ruler.toggleBookmark();
         return false;
@@ -379,7 +383,12 @@
         case "disconnected":
           connected = false;
           ruler.writeOutput("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n", null);
-          ruler.writeOutput("\x1b[1;33m" + (msg.message || "Disconnected.") + "\x1b[0m Press Enter to reconnect.\r\n", null);
+          // Clean local exits arrive as severity "info" (dim, not warning-yellow); the
+          // action verb keeps the hint honest for local tabs ("restart", not "reconnect").
+          ruler.writeOutput(
+            (msg.severity === "info" ? "\x1b[90m" : "\x1b[1;33m") +
+            (msg.message || "Disconnected.") +
+            "\x1b[0m Press Enter to " + (msg.action || "reconnect") + ".\r\n", null);
           break;
         case "divider":
           // Reconnect-in-place: visual separator, scrollback preserved.

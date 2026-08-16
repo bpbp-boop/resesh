@@ -8,9 +8,14 @@ public sealed partial class TreeNodeTemplateSelector : DataTemplateSelector
 {
     public DataTemplate? FolderTemplate { get; set; }
     public DataTemplate? SessionTemplate { get; set; }
+    public DataTemplate? LocalRootTemplate { get; set; }
 
-    protected override DataTemplate? SelectTemplateCore(object item) =>
-        item is TreeNodeViewModel { IsFolder: true } ? FolderTemplate : SessionTemplate;
+    protected override DataTemplate? SelectTemplateCore(object item) => item switch
+    {
+        TreeNodeViewModel { IsLocalRoot: true } => LocalRootTemplate ?? FolderTemplate,
+        TreeNodeViewModel { IsFolder: true } => FolderTemplate,
+        _ => SessionTemplate,
+    };
 
     protected override DataTemplate? SelectTemplateCore(object item, DependencyObject container) =>
         SelectTemplateCore(item);

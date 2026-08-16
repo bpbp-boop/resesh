@@ -16,6 +16,10 @@ public sealed record AppSettings
     /// <summary>Sessions pinned in the tab strip, in display order; reopened automatically on launch.</summary>
     public IReadOnlyList<Guid> PinnedSessionIds { get; init; } = [];
 
+    /// <summary>The local profile "+ Session" / Ctrl+Shift+T opens; null = highest-priority
+    /// discovered shell (see LocalShellDiscovery.DefaultProfile).</summary>
+    public Guid? DefaultLocalProfileId { get; init; }
+
     public string Theme { get; init; } = "dark";
     public string FontFamily { get; init; } = "Cascadia Mono, Consolas, monospace";
     public int FontSize { get; init; } = 14;

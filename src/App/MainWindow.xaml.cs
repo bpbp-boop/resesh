@@ -37,6 +37,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             ScheduleExpansionSync();
             SyncEmptyState();
         };
+        // The Session menubar renames its verbs per the active tab's capabilities
+        // (Disconnect/Stop, Reconnect/Restart) and hides remote-only entries.
+        ViewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainViewModel.StatusText))
+                SyncSessionMenu();
+        };
         ScheduleExpansionSync();
         SyncEmptyState();
         ApplySettingsToApp();
@@ -99,10 +106,85 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             e.Handled = true;
             QuickConnectBox.Focus(FocusState.Programmatic);
         };
+        // Ctrl+Shift+T: open the default local profile (also forwarded by the xterm page).
+        var newLocalTab = new KeyboardAccelerator
+        {
+            Key = VirtualKey.T,
+            Modifiers = VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift,
+        };
+        newLocalTab.Invoked += (_, e) =>
+        {
+            e.Handled = true;
+            OpenDefaultLocalProfile();
+        };
         Root.KeyboardAccelerators.Add(closeTab);
         Root.KeyboardAccelerators.Add(split);
         Root.KeyboardAccelerators.Add(filePane);
         Root.KeyboardAccelerators.Add(quickConnect);
+        Root.KeyboardAccelerators.Add(newLocalTab);
+    }
+
+    // ---- Local profiles: default launch + split-button menu ----
+
+    /// <summary>Opens the default local profile; falls back to the SSH editor when no
+    /// local shell was discovered at all (unlikely — cmd.exe always exists).</summary>
+    private void OpenDefaultLocalProfile()
+    {
+        var profile = Core.Local.LocalShellDiscovery.DefaultProfile(
+            App.Store, App.Settings.Current.DefaultLocalProfileId, App.AvailableLocalShells);
+        if (profile is not null)
+            ConnectSession(profile);
+        else
+            _ = OpenSessionEditorAsync(existing: null, defaultFolder: "");
+    }
+
+    private void NewSessionButton_Click(SplitButton sender, SplitButtonClickEventArgs args) =>
+        OpenDefaultLocalProfile();
+
+    /// <summary>Rebuilds the + Session menu: visible local profiles, then the two creators.</summary>
+    private void NewSessionFlyout_Opening(object sender, object e)
+    {
+        NewSessionFlyout.Items.Clear();
+        foreach (var profile in ViewModel.VisibleSessions.Where(s => s.IsLocal)
+                     .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            var captured = profile;
+            var item = new MenuFlyoutItem
+            {
+                Text = profile.Name,
+                Icon = App.Icons.GetImage(profile.Icon, Icons.SessionIconCatalog.ListIconSize) is { } image
+                    ? new ImageIcon { Source = image }
+                    : new FontIcon { Glyph = "" },
+            };
+            item.Click += (_, _) => ConnectSession(captured);
+            NewSessionFlyout.Items.Add(item);
+        }
+        if (NewSessionFlyout.Items.Count > 0)
+            NewSessionFlyout.Items.Add(new MenuFlyoutSeparator());
+        AddItem(NewSessionFlyout, "New SSH Session…", () => _ = OpenSessionEditorAsync(existing: null, defaultFolder: ""));
+        AddItem(NewSessionFlyout, "New Local Profile…", () => _ = OpenLocalProfileEditorAsync(existing: null, defaultFolder: ""));
+    }
+
+    private async void NewLocalProfile_Click(object sender, RoutedEventArgs e) =>
+        await OpenLocalProfileEditorAsync(existing: null, defaultFolder: "");
+
+    private async Task OpenLocalProfileEditorAsync(Session? existing, string defaultFolder)
+    {
+        var isCurrentDefault = existing is not null && App.Settings.Current.DefaultLocalProfileId == existing.Id;
+        var dialog = new LocalProfileEditDialog(ViewModel.LocalFolderPathsForPicker, existing, defaultFolder, isCurrentDefault)
+        {
+            XamlRoot = Root.XamlRoot,
+        };
+        await dialog.ShowAsync();
+        if (dialog.Result is not { } result)
+            return;
+
+        if (existing is null)
+            ViewModel.AddSession(result, null);
+        else
+            ViewModel.UpdateSession(result, null);
+        if (dialog.MakeDefault && App.Settings.Current.DefaultLocalProfileId != result.Id)
+            App.Settings.Save(App.Settings.Current with { DefaultLocalProfileId = result.Id });
     }
 
     // ---- Custom title bar ----
@@ -200,6 +282,17 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             presenter.IsAlwaysOnTop = PinButton.IsChecked == true;
     }
 
+    /// <summary>Adapts the Session menubar to the active tab's target kind.</summary>
+    private void SyncSessionMenu()
+    {
+        var caps = ViewModel.ActiveTab?.Capabilities;
+        ReconnectMenuItem.Text = caps?.StartAgainVerb ?? "Reconnect";
+        DisconnectMenuItem.Text = caps?.StopVerb ?? "Disconnect";
+        EndRemoteMenuItem.Visibility = caps is null || caps.RemoteSession
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
     // Menu items act on the focused group's selected tab; they no-op when idle.
     private void SplitRightMenu_Click(object sender, RoutedEventArgs e)
     {
@@ -287,8 +380,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             items.AddRange(ViewModel.RankedMatches(text).Take(8).Select(s => new QuickConnectSuggestion
             {
                 Display = s.Name,
-                Detail = $"{s.Username}@{s.Host}" + (s.Port != 22 ? $":{s.Port}" : ""),
-                Glyph = "\uE756",
+                Detail = s.IsLocal
+                    ? s.Local?.Executable ?? "local shell"
+                    : $"{s.Username}@{s.Host}" + (s.Port != 22 ? $":{s.Port}" : ""),
+                Glyph = s.IsLocal ? "\uE7F8" : "\uE756",
                 Session = s,
             }));
         }
@@ -377,12 +472,17 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         return true;
     }
 
-    /// <summary>Opens a tab for the session and starts its terminal + SSH lifecycle.</summary>
+    /// <summary>Launch-time entry for App's --open argument (the automated test rig).</summary>
+    public void OpenSessionFromLaunch(Session session) => ConnectSession(session);
+
+    /// <summary>Opens a tab for the session and starts its terminal + shell lifecycle
+    /// (SSH connect or local ConPTY launch, per the session's kind).</summary>
     private TabViewModel ConnectSession(Session session, TabGroupViewModel? group = null)
     {
         var tab = ViewModel.Connect(session, group);
         var view = new TerminalTabView(tab, App.Credentials, App.KnownHosts);
         view.CloseRequested += () => _ = RequestCloseTabAsync(tab);
+        view.NewLocalTabRequested += OpenDefaultLocalProfile;
         view.UnlockRequested += () => _ = HandleUnlockAsync(tab, view);
         view.IconSuggested += key =>
         {
@@ -425,9 +525,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         var detail = tab.State != TabConnectionState.Connected
             ? ""
-            : tab.Session.Persistent
-                ? " The remote session keeps running (persistent) — connecting again resumes it."
-                : " The session is still connected.";
+            : tab.IsLocal
+                ? " The process is still running — closing stops it and everything it started."
+                : tab.Session.Persistent
+                    ? " The remote session keeps running (persistent) — connecting again resumes it."
+                    : " The session is still connected.";
         if (tab.IsPinned)
         {
             // Pinned tabs need the extra deliberate step; one dialog covers both.
@@ -458,10 +560,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void CloseTabCore(TabViewModel tab)
     {
+        Trace($"CloseTabCore: closing '{tab.Header}' selected={ReferenceEquals(ViewModel.GroupOf(tab).SelectedTab, tab)}");
         var group = ViewModel.GroupOf(tab);
         if (tab.View is TerminalTabView view)
             _groupViews[group].RemoveTerminal(view);
         ViewModel.CloseTab(tab);
+        Trace($"CloseTabCore: done; selected now '{group.SelectedTab?.Header ?? "(null)"}'");
         CollapseGroupIfEmpty(group);
     }
 
@@ -681,6 +785,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var current = App.Store.Find(tab.Session.Id);
         if (current is null)
             return;
+        if (current.IsLocal)
+        {
+            await OpenLocalProfileEditorAsync(current, current.FolderPath);
+            return;
+        }
         var notice = tab.State == TabConnectionState.Connected
             ? "This tab is connected — changes to host, port, or authentication apply on the next connect."
             : null;
@@ -760,7 +869,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     public void ReconnectTab(TabViewModel tab)
     {
-        if (tab.View is TerminalTabView view && tab.State == TabConnectionState.Disconnected)
+        if (tab.View is TerminalTabView view
+            && tab.State is TabConnectionState.Disconnected or TabConnectionState.Exited)
             _ = view.ConnectAsync(isReconnect: true);
     }
 
@@ -793,6 +903,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         if (tab.View is TerminalTabView view && !tab.IsLocked)
             await view.OpenFilePaneAtCurrentFolderAsync();
+    }
+
+    public void OpenWorkingFolder(TabViewModel tab)
+    {
+        if (tab.View is TerminalTabView view && !tab.IsLocked)
+            view.OpenWorkingFolder();
     }
 
     // ---- settings ----
@@ -1190,13 +1306,37 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             return null;
         var menu = new MenuFlyout();
 
-        // Single session: the original per-session menu.
+        // Single local profile: process verbs, local editor, default-profile toggle.
+        if (_selection is [{ Session: { IsLocal: true } localProfile }])
+        {
+            AddItem(menu, "Open", () => ConnectSession(localProfile));
+            menu.Items.Add(new MenuFlyoutSeparator());
+            AddItem(menu, "Edit…", async () => await OpenLocalProfileEditorAsync(localProfile, localProfile.FolderPath));
+            if (App.Settings.Current.DefaultLocalProfileId != localProfile.Id)
+                AddItem(menu, "Set as Default", () =>
+                    App.Settings.Save(App.Settings.Current with { DefaultLocalProfileId = localProfile.Id }));
+            AddItem(menu, "Delete", async () => await DeleteSessionAsync(localProfile));
+            return menu;
+        }
+
+        // Single SSH session: the original per-session menu.
         if (_selection is [{ Session: { } single }])
         {
             AddItem(menu, "Connect", () => ConnectSession(single));
             menu.Items.Add(new MenuFlyoutSeparator());
             AddItem(menu, "Edit…", async () => await OpenSessionEditorAsync(single, single.FolderPath));
             AddItem(menu, "Delete", async () => await DeleteSessionAsync(single));
+            return menu;
+        }
+
+        // The permanent Local root: creators and expansion only — never rename/delete/move.
+        if (_selection is [{ IsLocalRoot: true } localRoot])
+        {
+            AddItem(menu, "New Local Profile…", async () => await OpenLocalProfileEditorAsync(existing: null, defaultFolder: ""));
+            AddItem(menu, "New Folder…", async () => await NewSubfolderAsync(localRoot));
+            menu.Items.Add(new MenuFlyoutSeparator());
+            AddItem(menu, "Expand All", () => SetFolderExpansion(localRoot, expanded: true));
+            AddItem(menu, "Collapse All", () => SetFolderExpansion(localRoot, expanded: false));
             return menu;
         }
 
@@ -1215,7 +1355,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             AddItem(menu, "Expand All", () => SetFolderExpansion(folder, expanded: true));
             AddItem(menu, "Collapse All", () => SetFolderExpansion(folder, expanded: false));
             menu.Items.Add(new MenuFlyoutSeparator());
-            AddItem(menu, "New Session…", async () => await OpenSessionEditorAsync(existing: null, defaultFolder: folder.FolderPath));
+            if (folder.IsLocalScope)
+                AddItem(menu, "New Local Profile…", async () => await OpenLocalProfileEditorAsync(existing: null, defaultFolder: folder.FolderPath));
+            else
+                AddItem(menu, "New Session…", async () => await OpenSessionEditorAsync(existing: null, defaultFolder: folder.FolderPath));
             AddItem(menu, "New Folder…", async () => await NewSubfolderAsync(folder));
             menu.Items.Add(new MenuFlyoutSeparator());
             AddItem(menu, "Rename…", async () => await RenameFolderAsync(folder));
@@ -1278,11 +1421,15 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             window.ConnectSession(session);
     }
 
+    private static SessionKind KindOf(TreeNodeViewModel node) =>
+        node.IsLocalScope ? SessionKind.Local : SessionKind.Ssh;
+
     private async Task NewSubfolderAsync(TreeNodeViewModel folder)
     {
-        var name = await PromptAsync("New Folder", $"Folder name (inside {folder.FolderPath})", "");
+        var location = folder.IsLocalRoot ? "under Local" : $"inside {folder.FolderPath}";
+        var name = await PromptAsync("New Folder", $"Folder name ({location})", "");
         if (!string.IsNullOrWhiteSpace(name))
-            ViewModel.CreateFolder(FolderPaths.Combine(folder.FolderPath, name));
+            ViewModel.CreateFolder(FolderPaths.Combine(folder.FolderPath, name), KindOf(folder));
     }
 
     private async Task RenameFolderAsync(TreeNodeViewModel folder)
@@ -1291,32 +1438,39 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (string.IsNullOrWhiteSpace(name) || name == folder.Name)
             return;
         var newPath = FolderPaths.Combine(FolderPaths.Parent(folder.FolderPath), name);
-        ViewModel.RenameFolder(folder.FolderPath, newPath);
+        ViewModel.RenameFolder(folder.FolderPath, newPath, KindOf(folder));
     }
 
     private async Task DeleteFolderAsync(TreeNodeViewModel folder)
     {
-        var count = ViewModel.CountSessionsUnder(folder.FolderPath);
+        var count = ViewModel.CountSessionsUnder(folder.FolderPath, KindOf(folder));
+        var what = folder.IsLocalScope ? "profile(s)" : "session(s)";
         var confirmed = await ConfirmAsync(
             "Delete Folder",
             count == 0
                 ? $"Delete the folder \"{folder.Name}\"?"
-                : $"Delete the folder \"{folder.Name}\" and the {count} session(s) inside it? Their saved credentials are removed too.");
+                : $"Delete the folder \"{folder.Name}\" and the {count} {what} inside it?"
+                    + (folder.IsLocalScope ? "" : " Their saved credentials are removed too."));
         if (confirmed)
-            ViewModel.DeleteFolder(folder.FolderPath);
+            ViewModel.DeleteFolder(folder.FolderPath, KindOf(folder));
     }
 
     private async Task DeleteSessionAsync(Session session)
     {
         var confirmed = await ConfirmAsync(
             "Delete Session",
-            $"Delete \"{session.Name}\" ({session.Host})? Its saved credential is removed too.");
+            session.IsLocal
+                ? $"Delete the local profile \"{session.Name}\"?"
+                    + (session.BuiltIn ? " (It returns with default settings after an app restart while its shell is installed.)" : "")
+                : $"Delete \"{session.Name}\" ({session.Host})? Its saved credential is removed too.");
         if (confirmed)
             ViewModel.DeleteSession(session);
     }
 
     private async Task DeleteSelectionAsync(IReadOnlyList<TreeNodeViewModel> items)
     {
+        // The virtual Local root is never deletable, even inside a multi-selection.
+        items = items.Where(n => !n.IsLocalRoot).ToList();
         var folders = items.Where(n => n.IsFolder).ToList();
         var sessions = items.Where(n => !n.IsFolder).ToList();
         var affected = SessionsOf(items).Count();
@@ -1333,7 +1487,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
         // Folders first; sessions already removed with a folder become harmless no-ops.
         foreach (var folder in folders)
-            ViewModel.DeleteFolder(folder.FolderPath);
+            ViewModel.DeleteFolder(folder.FolderPath, KindOf(folder));
         foreach (var node in sessions)
             ViewModel.DeleteSession(node.Session!);
     }
@@ -1387,18 +1541,21 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void SessionTree_DragItemsCompleted(TreeView sender, TreeViewDragItemsCompletedEventArgs args)
     {
-        // Dropping onto a session targets that session's folder; onto nothing targets the root.
-        var targetFolder = args.NewParentItem switch
+        // Dropping onto a session targets that session's folder; onto nothing targets the
+        // SSH root. Local and SSH are separate scopes: cross-boundary drops are ignored
+        // (the rebuild below discards whatever the TreeView displayed).
+        var (targetFolder, targetIsLocal) = args.NewParentItem switch
         {
-            TreeNodeViewModel { IsFolder: true } folder => folder.FolderPath,
-            TreeNodeViewModel sessionNode => sessionNode.FolderPath,
-            _ => "",
+            TreeNodeViewModel { IsFolder: true } folder => (folder.FolderPath, folder.IsLocalScope),
+            TreeNodeViewModel sessionNode => (sessionNode.FolderPath, sessionNode.IsLocalScope),
+            _ => ("", false),
         };
 
         var moved = false;
         foreach (var node in args.Items.OfType<TreeNodeViewModel>())
         {
             if (node.Session is { } session
+                && session.IsLocal == targetIsLocal
                 && !FolderPaths.Normalize(session.FolderPath).Equals(FolderPaths.Normalize(targetFolder), StringComparison.OrdinalIgnoreCase))
             {
                 ViewModel.MoveSessionToFolder(session.Id, targetFolder);

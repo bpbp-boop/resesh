@@ -6,9 +6,17 @@ namespace Sessions.App.ViewModels;
 
 public enum TabConnectionState
 {
+    /// <summary>SSH connecting, or a local process starting.</summary>
     Connecting,
+
+    /// <summary>SSH connected, or a local process running.</summary>
     Connected,
+
+    /// <summary>SSH connection ended/failed, or a local launch failed (red).</summary>
     Disconnected,
+
+    /// <summary>Local process ended normally — neutral, keeps the tab open with the exit code.</summary>
+    Exited,
 }
 
 /// <summary>One open tab: a session plus its terminal view and connection state.</summary>
@@ -24,6 +32,14 @@ public sealed class TabViewModel : ObservableObject
     {
         _session = session;
     }
+
+    /// <summary>What this tab's target kind supports; drives menu naming and visibility.</summary>
+    public SessionCapabilities Capabilities => SessionCapabilities.For(Session);
+
+    public bool IsLocal => Session.IsLocal;
+
+    /// <summary>Exit code of the last local process run, shown while <see cref="State"/> is Exited.</summary>
+    public int? ExitCode { get; set; }
 
     /// <summary>
     /// Distinguishes this tab's tmux session when several tabs of the same saved session are
@@ -199,8 +215,9 @@ public sealed class TabViewModel : ObservableObject
                 : (IsDark ? Windows.UI.Color.FromArgb(255, 0xC0, 0xC0, 0xC0) : Windows.UI.Color.FromArgb(255, 0x55, 0x55, 0x55))
             : (IsDark ? Windows.UI.Color.FromArgb(255, 0x9D, 0x9D, 0x9D) : Windows.UI.Color.FromArgb(255, 0x61, 0x61, 0x61)));
 
-    /// <summary>Tab-strip status dot: green connected, red disconnected, amber connecting;
-    /// accent blue when connected with unseen output (problems keep their color).</summary>
+    /// <summary>Tab-strip status dot: green connected/running, red disconnected/failed,
+    /// amber connecting, neutral gray for a clean local exit; accent blue when connected
+    /// with unseen output (problems keep their color).</summary>
     public Windows.UI.Color StateColor =>
         State == TabConnectionState.Connected && HasUnseenOutput
             ? Windows.UI.Color.FromArgb(255, 0x00, 0x78, 0xD4)
@@ -208,6 +225,7 @@ public sealed class TabViewModel : ObservableObject
             {
                 TabConnectionState.Connected => Windows.UI.Color.FromArgb(255, 0x16, 0xC6, 0x0C),
                 TabConnectionState.Connecting => Windows.UI.Color.FromArgb(255, 0xFF, 0xB9, 0x00),
+                TabConnectionState.Exited => Windows.UI.Color.FromArgb(255, 0x8A, 0x8A, 0x8A),
                 _ => Windows.UI.Color.FromArgb(255, 0xE7, 0x48, 0x56),
             };
 
@@ -226,13 +244,17 @@ public sealed class TabViewModel : ObservableObject
 
     public Visibility IconVisibility => IconSource is null ? Visibility.Collapsed : Visibility.Visible;
 
-    public string Endpoint => $"{Session.Username}@{Session.Host}:{Session.Port}";
+    public string Endpoint => IsLocal
+        ? Session.Local?.Executable ?? ""
+        : $"{Session.Username}@{Session.Host}:{Session.Port}";
 
     public string StateText => State switch
     {
-        TabConnectionState.Connecting => "connecting…",
+        TabConnectionState.Connecting => IsLocal ? "starting…" : "connecting…",
+        TabConnectionState.Connected when IsLocal => HasUnseenOutput ? "running — new output" : "running",
         TabConnectionState.Connected => HasUnseenOutput ? "connected — new output" : "connected",
-        _ => "disconnected",
+        TabConnectionState.Exited => ExitCode is { } code ? $"exited (code {code})" : "exited",
+        _ => IsLocal ? "failed" : "disconnected",
     };
 
     // ---- Pin state (browser-style: pinned tabs can't be closed without unpinning) ----

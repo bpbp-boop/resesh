@@ -153,7 +153,7 @@ store key passphrases in Credential Manager.
 
 ---
 
-## Phase 6 — Session identity and local terminals (base icons shipped 2026-08-15; 6.1–6.2 not started; title-bar icon deferred — needs SVG→ICO rasterization)
+## Phase 6 — Session identity and local terminals (base icons shipped 2026-08-15; 6.1 shipped 2026-08-16; 6.2 not started; title-bar icon deferred — needs SVG→ICO rasterization)
 
 Per-session icon shown in the tree, tab strip, and title bar (alongside the existing
 `ColorTag` accent). `Icon` field on `Session` (string key), picker in the session editor.
@@ -444,7 +444,7 @@ to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
 | 1 | Phase 0 foundations (overrides, search, host-key override) | S–M | Low |
 | 2 | **GSSAPI spike** (parallel with anything) | S | **High — do early** |
 | 3 | Phase 6 session icons | S | Low |
-| 4 | Phase 6.1 local terminal profiles (model → ConPTY → parity) | M–L | Medium |
+| 4 | Phase 6.1 local terminal profiles (model → ConPTY → parity) ✅ | M–L | Medium |
 | 5 | Phase 6.2 agent-aware tabs (identity → attention → adapters) | M | Medium |
 | 6 | Phase 1 highlighting | M | Low |
 | 7 | Phase 4 export/import | S–M | Low |

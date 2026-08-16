@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Sessions.Core.Models;
 
@@ -36,19 +36,33 @@ public sealed class TreeNodeViewModel : ObservableObject
     /// <summary>Null for folders.</summary>
     public Session? Session { get; }
 
-    /// <summary>Folder full path for folders; owning folder path for sessions.</summary>
+    /// <summary>Folder full path for folders; owning folder path for sessions. Local-scope
+    /// paths are relative to the virtual Local root (their own namespace).</summary>
     public string FolderPath { get; }
+
+    /// <summary>True for the virtual Local root and everything beneath it.</summary>
+    public bool IsLocalScope { get; }
+
+    /// <summary>The permanent virtual Local root: cannot be renamed, deleted, or moved.</summary>
+    public bool IsLocalRoot { get; }
+
+    /// <summary>Key for the expansion-state map; local folders live in their own namespace.</summary>
+    public string ExpansionKey => IsLocalScope ? "\u0000local\u0000" + FolderPath : FolderPath;
 
     public ObservableCollection<TreeNodeViewModel> Children { get; } = [];
 
     public bool IsFolder => Session is null;
 
-    public string Name => Session?.Name ?? Sessions.Core.Storage.FolderPaths.Name(FolderPath);
+    public string Name => IsLocalRoot
+        ? "Local"
+        : Session?.Name ?? Sessions.Core.Storage.FolderPaths.Name(FolderPath);
 
-
-    public string HostSummary => Session is null
-        ? ""
-        : Session.Port == 22 ? Session.Host : $"{Session.Host}:{Session.Port}";
+    public string HostSummary => Session switch
+    {
+        null => "",
+        { IsLocal: true } => Path.GetFileNameWithoutExtension(Session.Local?.Executable ?? ""),
+        _ => Session.Port == 22 ? Session.Host : $"{Session.Host}:{Session.Port}",
+    };
 
     /// <summary>Per-session color tag as a renderable color; transparent when unset.</summary>
     public Windows.UI.Color TagColor => ParseColor(Session?.ColorTag);
@@ -76,15 +90,20 @@ public sealed class TreeNodeViewModel : ObservableObject
         return Windows.UI.Color.FromArgb(0, 0, 0, 0);
     }
 
-    private TreeNodeViewModel(Session? session, string folderPath)
+    private TreeNodeViewModel(Session? session, string folderPath, bool isLocalScope, bool isLocalRoot = false)
     {
         Session = session;
         FolderPath = folderPath;
+        IsLocalScope = isLocalScope;
+        IsLocalRoot = isLocalRoot;
     }
 
-    public static TreeNodeViewModel ForFolder(string fullPath, bool isExpanded)
-        => new(null, fullPath) { IsExpanded = isExpanded };
+    public static TreeNodeViewModel ForFolder(string fullPath, bool isExpanded, bool isLocalScope = false)
+        => new(null, fullPath, isLocalScope) { IsExpanded = isExpanded };
 
     public static TreeNodeViewModel ForSession(Session session)
-        => new(session, session.FolderPath);
+        => new(session, session.FolderPath, session.IsLocal);
+
+    public static TreeNodeViewModel ForLocalRoot(bool isExpanded)
+        => new(null, "", isLocalScope: true, isLocalRoot: true) { IsExpanded = isExpanded };
 }

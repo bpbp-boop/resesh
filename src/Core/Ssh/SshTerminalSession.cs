@@ -32,7 +32,7 @@ public sealed record SshCommandResult(bool Success, string Output, string Error)
 /// One live SSH shell: SshClient + ShellStream plus a background reader.
 /// All calls are safe from any thread; events fire on background threads.
 /// </summary>
-public sealed class SshTerminalSession : IDisposable
+public sealed class SshTerminalSession : Backend.ITerminalBackend
 {
     private readonly KnownHostsStore _knownHosts;
     private SshClient? _client;
@@ -333,6 +333,9 @@ public sealed class SshTerminalSession : IDisposable
             client.Dispose();
         }
     }
+
+    /// <summary>ITerminalBackend: a user-initiated stop is a clean local disconnect.</summary>
+    public void Stop() => Disconnect();
 
     public void Dispose() => Disconnect();
 }

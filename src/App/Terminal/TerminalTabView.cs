@@ -4,7 +4,9 @@ using Microsoft.UI.Xaml.Controls;
 using Sessions.App.Controls;
 using Sessions.App.Dialogs;
 using Sessions.App.ViewModels;
+using Sessions.Core.Backend;
 using Sessions.Core.Credentials;
+using Sessions.Core.Local;
 using Sessions.Core.Models;
 using Sessions.Core.Sftp;
 using Sessions.Core.Ssh;
@@ -13,8 +15,10 @@ using Sessions.Terminal;
 namespace Sessions.App.Terminal;
 
 /// <summary>
-/// The content of one tab: a TerminalControl plus the SSH connection lifecycle
-/// (credential prompt, host key confirmation, connect/reconnect, teardown).
+/// The content of one tab: a TerminalControl plus the shell lifecycle for either target
+/// kind — SSH (credential prompt, host key confirmation, connect/reconnect, teardown) or
+/// a local ConPTY process (launch, exit code, restart). The live shell is an
+/// <see cref="ITerminalBackend"/>; SSH-only surfaces keep a typed reference beside it.
 /// </summary>
 public sealed class TerminalTabView : Grid, IDisposable
 {
@@ -24,7 +28,8 @@ public sealed class TerminalTabView : Grid, IDisposable
     private readonly TerminalControl _terminal = new();
     private readonly ProgressRing _spinner = new() { IsActive = false, Width = 48, Height = 48 };
 
-    private SshTerminalSession? _session;
+    private ITerminalBackend? _backend;
+    private SshTerminalSession? _ssh; // set when _backend is the SSH implementation
     private bool _connecting;
     private bool _disposed;
 
@@ -46,6 +51,9 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// <summary>Ctrl+Shift+\ inside the terminal (split right / move to other group).</summary>
     public event Action? SplitRequested;
 
+    /// <summary>Ctrl+Shift+T inside the terminal (open the default local profile).</summary>
+    public event Action? NewLocalTabRequested;
+
     /// <summary>Raised (UI thread) when a connect to a session with no icon set identified
     /// the OS/vendor from the server banner. The window decides whether to persist it.</summary>
     public event Action<string>? IconSuggested;
@@ -65,8 +73,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         Children.Add(_terminal);
         Children.Add(_spinner);
 
-        _terminal.InputReceived += data => _session?.Write(data);
-        _terminal.Resized += (cols, rows) => _session?.Resize(cols, rows);
+        _terminal.InputReceived += data => _backend?.Write(data);
+        _terminal.Resized += (cols, rows) => _backend?.Resize(cols, rows);
         _terminal.ReconnectRequested += () => DispatcherQueue.TryEnqueue(() => _ = ConnectAsync(isReconnect: true));
         // The page's terminal is constructed with these (init handshake), so it opens
         // with the right theme/fonts instead of restyling just after first paint.
@@ -81,10 +89,11 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.CloseTabRequested += () => DispatcherQueue.TryEnqueue(() => CloseRequested?.Invoke());
         _terminal.SplitRequested += () => DispatcherQueue.TryEnqueue(() => SplitRequested?.Invoke());
         _terminal.FilePaneRequested += () => DispatcherQueue.TryEnqueue(ToggleFilePane);
+        _terminal.NewLocalTabRequested += () => DispatcherQueue.TryEnqueue(() => NewLocalTabRequested?.Invoke());
 
         Loaded += async (_, _) =>
         {
-            if (_session is null && !_connecting)
+            if (_backend is null && !_connecting)
                 await _terminal.InitializeAsync(); // Ready fires when the page is up
         };
     }
@@ -100,20 +109,86 @@ public sealed class TerminalTabView : Grid, IDisposable
     public void SetRulerPresentation(bool isSplit, bool isGroupFocused) =>
         _terminal.SetRulerPresentation(isSplit, isGroupFocused);
 
-    /// <summary>Kicks off a fresh connection using the terminal's current size.</summary>
+    /// <summary>Kicks off a fresh connection/launch using the terminal's current size.</summary>
     public async Task ConnectAsync(bool isReconnect)
     {
-        if (_connecting || _disposed || _session?.IsConnected == true)
+        if (_connecting || _disposed || _ssh?.IsConnected == true
+            || _backend is LocalTerminalSession { IsRunning: true })
             return;
         _connecting = true;
         _spinner.IsActive = true;
         _tab.State = TabConnectionState.Connecting;
 
-        // Tear down the previous (dead) session so its blocked reader thread is released.
-        var stale = _session;
-        _session = null;
-        stale?.Disconnect();
+        // Tear down the previous (dead) backend so its blocked reader thread is released.
+        var stale = _backend;
+        _backend = null;
+        _ssh = null;
+        stale?.Stop();
 
+        try
+        {
+            if (Session.IsLocal)
+                await LaunchLocalAsync(isReconnect);
+            else
+                await ConnectSshAsync(isReconnect);
+        }
+        finally
+        {
+            _connecting = false;
+            _spinner.IsActive = false;
+        }
+    }
+
+    /// <summary>Local lifecycle: start the ConPTY process; a later natural exit keeps the
+    /// tab open, reports the exit code neutrally, and Enter/Restart relaunches.</summary>
+    private async Task LaunchLocalAsync(bool isReconnect)
+    {
+        try
+        {
+            if (isReconnect)
+                _terminal.WriteDivider(); // restart-in-place: scrollback preserved
+
+            var local = new LocalTerminalSession();
+            local.OutputReceived += data =>
+            {
+                _terminal.WriteOutput(data);
+                if (!_tab.IsActive && !_tab.HasUnseenOutput)
+                    DispatcherQueue.TryEnqueue(() => _tab.NotifyOutputActivity());
+            };
+            local.Exited += code => DispatcherQueue.TryEnqueue(() =>
+            {
+                _tab.ExitCode = code;
+                _tab.State = TabConnectionState.Exited;
+                _tab.ConnectionSummary = "";
+                _terminal.NotifyDisconnected($"Process exited with code {code}.", action: "restart", neutral: true);
+            });
+
+            var cols = _terminal.Columns;
+            var rows = _terminal.Rows;
+            await Task.Run(() => local.Start(Session, cols, rows));
+
+            _backend = local;
+            _tab.ExitCode = null;
+            _tab.State = TabConnectionState.Connected;
+            _tab.ConnectionSummary = $"pid {local.ProcessId}";
+            _terminal.NotifyConnected();
+            _terminal.FocusTerminal();
+        }
+        catch (LocalSessionException ex)
+        {
+            // Launch failure (unlike a normal exit) is an error state — red dot, warning text.
+            _tab.State = TabConnectionState.Disconnected;
+            _terminal.NotifyDisconnected(ex.Message, action: "restart");
+        }
+        catch (Exception ex)
+        {
+            _tab.State = TabConnectionState.Disconnected;
+            _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}", action: "restart");
+        }
+    }
+
+    private async Task ConnectSshAsync(bool isReconnect)
+    {
         try
         {
             if (string.IsNullOrWhiteSpace(Session.Username))
@@ -162,7 +237,8 @@ public sealed class TerminalTabView : Grid, IDisposable
                 : null;
             await Task.Run(() => session.Connect(Session, secret, Session.TerminalType, cols, rows, bootstrap));
 
-            _session = session;
+            _backend = session;
+            _ssh = session;
             _tab.State = TabConnectionState.Connected;
             _tab.ConnectionSummary = string.Join(" • ",
                 new[] { session.Encryption, session.HostKeyFingerprint }.Where(s => !string.IsNullOrEmpty(s)));
@@ -183,11 +259,6 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             _tab.State = TabConnectionState.Disconnected;
             _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}");
-        }
-        finally
-        {
-            _connecting = false;
-            _spinner.IsActive = false;
         }
     }
 
@@ -276,20 +347,49 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// </summary>
     public void EndRemoteSession()
     {
-        var session = _session;
+        var session = _ssh;
         if (Session.Persistent && session is not null)
             _ = Task.Run(() => session.TryRunCommand(TmuxPersistence.KillCommand(Session.Id, _tab.TmuxSlot)));
     }
 
-    /// <summary>Local, user-initiated disconnect: tab stays open showing the notice.</summary>
+    /// <summary>User-initiated Disconnect (SSH) / Stop (local): tab stays open showing the
+    /// notice. Stopping a local shell kills its whole process tree via the job object.</summary>
     public void DisconnectLocal()
     {
-        var session = _session;
-        _session = null;
-        session?.Disconnect();
-        _tab.State = TabConnectionState.Disconnected;
+        var backend = _backend;
+        _backend = null;
+        _ssh = null;
+        backend?.Stop();
         _tab.ConnectionSummary = "";
-        _terminal.NotifyDisconnected("Disconnected.");
+        if (Session.IsLocal)
+        {
+            _tab.ExitCode = null;
+            _tab.State = TabConnectionState.Exited;
+            _terminal.NotifyDisconnected("Stopped.", action: "restart", neutral: true);
+        }
+        else
+        {
+            _tab.State = TabConnectionState.Disconnected;
+            _terminal.NotifyDisconnected("Disconnected.");
+        }
+    }
+
+    /// <summary>Opens the local profile's starting directory in Explorer (local tabs'
+    /// stand-in for the remote file pane until a local files provider exists).</summary>
+    public void OpenWorkingFolder()
+    {
+        var directory = Environment.ExpandEnvironmentVariables(Session.Local?.StartingDirectory?.Trim() ?? "");
+        if (directory.Length == 0)
+            directory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (Directory.Exists(directory))
+        {
+            _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                Arguments = $"\"{directory}\"",
+                UseShellExecute = false,
+            });
+        }
     }
 
     // ---- file pane (Phase 3) ----
@@ -298,6 +398,8 @@ public sealed class TerminalTabView : Grid, IDisposable
 
     public void ToggleFilePane()
     {
+        if (!_tab.Capabilities.RemoteFiles)
+            return; // remote-only surface; local tabs use Open Working Folder instead
         if (IsFilePaneOpen)
             HideFilePane();
         else
@@ -309,7 +411,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// line once the listing lands (instead of the item count).</summary>
     public void ShowFilePane(string? initialPath = null, string? notice = null)
     {
-        if (_disposed)
+        if (_disposed || !_tab.Capabilities.RemoteFiles)
             return;
         if (_filePane is null)
         {
@@ -356,9 +458,11 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// </summary>
     public async Task OpenFilePaneAtCurrentFolderAsync()
     {
+        if (!_tab.Capabilities.RemoteFiles)
+            return;
         string? path = null;
         string? failure = null;
-        var session = _session;
+        var session = _ssh;
         if (Session.Persistent && session is not null && session.IsConnected)
         {
             var result = await Task.Run(() => session.RunCommand(TmuxPersistence.CurrentPathCommand()));
@@ -496,9 +600,11 @@ public sealed class TerminalTabView : Grid, IDisposable
         _filePane = null;
         _sshfsMount?.Dispose(); // killing the sshfs process unmounts the drive
         _sshfsMount = null;
-        // Plan-mandated order: reader â†’ shell â†’ client (inside Disconnect) â†’ WebView2.
-        _session?.Disconnect();
-        _session = null;
+        // Plan-mandated order: reader â†’ shell â†’ client (inside Stop) â†’ WebView2.
+        // For local tabs, Stop kills the process tree via the job object — no orphans.
+        _backend?.Stop();
+        _backend = null;
+        _ssh = null;
         _terminal.Dispose();
     }
 }

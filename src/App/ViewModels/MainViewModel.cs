@@ -12,8 +12,12 @@ public sealed class MainViewModel : ObservableObject
     private readonly SessionStore _store;
     private readonly ICredentialService _credentials;
 
-    // Folder expansion is keyed by path so it survives tree rebuilds. Default: expanded.
+    // Folder expansion is keyed by TreeNodeViewModel.ExpansionKey (path, with a reserved
+    // prefix for the Local scope) so it survives tree rebuilds. Default: expanded.
     private readonly Dictionary<string, bool> _expansion = new(StringComparer.OrdinalIgnoreCase);
+
+    private static string ExpansionKeyFor(string folderPath, SessionKind kind) =>
+        kind == SessionKind.Local ? "\u0000local\u0000" + folderPath : folderPath;
 
     private string _searchText = "";
     private TabGroupViewModel _focusedGroup;
@@ -99,7 +103,16 @@ public sealed class MainViewModel : ObservableObject
 
     public IReadOnlyList<string> FolderPathsForPicker => _store.Folders;
 
-    public IReadOnlyList<Session> RankedMatches(string query) => SessionSearch.Rank(_store.Sessions, query);
+    public IReadOnlyList<string> LocalFolderPathsForPicker => _store.FoldersOf(SessionKind.Local);
+
+    /// <summary>Built-in local profiles whose shell is not installed right now are hidden
+    /// everywhere (tree, search, quick connect) but never deleted.</summary>
+    private static bool IsVisible(Session session) =>
+        !session.IsLocal || !session.BuiltIn || App.AvailableLocalShells.Contains(session.Id);
+
+    public IEnumerable<Session> VisibleSessions => _store.Sessions.Where(IsVisible);
+
+    public IReadOnlyList<Session> RankedMatches(string query) => SessionSearch.Rank(VisibleSessions, query);
 
     // ---- Tabs / groups ----
 
@@ -196,29 +209,29 @@ public sealed class MainViewModel : ObservableObject
         RebuildTree();
     }
 
-    // ---- Folder CRUD ----
+    // ---- Folder CRUD (SSH and Local folders are separate namespaces) ----
 
-    public void CreateFolder(string path)
+    public void CreateFolder(string path, SessionKind kind = SessionKind.Ssh)
     {
-        _store.CreateFolder(path);
+        _store.CreateFolder(path, kind);
         RebuildTree();
     }
 
-    public void RenameFolder(string oldPath, string newPath)
+    public void RenameFolder(string oldPath, string newPath, SessionKind kind = SessionKind.Ssh)
     {
-        if (_expansion.Remove(oldPath, out var wasExpanded))
-            _expansion[FolderPaths.Normalize(newPath)] = wasExpanded;
-        _store.RenameFolder(oldPath, newPath);
+        if (_expansion.Remove(ExpansionKeyFor(oldPath, kind), out var wasExpanded))
+            _expansion[ExpansionKeyFor(FolderPaths.Normalize(newPath), kind)] = wasExpanded;
+        _store.RenameFolder(oldPath, newPath, kind);
         RebuildTree();
     }
 
-    /// <summary>Number of sessions that would be removed by deleting this folder.</summary>
-    public int CountSessionsUnder(string folderPath) =>
-        _store.Sessions.Count(s => FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath));
+    /// <summary>Number of same-kind sessions that would be removed by deleting this folder.</summary>
+    public int CountSessionsUnder(string folderPath, SessionKind kind = SessionKind.Ssh) =>
+        _store.Sessions.Count(s => s.Kind == kind && FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath));
 
-    public void DeleteFolder(string path)
+    public void DeleteFolder(string path, SessionKind kind = SessionKind.Ssh)
     {
-        foreach (var removed in _store.DeleteFolder(path))
+        foreach (var removed in _store.DeleteFolder(path, kind))
             _credentials.Delete(removed.Id);
         RebuildTree();
     }
@@ -234,7 +247,7 @@ public sealed class MainViewModel : ObservableObject
     {
         if (node.IsFolder && !IsSearching && _currentNodes.Contains(node))
         {
-            _expansion[node.FolderPath] = expanded;
+            _expansion[node.ExpansionKey] = expanded;
             node.IsExpanded = expanded; // keep the VM in sync; the view binding is OneWay
         }
     }
@@ -246,7 +259,7 @@ public sealed class MainViewModel : ObservableObject
             return;
         node.IsExpanded = expanded;
         if (!IsSearching)
-            _expansion[node.FolderPath] = expanded;
+            _expansion[node.ExpansionKey] = expanded;
         foreach (var child in node.Children)
             SetExpansionUnder(child, expanded);
     }
@@ -263,18 +276,33 @@ public sealed class MainViewModel : ObservableObject
 
     public void RebuildTree()
     {
-        var sessions = SessionSearch.Filter(_store.Sessions, _searchText);
+        var sessions = SessionSearch.Filter(VisibleSessions, _searchText);
+        var localSessions = sessions.Where(s => s.IsLocal).ToList();
+        var sshSessions = sessions.Where(s => !s.IsLocal).ToList();
 
         // While searching, show only folders that contain a match (ancestors included), all expanded.
-        IEnumerable<string> folders = IsSearching
-            ? sessions.SelectMany(s => FolderPaths.SelfAndAncestors(s.FolderPath)).Distinct(StringComparer.OrdinalIgnoreCase)
-            : _store.Folders;
-
-        var root = SessionTreeBuilder.Build(sessions, folders);
+        IEnumerable<string> FoldersFor(SessionKind kind, IEnumerable<Session> matched) => IsSearching
+            ? matched.SelectMany(s => FolderPaths.SelfAndAncestors(s.FolderPath)).Distinct(StringComparer.OrdinalIgnoreCase)
+            : _store.FoldersOf(kind);
 
         _currentNodes.Clear();
         RootNodes.Clear();
-        foreach (var child in BuildChildren(root))
+
+        // The permanent virtual Local root sits first while browsing. While filtering it
+        // follows normal match rules: no matching local profile, no Local node.
+        if (!IsSearching || localSessions.Count > 0)
+        {
+            var localRoot = TreeNodeViewModel.ForLocalRoot(
+                IsSearching || _expansion.GetValueOrDefault(ExpansionKeyFor("", SessionKind.Local), true));
+            _currentNodes.Add(localRoot);
+            var localTree = SessionTreeBuilder.Build(localSessions, FoldersFor(SessionKind.Local, localSessions));
+            foreach (var child in BuildChildren(localTree, isLocalScope: true))
+                localRoot.Children.Add(child);
+            RootNodes.Add(localRoot);
+        }
+
+        var root = SessionTreeBuilder.Build(sshSessions, FoldersFor(SessionKind.Ssh, sshSessions));
+        foreach (var child in BuildChildren(root, isLocalScope: false))
             RootNodes.Add(child);
 
         OnPropertyChanged(nameof(StatusText));
@@ -282,14 +310,15 @@ public sealed class MainViewModel : ObservableObject
         TreeRebuilt?.Invoke();
     }
 
-    private IEnumerable<TreeNodeViewModel> BuildChildren(FolderNode folder)
+    private IEnumerable<TreeNodeViewModel> BuildChildren(FolderNode folder, bool isLocalScope)
     {
         foreach (var sub in folder.Folders)
         {
-            var expanded = IsSearching || _expansion.GetValueOrDefault(sub.FullPath, true);
-            var node = TreeNodeViewModel.ForFolder(sub.FullPath, expanded);
+            var kind = isLocalScope ? SessionKind.Local : SessionKind.Ssh;
+            var expanded = IsSearching || _expansion.GetValueOrDefault(ExpansionKeyFor(sub.FullPath, kind), true);
+            var node = TreeNodeViewModel.ForFolder(sub.FullPath, expanded, isLocalScope);
             _currentNodes.Add(node);
-            foreach (var child in BuildChildren(sub))
+            foreach (var child in BuildChildren(sub, isLocalScope))
                 node.Children.Add(child);
             yield return node;
         }

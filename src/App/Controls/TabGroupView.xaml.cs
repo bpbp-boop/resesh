@@ -29,6 +29,7 @@ public interface ITabGroupHost
     Task EndRemoteSessionAsync(TabViewModel tab);
     void ToggleFilePane(TabViewModel tab);
     Task OpenFilePaneAtCurrentFolderAsync(TabViewModel tab);
+    void OpenWorkingFolder(TabViewModel tab);
 }
 
 public sealed partial class TabGroupView : UserControl
@@ -55,6 +56,22 @@ public sealed partial class TabGroupView : UserControl
         // Focus tracking: interacting anywhere in this group focuses it.
         AddHandler(PointerPressedEvent, new PointerEventHandler((_, _) => _host.FocusGroup(Group)), true);
 
+        // Visibility must also follow the view model, not just TabView.SelectionChanged:
+        // when the selected tab is closed, the TabView auto-selects a neighbor and raises
+        // SelectionChanged BEFORE the TwoWay binding writes SelectedTab back — a sync from
+        // that event reads the stale value and leaves the surviving terminal collapsed
+        // (observed: blank terminal area after closing the active tab). This handler runs
+        // when the write-back lands and re-syncs against the settled value.
+        Group.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TabGroupViewModel.SelectedTab))
+            {
+                SyncTerminalVisibility();
+                _host.ViewModel.NotifyActiveTabChanged();
+                FocusTerminal(Group.SelectedTab);
+            }
+        };
+
         // Middle-click closes a tab (same confirmed pathway); TabView has no built-in support.
         Tabs.AddHandler(PointerPressedEvent, new PointerEventHandler(Tabs_PointerPressed), true);
         Tabs.AddHandler(PointerReleasedEvent, new PointerEventHandler(Tabs_PointerReleased), true);
@@ -78,12 +95,14 @@ public sealed partial class TabGroupView : UserControl
     public void SyncTerminalVisibility()
     {
         var selected = Group.SelectedTab?.View;
+        MainWindow.Trace($"SyncTerminalVisibility: selected='{Group.SelectedTab?.Header}' children={TerminalHost.Children.Count}");
         foreach (var child in TerminalHost.Children)
             child.Visibility = ReferenceEquals(child, selected) ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        MainWindow.Trace($"Tabs_SelectionChanged: control={((e.AddedItems.Count > 0 ? e.AddedItems[0] : null) as TabViewModel)?.Header ?? "(none)"} vm={Group.SelectedTab?.Header ?? "(null)"}");
         SyncTerminalVisibility();
         _host.FocusGroup(Group);
         _host.ViewModel.NotifyActiveTabChanged();
@@ -186,7 +205,7 @@ public sealed partial class TabGroupView : UserControl
         _close = null!, _closeDisconnected = null!, _closeOthers = null!, _closeRight = null!,
         _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _splitDown = null!,
         _options = null!,
-        _filePane = null!, _filePaneCwd = null!;
+        _filePane = null!, _filePaneCwd = null!, _workingFolder = null!;
     private MenuFlyoutSubItem _highlight = null!;
 
     private MenuFlyout BuildTabMenu()
@@ -210,6 +229,7 @@ public sealed partial class TabGroupView : UserControl
         _filePane = Item("File Pane", tab => _host.ToggleFilePane(tab));
         _filePane.KeyboardAcceleratorTextOverride = "Ctrl+Shift+E";
         _filePaneCwd = Item("Open File Pane at Current Folder", tab => _ = _host.OpenFilePaneAtCurrentFolderAsync(tab));
+        _workingFolder = Item("Open Working Folder", tab => _host.OpenWorkingFolder(tab));
         _close = Item("Close", tab => _ = _host.RequestCloseTabAsync(tab));
         _close.KeyboardAcceleratorTextOverride = "Ctrl+F4";
         _closeDisconnected = Item("Close Disconnected Tabs", tab =>
@@ -256,22 +276,31 @@ public sealed partial class TabGroupView : UserControl
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_filePane);
         menu.Items.Add(_filePaneCwd);
+        menu.Items.Add(_workingFolder);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_highlight);
         menu.Items.Add(_options);
         return menu;
     }
 
+    private static bool IsStopped(TabViewModel tab) =>
+        tab.State is TabConnectionState.Disconnected or TabConnectionState.Exited;
+
     private void ConfigureMenuFor(TabViewModel tab)
     {
+        var caps = tab.Capabilities;
         _resetName.IsEnabled = tab.TitleOverride is not null;
-        _reconnect.IsEnabled = tab.State == TabConnectionState.Disconnected;
+        // Local tabs use process verbs (Stop/Restart); remote-only actions disappear entirely.
+        _reconnect.Text = caps.StartAgainVerb;
+        _reconnect.IsEnabled = IsStopped(tab);
+        _disconnect.Text = caps.StopVerb;
         _disconnect.IsEnabled = tab.State == TabConnectionState.Connected;
         // Only persistent sessions have a remote session to end; close/disconnect only detach them.
-        _endRemote.Visibility = tab.Session.Persistent ? Visibility.Visible : Visibility.Collapsed;
-        _endRemote.IsEnabled = tab.Session.Persistent && tab.State == TabConnectionState.Connected;
+        var endRemote = caps.RemoteSession && tab.Session.Persistent;
+        _endRemote.Visibility = endRemote ? Visibility.Visible : Visibility.Collapsed;
+        _endRemote.IsEnabled = endRemote && tab.State == TabConnectionState.Connected;
         // Bulk closes skip pinned tabs, so they're only offered when an unpinned tab qualifies.
-        _closeDisconnected.IsEnabled = Group.Tabs.Any(t => t.State == TabConnectionState.Disconnected && !t.IsPinned);
+        _closeDisconnected.IsEnabled = Group.Tabs.Any(t => IsStopped(t) && !t.IsPinned);
         _closeOthers.IsEnabled = Group.Tabs.Any(t => t != tab && !t.IsPinned);
         _closeRight.IsEnabled = Group.Tabs.Skip(Group.Tabs.IndexOf(tab) + 1).Any(t => !t.IsPinned);
         _pin.Text = tab.IsPinned ? "Unpin Tab" : "Pin Tab";
@@ -279,10 +308,13 @@ public sealed partial class TabGroupView : UserControl
         // Splitting a lone tab would leave an empty group that immediately collapses — pointless.
         _split.IsEnabled = Group.Tabs.Count > 1;
         _splitDown.IsEnabled = Group.Tabs.Count > 1;
+        _filePane.Visibility = caps.RemoteFiles ? Visibility.Visible : Visibility.Collapsed;
         _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
         // cwd tracking rides the tmux side-channel; plain sessions would just open at home.
-        _filePaneCwd.Visibility = tab.Session.Persistent ? Visibility.Visible : Visibility.Collapsed;
-        _filePaneCwd.IsEnabled = tab.Session.Persistent && tab.State == TabConnectionState.Connected;
+        var filePaneCwd = caps.RemoteFiles && tab.Session.Persistent;
+        _filePaneCwd.Visibility = filePaneCwd ? Visibility.Visible : Visibility.Collapsed;
+        _filePaneCwd.IsEnabled = filePaneCwd && tab.State == TabConnectionState.Connected;
+        _workingFolder.Visibility = caps.LocalWorkingFolder ? Visibility.Visible : Visibility.Collapsed;
         // Session Options is disabled when the saved session was deleted while connected.
         var sessionExists = _host.ViewModel.RankedMatches("").Any(s => s.Id == tab.Session.Id);
         _options.IsEnabled = sessionExists;

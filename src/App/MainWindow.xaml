@@ -57,10 +57,27 @@
                 </TreeViewItem>
             </DataTemplate>
 
+            <!-- The permanent virtual Local root: terminal glyph, no drag, no rename/delete. -->
+            <DataTemplate x:Key="LocalRootTemplate" x:DataType="vm:TreeNodeViewModel">
+                <TreeViewItem
+                    ItemsSource="{x:Bind Children}"
+                    IsExpanded="{x:Bind IsExpanded, Mode=OneWay}"
+                    AllowDrop="True"
+                    Background="{x:Bind SelectionBackground, Mode=OneWay}"
+                    Tapped="TreeNode_Tapped"
+                    ContextRequested="TreeNode_ContextRequested">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE7F8;" FontSize="14" />
+                        <TextBlock Text="{x:Bind Name}" FontWeight="SemiBold" />
+                    </StackPanel>
+                </TreeViewItem>
+            </DataTemplate>
+
             <local:TreeNodeTemplateSelector
                 x:Key="TreeNodeTemplateSelector"
                 FolderTemplate="{StaticResource FolderTemplate}"
-                SessionTemplate="{StaticResource SessionTemplate}" />
+                SessionTemplate="{StaticResource SessionTemplate}"
+                LocalRootTemplate="{StaticResource LocalRootTemplate}" />
         </Grid.Resources>
 
         <Grid.RowDefinitions>
@@ -92,7 +109,8 @@
 
             <MenuBar x:Name="TitleBarMenus" Grid.Column="2" VerticalAlignment="Center">
                 <MenuBarItem Title="File">
-                    <MenuFlyoutItem Text="New Session…" Click="NewSession_Click" />
+                    <MenuFlyoutItem Text="New SSH Session…" Click="NewSession_Click" />
+                    <MenuFlyoutItem Text="New Local Profile…" Click="NewLocalProfile_Click" />
                     <MenuFlyoutItem Text="New Folder…" Click="NewFolder_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Import from SecureCRT…" Click="Import_Click" />
@@ -116,14 +134,14 @@
                         KeyboardAcceleratorTextOverride="Ctrl+Shift+E" />
                 </MenuBarItem>
                 <MenuBarItem Title="Session">
-                    <MenuFlyoutItem Text="Reconnect" Click="ReconnectMenu_Click" />
-                    <MenuFlyoutItem Text="Disconnect" Click="DisconnectMenu_Click" />
+                    <MenuFlyoutItem x:Name="ReconnectMenuItem" Text="Reconnect" Click="ReconnectMenu_Click" />
+                    <MenuFlyoutItem x:Name="DisconnectMenuItem" Text="Disconnect" Click="DisconnectMenu_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Clone" Click="CloneMenu_Click" />
                     <MenuFlyoutItem Text="Pin Tab" Click="PinTabMenu_Click" />
                     <MenuFlyoutItem Text="Session Options…" Click="SessionOptionsMenu_Click" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem Text="End Remote Session…" Click="EndRemoteMenu_Click" />
+                    <MenuFlyoutItem x:Name="EndRemoteMenuItem" Text="End Remote Session…" Click="EndRemoteMenu_Click" />
                     <MenuFlyoutItem
                         Text="Close Tab"
                         Click="CloseTabMenu_Click"
@@ -180,12 +198,20 @@
                 Spacing="4"
                 VerticalAlignment="Center"
                 Margin="0,0,8,0">
-                <Button Click="NewSession_Click" ToolTipService.ToolTip="New session">
+                <!-- Split button: primary click opens the default local profile; the menu
+                     lists local profiles plus the two "new" entries (populated on opening). -->
+                <SplitButton
+                    x:Name="NewSessionButton"
+                    Click="NewSessionButton_Click"
+                    ToolTipService.ToolTip="Open the default local terminal (Ctrl+Shift+T)">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE710;" FontSize="14" />
                         <TextBlock Text="Session" />
                     </StackPanel>
-                </Button>
+                    <SplitButton.Flyout>
+                        <MenuFlyout x:Name="NewSessionFlyout" Opening="NewSessionFlyout_Opening" />
+                    </SplitButton.Flyout>
+                </SplitButton>
                 <ToggleButton
                     x:Name="PinButton"
                     Click="PinButton_Click"
@@ -248,7 +274,8 @@
                     </TreeView.Resources>
                     <TreeView.ContextFlyout>
                         <MenuFlyout>
-                            <MenuFlyoutItem Text="New Session…" Click="NewSession_Click" />
+                            <MenuFlyoutItem Text="New SSH Session…" Click="NewSession_Click" />
+                            <MenuFlyoutItem Text="New Local Profile…" Click="NewLocalProfile_Click" />
                             <MenuFlyoutItem Text="New Folder…" Click="NewFolder_Click" />
                             <MenuFlyoutSeparator />
                             <MenuFlyoutItem Text="Expand All" Click="ExpandAll_Click" />

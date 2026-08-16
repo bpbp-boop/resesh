@@ -48,6 +48,9 @@ public sealed class TerminalControl : Grid, IDisposable
     /// <summary>Ctrl+Shift+E pressed inside the terminal page (toggle file pane).</summary>
     public event Action? FilePaneRequested;
 
+    /// <summary>Ctrl+Shift+T pressed inside the terminal page (open default local profile).</summary>
+    public event Action? NewLocalTabRequested;
+
     /// <summary>Fires once when the xterm page is loaded and measured (initial cols/rows).</summary>
     public event Action<int, int>? Ready;
 
@@ -147,6 +150,9 @@ public sealed class TerminalControl : Grid, IDisposable
                 case "filePane":
                     FilePaneRequested?.Invoke();
                     break;
+                case "newLocalTab":
+                    NewLocalTabRequested?.Invoke();
+                    break;
                 case "pageError":
                     if (root.TryGetProperty("message", out var err))
                         TraceHook?.Invoke($"pageError: {err.GetString()}");
@@ -219,10 +225,13 @@ public sealed class TerminalControl : Grid, IDisposable
 
     public void NotifyConnected() => Post(new { type = "connected" });
 
-    public void NotifyDisconnected(string message)
+    /// <summary>Shell-over notice. <paramref name="action"/> is the verb in the
+    /// "Press Enter to …" hint ("reconnect"/"restart"); <paramref name="neutral"/> renders
+    /// the message dimmed instead of warning-yellow (clean local exits are not errors).</summary>
+    public void NotifyDisconnected(string message, string action = "reconnect", bool neutral = false)
     {
         FlushOutput();
-        Post(new { type = "disconnected", message });
+        Post(new { type = "disconnected", message, action, severity = neutral ? "info" : "warn" });
     }
 
     public void WriteDivider() => Post(new { type = "divider" });

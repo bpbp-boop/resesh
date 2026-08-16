@@ -24,6 +24,10 @@ public sealed class SessionStore
 
     private List<Session> _sessions = [];
     private List<string> _folders = [];
+    private List<string> _localFolders = [];
+
+    private List<string> FolderListOf(SessionKind kind) =>
+        kind == SessionKind.Local ? _localFolders : _folders;
 
     public SessionStore(string path)
     {
@@ -39,22 +43,27 @@ public sealed class SessionStore
         get { lock (_gate) return _sessions.ToList(); }
     }
 
-    /// <summary>Explicit folder paths, plus any folder mentioned by a session.</summary>
-    public IReadOnlyList<string> Folders
+    /// <summary>SSH folder paths (explicit plus mentioned by a session); see <see cref="FoldersOf"/>.</summary>
+    public IReadOnlyList<string> Folders => FoldersOf(SessionKind.Ssh);
+
+    /// <summary>
+    /// Explicit folder paths of one kind, plus any folder mentioned by a session of that
+    /// kind. SSH and local folders are separate namespaces: local paths are relative to
+    /// the virtual Local root.
+    /// </summary>
+    public IReadOnlyList<string> FoldersOf(SessionKind kind)
     {
-        get
+        lock (_gate)
         {
-            lock (_gate)
+            var all = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in FolderListOf(kind)
+                .Concat(_sessions.Where(s => s.Kind == kind).Select(s => s.FolderPath)))
             {
-                var all = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var path in _folders.Concat(_sessions.Select(s => s.FolderPath)))
-                {
-                    foreach (var ancestor in FolderPaths.SelfAndAncestors(path))
-                        all.Add(ancestor);
-                }
-                all.Remove("");
-                return all.ToList();
+                foreach (var ancestor in FolderPaths.SelfAndAncestors(path))
+                    all.Add(ancestor);
             }
+            all.Remove("");
+            return all.ToList();
         }
     }
 
@@ -65,6 +74,7 @@ public sealed class SessionStore
             var data = TryRead(_path) ?? TryRead(_bakPath) ?? new StoreData();
             _sessions = data.Sessions ?? [];
             _folders = data.Folders ?? [];
+            _localFolders = data.LocalFolders ?? [];
         }
     }
 
@@ -120,23 +130,24 @@ public sealed class SessionStore
         }
     }
 
-    public void CreateFolder(string folderPath)
+    public void CreateFolder(string folderPath, SessionKind kind = SessionKind.Ssh)
     {
         lock (_gate)
         {
             folderPath = FolderPaths.Normalize(folderPath);
             if (folderPath.Length == 0)
                 return;
-            if (!_folders.Contains(folderPath, StringComparer.OrdinalIgnoreCase))
+            var folders = FolderListOf(kind);
+            if (!folders.Contains(folderPath, StringComparer.OrdinalIgnoreCase))
             {
-                _folders.Add(folderPath);
+                folders.Add(folderPath);
                 Save();
             }
         }
     }
 
-    /// <summary>Renames/moves a folder; every session and subfolder under it follows.</summary>
-    public void RenameFolder(string oldPath, string newPath)
+    /// <summary>Renames/moves a folder; every same-kind session and subfolder under it follows.</summary>
+    public void RenameFolder(string oldPath, string newPath, SessionKind kind = SessionKind.Ssh)
     {
         lock (_gate)
         {
@@ -147,26 +158,33 @@ public sealed class SessionStore
 
             for (var i = 0; i < _sessions.Count; i++)
             {
+                if (_sessions[i].Kind != kind)
+                    continue;
                 var reparented = FolderPaths.Reparent(_sessions[i].FolderPath, oldPath, newPath);
                 if (reparented is not null)
                     _sessions[i] = _sessions[i] with { FolderPath = reparented };
             }
 
-            _folders = _folders
+            var folders = FolderListOf(kind);
+            var renamed = folders
                 .Select(f => FolderPaths.Reparent(f, oldPath, newPath) ?? f)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
-            if (!_folders.Contains(newPath, StringComparer.OrdinalIgnoreCase))
-                _folders.Add(newPath);
+            if (!renamed.Contains(newPath, StringComparer.OrdinalIgnoreCase))
+                renamed.Add(newPath);
+            if (kind == SessionKind.Local)
+                _localFolders = renamed;
+            else
+                _folders = renamed;
             Save();
         }
     }
 
     /// <summary>
-    /// Deletes a folder and everything under it. Returns the removed sessions so the
-    /// caller can delete their credentials.
+    /// Deletes a folder of one kind and everything under it. Returns the removed sessions
+    /// so the caller can delete their credentials.
     /// </summary>
-    public IReadOnlyList<Session> DeleteFolder(string folderPath)
+    public IReadOnlyList<Session> DeleteFolder(string folderPath, SessionKind kind = SessionKind.Ssh)
     {
         lock (_gate)
         {
@@ -174,9 +192,11 @@ public sealed class SessionStore
             if (folderPath.Length == 0)
                 return [];
 
-            var removed = _sessions.Where(s => FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath)).ToList();
-            _sessions.RemoveAll(s => FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath));
-            _folders.RemoveAll(f => FolderPaths.IsSelfOrDescendant(f, folderPath));
+            var removed = _sessions
+                .Where(s => s.Kind == kind && FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath))
+                .ToList();
+            _sessions.RemoveAll(s => s.Kind == kind && FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath));
+            FolderListOf(kind).RemoveAll(f => FolderPaths.IsSelfOrDescendant(f, folderPath));
             Save();
             return removed;
         }
@@ -184,7 +204,12 @@ public sealed class SessionStore
 
     private void Save()
     {
-        var data = new StoreData { Sessions = _sessions, Folders = _folders };
+        var data = new StoreData
+        {
+            Sessions = _sessions,
+            Folders = _folders,
+            LocalFolders = _localFolders.Count > 0 ? _localFolders : null,
+        };
         var json = JsonSerializer.Serialize(data, JsonOptions);
 
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
@@ -215,5 +240,8 @@ public sealed class SessionStore
     {
         public List<Session>? Sessions { get; set; }
         public List<string>? Folders { get; set; }
+
+        /// <summary>Folders under the virtual Local root (separate namespace from Folders).</summary>
+        public List<string>? LocalFolders { get; set; }
     }
 }

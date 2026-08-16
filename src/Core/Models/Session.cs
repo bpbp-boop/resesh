@@ -10,6 +10,39 @@ public enum AuthMethod
 }
 
 /// <summary>
+/// Target kind tag for a saved profile. Absent from pre-6.1 JSON records, so the
+/// serializer default (<see cref="Ssh"/>) is also the migration rule: records with
+/// no kind are SSH sessions.
+/// </summary>
+public enum SessionKind
+{
+    Ssh,
+    Local,
+}
+
+/// <summary>
+/// A local shell target hosted with ConPTY. Executable and arguments are kept separate
+/// (never an opaque command string) so quoting stays unambiguous.
+/// </summary>
+public sealed record LocalTarget
+{
+    /// <summary>Full path or PATH-resolvable name of the shell executable. May contain
+    /// environment variables (%SystemRoot% etc.), expanded at launch.</summary>
+    public string Executable { get; init; } = "";
+
+    /// <summary>Arguments passed to the process, one entry per argument.</summary>
+    public IReadOnlyList<string> Arguments { get; init; } = [];
+
+    /// <summary>Working directory for the process; empty = the user profile folder.
+    /// May contain environment variables, expanded at launch.</summary>
+    public string StartingDirectory { get; init; } = "";
+
+    /// <summary>Environment variable overrides layered onto the inherited environment.
+    /// An empty value removes the variable.</summary>
+    public IReadOnlyDictionary<string, string>? Environment { get; init; }
+}
+
+/// <summary>
 /// Per-session terminal appearance overrides. Null members inherit the app-wide
 /// setting, so a default instance is equivalent to no overrides at all.
 /// </summary>
@@ -35,7 +68,9 @@ public sealed record TerminalOverrides
 }
 
 /// <summary>
-/// A saved SSH session. Secrets (password / key passphrase) are never stored here;
+/// A saved profile: common identity plus exactly one target — SSH (host/port/username/auth,
+/// the fields below, present since v1) or local (<see cref="Local"/>), tagged by
+/// <see cref="Kind"/>. Secrets (password / key passphrase) are never stored here;
 /// they live in Windows Credential Manager keyed by <see cref="Id"/>.
 /// </summary>
 public sealed record Session
@@ -46,7 +81,22 @@ public sealed record Session
     // parameterless activator for types used as x:DataType.
     public string Name { get; init; } = "";
 
-    /// <summary>Forward-slash separated folder path, e.g. "Datacenter/Rack 4". Empty = root.</summary>
+    /// <summary>Which target this profile carries. Missing in pre-6.1 JSON → Ssh.</summary>
+    public SessionKind Kind { get; init; } = SessionKind.Ssh;
+
+    /// <summary>The local shell target; set exactly when <see cref="Kind"/> is Local.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public LocalTarget? Local { get; init; }
+
+    /// <summary>True for local profiles created by shell discovery (stable ids). Built-in
+    /// profiles are hidden while their shell is unavailable and can be reset to defaults.</summary>
+    public bool BuiltIn { get; init; }
+
+    [JsonIgnore]
+    public bool IsLocal => Kind == SessionKind.Local;
+
+    /// <summary>Forward-slash separated folder path, e.g. "Datacenter/Rack 4". Empty = root.
+    /// Local profiles are rooted under the virtual Local node, in their own namespace.</summary>
     public string FolderPath { get; init; } = "";
 
     public string Host { get; init; } = "";

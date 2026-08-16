@@ -341,3 +341,54 @@ keyboard-interactive fallback.
   the tab rather than the layout container.
 - Verified by the Release build and focused split-tree tests. Live multi-row dragging and
   WebView2 re-parenting have not yet been checked in a running app.
+
+## 2026-08-16 - Local terminal profiles (6.1)
+- **Tagged model via a `kind` discriminator, not a new Profile type.** `Session` gains
+  `kind` (`ssh`/`local`), an optional `local` target (executable, argument list, starting
+  directory, env overrides), and `builtIn`. Pre-6.1 JSON deserializes unchanged (missing
+  kind → ssh), which satisfies "records with no target kind are SSH" with zero migration
+  code; the existing host/port/username fields serve as the inline SSH target. Local
+  folders are a separate namespace (`localFolders` in sessions.json) rooted under the
+  virtual Local tree node, so an SSH folder and a local folder may share a name. The
+  Local root itself is never serialized; tree expansion keys for the local scope get a
+  NUL-prefixed key ("\0local\0<path>") that no user folder path can collide with.
+- **Backend contract.** `ITerminalBackend` (output event, Write/Resize/Stop) is the
+  post-connect surface shared by `SshTerminalSession` and the new ConPTY-backed
+  `LocalTerminalSession`; `SessionCapabilities.For(session)` drives menu naming
+  (Disconnect/Stop, Reconnect/Restart) and hides remote-only UI (SFTP pane, host keys,
+  tmux) so the UI has one switch point instead of scattered kind checks.
+- **ConPTY std-handle gotcha (load-bearing).** With only the pseudoconsole attribute,
+  CreateProcess *duplicates the parent's redirected std handles* into a console child
+  (bInheritHandles=FALSE notwithstanding), and the child's output bypasses the pty —
+  observed under the xunit host: the pty delivered only init/teardown VT sequences while
+  `cmd /c echo` printed to the test console. Fix, same as Windows Terminal: set
+  STARTF_USESTDHANDLES with null std handles so the client opens its console's handles.
+- **Flush-before-close.** conhost renders a fast-exiting client's output asynchronously;
+  closing the pseudoconsole immediately on process exit dropped the final line. The exit
+  watcher waits for the output stream to go quiet (200 ms quiet, 2 s cap), then closes the
+  console (EOFs the reader), drains, and only then raises Exited — so the neutral
+  "exited (code N)" notice always lands after the process's last output.
+- **No orphans.** The child starts CREATE_SUSPENDED, is assigned to a kill-on-close Job
+  Object, then resumes; Stop/Dispose terminates the job, so the entire descendant tree
+  dies with the tab. Verified by test (interactive cmd killed, no Exited event on
+  user-initiated stop).
+- **Discovery.** pwsh (Program Files/PATH), Windows PowerShell, cmd, WSL distros (Lxss
+  registry, no wsl.exe spawn), Git Bash (GitForWindows registry). Ids are MD5-derived
+  stable GUIDs of the discovery key ("sessions-local:cmd"), so pins survive restarts;
+  sync adds missing built-ins but never overwrites user edits, and built-ins whose shell
+  disappeared are hidden (App.AvailableLocalShells), not deleted. Verified live: two app
+  restarts against the real sessions.json — 11 SSH records untouched, 3 built-ins added
+  once, ids identical across runs.
+- **Post-ship fix (same day, user-reported): blank terminal after closing the active tab.**
+  Closing the selected tab left the surviving tab's terminal invisible (WebView2 host HWND
+  0x0) even though the tab strip showed it selected. Root cause (trace-proven): when the
+  selected item is removed, TabView auto-selects a neighbor and raises SelectionChanged
+  BEFORE the TwoWay x:Bind writes SelectedTab back to the view model — the handler's
+  SyncTerminalVisibility read the stale (null) VM value and collapsed every terminal, and
+  nothing re-ran when the write-back landed. Fix: TabGroupView also subscribes to the
+  group VM's SelectedTab PropertyChanged and re-syncs visibility/status/focus there.
+  Surfaced by 6.1 only by coincidence (ssh + local, close local); the race was
+  kind-agnostic. Verified by the hands-off UI rig: `Sessions.App.exe --open <name>`
+  (new launch arg) + UIA-only invokes + PrintWindow(PW_RENDERFULLCONTENT) screenshots —
+  no synthetic keyboard/mouse, safe to run while the user works. UIA gotcha: the window
+  caption's X is also a Button named "Close"; scope dialog-button searches by position.
