@@ -79,13 +79,18 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
     /// <summary>
     /// Connects and opens the shell. Blocking — run on a background thread.
     /// A non-null <paramref name="bootstrapCommand"/> is typed into the shell as its first
-    /// input (persistent sessions use this to exec into tmux).
+    /// input (persistent sessions use this to exec into tmux). A bootstrap factory runs
+    /// after SSH authentication but before the shell opens, so it can inspect remote tmux
+    /// state and ask the user which persistent shell to attach.
     /// </summary>
     public void Connect(Session session, string? secret, string terminalType, int columns, int rows,
-        string? bootstrapCommand = null)
+        string? bootstrapCommand = null,
+        Func<SshTerminalSession, string?>? bootstrapCommandFactory = null)
     {
         if (_client is not null)
             throw new InvalidOperationException("Session already used; create a new instance per connection.");
+        if (bootstrapCommand is not null && bootstrapCommandFactory is not null)
+            throw new ArgumentException("Specify either a bootstrap command or a bootstrap factory, not both.");
 
         // Fast pre-flight so unreachable hosts fail in seconds; the real connect then gets a
         // generous timeout because the first-connect host key dialog sits inside the handshake.
@@ -146,14 +151,23 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         }
 
         _client = client;
-        _shell = client.CreateShellStream(terminalType, (uint)columns, (uint)rows, 0, 0, 64 * 1024);
-        if (bootstrapCommand is not null)
+        try
         {
-            // The pty buffers this until the login shell reads stdin; its echo is short-lived
-            // (the persistent-session bootstrap clears the screen as its first action).
-            var bytes = System.Text.Encoding.UTF8.GetBytes(bootstrapCommand + "\n");
-            _shell.Write(bytes, 0, bytes.Length);
-            _shell.Flush();
+            bootstrapCommand = bootstrapCommandFactory?.Invoke(this) ?? bootstrapCommand;
+            _shell = client.CreateShellStream(terminalType, (uint)columns, (uint)rows, 0, 0, 64 * 1024);
+            if (bootstrapCommand is not null)
+            {
+                // The pty buffers this until the login shell reads stdin; its echo is short-lived
+                // (the persistent-session bootstrap clears the screen as its first action).
+                var bytes = System.Text.Encoding.UTF8.GetBytes(bootstrapCommand + "\n");
+                _shell.Write(bytes, 0, bytes.Length);
+                _shell.Flush();
+            }
+        }
+        catch
+        {
+            Disconnect();
+            throw;
         }
         _readerCts = new CancellationTokenSource();
         _readerTask = Task.Run(() => ReadLoop(_shell, _readerCts.Token));

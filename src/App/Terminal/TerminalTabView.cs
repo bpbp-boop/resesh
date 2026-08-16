@@ -25,6 +25,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     private readonly TabViewModel _tab;
     private readonly ICredentialService _credentials;
     private readonly KnownHostsStore _knownHosts;
+    private readonly IReadOnlySet<int> _tmuxSlotsAlreadyOpen;
     private readonly TerminalControl _terminal = new();
     private readonly ProgressRing _spinner = new() { IsActive = false, Width = 48, Height = 48 };
 
@@ -58,11 +59,13 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// the OS/vendor from the server banner. The window decides whether to persist it.</summary>
     public event Action<string>? IconSuggested;
 
-    public TerminalTabView(TabViewModel tab, ICredentialService credentials, KnownHostsStore knownHosts)
+    public TerminalTabView(TabViewModel tab, ICredentialService credentials, KnownHostsStore knownHosts,
+        IReadOnlySet<int>? tmuxSlotsAlreadyOpen = null)
     {
         _tab = tab;
         _credentials = credentials;
         _knownHosts = knownHosts;
+        _tmuxSlotsAlreadyOpen = tmuxSlotsAlreadyOpen ?? new HashSet<int>();
 
         // Column 0: terminal; column 1: splitter (collapsed); column 2: file pane (width 0
         // until opened). The lock overlay spans all three.
@@ -232,10 +235,12 @@ public sealed class TerminalTabView : Grid, IDisposable
 
             var cols = _terminal.Columns;
             var rows = _terminal.Rows;
-            var bootstrap = Session.Persistent
-                ? TmuxPersistence.BootstrapCommand(Session.Id, _tab.TmuxSlot)
+            Func<SshTerminalSession, string?>? bootstrapFactory = Session.Persistent
+                ? connected => SelectTmuxBootstrapBlocking(connected, isReconnect)
                 : null;
-            await Task.Run(() => session.Connect(Session, secret, Session.TerminalType, cols, rows, bootstrap));
+            await Task.Run(() => session.Connect(
+                Session, secret, Session.TerminalType, cols, rows,
+                bootstrapCommandFactory: bootstrapFactory));
 
             _backend = session;
             _ssh = session;
@@ -255,11 +260,67 @@ public sealed class TerminalTabView : Grid, IDisposable
             _tab.State = TabConnectionState.Disconnected;
             _terminal.NotifyDisconnected(ex.Message);
         }
+        catch (OperationCanceledException)
+        {
+            _tab.State = TabConnectionState.Disconnected;
+            _terminal.NotifyDisconnected("Connection cancelled.");
+        }
         catch (Exception ex)
         {
             _tab.State = TabConnectionState.Disconnected;
             _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}");
         }
+    }
+
+    /// <summary>Runs after SSH authentication and before the interactive shell opens.</summary>
+    private string SelectTmuxBootstrapBlocking(SshTerminalSession connected, bool isReconnect)
+    {
+        var result = connected.RunCommand(TmuxPersistence.DiscoveryCommand());
+        var remoteSessions = result is { Success: true }
+            ? TmuxPersistence.ParseSessions(result.Output, Session.Id)
+            : [];
+
+        // Reconnect keeps the target selected for this tab. If it no longer exists, the
+        // normal bootstrap recreates it with the same name.
+        if (isReconnect)
+            return TmuxPersistence.BootstrapCommand(Session.Id, _tab.TmuxSlot);
+
+        var available = remoteSessions
+            .Where(remote => !_tmuxSlotsAlreadyOpen.Contains(remote.Slot))
+            .ToList();
+        var newSlot = TmuxPersistence.NextAvailableSlot(
+            remoteSessions.Select(remote => remote.Slot).Concat(_tmuxSlotsAlreadyOpen));
+
+        var selectedSlot = available.Count switch
+        {
+            0 => newSlot,
+            1 => available[0].Slot,
+            _ => SelectTmuxSessionBlocking(available, newSlot),
+        };
+        _tab.TmuxSlot = selectedSlot;
+        return TmuxPersistence.BootstrapCommand(Session.Id, selectedSlot);
+    }
+
+    /// <summary>Marshals tmux selection onto the UI thread while the SSH worker waits.</summary>
+    private int SelectTmuxSessionBlocking(IReadOnlyList<TmuxSessionInfo> sessions, int newSlot)
+    {
+        var tcs = new TaskCompletionSource<int?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!DispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                tcs.TrySetResult(await ConnectDialogs.SelectTmuxSessionAsync(XamlRoot, sessions, newSlot));
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        }))
+        {
+            throw new OperationCanceledException("The tmux session selector could not open.");
+        }
+        return tcs.Task.GetAwaiter().GetResult()
+            ?? throw new OperationCanceledException("tmux session selection was cancelled.");
     }
 
     private bool NeedsSecret() =>

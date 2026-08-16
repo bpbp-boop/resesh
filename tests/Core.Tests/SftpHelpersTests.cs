@@ -164,4 +164,45 @@ public sealed class TmuxCurrentPathTests
     [InlineData("no session option: sessions-app")]     // tmux error text on stdout
     public void ParseCurrentPath_returns_null_when_absent_or_malformed(string output) =>
         Assert.Null(TmuxPersistence.ParseCurrentPath(output, Id, 0));
+
+    [Fact]
+    public void DiscoveryCommand_lists_tmux_metadata_on_the_private_socket()
+    {
+        Assert.Equal(
+            "tmux -L sessions-app list-panes -a -F '#{session_name}|#{pane_active}|#{session_attached}|#{pane_current_path}'",
+            TmuxPersistence.DiscoveryCommand());
+    }
+
+    [Fact]
+    public void ParseSessions_returns_only_matching_active_sessions_in_slot_order()
+    {
+        var output =
+            "saabbccddeeff-3|1|2|/srv/app|with-pipe\n" +
+            "saabbccddeeff|1|0|/home/a\n" +
+            "saabbccddeeff-2|0|0|/inactive\n" +
+            "sother000000|1|0|/other\n";
+
+        var sessions = TmuxPersistence.ParseSessions(output, Id);
+
+        Assert.Collection(sessions,
+            primary =>
+            {
+                Assert.Equal(0, primary.Slot);
+                Assert.Equal("/home/a", primary.CurrentPath);
+                Assert.Equal(0, primary.AttachedClients);
+            },
+            third =>
+            {
+                Assert.Equal(2, third.Slot);
+                Assert.Equal("/srv/app|with-pipe", third.CurrentPath);
+                Assert.Equal(2, third.AttachedClients);
+            });
+    }
+
+    [Fact]
+    public void NextAvailableSlot_accounts_for_remote_and_open_tabs()
+    {
+        Assert.Equal(3, TmuxPersistence.NextAvailableSlot(new[] { 0, 2, 1 }));
+        Assert.Equal(0, TmuxPersistence.NextAvailableSlot(Array.Empty<int>()));
+    }
 }

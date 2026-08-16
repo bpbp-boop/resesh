@@ -7,6 +7,8 @@ namespace Sessions.App.Dialogs;
 /// <summary>Small code-built dialogs used during the connect workflow.</summary>
 public static class ConnectDialogs
 {
+    private sealed record TmuxChoice(string Label, int Slot);
+
     /// <summary>Prompts for a password/passphrase. Returns (secret, save) or null on cancel.</summary>
     public static async Task<(string Secret, bool Save)?> PromptCredentialAsync(
         XamlRoot xamlRoot, string title, string prompt)
@@ -26,6 +28,64 @@ public static class ConnectDialogs
             ? (passwordBox.Password, saveCheck.IsChecked == true)
             : null;
     }
+
+    /// <summary>Lets the user choose an existing persistent shell or start a new one.</summary>
+    public static async Task<int?> SelectTmuxSessionAsync(
+        XamlRoot xamlRoot, IReadOnlyList<TmuxSessionInfo> sessions, int newSlot)
+    {
+        var choices = sessions.Select(session => new TmuxChoice(
+                $"{SlotLabel(session.Slot)} — {PathLabel(session.CurrentPath)} — {AttachmentLabel(session.AttachedClients)}",
+                session.Slot))
+            .Append(new TmuxChoice($"Start a new tmux session ({SlotLabel(newSlot)})", newSlot))
+            .ToList();
+        var picker = new ComboBox
+        {
+            Header = "tmux session",
+            ItemsSource = choices,
+            DisplayMemberPath = nameof(TmuxChoice.Label),
+            SelectedIndex = 0,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        var content = new StackPanel
+        {
+            Spacing = 12,
+            MinWidth = 460,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = "More than one saved tmux session is available for this connection. Select the shell to attach, or start a new shell.",
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                picker,
+            },
+        };
+        var dialog = new ContentDialog
+        {
+            Title = "Select tmux session",
+            Content = content,
+            PrimaryButtonText = "Continue",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = xamlRoot,
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary
+            && picker.SelectedItem is TmuxChoice choice
+                ? choice.Slot
+                : null;
+    }
+
+    private static string SlotLabel(int slot) => slot == 0 ? "Primary" : $"Session {slot + 1}";
+
+    private static string PathLabel(string path) =>
+        string.IsNullOrWhiteSpace(path) ? "path unavailable" : path;
+
+    private static string AttachmentLabel(int count) => count switch
+    {
+        0 => "detached",
+        1 => "attached by 1 client",
+        _ => $"attached by {count} clients",
+    };
 
     /// <summary>Host key confirmation: first connect, or a changed key (typed confirmation required).</summary>
     public static Task<bool> ConfirmHostKeyAsync(XamlRoot xamlRoot, HostKeyInfo info) =>

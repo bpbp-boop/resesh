@@ -79,6 +79,65 @@ public static class TmuxPersistence
     public static string KillCommand(Guid id, int slot) =>
         $"tmux -L {Socket} kill-session -t ={SessionName(id, slot)}";
 
+    /// <summary>Lists the active pane, attached-client count, and current path for every
+    /// session on the app's private tmux server. The path is last because it can contain
+    /// the separator character.</summary>
+    public static string DiscoveryCommand() =>
+        $"tmux -L {Socket} list-panes -a -F '#{{session_name}}|#{{pane_active}}|#{{session_attached}}|#{{pane_current_path}}'";
+
+    /// <summary>Reads the tmux sessions that belong to one saved Sessions profile.</summary>
+    public static IReadOnlyList<TmuxSessionInfo> ParseSessions(string output, Guid id)
+    {
+        var primaryName = SessionName(id, 0);
+        var sessions = new Dictionary<int, TmuxSessionInfo>();
+        foreach (var line in output.Split('\n'))
+        {
+            var parts = line.TrimEnd('\r').Split('|', 4);
+            if (parts is not [var name, "1", var attachedText, var path]
+                || !TryParseSlot(name, primaryName, out var slot)
+                || !int.TryParse(attachedText, out var attachedClients)
+                || attachedClients < 0)
+            {
+                continue;
+            }
+
+            sessions[slot] = new TmuxSessionInfo(slot, name, path, attachedClients);
+        }
+
+        return sessions.Values.OrderBy(session => session.Slot).ToList();
+    }
+
+    /// <summary>Returns the lowest slot that is not present remotely or in another app tab.</summary>
+    public static int NextAvailableSlot(IEnumerable<int> unavailableSlots)
+    {
+        var unavailable = unavailableSlots.ToHashSet();
+        var slot = 0;
+        while (unavailable.Contains(slot))
+            slot++;
+        return slot;
+    }
+
+    private static bool TryParseSlot(string name, string primaryName, out int slot)
+    {
+        if (name == primaryName)
+        {
+            slot = 0;
+            return true;
+        }
+
+        var prefix = primaryName + "-";
+        if (name.StartsWith(prefix, StringComparison.Ordinal)
+            && int.TryParse(name.AsSpan(prefix.Length), out var suffix)
+            && suffix >= 2)
+        {
+            slot = suffix - 1;
+            return true;
+        }
+
+        slot = 0;
+        return false;
+    }
+
     /// <summary>
     /// Lists every pane's session/active/cwd (for "open file pane at current folder").
     /// Deliberately queries the whole server and matches client-side in
@@ -103,3 +162,6 @@ public static class TmuxPersistence
         return null;
     }
 }
+
+/// <summary>One persistent shell found on the app's private tmux server.</summary>
+public sealed record TmuxSessionInfo(int Slot, string Name, string CurrentPath, int AttachedClients);

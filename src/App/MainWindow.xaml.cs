@@ -18,6 +18,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private readonly Dictionary<TabGroupViewModel, TabGroupView> _groupViews = [];
     private readonly SplitLayout<TabGroupViewModel> _groupLayout;
+    private bool _closeConfirmed;
+    private bool _closePromptOpen;
 
     public MainWindow()
     {
@@ -50,6 +52,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         RegisterAccelerators();
         if (App.Settings.Current.TreePaneWidth is { } treeWidth)
             TreeColumn.Width = new GridLength(Math.Clamp(treeWidth, 180, 800));
+        AppWindow.Closing += AppWindow_Closing;
         Closed += (_, _) =>
         {
             SaveTreePaneWidth();
@@ -276,6 +279,55 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
 
+    private void AppWindow_Closing(Microsoft.UI.Windowing.AppWindow sender,
+        Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
+    {
+        if (_closeConfirmed || !ViewModel.AllTabs.Any())
+            return;
+
+        args.Cancel = true;
+        if (_closePromptOpen)
+            return;
+
+        _closePromptOpen = true;
+        _ = ConfirmWindowCloseAsync();
+    }
+
+    private async Task ConfirmWindowCloseAsync()
+    {
+        try
+        {
+            var count = ViewModel.AllTabs.Count();
+            if (count == 0)
+            {
+                _closeConfirmed = true;
+                Close();
+                return;
+            }
+
+            var sessionText = count == 1 ? "session" : "sessions";
+            var pronoun = count == 1 ? "it" : "them";
+            var dialog = new ContentDialog
+            {
+                Title = "Close window?",
+                Content = $"You have {count} open {sessionText}. Closing the window will close {pronoun}.",
+                PrimaryButtonText = "Close window",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = Root.XamlRoot,
+            };
+            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            {
+                _closeConfirmed = true;
+                Close();
+            }
+        }
+        finally
+        {
+            _closePromptOpen = false;
+        }
+    }
+
     private void PinButton_Click(object sender, RoutedEventArgs e)
     {
         if (AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
@@ -480,7 +532,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private TabViewModel ConnectSession(Session session, TabGroupViewModel? group = null)
     {
         var tab = ViewModel.Connect(session, group);
-        var view = new TerminalTabView(tab, App.Credentials, App.KnownHosts);
+        var tmuxSlotsAlreadyOpen = ViewModel.AllTabs
+            .Where(other => other != tab && other.Session.Id == session.Id)
+            .Select(other => other.TmuxSlot)
+            .ToHashSet();
+        var view = new TerminalTabView(tab, App.Credentials, App.KnownHosts, tmuxSlotsAlreadyOpen);
         view.CloseRequested += () => _ = RequestCloseTabAsync(tab);
         view.NewLocalTabRequested += OpenDefaultLocalProfile;
         view.UnlockRequested += () => _ = HandleUnlockAsync(tab, view);
@@ -1065,12 +1121,30 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private static TreeNodeViewModel? NodeOf(object sender) =>
         (sender as FrameworkElement)?.DataContext as TreeNodeViewModel;
 
+    private static readonly object TraceGate = new();
+
     [System.Diagnostics.Conditional("DEBUG")]
     internal static void Trace(string message)
     {
-        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sessions");
-        Directory.CreateDirectory(dir);
-        File.AppendAllText(Path.Combine(dir, "trace.log"), $"[{DateTime.Now:HH:mm:ss.fff}] {message}\n");
+        try
+        {
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sessions");
+            Directory.CreateDirectory(dir);
+            // TraceHook producers (SSH/ConPTY read loops) call this off the UI thread, and a
+            // second app instance or a log tail may hold the file — so serialize in-process,
+            // share the handle, and never let diagnostics throw into the caller.
+            lock (TraceGate)
+            {
+                using var stream = new FileStream(
+                    Path.Combine(dir, "trace.log"),
+                    FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                using var writer = new StreamWriter(stream);
+                writer.Write($"[{DateTime.Now:HH:mm:ss.fff}] {message}\n");
+            }
+        }
+        catch (IOException)
+        {
+        }
     }
 
     // ---- Filter ----
