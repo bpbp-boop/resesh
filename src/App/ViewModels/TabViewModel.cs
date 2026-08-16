@@ -82,6 +82,7 @@ public sealed class TabViewModel : ObservableObject
 
     private bool _isActive;
     private bool _isPointerOver;
+    private bool _isGroupFocused = true;
 
     /// <summary>Whether this tab is its group's selected tab; drives the tab visuals.</summary>
     public bool IsActive
@@ -90,6 +91,21 @@ public sealed class TabViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _isActive, value))
+                NotifyTabVisuals();
+        }
+    }
+
+    /// <summary>
+    /// Whether this tab's group is the focused one. In split view each group has a
+    /// selected tab, but only the focused group's shows the accent + bright text
+    /// (VS Code style) — otherwise two tabs look equally "active".
+    /// </summary>
+    public bool IsGroupFocused
+    {
+        get => _isGroupFocused;
+        set
+        {
+            if (SetProperty(ref _isGroupFocused, value))
                 NotifyTabVisuals();
         }
     }
@@ -114,7 +130,7 @@ public sealed class TabViewModel : ObservableObject
         OnPropertyChanged(nameof(CloseInteractive));
     }
 
-    public Visibility AccentVisibility => IsActive ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility AccentVisibility => IsActive && IsGroupFocused ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>The × shows on the active tab and on hover; hidden (but space kept) otherwise. Never on pinned tabs.</summary>
     public double CloseOpacity => !IsPinned && (IsActive || IsPointerOver) ? 1.0 : 0.0;
@@ -143,7 +159,9 @@ public sealed class TabViewModel : ObservableObject
 
     public Microsoft.UI.Xaml.Media.Brush HeaderForeground => new Microsoft.UI.Xaml.Media.SolidColorBrush(
         IsActive
-            ? (IsDark ? Windows.UI.Color.FromArgb(255, 0xFF, 0xFF, 0xFF) : Windows.UI.Color.FromArgb(255, 0x33, 0x33, 0x33))
+            ? IsGroupFocused
+                ? (IsDark ? Windows.UI.Color.FromArgb(255, 0xFF, 0xFF, 0xFF) : Windows.UI.Color.FromArgb(255, 0x33, 0x33, 0x33))
+                : (IsDark ? Windows.UI.Color.FromArgb(255, 0xC0, 0xC0, 0xC0) : Windows.UI.Color.FromArgb(255, 0x55, 0x55, 0x55))
             : (IsDark ? Windows.UI.Color.FromArgb(255, 0x9D, 0x9D, 0x9D) : Windows.UI.Color.FromArgb(255, 0x61, 0x61, 0x61)));
 
     /// <summary>Tab-strip status dot: green connected, red disconnected, amber connecting.</summary>

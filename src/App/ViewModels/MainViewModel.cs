@@ -52,7 +52,22 @@ public sealed class MainViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _focusedGroup, value))
+            {
                 OnPropertyChanged(nameof(StatusText));
+                SyncGroupFocus();
+            }
+        }
+    }
+
+    /// <summary>Pushes group focus onto every tab: only the focused group's selected tab
+    /// renders as "active" in split view. Call after moving tabs between groups (the
+    /// FocusedGroup setter no-ops when the target group was already focused).</summary>
+    public void SyncGroupFocus()
+    {
+        foreach (var group in Groups)
+        {
+            foreach (var tab in group.Tabs)
+                tab.IsGroupFocused = group == _focusedGroup;
         }
     }
 
@@ -116,6 +131,7 @@ public sealed class MainViewModel : ObservableObject
         };
         group.Tabs.Add(tab);
         group.SelectedTab = tab;
+        tab.IsGroupFocused = group == _focusedGroup;
         OnPropertyChanged(nameof(StatusText));
         return tab;
     }

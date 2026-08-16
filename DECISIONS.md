@@ -283,3 +283,46 @@ keyboard-interactive fallback.
   persisting, so a choice made while connecting wins.
 - Title-bar icon (mentioned in the roadmap) deferred: swapping AppWindow.SetIcon per active
   tab needs runtime SVG→ICO rasterization for marginal value; revisit with 6.1.
+
+## 2026-08-16 - Merged title bar (mockup 1a): menus + quick connect in the title bar
+- Layout: content extends into a Tall (48 epx) title bar. Row hosts app icon + MenuBar
+  (File/View/Session), a centered AutoSuggestBox quick connect (Ctrl+K), and + Session /
+  always-on-top pin / settings on the right; system draws only the caption buttons. The old
+  toolbar row is gone (Import/New Folder moved into the File menu), so the filter box and
+  the tab strips sit directly under the title bar at full width.
+- KEY GOTCHA: `AppWindow.TitleBar.ExtendsContentIntoTitleBar = true` alone gives NO drag
+  region on a WinUI 3 window - the window renders right but cannot be dragged. The
+  Window-level `ExtendsContentIntoTitleBar = true` is what installs the fallback drag region
+  across the top strip. Interactive controls are then carved out via
+  `InputNonClientPointerSource.SetRegionRects(NonClientRegionKind.Passthrough, ...)`,
+  recomputed on Loaded/SizeChanged of the bar and each interactive block (physical px:
+  multiply XAML bounds by XamlRoot.RasterizationScale). LeftInset/RightInset (divided by
+  scale) pad the row's outer columns so content clears the caption buttons.
+- Caption buttons ignore XAML theming: ApplyTitleBarButtonColors() sets transparent
+  backgrounds + theme-matched foregrounds and is re-run from ApplySettingsToApp() on theme
+  change. Win10 guard: if AppWindowTitleBar.IsCustomizationSupported() is false the row
+  stays a plain toolbar under the stock title bar.
+- Quick connect semantics: plain text searches saved sessions (SessionSearch.Rank, top 8
+  as suggestions; Enter = connect best match, same as the filter box). "user@host[:port]"
+  or an explicit "ssh " prefix adds a "Connect to ..." suggestion that builds an ad-hoc
+  Session (not saved; username defaults to the local user) and opens it through the normal
+  ConnectSession path, which already tolerates not-in-store sessions. A bare hostname only
+  counts as a target with the "ssh " prefix so single words keep meaning "search".
+- Verified live (screenshots + synthetic input): drag moves the window, passthrough clicks
+  focus the quick connect box, saved + ad-hoc suggestions render, Enter connected
+  local-test end-to-end, pin toggles WS_EX_TOPMOST both ways, File menu opens. Not yet
+  human-verified: Ctrl+K (accelerator only reaches XAML focus, not the terminal WebView2),
+  MenuBar Alt-key navigation, light theme rendering.
+- Post-ship fixes from first real use: (1) drag region died right after Split Right and
+  came back "after a while" - the fallback caption region is disturbed transiently when the
+  second group's WebView2 enters the tree. Fix: stop relying on the fallback; set an
+  explicit Caption region rect for the full title bar strip in UpdateTitleBarRegions
+  (passthrough rects win where they overlap) and re-assert on window Activated plus a
+  low-priority dispatch after SplitRight/CollapseGroupIfEmpty. Verified: drag works
+  immediately after splitting. (2) Split view showed two equally-"active" tabs (each
+  group's SelectedTab got the accent). TabViewModel.IsGroupFocused now gates the accent
+  and full-bright text to the focused group's selected tab; the other group's selected tab
+  keeps the terminal background but no accent + mid-gray text (VS Code treatment). Synced
+  from MainViewModel.FocusedGroup setter, Connect, and MoveTabBetweenGroups (explicitly,
+  since the setter no-ops when the target group already had focus). Verified pixel-exact:
+  exactly one accent run in the strip, flipping groups on click.

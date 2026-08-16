@@ -69,30 +69,139 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Top bar: quick actions -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8" Padding="8" HorizontalAlignment="Right">
-            <Button Click="NewSession_Click" ToolTipService.ToolTip="New session">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <FontIcon Glyph="&#xE710;" FontSize="14" />
-                    <TextBlock Text="Session" />
-                </StackPanel>
-            </Button>
-            <Button Click="NewFolder_Click" ToolTipService.ToolTip="New folder">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <FontIcon Glyph="&#xE8F4;" FontSize="14" />
-                    <TextBlock Text="Folder" />
-                </StackPanel>
-            </Button>
-            <Button Click="Import_Click" ToolTipService.ToolTip="Import sessions from SecureCRT">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                    <FontIcon Glyph="&#xE896;" FontSize="14" />
-                    <TextBlock Text="Import" />
-                </StackPanel>
-            </Button>
-            <Button Click="Settings_Click" ToolTipService.ToolTip="Settings">
-                <FontIcon Glyph="&#xE713;" FontSize="14" />
-            </Button>
-        </StackPanel>
+        <!-- Custom title bar: menus + centered quick connect + window controls in one row.
+             The whole strip is a system drag region; interactive controls are carved out
+             via InputNonClientPointerSource passthrough rects (see UpdateTitleBarRegions). -->
+        <Grid x:Name="AppTitleBar" Grid.Row="0" Height="48">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="TitleBarLeftPadding" Width="0" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition x:Name="TitleBarRightPadding" Width="0" />
+            </Grid.ColumnDefinitions>
+
+            <Image
+                x:Name="TitleBarIcon"
+                Grid.Column="1"
+                Width="16"
+                Height="16"
+                Margin="14,0,6,0"
+                VerticalAlignment="Center" />
+
+            <MenuBar x:Name="TitleBarMenus" Grid.Column="2" VerticalAlignment="Center">
+                <MenuBarItem Title="File">
+                    <MenuFlyoutItem Text="New Session…" Click="NewSession_Click" />
+                    <MenuFlyoutItem Text="New Folder…" Click="NewFolder_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Import from SecureCRT…" Click="Import_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Settings…" Click="Settings_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Exit" Click="Exit_Click" />
+                </MenuBarItem>
+                <MenuBarItem Title="View">
+                    <MenuFlyoutItem Text="Expand All" Click="ExpandAll_Click" />
+                    <MenuFlyoutItem Text="Collapse All" Click="CollapseAll_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem
+                        Text="Split Right"
+                        Click="SplitRightMenu_Click"
+                        KeyboardAcceleratorTextOverride="Ctrl+Shift+\" />
+                    <MenuFlyoutItem
+                        Text="File Pane"
+                        Click="FilePaneMenu_Click"
+                        KeyboardAcceleratorTextOverride="Ctrl+Shift+E" />
+                </MenuBarItem>
+                <MenuBarItem Title="Session">
+                    <MenuFlyoutItem Text="Reconnect" Click="ReconnectMenu_Click" />
+                    <MenuFlyoutItem Text="Disconnect" Click="DisconnectMenu_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="Clone" Click="CloneMenu_Click" />
+                    <MenuFlyoutItem Text="Pin Tab" Click="PinTabMenu_Click" />
+                    <MenuFlyoutItem Text="Session Options…" Click="SessionOptionsMenu_Click" />
+                    <MenuFlyoutSeparator />
+                    <MenuFlyoutItem Text="End Remote Session…" Click="EndRemoteMenu_Click" />
+                    <MenuFlyoutItem
+                        Text="Close Tab"
+                        Click="CloseTabMenu_Click"
+                        KeyboardAcceleratorTextOverride="Ctrl+F4" />
+                </MenuBarItem>
+            </MenuBar>
+
+            <Grid
+                x:Name="QuickConnectHost"
+                Grid.Column="3"
+                MaxWidth="560"
+                Margin="24,0"
+                VerticalAlignment="Center">
+                <AutoSuggestBox
+                    x:Name="QuickConnectBox"
+                    PlaceholderText="ssh user@host or search sessions…"
+                    TextChanged="QuickConnect_TextChanged"
+                    QuerySubmitted="QuickConnect_QuerySubmitted"
+                    GotFocus="QuickConnect_FocusChanged"
+                    LostFocus="QuickConnect_FocusChanged"
+                    KeyDown="QuickConnect_KeyDown">
+                    <AutoSuggestBox.ItemTemplate>
+                        <DataTemplate x:DataType="local:QuickConnectSuggestion">
+                            <StackPanel Orientation="Horizontal" Spacing="8" Padding="0,4">
+                                <FontIcon Glyph="{x:Bind Glyph}" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                <TextBlock Text="{x:Bind Display}" VerticalAlignment="Center" />
+                                <TextBlock
+                                    Text="{x:Bind Detail}"
+                                    Opacity="0.55"
+                                    FontSize="12"
+                                    VerticalAlignment="Center" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </AutoSuggestBox.ItemTemplate>
+                </AutoSuggestBox>
+                <Border
+                    x:Name="QuickConnectHint"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Margin="0,0,8,0"
+                    Padding="6,1,6,2"
+                    CornerRadius="4"
+                    BorderThickness="1"
+                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    IsHitTestVisible="False">
+                    <TextBlock Text="Ctrl+K" FontSize="11" Opacity="0.6" />
+                </Border>
+            </Grid>
+
+            <StackPanel
+                x:Name="TitleBarButtons"
+                Grid.Column="4"
+                Orientation="Horizontal"
+                Spacing="4"
+                VerticalAlignment="Center"
+                Margin="0,0,8,0">
+                <Button Click="NewSession_Click" ToolTipService.ToolTip="New session">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE710;" FontSize="14" />
+                        <TextBlock Text="Session" />
+                    </StackPanel>
+                </Button>
+                <ToggleButton
+                    x:Name="PinButton"
+                    Click="PinButton_Click"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    ToolTipService.ToolTip="Keep window on top">
+                    <FontIcon Glyph="&#xE718;" FontSize="14" />
+                </ToggleButton>
+                <Button
+                    Click="Settings_Click"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    ToolTipService.ToolTip="Settings">
+                    <FontIcon Glyph="&#xE713;" FontSize="14" />
+                </Button>
+            </StackPanel>
+        </Grid>
 
         <!-- Main area: tree | splitter | tabs -->
         <Grid Grid.Row="1">

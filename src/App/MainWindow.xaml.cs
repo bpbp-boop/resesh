@@ -22,6 +22,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ViewModel = new MainViewModel(App.Store, App.Credentials);
         InitializeComponent();
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
+        InitializeTitleBar();
         // Lets the icon catalog rasterize at true device pixels (XamlRoot is null until
         // the content loads; the catalog falls back to scale 1 and re-renders on demand).
         App.Icons.ScaleProvider = () => Root.XamlRoot?.RasterizationScale ?? 1.0;
@@ -94,9 +95,286 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             if (ViewModel.ActiveTab is { } tab)
                 ToggleFilePane(tab);
         };
+        // Ctrl+K: focus the quick connect box (only while a XAML control has focus;
+        // keystrokes inside the terminal's WebView2 never reach these accelerators).
+        var quickConnect = new KeyboardAccelerator { Key = VirtualKey.K, Modifiers = VirtualKeyModifiers.Control };
+        quickConnect.Invoked += (_, e) =>
+        {
+            e.Handled = true;
+            QuickConnectBox.Focus(FocusState.Programmatic);
+        };
         Root.KeyboardAccelerators.Add(closeTab);
         Root.KeyboardAccelerators.Add(split);
         Root.KeyboardAccelerators.Add(filePane);
+        Root.KeyboardAccelerators.Add(quickConnect);
+    }
+
+    // ---- Custom title bar ----
+
+    /// <summary>
+    /// Merges the app content into the title bar: the 48px AppTitleBar row hosts the
+    /// menus, quick connect box and window buttons; the system draws only the caption
+    /// buttons. Interactive controls are punched out of the drag region with
+    /// passthrough rects, which must be recomputed on every layout/scale change.
+    /// </summary>
+    private void InitializeTitleBar()
+    {
+        if (!Microsoft.UI.Windowing.AppWindowTitleBar.IsCustomizationSupported())
+        {
+            AppTitleBar.Height = double.NaN; // Win10 fallback: keep the row as a plain toolbar
+            return;
+        }
+        // The Window-level property (not AppWindow.TitleBar's) is what installs the
+        // fallback drag region across the top strip; without it nothing is draggable.
+        ExtendsContentIntoTitleBar = true;
+        AppWindow.TitleBar.PreferredHeightOption = Microsoft.UI.Windowing.TitleBarHeightOption.Tall;
+        ApplyTitleBarButtonColors();
+        TitleBarIcon.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(
+            new Uri(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico")));
+        AppTitleBar.Loaded += (_, _) => UpdateTitleBarRegions();
+        AppTitleBar.SizeChanged += (_, _) => UpdateTitleBarRegions();
+        // Re-assert regions on every activation: creating a WebView2 (e.g. opening the
+        // second split group) can transiently disturb the non-client drag region.
+        Activated += (_, _) => UpdateTitleBarRegions();
+        // The center/right blocks move without AppTitleBar itself resizing (e.g. the
+        // MenuBar collapsing items), so track them individually too.
+        TitleBarMenus.SizeChanged += (_, _) => UpdateTitleBarRegions();
+        QuickConnectHost.SizeChanged += (_, _) => UpdateTitleBarRegions();
+        TitleBarButtons.SizeChanged += (_, _) => UpdateTitleBarRegions();
+    }
+
+    /// <summary>Caption buttons live outside XAML theming; keep them in sync with the app theme.</summary>
+    private void ApplyTitleBarButtonColors()
+    {
+        if (!Microsoft.UI.Windowing.AppWindowTitleBar.IsCustomizationSupported())
+            return;
+        var tb = AppWindow.TitleBar;
+        var dark = App.Settings.Current.Theme != "light";
+        var fg = dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
+        tb.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+        tb.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+        tb.ButtonForegroundColor = fg;
+        tb.ButtonInactiveForegroundColor = Windows.UI.Color.FromArgb(255, 128, 128, 128);
+        tb.ButtonHoverBackgroundColor = dark
+            ? Windows.UI.Color.FromArgb(25, 255, 255, 255)
+            : Windows.UI.Color.FromArgb(25, 0, 0, 0);
+        tb.ButtonHoverForegroundColor = fg;
+        tb.ButtonPressedBackgroundColor = dark
+            ? Windows.UI.Color.FromArgb(50, 255, 255, 255)
+            : Windows.UI.Color.FromArgb(50, 0, 0, 0);
+        tb.ButtonPressedForegroundColor = fg;
+    }
+
+    private void UpdateTitleBarRegions()
+    {
+        if (AppTitleBar.XamlRoot is null || !AppWindow.TitleBar.ExtendsContentIntoTitleBar)
+            return;
+        var scale = AppTitleBar.XamlRoot.RasterizationScale;
+        TitleBarLeftPadding.Width = new GridLength(AppWindow.TitleBar.LeftInset / scale);
+        TitleBarRightPadding.Width = new GridLength(AppWindow.TitleBar.RightInset / scale);
+
+        var rects = new List<Windows.Graphics.RectInt32>();
+        foreach (var el in new FrameworkElement[] { TitleBarMenus, QuickConnectHost, TitleBarButtons })
+        {
+            if (el.ActualWidth == 0 || el.ActualHeight == 0)
+                continue;
+            var bounds = el.TransformToVisual(null)
+                .TransformBounds(new Windows.Foundation.Rect(0, 0, el.ActualWidth, el.ActualHeight));
+            rects.Add(new Windows.Graphics.RectInt32(
+                (int)Math.Round(bounds.X * scale),
+                (int)Math.Round(bounds.Y * scale),
+                (int)Math.Round(bounds.Width * scale),
+                (int)Math.Round(bounds.Height * scale)));
+        }
+        var source = Microsoft.UI.Input.InputNonClientPointerSource.GetForWindowId(AppWindow.Id);
+        // Explicit caption strip: don't rely on the framework's fallback drag region,
+        // which proved flaky right after layout changes. Passthrough wins where they overlap.
+        source.SetRegionRects(Microsoft.UI.Input.NonClientRegionKind.Caption,
+            [new Windows.Graphics.RectInt32(0, 0,
+                (int)Math.Round(AppTitleBar.ActualWidth * scale),
+                (int)Math.Round(AppTitleBar.ActualHeight * scale))]);
+        source.SetRegionRects(Microsoft.UI.Input.NonClientRegionKind.Passthrough, [.. rects]);
+    }
+
+    private void Exit_Click(object sender, RoutedEventArgs e) => Close();
+
+    private void PinButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+            presenter.IsAlwaysOnTop = PinButton.IsChecked == true;
+    }
+
+    // Menu items act on the focused group's selected tab; they no-op when idle.
+    private void SplitRightMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTab is not { } tab)
+            return;
+        if (ViewModel.IsSplit)
+            MoveToOtherGroup(tab);
+        else if (ViewModel.GroupOf(tab).Tabs.Count > 1)
+            SplitRight(tab);
+    }
+
+    private void FilePaneMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTab is { } tab)
+            ToggleFilePane(tab);
+    }
+
+    private void ReconnectMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTab is { } tab)
+            ReconnectTab(tab);
+    }
+
+    private void DisconnectMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTab is { } tab)
+            DisconnectTab(tab);
+    }
+
+    private void CloneMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTab is { } tab)
+            CloneSession(tab);
+    }
+
+    private void PinTabMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTab is { } tab)
+            TogglePin(tab);
+    }
+
+    private void SessionOptionsMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTab is { } tab)
+            _ = OpenSessionOptionsAsync(tab);
+    }
+
+    private void EndRemoteMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTab is { } tab)
+            _ = EndRemoteSessionAsync(tab);
+    }
+
+    private void CloseTabMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTab is { } tab)
+            _ = RequestCloseTabAsync(tab);
+    }
+
+    // ---- Quick connect ----
+
+    private void QuickConnect_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        UpdateQuickConnectHint();
+        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput)
+            return;
+        var text = sender.Text.Trim();
+        var items = new List<QuickConnectSuggestion>();
+        if (TryParseSshTarget(text, out var adhoc))
+        {
+            items.Add(new QuickConnectSuggestion
+            {
+                Display = $"Connect to {adhoc.Username}@{adhoc.Host}" + (adhoc.Port != 22 ? $":{adhoc.Port}" : ""),
+                Detail = "new connection",
+                Glyph = "\uE768",
+                Session = adhoc,
+            });
+        }
+        if (text.Length > 0)
+        {
+            items.AddRange(ViewModel.RankedMatches(text).Take(8).Select(s => new QuickConnectSuggestion
+            {
+                Display = s.Name,
+                Detail = $"{s.Username}@{s.Host}" + (s.Port != 22 ? $":{s.Port}" : ""),
+                Glyph = "\uE756",
+                Session = s,
+            }));
+        }
+        sender.ItemsSource = items;
+    }
+
+    private void QuickConnect_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    {
+        var target = (args.ChosenSuggestion as QuickConnectSuggestion)?.Session;
+        if (target is null)
+        {
+            var text = args.QueryText.Trim();
+            if (text.Length == 0)
+                return;
+            target = TryParseSshTarget(text, out var adhoc)
+                ? adhoc
+                : ViewModel.RankedMatches(text).FirstOrDefault();
+        }
+        if (target is null)
+            return;
+        ConnectSession(target);
+        sender.Text = "";
+        sender.ItemsSource = null;
+    }
+
+    private void QuickConnect_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Escape)
+        {
+            QuickConnectBox.Text = "";
+            QuickConnectBox.ItemsSource = null;
+            e.Handled = true;
+        }
+    }
+
+    private void QuickConnect_FocusChanged(object sender, RoutedEventArgs e) => UpdateQuickConnectHint();
+
+    private void UpdateQuickConnectHint() =>
+        QuickConnectHint.Visibility =
+            QuickConnectBox.Text.Length == 0 && QuickConnectBox.FocusState == FocusState.Unfocused
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+    /// <summary>
+    /// Parses "ssh user@host", "user@host:2222" etc. into an ad-hoc (unsaved) session.
+    /// A bare hostname only counts with an explicit "ssh " prefix, so plain words keep
+    /// meaning "search my saved sessions".
+    /// </summary>
+    private static bool TryParseSshTarget(string input, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Session? session)
+    {
+        session = null;
+        var text = input.Trim();
+        var explicitSsh = text.StartsWith("ssh ", StringComparison.OrdinalIgnoreCase);
+        if (explicitSsh)
+            text = text[4..].Trim();
+        if (text.Length == 0 || text.Contains(' ') || (!explicitSsh && !text.Contains('@')))
+            return false;
+
+        var user = "";
+        var at = text.LastIndexOf('@');
+        if (at >= 0)
+        {
+            user = text[..at];
+            text = text[(at + 1)..];
+        }
+        var port = 22;
+        var colon = text.LastIndexOf(':');
+        if (colon >= 0)
+        {
+            if (!int.TryParse(text[(colon + 1)..], out port) || port is < 1 or > 65535)
+                return false;
+            text = text[..colon];
+        }
+        if (text.Length == 0 || at == 0)
+            return false;
+
+        var username = user.Length > 0 ? user : Environment.UserName;
+        session = new Session
+        {
+            Name = $"{username}@{text}",
+            Host = text,
+            Port = port,
+            Username = username,
+            AuthMethod = AuthMethod.Password,
+        };
+        return true;
     }
 
     /// <summary>Opens a tab for the session and starts its terminal + SSH lifecycle.</summary>
@@ -196,6 +474,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
         MoveTabBetweenGroups(tab, newGroup, 0);
         ViewModel.OnGroupsChanged();
+        // Re-assert after the new group's WebView2 settles into the layout.
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
     }
 
     public void MoveToOtherGroup(TabViewModel tab)
@@ -226,6 +506,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
 
         FocusGroup(targetGroup);
+        // The setter no-ops when targetGroup was already focused; the moved tab still
+        // needs its group-focus flag refreshed.
+        ViewModel.SyncGroupFocus();
         CollapseGroupIfEmpty(source);
     }
 
@@ -246,6 +529,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         Splitter.Visibility = Visibility.Collapsed;
         FocusGroup(remaining);
         ViewModel.OnGroupsChanged();
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
     }
 
     public void CloneSession(TabViewModel tab) =>
@@ -495,6 +779,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         var settings = App.Settings.Current;
         Root.RequestedTheme = settings.Theme == "light" ? ElementTheme.Light : ElementTheme.Dark;
+        ApplyTitleBarButtonColors(); // caption buttons don't follow XAML theming
         foreach (var tab in ViewModel.AllTabs)
         {
             if (tab.View is TerminalTabView view)
@@ -1089,4 +1374,16 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         };
         return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
+}
+
+/// <summary>One row in the quick connect dropdown: a saved session match or an ad-hoc target.</summary>
+public sealed class QuickConnectSuggestion
+{
+    public string Display { get; init; } = "";
+    public string Detail { get; init; } = "";
+    public string Glyph { get; init; } = "\uE756";
+    public Session Session { get; init; } = null!;
+
+    /// <summary>AutoSuggestBox writes this into the text box when a suggestion is chosen.</summary>
+    public override string ToString() => Display;
 }
