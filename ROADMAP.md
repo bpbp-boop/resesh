@@ -264,23 +264,53 @@ than turning Sessions into an agent IDE.
 
 ---
 
-## Phase 7 — Session recording
+## Phase 7 — Session recording & instant rewind
 
-Record terminal sessions for replay and audit; absorbs the old "output logging" backlog item.
+One capture spine, one player, three surfaces: rewind the live session (iTerm2
+Instant Replay-style), record to disk for audit, and play back `.cast` files. Absorbs the
+old "output logging" backlog item. The timing spine already exists — 9.5 records wall-clock
+time per SSH read *before* the 16 ms/32 KB WebView2 batching, so timing is faithful and
+capture works even for backgrounded tabs.
 
-- **Format: asciicast v2** (JSON-lines with per-event timestamps, includes resize events) —
-  interoperable with the whole asciinema ecosystem — plus a plain-text option (ANSI-stripped)
-  for greppable logs.
-- **Capture point:** host side, at the `SshTerminalSession` output stream *before* the
-  16 ms/32 KB WebView2 batching, so timing is faithful and recording works even for
-  backgrounded tabs.
+**Event shape everywhere: asciicast v2** (JSON-lines, per-event timestamps, resize events
+included) — the in-memory ring and the on-disk file share one format, and disk recordings
+interoperate with the whole asciinema ecosystem.
+
+### 7.1 Instant rewind
+"What did htop look like 10 minutes ago." Rewind is about **screen state, not scrollback**:
+for streaming output, scrollback + the Phase 9 ruler already answer history better. Rewind
+earns its keep exactly where they can't — alternate-buffer apps, cleared screens, TUIs that
+overwrite in place — which is also where the ruler bows out (it hides on alt buffer), so
+the features are complementary, not overlapping. Judge it on that turf.
+- **Always-on bounded ring buffer** at the capture point: timestamped output + resize
+  events, capped by bytes and/or minutes, trimmed from the tail. In-memory only, dies with
+  the tab — the secrets caveat below doesn't apply (no disk, no export).
+- **Keyframes for seeking:** an event stream gives state-at-T only by replaying everything
+  before T. Snapshot full terminal state every N seconds / M bytes (check whether the
+  vendored xterm.js includes the **serialize addon** — the search addon and ruler renderer
+  were both already in the bundle); seek = nearest keyframe + replay the delta. Keyframes
+  also let the ring drop raw events older than the last snapshot, keeping the cap honest.
+- **Frozen-view UI:** enter rewind (freeze the tab or overlay a read-only twin), scrub a
+  timeline with real wall-clock labels (9.5), jump back to live. Live output keeps
+  accumulating into the ring while rewinding — viewing a snapshot, not pausing the session.
+- **Fidelity rule:** replay by feeding bytes through xterm.js itself (resizes replayed from
+  the stream) — never diff screen text.
+- **tmux limit** (same as the command lane): capture-pane replay reconstructs content, not
+  history — the ring starts at attach and covers the attached lifetime.
+
+### 7.2 Recording to disk
 - **Controls:** record button on the tab (with a visible recording indicator), plus a
   per-session "always record" toggle via the Phase 0.1 override layer. Files auto-named
   `{session}-{timestamp}.cast` in a configurable directory.
-- **Playback:** open a `.cast` in a read-only terminal tab — replay through xterm.js with
-  pause/speed/seek. (Ships after write-side; asciinema tooling covers playback in the interim.)
+- **Formats:** asciicast v2, plus a plain-text option (ANSI-stripped) for greppable logs.
 - **Caveat to surface in UI:** recordings capture everything echoed to the terminal,
   including secrets a server echoes back — the recording indicator must be obvious.
+
+### 7.3 Playback
+The same player as 7.1 with a second source: open a `.cast` in a read-only terminal tab,
+replay through xterm.js with pause/speed/seek (keyframes built on load for scrubbing).
+Build the player once — rewind and playback ship as siblings; asciinema tooling covers
+file playback in the interim if 7.1 lands first.
 
 ---
 
@@ -415,14 +445,67 @@ and command tooltip composition, plus a rendered xterm harness (tooltip text and
 
 ---
 
+## Phase 10 — Telnet & serial consoles
+
+Console-cable and terminal-server access — the last standing objection from the SecureCRT
+crowd. Cheap now because Phase 6.1 already did the hard part: `ITerminalBackend` +
+`SessionCapabilities` mean telnet and serial are just two more backend implementations
+feeding the same xterm byte path, with remote-only UI (SFTP, tmux, host keys, agent)
+hidden by capability flags exactly as local shells do. Everything page-side — highlighting,
+the overview ruler, Enter-gated command discovery, recording — works unchanged.
+
+New target kinds alongside `SshTarget`/`LocalTarget` (same tagged-profile model, same
+atomic store, no migration impact): `TelnetTarget` and `SerialTarget`.
+
+### 10.1 Telnet
+
+- **Target:** host, port (default 23). Quick connect accepts `telnet host[:port]` — terminal
+  servers map console lines to high ports (`200x`-style), so port entry must be frictionless.
+- **Backend:** raw TCP plus minimal IAC option negotiation — BINARY, SGA, ECHO (remote echo
+  on, we never echo locally), TERMINAL-TYPE (`xterm-256color`), and NAWS wired to terminal
+  resize. Politely refuse (WONT/DONT) everything else. A few hundred lines; no library needed.
+- **Capabilities:** no host keys, no SFTP/SSHFS, no tmux, no auth storage. Disconnect/
+  Reconnect verbs as SSH.
+- **UI note in the editor:** plaintext protocol — position it for console servers and lab/
+  management networks, not general remote access.
+
+### 10.2 Serial
+
+- **Target:** COM port, baud (default 9600), data bits, parity, stop bits, flow control
+  (none / XON-XOFF / RTS-CTS).
+- **Transport:** `System.IO.Ports.SerialPort` feeding the existing byte path. No resize
+  semantics, no remote cwd — capability flags hide all of it.
+- **Port picker:** enumerate with friendly names ("USB Serial Device (COM5)" via SetupAPI/
+  WMI, not bare `COM5`), and refresh live on device arrival/removal (USB console cables
+  come and go constantly).
+- **Absent-port semantics:** a saved session whose COM port is missing shows as unavailable,
+  not an error; cable yank mid-session moves the tab to a disconnected state with the reason,
+  keeps scrollback, and Reconnect retries — auto-offer when the port reappears.
+- **Send Break** (tab menu / Ctrl+Break): required for password recovery and boot interrupts
+  on common network gear.
+
+**Acceptance:** telnet to a real network device or terminal server with NAWS-driven resize;
+serial to a switch console via USB adapter including unplug/replug survival and Break;
+highlighting + command discovery ticks working on both; both target kinds round-trip the
+Phase 4 export archive.
+
+---
+
 ## Backlog — "what else" (unordered candidates)
+
+**Non-goal — scripting/automation API (decided 2026-08-16):** Sessions is the interactive
+layer; fleet automation belongs in Ansible/Netmiko-class tooling run from a trusted host,
+where it's versioned and reviewed. No embedded scripting language, ever. Command snippets
+stay in scope — interactive-shaped, not automation-shaped. **Broadcast input is cut too**
+(2026-08-16): never once wanted in years of ISP operations, it's the classic
+multi-device-typo footgun on heterogeneous fleets, and anything worth sending to N devices
+at once is worth a playbook. Power users on tmux-persistent sessions already have
+`synchronize-panes` if they truly want it.
 
 **Finish/verify v1 loose ends first:** private-key auth and keyboard-interactive fallback
 have never been tested live; keyboard-interactive currently blind-echoes the saved password
 to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
 
-- **Broadcast input** — type into N tabs at once (the classic multi-host admin feature);
-  the split view already gives the UI surface.
 - **Command snippets** — saved commands with placeholders, per-folder scoping, send on
   click; optional "startup command" per session.
 - **Quick connect** — `user@host[:port]` box in the title bar creating an ad-hoc session,
@@ -448,12 +531,13 @@ to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
 | 6 | Phase 1 highlighting | M | Low |
 | 7 | Phase 4 export/import ✅ shipped 2026-08-16 | S–M | Low |
 | 8 | Phase 5 connectivity (tunnels → agent → jump hosts) | M–L | Medium |
-| 9 | Phase 3 SFTP pane (+ cwd tracking, SSHFS-Win link) | M–L | Medium |
-| 10 | Phase 9 annotated scrollbar (9.1–9.5 ✅) | S–M | Low |
-| 11 | Phase 7 session recording | M | Low |
-| 12 | Phase 8 workspaces (saved layouts) | M | Low |
-| 13 | Phase 2 GSSAPI productization (path chosen by spike) | M | Depends on spike |
-| 14 | Backlog picks | — | — |
+| 9 | Phase 10 telnet & serial consoles (telnet → serial) | S–M | Low |
+| 10 | Phase 3 SFTP pane (+ cwd tracking, SSHFS-Win link) | M–L | Medium |
+| 11 | Phase 9 annotated scrollbar (9.1–9.5 ✅) | S–M | Low |
+| 12 | Phase 7 recording & rewind (ring/rewind → disk → playback) | M | Low |
+| 13 | Phase 8 workspaces (saved layouts) | M | Low |
+| 14 | Phase 2 GSSAPI productization (path chosen by spike) | M | Depends on spike |
+| 15 | Backlog picks | — | — |
 
 Session icons slot in early because they're small, self-contained, and touch the same
 session-editor surface Phase 0 reworks anyway. Local terminal profiles follow them because the
@@ -462,6 +546,8 @@ it. Agent-aware tabs then keep profile identity, process state, and agent identi
 Export/import lands before SFTP because it's
 small and unblocks backing up the growing session tree (and now bundles custom icons). Within
 connectivity, tunnels come first (pure SSH.NET), then agent auth, then jump hosts (which build
-on the tunnel channel code). Workspaces sits late so the split model has settled, but it's
+on the tunnel channel code). Telnet/serial rides directly behind connectivity: it reuses the
+6.1 backend contract as-is, telnet before serial (no new dependency vs. port enumeration +
+device-arrival plumbing), and together they close the console-cable objection cheaply. Workspaces sits late so the split model has settled, but it's
 independent enough to pull forward if it itches. GSSAPI ships last only because its spike must
 settle the approach first.
