@@ -65,7 +65,7 @@
   var HL_SLICE = 2048;      // indexer lines per pass when no idle deadline is available
   var HL_IDLE_MIN_MS = 3;   // stop an idle pass when less than this remains
   var HL_REANCHOR_GAP = 4096; // re-anchor the sentinel once the cursor is this far past it
-  var HL_TICK_ALPHA = 0.5;  // "dimmed rule color": rule color blended into the lane
+  var HL_TICK_ALPHA = 0.8;  // slight dim keeps opaque search ticks dominant on top
 
   var CMD_ECHO_SETTLE_MS = 300; // Enter -> probe evaluation: wait for the echo round trip
   var CMD_ECHO_RETRY_MS = 900;  // one retry for laggy links before the probe gives up
@@ -88,9 +88,9 @@
 
     this._colors = {
       background: "#0c0c0c", border: "#333333", thumb: "rgba(255,255,255,0.10)",
-      match: "#515c6a", activeMatch: "#f2cc60", bookmark: "#61d6d6",
+      match: "#7f8ea3", activeMatch: "#f2cc60", bookmark: "#61d6d6",
       flash: "rgba(242,204,96,0.28)", pending: "rgba(255,255,255,0.06)",
-      cmdOk: "#2ea043", cmdFail: "#ff5555", cmdUnknown: "#767676",
+      cmdOk: "#2ea043", cmdFail: "#ff5555", cmdUnknown: "#9e9e9e",
       tooltipBg: "#252526", tooltipFg: "#cccccc", tooltipBorder: "#454545"
     };
 
@@ -837,8 +837,9 @@
     ctx.fillStyle = c.border;
     ctx.fillRect(0, 0, Math.max(1, Math.round(dpr)), devH);
 
-    // Device-pixel row buckets: count per row, alpha encodes density.
-    var tickH = Math.max(2, Math.round(2 * dpr));
+    // Device-pixel row buckets: count per row, alpha encodes density. 3 CSS px per
+    // tick: 2 px reads as noise on a tall strip (user feedback: "extremely subtle").
+    var tickH = Math.max(3, Math.round(3 * dpr));
 
     function bucketRows(lines) {
       var rows = new Map();
@@ -849,7 +850,7 @@
       return rows;
     }
 
-    var laneRx = Math.round(7 * dpr), laneRw = devW - laneRx - Math.round(1 * dpr);
+    var laneRx = Math.round(6 * dpr), laneRw = devW - laneRx - Math.round(1 * dpr);
 
     // Right (content) lane underlay: highlight-rule hits in dimmed rule colors.
     // Search ticks paint over them, so an active search stays dominant.
@@ -892,13 +893,19 @@
     }
 
     // Left lane: command marks (exit code colors them; discovered marks stay
-    // neutral), with bookmarks painted over — explicit beats inferred.
-    var laneLx = Math.round(2 * dpr), laneLw = Math.round(4 * dpr);
-    for (var m = 0; m < this._cmdMarks.length; m++) {
-      var cm = this._cmdMarks[m];
-      var cy = Math.min(devH - tickH, Math.round((cm.marker.line / total) * devH));
-      ctx.fillStyle = cm.exit === null ? c.cmdUnknown : (cm.exit === 0 ? c.cmdOk : c.cmdFail);
-      ctx.fillRect(laneLx, cy, laneLw, tickH);
+    // neutral), with bookmarks painted over — explicit beats inferred. Failed
+    // commands paint in a second pass so an overlapping success can never bury
+    // a red tick: the lane answers "where did it break".
+    var laneLx = Math.round(1 * dpr), laneLw = Math.round(4 * dpr);
+    for (var pass = 0; pass < 2; pass++) {
+      for (var m = 0; m < this._cmdMarks.length; m++) {
+        var cm = this._cmdMarks[m];
+        var failed = cm.exit !== null && cm.exit !== 0;
+        if ((pass === 1) !== failed) continue;
+        var cy = Math.min(devH - tickH, Math.round((cm.marker.line / total) * devH));
+        ctx.fillStyle = failed ? c.cmdFail : (cm.exit === 0 ? c.cmdOk : c.cmdUnknown);
+        ctx.fillRect(laneLx, cy, laneLw, tickH);
+      }
     }
     ctx.fillStyle = c.bookmark;
     for (var b = 0; b < this._bookmarks.length; b++) {
