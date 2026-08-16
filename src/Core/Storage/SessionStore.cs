@@ -146,6 +146,42 @@ public sealed class SessionStore
         }
     }
 
+    /// <summary>
+    /// Adds or replaces a prepared set of imported sessions and unions its explicit folders
+    /// into this store. The caller resolves conflicts and final ids before this method runs.
+    /// The complete merge is saved in one atomic write.
+    /// </summary>
+    public void ApplyImport(
+        IEnumerable<Session> sessions,
+        IEnumerable<string> folders,
+        IEnumerable<string> localFolders)
+    {
+        lock (_gate)
+        {
+            foreach (var session in sessions)
+            {
+                var index = _sessions.FindIndex(s => s.Id == session.Id);
+                if (index >= 0)
+                    _sessions[index] = session;
+                else
+                    _sessions.Add(session);
+            }
+
+            UnionFolders(_folders, folders);
+            UnionFolders(_localFolders, localFolders);
+            Save();
+        }
+    }
+
+    private static void UnionFolders(List<string> destination, IEnumerable<string> source)
+    {
+        foreach (var folder in source.Select(FolderPaths.Normalize).Where(f => f.Length > 0))
+        {
+            if (!destination.Contains(folder, StringComparer.OrdinalIgnoreCase))
+                destination.Add(folder);
+        }
+    }
+
     /// <summary>Renames/moves a folder; every same-kind session and subfolder under it follows.</summary>
     public void RenameFolder(string oldPath, string newPath, SessionKind kind = SessionKind.Ssh)
     {

@@ -5,6 +5,7 @@ using Sessions.App.Controls;
 using Sessions.App.Dialogs;
 using Sessions.App.Terminal;
 using Sessions.App.ViewModels;
+using Sessions.Core.Backup;
 using Sessions.Core.Layout;
 using Sessions.Core.Models;
 using Sessions.Core.Storage;
@@ -579,6 +580,15 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     /// <summary>THE close pathway: X button, Ctrl+F4, context menu, and middle-click all land here.</summary>
     public async Task RequestCloseTabAsync(TabViewModel tab)
     {
+        if (tab.Capabilities.RemoteSession
+            && tab.Session.Persistent
+            && tab.State == TabConnectionState.Connected
+            && tab.View is TerminalTabView tmuxView)
+        {
+            await RequestCloseTmuxTabAsync(tab, tmuxView);
+            return;
+        }
+
         var detail = tab.State != TabConnectionState.Connected
             ? ""
             : tab.IsLocal
@@ -597,6 +607,50 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
         if (await ConfirmAsync("Close Tab", $"Close \"{tab.Header}\"?{detail}", "Close"))
             CloseTabCore(tab);
+    }
+
+    private async Task RequestCloseTmuxTabAsync(TabViewModel tab, TerminalTabView view)
+    {
+        var endTmuxCheckBox = new CheckBox
+        {
+            Content = "End persistent session",
+        };
+        var content = new StackPanel { Spacing = 8 };
+        content.Children.Add(new TextBlock
+        {
+            Text = tab.IsPinned
+                ? $"\"{tab.Header}\" is pinned. Closing the tab also unpins it."
+                : $"Close \"{tab.Header}\"?",
+            TextWrapping = TextWrapping.Wrap,
+        });
+        content.Children.Add(endTmuxCheckBox);
+        content.Children.Add(new TextBlock
+        {
+            Text = "This ends everything running in the persistent session. Leave the check box clear to keep it running.",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.72,
+        });
+
+        var dialog = new ContentDialog
+        {
+            Title = tab.IsPinned ? "Tab Is Pinned" : "Close Tab",
+            Content = content,
+            PrimaryButtonText = tab.IsPinned ? "Unpin and Close" : "Close Tab",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Root.XamlRoot,
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            return;
+        if (endTmuxCheckBox.IsChecked == true && !await view.TryEndRemoteSessionAsync())
+        {
+            await ShowEndRemoteSessionFailureAsync(tab);
+            return;
+        }
+        if (tab.IsPinned)
+            TogglePin(tab);
+        CloseTabCore(tab);
     }
 
     public async Task RequestCloseManyAsync(IReadOnlyList<TabViewModel> tabs, string description)
@@ -945,8 +999,20 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             $"End the persistent session for \"{tab.Header}\" on the server? " +
             "Anything running inside it will be terminated. (Closing the tab merely detaches.)",
             "End Session");
-        if (confirmed)
-            view.EndRemoteSession();
+        if (confirmed && !await view.TryEndRemoteSessionAsync())
+            await ShowEndRemoteSessionFailureAsync(tab);
+    }
+
+    private async Task ShowEndRemoteSessionFailureAsync(TabViewModel tab)
+    {
+        await new ContentDialog
+        {
+            Title = "Could Not End Remote Session",
+            Content = $"The persistent session for \"{tab.Header}\" could not be ended. "
+                + "Check the connection and try again.",
+            CloseButtonText = "OK",
+            XamlRoot = Root.XamlRoot,
+        }.ShowAsync();
     }
 
     public void ToggleFilePane(TabViewModel tab)
@@ -1181,6 +1247,157 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var name = await PromptAsync("New Folder", "Folder name", "");
         if (!string.IsNullOrWhiteSpace(name))
             ViewModel.CreateFolder(name);
+    }
+
+    // ---- Backup export / import ----
+
+    private static string BackupDataDirectory => Path.GetDirectoryName(SessionStore.DefaultPath)!;
+
+    private async void ExportBackup_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var optionsDialog = new ExportBackupDialog(
+                App.Store.Folders, App.Store.FoldersOf(SessionKind.Local))
+            {
+                XamlRoot = Root.XamlRoot,
+            };
+            await optionsDialog.ShowAsync();
+            if (optionsDialog.Options is not { } options)
+                return;
+
+            var picker = new Windows.Storage.Pickers.FileSavePicker
+            {
+                SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+                SuggestedFileName = $"Sessions backup {DateTime.Now:yyyy-MM-dd}",
+            };
+            picker.FileTypeChoices.Add("Sessions backup", [".sessionsbackup"]);
+            WinRT.Interop.InitializeWithWindow.Initialize(
+                picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var file = await picker.PickSaveFileAsync();
+            if (file is null)
+                return;
+
+            await Task.Run(() => SessionsBackup.Export(
+                file.Path,
+                BackupDataDirectory,
+                App.Store,
+                App.Settings,
+                App.KnownHosts,
+                App.Highlights,
+                App.Credentials,
+                options));
+
+            await new ContentDialog
+            {
+                Title = "Backup complete",
+                Content = options.IncludeSecrets
+                    ? "The encrypted backup was saved. Keep its passphrase in a safe place."
+                    : "The backup was saved. It does not contain passwords or key passphrases.",
+                CloseButtonText = "OK",
+                XamlRoot = Root.XamlRoot,
+            }.ShowAsync();
+        }
+        catch (Exception ex)
+        {
+            await ShowBackupErrorAsync("Export failed", ex);
+        }
+    }
+
+    private async void ImportBackup_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker
+            {
+                SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+                ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
+            };
+            picker.FileTypeFilter.Add(".sessionsbackup");
+            WinRT.Interop.InitializeWithWindow.Initialize(
+                picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var file = await picker.PickSingleFileAsync();
+            if (file is null)
+                return;
+
+            string? passphrase = null;
+            if (await Task.Run(() => SessionsBackup.IsEncrypted(file.Path)))
+            {
+                passphrase = await PromptBackupPassphraseAsync();
+                if (passphrase is null)
+                    return;
+            }
+
+            var package = await Task.Run(() => SessionsBackup.Read(file.Path, passphrase));
+            var conflicts = SessionsBackup.FindConflicts(App.Store, package);
+            var preview = new ImportBackupDialog(package, conflicts) { XamlRoot = Root.XamlRoot };
+            await preview.ShowAsync();
+            if (preview.Resolutions is not { } resolutions)
+                return;
+
+            var result = await Task.Run(() => SessionsBackup.Import(
+                package,
+                BackupDataDirectory,
+                App.Store,
+                App.Settings,
+                App.KnownHosts,
+                App.Highlights,
+                App.Credentials,
+                resolutions));
+
+            App.Icons.InvalidateCustomIcons();
+            ViewModel.RebuildTree();
+            ApplySettingsToApp();
+
+            await new ContentDialog
+            {
+                Title = "Import complete",
+                Content = $"Added {result.Imported}, replaced {result.Replaced}, kept both for "
+                    + $"{result.Duplicated}, and kept {result.Kept} existing session(s)."
+                    + (result.SecretsImported > 0
+                        ? $" Imported {result.SecretsImported} saved secret(s)."
+                        : ""),
+                CloseButtonText = "OK",
+                XamlRoot = Root.XamlRoot,
+            }.ShowAsync();
+        }
+        catch (Exception ex)
+        {
+            await ShowBackupErrorAsync("Import failed", ex);
+        }
+    }
+
+    private async Task<string?> PromptBackupPassphraseAsync()
+    {
+        var box = new PasswordBox
+        {
+            Header = "Backup passphrase",
+            PasswordRevealMode = PasswordRevealMode.Peek,
+            MinWidth = 360,
+        };
+        var dialog = new ContentDialog
+        {
+            Title = "Encrypted backup",
+            Content = box,
+            PrimaryButtonText = "Continue",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = Root.XamlRoot,
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary && box.Password.Length > 0
+            ? box.Password
+            : null;
+    }
+
+    private async Task ShowBackupErrorAsync(string title, Exception exception)
+    {
+        await new ContentDialog
+        {
+            Title = title,
+            Content = exception.Message,
+            CloseButtonText = "OK",
+            XamlRoot = Root.XamlRoot,
+        }.ShowAsync();
     }
 
     // ---- SecureCRT import ----

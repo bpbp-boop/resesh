@@ -38,9 +38,11 @@ dotnet test tests/Core.Tests
 | Sessions + folders | `%APPDATA%\Sessions\sessions.json` (atomic writes, one `.bak` rotation) |
 | Secrets (passwords, key passphrases) | Windows Credential Manager, `Sessions:{session-guid}` |
 | Accepted host keys | `%APPDATA%\Sessions\known_hosts.json` (M2) |
+| Exported backups | User-selected `*.sessionsbackup` file (Phase 4) |
 | Crash log | `%LOCALAPPDATA%\Sessions\crash.log` |
 
-Secrets are **never** written to the JSON store.
+Secrets are **never** written to the normal JSON store. They are excluded from backups by
+default. When included, the complete backup is encrypted with its passphrase.
 
 ## Project layout
 

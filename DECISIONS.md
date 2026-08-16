@@ -392,3 +392,22 @@ keyboard-interactive fallback.
   (new launch arg) + UIA-only invokes + PrintWindow(PW_RENDERFULLCONTENT) screenshots —
   no synthetic keyboard/mouse, safe to run while the user works. UIA gotcha: the window
   caption's X is also a Button named "Close"; scope dialog-button searches by position.
+
+## 2026-08-16 - Export, import, and backup (Phase 4)
+- A plain `.sessionsbackup` is a versioned ZIP with `manifest.json`, the session/folder
+  snapshot, settings, known hosts, highlight state, PNG/SVG custom icons, and
+  `workspaces.json` when present. Recordings remain outside the archive. A folder-scoped
+  export limits only the session tree; global settings and shared assets stay complete.
+- Secrets remain excluded by default. Including them puts `secrets.json` inside an
+  AES-256-GCM envelope authenticated with a fixed format marker. The 256-bit key comes
+  from PBKDF2-SHA256 with a random 128-bit salt and 600,000 iterations; the nonce is
+  random per export. No plaintext temporary archive is written to disk.
+- Import matches by session id first, then SSH host, port, and username. Each conflict has
+  Keep existing, Replace, or Keep both. Replace preserves the destination id; Keep both
+  generates a new id, which also maps imported secrets and pinned-session settings.
+- Known hosts merge only when an endpoint is absent. An import cannot replace a different
+  trusted host key. Highlight deltas and custom rules merge by rule id; imported settings
+  replace app settings, with invalid pin/default references removed.
+- Archive reads limit entry count, per-entry size, and total expanded size. Custom icon
+  paths must be one PNG/SVG filename. Secret-bearing archives are rejected unless the
+  complete file uses the authenticated encryption envelope.

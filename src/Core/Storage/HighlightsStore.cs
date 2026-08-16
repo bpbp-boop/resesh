@@ -64,6 +64,51 @@ public sealed class HighlightsStore
         }
     }
 
+    /// <summary>A stable copy of the persisted highlight deltas and custom rules.</summary>
+    public HighlightBackupData ExportBackup()
+    {
+        lock (_gate)
+        {
+            return new HighlightBackupData
+            {
+                EnabledRules = _enabled.OrderBy(s => s, StringComparer.Ordinal).ToList(),
+                DisabledRules = _disabled.OrderBy(s => s, StringComparer.Ordinal).ToList(),
+                CustomRules = _custom.ToList(),
+            };
+        }
+    }
+
+    /// <summary>
+    /// Merges imported state. Imported deltas and same-id custom rules take precedence;
+    /// unrelated local rules remain.
+    /// </summary>
+    public void MergeBackup(HighlightBackupData imported)
+    {
+        lock (_gate)
+        {
+            foreach (var id in imported.EnabledRules)
+            {
+                _disabled.Remove(id);
+                _enabled.Add(id);
+            }
+            foreach (var id in imported.DisabledRules)
+            {
+                _enabled.Remove(id);
+                _disabled.Add(id);
+            }
+            foreach (var rule in imported.CustomRules.Where(r => !string.IsNullOrWhiteSpace(r.Id)))
+            {
+                var normalized = rule with { Pack = "custom" };
+                var index = _custom.FindIndex(r => r.Id == normalized.Id);
+                if (index >= 0)
+                    _custom[index] = normalized;
+                else
+                    _custom.Add(normalized);
+            }
+            Save();
+        }
+    }
+
     /// <summary>Sets a rule's global enabled state. For built-ins this stores a delta
     /// (removed again when it matches the shipped default); custom rules are rewritten.</summary>
     public void SetEnabled(string id, bool enabled)
@@ -175,4 +220,11 @@ public sealed class HighlightsStore
         public List<string>? DisabledRules { get; set; }
         public List<HighlightRule>? CustomRules { get; set; }
     }
+}
+
+public sealed record HighlightBackupData
+{
+    public IReadOnlyList<string> EnabledRules { get; init; } = [];
+    public IReadOnlyList<string> DisabledRules { get; init; } = [];
+    public IReadOnlyList<HighlightRule> CustomRules { get; init; } = [];
 }

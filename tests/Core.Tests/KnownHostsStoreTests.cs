@@ -28,6 +28,7 @@ public sealed class KnownHostsStoreTests : IDisposable
 
         var reloaded = NewStore();
         Assert.Equal(HostKeyVerdict.Match, reloaded.Check("host", 22, "ssh-ed25519", "abc"));
+        Assert.Equal(HostKeyVerdict.Match, reloaded.Check("HOST", 22, "ssh-ed25519", "abc"));
         Assert.Equal(HostKeyVerdict.Mismatch, reloaded.Check("host", 22, "ssh-ed25519", "OTHER"));
     }
 

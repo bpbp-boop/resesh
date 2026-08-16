@@ -403,14 +403,16 @@ public sealed class TerminalTabView : Grid, IDisposable
             .ToList();
 
     /// <summary>
-    /// Kills the remote tmux session (persistent sessions only); the attached channel then
-    /// closes on its own, which the normal Closed handler reports as disconnected.
+    /// Kills the remote tmux session (persistent sessions only). Waiting for the command
+    /// lets a caller close the tab only after the server accepted the request.
     /// </summary>
-    public void EndRemoteSession()
+    public async Task<bool> TryEndRemoteSessionAsync()
     {
         var session = _ssh;
-        if (Session.Persistent && session is not null)
-            _ = Task.Run(() => session.TryRunCommand(TmuxPersistence.KillCommand(Session.Id, _tab.TmuxSlot)));
+        return Session.Persistent
+            && session is not null
+            && await Task.Run(() => session.TryRunCommand(
+                TmuxPersistence.KillCommand(Session.Id, _tab.TmuxSlot)));
     }
 
     /// <summary>User-initiated Disconnect (SSH) / Stop (local): tab stays open showing the
@@ -530,12 +532,14 @@ public sealed class TerminalTabView : Grid, IDisposable
             if (result is null)
                 failure = "the connection did not accept the query";
             else if (!result.Success)
-                failure = string.IsNullOrWhiteSpace(result.Error) ? "the tmux query failed" : $"tmux: {result.Error.Trim()}";
+                failure = string.IsNullOrWhiteSpace(result.Error)
+                    ? "the persistent session query failed"
+                    : $"persistent session: {result.Error.Trim()}";
             else
             {
                 path = TmuxPersistence.ParseCurrentPath(result.Output, Session.Id, _tab.TmuxSlot);
                 if (path is null)
-                    failure = "no matching tmux session in the reply";
+                    failure = "no matching persistent session in the reply";
             }
         }
         ShowFilePane(path, failure is null ? null : $"Couldn't read the current folder ({failure}) — opened home instead.");

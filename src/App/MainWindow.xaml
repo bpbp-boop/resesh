@@ -114,6 +114,8 @@
                     <MenuFlyoutItem Text="New Folder…" Click="NewFolder_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Import from SecureCRT…" Click="Import_Click" />
+                    <MenuFlyoutItem Text="Export backup…" Click="ExportBackup_Click" />
+                    <MenuFlyoutItem Text="Import backup…" Click="ImportBackup_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Settings…" Click="Settings_Click" />
                     <MenuFlyoutSeparator />

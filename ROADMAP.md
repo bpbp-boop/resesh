@@ -109,19 +109,18 @@ driver.
 
 ---
 
-## Phase 4 — Export / import & backup
+## Phase 4 — Export / import & backup ✅ shipped 2026-08-16
 
-On-disk format is already where it should be: `%APPDATA%\Sessions\` (`sessions.json`,
-`settings.json`, `known_hosts.json`), human-editable JSON, atomic writes with `.bak`
-rotation. Remaining work:
+On-disk format remains `%APPDATA%\Sessions\` (`sessions.json`, `settings.json`,
+`known_hosts.json`), human-editable JSON, with atomic writes. Shipped work:
 
 - **Export archive** (`*.sessionsbackup`, a zip): sessions + folders + settings +
   known hosts + highlight rules + custom icons + workspaces (Phase 8). Optional filter (export a folder subtree
   only). Recordings are excluded (large; they live in their own configurable directory).
-- **Secrets:** Credential Manager entries are machine-bound and never in JSON. Default
-  export excludes them; optional "include secrets" encrypts the archive with a
-  user-supplied passphrase (AES-GCM, scrypt/PBKDF2 key derivation) and re-imports into
-  Credential Manager on the target machine.
+- **Secrets:** Credential Manager entries are machine-bound and never in the on-disk JSON
+  store. Default export excludes them; optional "include secrets" encrypts the complete
+  archive with a user-supplied passphrase (AES-256-GCM, PBKDF2-SHA256) and re-imports
+  them into Credential Manager on the target machine.
 - **Import with merge:** match by session id, then by (host, port, username); prompt on
   conflict (keep / replace / duplicate). Reuse the dedupe logic patterns from
   `SecureCrtImporter`.
@@ -447,7 +446,7 @@ to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
 | 4 | Phase 6.1 local terminal profiles (model → ConPTY → parity) ✅ shipped 2026-08-16 | M–L | Medium |
 | 5 | Phase 6.2 agent-aware tabs (identity → attention → adapters) | M | Medium |
 | 6 | Phase 1 highlighting | M | Low |
-| 7 | Phase 4 export/import | S–M | Low |
+| 7 | Phase 4 export/import ✅ shipped 2026-08-16 | S–M | Low |
 | 8 | Phase 5 connectivity (tunnels → agent → jump hosts) | M–L | Medium |
 | 9 | Phase 3 SFTP pane (+ cwd tracking, SSHFS-Win link) | M–L | Medium |
 | 10 | Phase 9 annotated scrollbar (9.1–9.5 ✅) | S–M | Low |

@@ -36,11 +36,11 @@ public static class ConnectDialogs
         var choices = sessions.Select(session => new TmuxChoice(
                 $"{SlotLabel(session.Slot)} — {PathLabel(session.CurrentPath)} — {AttachmentLabel(session.AttachedClients)}",
                 session.Slot))
-            .Append(new TmuxChoice($"Start a new tmux session ({SlotLabel(newSlot)})", newSlot))
+            .Append(new TmuxChoice($"Start a new persistent session ({SlotLabel(newSlot)})", newSlot))
             .ToList();
         var picker = new ComboBox
         {
-            Header = "tmux session",
+            Header = "Persistent session",
             ItemsSource = choices,
             DisplayMemberPath = nameof(TmuxChoice.Label),
             SelectedIndex = 0,
@@ -54,7 +54,7 @@ public static class ConnectDialogs
             {
                 new TextBlock
                 {
-                    Text = "More than one saved tmux session is available for this connection. Select the shell to attach, or start a new shell.",
+                    Text = "More than one saved persistent session is available for this connection. Select the shell to resume, or start a new shell.",
                     TextWrapping = TextWrapping.Wrap,
                 },
                 picker,
@@ -62,7 +62,7 @@ public static class ConnectDialogs
         };
         var dialog = new ContentDialog
         {
-            Title = "Select tmux session",
+            Title = "Select Persistent Session",
             Content = content,
             PrimaryButtonText = "Continue",
             CloseButtonText = "Cancel",

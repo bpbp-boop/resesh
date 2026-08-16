@@ -131,4 +131,11 @@ public sealed class SessionIconCatalog
         }
         return entries;
     }
+
+    /// <summary>Clears cached custom images after a backup import replaces icon files.</summary>
+    public void InvalidateCustomIcons()
+    {
+        foreach (var key in _cache.Keys.Where(k => !SessionIcons.IsBuiltIn(k.Key)).ToList())
+            _cache.Remove(key);
+    }
 }
