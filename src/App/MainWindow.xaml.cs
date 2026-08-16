@@ -548,6 +548,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             if (App.Store.Find(tab.Session.Id) is { Icon: null } current)
                 ViewModel.UpdateSession(current with { Icon = key }, null);
         };
+        view.AgentAlert += OnAgentAlert;
         view.SplitRequested += () =>
         {
             if (ViewModel.GroupOf(tab).Tabs.Count > 1)
@@ -558,6 +559,51 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         view.SetRulerPresentation(ViewModel.IsSplit, tab.IsGroupFocused);
         return tab;
     }
+
+    // ---- agent awareness (Phase 6.2) ----
+
+    /// <summary>
+    /// An agent in some tab wants the user. Nothing happens for a tab the user is already
+    /// looking at; otherwise the tab's own badge is the notification, plus (per settings)
+    /// a taskbar flash and the system sound when the window itself is in the background.
+    /// Content never leaves the app: the OS-level signals carry no agent text at all.
+    /// </summary>
+    private void OnAgentAlert(TabViewModel tab, Sessions.Core.Agents.AgentSnapshot snapshot)
+    {
+        var settings = App.Settings.Current;
+        if (!settings.ShowAgentIcons)
+            return;
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        if (Interop.WindowAlerts.IsForeground(hwnd) && tab.IsActive)
+            return;
+        if (!Interop.WindowAlerts.IsForeground(hwnd))
+        {
+            if (settings.AgentAlertFlash)
+                Interop.WindowAlerts.Flash(hwnd);
+            if (settings.AgentAlertSound)
+                Interop.WindowAlerts.Beep();
+        }
+    }
+
+    /// <summary>Tab menu: pin an agent identity for this tab (null = auto-detect).</summary>
+    public void SetTabAgent(TabViewModel tab, string? key)
+    {
+        if (tab.View is TerminalTabView view)
+            view.SetAgentOverride(key);
+    }
+
+    /// <summary>Persists whatever the tab is showing as the session's default identity, so
+    /// new tabs of this session start there. Saved sessions only — an ad-hoc or deleted
+    /// session has nowhere to keep it.</summary>
+    public void SaveTabAgentAsSessionDefault(TabViewModel tab)
+    {
+        if (tab.View is not TerminalTabView view || App.Store.Find(tab.Session.Id) is not { } session)
+            return;
+        var key = view.AgentOverride ?? view.AgentState.Key;
+        ViewModel.UpdateSession(session with { Agent = key }, null);
+    }
+
+    public Task ShowAgentAdaptersAsync() => Dialogs.AgentAdapterDialog.ShowAsync(Root.XamlRoot);
 
     // ---- ITabGroupHost ----
 
@@ -1066,6 +1112,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var copyOnSelect = new ToggleSwitch { Header = "Copy on select", IsOn = current.CopyOnSelect };
         var rightClickPaste = new ToggleSwitch { Header = "Right-click paste", IsOn = current.RightClickPaste };
         var highlighting = new Button { Content = "Keyword highlighting…" };
+        var agentIcons = new ToggleSwitch { Header = "Agent icons on tabs", IsOn = current.ShowAgentIcons };
+        var agentFlash = new ToggleSwitch
+        {
+            Header = "Flash the taskbar when a background agent needs you",
+            IsOn = current.AgentAlertFlash,
+        };
+        var agentSound = new ToggleSwitch { Header = "…and play the notification sound", IsOn = current.AgentAlertSound };
+        var agentAdapters = new Button { Content = "Agent adapters…" };
 
         var dialog = new ContentDialog
         {
@@ -1077,7 +1131,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 {
                     Spacing = 12,
                     MinWidth = 380,
-                    Children = { theme, fontFamily, fontSize, scrollback, copyOnSelect, rightClickPaste, highlighting },
+                    Children =
+                    {
+                        theme, fontFamily, fontSize, scrollback, copyOnSelect, rightClickPaste,
+                        highlighting, agentIcons, agentFlash, agentSound, agentAdapters,
+                    },
                 },
             },
             PrimaryButtonText = "Save",
@@ -1092,6 +1150,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             dialog.Hide();
             await Dialogs.HighlightEditorDialog.ShowAsync(Root.XamlRoot, ApplySettingsToApp);
         };
+        agentAdapters.Click += async (_, _) =>
+        {
+            dialog.Hide(); // one ContentDialog at a time; the snippets are read-only anyway
+            await Dialogs.AgentAdapterDialog.ShowAsync(Root.XamlRoot);
+        };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
             return;
 
@@ -1103,6 +1166,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             Scrollback = double.IsNaN(scrollback.Value) ? current.Scrollback : (int)scrollback.Value,
             CopyOnSelect = copyOnSelect.IsOn,
             RightClickPaste = rightClickPaste.IsOn,
+            ShowAgentIcons = agentIcons.IsOn,
+            AgentAlertFlash = agentFlash.IsOn,
+            AgentAlertSound = agentSound.IsOn,
         };
         App.Settings.Save(updated);
         ApplySettingsToApp();
@@ -1118,6 +1184,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         {
             if (tab.View is TerminalTabView view)
                 view.ApplySettings(settings);
+            tab.NotifyAgentVisuals(); // the agent icon/badge is gated on a setting
         }
     }
 

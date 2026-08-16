@@ -161,6 +161,28 @@
     ruler.setTheme(term.options.theme === LIGHT_THEME ? LIGHT_RULER : DARK_RULER);
     if (Array.isArray(init.highlights)) ruler.setHighlightRules(init.highlights);
 
+    // ---- agent awareness (ROADMAP Phase 6.2) ----
+    // The page only forwards evidence; every mapping decision (which agent, which
+    // attention state, what outranks what) lives in the native AgentTracker, where it is
+    // testable. Each tab has its own page, so an event can only ever describe its own tab.
+    function postAgent(message) {
+      try { host.postMessage(message); } catch (_) {}
+    }
+    [7377, 9, 777].forEach(function (code) {
+      if (!term.parser || !term.parser.registerOscHandler) return;
+      term.parser.registerOscHandler(code, function (data) {
+        postAgent({ type: "agentOsc", code: code, data: String(data == null ? "" : data).slice(0, 2048) });
+        return true;
+      });
+    });
+    if (term.onBell) term.onBell(function () { postAgent({ type: "agentBell" }); });
+    term.onTitleChange(function (title) {
+      postAgent({ type: "title", text: String(title || "").slice(0, 512) });
+    });
+    ruler.onCommand(function (command) {
+      postAgent({ type: "command", text: String(command || "").slice(0, 512) });
+    });
+
     function fitPreservingTimestamps() {
       ruler.captureTimestampReflow();
       fit.fit();

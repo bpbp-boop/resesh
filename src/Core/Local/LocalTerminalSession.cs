@@ -255,6 +255,73 @@ public sealed class LocalTerminalSession : ITerminalBackend
         }
     }
 
+    /// <summary>
+    /// Names of the processes currently inside this shell's job object — the shell itself
+    /// plus everything it started. Agent awareness (Phase 6.2) uses this as the local
+    /// identity signal: job membership is authoritative in both directions, unlike a
+    /// prompt guess, and it costs one kernel call plus a name lookup per process.
+    /// Empty when the shell is gone or the query fails; never throws.
+    /// </summary>
+    public IReadOnlyList<string> GetJobProcessNames()
+    {
+        var ids = GetJobProcessIds();
+        if (ids.Count == 0)
+            return [];
+        var names = new List<string>(ids.Count);
+        foreach (var id in ids)
+        {
+            try
+            {
+                using var process = System.Diagnostics.Process.GetProcessById(id);
+                names.Add(process.ProcessName);
+            }
+            catch (Exception e) when (e is ArgumentException or InvalidOperationException)
+            {
+                // Exited between the job snapshot and the lookup.
+            }
+        }
+        return names;
+    }
+
+    private IReadOnlyList<int> GetJobProcessIds()
+    {
+        lock (_jobGate)
+        {
+            if (_disposed || _job == IntPtr.Zero)
+                return [];
+            // The list is variable length; ask with room for a typical shell tree and grow
+            // once if the kernel says there are more.
+            for (var capacity = 32; capacity <= 512; capacity *= 4)
+            {
+                var size = (2 * sizeof(uint)) + (capacity * IntPtr.Size);
+                var buffer = Marshal.AllocHGlobal(size);
+                try
+                {
+                    if (!QueryInformationJobObject(_job, JobObjectBasicProcessIdList, buffer, size, IntPtr.Zero))
+                        return [];
+                    var assigned = (int)(uint)Marshal.ReadInt32(buffer);
+                    var returned = (int)(uint)Marshal.ReadInt32(buffer, sizeof(uint));
+                    if (returned < assigned && assigned <= 512)
+                        continue; // buffer was too small for the whole tree
+                    var ids = new List<int>(returned);
+                    for (var i = 0; i < returned; i++)
+                    {
+                        var value = Marshal.ReadIntPtr(buffer, (2 * sizeof(uint)) + (i * IntPtr.Size));
+                        ids.Add((int)value);
+                    }
+                    return ids;
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(buffer);
+                }
+            }
+            return [];
+        }
+    }
+
+    private readonly object _jobGate = new();
+
     /// <summary>Kills the process tree without raising <see cref="Exited"/> (a user-initiated
     /// stop is reported by the caller). Idempotent; also the Dispose path.</summary>
     public void Stop()
@@ -280,10 +347,13 @@ public sealed class LocalTerminalSession : ITerminalBackend
         _inputWrite = null;
         _outputRead?.Dispose(); // unblocks the reader thread
         _outputRead = null;
-        if (_job != IntPtr.Zero)
+        lock (_jobGate)
         {
-            CloseHandle(_job);
-            _job = IntPtr.Zero;
+            if (_job != IntPtr.Zero)
+            {
+                CloseHandle(_job);
+                _job = IntPtr.Zero;
+            }
         }
         if (_process != IntPtr.Zero)
         {
@@ -360,6 +430,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
     private const uint CREATE_SUSPENDED = 0x00000004;
     private const int STARTF_USESTDHANDLES = 0x00000100;
     private const int JobObjectExtendedLimitInformation = 9;
+    private const int JobObjectBasicProcessIdList = 3;
     private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
     private const uint INFINITE = 0xFFFFFFFF;
 
@@ -485,6 +556,11 @@ public sealed class LocalTerminalSession : ITerminalBackend
     private static extern bool SetInformationJobObject(
         IntPtr hJob, int jobObjectInfoClass, ref JOBOBJECT_EXTENDED_LIMIT_INFORMATION lpJobObjectInfo,
         int cbJobObjectInfoLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool QueryInformationJobObject(
+        IntPtr hJob, int jobObjectInfoClass, IntPtr lpJobObjectInfo, int cbJobObjectInfoLength,
+        IntPtr lpReturnLength);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);

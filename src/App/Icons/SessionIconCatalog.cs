@@ -62,6 +62,34 @@ public sealed class SessionIconCatalog
         return source;
     }
 
+    /// <summary>
+    /// The bundled badge for an agent identity (Phase 6.2), or null when the key names no
+    /// agent. Agent icons live in their own directory and their own cache namespace: they
+    /// answer "what is running here", never "what is this host", so the two sets must not
+    /// be able to resolve each other's keys.
+    /// </summary>
+    public ImageSource? GetAgentImage(string? key, double logicalSize)
+    {
+        if (!Sessions.Core.Agents.AgentIdentities.IsAgentKey(key))
+            return null;
+        var cacheKey = ("agent:" + key!.ToLowerInvariant(), PhysicalPixels(logicalSize));
+        if (_cache.TryGetValue(cacheKey, out var cached))
+            return cached;
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "Assets", "AgentIcons", key.ToLowerInvariant() + ".svg");
+            if (!File.Exists(path))
+                return null;
+            var source = LoadFile(path, cacheKey.Item2);
+            _cache[cacheKey] = source;
+            return source;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or UriFormatException)
+        {
+            return null;
+        }
+    }
+
     private static ImageSource? Load(string key, int pixels)
     {
         try

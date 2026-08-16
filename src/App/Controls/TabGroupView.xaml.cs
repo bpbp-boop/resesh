@@ -30,6 +30,9 @@ public interface ITabGroupHost
     void ToggleFilePane(TabViewModel tab);
     Task OpenFilePaneAtCurrentFolderAsync(TabViewModel tab);
     void OpenWorkingFolder(TabViewModel tab);
+    void SetTabAgent(TabViewModel tab, string? key);
+    void SaveTabAgentAsSessionDefault(TabViewModel tab);
+    Task ShowAgentAdaptersAsync();
 }
 
 public sealed partial class TabGroupView : UserControl
@@ -206,7 +209,7 @@ public sealed partial class TabGroupView : UserControl
         _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _splitDown = null!,
         _options = null!,
         _filePane = null!, _filePaneCwd = null!, _workingFolder = null!;
-    private MenuFlyoutSubItem _highlight = null!;
+    private MenuFlyoutSubItem _highlight = null!, _agent = null!;
 
     private MenuFlyout BuildTabMenu()
     {
@@ -252,6 +255,7 @@ public sealed partial class TabGroupView : UserControl
         _splitDown = Item("Split Down", tab => _host.SplitDown(tab));
         _options = Item("Session Options…", tab => _ = _host.OpenSessionOptionsAsync(tab));
         _highlight = new MenuFlyoutSubItem { Text = "Highlighting" };
+        _agent = new MenuFlyoutSubItem { Text = "Agent" };
 
         var menu = new MenuFlyout();
         menu.Items.Add(_rename);
@@ -279,6 +283,7 @@ public sealed partial class TabGroupView : UserControl
         menu.Items.Add(_workingFolder);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_highlight);
+        menu.Items.Add(_agent);
         menu.Items.Add(_options);
         return menu;
     }
@@ -319,6 +324,51 @@ public sealed partial class TabGroupView : UserControl
         var sessionExists = _host.ViewModel.RankedMatches("").Any(s => s.Id == tab.Session.Id);
         _options.IsEnabled = sessionExists;
         ConfigureHighlightMenu(tab, sessionExists);
+        ConfigureAgentMenu(tab, sessionExists);
+    }
+
+    /// <summary>
+    /// Rebuilds the Agent submenu: what Sessions thinks is running here, an explicit
+    /// override (or "auto"), and the adapter snippets. A manual choice is exactly that —
+    /// detection never overwrites it, and it never touches the session icon.
+    /// </summary>
+    private void ConfigureAgentMenu(TabViewModel tab, bool sessionExists)
+    {
+        _agent.Items.Clear();
+        var view = tab.View as Terminal.TerminalTabView;
+        var chosen = view?.AgentOverride; // null = auto-detect
+
+        ToggleMenuFlyoutItem Choice(string text, string? key)
+        {
+            var item = new ToggleMenuFlyoutItem
+            {
+                Text = text,
+                IsChecked = string.Equals(chosen, key, StringComparison.OrdinalIgnoreCase),
+            };
+            item.Click += (_, _) => _host.SetTabAgent(tab, key);
+            return item;
+        }
+
+        var detected = tab.Agent.IsAgent ? tab.Agent.Name : "none detected";
+        _agent.Items.Add(new MenuFlyoutItem { Text = $"Running: {detected}", IsEnabled = false });
+        _agent.Items.Add(new MenuFlyoutSeparator());
+        _agent.Items.Add(Choice("Auto-detect", null));
+        foreach (var identity in Sessions.Core.Agents.AgentIdentities.All.Where(a => a.IsAgent))
+            _agent.Items.Add(Choice(identity.Name, identity.Key));
+        _agent.Items.Add(Choice("No agent icon", Sessions.Core.Agents.AgentIdentities.None));
+        _agent.Items.Add(new MenuFlyoutSeparator());
+
+        var saveDefault = new MenuFlyoutItem
+        {
+            Text = "Save as Session Default",
+            IsEnabled = sessionExists && view is not null,
+        };
+        saveDefault.Click += (_, _) => _host.SaveTabAgentAsSessionDefault(tab);
+        _agent.Items.Add(saveDefault);
+
+        var adapters = new MenuFlyoutItem { Text = "Adapter Snippets…" };
+        adapters.Click += (_, _) => _ = _host.ShowAgentAdaptersAsync();
+        _agent.Items.Add(adapters);
     }
 
     /// <summary>Rebuilds the per-session Highlighting submenu: one checkable item per rule

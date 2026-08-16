@@ -411,3 +411,48 @@ keyboard-interactive fallback.
 - Archive reads limit entry count, per-entry size, and total expanded size. Custom icon
   paths must be one PNG/SVG filename. Secret-bearing archives are rejected unless the
   complete file uses the authenticated encryption envelope.
+
+## 2026-08-16 - Agent-aware tabs (6.2)
+- Two icons, never merged: the session icon says where a tab runs, a second agent icon
+  says what is running in it. Detection may set the agent icon and never touches
+  `Session.Icon`; `Session.Agent` mirrors the icon field's semantics (null = detect,
+  `none` = never show, a key = default until something is observed).
+- All mapping lives in `AgentTracker` (Core, no UI): the page forwards raw evidence only —
+  OSC payloads, titles, marked commands, bells — and every precedence rule is unit-tested.
+  Order, strongest first: manual tab override, adapter events, live detection, session
+  default. Detection may say WHICH agent runs; only an adapter may say it is waiting.
+- Attention states are working / needs-approval / needs-answer / complete / failed / idle,
+  plus `Signal` for a bare bell or OSC 9 — deliberately a separate low-confidence state
+  with a neutral gray badge and hedged wording ("signalled (bell)"), because the roadmap
+  forbids claiming input is required from a heuristic. Amber means an agent actually said
+  it is blocked. Bells are ignored entirely once an adapter has reported once, when no
+  agent is showing, and whenever they would downgrade a blocked state.
+- ConEmu's `OSC 9;4` progress form is explicitly NOT a notification: PowerShell 7 emits it
+  for ordinary progress bars, which would otherwise light up every long-running tab.
+- Structured events use `OSC 7377 ; agent ; id=… ; state=… ; label=…` ("SESS" on a phone
+  keypad), namespaced after the code so 7377 can carry other Sessions subprotocols. Chosen
+  clear of 0/1/2, 7, 8, 9, 52, 133, 633, 777 and 1337. Labels are percent-decoded, then
+  stripped of control/format characters and truncated to 80 chars — terminal output is
+  untrusted, and a label never leaves the app (taskbar flash and beep carry no content).
+- Local tabs detect agents from **job-object membership**
+  (`QueryInformationJobObject`/`JobObjectBasicProcessIdList` on the job 6.1 already
+  creates), not from the screen. It needs no shell integration, covers PowerShell and cmd
+  (whose prompts the mark regex can't discover), is scoped to the tab's own job so
+  unrelated `claude.exe` processes elsewhere on the machine are invisible to it, and — the
+  real win — an agent's disappearance is as definite as its arrival, which also retires an
+  adapter-reported agent that died without emitting its exit event.
+- Remote tabs reuse the Phase 9.4 command marks: `addon-ruler.js` gained an `onCommand`
+  hook fired as each mark commits, so identity rides the existing OSC 133 / Enter-gated
+  discovery instead of re-deriving commands. Reaching a shell prompt is also what retires a
+  remote agent — you cannot type a shell command while an agent owns the pty.
+- `CMD_PROMPT_RE` gained a `PS …>` alternative (the one common prompt shape with spaces
+  before the terminator), so local PowerShell tabs get command marks as well as agent
+  detection. cmd.exe's `C:\dir>` already matched the space-free body.
+- Adapters are text, not automation: the tab menu shows the exact snippet, the user installs
+  it where they choose, and deleting the lines removes it. An adapter's only power is to
+  emit one escape sequence; nothing in this phase can send input or approve a tool call.
+- Live-verified in the real app (CDP rig, PrintWindow screenshots): a fake `claude.exe`
+  (a renamed powershell.exe) in a local cmd tab produced the agent icon with a blue working
+  badge from job membership, then an amber needs-approval badge from its own OSC 7377
+  event, then no icon at all once Ctrl+C killed it; over SSH, typing `claude --resume` at
+  the prompt raised the icon and `ls -la` retired it.

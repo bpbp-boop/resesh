@@ -152,7 +152,7 @@ store key passphrases in Credential Manager.
 
 ---
 
-## Phase 6 — Session identity and local terminals (base icons shipped 2026-08-15; 6.1 shipped 2026-08-16; 6.2 not started; title-bar icon deferred — needs SVG→ICO rasterization)
+## Phase 6 — Session identity and local terminals (base icons shipped 2026-08-15; 6.1 and 6.2 shipped 2026-08-16; title-bar icon deferred — needs SVG→ICO rasterization)
 
 Per-session icon shown in the tree, tab strip, and title bar (alongside the existing
 `ColorTag` accent). `Icon` field on `Session` (string key), picker in the session editor.
@@ -224,7 +224,19 @@ clean `exit`/restart, and close with no orphaned descendants. Verify discovered 
 restart with stable identities, local profiles appear in search/Quick Connect, remote-only
 commands never appear on local tabs, and an existing SSH `sessions.json` migrates unchanged.
 
-### 6.2 Agent-aware tabs
+### 6.2 Agent-aware tabs ✅ shipped 2026-08-16 (live-verified local + SSH; toasts deferred)
+
+Shipped: `AgentTracker` (Core) resolves identity and attention from manual override →
+adapter events → detection → session default, with every precedence rule unit-tested;
+`OSC 7377` structured events plus OSC 9 / OSC 777 / BEL as low-confidence signals;
+local detection from job-object membership and remote detection from the Phase 9.4
+command marks (new `onCommand` hook); a second tab icon with an attention badge,
+tab-menu override + session default, adapter snippets dialog, settings toggles, and a
+taskbar flash / optional sound for background alerts. Details in DECISIONS.md.
+
+Deferred: Windows toast notifications (needs package identity) and a taskbar count; an
+alerts list to jump between waiting tabs; per-agent adapters beyond Claude Code and the
+generic shell wrapper; richer ACP-style status.
 
 Keep the session icon above as the stable identity of the saved target (remote host or local
 shell), and add a **second, separate agent icon** to a tab while an agent CLI is active. The two
@@ -527,7 +539,7 @@ to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
 | 2 | **GSSAPI spike** (parallel with anything) | S | **High — do early** |
 | 3 | Phase 6 session icons | S | Low |
 | 4 | Phase 6.1 local terminal profiles (model → ConPTY → parity) ✅ shipped 2026-08-16 | M–L | Medium |
-| 5 | Phase 6.2 agent-aware tabs (identity → attention → adapters) | M | Medium |
+| 5 | Phase 6.2 agent-aware tabs (identity → attention → adapters) ✅ shipped 2026-08-16 | M | Medium |
 | 6 | Phase 1 highlighting | M | Low |
 | 7 | Phase 4 export/import ✅ shipped 2026-08-16 | S–M | Low |
 | 8 | Phase 5 connectivity (tunnels → agent → jump hosts) | M–L | Medium |

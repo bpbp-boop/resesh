@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.UI.Xaml;
+using Sessions.Core.Agents;
 using Sessions.Core.Models;
 
 namespace Sessions.App.ViewModels;
@@ -144,6 +145,83 @@ public sealed class TabViewModel : ObservableObject
     {
         if (!IsActive)
             HasUnseenOutput = true;
+    }
+
+    // ---- agent awareness (Phase 6.2): a SECOND icon, never the session icon ----
+
+    private AgentSnapshot _agent = AgentSnapshot.Empty;
+
+    /// <summary>What is running in this tab right now, as resolved by the tab's
+    /// <c>AgentTracker</c>. The session icon (where the tab runs) is untouched by this.</summary>
+    public AgentSnapshot Agent
+    {
+        get => _agent;
+        set
+        {
+            if (SetProperty(ref _agent, value))
+                NotifyAgentVisuals();
+        }
+    }
+
+    /// <summary>Re-reads the agent visuals; also used when the app-wide "show agent icons"
+    /// setting changes, since the icon and badge are derived from it.</summary>
+    public void NotifyAgentVisuals()
+    {
+        OnPropertyChanged(nameof(AgentIconSource));
+        OnPropertyChanged(nameof(AgentIconVisibility));
+        OnPropertyChanged(nameof(AgentBadgeVisibility));
+        OnPropertyChanged(nameof(AgentBadgeColor));
+        OnPropertyChanged(nameof(AgentTooltip));
+    }
+
+    private static bool AgentIconsEnabled => App.Settings.Current.ShowAgentIcons;
+
+    public Microsoft.UI.Xaml.Media.ImageSource? AgentIconSource =>
+        AgentIconsEnabled ? App.Icons.GetAgentImage(Agent.Key, Icons.SessionIconCatalog.ListIconSize) : null;
+
+    public Visibility AgentIconVisibility => AgentIconSource is null ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>The attention badge rides on the agent icon, so it needs one to sit on.</summary>
+    public Visibility AgentBadgeVisibility =>
+        AgentIconSource is not null && Agent.Attention is not (AgentAttention.None
+            or AgentAttention.Idle)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+    /// <summary>Amber only for states that genuinely mean "the agent is waiting for you";
+    /// a bare bell (Signal) gets neutral gray so it can't be mistaken for one.</summary>
+    public Windows.UI.Color AgentBadgeColor => Agent.Attention switch
+    {
+        AgentAttention.Working => Windows.UI.Color.FromArgb(255, 0x00, 0x78, 0xD4),
+        AgentAttention.NeedsApproval => Windows.UI.Color.FromArgb(255, 0xFF, 0xB9, 0x00),
+        AgentAttention.NeedsAnswer => Windows.UI.Color.FromArgb(255, 0xFF, 0xB9, 0x00),
+        AgentAttention.Complete => Windows.UI.Color.FromArgb(255, 0x16, 0xC6, 0x0C),
+        AgentAttention.Failed => Windows.UI.Color.FromArgb(255, 0xE7, 0x48, 0x56),
+        _ => Windows.UI.Color.FromArgb(255, 0x9E, 0x9E, 0x9E),
+    };
+
+    /// <summary>Names the agent, its state, and how we know — so a guess never reads like
+    /// a report. Any label came off the wire and is already sanitized and truncated.</summary>
+    public string AgentTooltip
+    {
+        get
+        {
+            if (!Agent.IsAgent)
+                return "";
+            var text = Agent.Name;
+            var state = AgentAttentionExtensions.Describe(Agent.Attention);
+            if (state.Length > 0)
+                text += " — " + state;
+            if (!string.IsNullOrEmpty(Agent.Label))
+                text += ": " + Agent.Label;
+            return text + Agent.Source switch
+            {
+                AgentSource.Structured => " (reported by the agent)",
+                AgentSource.Manual => " (set by you)",
+                AgentSource.Unknown => "",
+                _ => " (detected)",
+            };
+        }
     }
 
     /// <summary>

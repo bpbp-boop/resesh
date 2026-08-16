@@ -82,8 +82,13 @@
   // $ # % > terminator, an optional space, and a non-space (the command; an empty
   // prompt never marks). Matches Linux default PS1s, Cisco/Junos-style prompts, root
   // shells, and REPLs like "mysql>"; fancy unicode prompts belong to hosts whose
-  // owners can install the OSC 133 snippet instead.
-  var CMD_PROMPT_RE = /^(?:\[[^\]]{1,100}\]|[^\s$#%>]{0,100})[$#%>]\s?\S/;
+  // owners can install the OSC 133 snippet instead. The leading "PS …>" alternative is
+  // PowerShell, whose prompt is the one common shape with spaces before the terminator
+  // (cmd.exe's "C:\dir>" already matches the space-free body).
+  var CMD_PROMPT_BODY = "(?:PS [^\\n]{0,200}>|(?:\\[[^\\]]{1,100}\\]|[^\\s$#%>]{0,100})[$#%>])";
+  var CMD_PROMPT_RE = new RegExp("^" + CMD_PROMPT_BODY + "\\s?\\S");
+  // Same shapes, capturing prompt and command separately (tooltip card, agent detection).
+  var CMD_SPLIT_RE = new RegExp("^(" + CMD_PROMPT_BODY + ")\\s?(.*)$");
 
   function RulerAddon() {
     this._term = null;
@@ -114,6 +119,7 @@
     this._cmdOscSeen = false; // a shell spoke OSC 133: discovery defers to it from then on
     this._cmdPromptLine = -1; // absolute line of the last OSC 133;A/B prompt start
     this._cmdPending = null;  // mark committed by C, awaiting its D exit code
+    this._cmdObserver = null; // page hook: commands as they are marked (agent detection)
 
     this._timeWrites = [];    // serialized xterm writes: { data, unixMs|null }
     this._timeWriteActive = false;
@@ -629,8 +635,32 @@
       self._queuePaint();
     });
     this._cmdMarks.push(entry);
+    this._notifyCommand(line);
     this._queuePaint();
     return entry;
+  };
+
+  /** Register a listener for commands as they are marked (Phase 6.2 agent detection).
+   * The ruler already owns both discovery paths — OSC 133 and the Enter-gated probe —
+   * so agent identity rides the same evidence instead of re-deriving it. */
+  RulerAddon.prototype.onCommand = function (callback) {
+    this._cmdObserver = callback;
+  };
+
+  /** Hand the listener just the command part of a freshly marked prompt line. */
+  RulerAddon.prototype._notifyCommand = function (line) {
+    if (!this._cmdObserver) return;
+    var bufLine = this._term.buffer.active.getLine(line);
+    if (!bufLine) return;
+    var text = bufLine.translateToString(true).trim();
+    var match = text.match(CMD_SPLIT_RE);
+    var command = match ? match[2] : text;
+    if (!command) return;
+    try {
+      this._cmdObserver(command);
+    } catch (err) {
+      if (window.__pageTrace) window.__pageTrace("ruler onCommand: " + (err && err.message));
+    }
   };
 
   /** Scroll to the previous (dir<0) or next (dir>0) command mark relative to the
@@ -1017,7 +1047,7 @@
    * use the newline fallback. */
   RulerAddon.prototype._renderTooltip = function (tip, sample, metadata) {
     var prompt = "", command = sample;
-    var match = sample.match(/^((?:\[[^\]]{1,100}\]|[^\s$#%>]{0,100})[$#%>])\s?(.*)$/);
+    var match = sample.match(CMD_SPLIT_RE);
     if (match) { prompt = match[1]; command = match[2]; }
 
     var metadataText = metadata.map(function (part) { return part.text; }).join(" · ");

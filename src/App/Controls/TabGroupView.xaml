@@ -147,6 +147,33 @@
                                         Height="16"
                                         VerticalAlignment="Center"
                                         Visibility="{x:Bind IconVisibility, Mode=OneWay}" />
+                                    <!-- Agent icon + attention badge (Phase 6.2). Deliberately
+                                         separate from the session icon above: that one says
+                                         where the tab runs, this one says what is running in it. -->
+                                    <Grid
+                                        Width="16"
+                                        Height="16"
+                                        VerticalAlignment="Center"
+                                        ToolTipService.ToolTip="{x:Bind AgentTooltip, Mode=OneWay}"
+                                        Visibility="{x:Bind AgentIconVisibility, Mode=OneWay}">
+                                        <Image
+                                            Source="{x:Bind AgentIconSource, Mode=OneWay}"
+                                            Width="16"
+                                            Height="16" />
+                                        <Ellipse
+                                            Width="7"
+                                            Height="7"
+                                            Margin="0,0,-1,-1"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Bottom"
+                                            StrokeThickness="1.5"
+                                            Stroke="{x:Bind HeaderBackground, Mode=OneWay}"
+                                            Visibility="{x:Bind AgentBadgeVisibility, Mode=OneWay}">
+                                            <Ellipse.Fill>
+                                                <SolidColorBrush Color="{x:Bind AgentBadgeColor, Mode=OneWay}" />
+                                            </Ellipse.Fill>
+                                        </Ellipse>
+                                    </Grid>
                                     <FontIcon
                                         Glyph="&#xE840;"
                                         FontSize="11"

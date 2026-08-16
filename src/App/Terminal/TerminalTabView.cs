@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Sessions.App.Controls;
 using Sessions.App.Dialogs;
 using Sessions.App.ViewModels;
+using Sessions.Core.Agents;
 using Sessions.Core.Backend;
 using Sessions.Core.Credentials;
 using Sessions.Core.Local;
@@ -34,6 +35,12 @@ public sealed class TerminalTabView : Grid, IDisposable
     private bool _connecting;
     private bool _disposed;
 
+    // Agent awareness (Phase 6.2). One tracker per tab, fed only by this tab's own page
+    // and backend — a session cannot describe another tab's agent, whatever it writes.
+    private readonly AgentTracker _agent;
+    private DispatcherQueueTimer? _agentPoll;
+    private bool _agentPollBusy;
+
     // File pane (Phase 3): lives in column 2 behind a splitter; the resolved connect
     // secret is kept for the tab's lifetime so the SFTP channel never re-prompts.
     private SftpPaneView? _filePane;
@@ -59,6 +66,11 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// the OS/vendor from the server banner. The window decides whether to persist it.</summary>
     public event Action<string>? IconSuggested;
 
+    /// <summary>Raised (UI thread) when this tab's agent moved into a state worth alerting
+    /// on. The window decides whether anything is shown — an agent event may change UI
+    /// state and draw attention, never send input or approve anything.</summary>
+    public event Action<TabViewModel, AgentSnapshot>? AgentAlert;
+
     public TerminalTabView(TabViewModel tab, ICredentialService credentials, KnownHostsStore knownHosts,
         IReadOnlySet<int>? tmuxSlotsAlreadyOpen = null)
     {
@@ -76,7 +88,12 @@ public sealed class TerminalTabView : Grid, IDisposable
         Children.Add(_terminal);
         Children.Add(_spinner);
 
-        _terminal.InputReceived += data => _backend?.Write(data);
+        _terminal.InputReceived += data =>
+        {
+            _backend?.Write(data);
+            // Answering is what unblocks a waiting agent, so input clears a sticky badge.
+            ApplyAgent(tracker => tracker.ObserveUserInput());
+        };
         _terminal.Resized += (cols, rows) => _backend?.Resize(cols, rows);
         _terminal.ReconnectRequested += () => DispatcherQueue.TryEnqueue(() => _ = ConnectAsync(isReconnect: true));
         // The page's terminal is constructed with these (init handshake), so it opens
@@ -94,11 +111,129 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.FilePaneRequested += () => DispatcherQueue.TryEnqueue(ToggleFilePane);
         _terminal.NewLocalTabRequested += () => DispatcherQueue.TryEnqueue(() => NewLocalTabRequested?.Invoke());
 
+        _agent = new AgentTracker(Session.Agent);
+        WireAgentSignals();
+
         Loaded += async (_, _) =>
         {
             if (_backend is null && !_connecting)
                 await _terminal.InitializeAsync(); // Ready fires when the page is up
         };
+    }
+
+    // ---- agent awareness (Phase 6.2) ----
+
+    /// <summary>The identity the user pinned from the tab menu; null = follow detection.</summary>
+    public string? AgentOverride => _agent.ManualOverride;
+
+    /// <summary>What the tab is showing right now (identity, attention, and its source).</summary>
+    public AgentSnapshot AgentState => _agent.Current;
+
+    /// <summary>Tab menu: pin an identity, "auto" (null), or <c>AgentIdentities.None</c>.</summary>
+    public void SetAgentOverride(string? key) => ApplyAgent(tracker => tracker.SetManualOverride(key));
+
+    /// <summary>Re-reads the session's saved default after Session Options changed it.</summary>
+    public void RefreshAgentDefault()
+    {
+        _agent.SessionDefault = Session.Agent;
+        PushAgentState();
+    }
+
+    /// <summary>
+    /// Subscribes to every evidence source. The page forwards raw escape sequences, titles
+    /// and marked commands; all of the mapping happens in the tracker. Detection can say
+    /// WHICH agent is running; only an adapter's structured event may say it is waiting.
+    /// </summary>
+    private void WireAgentSignals()
+    {
+        _terminal.AgentOscReceived += (code, data) =>
+            ApplyAgent(tracker => tracker.ObserveEvent(AgentOsc.Parse(code, data)));
+        _terminal.BellReceived += () =>
+            ApplyAgent(tracker => tracker.ObserveEvent(AgentOsc.Bell()));
+        _terminal.TitleChanged += title => ApplyAgent(tracker => tracker.ObserveTitle(title));
+        _terminal.CommandObserved += command => ApplyAgent(tracker => tracker.ObserveCommand(command));
+
+        _tab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TabViewModel.IsActive) && _tab.IsActive)
+                ApplyAgent(tracker => tracker.ObserveViewed());
+            else if (e.PropertyName == nameof(TabViewModel.Session))
+                RefreshAgentDefault();
+        };
+        PushAgentState(); // a session default shows before anything has been observed
+    }
+
+    private void ApplyAgent(Func<AgentTracker, bool> observe)
+    {
+        if (_disposed || !observe(_agent))
+            return;
+        PushAgentState();
+    }
+
+    private void PushAgentState()
+    {
+        var snapshot = _agent.Current;
+        _tab.Agent = snapshot;
+        if (snapshot.Attention.IsAlert())
+            AgentAlert?.Invoke(_tab, snapshot);
+    }
+
+    /// <summary>
+    /// Local tabs learn their agent from job-object membership: the processes inside this
+    /// shell's own job. It needs no shell integration, works for PowerShell and cmd (whose
+    /// prompts the command-mark regex deliberately can't discover), and — unlike any screen
+    /// heuristic — an agent's disappearance is as definite as its arrival.
+    /// </summary>
+    private void StartAgentPolling()
+    {
+        if (_agent.Suppressed || !Session.IsLocal)
+            return;
+        _agentPoll ??= CreateAgentPollTimer();
+        if (!_agentPoll.IsRunning)
+            _agentPoll.Start();
+    }
+
+    private DispatcherQueueTimer CreateAgentPollTimer()
+    {
+        var timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromSeconds(2);
+        timer.IsRepeating = true;
+        timer.Tick += (_, _) => PollLocalAgentProcesses();
+        return timer;
+    }
+
+    private async void PollLocalAgentProcesses()
+    {
+        if (_disposed || _agentPollBusy)
+            return;
+        if (_backend is not LocalTerminalSession { IsRunning: true } local || _agent.Suppressed)
+        {
+            _agentPoll?.Stop();
+            return;
+        }
+        _agentPollBusy = true;
+        try
+        {
+            // Off the UI thread: one kernel call plus a name lookup per process in the job.
+            var names = await Task.Run(local.GetJobProcessNames);
+            if (!_disposed)
+                ApplyAgent(tracker => tracker.ObserveProcesses(names));
+        }
+        catch (Exception ex)
+        {
+            TerminalControl.TraceHook?.Invoke($"agent poll: {ex.Message}");
+        }
+        finally
+        {
+            _agentPollBusy = false;
+        }
+    }
+
+    /// <summary>The shell ended: everything detected about the agent is stale.</summary>
+    private void EndAgentTracking()
+    {
+        _agentPoll?.Stop();
+        ApplyAgent(tracker => tracker.ObserveEnded());
     }
 
     /// <summary>Moves keyboard focus to this tab's terminal when the tab is selected.</summary>
@@ -163,6 +298,7 @@ public sealed class TerminalTabView : Grid, IDisposable
                 _tab.ExitCode = code;
                 _tab.State = TabConnectionState.Exited;
                 _tab.ConnectionSummary = "";
+                EndAgentTracking();
                 _terminal.NotifyDisconnected($"Process exited with code {code}.", action: "restart", neutral: true);
             });
 
@@ -176,6 +312,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             _tab.ConnectionSummary = $"pid {local.ProcessId}";
             _terminal.NotifyConnected();
             _terminal.FocusTerminal();
+            StartAgentPolling();
         }
         catch (LocalSessionException ex)
         {
@@ -230,6 +367,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             {
                 _tab.State = TabConnectionState.Disconnected;
                 _tab.ConnectionSummary = "";
+                EndAgentTracking();
                 _terminal.NotifyDisconnected(ex is null ? "Connection closed." : $"Connection lost: {ex.Message}");
             });
 
@@ -424,6 +562,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         _ssh = null;
         backend?.Stop();
         _tab.ConnectionSummary = "";
+        EndAgentTracking();
         if (Session.IsLocal)
         {
             _tab.ExitCode = null;
@@ -659,6 +798,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        _agentPoll?.Stop();
+        _agentPoll = null;
         if (IsFilePaneOpen)
             SaveFilePaneWidth();
         _filePane?.Dispose();

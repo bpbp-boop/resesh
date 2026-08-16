@@ -27,6 +27,15 @@ public sealed record AppSettings
     public bool CopyOnSelect { get; init; } = true;
     public bool RightClickPaste { get; init; } = true;
 
+    /// <summary>Show the agent icon and attention badge on tabs (Phase 6.2).</summary>
+    public bool ShowAgentIcons { get; init; } = true;
+
+    /// <summary>Flash the taskbar button when a background tab's agent needs the user.</summary>
+    public bool AgentAlertFlash { get; init; } = true;
+
+    /// <summary>Also play the system notification sound for those alerts.</summary>
+    public bool AgentAlertSound { get; init; }
+
     /// <summary>These settings with a session's overrides layered on top (null members inherit).</summary>
     public AppSettings WithOverrides(TerminalOverrides? overrides) =>
         overrides is null

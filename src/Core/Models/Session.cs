@@ -129,6 +129,14 @@ public sealed record Session
     /// </summary>
     public string? Icon { get; init; }
 
+    /// <summary>
+    /// Default agent identity for tabs of this session (Phase 6.2): null = detect,
+    /// <c>AgentIdentities.None</c> = never show an agent icon here, otherwise an agent key
+    /// used until detection knows better. Never overwrites <see cref="Icon"/> — the session
+    /// icon says where the tab runs, the agent icon says what is running in it.
+    /// </summary>
+    public string? Agent { get; init; }
+
     /// <summary>Set for imported sessions whose credential has not been captured yet.</summary>
     public bool CredentialNeeded { get; init; }
 

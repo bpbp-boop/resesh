@@ -54,6 +54,20 @@ public sealed class TerminalControl : Grid, IDisposable
     /// <summary>Fires once when the xterm page is loaded and measured (initial cols/rows).</summary>
     public event Action<int, int>? Ready;
 
+    // ---- agent-awareness evidence (Phase 6.2); raw, unmapped, from this tab's page only ----
+
+    /// <summary>An OSC sequence we watch for agent events: the code and its payload.</summary>
+    public event Action<int, string>? AgentOscReceived;
+
+    /// <summary>The terminal rang the bell.</summary>
+    public event Action? BellReceived;
+
+    /// <summary>The terminal title changed (OSC 0/2).</summary>
+    public event Action<string>? TitleChanged;
+
+    /// <summary>A command was marked at a shell prompt (OSC 133 or Enter-gated discovery).</summary>
+    public event Action<string>? CommandObserved;
+
     public int Columns { get; private set; } = 80;
     public int Rows { get; private set; } = 24;
 
@@ -152,6 +166,25 @@ public sealed class TerminalControl : Grid, IDisposable
                     break;
                 case "newLocalTab":
                     NewLocalTabRequested?.Invoke();
+                    break;
+                case "agentOsc":
+                    if (root.TryGetProperty("code", out var oscCode))
+                    {
+                        AgentOscReceived?.Invoke(
+                            oscCode.GetInt32(),
+                            root.TryGetProperty("data", out var oscData) ? oscData.GetString() ?? "" : "");
+                    }
+                    break;
+                case "agentBell":
+                    BellReceived?.Invoke();
+                    break;
+                case "title":
+                    if (root.TryGetProperty("text", out var title))
+                        TitleChanged?.Invoke(title.GetString() ?? "");
+                    break;
+                case "command":
+                    if (root.TryGetProperty("text", out var command))
+                        CommandObserved?.Invoke(command.GetString() ?? "");
                     break;
                 case "pageError":
                     if (root.TryGetProperty("message", out var err))
