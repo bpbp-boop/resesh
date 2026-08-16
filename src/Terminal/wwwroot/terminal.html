@@ -386,6 +386,9 @@
           highlighter.setRules(Array.isArray(msg.rules) ? msg.rules : []);
           ruler.setHighlightRules(Array.isArray(msg.rules) ? msg.rules : []);
           break;
+        case "setRulerPresentation":
+          ruler.setPresentation(msg.isSplit === true, msg.isGroupFocused !== false);
+          break;
         case "focus":
           term.focus();
           break;

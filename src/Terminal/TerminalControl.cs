@@ -28,6 +28,8 @@ public sealed class TerminalControl : Grid, IDisposable
     private DispatcherQueueTimer? _flushTimer;
     private bool _pageReady;
     private bool _disposed;
+    private bool _rulerIsSplit;
+    private bool _rulerIsGroupFocused = true;
 
     /// <summary>Debug diagnostics sink (same pattern as SshTerminalSession.TraceHook).</summary>
     public static Action<string>? TraceHook { get; set; }
@@ -120,6 +122,7 @@ public sealed class TerminalControl : Grid, IDisposable
                     Columns = root.GetProperty("cols").GetInt32();
                     Rows = root.GetProperty("rows").GetInt32();
                     _pageReady = true;
+                    PostRulerPresentation();
                     Ready?.Invoke(Columns, Rows);
                     break;
                 case "input":
@@ -227,6 +230,26 @@ public sealed class TerminalControl : Grid, IDisposable
     /// <summary>Blocks or restores pointer input to the page (used by session lock).
     /// Callers must also move keyboard focus off the terminal (the lock overlay does).</summary>
     public void SetInputEnabled(bool enabled) => _webView.IsHitTestVisible = enabled;
+
+    /// <summary>Uses the quieter ruler presentation while two terminal groups are visible.
+    /// The inactive group is dimmer, but pointer hover restores the full presentation.</summary>
+    public void SetRulerPresentation(bool isSplit, bool isGroupFocused)
+    {
+        if (_rulerIsSplit == isSplit && _rulerIsGroupFocused == isGroupFocused)
+            return;
+
+        _rulerIsSplit = isSplit;
+        _rulerIsGroupFocused = isGroupFocused;
+        if (_pageReady)
+            PostRulerPresentation();
+    }
+
+    private void PostRulerPresentation() => Post(new
+    {
+        type = "setRulerPresentation",
+        isSplit = _rulerIsSplit,
+        isGroupFocused = _rulerIsGroupFocused,
+    });
 
     /// <summary>Options the page's terminal is constructed with. Must be set before
     /// <see cref="InitializeAsync"/>; later changes go through <see cref="ApplyOptions"/>.</summary>

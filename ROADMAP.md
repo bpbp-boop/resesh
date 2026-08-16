@@ -285,6 +285,10 @@ The built-in ruler is render-only; replaced by `addon-ruler.js` + the native vie
 scrollbar hidden. Click to jump (snaps to a mark within 8 px, flashes the target line),
 hover tooltip (~150 ms; region line number, match/bookmark counts, first matching line),
 drag scrubs, wheel forwards, translucent viewport window doubles as the thumb.
+Split view automatically uses a Calm presentation: the 14 px pointer target draws as a
+10 px rail, routine marks become faint and neutral, nearby marks merge, and the inactive
+group dims further. Failures, bookmarks, and active search keep priority; hover restores
+the full-width, full-color ruler. Single-group presentation is unchanged.
 Sources: search + user bookmarks (Ctrl+Shift+M toggles one on the cursor line; xterm
 Marker API — markers survive trimming for free). Key implementation facts: the search
 addon does NOT expose match positions, so the ruler runs its own line-level buffer scan

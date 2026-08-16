@@ -91,8 +91,43 @@ public sealed class TabViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _isActive, value))
+            {
+                if (value)
+                    HasUnseenOutput = false; // selecting the tab means the output has been seen
                 NotifyTabVisuals();
+            }
         }
+    }
+
+    // ---- activity indicator (output arrived while the tab wasn't visible) ----
+
+    private bool _hasUnseenOutput;
+
+    /// <summary>Output arrived while this tab wasn't its group's selected tab; cleared on selection.
+    /// Shown SecureCRT-style: the status dot turns accent blue and the title goes semibold.</summary>
+    public bool HasUnseenOutput
+    {
+        get => _hasUnseenOutput;
+        private set
+        {
+            if (SetProperty(ref _hasUnseenOutput, value))
+            {
+                OnPropertyChanged(nameof(StateColor));
+                OnPropertyChanged(nameof(StateText));
+                OnPropertyChanged(nameof(HeaderFontWeight));
+            }
+        }
+    }
+
+    public Windows.UI.Text.FontWeight HeaderFontWeight =>
+        HasUnseenOutput ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+
+    /// <summary>Called (UI thread) when session output arrives; marks the tab unless it's visible.
+    /// A tab selected in an unfocused split group is still on screen, so IsActive is the gate.</summary>
+    public void NotifyOutputActivity()
+    {
+        if (!IsActive)
+            HasUnseenOutput = true;
     }
 
     /// <summary>
@@ -164,13 +199,17 @@ public sealed class TabViewModel : ObservableObject
                 : (IsDark ? Windows.UI.Color.FromArgb(255, 0xC0, 0xC0, 0xC0) : Windows.UI.Color.FromArgb(255, 0x55, 0x55, 0x55))
             : (IsDark ? Windows.UI.Color.FromArgb(255, 0x9D, 0x9D, 0x9D) : Windows.UI.Color.FromArgb(255, 0x61, 0x61, 0x61)));
 
-    /// <summary>Tab-strip status dot: green connected, red disconnected, amber connecting.</summary>
-    public Windows.UI.Color StateColor => State switch
-    {
-        TabConnectionState.Connected => Windows.UI.Color.FromArgb(255, 0x16, 0xC6, 0x0C),
-        TabConnectionState.Connecting => Windows.UI.Color.FromArgb(255, 0xFF, 0xB9, 0x00),
-        _ => Windows.UI.Color.FromArgb(255, 0xE7, 0x48, 0x56),
-    };
+    /// <summary>Tab-strip status dot: green connected, red disconnected, amber connecting;
+    /// accent blue when connected with unseen output (problems keep their color).</summary>
+    public Windows.UI.Color StateColor =>
+        State == TabConnectionState.Connected && HasUnseenOutput
+            ? Windows.UI.Color.FromArgb(255, 0x00, 0x78, 0xD4)
+            : State switch
+            {
+                TabConnectionState.Connected => Windows.UI.Color.FromArgb(255, 0x16, 0xC6, 0x0C),
+                TabConnectionState.Connecting => Windows.UI.Color.FromArgb(255, 0xFF, 0xB9, 0x00),
+                _ => Windows.UI.Color.FromArgb(255, 0xE7, 0x48, 0x56),
+            };
 
     /// <summary>e.g. "aes256-gcm@openssh.com • SHA256:…" once connected.</summary>
     public string ConnectionSummary
@@ -192,7 +231,7 @@ public sealed class TabViewModel : ObservableObject
     public string StateText => State switch
     {
         TabConnectionState.Connecting => "connecting…",
-        TabConnectionState.Connected => "connected",
+        TabConnectionState.Connected => HasUnseenOutput ? "connected — new output" : "connected",
         _ => "disconnected",
     };
 

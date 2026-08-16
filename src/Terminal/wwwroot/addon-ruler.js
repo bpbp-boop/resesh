@@ -54,6 +54,7 @@
   "use strict";
 
   var WIDTH = 14;           // CSS px
+  var CALM_WIDTH = 10;      // visible CSS px; the pointer target remains WIDTH
   var SCAN_SLICE = 4096;    // lines per animation-frame slice
   var RESCAN_DEBOUNCE = 250;
   var HOVER_DELAY = 150;
@@ -118,6 +119,9 @@
     this._drag = null;        // { startY, moved }
     this._hoverTimer = null;
     this._flash = null;       // { deco, marker, timer }
+    this._isSplit = false;
+    this._isGroupFocused = true;
+    this._isPointerOver = false;
   }
 
   RulerAddon.prototype.activate = function (term) {
@@ -172,10 +176,18 @@
       self._hlKick();
     }));
 
+    strip.addEventListener("pointerenter", function () {
+      self._isPointerOver = true;
+      self._queuePaint();
+    });
     strip.addEventListener("pointerdown", function (e) { self._onPointerDown(e); });
     strip.addEventListener("pointermove", function (e) { self._onPointerMove(e); });
     strip.addEventListener("pointerup", function (e) { self._onPointerUp(e); });
-    strip.addEventListener("pointerleave", function () { self._hideTooltip(); });
+    strip.addEventListener("pointerleave", function () {
+      self._isPointerOver = false;
+      self._hideTooltip();
+      self._queuePaint();
+    });
     strip.addEventListener("wheel", function (e) {
       e.preventDefault();
       var lines = Math.round(e.deltaY / 40) || (e.deltaY > 0 ? 1 : -1);
@@ -210,6 +222,14 @@
   /** Partial override of the color set; keys as in the constructor default. */
   RulerAddon.prototype.setTheme = function (colors) {
     for (var k in colors) this._colors[k] = colors[k];
+    this._queuePaint();
+  };
+
+  /** Full presentation in one group; a quieter, narrower rail in split mode.
+   * Hover always restores full detail so marks remain easy to inspect. */
+  RulerAddon.prototype.setPresentation = function (isSplit, isGroupFocused) {
+    this._isSplit = isSplit === true;
+    this._isGroupFocused = isGroupFocused !== false;
     this._queuePaint();
   };
 
@@ -830,38 +850,55 @@
     var ctx = canvas.getContext("2d");
     var c = this._colors;
     var total = Math.max(buf.length, 1);
+    var calm = this._isSplit && !this._isPointerOver;
+    var ordinaryAlpha = calm ? (this._isGroupFocused ? 0.42 : 0.25) : 1;
+    var importantAlpha = calm ? (this._isGroupFocused ? 0.90 : 0.62) : 1;
+    var searchAlpha = calm ? (this._isGroupFocused ? 0.75 : 0.50) : 1;
+    var visualWidth = Math.round((calm ? CALM_WIDTH : WIDTH) * dpr);
+    var visualLeft = devW - visualWidth;
+
+    this._strip.dataset.presentation = calm
+      ? (this._isGroupFocused ? "calm-focused" : "calm-unfocused")
+      : "full";
 
     ctx.clearRect(0, 0, devW, devH);
     ctx.fillStyle = c.background;
-    ctx.fillRect(0, 0, devW, devH);
+    ctx.fillRect(visualLeft, 0, visualWidth, devH);
     ctx.fillStyle = c.border;
-    ctx.fillRect(0, 0, Math.max(1, Math.round(dpr)), devH);
+    ctx.fillRect(visualLeft, 0, Math.max(1, Math.round(dpr)), devH);
 
     // Device-pixel row buckets: count per row, alpha encodes density. 3 CSS px per
     // tick: 2 px reads as noise on a tall strip (user feedback: "extremely subtle").
     var tickH = Math.max(3, Math.round(3 * dpr));
 
+    function markerRow(line) {
+      var row = Math.min(devH - tickH, Math.round((line / total) * devH));
+      // Calm mode combines nearby marks into one short block instead of a noisy stack.
+      return calm ? Math.floor(row / tickH) * tickH : row;
+    }
+
     function bucketRows(lines) {
       var rows = new Map();
       for (var i = 0; i < lines.length; i++) {
-        var row = Math.min(devH - tickH, Math.round((lines[i] / total) * devH));
+        var row = markerRow(lines[i]);
         rows.set(row, (rows.get(row) || 0) + 1);
       }
       return rows;
     }
 
-    var laneRx = Math.round(6 * dpr), laneRw = devW - laneRx - Math.round(1 * dpr);
+    var laneRx = visualLeft + Math.round((calm ? 5 : 6) * dpr);
+    var laneRw = devW - laneRx - Math.round(1 * dpr);
 
     // Right (content) lane underlay: highlight-rule hits in dimmed rule colors.
     // Search ticks paint over them, so an active search stays dominant.
     if (this._hlRules.length > 0 && this._hlAnchor) {
       var hlOffset = this._hlAnchor.virtual - this._hlAnchor.marker.line;
       var hlRules = this._hlRules;
-      ctx.globalAlpha = HL_TICK_ALPHA;
+      ctx.globalAlpha = HL_TICK_ALPHA * ordinaryAlpha;
       this._hlIndex.forEach(function (mask, virt) {
         var line = virt - hlOffset;
         if (line < 0 || line >= total) return;
-        var row = Math.min(devH - tickH, Math.round((line / total) * devH));
+        var row = markerRow(line);
         // Highest set bit: the last matching rule wins, as in the viewport decorations.
         ctx.fillStyle = hlRules[31 - Math.clz32(mask)].color;
         ctx.fillRect(laneRx, row, laneRw, tickH);
@@ -873,7 +910,9 @@
       if (frontierLine < total - 1) {
         var veilY = Math.round((Math.max(frontierLine, 0) / total) * devH);
         ctx.fillStyle = c.pending;
+        ctx.globalAlpha = ordinaryAlpha;
         ctx.fillRect(laneRx, veilY, laneRw, devH - veilY);
+        ctx.globalAlpha = 1;
       }
     }
 
@@ -881,43 +920,51 @@
     var matchRows = bucketRows(this._matchLines);
     ctx.fillStyle = c.match;
     matchRows.forEach(function (count, row) {
-      ctx.globalAlpha = Math.min(1, 0.55 + count * 0.15);
+      ctx.globalAlpha = Math.min(1, 0.55 + count * 0.15) * searchAlpha;
       ctx.fillRect(laneRx, row, laneRw, tickH);
     });
     ctx.globalAlpha = 1;
 
     if (this._activeLine >= 0) {
-      var ay = Math.min(devH - tickH, Math.round((this._activeLine / total) * devH));
+      var ay = markerRow(this._activeLine);
+      var activeExpand = Math.round((calm ? 1 : 2) * dpr);
       ctx.fillStyle = c.activeMatch;
-      ctx.fillRect(laneRx - Math.round(2 * dpr), ay, laneRw + Math.round(2 * dpr), tickH);
+      ctx.globalAlpha = importantAlpha;
+      ctx.fillRect(laneRx - activeExpand, ay, laneRw + activeExpand, tickH);
+      ctx.globalAlpha = 1;
     }
 
     // Left lane: command marks (exit code colors them; discovered marks stay
     // neutral), with bookmarks painted over — explicit beats inferred. Failed
     // commands paint in a second pass so an overlapping success can never bury
     // a red tick: the lane answers "where did it break".
-    var laneLx = Math.round(1 * dpr), laneLw = Math.round(4 * dpr);
+    var laneLx = visualLeft + Math.round(1 * dpr);
+    var laneLw = Math.round((calm ? 3 : 4) * dpr);
     for (var pass = 0; pass < 2; pass++) {
       for (var m = 0; m < this._cmdMarks.length; m++) {
         var cm = this._cmdMarks[m];
         var failed = cm.exit !== null && cm.exit !== 0;
         if ((pass === 1) !== failed) continue;
-        var cy = Math.min(devH - tickH, Math.round((cm.marker.line / total) * devH));
-        ctx.fillStyle = failed ? c.cmdFail : (cm.exit === 0 ? c.cmdOk : c.cmdUnknown);
+        var cy = markerRow(cm.marker.line);
+        // In Calm mode, routine success is structure, not an alert. Keep only failures red.
+        ctx.fillStyle = failed ? c.cmdFail : (calm ? c.cmdUnknown : (cm.exit === 0 ? c.cmdOk : c.cmdUnknown));
+        ctx.globalAlpha = failed ? importantAlpha : ordinaryAlpha;
         ctx.fillRect(laneLx, cy, laneLw, tickH);
       }
     }
+    ctx.globalAlpha = importantAlpha;
     ctx.fillStyle = c.bookmark;
     for (var b = 0; b < this._bookmarks.length; b++) {
-      var by = Math.min(devH - tickH, Math.round((this._bookmarks[b].marker.line / total) * devH));
+      var by = markerRow(this._bookmarks[b].marker.line);
       ctx.fillRect(laneLx, by, laneLw, tickH);
     }
+    ctx.globalAlpha = 1;
 
     // Viewport window / thumb.
     var thumbTop = (buf.viewportY / total) * devH;
     var thumbH = Math.max((term.rows / total) * devH, Math.round(20 * dpr));
     ctx.fillStyle = c.thumb;
-    ctx.fillRect(0, Math.round(Math.min(thumbTop, devH - thumbH)), devW, Math.round(thumbH));
+    ctx.fillRect(visualLeft, Math.round(Math.min(thumbTop, devH - thumbH)), visualWidth, Math.round(thumbH));
   };
 
   window.RulerAddon = { RulerAddon: RulerAddon };

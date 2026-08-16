@@ -400,6 +400,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         };
         tab.View = view;
         _groupViews[ViewModel.GroupOf(tab)].AddTerminal(view);
+        view.SetRulerPresentation(ViewModel.IsSplit, tab.IsGroupFocused);
         return tab;
     }
 
@@ -409,6 +410,16 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         ViewModel.FocusedGroup = group;
         ViewModel.NotifyActiveTabChanged();
+        UpdateRulerPresentations();
+    }
+
+    private void UpdateRulerPresentations()
+    {
+        foreach (var tab in ViewModel.AllTabs)
+        {
+            if (tab.View is TerminalTabView view)
+                view.SetRulerPresentation(ViewModel.IsSplit, tab.IsGroupFocused);
+        }
     }
 
     /// <summary>THE close pathway: X button, Ctrl+F4, context menu, and middle-click all land here.</summary>

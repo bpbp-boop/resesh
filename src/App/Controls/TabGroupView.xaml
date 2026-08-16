@@ -160,7 +160,7 @@
                                     <TextBlock
                                         Text="{x:Bind Header, Mode=OneWay}"
                                         FontSize="13"
-                                        FontWeight="Normal"
+                                        FontWeight="{x:Bind HeaderFontWeight, Mode=OneWay}"
                                         VerticalAlignment="Center"
                                         Foreground="{x:Bind HeaderForeground, Mode=OneWay}" />
                                     <Button

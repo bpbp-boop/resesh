@@ -83,6 +83,13 @@ public sealed partial class TabGroupView : UserControl
         SyncTerminalVisibility();
         _host.FocusGroup(Group);
         _host.ViewModel.NotifyActiveTabChanged();
+        FocusTerminal(Group.SelectedTab);
+    }
+
+    private void FocusTerminal(TabViewModel? tab)
+    {
+        if (tab?.View is Terminal.TerminalTabView view)
+            DispatcherQueue.TryEnqueue(view.FocusTerminal);
     }
 
     // ---- the single confirmed-close pathway (X button converges here too) ----
@@ -125,7 +132,25 @@ public sealed partial class TabGroupView : UserControl
     private void Tabs_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
         var point = e.GetCurrentPoint(Tabs);
-        _middleClickTab = point.Properties.IsMiddleButtonPressed ? TabFromOriginalSource(e.OriginalSource) : null;
+        var tab = TabFromOriginalSource(e.OriginalSource);
+        _middleClickTab = point.Properties.IsMiddleButtonPressed ? tab : null;
+
+        // SelectionChanged does not run when the selected tab is clicked again. Queue the
+        // focus so the TabView can finish its pointer handling before focus enters WebView2.
+        if (point.Properties.IsLeftButtonPressed && tab is not null && !IsButtonSource(e.OriginalSource))
+            FocusTerminal(tab);
+    }
+
+    private static bool IsButtonSource(object originalSource)
+    {
+        for (var d = originalSource as DependencyObject; d is not null; d = VisualTreeHelper.GetParent(d))
+        {
+            if (d is Button)
+                return true;
+            if (d is TabViewItem)
+                return false;
+        }
+        return false;
     }
 
     private async void Tabs_PointerReleased(object sender, PointerRoutedEventArgs e)

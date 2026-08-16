@@ -89,6 +89,17 @@ public sealed class TerminalTabView : Grid, IDisposable
         };
     }
 
+    /// <summary>Moves keyboard focus to this tab's terminal when the tab is selected.</summary>
+    public void FocusTerminal()
+    {
+        if (!_disposed && !_tab.IsLocked)
+            _terminal.FocusTerminal();
+    }
+
+    /// <summary>Adjusts the annotated scrollbar for the current group layout and focus.</summary>
+    public void SetRulerPresentation(bool isSplit, bool isGroupFocused) =>
+        _terminal.SetRulerPresentation(isSplit, isGroupFocused);
+
     /// <summary>Kicks off a fresh connection using the terminal's current size.</summary>
     public async Task ConnectAsync(bool isReconnect)
     {
@@ -130,7 +141,13 @@ public sealed class TerminalTabView : Grid, IDisposable
             {
                 HostKeyDecision = info => ConfirmHostKeyBlocking(info),
             };
-            session.OutputReceived += data => _terminal.WriteOutput(data);
+            session.OutputReceived += data =>
+            {
+                _terminal.WriteOutput(data);
+                // Benign cross-thread reads: worst case is one redundant enqueue.
+                if (!_tab.IsActive && !_tab.HasUnseenOutput)
+                    DispatcherQueue.TryEnqueue(() => _tab.NotifyOutputActivity());
+            };
             session.Closed += ex => DispatcherQueue.TryEnqueue(() =>
             {
                 _tab.State = TabConnectionState.Disconnected;

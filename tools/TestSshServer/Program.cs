@@ -6,6 +6,7 @@ using FxSsh.Services;
 // Throwaway local SSH echo server for exercising the Sessions terminal end-to-end.
 // Listens on loopback:2200, accepts test/test123, echoes typed lines, and understands:
 //   big   -> streams ~10 MB of numbered lines (throughput/batching test)
+//   slow  -> ten ticks over ~6 s, first after 1.5 s (background-tab activity test)
 //   bye   -> closes the channel from the server side
 // Window-change requests are acknowledged in-band so resize plumbing is observable.
 
@@ -49,7 +50,7 @@ server.ConnectionAccepted += (_, session) =>
                     void Send(string s) => channel.SendData(Encoding.UTF8.GetBytes(s));
 
                     Send("Welcome to the Sessions test server!\r\n");
-                    Send("Commands: big (10 MB dump), bye (server-side close). Anything else echoes.\r\n$ ");
+                    Send("Commands: big (10 MB dump), slow (delayed ticks), bye (server-side close). Anything else echoes.\r\n$ ");
 
                     channel.WindowChange += (_, wc) =>
                         Send($"\r\n[window-change: {wc.WidthColumns}x{wc.HeightRows}]\r\n$ ");
@@ -96,6 +97,27 @@ server.ConnectionAccepted += (_, session) =>
                                             catch (Exception ex)
                                             {
                                                 Console.WriteLine($"[server] big failed: {ex}");
+                                            }
+                                        });
+                                        break;
+                                    case "slow":
+                                        // Delayed trickle: output that arrives well after the user
+                                        // has switched away (exercises unseen-output indicators).
+                                        _ = Task.Run(async () =>
+                                        {
+                                            try
+                                            {
+                                                await Task.Delay(1500);
+                                                for (var i = 1; i <= 10; i++)
+                                                {
+                                                    Send($"tick {i}\r\n");
+                                                    await Task.Delay(500);
+                                                }
+                                                Send("[done]\r\n$ ");
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                Console.WriteLine($"[server] slow failed: {ex}");
                                             }
                                         });
                                         break;
