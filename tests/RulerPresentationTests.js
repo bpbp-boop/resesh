@@ -11,6 +11,10 @@ const window = { devicePixelRatio: 1 };
 vm.runInNewContext(source, { window, Map, Math, RegExp, Set, requestAnimationFrame() {} });
 const RulerAddon = window.RulerAddon.RulerAddon;
 
+test("ruler tooltip uses readable text", () => {
+  assert.match(source, /font-size:14px/);
+});
+
 function paintPresentation(isSplit, isGroupFocused, isPointerOver = false) {
   const operations = [];
   const context = {

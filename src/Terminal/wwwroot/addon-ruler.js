@@ -143,7 +143,7 @@
     tooltip.className = "scroll-ruler-tooltip";
     tooltip.style.cssText = "position:absolute;right:" + (WIDTH + 6) +
       "px;display:none;z-index:31;max-width:420px;padding:4px 8px;border-radius:4px;" +
-      "font-family:'Segoe UI',sans-serif;font-size:12px;white-space:nowrap;overflow:hidden;" +
+      "font-family:'Segoe UI',sans-serif;font-size:14px;white-space:nowrap;overflow:hidden;" +
       "text-overflow:ellipsis;pointer-events:none;";
     term.element.appendChild(tooltip);
     this._tooltip = tooltip;
