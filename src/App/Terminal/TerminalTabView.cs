@@ -243,11 +243,13 @@ public sealed class TerminalTabView : Grid, IDisposable
             .Select(r => (object)new
             {
                 id = r.Id,
+                name = r.Name,
                 pattern = r.Pattern,
                 color = r.Color,
                 bold = r.Bold,
                 underline = r.Underline,
                 matchCase = r.MatchCase,
+                showInOverview = r.ShowInOverview,
             })
             .ToList();
 

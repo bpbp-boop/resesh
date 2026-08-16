@@ -29,6 +29,11 @@ public sealed record HighlightRule
 
     public bool MatchCase { get; init; }
 
+    /// <summary>Marks this rule's hits in the annotated scrollbar's content lane. Off by
+    /// default for all but the negative-states rule: the ruler answers "where is it
+    /// broken", not "where is there text".</summary>
+    public bool ShowInOverview { get; init; }
+
     /// <summary>Global enabled state (session overrides layer on top of this).</summary>
     public bool Enabled { get; init; } = true;
 
@@ -92,7 +97,7 @@ public static class BuiltinHighlights
         {
             Id = "state-negative", Name = "Down/error states", Pack = NetworkPack,
             Pattern = @"\b(?:down|disabled|shutdown|shut|failure|failed|fail|err-?disabled|error|denied|deny|dropped|refused|rejected|invalid|unreachable|timed[- ]?out|timeout|critical|crit|emergency|emerg|alert|blocked|blocking|notconnect|stopped|dead|expired)\b",
-            Color = "#ff5555", Bold = true,
+            Color = "#ff5555", Bold = true, ShowInOverview = true,
         },
         new()
         {

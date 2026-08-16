@@ -8,6 +8,8 @@
   html, body { margin: 0; padding: 0; height: 100%; background: #0c0c0c; overflow: hidden; }
   #term { height: 100%; width: 100%; }
   .xterm .xterm-viewport { overflow-y: auto; }
+  /* The annotated ruler (addon-ruler.js) replaces the native scrollbar. */
+  .xterm .xterm-viewport::-webkit-scrollbar { display: none; }
 
   /* Find bar (Ctrl+Shift+F): VS Code-style floating panel, top-right over the terminal. */
   #findbar {
@@ -37,6 +39,7 @@
 <script src="addon-web-links.js"></script>
 <script src="addon-search.js"></script>
 <script src="addon-highlight.js"></script>
+<script src="addon-ruler.js"></script>
 </head>
 <body>
 <div id="term"></div>
@@ -60,6 +63,21 @@
     brightBlack: "#767676", brightRed: "#e74856", brightGreen: "#16c60c",
     brightYellow: "#f9f1a5", brightBlue: "#3b78ff", brightMagenta: "#b4009e",
     brightCyan: "#61d6d6", brightWhite: "#f2f2f2"
+  };
+  // Annotated scrollbar (ROADMAP Phase 9.2) palettes, one per terminal theme.
+  const DARK_RULER = {
+    background: "#0c0c0c", border: "#333333", thumb: "rgba(255,255,255,0.10)",
+    match: "#515c6a", activeMatch: "#f2cc60", bookmark: "#61d6d6",
+    flash: "rgba(242,204,96,0.28)", pending: "rgba(255,255,255,0.06)",
+    cmdOk: "#2ea043", cmdFail: "#ff5555", cmdUnknown: "#767676",
+    tooltipBg: "#252526", tooltipFg: "#cccccc", tooltipBorder: "#454545"
+  };
+  const LIGHT_RULER = {
+    background: "#ffffff", border: "#dddddd", thumb: "rgba(0,0,0,0.10)",
+    match: "#7a8aa0", activeMatch: "#c18401", bookmark: "#0997b3",
+    flash: "rgba(193,132,1,0.22)", pending: "rgba(0,0,0,0.06)",
+    cmdOk: "#50a14f", cmdFail: "#e45649", cmdUnknown: "#8a8a8a",
+    tooltipBg: "#f3f3f3", tooltipFg: "#333333", tooltipBorder: "#c8c8c8"
   };
   const LIGHT_THEME = {
     background: "#ffffff", foreground: "#383a42", cursor: "#383a42",
@@ -135,9 +153,20 @@
     document.body.style.background = term.options.theme.background;
     document.body.classList.toggle("light-ui", term.options.theme === LIGHT_THEME);
 
+    // The ruler addon builds DOM inside term.element, so it loads after open().
+    const ruler = new RulerAddon.RulerAddon();
+    term.loadAddon(ruler);
+    ruler.setTheme(term.options.theme === LIGHT_THEME ? LIGHT_RULER : DARK_RULER);
+    if (Array.isArray(init.highlights)) ruler.setHighlightRules(init.highlights);
+
     // UI -> SSH
     term.onData(function (data) {
       if (connected) {
+        // Enter on a prompt-shaped line becomes a discovered command mark (Phase 9.4).
+        // Checked before the input round-trips: the typed command is already echoed on
+        // the cursor line, the resulting newline is not. A multi-line paste only marks
+        // the first command — the rest echo asynchronously.
+        if (data.indexOf("\r") >= 0) ruler.notifyEnter();
         host.postMessage({ type: "input", data: strToB64(data) });
       } else if (data === "\r") {
         host.postMessage({ type: "reconnect" });
@@ -177,9 +206,7 @@
         incremental: !!incremental,
         decorations: {
           matchBackground: "#515c6a",
-          matchOverviewRuler: "#515c6a",
-          activeMatchBackground: "#f2cc60",
-          activeMatchColorOverviewRuler: "#f2cc60"
+          activeMatchBackground: "#f2cc60"
         }
       };
     }
@@ -188,13 +215,16 @@
       const query = findInput.value;
       if (!query) {
         search.clearDecorations();
+        ruler.clearSearch();
         findCount.textContent = "";
         return;
       }
       try {
         if (direction === "prev") search.findPrevious(query, searchOptions(false));
         else search.findNext(query, searchOptions(incremental));
+        ruler.notifySearch(query, findCaseOn, findRegexOn);
       } catch (err) {
+        ruler.clearSearch();
         findCount.textContent = "Bad regex"; // e.g. an unclosed group while typing
       }
     }
@@ -225,6 +255,7 @@
     function closeFind() {
       findbar.style.display = "none";
       search.clearDecorations();
+      ruler.clearSearch();
       findCount.textContent = "";
       term.focus();
     }
@@ -264,6 +295,15 @@
       }
       if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyE") {
         host.postMessage({ type: "filePane" });
+        return false;
+      }
+      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyM") {
+        ruler.toggleBookmark();
+        return false;
+      }
+      if (e.type === "keydown" && e.ctrlKey && e.shiftKey &&
+          (e.code === "ArrowUp" || e.code === "ArrowDown")) {
+        ruler.jumpCommand(e.code === "ArrowDown" ? 1 : -1);
         return false;
       }
       if (e.type === "keydown" && e.ctrlKey && e.shiftKey) {
@@ -331,6 +371,7 @@
           if (typeof msg.rightClickPaste === "boolean") rightClickPaste = msg.rightClickPaste;
           document.body.style.background = term.options.theme.background;
           document.body.classList.toggle("light-ui", term.options.theme === LIGHT_THEME);
+          ruler.setTheme(term.options.theme === LIGHT_THEME ? LIGHT_RULER : DARK_RULER);
           try {
             if (typeof msg.scrollback === "number") term.options.scrollback = msg.scrollback;
             if (msg.fontSize) term.options.fontSize = msg.fontSize;
@@ -343,6 +384,7 @@
           break;
         case "setHighlights":
           highlighter.setRules(Array.isArray(msg.rules) ? msg.rules : []);
+          ruler.setHighlightRules(Array.isArray(msg.rules) ? msg.rules : []);
           break;
         case "focus":
           term.focus();

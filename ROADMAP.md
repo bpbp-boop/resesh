@@ -259,6 +259,98 @@ the model above doesn't assume a cap). Include workspaces in the Phase 4 export 
 
 ---
 
+## Phase 9 — Annotated scrollbar (scrollback overview ruler)
+
+A slim overview ruler on the terminal's scrollbar edge mapping the whole scrollback —
+"where did that command start, where were the errors" answered at a glance instead of by
+blind dragging. Composes Phase 0.2 (search) and Phase 1 (highlighting) into a map; the
+line/timestamp index later feeds Phase 7 playback seeking, and Phase 6.1 agent events are
+a future mark type.
+
+**Visual model:** the ruler replaces the bare viewport scrollbar (no two adjacent scroll
+affordances). Left lane = structure (command marks, bookmarks; red on nonzero exit),
+right lane = content (error/warning/search ticks; active match brighter). Translucent
+viewport window doubles as the thumb. Ticks bucket per pixel with density→opacity —
+a 10 MB `big` dump must render as an intensity band, never 10k rects.
+
+### 9.1 Search matches via the built-in ruler ✅ shipped 2026-08-16 (superseded by 9.2 same day)
+The vendored xterm.js already contains VS Code's overview-ruler renderer (decorations
+API `overviewRulerOptions`), and the search addon already emits ruler decorations —
+the find bar's `matchOverviewRuler` colors were silently unused because the default
+`overviewRuler: {}` (zero width) disables the renderer. Enabling is one constructor
+option in `terminal.html` (`overviewRuler: { width: 14 }`).
+
+### 9.2 Custom interactive ruler ✅ shipped 2026-08-16 (live-verified: CDP hover/click in the real app)
+The built-in ruler is render-only; replaced by `addon-ruler.js` + the native viewport
+scrollbar hidden. Click to jump (snaps to a mark within 8 px, flashes the target line),
+hover tooltip (~150 ms; region line number, match/bookmark counts, first matching line),
+drag scrubs, wheel forwards, translucent viewport window doubles as the thumb.
+Sources: search + user bookmarks (Ctrl+Shift+M toggles one on the cursor line; xterm
+Marker API — markers survive trimming for free). Key implementation facts: the search
+addon does NOT expose match positions, so the ruler runs its own line-level buffer scan
+(same query/flags, 4096-line slices per frame, debounced rescan on writes so trimming
+can't leave stale ticks); alternate buffer hides the strip. Live-verified via the CDP rig
+against `local-test` + `big` (hover tooltip, click flash). Still untried by a human:
+a real Ctrl+Shift+M keypress.
+
+### 9.3 Content lane — highlight-rule hits ✅ shipped 2026-08-16
+The Phase-1-scans-viewport-only vs ruler-needs-whole-buffer tension resolved as
+planned: `onLineFeed` kicks a budgeted idle-time indexer (`requestIdleCallback` with a
+500 ms timeout, rAF-slice fallback) that scans completed lines above the cursor row;
+the same pass backfills existing scrollback, so tmux replay dumps just flow through
+ingest. Index = Map(line → rule bitmask), ≤32 overview rules, NOT per-line decorations.
+Lines are keyed by trim-stable "virtual" numbers anchored to a sentinel marker,
+re-anchored near the cursor each pass (gap 4096) so trimming can't reach it; a flood
+that outruns re-anchoring disposes the sentinel → full rebuild (verified: mapping
+survives 6000 steady-drip trims exactly; a 8000-line flood takes the rebuild path and
+re-indexes exactly). Resize reflow and rule swaps also rebuild; the not-yet-indexed
+span paints as a faint veil (`pending` palette color) instead of a literal shimmer.
+Per-rule `showInOverview`: builtin default on only for `state-negative`; custom rules
+get an editor checkbox (builtin overview flags are code-fixed — the deltas store only
+covers enabled state). Ticks paint in the content lane at 0.5 alpha of the rule color
+under search ticks; multi-rule lines use the highest bit (later rule wins, matching
+decoration precedence). Tooltip gains per-rule hit counts ("2× Down/error states");
+click-snap includes hits. Verified pixel-exact in the stubbed harness (tick blends,
+trim/re-anchor/prune, rule swap, alt buffer, resize) AND live via the CDP rig
+(negative-states ticks + tooltip with rule name, proving the C# payload plumbing).
+
+### 9.4 Command marks — OSC 133 + Enter-gated prompt discovery ✅ shipped 2026-08-16
+Two sources feed one left-lane (bookmarks paint over them — explicit beats inferred):
+- **Exact — OSC 133 (FinalTerm)**: A/B remember the prompt line, C commits a mark
+  there (a command actually ran), D;exit colors the tick (green ok / red fail).
+  Shells emitting A/D but never C still commit on D (empty Enters indistinguishable
+  there; accepted). Handler registered via `parser.registerOscHandler(133)`.
+- **Discovered — for the fleet of VMs/network devices that will never get a custom
+  bashrc** (user decision 2026-08-16, revising this section's original "no
+  prompt-regex guessing" stance; PASSIVE output scanning stays banned — discovery is
+  gated on the user pressing Enter, which output that merely looks like a prompt
+  never coincides with). On Enter (page forwards from `term.onData`), a probe marker
+  anchors the cursor row; its text is evaluated only after the remote echo settles
+  (300 ms + one 900 ms retry — typed chars echo from the REMOTE side, so a fast
+  paste/laggy link puts Enter ahead of its own command's echo; found live, the sync
+  version missed every SendKeys-speed command). Regex covers default Linux PS1s,
+  bracketed prompts, Cisco `sw1#cmd` (no space), Junos, bare `$`/`#`/`%`/`>`, REPLs;
+  requires a command after the terminator (empty prompt never marks); walks back soft
+  wraps to the prompt row. Neutral gray ticks (no exit knowledge). First OSC 133
+  sequence in a session disables discovery — the shell knows better than the regex.
+Ctrl+Shift+Up/Down jump prev/next command from the viewport center, with flash.
+Tooltip: "exit N" / "command" / "N commands"; sample falls back to the command line.
+tmux replay limit stands: capture-pane preserves neither OSC marks nor keystrokes, so
+the command lane starts fresh on reattach. The opt-in `.bashrc` snippet UX (shared
+with the Phase 3.2 OSC 7 plan) is still pending — discovery covers unprovisioned
+hosts, which was the point. Verified in the stubbed harness (both tiers, slow-echo
+probe, traps, jump keys via synthetic keydown, exit-color pixels) and live against
+local-test (real SSH echo → discovered gray ticks, pixel-exact). Real human
+accelerator keypresses remain untried (standing item). Next/prev **error** jump
+(failed-exit marks only) deferred.
+
+### 9.5 Timestamps
+Record coarse wall-clock per line at ingest (host side, pre-batching — nearly free)
+so hovers can answer "when did this happen" (`exit 2 · 14:32 · 3h ago`). Pre-builds
+the timing spine Phase 7 recording wants.
+
+---
+
 ## Backlog — "what else" (unordered candidates)
 
 **Finish/verify v1 loose ends first:** private-key auth and keyboard-interactive fallback
@@ -292,10 +384,11 @@ to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
 | 6 | Phase 4 export/import | S–M | Low |
 | 7 | Phase 5 connectivity (tunnels → agent → jump hosts) | M–L | Medium |
 | 8 | Phase 3 SFTP pane (+ cwd tracking, SSHFS-Win link) | M–L | Medium |
-| 9 | Phase 7 session recording | M | Low |
-| 10 | Phase 8 workspaces (saved layouts) | M | Low |
-| 11 | Phase 2 GSSAPI productization (path chosen by spike) | M | Depends on spike |
-| 12 | Backlog picks | — | — |
+| 9 | Phase 9 annotated scrollbar (9.1–9.4 ✅; 9.5 staged) | S–M | Low |
+| 10 | Phase 7 session recording | M | Low |
+| 11 | Phase 8 workspaces (saved layouts) | M | Low |
+| 12 | Phase 2 GSSAPI productization (path chosen by spike) | M | Depends on spike |
+| 13 | Backlog picks | — | — |
 
 Session icons slot in early because they're small, self-contained, and touch the same
 session-editor surface Phase 0 reworks anyway. Agent-aware tabs follow them so the distinct

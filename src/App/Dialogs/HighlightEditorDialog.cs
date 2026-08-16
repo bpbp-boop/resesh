@@ -59,6 +59,7 @@ public static class HighlightEditorDialog
         var boldCheck = new CheckBox { Content = "Bold (renders as a background tint)" };
         var underlineCheck = new CheckBox { Content = "Underline" };
         var matchCaseCheck = new CheckBox { Content = "Match case" };
+        var overviewCheck = new CheckBox { Content = "Mark hits in the scrollbar overview" };
         var sampleBox = new TextBox { Header = "Preview sample", Text = DefaultSample, AcceptsReturn = false };
         var preview = new TextBlock
         {
@@ -79,7 +80,7 @@ public static class HighlightEditorDialog
         {
             Spacing = 10,
             Visibility = Visibility.Collapsed,
-            Children = { nameBox, patternBox, colorRow, boldCheck, underlineCheck, matchCaseCheck, sampleBox, preview, formStatus, formButtons },
+            Children = { nameBox, patternBox, colorRow, boldCheck, underlineCheck, matchCaseCheck, overviewCheck, sampleBox, preview, formStatus, formButtons },
         };
 
         var dialog = new ContentDialog
@@ -168,6 +169,7 @@ public static class HighlightEditorDialog
             boldCheck.IsChecked = existing?.Bold ?? false;
             underlineCheck.IsChecked = existing?.Underline ?? false;
             matchCaseCheck.IsChecked = existing?.MatchCase ?? false;
+            overviewCheck.IsChecked = existing?.ShowInOverview ?? false;
             formStatus.Text = "";
             listPanel.Visibility = Visibility.Collapsed;
             formPanel.Visibility = Visibility.Visible;
@@ -294,6 +296,7 @@ public static class HighlightEditorDialog
                 Bold = boldCheck.IsChecked == true,
                 Underline = underlineCheck.IsChecked == true,
                 MatchCase = matchCaseCheck.IsChecked == true,
+                ShowInOverview = overviewCheck.IsChecked == true,
                 Enabled = true,
             });
             HideForm();
