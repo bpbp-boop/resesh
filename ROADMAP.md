@@ -153,7 +153,7 @@ store key passphrases in Credential Manager.
 
 ---
 
-## Phase 6 — Session icons ✅ base phase shipped 2026-08-15 (6.1 not started; title-bar icon deferred — needs SVG→ICO rasterization)
+## Phase 6 — Session identity and local terminals (base icons shipped 2026-08-15; 6.1–6.2 not started; title-bar icon deferred — needs SVG→ICO rasterization)
 
 Per-session icon shown in the tree, tab strip, and title bar (alongside the existing
 `ColorTag` accent). `Icon` field on `Session` (string key), picker in the session editor.
@@ -170,18 +170,74 @@ Per-session icon shown in the tree, tab strip, and title bar (alongside the exis
 **Nice-to-have:** auto-suggest an icon on first connect from the SSH server banner /
 detected OS (e.g. `Cisco-1.25`, `OpenSSH_… Ubuntu`), never overriding a manual choice.
 
-### 6.1 Agent-aware tabs
+### 6.1 Local terminal profiles
 
-Keep the session icon above as the stable identity of the saved host, and add a **second,
-separate agent icon** to a tab while an agent CLI is active. The two icons answer different
-questions: the session icon says *where this tab is connected*; the agent icon says *what is
-currently running*. Initial built-in agent identities: Claude Code, Codex, Gemini CLI,
+Make local shells first-class Sessions targets instead of requiring a loopback SSH session or
+an external terminal. Add a permanent, virtual **Local** root at the top of the session tree.
+It is expanded by default and cannot be renamed, deleted, or moved. Local profiles participate
+in search, tabs, splits, pinning, highlighting, the overview ruler, recording, and workspaces
+in the same way as SSH profiles.
+
+**Built-in profiles and tree behavior:**
+- Discover PowerShell 7 (`pwsh.exe`), Command Prompt, Windows PowerShell 5.1, installed WSL
+  distributions, and Git Bash when present. Hide unavailable shells.
+- Give discovered profiles stable identities so pinned tabs and workspaces can reference them.
+  Users may edit or reset built-in profile defaults, and may create, rename, delete, and organize
+  custom profiles below `Local`; local and SSH profiles cannot be dragged across that boundary.
+- During normal browsing `Local` is always first. During filtering it follows normal match rules
+  and disappears when no local profile matches, so it does not become an empty search result.
+- Change the title-bar **+ Session** control to a split button: its primary action opens the
+  default local profile; its menu lists local profiles plus **New SSH Session…** and
+  **New Local Profile…**. `Ctrl+Shift+T` opens the default local profile, and Quick Connect
+  searches local and SSH profiles together.
+
+**Profile model and migration:** replace the SSH-shaped leaf model with one tagged profile
+model containing common identity, folder, icon/color, and terminal overrides, plus exactly one
+target: `SshTarget` (host, port, username, auth, tmux) or `LocalTarget` (executable, arguments,
+starting directory, environment overrides). Store both in the same atomic profile store. Treat
+existing JSON records with no target kind as SSH during migration. The `Local` root itself is
+virtual and is never serialized as an ordinary folder. Keep executable and arguments separate;
+do not store an opaque command string with ambiguous quoting.
+
+**Terminal backend:** extract the input/output/resize/exit lifecycle from `TerminalTabView` into
+a small backend contract. The current `SshTerminalSession` is one implementation; the local
+implementation hosts the process with Windows ConPTY. ConPTY output feeds the existing xterm.js
+byte path, terminal resize calls `ResizePseudoConsole`, and close/stop owns the complete child
+process tree so an abandoned shell cannot leave child processes running. No console window may
+flash during launch.
+
+**Lifecycle and capability-aware UI:** local states are `starting`, `running`, `exited`, and
+`failed`; a normal `exit` is neutral, while launch failure is red. Keep the tab open after exit,
+show the exit code, and let Enter or **Restart** launch a fresh process with a scrollback divider.
+Rename SSH-specific actions for local tabs (`Disconnect` → `Stop`, `Reconnect` → `Restart`) and
+hide SFTP, SSHFS, host-key, tmux, and **End Remote Session** actions. The common backend surface
+must expose capabilities so the UI does not grow scattered target-kind checks.
+
+**Local profile editor:** name, executable, arguments, starting directory, environment-variable
+overrides, icon/color, terminal overrides, and **Make default**. Defer elevation / **Run as
+administrator** until a separate UAC and pseudoconsole-ownership design exists. Later, add a
+local filesystem provider to the file pane and OSC cwd integration; first delivery may expose
+**Open Working Folder** instead.
+
+**Acceptance:** open PowerShell and Command Prompt together; verify interactive input, UTF-8 and
+ANSI output, full-screen programs, resize, split/move without process loss, clone independence,
+clean `exit`/restart, and close with no orphaned descendants. Verify discovered profiles survive
+restart with stable identities, local profiles appear in search/Quick Connect, remote-only
+commands never appear on local tabs, and an existing SSH `sessions.json` migrates unchanged.
+
+### 6.2 Agent-aware tabs
+
+Keep the session icon above as the stable identity of the saved target (remote host or local
+shell), and add a **second, separate agent icon** to a tab while an agent CLI is active. The two
+icons answer different questions: the session icon says *where and how this tab is running*;
+the agent icon says *what is currently running in it*. Initial built-in agent identities:
+Claude Code, Codex, Gemini CLI,
 Pi / oh-my-pi, Grok Build, generic agent, and normal shell.
 
 Agent identity can come from a recognized launch command or terminal title, a per-session
 default, or a manual tab-menu override. Detection must never replace or modify a manually
-selected session icon. Keep the existing connection dot as a third, independent signal for
-SSH health.
+selected session icon. Keep the existing state dot as a third, independent signal for SSH
+connection health or local-process health.
 
 **Attention state:** show a small badge on the agent icon for `working`, `needs approval`,
 `needs answer`, `complete`, `failed`, or `idle`. An inactive tab that needs input keeps its
@@ -196,12 +252,12 @@ containing agent identity, attention state, and a short non-sensitive label. Acc
 BEL as generic fallbacks; pattern matching and quiet-output heuristics are low-confidence only
 and must not claim that input is definitely required.
 
-**Remote and security constraints:** validate the event path through plain SSH and the
-persistent tmux mode. Bind structured events to the originating tab so arbitrary remote output
-cannot impersonate a trusted event. Agent events may change UI state and focus a tab, but must
-never approve a tool call or send input automatically. Do not include prompts, commands, or
-terminal output in desktop notifications by default. Adapter installation on a remote host is
-explicit, previewed, and reversible.
+**Transport and security constraints:** validate the event path through local ConPTY, plain SSH,
+and persistent tmux mode. Bind structured events to the originating tab so arbitrary process or
+remote output cannot impersonate a trusted event. Agent events may change UI state and focus a
+tab, but must never approve a tool call or send input automatically. Do not include prompts,
+commands, or terminal output in desktop notifications by default. Adapter installation on a
+local or remote target is explicit, previewed, and reversible.
 
 **Later integration:** agents that expose ACP or a similar structured runtime can get richer
 status and controls in a later phase. The first version remains a terminal integration rather
@@ -264,7 +320,7 @@ layout can supply the workspace model above. Include workspaces in the Phase 4 e
 A slim overview ruler on the terminal's scrollbar edge mapping the whole scrollback —
 "where did that command start, where were the errors" answered at a glance instead of by
 blind dragging. Composes Phase 0.2 (search) and Phase 1 (highlighting) into a map; the
-line/timestamp index later feeds Phase 7 playback seeking, and Phase 6.1 agent events are
+line/timestamp index later feeds Phase 7 playback seeking, and Phase 6.2 agent events are
 a future mark type.
 
 **Visual model:** the ruler replaces the bare viewport scrollbar (no two adjacent scroll
@@ -348,10 +404,15 @@ local-test (real SSH echo → discovered gray ticks, pixel-exact). Real human
 accelerator keypresses remain untried (standing item). Next/prev **error** jump
 (failed-exit marks only) deferred.
 
-### 9.5 Timestamps
-Record coarse wall-clock per line at ingest (host side, pre-batching — nearly free)
-so hovers can answer "when did this happen" (`exit 2 · 14:32 · 3h ago`). Pre-builds
-the timing spine Phase 7 recording wants.
+### 9.5 Timestamps ✅ shipped 2026-08-16 (render-verified in xterm harness)
+The native host records Unix wall-clock time for every SSH read before the 16 ms/32 KB
+WebView batch combines reads. Batch payloads retain the original byte offsets, and page-side
+writes are serialized so each parsed logical line gets the correct coarse ingest time. A
+compact marker-anchored virtual-line index follows scrollback trimming; logical-line snapshots
+around `fit()` preserve times through resize/font reflow. Ruler hovers now answer "when did this
+happen" (`exit 2 · 14:32 · 3h ago`). This is also the timing spine Phase 7 recording needs.
+Verified with focused tests for async write ordering, wrapped lines, trimming, reflow, formatting,
+and command tooltip composition, plus a rendered xterm harness (tooltip text and resize reflow).
 
 ---
 
@@ -383,21 +444,23 @@ to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
 | 1 | Phase 0 foundations (overrides, search, host-key override) | S–M | Low |
 | 2 | **GSSAPI spike** (parallel with anything) | S | **High — do early** |
 | 3 | Phase 6 session icons | S | Low |
-| 4 | Phase 6.1 agent-aware tabs (identity → attention → adapters) | M | Medium |
-| 5 | Phase 1 highlighting | M | Low |
-| 6 | Phase 4 export/import | S–M | Low |
-| 7 | Phase 5 connectivity (tunnels → agent → jump hosts) | M–L | Medium |
-| 8 | Phase 3 SFTP pane (+ cwd tracking, SSHFS-Win link) | M–L | Medium |
-| 9 | Phase 9 annotated scrollbar (9.1–9.4 ✅; 9.5 staged) | S–M | Low |
-| 10 | Phase 7 session recording | M | Low |
-| 11 | Phase 8 workspaces (saved layouts) | M | Low |
-| 12 | Phase 2 GSSAPI productization (path chosen by spike) | M | Depends on spike |
-| 13 | Backlog picks | — | — |
+| 4 | Phase 6.1 local terminal profiles (model → ConPTY → parity) | M–L | Medium |
+| 5 | Phase 6.2 agent-aware tabs (identity → attention → adapters) | M | Medium |
+| 6 | Phase 1 highlighting | M | Low |
+| 7 | Phase 4 export/import | S–M | Low |
+| 8 | Phase 5 connectivity (tunnels → agent → jump hosts) | M–L | Medium |
+| 9 | Phase 3 SFTP pane (+ cwd tracking, SSHFS-Win link) | M–L | Medium |
+| 10 | Phase 9 annotated scrollbar (9.1–9.5 ✅) | S–M | Low |
+| 11 | Phase 7 session recording | M | Low |
+| 12 | Phase 8 workspaces (saved layouts) | M | Low |
+| 13 | Phase 2 GSSAPI productization (path chosen by spike) | M | Depends on spike |
+| 14 | Backlog picks | — | — |
 
 Session icons slot in early because they're small, self-contained, and touch the same
-session-editor surface Phase 0 reworks anyway. Agent-aware tabs follow them so the distinct
-session and agent identities are designed together, and because background attention is more
-valuable than cosmetic terminal highlighting. Export/import lands before SFTP because it's
+session-editor surface Phase 0 reworks anyway. Local terminal profiles follow them because the
+shared profile/backend model must settle before agent adapters and workspace restore depend on
+it. Agent-aware tabs then keep profile identity, process state, and agent identity separate.
+Export/import lands before SFTP because it's
 small and unblocks backing up the growing session tree (and now bundles custom icons). Within
 connectivity, tunnels come first (pure SSH.NET), then agent auth, then jump hosts (which build
 on the tunnel channel code). Workspaces sits late so the split model has settled, but it's

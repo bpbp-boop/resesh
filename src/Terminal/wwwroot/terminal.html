@@ -70,14 +70,16 @@
     match: "#7f8ea3", activeMatch: "#f2cc60", bookmark: "#61d6d6",
     flash: "rgba(242,204,96,0.28)", pending: "rgba(255,255,255,0.06)",
     cmdOk: "#2ea043", cmdFail: "#ff5555", cmdUnknown: "#9e9e9e",
-    tooltipBg: "#252526", tooltipFg: "#cccccc", tooltipBorder: "#454545"
+    tooltipBg: "#1e1e2b", tooltipFg: "#e6edf3", tooltipMuted: "#a7a7b5",
+    tooltipBorder: "#3a3a50"
   };
   const LIGHT_RULER = {
     background: "#ffffff", border: "#dddddd", thumb: "rgba(0,0,0,0.10)",
     match: "#5a6b85", activeMatch: "#c18401", bookmark: "#0997b3",
     flash: "rgba(193,132,1,0.22)", pending: "rgba(0,0,0,0.06)",
     cmdOk: "#50a14f", cmdFail: "#e45649", cmdUnknown: "#6a6a6a",
-    tooltipBg: "#f3f3f3", tooltipFg: "#333333", tooltipBorder: "#c8c8c8"
+    tooltipBg: "#f7f7fa", tooltipFg: "#24242b", tooltipMuted: "#666675",
+    tooltipBorder: "#c8c8d2"
   };
   const LIGHT_THEME = {
     background: "#ffffff", foreground: "#383a42", cursor: "#383a42",
@@ -158,6 +160,30 @@
     term.loadAddon(ruler);
     ruler.setTheme(term.options.theme === LIGHT_THEME ? LIGHT_RULER : DARK_RULER);
     if (Array.isArray(init.highlights)) ruler.setHighlightRules(init.highlights);
+
+    function fitPreservingTimestamps() {
+      ruler.captureTimestampReflow();
+      fit.fit();
+      ruler.restoreTimestampReflow();
+    }
+
+    // One native output message can contain several SSH reads combined by the 16 ms
+    // host batch. Parse each original byte range with its pre-batch arrival time.
+    function writeHostOutput(msg) {
+      const bytes = b64ToBytes(msg.data);
+      const ingest = Array.isArray(msg.ingest) ? msg.ingest : [];
+      if (ingest.length === 0) {
+        ruler.writeOutput(bytes, null); // compatibility with an older native host
+        return;
+      }
+      for (let i = 0; i < ingest.length; i++) {
+        const start = Math.max(0, Math.min(bytes.length, ingest[i].offset | 0));
+        const end = i + 1 < ingest.length
+          ? Math.max(start, Math.min(bytes.length, ingest[i + 1].offset | 0))
+          : bytes.length;
+        if (end > start) ruler.writeOutput(bytes.subarray(start, end), ingest[i].unixMs);
+      }
+    }
 
     // UI -> SSH
     term.onData(function (data) {
@@ -330,7 +356,7 @@
       if (fitPending) clearTimeout(fitPending);
       fitPending = setTimeout(function () {
         fitPending = null;
-        fit.fit();
+        fitPreservingTimestamps();
         reportSize();
       }, 40);
     }).observe(container);
@@ -345,22 +371,22 @@
       }
       switch (msg.type) {
         case "output":
-          term.write(b64ToBytes(msg.data));
+          writeHostOutput(msg);
           break;
         case "connected":
           connected = true;
           break;
         case "disconnected":
           connected = false;
-          term.write("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n");
-          term.write("\x1b[1;33m" + (msg.message || "Disconnected.") + "\x1b[0m Press Enter to reconnect.\r\n");
+          ruler.writeOutput("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n", null);
+          ruler.writeOutput("\x1b[1;33m" + (msg.message || "Disconnected.") + "\x1b[0m Press Enter to reconnect.\r\n", null);
           break;
         case "divider":
           // Reconnect-in-place: visual separator, scrollback preserved.
-          term.write("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n");
+          ruler.writeOutput("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n", null);
           break;
         case "notice":
-          term.write("\x1b[90m" + (msg.message || "") + "\x1b[0m\r\n");
+          ruler.writeOutput("\x1b[90m" + (msg.message || "") + "\x1b[0m\r\n", null);
           break;
         case "setOptions":
           // Live settings changes only — initial options arrive via the init handshake.
@@ -376,7 +402,7 @@
             if (typeof msg.scrollback === "number") term.options.scrollback = msg.scrollback;
             if (msg.fontSize) term.options.fontSize = msg.fontSize;
             if (msg.fontFamily) term.options.fontFamily = msg.fontFamily;
-            fit.fit();
+            fitPreservingTimestamps();
             reportSize();
           } catch (err) {
             pageTrace("setOptions: " + (err && err.message));
@@ -398,7 +424,7 @@
       }
     };
 
-    fit.fit();
+    fitPreservingTimestamps();
     term.focus();
     host.postMessage({ type: "ready", cols: term.cols, rows: term.rows });
   }

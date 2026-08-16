@@ -11,8 +11,11 @@ const window = { devicePixelRatio: 1 };
 vm.runInNewContext(source, { window, Map, Math, RegExp, Set, requestAnimationFrame() {} });
 const RulerAddon = window.RulerAddon.RulerAddon;
 
-test("ruler tooltip uses readable text", () => {
-  assert.match(source, /font-size:14px/);
+test("ruler tooltip uses the compact command-card typography", () => {
+  assert.match(source, /font-family:'Cascadia Mono',Consolas,monospace/);
+  assert.match(source, /font-size:12px/);
+  assert.match(source, /padding:5px 10px/);
+  assert.match(source, /border-radius:6px/);
 });
 
 function paintPresentation(isSplit, isGroupFocused, isPointerOver = false) {
@@ -87,4 +90,137 @@ test("hover restores the full width, colors, and opacity", () => {
   assert.equal(result.operations[0].x, 0);
   assert.equal(result.operations[0].width, 14);
   assert.equal(operationsWithColor(result, "#2ea043")[0].alpha, 1);
+});
+
+function timestampHarness(lines, cursorLine) {
+  const disposeHandlers = [];
+  const marker = {
+    line: cursorLine,
+    dispose() {},
+    onDispose(handler) { disposeHandlers.push(handler); },
+  };
+  const addon = new RulerAddon();
+  addon._term = {
+    buffer: {
+      active: {
+        type: "normal",
+        baseY: cursorLine,
+        cursorY: 0,
+        get length() { return lines.length; },
+        getLine(index) { return lines[index] || null; },
+      },
+    },
+    registerMarker() { marker.line = addon._term.buffer.active.baseY; return marker; },
+  };
+  return { addon, marker };
+}
+
+test("line times follow wrapped rows and scrollback trimming", () => {
+  const lines = [{ isWrapped: false }, { isWrapped: false }, { isWrapped: true }];
+  const { addon, marker } = timestampHarness(lines, 2);
+  const when = Date.UTC(2026, 7, 16, 4, 32);
+
+  addon._timeStampLine(1, when);
+  assert.equal(addon._timeForLine(2), when);
+
+  // The logical line and its continuation each moved up by one row. The sentinel
+  // marker moved with them, so the virtual coordinate still resolves the same time.
+  lines.shift();
+  marker.line--;
+  addon._term.buffer.active.baseY--;
+  assert.equal(addon._timeForLine(1), when);
+});
+
+test("timestamped writes stay ordered while xterm parses asynchronously", () => {
+  const lines = [{ isWrapped: false }];
+  const { addon } = timestampHarness(lines, 0);
+  const writes = [];
+  addon._term.write = (data, done) => writes.push({ data, done });
+
+  addon.writeOutput("first", 1000);
+  addon.writeOutput("second", 2000);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].data, "first");
+  assert.equal(addon._timeForLine(0), 1000);
+
+  writes[0].done();
+  assert.equal(writes.length, 2);
+  assert.equal(writes[1].data, "second");
+  assert.equal(addon._timeForLine(0), 2000);
+});
+
+test("line times are restored by logical-line order after reflow", () => {
+  const lines = [{ isWrapped: false }, { isWrapped: true }, { isWrapped: false }];
+  const { addon } = timestampHarness(lines, 2);
+  addon._timeStampLine(0, 1000);
+  addon._timeStampLine(2, 2000);
+  addon.captureTimestampReflow();
+
+  // A wider terminal unwraps the first logical line and wraps the second one.
+  lines.splice(0, lines.length,
+    { isWrapped: false }, { isWrapped: false }, { isWrapped: true });
+  addon.restoreTimestampReflow();
+
+  assert.equal(addon._timeForLine(0), 1000);
+  assert.equal(addon._timeForLine(2), 2000);
+});
+
+test("timestamp text is coarse local wall clock plus relative age", () => {
+  const addon = new RulerAddon();
+  const when = new Date(2026, 7, 16, 14, 32).getTime();
+
+  const old = addon._formatTimestamp(when, when + 3 * 60 * 60 * 1000);
+  assert.equal(old.clock, "14:32");
+  assert.equal(old.relative, "3h ago");
+
+  const recent = addon._formatTimestamp(when, when + 45 * 1000);
+  assert.equal(recent.clock, "14:32");
+  assert.equal(recent.relative, "now");
+});
+
+test("command tooltip includes its wall clock and relative age", () => {
+  const lines = [{
+    isWrapped: false,
+    translateToString() { return "$ deploy"; },
+  }];
+  const { addon } = timestampHarness(lines, 0);
+  addon._strip = { clientHeight: 100 };
+  addon._tooltip = { textContent: "", offsetHeight: 20, style: {} };
+  addon._cmdMarks = [{ marker: { line: 0 }, exit: 2, src: "osc" }];
+  addon._timeStampLine(0, Date.now() - 3 * 60 * 60 * 1000);
+
+  addon._showTooltip(0);
+
+  assert.match(addon._tooltip.textContent, /^\$ deploy\nexit 2 · \d{2}:\d{2} · 3h ago$/);
+});
+
+test("command card colors the prompt and alert metadata separately", () => {
+  function makeElement(ownerDocument) {
+    return {
+      ownerDocument,
+      children: [],
+      style: {},
+      textContent: "",
+      appendChild(child) { this.children.push(child); return child; },
+    };
+  }
+  const doc = {
+    createElement() { return makeElement(doc); },
+    createTextNode(text) { return { textContent: text }; },
+  };
+  const tip = makeElement(doc);
+  const addon = new RulerAddon();
+
+  addon._renderTooltip(tip, "$ deploy", [
+    { text: "exit 2", color: null },
+    { text: "61 errors below", color: addon._colors.cmdFail },
+  ]);
+
+  assert.equal(tip.children.length, 2);
+  assert.equal(tip.children[0].children[0].textContent, "$");
+  assert.equal(tip.children[0].children[0].style.color, addon._colors.cmdOk);
+  assert.equal(tip.children[0].children[1].textContent, " deploy");
+  assert.equal(tip.children[1].children[0].style.color, undefined);
+  assert.equal(tip.children[1].children[2].textContent, "61 errors below");
+  assert.equal(tip.children[1].children[2].style.color, addon._colors.cmdFail);
 });

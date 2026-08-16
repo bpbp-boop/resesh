@@ -48,6 +48,10 @@
  *       — the shell knows better than the regex.
  *     Marks are xterm markers (trim-safe); tmux capture-pane replay preserves neither
  *     OSC 133 nor keystroke history, so the command lane starts fresh on reattach.
+ *   - Line timestamps (Phase 9.5) arrive from the native host with each SSH read,
+ *     before its 16 ms output batch combines reads. A compact virtual-line map keeps
+ *     them aligned through scrollback trimming. The page snapshots logical-line times
+ *     around xterm reflow so a font or window-size change does not detach them.
  *   - The alternate buffer (vim/htop) has no scrollback: the ruler hides itself.
  */
 (function () {
@@ -71,6 +75,8 @@
   var CMD_ECHO_SETTLE_MS = 300; // Enter -> probe evaluation: wait for the echo round trip
   var CMD_ECHO_RETRY_MS = 900;  // one retry for laggy links before the probe gives up
 
+  var TIME_REANCHOR_GAP = 4096;
+
   // Prompt shapes for discovered command marks: an optional body — bracketed
   // ("[user@host ~]") or space-free ("user@host:~/dir", "Switch(config-if)") — then a
   // $ # % > terminator, an optional space, and a non-space (the command; an empty
@@ -92,7 +98,8 @@
       match: "#7f8ea3", activeMatch: "#f2cc60", bookmark: "#61d6d6",
       flash: "rgba(242,204,96,0.28)", pending: "rgba(255,255,255,0.06)",
       cmdOk: "#2ea043", cmdFail: "#ff5555", cmdUnknown: "#9e9e9e",
-      tooltipBg: "#252526", tooltipFg: "#cccccc", tooltipBorder: "#454545"
+      tooltipBg: "#1e1e2b", tooltipFg: "#e6edf3", tooltipMuted: "#a7a7b5",
+      tooltipBorder: "#3a3a50"
     };
 
     this._search = null;      // { query, caseSensitive, regex }
@@ -107,6 +114,14 @@
     this._cmdOscSeen = false; // a shell spoke OSC 133: discovery defers to it from then on
     this._cmdPromptLine = -1; // absolute line of the last OSC 133;A/B prompt start
     this._cmdPending = null;  // mark committed by C, awaiting its D exit code
+
+    this._timeWrites = [];    // serialized xterm writes: { data, unixMs|null }
+    this._timeWriteActive = false;
+    this._timeActiveUnixMs = null;
+    this._timeIndex = new Map(); // virtual logical-line start -> Unix milliseconds
+    this._timeAnchor = null;  // { marker, virtual }, same trim-safe coordinate scheme as highlights
+    this._timePruneAt = 0;
+    this._timeReflowSnapshot = null;
 
     this._hlRules = [];       // compiled overview rules: { id, name, re, color }
     this._hlIndex = new Map();// virtual line -> bitmask of _hlRules indexes
@@ -142,9 +157,10 @@
     var tooltip = document.createElement("div");
     tooltip.className = "scroll-ruler-tooltip";
     tooltip.style.cssText = "position:absolute;right:" + (WIDTH + 6) +
-      "px;display:none;z-index:31;max-width:420px;padding:4px 8px;border-radius:4px;" +
-      "font-family:'Segoe UI',sans-serif;font-size:14px;white-space:nowrap;overflow:hidden;" +
-      "text-overflow:ellipsis;pointer-events:none;";
+      "px;display:none;z-index:31;max-width:420px;padding:5px 10px;border-radius:6px;" +
+      "font-family:'Cascadia Mono',Consolas,monospace;font-size:12px;line-height:16px;" +
+      "white-space:normal;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,0.35);" +
+      "pointer-events:none;";
     term.element.appendChild(tooltip);
     this._tooltip = tooltip;
 
@@ -158,7 +174,10 @@
       self._queuePaint();
       if (self._search) self._scheduleRescan();
     }));
-    this._disposables.push(term.onLineFeed(function () { self._hlKick(); }));
+    this._disposables.push(term.onLineFeed(function () {
+      self._timeStampCurrent();
+      self._hlKick();
+    }));
     if (term.parser && term.parser.registerOscHandler) {
       this._disposables.push(term.parser.registerOscHandler(133, function (data) {
         try {
@@ -209,6 +228,11 @@
     for (var m = 0; m < cmdMarks.length; m++) cmdMarks[m].marker.dispose();
     this._cmdMarks = [];
     this._cmdPending = null;
+    this._timeWrites = [];
+    this._timeWriteActive = false;
+    this._timeActiveUnixMs = null;
+    this._timeIndex.clear();
+    if (this._timeAnchor) { var timeAnchor = this._timeAnchor; this._timeAnchor = null; timeAnchor.marker.dispose(); }
     this._hlRules = [];
     this._hlIndex.clear();
     if (this._hlAnchor) { var anchor = this._hlAnchor; this._hlAnchor = null; anchor.marker.dispose(); }
@@ -231,6 +255,180 @@
     this._isSplit = isSplit === true;
     this._isGroupFocused = isGroupFocused !== false;
     this._queuePaint();
+  };
+
+  // ---- host-ingest timestamps (Phase 9.5) ----
+
+  /** Serialize all terminal writes so the active host timestamp is exact while xterm's
+   * asynchronous parser raises onLineFeed. Pass null for app-generated notices. */
+  RulerAddon.prototype.writeOutput = function (data, unixMs) {
+    this._timeWrites.push({
+      data: data,
+      unixMs: typeof unixMs === "number" && isFinite(unixMs) ? unixMs : null
+    });
+    this._timeDrainWrites();
+  };
+
+  RulerAddon.prototype._timeDrainWrites = function () {
+    if (this._timeWriteActive || !this._term || this._timeWrites.length === 0) return;
+    var self = this;
+    var next = this._timeWrites.shift();
+    this._timeWriteActive = true;
+    this._timeActiveUnixMs = next.unixMs;
+    this._timeStampCurrent();
+    this._term.write(next.data, function () {
+      // Capture a partial line or cursor movement which did not raise onLineFeed.
+      self._timeStampCurrent();
+      self._timeActiveUnixMs = null;
+      self._timeWriteActive = false;
+      self._timeDrainWrites();
+    });
+  };
+
+  RulerAddon.prototype._timeStampCurrent = function () {
+    if (this._timeActiveUnixMs === null || !this._term) return;
+    var buf = this._term.buffer.active;
+    if (buf.type === "alternate") return;
+    this._timeStampLine(buf.baseY + buf.cursorY, this._timeActiveUnixMs);
+  };
+
+  /** Timestamp the logical line containing abs. Wrapped display rows inherit the time
+   * from their first row, so the index stays compact and reflow has one value to move. */
+  RulerAddon.prototype._timeStampLine = function (abs, unixMs) {
+    var buf = this._term.buffer.active;
+    var line = buf.getLine(abs);
+    while (line && line.isWrapped && abs > 0) {
+      abs--;
+      line = buf.getLine(abs);
+    }
+    var anchor = this._timeEnsureAnchor();
+    if (!anchor) return;
+    var offset = anchor.virtual - anchor.marker.line;
+    this._timeIndex.set(abs + offset, unixMs);
+
+    var topVirt = offset;
+    if (topVirt > this._timePruneAt + TIME_REANCHOR_GAP) {
+      this._timePruneAt = topVirt;
+      var dead = [];
+      this._timeIndex.forEach(function (value, virt) { if (virt < topVirt) dead.push(virt); });
+      for (var i = 0; i < dead.length; i++) this._timeIndex.delete(dead[i]);
+    }
+  };
+
+  RulerAddon.prototype._timeForLine = function (abs) {
+    if (!this._timeAnchor || !this._term) return null;
+    var buf = this._term.buffer.active;
+    var line = buf.getLine(abs);
+    while (line && line.isWrapped && abs > 0) {
+      abs--;
+      line = buf.getLine(abs);
+    }
+    var virt = abs + this._timeAnchor.virtual - this._timeAnchor.marker.line;
+    var value = this._timeIndex.get(virt);
+    return typeof value === "number" ? value : null;
+  };
+
+  RulerAddon.prototype._timeEnsureAnchor = function () {
+    var term = this._term;
+    var buf = term.buffer.active;
+    if (this._timeAnchor) {
+      if (buf.baseY + buf.cursorY - this._timeAnchor.marker.line > TIME_REANCHOR_GAP) {
+        var next = term.registerMarker(0);
+        if (next) {
+          var virt = next.line + this._timeAnchor.virtual - this._timeAnchor.marker.line;
+          var old = this._timeAnchor;
+          this._timeAnchor = { marker: next, virtual: virt };
+          this._timeWatchAnchor(next);
+          old.marker.dispose();
+        }
+      }
+      return this._timeAnchor;
+    }
+    var marker = term.registerMarker(0);
+    if (!marker) return null;
+    this._timeAnchor = { marker: marker, virtual: marker.line };
+    this._timeWatchAnchor(marker);
+    return this._timeAnchor;
+  };
+
+  RulerAddon.prototype._timeWatchAnchor = function (marker) {
+    var self = this;
+    marker.onDispose(function () {
+      if (self._timeAnchor && self._timeAnchor.marker === marker) {
+        // A single parser flood outran re-anchoring. Old coordinates can no longer be
+        // related to the buffer safely, so discard them instead of showing wrong times.
+        self._timeAnchor = null;
+        self._timeIndex.clear();
+        self._timePruneAt = 0;
+      }
+    });
+  };
+
+  /** Called immediately before fit.fit(). Preserve one timestamp (or null) per
+   * logical line plus the cursor's ordinal. The cursor anchor accounts for any blank
+   * viewport rows added or removed, or old scrollback trimmed, during reflow. */
+  RulerAddon.prototype.captureTimestampReflow = function () {
+    if (!this._term || !this._timeAnchor) { this._timeReflowSnapshot = null; return; }
+    var buf = this._term.buffer.active;
+    if (buf.type === "alternate") { this._timeReflowSnapshot = null; return; }
+    var values = [];
+    var cursorAbs = buf.baseY + buf.cursorY;
+    var cursorLogical = 0;
+    for (var i = 0; i < buf.length; i++) {
+      var line = buf.getLine(i);
+      if (line && !line.isWrapped) {
+        if (i <= cursorAbs) cursorLogical = values.length;
+        values.push(this._timeForLine(i));
+      }
+    }
+    this._timeReflowSnapshot = { values: values, cursorLogical: cursorLogical };
+  };
+
+  RulerAddon.prototype.restoreTimestampReflow = function () {
+    var snapshot = this._timeReflowSnapshot;
+    this._timeReflowSnapshot = null;
+    if (!snapshot || !this._term) return;
+
+    this._timeIndex.clear();
+    this._timePruneAt = 0;
+    if (this._timeAnchor) {
+      var old = this._timeAnchor;
+      this._timeAnchor = null;
+      old.marker.dispose();
+    }
+
+    var buf = this._term.buffer.active;
+    var starts = [];
+    var cursorAbs = buf.baseY + buf.cursorY;
+    var cursorLogical = 0;
+    for (var i = 0; i < buf.length; i++) {
+      var line = buf.getLine(i);
+      if (!line || line.isWrapped) continue;
+      if (i <= cursorAbs) cursorLogical = starts.length;
+      starts.push(i);
+    }
+    var shift = cursorLogical - snapshot.cursorLogical;
+    for (var logical = 0; logical < snapshot.values.length; logical++) {
+      var target = logical + shift;
+      var unixMs = snapshot.values[logical];
+      if (unixMs !== null && target >= 0 && target < starts.length)
+        this._timeStampLine(starts[target], unixMs);
+    }
+  };
+
+  RulerAddon.prototype._formatTimestamp = function (unixMs, nowMs) {
+    if (typeof unixMs !== "number" || !isFinite(unixMs)) return null;
+    var date = new Date(unixMs);
+    var clock = String(date.getHours()).padStart(2, "0") + ":" +
+      String(date.getMinutes()).padStart(2, "0");
+    var elapsed = Math.max(0, (typeof nowMs === "number" ? nowMs : Date.now()) - unixMs);
+    var seconds = Math.floor(elapsed / 1000);
+    var relative;
+    if (seconds < 60) relative = "now";
+    else if (seconds < 3600) relative = Math.floor(seconds / 60) + "m ago";
+    else if (seconds < 86400) relative = Math.floor(seconds / 3600) + "h ago";
+    else relative = Math.floor(seconds / 86400) + "d ago";
+    return { clock: clock, relative: relative };
   };
 
   // ---- search source ----
@@ -772,36 +970,91 @@
       }
     }
 
-    var parts = ["line " + Math.min(line + 1, total)];
-    if (commands === 1) {
-      parts.push(soleCommand.exit === null ? "command" : "exit " + soleCommand.exit);
-    } else if (commands > 1) {
-      parts.push(commands + " commands");
-    }
-    if (matches > 0) parts.push(matches === 1 ? "1 match" : matches + " matches");
-    if (bookmarks > 0) parts.push(bookmarks === 1 ? "1 bookmark" : bookmarks + " bookmarks");
-    for (var hr = 0; hr < hlRules.length; hr++) {
-      if (hlCounts[hr]) parts.push(hlCounts[hr] + "× " + hlRules[hr].name);
-    }
-    var text = parts.join(" · ");
-
     var sampleLine = firstMatch >= 0 ? firstMatch
       : firstHl >= 0 ? firstHl
       : soleCommand ? soleCommand.marker.line
       : line;
+
+    var metadata = [];
+    function addMetadata(text, color) { metadata.push({ text: text, color: color || null }); }
+    if (commands === 1) {
+      addMetadata(soleCommand.exit === null ? "command" : "exit " + soleCommand.exit);
+    } else if (commands > 1) {
+      addMetadata(commands + " commands");
+    }
+    var timestamp = this._formatTimestamp(this._timeForLine(sampleLine));
+    if (timestamp) {
+      addMetadata(timestamp.clock);
+      addMetadata(timestamp.relative);
+    }
+    if (matches > 0)
+      addMetadata(matches === 1 ? "1 match" : matches + " matches", this._colors.activeMatch);
+    if (bookmarks > 0)
+      addMetadata(bookmarks === 1 ? "1 bookmark" : bookmarks + " bookmarks", this._colors.bookmark);
+    for (var hr = 0; hr < hlRules.length; hr++) {
+      if (hlCounts[hr]) addMetadata(hlCounts[hr] + "× " + hlRules[hr].name, hlRules[hr].color);
+    }
+
     var bufLine = buf.getLine(Math.max(0, Math.min(sampleLine, total - 1)));
     var sample = bufLine ? bufLine.translateToString(true).trim() : "";
-    if (sample) text += " · " + (sample.length > 60 ? sample.slice(0, 60) + "…" : sample);
+    sample = sample.length > 72 ? sample.slice(0, 72) + "…" : sample;
+    if (!sample) sample = "line " + Math.min(line + 1, total);
+    else if (commands === 0) metadata.unshift({ text: "line " + Math.min(line + 1, total), color: null });
 
     var c = this._colors;
     var tip = this._tooltip;
-    tip.textContent = text;
+    this._renderTooltip(tip, sample, metadata);
     tip.style.background = c.tooltipBg;
     tip.style.color = c.tooltipFg;
     tip.style.border = "1px solid " + c.tooltipBorder;
     tip.style.display = "block";
     var tipH = tip.offsetHeight;
     tip.style.top = Math.max(0, Math.min(y - tipH / 2, h - tipH)) + "px";
+  };
+
+  /** Render the tooltip as a compact command card: command/sample first, metadata below.
+   * Build DOM with textContent only; terminal output is untrusted. Plain-object test doubles
+   * use the newline fallback. */
+  RulerAddon.prototype._renderTooltip = function (tip, sample, metadata) {
+    var prompt = "", command = sample;
+    var match = sample.match(/^((?:\[[^\]]{1,100}\]|[^\s$#%>]{0,100})[$#%>])\s?(.*)$/);
+    if (match) { prompt = match[1]; command = match[2]; }
+
+    var metadataText = metadata.map(function (part) { return part.text; }).join(" · ");
+    if (!tip.ownerDocument || typeof tip.appendChild !== "function") {
+      tip.textContent = sample + (metadataText ? "\n" + metadataText : "");
+      return;
+    }
+
+    tip.textContent = "";
+    var doc = tip.ownerDocument;
+    var top = doc.createElement("div");
+    top.style.cssText = "font-weight:600;color:" + this._colors.tooltipFg +
+      ";white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+    if (prompt) {
+      var promptSpan = doc.createElement("span");
+      promptSpan.style.color = this._colors.cmdOk;
+      promptSpan.textContent = prompt;
+      top.appendChild(promptSpan);
+      if (command) top.appendChild(doc.createTextNode(" " + command));
+    } else {
+      top.textContent = sample;
+    }
+    tip.appendChild(top);
+
+    if (metadata.length > 0) {
+      var bottom = doc.createElement("div");
+      bottom.style.cssText = "color:" + (this._colors.tooltipMuted || this._colors.tooltipFg) +
+        ";white-space:nowrap;";
+      for (var i = 0; i < metadata.length; i++) {
+        if (i > 0) bottom.appendChild(doc.createTextNode(" · "));
+        var span = doc.createElement("span");
+        span.textContent = metadata[i].text;
+        if (metadata[i].color) span.style.color = metadata[i].color;
+        bottom.appendChild(span);
+      }
+      tip.appendChild(bottom);
+    }
   };
 
   RulerAddon.prototype._hideTooltip = function () {

@@ -25,6 +25,7 @@ public sealed class TerminalControl : Grid, IDisposable
     private object? _initialOptions;
     private readonly object _outputGate = new();
     private MemoryStream _pendingOutput = new();
+    private List<OutputIngest> _pendingIngest = [];
     private DispatcherQueueTimer? _flushTimer;
     private bool _pageReady;
     private bool _disposed;
@@ -158,12 +159,16 @@ public sealed class TerminalControl : Grid, IDisposable
 
     public void WriteOutput(byte[] data)
     {
-        if (_disposed)
+        if (_disposed || data.Length == 0)
             return;
 
+        // Capture arrival time before the UI batch combines independent SSH reads.
+        // The page uses the byte offsets to restore each read's time while parsing.
+        var unixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         bool flushNow;
         lock (_outputGate)
         {
+            _pendingIngest.Add(new OutputIngest((int)_pendingOutput.Length, unixMs));
             _pendingOutput.Write(data);
             flushNow = _pendingOutput.Length >= FlushThresholdBytes;
         }
@@ -195,15 +200,20 @@ public sealed class TerminalControl : Grid, IDisposable
     private void FlushOutput()
     {
         byte[] chunk;
+        List<OutputIngest> ingest;
         lock (_outputGate)
         {
             if (_pendingOutput.Length == 0)
                 return;
             chunk = _pendingOutput.ToArray();
             _pendingOutput = new MemoryStream();
+            ingest = _pendingIngest;
+            _pendingIngest = [];
         }
-        Post(new { type = "output", data = Convert.ToBase64String(chunk) });
+        Post(new { type = "output", data = Convert.ToBase64String(chunk), ingest });
     }
+
+    private readonly record struct OutputIngest(int Offset, long UnixMs);
 
     // ---- control messages (UI thread) ----
 
