@@ -20,7 +20,7 @@ public sealed class MainViewModel : ObservableObject
 
     public ObservableCollection<TreeNodeViewModel> RootNodes { get; } = [];
 
-    /// <summary>1 or 2 tab groups (v1 caps at 2, side by side).</summary>
+    /// <summary>All tab groups in visual traversal order.</summary>
     public ObservableCollection<TabGroupViewModel> Groups { get; } = [];
 
     public MainViewModel(SessionStore store, ICredentialService credentials)

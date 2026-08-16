@@ -254,8 +254,8 @@ the DB, side by side").
   feature (continuum to resurrect). Persist the live layout on clean exit; pairs especially
   well with tmux-persistent sessions, which reattach instantly.
 
-**Sequencing note:** lands after the v1 two-group split cap is revisited (or ships with it —
-the model above doesn't assume a cap). Include workspaces in the Phase 4 export archive.
+**Sequencing note:** the v1 two-group split cap is now removed. The recursive row/column
+layout can supply the workspace model above. Include workspaces in the Phase 4 export archive.
 
 ---
 

@@ -109,6 +109,7 @@
                         Text="Split Right"
                         Click="SplitRightMenu_Click"
                         KeyboardAcceleratorTextOverride="Ctrl+Shift+\" />
+                    <MenuFlyoutItem Text="Split Down" Click="SplitDownMenu_Click" />
                     <MenuFlyoutItem
                         Text="File Pane"
                         Click="FilePaneMenu_Click"
@@ -285,22 +286,9 @@
                 ResizeBehavior="BasedOnAlignment"
                 ManipulationCompleted="TreeSplitter_ManipulationCompleted" />
 
-            <!-- Tab group area: up to two side-by-side groups; group views are created in code. -->
-            <Grid x:Name="GroupArea" Grid.Column="2" Margin="0,0,4,4">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition x:Name="LeftGroupColumn" Width="*" />
-                    <ColumnDefinition x:Name="SplitterColumn" Width="Auto" />
-                    <ColumnDefinition x:Name="RightGroupColumn" Width="0" />
-                </Grid.ColumnDefinitions>
-
-                <toolkit:GridSplitter
-                    x:Name="Splitter"
-                    Grid.Column="1"
-                    Width="8"
-                    Visibility="Collapsed"
-                    ResizeBehavior="BasedOnAlignment"
-                    ManipulationCompleted="Splitter_ManipulationCompleted" />
-            </Grid>
+            <!-- Recursive tab-group layout. Code builds equal row/column siblings and
+                 inserts a GridSplitter between each pair. -->
+            <Grid x:Name="GroupArea" Grid.Column="2" Margin="0,0,4,4" />
         </Grid>
 
         <!-- Status bar -->

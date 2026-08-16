@@ -326,3 +326,18 @@ keyboard-interactive fallback.
   from MainViewModel.FocusedGroup setter, Connect, and MoveTabBetweenGroups (explicitly,
   since the setter no-ops when the target group already had focus). Verified pixel-exact:
   exactly one accent run in the strip, flipping groups on click.
+
+## 2026-08-16 - Recursive tab-group splits
+- The fixed two-column group grid is replaced by a recursive split tree. A branch contains
+  equal-size column or row children, and a leaf owns one TabGroupView. Splitting a leaf in
+  the same direction as its parent adds a sibling to that branch, so repeated column or row
+  creation gives every sibling one equal star share.
+- Dragging a tab over terminal content resolves the nearest edge: left/right create columns,
+  and top/bottom create rows. The translucent VS Code-style rectangle covers the half that
+  the new group will occupy. Dropping on a tab strip still moves or reorders without a split.
+- Empty leaves are removed from the split tree. One-child branches collapse, and adjacent
+  branches with the same orientation flatten. Live TerminalTabView instances are detached
+  and re-parented during layout rebuilds; their SSH sessions and scrollback remain owned by
+  the tab rather than the layout container.
+- Verified by the Release build and focused split-tree tests. Live multi-row dragging and
+  WebView2 re-parenting have not yet been checked in a running app.

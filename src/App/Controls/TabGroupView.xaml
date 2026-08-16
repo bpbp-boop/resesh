@@ -25,6 +25,8 @@
                     <x:Double x:Key="TabViewItemMinHeight">35</x:Double>
                     <x:Double x:Key="TabViewItemHeaderMinHeight">35</x:Double>
                     <SolidColorBrush x:Key="CodeTabSeparatorBrush" Color="#2B2B2B" />
+                    <!-- Matches VS Code's dark editor-group drop preview. -->
+                    <SolidColorBrush x:Key="TabDropOverlayBrush" Color="#8053595D" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="TabViewBackground" Color="#F3F3F3" />
@@ -39,6 +41,7 @@
                     <x:Double x:Key="TabViewItemMinHeight">35</x:Double>
                     <x:Double x:Key="TabViewItemHeaderMinHeight">35</x:Double>
                     <SolidColorBrush x:Key="CodeTabSeparatorBrush" Color="#D8D8D8" />
+                    <SolidColorBrush x:Key="TabDropOverlayBrush" Color="#332677CB" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
@@ -187,5 +190,24 @@
         </TabView>
 
         <Grid x:Name="TerminalHost" Grid.Row="1" />
+
+        <!-- Visible only during an in-app tab drag. It sits above WebView2 so the XAML
+             drag target stays reliable, while the rectangle previews the resulting group. -->
+        <Grid
+            x:Name="ContentDropSurface"
+            Grid.Row="1"
+            Background="Transparent"
+            AllowDrop="True"
+            Visibility="Collapsed"
+            DragOver="ContentDropSurface_DragOver"
+            DragLeave="ContentDropSurface_DragLeave"
+            Drop="ContentDropSurface_Drop">
+            <Rectangle
+                x:Name="ContentDropOverlay"
+                Margin="3"
+                Fill="{ThemeResource TabDropOverlayBrush}"
+                IsHitTestVisible="False"
+                Visibility="Collapsed" />
+        </Grid>
     </Grid>
 </UserControl>

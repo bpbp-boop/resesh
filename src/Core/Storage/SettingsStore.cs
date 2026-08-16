@@ -4,12 +4,9 @@ using Sessions.Core.Models;
 
 namespace Sessions.Core.Storage;
 
-/// <summary>App-wide settings (window/split layout now; terminal preferences in M5).</summary>
+/// <summary>App-wide shell and terminal settings.</summary>
 public sealed record AppSettings
 {
-    /// <summary>Left group's share of the tab area width when split (0..1); null = never split.</summary>
-    public double? SplitterFraction { get; init; }
-
     /// <summary>Session tree pane width in pixels; null = default.</summary>
     public double? TreePaneWidth { get; init; }
 

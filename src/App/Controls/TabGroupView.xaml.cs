@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Sessions.App.ViewModels;
+using Sessions.Core.Layout;
 using Sessions.Core.Models;
 
 namespace Sessions.App.Controls;
@@ -15,8 +16,10 @@ public interface ITabGroupHost
     Task RequestCloseTabAsync(TabViewModel tab);
     Task RequestCloseManyAsync(IReadOnlyList<TabViewModel> tabs, string description);
     void SplitRight(TabViewModel tab);
-    void MoveToOtherGroup(TabViewModel tab);
+    void SplitDown(TabViewModel tab);
+    void SplitTab(TabViewModel tab, TabGroupViewModel targetGroup, SplitDirection direction);
     void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex);
+    void SetTabContentDropTargetsVisible(bool visible);
     void CloneSession(TabViewModel tab);
     void TogglePin(TabViewModel tab);
     Task OpenSessionOptionsAsync(TabViewModel tab);
@@ -38,6 +41,7 @@ public sealed partial class TabGroupView : UserControl
     private readonly MenuFlyout _tabMenu;
     private TabViewModel? _menuTab;
     private TabViewModel? _middleClickTab;
+    private SplitDirection _dropDirection = SplitDirection.Right;
 
     public TabGroupViewModel Group { get; }
 
@@ -180,7 +184,8 @@ public sealed partial class TabGroupView : UserControl
 
     private MenuFlyoutItem _rename = null!, _resetName = null!, _reconnect = null!, _disconnect = null!, _endRemote = null!,
         _close = null!, _closeDisconnected = null!, _closeOthers = null!, _closeRight = null!,
-        _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _options = null!,
+        _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _splitDown = null!,
+        _options = null!,
         _filePane = null!, _filePaneCwd = null!;
     private MenuFlyoutSubItem _highlight = null!;
 
@@ -222,14 +227,9 @@ public sealed partial class TabGroupView : UserControl
         _pin = Item("Pin Tab", tab => _host.TogglePin(tab));
         _lock = Item("Lock Session…", tab => _ = _host.LockSessionAsync(tab));
         _clone = Item("Clone Session", tab => _host.CloneSession(tab));
-        _split = Item("Split Right", tab =>
-        {
-            if (_host.ViewModel.IsSplit)
-                _host.MoveToOtherGroup(tab);
-            else
-                _host.SplitRight(tab);
-        });
+        _split = Item("Split Right", tab => _host.SplitRight(tab));
         _split.KeyboardAcceleratorTextOverride = "Ctrl+Shift+\\";
+        _splitDown = Item("Split Down", tab => _host.SplitDown(tab));
         _options = Item("Session Options…", tab => _ = _host.OpenSessionOptionsAsync(tab));
         _highlight = new MenuFlyoutSubItem { Text = "Highlighting" };
 
@@ -252,6 +252,7 @@ public sealed partial class TabGroupView : UserControl
         menu.Items.Add(_clone);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_split);
+        menu.Items.Add(_splitDown);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_filePane);
         menu.Items.Add(_filePaneCwd);
@@ -275,9 +276,9 @@ public sealed partial class TabGroupView : UserControl
         _closeRight.IsEnabled = Group.Tabs.Skip(Group.Tabs.IndexOf(tab) + 1).Any(t => !t.IsPinned);
         _pin.Text = tab.IsPinned ? "Unpin Tab" : "Pin Tab";
         _lock.IsEnabled = !tab.IsLocked;
-        _split.Text = _host.ViewModel.IsSplit ? "Move to Other Group" : "Split Right";
         // Splitting a lone tab would leave an empty group that immediately collapses — pointless.
-        _split.IsEnabled = _host.ViewModel.IsSplit || Group.Tabs.Count > 1;
+        _split.IsEnabled = Group.Tabs.Count > 1;
+        _splitDown.IsEnabled = Group.Tabs.Count > 1;
         _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
         // cwd tracking rides the tmux side-channel; plain sessions would just open at home.
         _filePaneCwd.Visibility = tab.Session.Persistent ? Visibility.Visible : Visibility.Collapsed;
@@ -373,6 +374,13 @@ public sealed partial class TabGroupView : UserControl
 
     // ---- drag between groups ----
 
+    public void SetContentDropTargetVisible(bool visible)
+    {
+        ContentDropSurface.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (!visible)
+            ContentDropOverlay.Visibility = Visibility.Collapsed;
+    }
+
     private void Tabs_TabDragStarting(TabView sender, TabViewTabDragStartingEventArgs args)
     {
         // Pinned tabs stay put at the front of their group.
@@ -384,6 +392,7 @@ public sealed partial class TabGroupView : UserControl
         _draggedTab = args.Item as TabViewModel;
         _dragSource = this;
         args.Data.RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
+        _host.SetTabContentDropTargetsVisible(true);
     }
 
     private void Tabs_TabStripDragOver(object sender, DragEventArgs e)
@@ -416,12 +425,80 @@ public sealed partial class TabGroupView : UserControl
 
         // Never land in front of the target group's pinned tabs.
         _host.MoveTabBetweenGroups(tab, Group, Math.Max(index, Group.Tabs.Count(t => t.IsPinned)));
-        _draggedTab = null;
-        _dragSource = null;
+        EndTabDrag();
+    }
+
+    private void ContentDropSurface_DragOver(object sender, DragEventArgs e)
+    {
+        if (_draggedTab is null || _dragSource is null)
+            return;
+
+        var sourceGroup = _dragSource.Group;
+        // Splitting a group's only tab around itself would collapse the source and produce
+        // no visible change. A lone tab can still be moved to split another group.
+        if (ReferenceEquals(sourceGroup, Group) && sourceGroup.Tabs.Count <= 1)
+            return;
+
+        var position = e.GetPosition(ContentDropSurface);
+        _dropDirection = SplitDropTarget.Resolve(
+            position.X, position.Y, ContentDropSurface.ActualWidth, ContentDropSurface.ActualHeight);
+        PositionDropOverlay(_dropDirection);
+
+        ContentDropOverlay.Visibility = Visibility.Visible;
+        e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
+    }
+
+    private void PositionDropOverlay(SplitDirection direction)
+    {
+        ContentDropOverlay.Width = double.NaN;
+        ContentDropOverlay.Height = double.NaN;
+        ContentDropOverlay.HorizontalAlignment = HorizontalAlignment.Stretch;
+        ContentDropOverlay.VerticalAlignment = VerticalAlignment.Stretch;
+
+        switch (direction)
+        {
+            case SplitDirection.Left:
+                ContentDropOverlay.Width = ContentDropSurface.ActualWidth / 2;
+                ContentDropOverlay.HorizontalAlignment = HorizontalAlignment.Left;
+                break;
+            case SplitDirection.Right:
+                ContentDropOverlay.Width = ContentDropSurface.ActualWidth / 2;
+                ContentDropOverlay.HorizontalAlignment = HorizontalAlignment.Right;
+                break;
+            case SplitDirection.Up:
+                ContentDropOverlay.Height = ContentDropSurface.ActualHeight / 2;
+                ContentDropOverlay.VerticalAlignment = VerticalAlignment.Top;
+                break;
+            case SplitDirection.Down:
+                ContentDropOverlay.Height = ContentDropSurface.ActualHeight / 2;
+                ContentDropOverlay.VerticalAlignment = VerticalAlignment.Bottom;
+                break;
+        }
+    }
+
+    private void ContentDropSurface_DragLeave(object sender, DragEventArgs e) =>
+        ContentDropOverlay.Visibility = Visibility.Collapsed;
+
+    private void ContentDropSurface_Drop(object sender, DragEventArgs e)
+    {
+        if (_draggedTab is not { } tab || _dragSource is null)
+            return;
+
+        var sourceGroup = _dragSource.Group;
+        if (ReferenceEquals(sourceGroup, Group) && sourceGroup.Tabs.Count <= 1)
+            return;
+
+        var direction = _dropDirection;
+        EndTabDrag();
+        _host.SplitTab(tab, Group, direction);
     }
 
     private void Tabs_TabDragCompleted(TabView sender, TabViewTabDragCompletedEventArgs args)
+        => EndTabDrag();
+
+    private void EndTabDrag()
     {
+        _host.SetTabContentDropTargetsVisible(false);
         _draggedTab = null;
         _dragSource = null;
     }

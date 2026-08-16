@@ -5,6 +5,7 @@ using Sessions.App.Controls;
 using Sessions.App.Dialogs;
 using Sessions.App.Terminal;
 using Sessions.App.ViewModels;
+using Sessions.Core.Layout;
 using Sessions.Core.Models;
 using Sessions.Core.Storage;
 using Windows.System;
@@ -16,17 +17,20 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     public MainViewModel ViewModel { get; }
 
     private readonly Dictionary<TabGroupViewModel, TabGroupView> _groupViews = [];
+    private readonly SplitLayout<TabGroupViewModel> _groupLayout;
 
     public MainWindow()
     {
         ViewModel = new MainViewModel(App.Store, App.Credentials);
+        _groupLayout = new SplitLayout<TabGroupViewModel>(ViewModel.Groups[0]);
         InitializeComponent();
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
         InitializeTitleBar();
         // Lets the icon catalog rasterize at true device pixels (XamlRoot is null until
         // the content loads; the catalog falls back to scale 1 and re-renders on demand).
         App.Icons.ScaleProvider = () => Root.XamlRoot?.RasterizationScale ?? 1.0;
-        AttachGroupView(ViewModel.Groups[0], column: 0);
+        AttachGroupView(ViewModel.Groups[0]);
+        RebuildGroupLayout();
         ViewModel.TreeRebuilt += () =>
         {
             ClearSelection(); // rebuild recreates every node; stale references would leak
@@ -41,24 +45,21 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             TreeColumn.Width = new GridLength(Math.Clamp(treeWidth, 180, 800));
         Closed += (_, _) =>
         {
-            SaveSplitterFraction();
             SaveTreePaneWidth();
             ViewModel.CloseAllTabs(); // tear down live SSH sessions without hanging
         };
     }
 
-    private TabGroupView AttachGroupView(TabGroupViewModel group, int column)
+    private TabGroupView AttachGroupView(TabGroupViewModel group)
     {
         var view = new TabGroupView(group, this);
-        Grid.SetColumn(view, column);
-        GroupArea.Children.Add(view);
         _groupViews[group] = view;
         return view;
     }
 
     private void RegisterAccelerators()
     {
-        // Ctrl+F4: close active tab. Ctrl+Shift+\: split right / move to other group.
+        // Ctrl+F4: close active tab. Ctrl+Shift+\: split the active tab to the right.
         // (Both also work while the terminal has focus — the xterm page forwards Ctrl+F4.)
         var closeTab = new KeyboardAccelerator { Key = VirtualKey.F4, Modifiers = VirtualKeyModifiers.Control };
         closeTab.Invoked += (sender, e) =>
@@ -75,13 +76,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         split.Invoked += (_, e) =>
         {
             e.Handled = true;
-            if (ViewModel.ActiveTab is { } tab)
-            {
-                if (ViewModel.IsSplit)
-                    MoveToOtherGroup(tab);
-                else
-                    SplitRight(tab);
-            }
+            if (ViewModel.ActiveTab is { } tab && ViewModel.GroupOf(tab).Tabs.Count > 1)
+                SplitRight(tab);
         };
         // Ctrl+Shift+E: toggle the active tab's file pane (also forwarded by the xterm page).
         var filePane = new KeyboardAccelerator
@@ -209,10 +205,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         if (ViewModel.ActiveTab is not { } tab)
             return;
-        if (ViewModel.IsSplit)
-            MoveToOtherGroup(tab);
-        else if (ViewModel.GroupOf(tab).Tabs.Count > 1)
+        if (ViewModel.GroupOf(tab).Tabs.Count > 1)
             SplitRight(tab);
+    }
+
+    private void SplitDownMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTab is { } tab && ViewModel.GroupOf(tab).Tabs.Count > 1)
+            SplitDown(tab);
     }
 
     private void FilePaneMenu_Click(object sender, RoutedEventArgs e)
@@ -393,9 +393,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         };
         view.SplitRequested += () =>
         {
-            if (ViewModel.IsSplit)
-                MoveToOtherGroup(tab);
-            else if (ViewModel.GroupOf(tab).Tabs.Count > 1)
+            if (ViewModel.GroupOf(tab).Tabs.Count > 1)
                 SplitRight(tab);
         };
         tab.View = view;
@@ -469,32 +467,39 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     public void SplitRight(TabViewModel tab)
     {
-        if (ViewModel.IsSplit)
-        {
-            MoveToOtherGroup(tab);
-            return;
-        }
-        var newGroup = new TabGroupViewModel();
-        ViewModel.Groups.Add(newGroup);
-        AttachGroupView(newGroup, column: 2);
-
-        var fraction = App.Settings.Current.SplitterFraction is > 0.1 and < 0.9 ? App.Settings.Current.SplitterFraction!.Value : 0.5;
-        LeftGroupColumn.Width = new GridLength(fraction, GridUnitType.Star);
-        RightGroupColumn.Width = new GridLength(1 - fraction, GridUnitType.Star);
-        Splitter.Visibility = Visibility.Visible;
-
-        MoveTabBetweenGroups(tab, newGroup, 0);
-        ViewModel.OnGroupsChanged();
-        // Re-assert after the new group's WebView2 settles into the layout.
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
+        var sourceGroup = ViewModel.GroupOf(tab);
+        if (sourceGroup.Tabs.Count > 1)
+            SplitTab(tab, sourceGroup, SplitDirection.Right);
     }
 
-    public void MoveToOtherGroup(TabViewModel tab)
+    public void SplitDown(TabViewModel tab)
     {
-        if (!ViewModel.IsSplit)
+        var sourceGroup = ViewModel.GroupOf(tab);
+        if (sourceGroup.Tabs.Count > 1)
+            SplitTab(tab, sourceGroup, SplitDirection.Down);
+    }
+
+    public void SplitTab(TabViewModel tab, TabGroupViewModel targetGroup, SplitDirection direction)
+    {
+        var sourceGroup = ViewModel.GroupOf(tab);
+        if (ReferenceEquals(sourceGroup, targetGroup) && sourceGroup.Tabs.Count <= 1)
             return;
-        var other = ViewModel.Groups.First(g => g != ViewModel.GroupOf(tab));
-        MoveTabBetweenGroups(tab, other, other.Tabs.Count);
+
+        var newGroup = new TabGroupViewModel();
+        _groupLayout.Split(targetGroup, newGroup, direction);
+        ViewModel.Groups.Add(newGroup);
+        SyncGroupOrder();
+        AttachGroupView(newGroup);
+        ViewModel.OnGroupsChanged();
+
+        MoveTabBetweenGroups(tab, newGroup, 0);
+        RebuildGroupLayout();
+    }
+
+    public void SetTabContentDropTargetsVisible(bool visible)
+    {
+        foreach (var groupView in _groupViews.Values)
+            groupView.SetContentDropTargetVisible(visible);
     }
 
     public void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex)
@@ -528,19 +533,99 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (!ViewModel.IsSplit || group.Tabs.Count > 0)
             return;
 
-        SaveSplitterFraction();
-        GroupArea.Children.Remove(_groupViews[group]);
+        if (!_groupLayout.Remove(group))
+            return;
+        if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(_groupViews[group]) is Panel parent)
+            parent.Children.Remove(_groupViews[group]);
         _groupViews.Remove(group);
         ViewModel.Groups.Remove(group);
+        SyncGroupOrder();
 
-        var remaining = ViewModel.Groups[0];
-        Grid.SetColumn(_groupViews[remaining], 0);
-        LeftGroupColumn.Width = new GridLength(1, GridUnitType.Star);
-        RightGroupColumn.Width = new GridLength(0);
-        Splitter.Visibility = Visibility.Collapsed;
-        FocusGroup(remaining);
+        if (ReferenceEquals(ViewModel.FocusedGroup, group))
+            FocusGroup(_groupLayout.Values[0]);
         ViewModel.OnGroupsChanged();
+        RebuildGroupLayout();
+    }
+
+    private void SyncGroupOrder()
+    {
+        var ordered = _groupLayout.Values;
+        for (var targetIndex = 0; targetIndex < ordered.Count; targetIndex++)
+        {
+            var currentIndex = ViewModel.Groups.IndexOf(ordered[targetIndex]);
+            if (currentIndex != targetIndex)
+                ViewModel.Groups.Move(currentIndex, targetIndex);
+        }
+    }
+
+    private void RebuildGroupLayout()
+    {
+        // A group view keeps its parent even after the old root grid leaves the visual tree.
+        // Detach every leaf before the recursive layout is rebuilt around the same views.
+        foreach (var groupView in _groupViews.Values)
+        {
+            if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(groupView) is Panel parent)
+                parent.Children.Remove(groupView);
+        }
+
+        GroupArea.Children.Clear();
+        GroupArea.Children.Add(BuildGroupLayoutElement(_groupLayout.Root));
+        UpdateRulerPresentations();
+        // Re-assert after WebView2 controls settle into their new rows and columns.
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
+    }
+
+    private FrameworkElement BuildGroupLayoutElement(SplitLayoutNode<TabGroupViewModel> node)
+    {
+        if (node is SplitLayoutLeaf<TabGroupViewModel> leaf)
+            return _groupViews[leaf.Value];
+
+        var branch = (SplitLayoutBranch<TabGroupViewModel>)node;
+        var grid = new Grid();
+        var isColumns = branch.Orientation == SplitOrientation.Columns;
+
+        for (var index = 0; index < branch.Children.Count; index++)
+        {
+            var gridIndex = index * 2;
+            if (isColumns)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            else
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+            var child = BuildGroupLayoutElement(branch.Children[index]);
+            Grid.SetColumn(child, 0);
+            Grid.SetRow(child, 0);
+            if (isColumns)
+                Grid.SetColumn(child, gridIndex);
+            else
+                Grid.SetRow(child, gridIndex);
+            grid.Children.Add(child);
+
+            if (index == branch.Children.Count - 1)
+                continue;
+
+            if (isColumns)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
+            else
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(8) });
+
+            var splitter = new CommunityToolkit.WinUI.Controls.GridSplitter
+            {
+                ResizeBehavior = CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeBehavior.PreviousAndNext,
+                ResizeDirection = isColumns
+                    ? CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns
+                    : CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Rows,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+            };
+            if (isColumns)
+                Grid.SetColumn(splitter, gridIndex + 1);
+            else
+                Grid.SetRow(splitter, gridIndex + 1);
+            grid.Children.Add(splitter);
+        }
+
+        return grid;
     }
 
     public void CloneSession(TabViewModel tab) =>
@@ -801,10 +886,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private void SyncEmptyState() =>
         EmptyState.Visibility = App.Store.Sessions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-    // ---- splitter persistence ----
-
-    private void Splitter_ManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e) =>
-        SaveSplitterFraction();
+    // ---- tree pane persistence ----
 
     private void TreeSplitter_ManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e) =>
         SaveTreePaneWidth();
@@ -813,15 +895,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         if (TreeColumn.ActualWidth > 0)
             App.Settings.Save(App.Settings.Current with { TreePaneWidth = TreeColumn.ActualWidth });
-    }
-
-    private void SaveSplitterFraction()
-    {
-        if (!ViewModel.IsSplit)
-            return;
-        var total = LeftGroupColumn.ActualWidth + RightGroupColumn.ActualWidth;
-        if (total > 0)
-            App.Settings.Save(App.Settings.Current with { SplitterFraction = LeftGroupColumn.ActualWidth / total });
     }
 
     /// <summary>
