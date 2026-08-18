@@ -56,6 +56,11 @@ test("_cmdText falls back to the prompt regex when the column is unknown", () =>
   assert.equal(addon._cmdText(addon._term.buffer.active, 0, -1), "show version");
 });
 
+test("_cmdText recognizes a spaced Bash user, host, and cwd prompt", () => {
+  const addon = makeAddon(buffer([line("u@h ~/work $ htop -d 10")]));
+  assert.equal(addon._cmdText(addon._term.buffer.active, 0, -1), "htop -d 10");
+});
+
 test("OSC 133 B remembers the input start, C reports the text, D reports the end", () => {
   const lines = [line("")];
   const active = buffer(lines);
@@ -76,6 +81,14 @@ test("discovery reports the command with the page's epoch and commits a mark", (
   runPendingTimers(); // echo-settle probe
   assert.deepEqual(addon.calls, [["htop", 42]]);
   assert.equal(addon.markerCount(), 2); // the probe plus the committed mark
+});
+
+test("discovery reports a command from a spaced Bash prompt", () => {
+  const addon = makeAddon(buffer([line("u@h ~ $ less notes.txt")]));
+  addon.notifyEnter(9);
+  runPendingTimers();
+  assert.deepEqual(addon.calls, [["less notes.txt", 9]]);
+  assert.equal(addon.markerCount(), 2);
 });
 
 test("discovery still titles a full-screen app that took the alternate screen, without a mark", () => {
@@ -111,6 +124,16 @@ test("idle Windows prompts report their current directory", () => {
 
   assert.deepEqual(cmd.promptCalls, [["C:\\Users\\Boden", null]]);
   assert.deepEqual(powershell.promptCalls, [["D:\\work\\Sessions", null]]);
+});
+
+test("an idle spaced Bash prompt reports its current directory", () => {
+  const addon = makeAddon(buffer([line("u@h ~/work $ ")]));
+  addon.promptCalls = [];
+  addon.onPromptContext = (text, platform) => addon.promptCalls.push([text, platform]);
+
+  addon._reportPromptContext();
+
+  assert.deepEqual(addon.promptCalls, [["~/work", null]]);
 });
 
 test("prompt reporting rejects output and reports the same directory on a new line", () => {

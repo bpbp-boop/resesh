@@ -84,15 +84,18 @@
 
   var TIME_REANCHOR_GAP = 4096;
 
-  // Prompt shapes for discovered command marks: an optional body — bracketed
-  // ("[user@host ~]") or space-free ("user@host:~/dir", "Switch(config-if)") — then a
-  // $ # % > terminator, an optional space, and a non-space (the command; an empty
-  // prompt never marks). Matches Linux default PS1s, Cisco/Junos-style prompts, root
-  // shells, and REPLs like "mysql>"; fancy unicode prompts belong to hosts whose
-  // owners can install the OSC 133 snippet instead. The leading "PS …>" alternative is
-  // PowerShell, whose prompt is the one common shape with spaces before the terminator
+  // Prompt shapes for discovered command marks: bracketed, compact, or a spaced
+  // user@host + cwd Bash prompt. Then comes an optional space and a non-space (the
+  // command; an empty prompt never marks). Fancy unicode prompts belong to hosts with
+  // OSC 133 shell integration. The leading "PS …>" alternative covers PowerShell
   // (cmd.exe's "C:\dir>" already matches the space-free body).
-  var CMD_PROMPT_BODY = "(?:PS [^\\n]{0,200}>|(?:\\[[^\\]]{1,100}\\]|[^\\s$#%>]{0,100})[$#%>])";
+  // Keep spaced prompts narrow: user@host must precede the cwd. This accepts common
+  // coloured Bash prompts such as "user@host ~/work $" without admitting arbitrary
+  // output lines that contain spaces.
+  var UNIX_SPACED_PROMPT_BODY =
+    "[^@\\s$#%>]{1,100}@[^\\s$#%>]{1,100}\\s+[^\\r\\n$#%>]{1,160}?\\s*[$#%>]";
+  var CMD_PROMPT_BODY = "(?:PS [^\\n]{0,200}>|" + UNIX_SPACED_PROMPT_BODY
+    + "|(?:\\[[^\\]]{1,100}\\]|[^\\s$#%>]{0,100})[$#%>])";
   var CMD_PROMPT_RE = new RegExp("^" + CMD_PROMPT_BODY + "\\s?\\S");
   // Same shapes, capturing prompt and command separately: the tooltip card, agent
   // detection, and the running-command title all slice the command out with this.
@@ -100,6 +103,10 @@
   // Default Windows prompts expose the current directory but do not update the console
   // title. Keep this deliberately narrow: only PowerShell and absolute drive/UNC paths.
   var WINDOWS_IDLE_PROMPT_RE = /^(?:PS )?((?:[A-Za-z]:[\\/]|\\\\)[^\r\n>]*)>\s*$/;
+  // A spaced Bash prompt does not normally emit OSC 0/2. Reading its cwd lets the tab
+  // leave the endpoint fallback while idle and clears a discovered command on return.
+  var UNIX_SPACED_IDLE_PROMPT_RE =
+    /^[^@\s$#%>]{1,100}@[^\s$#%>]{1,100}\s+([^\r\n$#%>]{1,160}?)\s*[$#%>]\s*$/;
   // Nokia SR OS MD-CLI uses a two-line prompt. The first line carries the current
   // cli-path and candidate mode; the second carries the active CPM, user, and node.
   // Requiring both lines keeps a bracketed output line from being mistaken for a prompt.
@@ -724,6 +731,8 @@
     var match = WINDOWS_IDLE_PROMPT_RE.exec(promptText);
     if (match) {
       label = match[1];
+    } else if ((match = UNIX_SPACED_IDLE_PROMPT_RE.exec(promptText))) {
+      label = match[1].trim();
     } else if (NOKIA_MD_CLI_PROMPT_RE.test(promptText) && start > 0) {
       var contextLine = buf.getLine(start - 1);
       var contextText = contextLine && !contextLine.isWrapped

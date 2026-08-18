@@ -535,6 +535,9 @@ Phase 4 export archive.
   screen still gets titled (the mark stays normal-screen-only, as before). Subtitle
   precedence: program-set title → running command → prompt cwd → endpoint.
   ✅ fixed 2026-08-18 (browser-harness + node tests; live SSH pass still pending)
+- Spaced Bash prompts such as `user@host ~ $` are also recognized. Their cwd replaces the
+  endpoint while idle and reports the return to the prompt, so a detected command does not
+  stay in the subtitle after it ends. Fixed 2026-08-18.
 - Follow-ups promoted to the backlog: the opt-in shell-integration snippet (exact commands
   and exit codes through this same path) and the foreground-process side channel
   (tmux-grade names with zero shell cooperation).
