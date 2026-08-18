@@ -7,6 +7,16 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="SessionFrameBrush" Color="#3C3C3C" />
+                    <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="#0078D4" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="SessionFrameBrush" Color="#C8C8C8" />
+                    <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="#0078D4" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

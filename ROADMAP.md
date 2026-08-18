@@ -416,6 +416,23 @@ and command tooltip composition, plus a rendered xterm harness (tooltip text and
 
 ---
 
+## Field feedback — 2026-08-18
+
+### Multi-session connect
+- Pressing Enter with two or more sessions selected connects them in tabs. ✅ fixed 2026-08-18
+- Concurrent connection prompts are serialized per window, preventing password, private-key,
+  host-key, and tmux dialogs from colliding. ✅ fixed 2026-08-18
+
+### Credentials
+- Design first-class private-key management so users do not have to choose a key file for every
+  session. Decide storage, session assignment, passphrase handling, and migration behavior first.
+
+### Tabs and framing
+- Tabs split out of a group can be dragged back into another group's tab strip. ✅ fixed 2026-08-18
+- Session content and tabs have a subtle theme-aware gray frame, similar to VS Code. ✅ fixed 2026-08-18
+
+---
+
 ## Backlog — "what else" (unordered candidates)
 
 **Finish/verify v1 loose ends first:** private-key auth and keyboard-interactive fallback

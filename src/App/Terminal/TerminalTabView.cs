@@ -38,6 +38,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     // secret is kept for the tab's lifetime so the SFTP channel never re-prompts.
     private SftpPaneView? _filePane;
     private CommunityToolkit.WinUI.Controls.GridSplitter? _paneSplitter;
+    private Border? _paneSplitterLine;
     private string? _secret;
     private const double DefaultFilePaneWidth = 340;
 
@@ -483,10 +484,26 @@ public sealed class TerminalTabView : Grid, IDisposable
 
             _paneSplitter = new CommunityToolkit.WinUI.Controls.GridSplitter
             {
-                Width = 8,
+                Width = 7,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 ResizeBehavior = CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeBehavior.PreviousAndNext,
                 ResizeDirection = CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns,
             };
+            _paneSplitterLine = new Border
+            {
+                Width = 1,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionFrameBrush"],
+                IsHitTestVisible = false,
+            };
+            _paneSplitter.PointerEntered += (_, _) => SetPaneSplitterActive(active: true);
+            _paneSplitter.PointerExited += (_, _) => SetPaneSplitterActive(active: false);
+            _paneSplitter.ManipulationStarted += (_, _) => SetPaneSplitterActive(active: true);
+            _paneSplitter.ManipulationCompleted += (_, _) => SetPaneSplitterActive(active: false);
+            ColumnDefinitions[1].Width = new GridLength(1);
+            Grid.SetColumn(_paneSplitterLine, 1);
+            Children.Add(_paneSplitterLine);
             Grid.SetColumn(_paneSplitter, 1);
             Children.Add(_paneSplitter);
         }
@@ -497,9 +514,19 @@ public sealed class TerminalTabView : Grid, IDisposable
             ColumnDefinitions[2].Width = new GridLength(width);
         }
         _paneSplitter!.Visibility = Visibility.Visible;
+        _paneSplitterLine!.Visibility = Visibility.Visible;
         _filePane.Visibility = Visibility.Visible;
         if (initialPath is not null || _filePane.IsLoaded)
             _ = _filePane.NavigateAsync(initialPath ?? _filePane.CurrentPath, notice);
+    }
+
+    private void SetPaneSplitterActive(bool active)
+    {
+        if (_paneSplitterLine is null)
+            return;
+        var resource = active ? "SessionSplitterHoverBrush" : "SessionFrameBrush";
+        _paneSplitterLine.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[resource];
+        _paneSplitterLine.Width = active ? 3 : 1;
     }
 
     public void HideFilePane()
@@ -509,6 +536,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         SaveFilePaneWidth();
         ColumnDefinitions[2].Width = new GridLength(0);
         _paneSplitter!.Visibility = Visibility.Collapsed;
+        _paneSplitterLine!.Visibility = Visibility.Collapsed;
         _terminal.FocusTerminal();
     }
 

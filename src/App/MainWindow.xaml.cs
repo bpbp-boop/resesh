@@ -26,6 +26,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ViewModel = new MainViewModel(App.Store, App.Credentials);
         _groupLayout = new SplitLayout<TabGroupViewModel>(ViewModel.Groups[0]);
         InitializeComponent();
+        ConfigureSplitter(TreeSplitter, TreeSplitterLine);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
         InitializeTitleBar();
         // Lets the icon catalog rasterize at true device pixels (XamlRoot is null until
@@ -729,6 +730,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
 
         GroupArea.Children.Clear();
+        foreach (var splitter in _splitterLines.Keys.Where(splitter => splitter != TreeSplitter).ToList())
+            _splitterLines.Remove(splitter);
         GroupArea.Children.Add(BuildGroupLayoutElement(_groupLayout.Root));
         UpdateRulerPresentations();
         // Re-assert after WebView2 controls settle into their new rows and columns.
@@ -765,24 +768,44 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 continue;
 
             if (isColumns)
-                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
             else
-                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(8) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1) });
 
+            var splitterLine = new Border
+            {
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionFrameBrush"],
+                IsHitTestVisible = false,
+                HorizontalAlignment = isColumns ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
+                VerticalAlignment = isColumns ? VerticalAlignment.Stretch : VerticalAlignment.Center,
+                Width = isColumns ? 1 : double.NaN,
+                Height = isColumns ? double.NaN : 1,
+            };
             var splitter = new CommunityToolkit.WinUI.Controls.GridSplitter
             {
                 ResizeBehavior = CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeBehavior.PreviousAndNext,
                 ResizeDirection = isColumns
                     ? CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns
                     : CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Rows,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Stretch,
+                HorizontalAlignment = isColumns ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
+                VerticalAlignment = isColumns ? VerticalAlignment.Stretch : VerticalAlignment.Center,
+                Width = isColumns ? 7 : double.NaN,
+                Height = isColumns ? double.NaN : 7,
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
             };
             if (isColumns)
+            {
+                Grid.SetColumn(splitterLine, gridIndex + 1);
                 Grid.SetColumn(splitter, gridIndex + 1);
+            }
             else
+            {
+                Grid.SetRow(splitterLine, gridIndex + 1);
                 Grid.SetRow(splitter, gridIndex + 1);
+            }
+            grid.Children.Add(splitterLine);
             grid.Children.Add(splitter);
+            ConfigureSplitter(splitter, splitterLine);
         }
 
         return grid;
@@ -1060,8 +1083,36 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     // ---- tree pane persistence ----
 
-    private void TreeSplitter_ManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e) =>
+    private readonly Dictionary<CommunityToolkit.WinUI.Controls.GridSplitter, Border> _splitterLines = [];
+
+    private void ConfigureSplitter(CommunityToolkit.WinUI.Controls.GridSplitter splitter, Border line)
+    {
+        _splitterLines[splitter] = line;
+        splitter.PointerEntered += (_, _) => SetSplitterActive(splitter, active: true);
+        splitter.PointerExited += (_, _) => SetSplitterActive(splitter, active: false);
+        splitter.ManipulationStarted += (_, _) => SetSplitterActive(splitter, active: true);
+        splitter.ManipulationCompleted += (_, _) => SetSplitterActive(splitter, active: false);
+    }
+
+    private void TreeSplitter_ManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e)
+    {
+        SetSplitterActive(sender, active: false);
         SaveTreePaneWidth();
+    }
+
+    private void SetSplitterActive(object sender, bool active)
+    {
+        if (sender is CommunityToolkit.WinUI.Controls.GridSplitter splitter
+            && _splitterLines.TryGetValue(splitter, out var line))
+        {
+            var resource = active ? "SessionSplitterHoverBrush" : "SessionFrameBrush";
+            line.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[resource];
+            if (splitter.ResizeDirection == CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns)
+                line.Width = active ? 3 : 1;
+            else
+                line.Height = active ? 3 : 1;
+        }
+    }
 
     private void SaveTreePaneWidth()
     {
@@ -1355,6 +1406,20 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             ConnectSession(session);
             e.Handled = true;
         }
+    }
+
+    private void SessionTree_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter || _selection.Count == 0)
+            return;
+
+        var sessions = SessionsOf(_selection.ToList()).ToList();
+        if (sessions.Count == 0)
+            return;
+
+        foreach (var session in sessions)
+            ConnectSession(session);
+        e.Handled = true;
     }
 
     // ---- Tree context menu (built per selection: session, folder, or multi) ----

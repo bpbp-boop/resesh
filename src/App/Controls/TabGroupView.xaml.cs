@@ -86,6 +86,49 @@ public sealed partial class TabGroupView : UserControl
         SyncTerminalVisibility();
     }
 
+    private void Tabs_Loaded(object sender, RoutedEventArgs e)
+    {
+        // TabView reserves a 2px minimum column for TabStripHeader even when it is null.
+        if (FindDescendant(Tabs, "TabContainerGrid") is Grid tabContainerGrid &&
+            tabContainerGrid.ColumnDefinitions.Count > 0)
+        {
+            tabContainerGrid.ColumnDefinitions[0].MinWidth = 0;
+            tabContainerGrid.ColumnDefinitions[0].Width = new GridLength(0);
+        }
+
+        // WinUI's TabViewListView template inserts a fixed 4px ItemsPresenter header
+        // and another 1px on its ScrollContentPresenter. Keep the header object alive
+        // because TabView visual states target its named border, but collapse its width.
+        if (FindDescendant(Tabs, "TabsItemsPresenter") is ItemsPresenter { Header: FrameworkElement header })
+            header.Width = 0;
+
+        if (FindDescendant(Tabs, "ScrollContentPresenter") is ScrollContentPresenter scrollContent)
+        {
+            scrollContent.Padding = new Thickness(0);
+
+            if (VisualTreeHelper.GetParent(scrollContent) is Grid scrollViewerGrid &&
+                scrollViewerGrid.ColumnDefinitions.Count > 0)
+            {
+                scrollViewerGrid.ColumnDefinitions[0].MinWidth = 0;
+            }
+        }
+    }
+
+    private static FrameworkElement? FindDescendant(DependencyObject root, string name)
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is FrameworkElement element && element.Name == name)
+                return element;
+
+            if (FindDescendant(child, name) is { } descendant)
+                return descendant;
+        }
+
+        return null;
+    }
+
     public void RemoveTerminal(UIElement view)
     {
         TerminalHost.Children.Remove(view);
@@ -526,7 +569,15 @@ public sealed partial class TabGroupView : UserControl
     }
 
     private void Tabs_TabDragCompleted(TabView sender, TabViewTabDragCompletedEventArgs args)
-        => EndTabDrag();
+    {
+        // WinUI can raise completion on the source before TabStripDrop reaches another
+        // TabView. Keep the in-process handoff alive through the current dispatcher turn.
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_dragSource == this)
+                EndTabDrag();
+        });
+    }
 
     private void EndTabDrag()
     {
