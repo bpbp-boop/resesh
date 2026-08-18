@@ -344,6 +344,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         // AppWindow.Closing event, so waiting for the confirmed pass can lose the bounds.
         SaveWindowPlacement();
 
+        // File > Exit, Alt+F4, the title-bar close button, and other window-close
+        // requests all come through this event. Require confirmation when closing
+        // open sessions, but let an empty window close immediately.
         if (_closeConfirmed || !ViewModel.AllTabs.Any())
             return;
 
@@ -371,9 +374,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             var pronoun = count == 1 ? "it" : "them";
             var dialog = new ContentDialog
             {
-                Title = "Close window?",
-                Content = $"You have {count} open {sessionText}. Closing the window will close {pronoun}.",
-                PrimaryButtonText = "Close window",
+                Title = "Exit Sessions?",
+                Content = $"Are you sure you want to exit? You have {count} open {sessionText}. Exiting will close {pronoun}.",
+                PrimaryButtonText = "Exit",
                 CloseButtonText = "Cancel",
                 DefaultButton = ContentDialogButton.Close,
                 XamlRoot = Root.XamlRoot,
