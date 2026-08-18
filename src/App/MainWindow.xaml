@@ -47,7 +47,7 @@
                             Height="16"
                             VerticalAlignment="Center"
                             Visibility="{x:Bind IconVisibility, Mode=OneWay}" />
-                        <FontIcon Glyph="&#xE756;" FontSize="14" Visibility="{x:Bind DefaultIconVisibility, Mode=OneWay}" />
+                        <FontIcon Glyph="&#xEDA2;" FontSize="14" Visibility="{x:Bind DefaultIconVisibility, Mode=OneWay}" />
                         <TextBlock
                             local:MatchHighlighter.Text="{x:Bind Name}"
                             local:MatchHighlighter.Query="{x:Bind HighlightQuery}"

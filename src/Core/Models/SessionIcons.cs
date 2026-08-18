@@ -21,6 +21,7 @@ public static class SessionIcons
     public static readonly IReadOnlyList<SessionIconInfo> BuiltIn =
     [
         new("linux", "Linux", LinuxGroup),
+        new("proxmox", "Proxmox", LinuxGroup),
         new("debian", "Debian", LinuxGroup),
         new("ubuntu", "Ubuntu", LinuxGroup),
         new("rhel", "Red Hat", LinuxGroup),
@@ -56,6 +57,7 @@ public static class SessionIcons
     private static readonly (string Marker, string Key)[] BannerMarkers =
     [
         ("openssh_for_windows", "windows"),
+        ("proxmox", "proxmox"),
         ("raspbian", "debian"),
         ("debian", "debian"),
         ("ubuntu", "ubuntu"),

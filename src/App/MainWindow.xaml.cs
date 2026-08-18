@@ -496,7 +496,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 Detail = s.IsLocal
                     ? s.Local?.Executable ?? "local shell"
                     : $"{s.Username}@{s.Host}" + (s.Port != 22 ? $":{s.Port}" : ""),
-                Glyph = s.IsLocal ? "\uE7F8" : "\uE756",
+                Glyph = s.IsLocal ? "\uE7F8" : "\uEDA2",
                 Session = s,
             }));
         }
@@ -1891,7 +1891,7 @@ public sealed class QuickConnectSuggestion
 {
     public string Display { get; init; } = "";
     public string Detail { get; init; } = "";
-    public string Glyph { get; init; } = "\uE756";
+    public string Glyph { get; init; } = "\uEDA2";
     public Session Session { get; init; } = null!;
 
     /// <summary>AutoSuggestBox writes this into the text box when a suggestion is chosen.</summary>
