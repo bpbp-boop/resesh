@@ -79,6 +79,9 @@ public sealed partial class TabGroupView : UserControl
         Tabs.AddHandler(PointerPressedEvent, new PointerEventHandler(Tabs_PointerPressed), true);
         Tabs.AddHandler(PointerReleasedEvent, new PointerEventHandler(Tabs_PointerReleased), true);
         Tabs.AddHandler(RightTappedEvent, new RightTappedEventHandler(Tabs_RightTapped), true);
+        // TabView can keep keyboard focus on an already-selected header after a click. In
+        // that state xterm cannot see Enter, so retain its stopped-terminal shortcut here.
+        Tabs.AddHandler(KeyDownEvent, new KeyEventHandler(Tabs_KeyDown), true);
 
         // TabView consumes drag events over parts of its strip without raising TabStripDrop.
         // Listen on the surrounding row even for handled events so its unused space remains
@@ -249,6 +252,18 @@ public sealed partial class TabGroupView : UserControl
                 return false;
         }
         return false;
+    }
+
+    private void Tabs_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter
+            && Group.SelectedTab is { } tab
+            && IsStopped(tab)
+            && !IsButtonSource(e.OriginalSource))
+        {
+            _host.ReconnectTab(tab);
+            e.Handled = true;
+        }
     }
 
     private async void Tabs_PointerReleased(object sender, PointerRoutedEventArgs e)
