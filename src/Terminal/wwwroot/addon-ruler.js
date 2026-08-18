@@ -100,6 +100,14 @@
   // Default Windows prompts expose the current directory but do not update the console
   // title. Keep this deliberately narrow: only PowerShell and absolute drive/UNC paths.
   var WINDOWS_IDLE_PROMPT_RE = /^(?:PS )?((?:[A-Za-z]:[\\/]|\\\\)[^\r\n>]*)>\s*$/;
+  // Nokia SR OS MD-CLI uses a two-line prompt. The first line carries the current
+  // cli-path and candidate mode; the second carries the active CPM, user, and node.
+  // Requiring both lines keeps a bracketed output line from being mistaken for a prompt.
+  var NOKIA_MD_CLI_PROMPT_RE = /^[A-Z]:[^@\s]+@[^\s#]+#\s*$/;
+  var NOKIA_MD_CLI_CONTEXT_RE = /^(\*)?(?:\((gl|ex|pr|ro)\)\s*)?\[((?:(gl|ex|pr|ro):)?[^\]\r\n]{0,500})\]$/;
+  var NOKIA_MD_CLI_MODES = {
+    gl: "global", ex: "exclusive", pr: "private", ro: "read-only"
+  };
 
   function RulerAddon() {
     this._term = null;
@@ -133,7 +141,7 @@
     this._cmdPending = null;  // mark committed by C, awaiting its D exit code
     this._cmdObserver = null; // page hook: commands as they are marked (agent detection)
     this.onRunningCommand = null; // page hook: (text, epoch?) on start, ("") on 133;D
-    this.onPromptDirectory = null; // page hook: (path) when a Windows shell is idle
+    this.onPromptContext = null; // page hook: (label, platform?) when a known prompt is idle
     this._lastPromptSignature = null;
 
     this._timeWrites = [];    // serialized xterm writes: { data, unixMs|null }
@@ -198,7 +206,7 @@
     this._disposables.push(term.onWriteParsed(function () {
       self._queuePaint();
       if (self._search) self._scheduleRescan();
-      self._reportPromptDirectory();
+      self._reportPromptContext();
     }));
     this._disposables.push(term.onLineFeed(function () {
       self._timeStampCurrent();
@@ -634,11 +642,11 @@
     }
   };
 
-  /** Reports the current directory from a completed default cmd/PowerShell prompt.
-   * The absolute cursor line is part of the signature, so returning to the same directory
-   * after a command still reports that the command ended. */
-  RulerAddon.prototype._reportPromptDirectory = function () {
-    if (!this.onPromptDirectory || !this._term) return;
+  /** Reports the best current-location label from a completed known prompt. The absolute
+   * cursor line is part of the signature, so returning to the same context after a command
+   * still reports that the command ended. */
+  RulerAddon.prototype._reportPromptContext = function () {
+    if (!this.onPromptContext || !this._term) return;
     var buf = this._term.buffer.active;
     if (!buf || buf.type === "alternate") return;
     var row = buf.baseY + buf.cursorY;
@@ -655,15 +663,36 @@
       if (!next || !next.isWrapped) break;
       promptText += next.translateToString(true);
     }
+    var label = null;
+    var platform = null;
     var match = WINDOWS_IDLE_PROMPT_RE.exec(promptText);
-    if (!match) return;
-    var signature = row + ":" + match[1];
+    if (match) {
+      label = match[1];
+    } else if (NOKIA_MD_CLI_PROMPT_RE.test(promptText) && start > 0) {
+      var contextLine = buf.getLine(start - 1);
+      var contextText = contextLine && !contextLine.isWrapped
+        ? contextLine.translateToString(true) : "";
+      var context = NOKIA_MD_CLI_CONTEXT_RE.exec(contextText);
+      if (context) {
+        var modeKey = context[4] || context[2] || "";
+        var path = context[3];
+        if (context[4]) path = path.slice(context[4].length + 1);
+        label = path || "MD-CLI";
+        if (modeKey) {
+          label = NOKIA_MD_CLI_MODES[modeKey] + (context[1] ? "*" : "")
+            + " \u00b7 " + label;
+        }
+        platform = "nokia";
+      }
+    }
+    if (!label) return;
+    var signature = row + ":" + platform + ":" + label;
     if (signature === this._lastPromptSignature) return;
     this._lastPromptSignature = signature;
     try {
-      this.onPromptDirectory(match[1]);
+      this.onPromptContext(label, platform);
     } catch (err) {
-      if (window.__pageTrace) window.__pageTrace("ruler onPromptDirectory: " + (err && err.message));
+      if (window.__pageTrace) window.__pageTrace("ruler onPromptContext: " + (err && err.message));
     }
   };
 

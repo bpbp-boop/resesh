@@ -101,16 +101,16 @@ test("discovery stays quiet on a line without a prompt shape", () => {
 test("idle Windows prompts report their current directory", () => {
   const cmd = makeAddon(buffer([line("C:\\Users\\Boden>")]));
   cmd.promptCalls = [];
-  cmd.onPromptDirectory = text => cmd.promptCalls.push(text);
-  cmd._reportPromptDirectory();
+  cmd.onPromptContext = (text, platform) => cmd.promptCalls.push([text, platform]);
+  cmd._reportPromptContext();
 
   const powershell = makeAddon(buffer([line("PS D:\\work\\Sessions> ")]));
   powershell.promptCalls = [];
-  powershell.onPromptDirectory = text => powershell.promptCalls.push(text);
-  powershell._reportPromptDirectory();
+  powershell.onPromptContext = (text, platform) => powershell.promptCalls.push([text, platform]);
+  powershell._reportPromptContext();
 
-  assert.deepEqual(cmd.promptCalls, ["C:\\Users\\Boden"]);
-  assert.deepEqual(powershell.promptCalls, ["D:\\work\\Sessions"]);
+  assert.deepEqual(cmd.promptCalls, [["C:\\Users\\Boden", null]]);
+  assert.deepEqual(powershell.promptCalls, [["D:\\work\\Sessions", null]]);
 });
 
 test("prompt reporting rejects output and reports the same directory on a new line", () => {
@@ -118,14 +118,44 @@ test("prompt reporting rejects output and reports the same directory on a new li
   const active = buffer(lines);
   const addon = makeAddon(active);
   addon.promptCalls = [];
-  addon.onPromptDirectory = text => addon.promptCalls.push(text);
-  addon._reportPromptDirectory();
+  addon.onPromptContext = text => addon.promptCalls.push(text);
+  addon._reportPromptContext();
   assert.deepEqual(addon.promptCalls, []);
 
   lines[0] = line("C:\\work>");
   lines[1] = line("C:\\work>");
-  addon._reportPromptDirectory();
+  addon._reportPromptContext();
   active.cursorY = 1;
-  addon._reportPromptDirectory();
+  addon._reportPromptContext();
   assert.deepEqual(addon.promptCalls, ["C:\\work", "C:\\work"]);
+});
+
+test("Nokia MD-CLI prompts report operational and candidate contexts", () => {
+  const lines = [line("[/show]"), line("A:boden@bng-sr01#")];
+  const active = buffer(lines);
+  active.cursorY = 1;
+  const addon = makeAddon(active);
+  addon.promptCalls = [];
+  addon.onPromptContext = (text, platform) => addon.promptCalls.push([text, platform]);
+
+  addon._reportPromptContext();
+  lines[0] = line('*[pr:/configure router "Base"]');
+  addon._reportPromptContext();
+
+  assert.deepEqual(addon.promptCalls, [
+    ["/show", "nokia"],
+    ['private* \u00b7 /configure router "Base"', "nokia"],
+  ]);
+});
+
+test("a bracketed line without the Nokia identity prompt is not a device context", () => {
+  const active = buffer([line("[/show]"), line("ordinary output")]);
+  active.cursorY = 1;
+  const addon = makeAddon(active);
+  addon.promptCalls = [];
+  addon.onPromptContext = text => addon.promptCalls.push(text);
+
+  addon._reportPromptContext();
+
+  assert.deepEqual(addon.promptCalls, []);
 });

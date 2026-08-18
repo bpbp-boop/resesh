@@ -247,10 +247,11 @@
         text: typeof text === "string" ? text.slice(0, 256) : "",
       });
     };
-    ruler.onPromptDirectory = function (directory) {
+    ruler.onPromptContext = function (context, platform) {
       host.postMessage({
-        type: "promptDirectory",
-        text: typeof directory === "string" ? directory.slice(0, 512) : "",
+        type: "promptContext",
+        text: typeof context === "string" ? context.slice(0, 512) : "",
+        platform: typeof platform === "string" ? platform.slice(0, 32) : "",
       });
     };
 

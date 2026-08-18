@@ -61,8 +61,9 @@ public sealed class TerminalControl : Grid, IDisposable
     /// Drives the tab's subtitle; the page epoch-gates it against the title stream.</summary>
     public event Action<string>? CommandChanged;
 
-    /// <summary>Current directory read from a default cmd or PowerShell prompt.</summary>
-    public event Action<string>? PromptDirectoryChanged;
+    /// <summary>Current location read from a known idle prompt, plus an optional detected
+    /// platform key. Examples: a Windows directory or a Nokia MD-CLI cli-path.</summary>
+    public event Action<string, string?>? PromptContextChanged;
 
     // ---- agent-awareness evidence (Phase 6.2); raw, unmapped, from this tab's page only ----
 
@@ -209,9 +210,14 @@ public sealed class TerminalControl : Grid, IDisposable
                         CommandChanged?.Invoke(runningText);
                     }
                     break;
-                case "promptDirectory":
-                    if (root.TryGetProperty("text", out var promptDirectory))
-                        PromptDirectoryChanged?.Invoke(promptDirectory.GetString() ?? "");
+                case "promptContext":
+                    if (root.TryGetProperty("text", out var promptContext))
+                    {
+                        var platform = root.TryGetProperty("platform", out var platformElement)
+                            ? platformElement.GetString()
+                            : null;
+                        PromptContextChanged?.Invoke(promptContext.GetString() ?? "", platform);
+                    }
                     break;
                 case "pageError":
                     if (root.TryGetProperty("message", out var err))

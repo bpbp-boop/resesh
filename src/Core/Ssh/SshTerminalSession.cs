@@ -59,7 +59,14 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
     /// <summary>Diagnostic hook (DEBUG builds wire this to a trace log).</summary>
     public static Action<string>? TraceHook { get; set; }
 
-    public bool IsConnected => _client?.IsConnected == true && _shell is not null;
+    public bool IsConnected => IsConnectionOpen(
+        _client?.IsConnected == true,
+        _shell is not null,
+        Volatile.Read(ref _closedRaised));
+
+    /// <summary>The interactive shell can end while its SSH transport stays connected.</summary>
+    internal static bool IsConnectionOpen(bool transportConnected, bool shellCreated, int closedRaised) =>
+        transportConnected && shellCreated && closedRaised == 0;
 
     /// <summary>Negotiated server-to-client cipher, once connected.</summary>
     public string? Encryption => _client?.ConnectionInfo?.CurrentServerEncryption;
@@ -213,14 +220,8 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             while (!token.IsCancellationRequested)
             {
                 var read = shell.Read(buffer, 0, buffer.Length);
-                if (read < 0)
-                    break;
                 if (read == 0)
-                {
-                    if (_client?.IsConnected != true)
-                        break;
-                    continue;
-                }
+                    break; // end of the shell channel; the SSH transport can remain connected
                 if (TraceHook is not null && _tracedBytes < TraceCap)
                 {
                     _tracedBytes += read;

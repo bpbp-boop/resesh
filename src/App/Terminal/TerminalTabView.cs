@@ -109,8 +109,13 @@ public sealed class TerminalTabView : Grid, IDisposable
             _ = ConnectAsync(isReconnect: false));
         _terminal.TitleChanged += title => DispatcherQueue.TryEnqueue(() => _tab.ApplyTerminalTitle(title));
         _terminal.CommandChanged += text => DispatcherQueue.TryEnqueue(() => _tab.ApplyRunningCommand(text));
-        _terminal.PromptDirectoryChanged += directory =>
-            DispatcherQueue.TryEnqueue(() => _tab.ApplyPromptDirectory(directory));
+        _terminal.PromptContextChanged += (context, platform) =>
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _tab.ApplyPromptContext(context);
+                if (platform == "nokia" && Session.Icon is null)
+                    IconSuggested?.Invoke("nokia");
+            });
         _terminal.CloseTabRequested += () => DispatcherQueue.TryEnqueue(() => CloseRequested?.Invoke());
         _terminal.SplitRequested += () => DispatcherQueue.TryEnqueue(() => SplitRequested?.Invoke());
         _terminal.FilePaneRequested += () => DispatcherQueue.TryEnqueue(ToggleFilePane);

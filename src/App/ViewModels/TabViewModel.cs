@@ -98,7 +98,7 @@ public sealed class TabViewModel : ObservableObject
                 {
                     TerminalTitle = null;
                     RunningCommand = null;
-                    PromptDirectory = null;
+                    PromptContext = null;
                 }
                 OnPropertyChanged(nameof(StateText));
                 OnPropertyChanged(nameof(StateColor));
@@ -403,24 +403,25 @@ public sealed class TabViewModel : ObservableObject
     public void ApplyRunningCommand(string? commandLine) =>
         RunningCommand = CommandTitle.ProgramName(commandLine);
 
-    private string? _promptDirectory;
+    private string? _promptContext;
 
-    /// <summary>Current directory read from a default cmd or PowerShell prompt.</summary>
-    public string? PromptDirectory
+    /// <summary>Current location read from a known idle prompt: a local directory or a
+    /// network CLI context.</summary>
+    public string? PromptContext
     {
-        get => _promptDirectory;
+        get => _promptContext;
         private set
         {
-            if (SetProperty(ref _promptDirectory, value))
+            if (SetProperty(ref _promptContext, value))
                 OnPropertyChanged(nameof(Subtitle));
         }
     }
 
-    /// <summary>A Windows path prompt means the shell is idle in this directory.</summary>
-    public void ApplyPromptDirectory(string? directory)
+    /// <summary>A recognized prompt means the shell is idle in this location.</summary>
+    public void ApplyPromptContext(string? context)
     {
-        var trimmed = directory?.Trim();
-        PromptDirectory = string.IsNullOrEmpty(trimmed) ? null : trimmed;
+        var trimmed = context?.Trim();
+        PromptContext = string.IsNullOrEmpty(trimmed) ? null : trimmed;
         RunningCommand = null;
     }
 
@@ -435,11 +436,11 @@ public sealed class TabViewModel : ObservableObject
         get
         {
             if (TerminalTitle is not { } title)
-                return RunningCommand ?? PromptDirectory ?? FallbackSubtitle;
+                return RunningCommand ?? PromptContext ?? FallbackSubtitle;
             var match = PromptTitle.Match(title);
             if (!match.Success)
                 return title; // a program's own title beats a guessed command name
-            return RunningCommand ?? PromptDirectory ?? match.Groups["cwd"].Value;
+            return RunningCommand ?? PromptContext ?? match.Groups["cwd"].Value;
         }
     }
 
