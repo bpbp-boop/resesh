@@ -43,7 +43,7 @@ function observeCommand(promptLine) {
   const addon = new RulerAddon();
   addon._term = fakeTerm([promptLine]);
   const seen = [];
-  addon.onCommand((command) => seen.push(command));
+  addon.onCommandMark((command) => seen.push(command));
   addon._cmdCommit(0, null, "guess");
   return seen;
 }
@@ -69,7 +69,7 @@ test("re-committing the same line does not report the command twice", () => {
   const addon = new RulerAddon();
   addon._term = fakeTerm(["bpg@host:~$ claude"]);
   const seen = [];
-  addon.onCommand((command) => seen.push(command));
+  addon.onCommandMark((command) => seen.push(command));
   addon._cmdCommit(0, null, "osc");
   addon._cmdCommit(0, 0, "osc"); // the exit code arriving must not re-fire
   assert.deepEqual(seen, ["claude"]);
@@ -78,7 +78,7 @@ test("re-committing the same line does not report the command twice", () => {
 test("a throwing listener cannot break command marking", () => {
   const addon = new RulerAddon();
   addon._term = fakeTerm(["bpg@host:~$ claude"]);
-  addon.onCommand(() => {
+  addon.onCommandMark(() => {
     throw new Error("boom");
   });
   assert.doesNotThrow(() => addon._cmdCommit(0, null, "guess"));

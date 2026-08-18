@@ -38,6 +38,7 @@ public class SessionIconsTests
 
     [Theory]
     [InlineData("SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.10", "ubuntu")]
+    [InlineData("SSH-2.0-OpenSSH_9.2p1 Proxmox-VE Debian-2+deb12u3", "proxmox")]
     [InlineData("SSH-2.0-OpenSSH_9.2p1 Debian-2+deb12u3", "debian")]
     [InlineData("SSH-2.0-OpenSSH_7.9p1 Raspbian-10+deb10u2", "debian")]
     [InlineData("SSH-2.0-OpenSSH_for_Windows_8.1", "windows")]
@@ -63,7 +64,7 @@ public class SessionIconsTests
         // Exercise the mapping through representative banners; every returned key must exist.
         string?[] banners =
         [
-            "ubuntu", "debian", "raspbian", "fedora", "centos", "red hat", "redhat", "rhel", "suse",
+            "ubuntu", "proxmox", "debian", "raspbian", "fedora", "centos", "red hat", "redhat", "rhel", "suse",
             "alpine", "freebsd", "openbsd", "cisco", "rosssh", "mikrotik", "forti", "juniper", "junos",
             "arista", "palo alto", "pan-os", "aruba", "vyos", "openssh_for_windows",
         ];

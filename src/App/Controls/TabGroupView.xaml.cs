@@ -79,6 +79,12 @@ public sealed partial class TabGroupView : UserControl
         Tabs.AddHandler(PointerPressedEvent, new PointerEventHandler(Tabs_PointerPressed), true);
         Tabs.AddHandler(PointerReleasedEvent, new PointerEventHandler(Tabs_PointerReleased), true);
         Tabs.AddHandler(RightTappedEvent, new RightTappedEventHandler(Tabs_RightTapped), true);
+
+        // TabView consumes drag events over parts of its strip without raising TabStripDrop.
+        // Listen on the surrounding row even for handled events so its unused space remains
+        // a cross-group drop target.
+        TabStripHost.AddHandler(DragOverEvent, new DragEventHandler(TabStripHost_DragOver), true);
+        TabStripHost.AddHandler(DropEvent, new DragEventHandler(TabStripHost_Drop), true);
     }
 
     // ---- terminal hosting ----
@@ -87,6 +93,49 @@ public sealed partial class TabGroupView : UserControl
     {
         TerminalHost.Children.Add(view);
         SyncTerminalVisibility();
+    }
+
+    private void Tabs_Loaded(object sender, RoutedEventArgs e)
+    {
+        // TabView reserves a 2px minimum column for TabStripHeader even when it is null.
+        if (FindDescendant(Tabs, "TabContainerGrid") is Grid tabContainerGrid &&
+            tabContainerGrid.ColumnDefinitions.Count > 0)
+        {
+            tabContainerGrid.ColumnDefinitions[0].MinWidth = 0;
+            tabContainerGrid.ColumnDefinitions[0].Width = new GridLength(0);
+        }
+
+        // WinUI's TabViewListView template inserts a fixed 4px ItemsPresenter header
+        // and another 1px on its ScrollContentPresenter. Keep the header object alive
+        // because TabView visual states target its named border, but collapse its width.
+        if (FindDescendant(Tabs, "TabsItemsPresenter") is ItemsPresenter { Header: FrameworkElement header })
+            header.Width = 0;
+
+        if (FindDescendant(Tabs, "ScrollContentPresenter") is ScrollContentPresenter scrollContent)
+        {
+            scrollContent.Padding = new Thickness(0);
+
+            if (VisualTreeHelper.GetParent(scrollContent) is Grid scrollViewerGrid &&
+                scrollViewerGrid.ColumnDefinitions.Count > 0)
+            {
+                scrollViewerGrid.ColumnDefinitions[0].MinWidth = 0;
+            }
+        }
+    }
+
+    private static FrameworkElement? FindDescendant(DependencyObject root, string name)
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is FrameworkElement element && element.Name == name)
+                return element;
+
+            if (FindDescendant(child, name) is { } descendant)
+                return descendant;
+        }
+
+        return null;
     }
 
     public void RemoveTerminal(UIElement view)
@@ -131,6 +180,29 @@ public sealed partial class TabGroupView : UserControl
     {
         if ((sender as FrameworkElement)?.DataContext is TabViewModel tab)
             await _host.RequestCloseTabAsync(tab);
+    }
+
+    /// <summary>
+    /// Floor for the subtitle so a short session name ("db2") still leaves room for a few
+    /// characters instead of an ellipsis on its own.
+    /// </summary>
+    private const double MinSubtitleWidth = 60;
+
+    /// <summary>
+    /// Keeps the session name in charge of the tab's width. The subtitle is free text from
+    /// the host — Claude Code reports "[ . ] Action Required | ansible-playbooks" — and in a
+    /// SizeToContent strip it would stretch every tab to whatever the remote tool decided to
+    /// call itself. Clamping it to the name's width means the strip measures exactly as it
+    /// did before the second line existed; the subtitle ellipsises into what's left.
+    /// </summary>
+    private void TabTitleText_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (sender is FrameworkElement title
+            && title.Parent is FrameworkElement stack
+            && stack.FindName("TabSubtitleText") is FrameworkElement subtitle)
+        {
+            subtitle.MaxWidth = Math.Max(e.NewSize.Width, MinSubtitleWidth);
+        }
     }
 
     private void TabHeader_PointerEntered(object sender, PointerRoutedEventArgs e)
@@ -488,16 +560,38 @@ public sealed partial class TabGroupView : UserControl
         if (_draggedTab is not { } tab || _dragSource == this)
             return; // reorders within a group are handled natively by the TabView
 
-        // Insert at the position the tab was dropped.
+        MoveDraggedTabIntoGroup(tab, e.GetPosition(Tabs).X);
+        EndTabDrag();
+    }
+
+    private void TabStripHost_DragOver(object sender, DragEventArgs e)
+    {
+        if (_draggedTab is not null && _dragSource != this)
+            e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
+    }
+
+    private void TabStripHost_Drop(object sender, DragEventArgs e)
+    {
+        if (_draggedTab is not { } tab || _dragSource == this)
+            return;
+
+        MoveDraggedTabIntoGroup(tab, e.GetPosition(Tabs).X);
+        EndTabDrag();
+    }
+
+    private void MoveDraggedTabIntoGroup(TabViewModel tab, double pointerX)
+    {
+        // Insert at the position the tab was dropped. The surrounding TabStripHost also
+        // receives drops over the unused portion of the strip, where WinUI's TabStripDrop
+        // is not raised; in that case the loop naturally appends the tab.
         var index = Group.Tabs.Count;
-        var position = e.GetPosition(Tabs);
         for (var i = 0; i < Group.Tabs.Count; i++)
         {
             if (Tabs.ContainerFromIndex(i) is TabViewItem item)
             {
                 var bounds = item.TransformToVisual(Tabs).TransformBounds(
                     new Windows.Foundation.Rect(0, 0, item.ActualWidth, item.ActualHeight));
-                if (position.X < bounds.X + bounds.Width / 2)
+                if (pointerX < bounds.X + bounds.Width / 2)
                 {
                     index = i;
                     break;
@@ -507,7 +601,6 @@ public sealed partial class TabGroupView : UserControl
 
         // Never land in front of the target group's pinned tabs.
         _host.MoveTabBetweenGroups(tab, Group, Math.Max(index, Group.Tabs.Count(t => t.IsPinned)));
-        EndTabDrag();
     }
 
     private void ContentDropSurface_DragOver(object sender, DragEventArgs e)
@@ -576,7 +669,15 @@ public sealed partial class TabGroupView : UserControl
     }
 
     private void Tabs_TabDragCompleted(TabView sender, TabViewTabDragCompletedEventArgs args)
-        => EndTabDrag();
+    {
+        // WinUI can raise completion on the source before TabStripDrop reaches another
+        // TabView. Keep the in-process handoff alive through the current dispatcher turn.
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_dragSource == this)
+                EndTabDrag();
+        });
+    }
 
     private void EndTabDrag()
     {

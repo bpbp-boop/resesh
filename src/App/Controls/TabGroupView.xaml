@@ -22,8 +22,8 @@
                          0,8,0,0) which shoves tabs down and clips them; VS Code tabs sit flush. -->
                     <Thickness x:Key="TabViewHeaderPadding">0,0,0,0</Thickness>
                     <Thickness x:Key="TabViewItemHeaderPadding">0,0,0,0</Thickness>
-                    <x:Double x:Key="TabViewItemMinHeight">35</x:Double>
-                    <x:Double x:Key="TabViewItemHeaderMinHeight">35</x:Double>
+                    <x:Double x:Key="TabViewItemMinHeight">40</x:Double>
+                    <x:Double x:Key="TabViewItemHeaderMinHeight">40</x:Double>
                     <SolidColorBrush x:Key="CodeTabSeparatorBrush" Color="#2B2B2B" />
                     <!-- Matches VS Code's dark editor-group drop preview. -->
                     <SolidColorBrush x:Key="TabDropOverlayBrush" Color="#8053595D" />
@@ -38,8 +38,8 @@
                     <SolidColorBrush x:Key="TabViewSelectedItemBorderBrush" Color="Transparent" />
                     <Thickness x:Key="TabViewHeaderPadding">0,0,0,0</Thickness>
                     <Thickness x:Key="TabViewItemHeaderPadding">0,0,0,0</Thickness>
-                    <x:Double x:Key="TabViewItemMinHeight">35</x:Double>
-                    <x:Double x:Key="TabViewItemHeaderMinHeight">35</x:Double>
+                    <x:Double x:Key="TabViewItemMinHeight">40</x:Double>
+                    <x:Double x:Key="TabViewItemHeaderMinHeight">40</x:Double>
                     <SolidColorBrush x:Key="CodeTabSeparatorBrush" Color="#D8D8D8" />
                     <SolidColorBrush x:Key="TabDropOverlayBrush" Color="#332677CB" />
                 </ResourceDictionary>
@@ -76,35 +76,43 @@
         </Grid.RowDefinitions>
 
         <!-- Tab strip only; terminals render in TerminalHost so WebView2 gets real space. -->
-        <TabView
-            x:Name="Tabs"
+        <Grid
+            x:Name="TabStripHost"
             Grid.Row="0"
-            Height="35"
-            VerticalAlignment="Top"
-            TabItemsSource="{x:Bind Group.Tabs}"
-            SelectedItem="{x:Bind Group.SelectedTab, Mode=TwoWay}"
-            SelectionChanged="Tabs_SelectionChanged"
-            IsAddTabButtonVisible="False"
-            TabWidthMode="SizeToContent"
-            CanDragTabs="True"
-            CanReorderTabs="True"
-            TabCloseRequested="Tabs_TabCloseRequested"
-            TabDragStarting="Tabs_TabDragStarting"
-            TabDragCompleted="Tabs_TabDragCompleted"
-            TabStripDragOver="Tabs_TabStripDragOver"
-            TabStripDrop="Tabs_TabStripDrop">
+            Background="Transparent"
+            AllowDrop="True">
+            <TabView
+                x:Name="Tabs"
+                Height="40"
+                Margin="0"
+                Padding="0"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Top"
+                Loaded="Tabs_Loaded"
+                TabItemsSource="{x:Bind Group.Tabs}"
+                SelectedItem="{x:Bind Group.SelectedTab, Mode=TwoWay}"
+                SelectionChanged="Tabs_SelectionChanged"
+                IsAddTabButtonVisible="False"
+                TabWidthMode="SizeToContent"
+                CanDragTabs="True"
+                CanReorderTabs="True"
+                TabCloseRequested="Tabs_TabCloseRequested"
+                TabDragStarting="Tabs_TabDragStarting"
+                TabDragCompleted="Tabs_TabDragCompleted"
+                TabStripDragOver="Tabs_TabStripDragOver"
+                TabStripDrop="Tabs_TabStripDrop">
             <TabView.TabItemTemplate>
                 <DataTemplate x:DataType="vm:TabViewModel">
                     <TabViewItem
                         Style="{StaticResource CodeTabStyle}"
                         IsClosable="False"
-                        Height="35">
+                        Height="40">
                         <TabViewItem.Header>
                             <!-- The tab is painted entirely here: background, VS Code-style top
                                  accent on the active tab, and a custom close button. -->
                             <!-- The right border is the VS Code-style 1px divider between tabs. -->
                             <Grid
-                                Height="35"
+                                Height="40"
                                 Margin="0"
                                 Background="{x:Bind HeaderBackground, Mode=OneWay}"
                                 BorderThickness="0,0,1,0"
@@ -124,7 +132,7 @@
                                     VerticalAlignment="Center">
                                     <Rectangle
                                         Width="3"
-                                        Height="13"
+                                        Height="22"
                                         RadiusX="1.5"
                                         RadiusY="1.5"
                                         VerticalAlignment="Center">
@@ -187,12 +195,35 @@
                                         VerticalAlignment="Center"
                                         Foreground="{x:Bind HeaderForeground, Mode=OneWay}"
                                         Visibility="{x:Bind LockIconVisibility, Mode=OneWay}" />
-                                    <TextBlock
-                                        Text="{x:Bind Header, Mode=OneWay}"
-                                        FontSize="13"
-                                        FontWeight="{x:Bind HeaderFontWeight, Mode=OneWay}"
-                                        VerticalAlignment="Center"
-                                        Foreground="{x:Bind HeaderForeground, Mode=OneWay}" />
+                                    <!-- Two lines: the session name, and whatever best identifies
+                                         this particular tab (running program, cwd, or endpoint) —
+                                         so several tabs of one host aren't interchangeable. -->
+                                    <StackPanel VerticalAlignment="Center" Spacing="0">
+                                        <!-- Explicit line heights: the default leading on two
+                                             stacked lines is what makes the strip look tall. -->
+                                        <TextBlock
+                                            x:Name="TabTitleText"
+                                            Text="{x:Bind Header, Mode=OneWay}"
+                                            FontSize="13"
+                                            LineHeight="17"
+                                            LineStackingStrategy="BlockLineHeight"
+                                            FontWeight="{x:Bind HeaderFontWeight, Mode=OneWay}"
+                                            SizeChanged="TabTitleText_SizeChanged"
+                                            Foreground="{x:Bind HeaderForeground, Mode=OneWay}" />
+                                        <!-- MaxWidth is set from the title's width in code-behind:
+                                             the subtitle is free text from the host and must never
+                                             be what decides how wide the tab is. -->
+                                        <TextBlock
+                                            x:Name="TabSubtitleText"
+                                            Text="{x:Bind Subtitle, Mode=OneWay}"
+                                            FontSize="11"
+                                            LineHeight="14"
+                                            LineStackingStrategy="BlockLineHeight"
+                                            TextTrimming="CharacterEllipsis"
+                                            Opacity="0.7"
+                                            ToolTipService.ToolTip="{x:Bind Subtitle, Mode=OneWay}"
+                                            Foreground="{x:Bind HeaderForeground, Mode=OneWay}" />
+                                    </StackPanel>
                                     <Button
                                         Click="TabCloseGlyph_Click"
                                         Padding="3"
@@ -214,7 +245,8 @@
                     </TabViewItem>
                 </DataTemplate>
             </TabView.TabItemTemplate>
-        </TabView>
+            </TabView>
+        </Grid>
 
         <Grid x:Name="TerminalHost" Grid.Row="1" />
 

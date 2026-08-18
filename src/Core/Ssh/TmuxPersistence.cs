@@ -43,6 +43,25 @@ public static class TmuxPersistence
     /// </summary>
     private const string TerminalOverrides = "set -g terminal-overrides '*:smcup@:rmcup@:indn@'";
 
+    /// <summary>
+    /// tmux keeps OSC 0/2 from programs inside the pane to itself and emits a title to the
+    /// outer terminal only when set-titles is on — which is off by default, so without this
+    /// the app never sees a title on the persistent path at all.
+    /// <para>
+    /// What it reports matters as much as that it reports: pane_current_command is the
+    /// foreground process's comm, so anything run through an interpreter is "node" or
+    /// "python3" (codex and claude are both node scripts). The pane title is what the
+    /// program calls itself, so prefer it and keep the command as the fallback for programs
+    /// that set no title. tmux seeds the pane title with the hostname; that default means
+    /// "nobody has set one". Needs tmux 2.6+ for #{==:}; older servers emit the format
+    /// literally, which <c>TabViewModel.ApplyTerminalTitle</c> discards.
+    /// </para>
+    /// </summary>
+    private const string TitleReporting =
+        "set -g set-titles on \\; "
+        + "set -g set-titles-string "
+        + "'#{?#{==:#{pane_title},#{host}},#{pane_current_command},#{pane_title}}'";
+
     public static string BootstrapCommand(Guid id, int slot)
     {
         var name = SessionName(id, slot);
@@ -58,7 +77,7 @@ public static class TmuxPersistence
             // version (or with stale options) pick up the current value — the client's tty
             // capabilities are built at attach time.
             + $"{tmux} capture-pane -e -p -t ={name} -S -; "
-            + $"exec {tmux} {TerminalOverrides} \\; attach-session -t ={name}; "
+            + $"exec {tmux} {TerminalOverrides} \\; {TitleReporting} \\; attach-session -t ={name}; "
             + "else "
             + $"exec {tmux} -f /dev/null start-server \\; "
             + $"set -g history-limit {HistoryLimit} \\; "
@@ -66,6 +85,7 @@ public static class TmuxPersistence
             + "set -g prefix None \\; "
             + "set -s escape-time 25 \\; "
             + $"{TerminalOverrides} \\; "
+            + $"{TitleReporting} \\; "
             + $"new-session -s {name}; "
             + "fi; "
             + "else "

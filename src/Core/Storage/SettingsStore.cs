@@ -7,6 +7,9 @@ namespace Sessions.Core.Storage;
 /// <summary>App-wide shell and terminal settings.</summary>
 public sealed record AppSettings
 {
+    /// <summary>The main window's last normal desktop bounds and presentation state.</summary>
+    public WindowPlacement? WindowPlacement { get; init; }
+
     /// <summary>Session tree pane width in pixels; null = default.</summary>
     public double? TreePaneWidth { get; init; }
 
@@ -48,6 +51,8 @@ public sealed record AppSettings
                 Scrollback = overrides.Scrollback ?? Scrollback,
             };
 }
+
+public sealed record WindowPlacement(int X, int Y, int Width, int Height, bool IsMaximized = false);
 
 public sealed class SettingsStore
 {

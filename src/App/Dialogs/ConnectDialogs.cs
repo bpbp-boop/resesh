@@ -1,13 +1,32 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Sessions.Core.Ssh;
+using System.Runtime.CompilerServices;
 
 namespace Sessions.App.Dialogs;
 
 /// <summary>Small code-built dialogs used during the connect workflow.</summary>
 public static class ConnectDialogs
 {
+    private static readonly ConditionalWeakTable<XamlRoot, SemaphoreSlim> DialogGates = new();
+
     private sealed record TmuxChoice(string Label, int Slot);
+
+    private static async Task<ContentDialogResult> ShowAsync(ContentDialog dialog)
+    {
+        var xamlRoot = dialog.XamlRoot
+            ?? throw new InvalidOperationException("Connect dialogs require a XamlRoot.");
+        var dialogGate = DialogGates.GetValue(xamlRoot, _ => new SemaphoreSlim(1, 1));
+        await dialogGate.WaitAsync();
+        try
+        {
+            return await dialog.ShowAsync();
+        }
+        finally
+        {
+            dialogGate.Release();
+        }
+    }
 
     /// <summary>Prompts for a password/passphrase. Returns (secret, save) or null on cancel.</summary>
     public static async Task<(string Secret, bool Save)?> PromptCredentialAsync(
@@ -24,7 +43,7 @@ public static class ConnectDialogs
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = xamlRoot,
         };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary
+        return await ShowAsync(dialog) == ContentDialogResult.Primary
             ? (passwordBox.Password, saveCheck.IsChecked == true)
             : null;
     }
@@ -69,7 +88,7 @@ public static class ConnectDialogs
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = xamlRoot,
         };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary
+        return await ShowAsync(dialog) == ContentDialogResult.Primary
             && picker.SelectedItem is TmuxChoice choice
                 ? choice.Slot
                 : null;
@@ -124,7 +143,7 @@ public static class ConnectDialogs
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = xamlRoot,
         };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        return await ShowAsync(dialog) == ContentDialogResult.Primary;
     }
 
     private static async Task<bool> ConfirmChangedHostKeyAsync(XamlRoot xamlRoot, HostKeyInfo info)
@@ -176,6 +195,6 @@ public static class ConnectDialogs
         confirmBox.TextChanged += (_, _) =>
             dialog.IsPrimaryButtonEnabled =
                 string.Equals(confirmBox.Text.Trim(), info.Host, StringComparison.OrdinalIgnoreCase);
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        return await ShowAsync(dialog) == ContentDialogResult.Primary;
     }
 }

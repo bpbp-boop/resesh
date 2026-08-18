@@ -6,7 +6,13 @@
 <link rel="stylesheet" href="xterm.css">
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #0c0c0c; overflow: hidden; }
-  #term { height: 100%; width: 100%; }
+  #term {
+    position: relative;
+    box-sizing: border-box;
+    height: 100%;
+    width: 100%;
+    padding-left: 6px;
+  }
   .xterm .xterm-viewport { overflow-y: auto; }
   /* The annotated ruler (addon-ruler.js) replaces the native scrollbar. */
   .xterm .xterm-viewport::-webkit-scrollbar { display: none; }
@@ -176,10 +182,7 @@
       });
     });
     if (term.onBell) term.onBell(function () { postAgent({ type: "agentBell" }); });
-    term.onTitleChange(function (title) {
-      postAgent({ type: "title", text: String(title || "").slice(0, 512) });
-    });
-    ruler.onCommand(function (command) {
+    ruler.onCommandMark(function (command) {
       postAgent({ type: "command", text: String(command || "").slice(0, 512) });
     });
 
@@ -214,12 +217,36 @@
         // Checked before the input round-trips: the typed command is already echoed on
         // the cursor line, the resulting newline is not. A multi-line paste only marks
         // the first command — the rest echo asynchronously.
-        if (data.indexOf("\r") >= 0) ruler.notifyEnter();
+        if (data.indexOf("\r") >= 0) ruler.notifyEnter(titlesSeen);
         host.postMessage({ type: "input", data: strToB64(data) });
       } else if (data === "\r") {
         host.postMessage({ type: "reconnect" });
       }
     });
+
+    // The window title is the only process hint a host without tmux gives us for free:
+    // stock .bashrc emits OSC 0 "user@host: cwd" on every prompt (gated on TERM=xterm*,
+    // which our default xterm-256color matches), and some full-screen programs set
+    // their own while they run. The host turns this into the tab's second line.
+    var titlesSeen = 0; // counts title changes; discovery epochs compare against it
+    term.onTitleChange(function (title) {
+      titlesSeen++;
+      postAgent({ type: "title", text: String(title || "").slice(0, 512) });
+    });
+
+    // Titles only refresh AFTER a command finishes (the next prompt redraws them), so
+    // between prompts the ruler reports what just started — Enter-gated discovery or
+    // OSC 133. A discovered command with a stale epoch lost its race: a title arrived
+    // after the Enter, meaning the command already finished (fast commands) or the
+    // program titled itself; either way the title stream owns the subtitle now.
+    // OSC 133 rides the output stream itself, already ordered against titles — no epoch.
+    ruler.onRunningCommand = function (text, epoch) {
+      if (epoch !== undefined && epoch !== titlesSeen) return;
+      host.postMessage({
+        type: "runningCommand",
+        text: typeof text === "string" ? text.slice(0, 256) : "",
+      });
+    };
 
     term.onSelectionChange(function () {
       // Find selects each match it lands on; don't let copy-on-select clobber the clipboard.

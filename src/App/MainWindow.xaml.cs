@@ -9,6 +9,8 @@ using Sessions.Core.Backup;
 using Sessions.Core.Layout;
 using Sessions.Core.Models;
 using Sessions.Core.Storage;
+using Microsoft.UI.Windowing;
+using Windows.Graphics;
 using Windows.System;
 
 namespace Sessions.App;
@@ -21,12 +23,17 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private readonly SplitLayout<TabGroupViewModel> _groupLayout;
     private bool _closeConfirmed;
     private bool _closePromptOpen;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
+    private RectInt32? _normalWindowBounds;
 
     public MainWindow()
     {
         ViewModel = new MainViewModel(App.Store, App.Credentials);
         _groupLayout = new SplitLayout<TabGroupViewModel>(ViewModel.Groups[0]);
         InitializeComponent();
+        RestoreWindowPlacement();
+        AppWindow.Changed += AppWindow_Changed;
+        ConfigureSplitter(TreeSplitter, TreeSplitterLine);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
         InitializeTitleBar();
         // Lets the icon catalog rasterize at true device pixels (XamlRoot is null until
@@ -59,6 +66,47 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             SaveTreePaneWidth();
             ViewModel.CloseAllTabs(); // tear down live SSH sessions without hanging
         };
+    }
+
+    private void RestoreWindowPlacement()
+    {
+        if (App.Settings.Current.WindowPlacement is not { Width: >= 320, Height: >= 240 } placement)
+            return;
+
+        var requested = new RectInt32(placement.X, placement.Y, placement.Width, placement.Height);
+        var workArea = DisplayArea.GetFromRect(requested, DisplayAreaFallback.Nearest).WorkArea;
+        var width = Math.Min(requested.Width, workArea.Width);
+        var height = Math.Min(requested.Height, workArea.Height);
+        var x = Math.Clamp(requested.X, workArea.X, workArea.X + workArea.Width - width);
+        var y = Math.Clamp(requested.Y, workArea.Y, workArea.Y + workArea.Height - height);
+        _normalWindowBounds = new RectInt32(x, y, width, height);
+        AppWindow.MoveAndResize(_normalWindowBounds.Value);
+
+        if (placement.IsMaximized && AppWindow.Presenter is OverlappedPresenter presenter)
+            presenter.Maximize();
+    }
+
+    private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if ((args.DidPositionChange || args.DidSizeChange)
+            && sender.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Restored })
+        {
+            _normalWindowBounds = new RectInt32(sender.Position.X, sender.Position.Y, sender.Size.Width, sender.Size.Height);
+        }
+    }
+
+    private void SaveWindowPlacement()
+    {
+        var maximized = AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Maximized };
+        var bounds = _normalWindowBounds
+            ?? new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
+        if (bounds.Width < 320 || bounds.Height < 240)
+            return;
+
+        App.Settings.Save(App.Settings.Current with
+        {
+            WindowPlacement = new WindowPlacement(bounds.X, bounds.Y, bounds.Width, bounds.Height, maximized),
+        });
     }
 
     private TabGroupView AttachGroupView(TabGroupViewModel group)
@@ -110,6 +158,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             e.Handled = true;
             QuickConnectBox.Focus(FocusState.Programmatic);
         };
+        var focusFilter = new KeyboardAccelerator { Key = VirtualKey.F, Modifiers = VirtualKeyModifiers.Control };
+        focusFilter.Invoked += (_, e) =>
+        {
+            e.Handled = true;
+            FilterBox.Focus(FocusState.Programmatic);
+            FilterBox.SelectAll();
+        };
         // Ctrl+Shift+T: open the default local profile (also forwarded by the xterm page).
         var newLocalTab = new KeyboardAccelerator
         {
@@ -125,6 +180,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         Root.KeyboardAccelerators.Add(split);
         Root.KeyboardAccelerators.Add(filePane);
         Root.KeyboardAccelerators.Add(quickConnect);
+        Root.KeyboardAccelerators.Add(focusFilter);
         Root.KeyboardAccelerators.Add(newLocalTab);
     }
 
@@ -283,6 +339,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private void AppWindow_Closing(Microsoft.UI.Windowing.AppWindow sender,
         Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
     {
+        // Save before potentially cancelling this event for the open-tabs confirmation.
+        // Calling Close() after that dialog is accepted does not reliably raise a second
+        // AppWindow.Closing event, so waiting for the confirmed pass can lose the bounds.
+        SaveWindowPlacement();
+
         if (_closeConfirmed || !ViewModel.AllTabs.Any())
             return;
 
@@ -436,7 +497,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 Detail = s.IsLocal
                     ? s.Local?.Executable ?? "local shell"
                     : $"{s.Username}@{s.Host}" + (s.Port != 22 ? $":{s.Port}" : ""),
-                Glyph = s.IsLocal ? "\uE7F8" : "\uE756",
+                Glyph = s.IsLocal ? "\uE7F8" : "\uEDA2",
                 Session = s,
             }));
         }
@@ -829,6 +890,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
 
         GroupArea.Children.Clear();
+        foreach (var splitter in _splitterLines.Keys.Where(splitter => splitter != TreeSplitter).ToList())
+            _splitterLines.Remove(splitter);
         GroupArea.Children.Add(BuildGroupLayoutElement(_groupLayout.Root));
         UpdateRulerPresentations();
         // Re-assert after WebView2 controls settle into their new rows and columns.
@@ -865,24 +928,48 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 continue;
 
             if (isColumns)
-                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(8) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(7) });
             else
-                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(8) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(7) });
 
+            var splitterLine = new Border
+            {
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionFrameBrush"],
+                IsHitTestVisible = false,
+                HorizontalAlignment = isColumns ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
+                VerticalAlignment = isColumns ? VerticalAlignment.Stretch : VerticalAlignment.Center,
+                Width = isColumns ? 1 : double.NaN,
+                Height = isColumns ? double.NaN : 1,
+            };
             var splitter = new CommunityToolkit.WinUI.Controls.GridSplitter
             {
                 ResizeBehavior = CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeBehavior.PreviousAndNext,
                 ResizeDirection = isColumns
                     ? CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns
                     : CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Rows,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Stretch,
+                HorizontalAlignment = isColumns ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
+                VerticalAlignment = isColumns ? VerticalAlignment.Stretch : VerticalAlignment.Center,
+                Width = isColumns ? 7 : double.NaN,
+                Height = isColumns ? double.NaN : 7,
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSurfaceBrush"],
             };
+            // Keep the splitter above the WebView2-backed terminal content. Its grid track
+            // is the full seven-pixel hit target so it does not overlap a terminal scrollbar;
+            // the separate centered border preserves the one-pixel visual divider.
+            Canvas.SetZIndex(splitter, 1);
             if (isColumns)
+            {
+                Grid.SetColumn(splitterLine, gridIndex + 1);
                 Grid.SetColumn(splitter, gridIndex + 1);
+            }
             else
+            {
+                Grid.SetRow(splitterLine, gridIndex + 1);
                 Grid.SetRow(splitter, gridIndex + 1);
+            }
+            grid.Children.Add(splitterLine);
             grid.Children.Add(splitter);
+            ConfigureSplitter(splitter, splitterLine);
         }
 
         return grid;
@@ -1188,13 +1275,46 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
     }
 
-    private void SyncEmptyState() =>
-        EmptyState.Visibility = App.Store.Sessions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    private void SyncEmptyState()
+    {
+        EmptyState.Visibility = App.Store.Sessions.Count == 0 && !ViewModel.IsFiltering
+            ? Visibility.Visible : Visibility.Collapsed;
+        NoFilterMatchesState.Visibility = ViewModel.IsFiltering && ViewModel.MatchCount == 0
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     // ---- tree pane persistence ----
 
-    private void TreeSplitter_ManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e) =>
+    private readonly Dictionary<CommunityToolkit.WinUI.Controls.GridSplitter, Border> _splitterLines = [];
+
+    private void ConfigureSplitter(CommunityToolkit.WinUI.Controls.GridSplitter splitter, Border line)
+    {
+        _splitterLines[splitter] = line;
+        splitter.PointerEntered += (_, _) => SetSplitterActive(splitter, active: true);
+        splitter.PointerExited += (_, _) => SetSplitterActive(splitter, active: false);
+        splitter.ManipulationStarted += (_, _) => SetSplitterActive(splitter, active: true);
+        splitter.ManipulationCompleted += (_, _) => SetSplitterActive(splitter, active: false);
+    }
+
+    private void TreeSplitter_ManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e)
+    {
+        SetSplitterActive(sender, active: false);
         SaveTreePaneWidth();
+    }
+
+    private void SetSplitterActive(object sender, bool active)
+    {
+        if (sender is CommunityToolkit.WinUI.Controls.GridSplitter splitter
+            && _splitterLines.TryGetValue(splitter, out var line))
+        {
+            var resource = active ? "SessionSplitterHoverBrush" : "SessionFrameBrush";
+            line.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[resource];
+            if (splitter.ResizeDirection == CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns)
+                line.Width = active ? 3 : 1;
+            else
+                line.Height = active ? 3 : 1;
+        }
+    }
 
     private void SaveTreePaneWidth()
     {
@@ -1251,6 +1371,23 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         });
     }
 
+    /// <summary>
+    /// TreeView virtualizes rows outside the viewport. Those rows can be realized long
+    /// after the bounded rebuild sync has finished, and WinUI does not reliably apply an
+    /// IsExpanded binding before the item's children exist. Re-apply the VM state whenever
+    /// a folder row enters the visual tree so scrolling cannot reveal a stale collapse.
+    /// </summary>
+    private void FolderTreeViewItem_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is TreeViewItem item
+            && item.DataContext is TreeNodeViewModel { IsFolder: true } node
+            && item.IsExpanded != node.IsExpanded)
+        {
+            Trace($"realized: '{node.FolderPath}' container={item.IsExpanded} vm={node.IsExpanded} -> pushing");
+            item.IsExpanded = node.IsExpanded;
+        }
+    }
+
     private static TreeNodeViewModel? NodeOf(object sender) =>
         (sender as FrameworkElement)?.DataContext as TreeNodeViewModel;
 
@@ -1282,26 +1419,105 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     // ---- Filter ----
 
-    private void FilterBox_TextChanged(object sender, TextChangedEventArgs e) =>
+    private void FilterBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        ClearFilterButton.Visibility = string.IsNullOrEmpty(FilterBox.Text)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        _filterDebounce ??= CreateFilterDebounce();
+        _filterDebounce.Stop();
+        _filterDebounce.Start();
+    }
+
+    private void FilterBox_Loaded(object sender, RoutedEventArgs e)
+    {
+        // The stock TextBox template shows its own clear button while focused.
+        // This field has a persistent clear button, so remove the template button
+        // to avoid two slightly offset X glyphs occupying the same space.
+        if (FindFilterBoxTemplateElement(FilterBox, "DeleteButton") is Button deleteButton)
+        {
+            deleteButton.Opacity = 0;
+            deleteButton.IsHitTestVisible = false;
+            deleteButton.Width = 0;
+            deleteButton.MinWidth = 0;
+        }
+    }
+
+    private static FrameworkElement? FindFilterBoxTemplateElement(DependencyObject root, string name)
+    {
+        for (var index = 0; index < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, index);
+            if (child is FrameworkElement { Name: var childName } element && childName == name)
+                return element;
+
+            if (FindFilterBoxTemplateElement(child, name) is { } descendant)
+                return descendant;
+        }
+
+        return null;
+    }
+
+    private void ClearFilterButton_Click(object sender, RoutedEventArgs e) => ClearFilter();
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer CreateFilterDebounce()
+    {
+        var timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(150);
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) => ApplyFilterNow();
+        return timer;
+    }
+
+    private void ApplyFilterNow()
+    {
+        _filterDebounce?.Stop();
         ViewModel.SearchText = FilterBox.Text;
+    }
+
+    private void ClearFilter()
+    {
+        FilterBox.Text = "";
+        ApplyFilterNow();
+        FilterBox.Focus(FocusState.Programmatic);
+    }
+
+    private void FilterBox_GotFocus(object sender, RoutedEventArgs e) =>
+        FilterFieldBorder.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSplitterHoverBrush"];
+
+    private void FilterBox_LostFocus(object sender, RoutedEventArgs e) =>
+        FilterFieldBorder.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ControlStrokeColorDefaultBrush"];
 
     private void FilterBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key == VirtualKey.Enter)
         {
-            // Enter connects the best match and clears the filter.
-            if (ViewModel.RankedMatches(FilterBox.Text).FirstOrDefault() is { } target)
-            {
-                ConnectSession(target);
-                FilterBox.Text = "";
-            }
+            // Filtering narrows the view only; Enter must never launch a session.
             e.Handled = true;
         }
         else if (e.Key == VirtualKey.Escape)
         {
-            FilterBox.Text = "";
+            if (FilterBox.Text.Length > 0)
+                ClearFilter();
+            else
+                FocusFirstTreeItem();
             e.Handled = true;
         }
+        else if (e.Key == VirtualKey.Down)
+        {
+            FocusFirstTreeItem();
+            e.Handled = true;
+        }
+    }
+
+    private void FocusFirstTreeItem()
+    {
+        if (ViewModel.RootNodes.FirstOrDefault() is { } first
+            && SessionTree.ContainerFromItem(first) is TreeViewItem item)
+            item.Focus(FocusState.Keyboard);
+        else
+            SessionTree.Focus(FocusState.Keyboard);
     }
 
     // ---- Toolbar / root context menu ----
@@ -1639,6 +1855,20 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             ConnectSession(session);
             e.Handled = true;
         }
+    }
+
+    private void SessionTree_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter || _selection.Count == 0)
+            return;
+
+        var sessions = SessionsOf(_selection.ToList()).ToList();
+        if (sessions.Count == 0)
+            return;
+
+        foreach (var session in sessions)
+            ConnectSession(session);
+        e.Handled = true;
     }
 
     // ---- Tree context menu (built per selection: session, folder, or multi) ----
@@ -1980,7 +2210,7 @@ public sealed class QuickConnectSuggestion
 {
     public string Display { get; init; } = "";
     public string Detail { get; init; } = "";
-    public string Glyph { get; init; } = "\uE756";
+    public string Glyph { get; init; } = "\uEDA2";
     public Session Session { get; init; } = null!;
 
     /// <summary>AutoSuggestBox writes this into the text box when a suggestion is chosen.</summary>

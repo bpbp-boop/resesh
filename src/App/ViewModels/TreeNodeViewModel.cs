@@ -33,8 +33,9 @@ public sealed class TreeNodeViewModel : ObservableObject
 
     public Microsoft.UI.Xaml.Media.Brush? SelectionBackground => _isSelected ? SelectedBrush : null;
 
-    /// <summary>Null for folders.</summary>
-    public Session? Session { get; }
+    /// <summary>Null for folders. Session leaves can replace their immutable model in place
+    /// when an edit does not change tree structure or ordering.</summary>
+    public Session? Session { get; private set; }
 
     /// <summary>Folder full path for folders; owning folder path for sessions. Local-scope
     /// paths are relative to the virtual Local root (their own namespace).</summary>
@@ -63,6 +64,9 @@ public sealed class TreeNodeViewModel : ObservableObject
         { IsLocal: true } => Path.GetFileNameWithoutExtension(Session.Local?.Executable ?? ""),
         _ => Session.Port == 22 ? Session.Host : $"{Session.Host}:{Session.Port}",
     };
+
+    /// <summary>The active tree filter, used only to highlight matching session names.</summary>
+    public string HighlightQuery { get; init; } = "";
 
     /// <summary>Per-session color tag as a renderable color; transparent when unset.</summary>
     public Windows.UI.Color TagColor => ParseColor(Session?.ColorTag);
@@ -101,9 +105,25 @@ public sealed class TreeNodeViewModel : ObservableObject
     public static TreeNodeViewModel ForFolder(string fullPath, bool isExpanded, bool isLocalScope = false)
         => new(null, fullPath, isLocalScope) { IsExpanded = isExpanded };
 
-    public static TreeNodeViewModel ForSession(Session session)
-        => new(session, session.FolderPath, session.IsLocal);
+    public static TreeNodeViewModel ForSession(Session session, string highlightQuery = "")
+        => new(session, session.FolderPath, session.IsLocal) { HighlightQuery = highlightQuery };
 
     public static TreeNodeViewModel ForLocalRoot(bool isExpanded)
         => new(null, "", isLocalScope: true, isLocalRoot: true) { IsExpanded = isExpanded };
+
+    /// <summary>Refreshes a session leaf without replacing its realized tree container.</summary>
+    public void UpdateSession(Session session)
+    {
+        if (Session is null || Session.Id != session.Id)
+            throw new InvalidOperationException("Only the session represented by this leaf can be updated.");
+
+        Session = session;
+        OnPropertyChanged(nameof(Session));
+        OnPropertyChanged(nameof(Name));
+        OnPropertyChanged(nameof(HostSummary));
+        OnPropertyChanged(nameof(TagColor));
+        OnPropertyChanged(nameof(IconSource));
+        OnPropertyChanged(nameof(IconVisibility));
+        OnPropertyChanged(nameof(DefaultIconVisibility));
+    }
 }

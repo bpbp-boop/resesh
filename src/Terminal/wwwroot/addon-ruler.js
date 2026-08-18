@@ -48,6 +48,13 @@
  *       — the shell knows better than the regex.
  *     Marks are xterm markers (trim-safe); tmux capture-pane replay preserves neither
  *     OSC 133 nor keystroke history, so the command lane starts fresh on reattach.
+ *     Both sources also hand the command TEXT to the page through two hooks:
+ *     onRunningCommand drives the tab's subtitle, showing what is running between
+ *     prompt titles (those only refresh after a command ends) — 133;D reports the end,
+ *     and for discovered commands the host treats the next prompt-shaped title as the
+ *     end. onCommandMark is the separate per-mark feed Phase 6.2 agent detection reads:
+ *     it never reports an end and is not epoch-gated, so agent evidence survives a
+ *     command the subtitle discards.
  *   - Line timestamps (Phase 9.5) arrive from the native host with each SSH read,
  *     before its 16 ms output batch combines reads. A compact virtual-line map keeps
  *     them aligned through scrollback trimming. The page snapshots logical-line times
@@ -87,7 +94,8 @@
   // (cmd.exe's "C:\dir>" already matches the space-free body).
   var CMD_PROMPT_BODY = "(?:PS [^\\n]{0,200}>|(?:\\[[^\\]]{1,100}\\]|[^\\s$#%>]{0,100})[$#%>])";
   var CMD_PROMPT_RE = new RegExp("^" + CMD_PROMPT_BODY + "\\s?\\S");
-  // Same shapes, capturing prompt and command separately (tooltip card, agent detection).
+  // Same shapes, capturing prompt and command separately: the tooltip card, agent
+  // detection, and the running-command title all slice the command out with this.
   var CMD_SPLIT_RE = new RegExp("^(" + CMD_PROMPT_BODY + ")\\s?(.*)$");
 
   function RulerAddon() {
@@ -118,8 +126,10 @@
     this._cmdMarks = [];      // [{ marker, exit, src }] src "osc"|"guess"; exit int or null
     this._cmdOscSeen = false; // a shell spoke OSC 133: discovery defers to it from then on
     this._cmdPromptLine = -1; // absolute line of the last OSC 133;A/B prompt start
+    this._cmdPromptCol = -1;  // cursor column at OSC 133;B — where the typed command starts
     this._cmdPending = null;  // mark committed by C, awaiting its D exit code
     this._cmdObserver = null; // page hook: commands as they are marked (agent detection)
+    this.onRunningCommand = null; // page hook: (text, epoch?) on start, ("") on 133;D
 
     this._timeWrites = [];    // serialized xterm writes: { data, unixMs|null }
     this._timeWriteActive = false;
@@ -156,7 +166,11 @@
     var canvas = document.createElement("canvas");
     canvas.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;";
     strip.appendChild(canvas);
-    term.element.appendChild(strip);
+    // xterm's element is only as tall as its whole character rows, which can leave
+    // unused pixels below it after fitting. Mount the ruler in the full-height host
+    // so the scrollbar reaches the actual bottom edge of the content pane.
+    var host = term.element.parentElement || term.element;
+    host.appendChild(strip);
     this._strip = strip;
     this._canvas = canvas;
 
@@ -167,7 +181,7 @@
       "font-family:'Cascadia Mono',Consolas,monospace;font-size:12px;line-height:16px;" +
       "white-space:normal;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,0.35);" +
       "pointer-events:none;";
-    term.element.appendChild(tooltip);
+    host.appendChild(tooltip);
     this._tooltip = tooltip;
 
     this._disposables.push(term.onScroll(function () { self._queuePaint(); }));
@@ -554,10 +568,16 @@
     var kind = parts[0];
     if (kind === "A" || kind === "B") {
       this._cmdPromptLine = buf.baseY + buf.cursorY;
+      // B fires with the prompt painted and the cursor sitting at the input start;
+      // A is the prompt's own start, useless for slicing the command text out.
+      this._cmdPromptCol = kind === "B" ? buf.cursorX : -1;
     } else if (kind === "C") {
       if (this._cmdPromptLine >= 0) {
+        var text = this._cmdText(buf, this._cmdPromptLine, this._cmdPromptCol);
+        if (text) this._fireCommand(text, undefined);
         this._cmdPending = this._cmdCommit(this._cmdPromptLine, null, "osc");
         this._cmdPromptLine = -1;
+        this._cmdPromptCol = -1;
       }
     } else if (kind === "D") {
       var exit = parts.length > 1 && parts[1] !== "" ? parseInt(parts[1], 10) : null;
@@ -572,6 +592,39 @@
         this._cmdCommit(this._cmdPromptLine, exit, "osc");
         this._cmdPromptLine = -1;
       }
+      this._fireCommand("", undefined); // the command is over, whatever it was
+    }
+  };
+
+  /** First logical line of the buffer starting at (row, col), following soft wraps —
+   * the command text for the running-command title. col -1 means "unknown" (no 133;B):
+   * fall back to the prompt regex. Capped: a title needs a name, not the whole paste. */
+  RulerAddon.prototype._cmdText = function (buf, row, col) {
+    var line = buf.getLine(row);
+    if (!line) return "";
+    var full = line.translateToString(true);
+    if (col < 0) {
+      var m = CMD_SPLIT_RE.exec(full);
+      if (!m || !m[2]) return "";
+      col = full.length - m[2].length;
+    }
+    var text = full.slice(col);
+    for (var r = row + 1; text.length < 256; r++) {
+      var next = buf.getLine(r);
+      if (!next || !next.isWrapped) break;
+      text += next.translateToString(true);
+    }
+    return text.trim().slice(0, 256);
+  };
+
+  /** Hands a command start (or "" = end) to the page without letting a host-side
+   * hook error break mark bookkeeping. */
+  RulerAddon.prototype._fireCommand = function (text, epoch) {
+    if (!this.onRunningCommand) return;
+    try {
+      this.onRunningCommand(text, epoch);
+    } catch (err) {
+      if (window.__pageTrace) window.__pageTrace("ruler onRunningCommand: " + (err && err.message));
     }
   };
 
@@ -580,26 +633,41 @@
    * the echo round trip settles — typed characters are echoed by the REMOTE side, so
    * a fast paste (or a laggy link) can put Enter ahead of its own command's echo.
    * The probe walks back across soft wraps to the row the prompt started on; a line
-   * that never grows a prompt+command shape just disposes quietly. */
-  RulerAddon.prototype.notifyEnter = function () {
+   * that never grows a prompt+command shape just disposes quietly. The page's title
+   * epoch rides along so it can drop a discovered command whose prompt title already
+   * moved on (a fast command finished before the probe fired). */
+  RulerAddon.prototype.notifyEnter = function (epoch) {
     if (this._cmdOscSeen || this._term.buffer.active.type === "alternate") return;
     var marker = this._term.registerMarker(0);
     if (!marker) return;
     var self = this;
     var attempts = 0;
+    var reported = false;
     function evaluate() {
       if (marker.isDisposed) return; // trimmed away while waiting
       if (self._cmdOscSeen || !self._term) { marker.dispose(); return; }
       attempts++;
-      var buf = self._term.buffer.active;
-      if (buf.type !== "alternate") {
-        var row = marker.line;
-        var bufLine = buf.getLine(row);
-        while (bufLine && bufLine.isWrapped && row > 0) {
-          row--;
-          bufLine = buf.getLine(row);
+      // Probe the NORMAL buffer: the marker lives there, and a full-screen app may
+      // have taken the alternate screen before the probe fired — that app IS the
+      // running command, so the title must still come out. The mark stays gated on
+      // the normal screen being active (_cmdCommit's math is cursor-relative).
+      var norm = self._term.buffer.normal;
+      var row = marker.line;
+      var bufLine = norm.getLine(row);
+      while (bufLine && bufLine.isWrapped && row > 0) {
+        row--;
+        bufLine = norm.getLine(row);
+      }
+      var lineText = bufLine ? bufLine.translateToString(true) : "";
+      // Gate on CMD_PROMPT_RE (prompt plus a real command); CMD_SPLIT_RE then says
+      // where the command starts, so the title slices at the column the mark used.
+      var m = CMD_PROMPT_RE.test(lineText) ? CMD_SPLIT_RE.exec(lineText) : null;
+      if (m) {
+        if (!reported) {
+          reported = true;
+          self._fireCommand(self._cmdText(norm, row, lineText.length - m[2].length), epoch);
         }
-        if (bufLine && CMD_PROMPT_RE.test(bufLine.translateToString(true))) {
+        if (self._term.buffer.active.type !== "alternate") {
           self._cmdCommit(row, null, "guess");
           marker.dispose();
           return;
@@ -642,8 +710,10 @@
 
   /** Register a listener for commands as they are marked (Phase 6.2 agent detection).
    * The ruler already owns both discovery paths — OSC 133 and the Enter-gated probe —
-   * so agent identity rides the same evidence instead of re-deriving it. */
-  RulerAddon.prototype.onCommand = function (callback) {
+   * so agent identity rides the same evidence instead of re-deriving it. Distinct from
+   * the onRunningCommand property: this fires per MARK, never reports an end, and is
+   * not epoch-gated. */
+  RulerAddon.prototype.onCommandMark = function (callback) {
     this._cmdObserver = callback;
   };
 
@@ -659,7 +729,7 @@
     try {
       this._cmdObserver(command);
     } catch (err) {
-      if (window.__pageTrace) window.__pageTrace("ruler onCommand: " + (err && err.message));
+      if (window.__pageTrace) window.__pageTrace("ruler onCommandMark: " + (err && err.message));
     }
   };
 
