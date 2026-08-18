@@ -61,6 +61,9 @@ public sealed class TerminalControl : Grid, IDisposable
     /// Drives the tab's subtitle; the page epoch-gates it against the title stream.</summary>
     public event Action<string>? CommandChanged;
 
+    /// <summary>Current directory read from a default cmd or PowerShell prompt.</summary>
+    public event Action<string>? PromptDirectoryChanged;
+
     // ---- agent-awareness evidence (Phase 6.2); raw, unmapped, from this tab's page only ----
 
     /// <summary>An OSC sequence we watch for agent events: the code and its payload.</summary>
@@ -205,6 +208,10 @@ public sealed class TerminalControl : Grid, IDisposable
                         TraceHook?.Invoke($"runningCommand: {runningText}");
                         CommandChanged?.Invoke(runningText);
                     }
+                    break;
+                case "promptDirectory":
+                    if (root.TryGetProperty("text", out var promptDirectory))
+                        PromptDirectoryChanged?.Invoke(promptDirectory.GetString() ?? "");
                     break;
                 case "pageError":
                     if (root.TryGetProperty("message", out var err))

@@ -24,7 +24,7 @@ public sealed class TmuxTitleReportingTests
     }
 
     [Fact]
-    public void Bootstrap_PrefersPaneTitleOverCommand()
+    public void Bootstrap_PrefersPaneTitleForANonShellCommand()
     {
         var command = TmuxPersistence.BootstrapCommand(Id, 0);
 
@@ -32,7 +32,20 @@ public sealed class TmuxTitleReportingTests
         // as "node" or "python3"; the pane title is what the program calls itself. Fall back
         // to the command only when the pane title is still tmux's hostname default.
         Assert.Contains(
-            "'#{?#{==:#{pane_title},#{host}},#{pane_current_command},#{pane_title}}'",
+            "#{?#{==:#{pane_title},#{host}},#{pane_current_command},#{pane_title}}",
+            command);
+    }
+
+    [Fact]
+    public void Bootstrap_ReportsTheShellInsteadOfAStalePaneTitle()
+    {
+        var command = TmuxPersistence.BootstrapCommand(Id, 0);
+
+        Assert.Contains(
+            "#{?#{==:#{pane_current_command},bash},#{pane_current_command}",
+            command);
+        Assert.Contains(
+            "#{?#{==:#{pane_current_command},zsh},#{pane_current_command}",
             command);
     }
 

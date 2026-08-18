@@ -235,26 +235,30 @@ tab-menu override + session default, adapter snippets dialog, settings toggles, 
 taskbar flash / optional sound for background alerts. Details in DECISIONS.md.
 
 Deferred: Windows toast notifications (needs package identity) and a taskbar count; an
-alerts list to jump between waiting tabs; per-agent adapters beyond Claude Code and the
-generic shell wrapper; richer ACP-style status.
+alerts list to jump between waiting tabs; per-agent adapters beyond Codex, Claude Code,
+and the generic shell wrapper; richer ACP-style status.
 
-Keep the session icon above as the stable identity of the saved target (remote host or local
-shell), and add a **second, separate agent icon** to a tab while an agent CLI is active. The two
-icons answer different questions: the session icon says *where and how this tab is running*;
-the agent icon says *what is currently running in it*. Initial built-in agent identities:
+Use one icon slot in each tab. Keep the session icon as the normal identity of the saved target
+(remote host or local shell), then replace it with the agent icon while an agent CLI is active.
+Restore the session icon when the agent exits. Initial built-in agent identities:
 Claude Code, Codex, Gemini CLI,
 Pi / oh-my-pi, Grok Build, generic agent, and normal shell.
 
 Agent identity can come from a recognized launch command or terminal title, a per-session
-default, or a manual tab-menu override. Detection must never replace or modify a manually
-selected session icon. Keep the existing state dot as a third, independent signal for SSH
-connection health or local-process health.
+default, or a manual tab-menu override. Agent detection only changes the icon shown in the tab;
+it must never modify the saved session icon. Keep the existing state dot as an independent
+signal for SSH connection health or local-process health.
 
 **Attention state:** show a small badge on the agent icon for `working`, `needs approval`,
 `needs answer`, `complete`, `failed`, or `idle`. An inactive tab that needs input keeps its
 amber badge until the user sends input or a structured agent event reports that work resumed.
 Selecting an alert focuses the correct tab and terminal. Optional Windows toast, sound, and
 taskbar-count notifications apply only when the tab or app is in the background.
+
+The Codex adapter uses Codex lifecycle hooks: `SessionStart`, `UserPromptSubmit`,
+`PermissionRequest`, `PostToolUse`, `Stop`, and `SessionEnd`. It reports status only through
+OSC 7377. It does not return an approval decision, inspect tool input, or send terminal input.
+Codex requires the user to review and trust the hook definition with `/hooks`.
 
 **Detection and adapters:** prefer explicit lifecycle events over terminal-screen guessing.
 Provide small adapters for each supported agent using its hooks, extensions, notification

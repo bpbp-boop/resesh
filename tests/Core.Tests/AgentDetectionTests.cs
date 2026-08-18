@@ -47,6 +47,20 @@ public class AgentDetectionTests
     public void PathShapedTitlesAreNotAgents(string title) =>
         Assert.Null(AgentDetection.FromTitle(title));
 
+    [Theory]
+    [InlineData("bash")]
+    [InlineData("-zsh")]
+    [InlineData("fish")]
+    public void ExactShellTitlesAreExitSignals(string title) =>
+        Assert.True(AgentDetection.IsShellTitle(title));
+
+    [Theory]
+    [InlineData("bash — server")]
+    [InlineData("/usr/bin/bash")]
+    [InlineData("my-bash")]
+    public void ShellWordsInsideOtherTitlesAreNotExitSignals(string title) =>
+        Assert.False(AgentDetection.IsShellTitle(title));
+
     [Fact]
     public void NamedAgentBeatsGenericInAProcessList()
     {

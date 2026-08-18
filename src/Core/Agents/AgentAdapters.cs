@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Sessions.Core.Agents;
 
 /// <summary>An adapter snippet the user can install on a target to upgrade a tab from
@@ -21,10 +23,72 @@ public static class AgentAdapters
 
     public static IReadOnlyList<AgentAdapterSnippet> All =>
     [
+        Codex(),
         ClaudeCodePosix(),
         ClaudeCodeWindows(),
         ShellFunction(),
     ];
+
+    /// <summary>Codex lifecycle hooks. One hooks.json works on Windows and POSIX targets:
+    /// Codex selects commandWindows on Windows and command everywhere else. Commands drain
+    /// the hook JSON from stdin, write only to the controlling terminal, and return no hook
+    /// output, so they can report state without changing an approval or agent decision.</summary>
+    public static AgentAdapterSnippet Codex() => new(
+        "Codex — Windows / Linux / macOS",
+        "~/.codex/hooks.json (then review and trust it with /hooks)",
+        "Uses Codex lifecycle hooks for exact idle / working / needs-approval / complete / exit states.",
+        CodexHooksJson());
+
+    private static string CodexHooksJson()
+    {
+        var eventStates = new (string Event, string State)[]
+        {
+            ("SessionStart", "idle"),
+            ("UserPromptSubmit", "working"),
+            ("PermissionRequest", "needs-approval"),
+            ("PostToolUse", "working"),
+            ("Stop", "complete"),
+            ("SessionEnd", "exit"),
+        };
+
+        var hooks = new Dictionary<string, object>();
+        foreach (var (eventName, state) in eventStates)
+        {
+            hooks[eventName] = new[]
+            {
+                new
+                {
+                    hooks = new[]
+                    {
+                        new
+                        {
+                            type = "command",
+                            command = CodexPosixCommand(state),
+                            commandWindows = CodexWindowsCommand(state),
+                            timeout = 3,
+                        },
+                    },
+                },
+            };
+        }
+
+        return JsonSerializer.Serialize(
+            new
+            {
+                description = "Sessions tab status for Codex. Reports state only; never approves or sends input.",
+                hooks,
+            },
+            new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    private static string CodexPosixCommand(string state) =>
+        $"sh -c \"cat >/dev/null; printf '\\033]7377;agent;id=codex;state={state}\\007' > /dev/tty\"";
+
+    private static string CodexWindowsCommand(string state) =>
+        $"powershell -NoProfile -NonInteractive -Command \"$input | Out-Null; "
+        + "$s=[IO.File]::OpenWrite('\\\\.\\CONOUT$'); "
+        + $"$b=[Text.Encoding]::UTF8.GetBytes([char]27+']7377;agent;id=codex;state={state}'+[char]7); "
+        + "$s.Write($b,0,$b.Length); $s.Dispose()\"";
 
     /// <summary>Claude Code hooks on a POSIX host (Linux/macOS/WSL). Writes straight to the
     /// tty so the sequence reaches the terminal instead of the hook's captured stdout.</summary>

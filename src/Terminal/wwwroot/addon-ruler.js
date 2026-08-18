@@ -97,6 +97,9 @@
   // Same shapes, capturing prompt and command separately: the tooltip card, agent
   // detection, and the running-command title all slice the command out with this.
   var CMD_SPLIT_RE = new RegExp("^(" + CMD_PROMPT_BODY + ")\\s?(.*)$");
+  // Default Windows prompts expose the current directory but do not update the console
+  // title. Keep this deliberately narrow: only PowerShell and absolute drive/UNC paths.
+  var WINDOWS_IDLE_PROMPT_RE = /^(?:PS )?((?:[A-Za-z]:[\\/]|\\\\)[^\r\n>]*)>\s*$/;
 
   function RulerAddon() {
     this._term = null;
@@ -130,6 +133,8 @@
     this._cmdPending = null;  // mark committed by C, awaiting its D exit code
     this._cmdObserver = null; // page hook: commands as they are marked (agent detection)
     this.onRunningCommand = null; // page hook: (text, epoch?) on start, ("") on 133;D
+    this.onPromptDirectory = null; // page hook: (path) when a Windows shell is idle
+    this._lastPromptSignature = null;
 
     this._timeWrites = [];    // serialized xterm writes: { data, unixMs|null }
     this._timeWriteActive = false;
@@ -193,6 +198,7 @@
     this._disposables.push(term.onWriteParsed(function () {
       self._queuePaint();
       if (self._search) self._scheduleRescan();
+      self._reportPromptDirectory();
     }));
     this._disposables.push(term.onLineFeed(function () {
       self._timeStampCurrent();
@@ -628,6 +634,39 @@
     }
   };
 
+  /** Reports the current directory from a completed default cmd/PowerShell prompt.
+   * The absolute cursor line is part of the signature, so returning to the same directory
+   * after a command still reports that the command ended. */
+  RulerAddon.prototype._reportPromptDirectory = function () {
+    if (!this.onPromptDirectory || !this._term) return;
+    var buf = this._term.buffer.active;
+    if (!buf || buf.type === "alternate") return;
+    var row = buf.baseY + buf.cursorY;
+    var start = row;
+    var line = buf.getLine(start);
+    while (line && line.isWrapped && start > 0) {
+      start--;
+      line = buf.getLine(start);
+    }
+    if (!line) return;
+    var promptText = line.translateToString(true);
+    for (var nextRow = start + 1; nextRow <= row && promptText.length < 512; nextRow++) {
+      var next = buf.getLine(nextRow);
+      if (!next || !next.isWrapped) break;
+      promptText += next.translateToString(true);
+    }
+    var match = WINDOWS_IDLE_PROMPT_RE.exec(promptText);
+    if (!match) return;
+    var signature = row + ":" + match[1];
+    if (signature === this._lastPromptSignature) return;
+    this._lastPromptSignature = signature;
+    try {
+      this.onPromptDirectory(match[1]);
+    } catch (err) {
+      if (window.__pageTrace) window.__pageTrace("ruler onPromptDirectory: " + (err && err.message));
+    }
+  };
+
   /** Discovered marks: called by the page when the user's input contains Enter.
    * The cursor row is anchored with a probe marker and its text evaluated only after
    * the echo round trip settles — typed characters are echoed by the REMOTE side, so
@@ -638,6 +677,7 @@
    * moved on (a fast command finished before the probe fired). */
   RulerAddon.prototype.notifyEnter = function (epoch) {
     if (this._cmdOscSeen || this._term.buffer.active.type === "alternate") return;
+    this._lastPromptSignature = null;
     var marker = this._term.registerMarker(0);
     if (!marker) return;
     var self = this;

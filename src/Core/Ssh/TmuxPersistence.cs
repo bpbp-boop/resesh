@@ -51,16 +51,31 @@ public static class TmuxPersistence
     /// What it reports matters as much as that it reports: pane_current_command is the
     /// foreground process's comm, so anything run through an interpreter is "node" or
     /// "python3" (codex and claude are both node scripts). The pane title is what the
-    /// program calls itself, so prefer it and keep the command as the fallback for programs
-    /// that set no title. tmux seeds the pane title with the hostname; that default means
-    /// "nobody has set one". Needs tmux 2.6+ for #{==:}; older servers emit the format
-    /// literally, which <c>TabViewModel.ApplyTerminalTitle</c> discards.
+    /// program calls itself, so prefer it for running programs. Pane titles are sticky,
+    /// however, so report pane_current_command when it is an interactive shell. That lets
+    /// the app retire a stale agent as soon as control returns to the prompt. tmux seeds the
+    /// pane title with the hostname; that default also falls back to the command. Needs
+    /// tmux 2.6+ for #{==:}; older servers emit the format literally, which
+    /// <c>TabViewModel.ApplyTerminalTitle</c> discards.
     /// </para>
     /// </summary>
-    private const string TitleReporting =
+    private static readonly string[] InteractiveShells =
+        ["sh", "bash", "zsh", "fish", "dash", "ash", "ksh", "mksh", "csh", "tcsh", "nu"];
+
+    private static readonly string TitleReporting =
         "set -g set-titles on \\; "
         + "set -g set-titles-string "
-        + "'#{?#{==:#{pane_title},#{host}},#{pane_current_command},#{pane_title}}'";
+        + $"'{BuildTitleFormat()}'";
+
+    private static string BuildTitleFormat()
+    {
+        var format = "#{?#{==:#{pane_title},#{host}},#{pane_current_command},#{pane_title}}";
+        foreach (var shell in InteractiveShells)
+        {
+            format = $"#{{?#{{==:#{{pane_current_command}},{shell}}},#{{pane_current_command}},{format}}}";
+        }
+        return format;
+    }
 
     public static string BootstrapCommand(Guid id, int slot)
     {

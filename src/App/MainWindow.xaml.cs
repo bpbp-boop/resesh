@@ -1199,7 +1199,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var copyOnSelect = new ToggleSwitch { Header = "Copy on select", IsOn = current.CopyOnSelect };
         var rightClickPaste = new ToggleSwitch { Header = "Right-click paste", IsOn = current.RightClickPaste };
         var highlighting = new Button { Content = "Keyword highlighting…" };
-        var agentIcons = new ToggleSwitch { Header = "Agent icons on tabs", IsOn = current.ShowAgentIcons };
+        var agentIcons = new ToggleSwitch { Header = "Use agent icons on tabs", IsOn = current.ShowAgentIcons };
         var agentFlash = new ToggleSwitch
         {
             Header = "Flash the taskbar when a background agent needs you",

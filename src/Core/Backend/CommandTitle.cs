@@ -19,6 +19,23 @@ public static class CommandTitle
     private static readonly char[] Operators = { ';', '|', '&', '<', '>', '(', ')' };
     private static readonly char[] Separators = { '/', '\\' };
 
+    /// <summary>
+    /// ConPTY can publish the launched executable path as its initial window title. It is
+    /// transport noise, not a program-selected title, so callers can fall back to the
+    /// profile's starting directory until the first prompt arrives.
+    /// </summary>
+    public static bool IsLocalExecutableTitle(string? title, string? executable)
+    {
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(executable))
+            return false;
+
+        var expanded = Environment.ExpandEnvironmentVariables(executable.Trim());
+        return string.Equals(
+            title.Trim().Trim('"'),
+            expanded.Trim().Trim('"'),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Null when nothing legible runs (blank, a bare VAR=value, a subshell).</summary>
     public static string? ProgramName(string? commandLine)
     {

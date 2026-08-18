@@ -143,44 +143,47 @@
                                     <Ellipse
                                         Width="7"
                                         Height="7"
+                                        Margin="-3,0,3,0"
                                         VerticalAlignment="Center"
                                         ToolTipService.ToolTip="{x:Bind StateText, Mode=OneWay}">
                                         <Ellipse.Fill>
                                             <SolidColorBrush Color="{x:Bind StateColor, Mode=OneWay}" />
                                         </Ellipse.Fill>
                                     </Ellipse>
-                                    <Image
-                                        Source="{x:Bind IconSource, Mode=OneWay}"
-                                        Width="16"
-                                        Height="16"
-                                        VerticalAlignment="Center"
-                                        Visibility="{x:Bind IconVisibility, Mode=OneWay}" />
-                                    <!-- Agent icon + attention badge (Phase 6.2). Deliberately
-                                         separate from the session icon above: that one says
-                                         where the tab runs, this one says what is running in it. -->
+                                    <!-- One identity slot: an active agent replaces the session
+                                         icon. The attention badge stays attached to that icon. -->
                                     <Grid
                                         Width="16"
                                         Height="16"
                                         VerticalAlignment="Center"
                                         ToolTipService.ToolTip="{x:Bind AgentTooltip, Mode=OneWay}"
-                                        Visibility="{x:Bind AgentIconVisibility, Mode=OneWay}">
+                                        Visibility="{x:Bind IconVisibility, Mode=OneWay}">
                                         <Image
-                                            Source="{x:Bind AgentIconSource, Mode=OneWay}"
+                                            Source="{x:Bind IconSource, Mode=OneWay}"
                                             Width="16"
                                             Height="16" />
-                                        <Ellipse
-                                            Width="7"
-                                            Height="7"
-                                            Margin="0,0,-1,-1"
+                                        <Border
+                                            Width="{x:Bind AgentBadgeSize, Mode=OneWay}"
+                                            Height="{x:Bind AgentBadgeSize, Mode=OneWay}"
+                                            Margin="0,0,-2,-2"
                                             HorizontalAlignment="Right"
                                             VerticalAlignment="Bottom"
-                                            StrokeThickness="1.5"
-                                            Stroke="{x:Bind HeaderBackground, Mode=OneWay}"
+                                            CornerRadius="6"
+                                            BorderThickness="1"
+                                            BorderBrush="{x:Bind HeaderBackground, Mode=OneWay}"
                                             Visibility="{x:Bind AgentBadgeVisibility, Mode=OneWay}">
-                                            <Ellipse.Fill>
+                                            <Border.Background>
                                                 <SolidColorBrush Color="{x:Bind AgentBadgeColor, Mode=OneWay}" />
-                                            </Ellipse.Fill>
-                                        </Ellipse>
+                                            </Border.Background>
+                                            <TextBlock
+                                                Text="{x:Bind AgentBadgeGlyph, Mode=OneWay}"
+                                                Foreground="White"
+                                                FontSize="8"
+                                                FontWeight="Bold"
+                                                IsTextScaleFactorEnabled="False"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center" />
+                                        </Border>
                                     </Grid>
                                     <FontIcon
                                         Glyph="&#xE840;"

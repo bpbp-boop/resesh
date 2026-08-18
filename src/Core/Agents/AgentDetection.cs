@@ -44,6 +44,13 @@ public static class AgentDetection
 
     private static readonly string[] Extensions = [".exe", ".cmd", ".bat", ".ps1", ".sh", ".js", ".mjs"];
 
+    /// <summary>Exact foreground-process titles that mean control has returned to an
+    /// interactive shell. tmux reports one of these instead of a program's stale pane title.</summary>
+    private static readonly HashSet<string> ShellTitles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "sh", "bash", "zsh", "fish", "dash", "ash", "ksh", "mksh", "csh", "tcsh", "nu",
+    };
+
     /// <summary>
     /// The agent started by a command line, or null when it starts no agent we know.
     /// Null is a real answer for the caller ("this is a plain shell command"), which is
@@ -96,6 +103,12 @@ public static class AgentDetection
         }
         return null;
     }
+
+    /// <summary>True only for an exact shell-process title. A path or prose that happens
+    /// to contain a shell name is not an exit signal.</summary>
+    public static bool IsShellTitle(string? title) =>
+        !string.IsNullOrWhiteSpace(title)
+        && ShellTitles.Contains(title.Trim().TrimStart('-'));
 
     /// <summary>The agent identified by a process name (local tabs enumerate the processes
     /// inside their own job object, which is the strongest local signal we have).</summary>

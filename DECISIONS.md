@@ -413,10 +413,10 @@ keyboard-interactive fallback.
   complete file uses the authenticated encryption envelope.
 
 ## 2026-08-16 - Agent-aware tabs (6.2)
-- Two icons, never merged: the session icon says where a tab runs, a second agent icon
-  says what is running in it. Detection may set the agent icon and never touches
-  `Session.Icon`; `Session.Agent` mirrors the icon field's semantics (null = detect,
-  `none` = never show, a key = default until something is observed).
+- One tab icon slot shows the session icon normally and replaces it with the active agent
+  icon. Detection changes only the displayed icon and never changes `Session.Icon`;
+  `Session.Agent` mirrors the icon field's semantics (null = detect, `none` = never show,
+  a key = default until something is observed).
 - All mapping lives in `AgentTracker` (Core, no UI): the page forwards raw evidence only —
   OSC payloads, titles, marked commands, bells — and every precedence rule is unit-tested.
   Order, strongest first: manual tab override, adapter events, live detection, session
@@ -451,6 +451,16 @@ keyboard-interactive fallback.
 - Adapters are text, not automation: the tab menu shows the exact snippet, the user installs
   it where they choose, and deleting the lines removes it. An adapter's only power is to
   emit one escape sequence; nothing in this phase can send input or approve a tool call.
+- Codex uses its official command-hook lifecycle. `SessionStart` reports idle,
+  `UserPromptSubmit` and `PostToolUse` report working, `PermissionRequest` reports
+  needs-approval, `Stop` reports complete, and `SessionEnd` reports exit. The hook drains
+  its JSON input without inspecting tool arguments, emits only OSC 7377 to the controlling
+  terminal, and returns no approval decision. Codex still requires explicit trust via `/hooks`.
+- `SessionEnd` is not the only exit signal: Codex can keep a conversation open after its
+  terminal client exits, and tmux pane titles are sticky. The tmux title bridge therefore
+  reports `pane_current_command` when the foreground process is an interactive shell. An
+  exact shell title retires structured and detected agent state immediately; ordinary
+  non-agent titles remain too weak to do that.
 - Live-verified in the real app (CDP rig, PrintWindow screenshots): a fake `claude.exe`
   (a renamed powershell.exe) in a local cmd tab produced the agent icon with a blue working
   badge from job membership, then an amber needs-approval badge from its own OSC 7377

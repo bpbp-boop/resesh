@@ -115,7 +115,23 @@ public sealed class AgentTracker
     /// a title that mentions no agent is not evidence that one exited.</summary>
     public bool ObserveTitle(string? title) => Change(() =>
     {
-        if (Suppressed || _structured is not null)
+        if (Suppressed)
+            return;
+
+        // The tmux title bridge reports the foreground shell instead of a stale pane title
+        // when an agent exits. This is definite negative evidence and retires even a
+        // structured identity whose SessionEnd hook did not run yet.
+        if (AgentDetection.IsShellTitle(title))
+        {
+            _structured = null;
+            _detected = AgentIdentities.Shell;
+            _detectedSource = AgentSource.Title;
+            _label = null;
+            _attention = AgentAttention.None;
+            return;
+        }
+
+        if (_structured is not null)
             return;
         var key = AgentDetection.FromTitle(title);
         if (key is null || key == _detected)

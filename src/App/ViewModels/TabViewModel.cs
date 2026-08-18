@@ -98,6 +98,7 @@ public sealed class TabViewModel : ObservableObject
                 {
                     TerminalTitle = null;
                     RunningCommand = null;
+                    PromptDirectory = null;
                 }
                 OnPropertyChanged(nameof(StateText));
                 OnPropertyChanged(nameof(StateColor));
@@ -157,12 +158,12 @@ public sealed class TabViewModel : ObservableObject
             HasUnseenOutput = true;
     }
 
-    // ---- agent awareness (Phase 6.2): a SECOND icon, never the session icon ----
+    // ---- agent awareness (Phase 6.2): replace the session icon while an agent is active ----
 
     private AgentSnapshot _agent = AgentSnapshot.Empty;
 
     /// <summary>What is running in this tab right now, as resolved by the tab's
-    /// <c>AgentTracker</c>. The session icon (where the tab runs) is untouched by this.</summary>
+    /// <c>AgentTracker</c>. Its icon replaces the session icon while the agent is active.</summary>
     public AgentSnapshot Agent
     {
         get => _agent;
@@ -174,22 +175,22 @@ public sealed class TabViewModel : ObservableObject
     }
 
     /// <summary>Re-reads the agent visuals; also used when the app-wide "show agent icons"
-    /// setting changes, since the icon and badge are derived from it.</summary>
+    /// setting changes, since the displayed icon and badge are derived from it.</summary>
     public void NotifyAgentVisuals()
     {
-        OnPropertyChanged(nameof(AgentIconSource));
-        OnPropertyChanged(nameof(AgentIconVisibility));
+        OnPropertyChanged(nameof(IconSource));
+        OnPropertyChanged(nameof(IconVisibility));
         OnPropertyChanged(nameof(AgentBadgeVisibility));
         OnPropertyChanged(nameof(AgentBadgeColor));
+        OnPropertyChanged(nameof(AgentBadgeGlyph));
+        OnPropertyChanged(nameof(AgentBadgeSize));
         OnPropertyChanged(nameof(AgentTooltip));
     }
 
     private static bool AgentIconsEnabled => App.Settings.Current.ShowAgentIcons;
 
-    public Microsoft.UI.Xaml.Media.ImageSource? AgentIconSource =>
+    private Microsoft.UI.Xaml.Media.ImageSource? AgentIconSource =>
         AgentIconsEnabled ? App.Icons.GetAgentImage(Agent.Key, Icons.SessionIconCatalog.ListIconSize) : null;
-
-    public Visibility AgentIconVisibility => AgentIconSource is null ? Visibility.Collapsed : Visibility.Visible;
 
     /// <summary>The attention badge rides on the agent icon, so it needs one to sit on.</summary>
     public Visibility AgentBadgeVisibility =>
@@ -209,6 +210,19 @@ public sealed class TabViewModel : ObservableObject
         AgentAttention.Failed => Windows.UI.Color.FromArgb(255, 0xE7, 0x48, 0x56),
         _ => Windows.UI.Color.FromArgb(255, 0x9E, 0x9E, 0x9E),
     };
+
+    /// <summary>Meaningful states get a symbol as well as a colour, so the badge remains
+    /// readable for users who cannot distinguish the colours.</summary>
+    public string AgentBadgeGlyph => Agent.Attention switch
+    {
+        AgentAttention.NeedsApproval => "!",
+        AgentAttention.NeedsAnswer => "?",
+        AgentAttention.Complete => "✓",
+        AgentAttention.Failed => "×",
+        _ => "",
+    };
+
+    public double AgentBadgeSize => AgentBadgeGlyph.Length == 0 ? 7 : 11;
 
     /// <summary>Names the agent, its state, and how we know — so a guess never reads like
     /// a report. Any label came off the wire and is already sanitized and truncated.</summary>
@@ -355,7 +369,9 @@ public sealed class TabViewModel : ObservableObject
         var trimmed = title?.Trim();
         // A tmux older than 2.6 has no #{==:} and sends our set-titles-string back verbatim;
         // that is noise, not a title, and the endpoint fallback beats showing it.
-        if (string.IsNullOrEmpty(trimmed) || trimmed.Contains("#{", StringComparison.Ordinal))
+        if (string.IsNullOrEmpty(trimmed)
+            || trimmed.Contains("#{", StringComparison.Ordinal)
+            || (IsLocal && CommandTitle.IsLocalExecutableTitle(trimmed, Session.Local?.Executable)))
             TerminalTitle = null;
         else
             TerminalTitle = trimmed;
@@ -387,6 +403,27 @@ public sealed class TabViewModel : ObservableObject
     public void ApplyRunningCommand(string? commandLine) =>
         RunningCommand = CommandTitle.ProgramName(commandLine);
 
+    private string? _promptDirectory;
+
+    /// <summary>Current directory read from a default cmd or PowerShell prompt.</summary>
+    public string? PromptDirectory
+    {
+        get => _promptDirectory;
+        private set
+        {
+            if (SetProperty(ref _promptDirectory, value))
+                OnPropertyChanged(nameof(Subtitle));
+        }
+    }
+
+    /// <summary>A Windows path prompt means the shell is idle in this directory.</summary>
+    public void ApplyPromptDirectory(string? directory)
+    {
+        var trimmed = directory?.Trim();
+        PromptDirectory = string.IsNullOrEmpty(trimmed) ? null : trimmed;
+        RunningCommand = null;
+    }
+
     /// <summary>
     /// The tab's second line, best available: what a program set as the title, else the
     /// running command the page saw start, else the cwd from a prompt-shaped title, else
@@ -398,11 +435,11 @@ public sealed class TabViewModel : ObservableObject
         get
         {
             if (TerminalTitle is not { } title)
-                return RunningCommand ?? FallbackSubtitle;
+                return RunningCommand ?? PromptDirectory ?? FallbackSubtitle;
             var match = PromptTitle.Match(title);
             if (!match.Success)
                 return title; // a program's own title beats a guessed command name
-            return RunningCommand ?? match.Groups["cwd"].Value;
+            return RunningCommand ?? PromptDirectory ?? match.Groups["cwd"].Value;
         }
     }
 
@@ -413,8 +450,11 @@ public sealed class TabViewModel : ObservableObject
         {
             if (IsLocal)
             {
-                var exe = System.IO.Path.GetFileName(Session.Local?.Executable ?? "");
-                return string.IsNullOrEmpty(exe) ? "local" : exe;
+                var directory = Environment.ExpandEnvironmentVariables(
+                    Session.Local?.StartingDirectory?.Trim() ?? "");
+                return string.IsNullOrEmpty(directory)
+                    ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+                    : directory;
             }
             return string.IsNullOrEmpty(Session.Username)
                 ? Session.Host
@@ -422,9 +462,9 @@ public sealed class TabViewModel : ObservableObject
         }
     }
 
-    /// <summary>Session icon for the tab strip; null collapses the Image.</summary>
+    /// <summary>The active agent icon, or the session icon when no agent is active.</summary>
     public Microsoft.UI.Xaml.Media.ImageSource? IconSource =>
-        App.Icons.GetImage(Session.Icon, Icons.SessionIconCatalog.ListIconSize);
+        AgentIconSource ?? App.Icons.GetImage(Session.Icon, Icons.SessionIconCatalog.ListIconSize);
 
     public Visibility IconVisibility => IconSource is null ? Visibility.Collapsed : Visibility.Visible;
 

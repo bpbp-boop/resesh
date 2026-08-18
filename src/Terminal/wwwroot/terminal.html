@@ -247,6 +247,12 @@
         text: typeof text === "string" ? text.slice(0, 256) : "",
       });
     };
+    ruler.onPromptDirectory = function (directory) {
+      host.postMessage({
+        type: "promptDirectory",
+        text: typeof directory === "string" ? directory.slice(0, 512) : "",
+      });
+    };
 
     term.onSelectionChange(function () {
       // Find selects each match it lands on; don't let copy-on-select clobber the clipboard.

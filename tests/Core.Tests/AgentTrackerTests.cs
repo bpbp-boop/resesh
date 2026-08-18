@@ -62,6 +62,17 @@ public class AgentTrackerTests
     }
 
     [Fact]
+    public void TmuxShellTitleRetiresAnAgentWithAStalePaneTitle()
+    {
+        var tracker = new AgentTracker();
+        tracker.ObserveEvent(Structured("agent;id=codex;state=complete"));
+
+        Assert.True(tracker.ObserveTitle("bash"));
+        Assert.False(tracker.Current.IsAgent);
+        Assert.Equal(AgentAttention.None, tracker.Current.Attention);
+    }
+
+    [Fact]
     public void StructuredEventsOutrankTitles()
     {
         var tracker = new AgentTracker();

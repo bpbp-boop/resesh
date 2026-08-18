@@ -97,3 +97,35 @@ test("discovery stays quiet on a line without a prompt shape", () => {
   runPendingTimers();
   assert.equal(addon.calls.length, 0);
 });
+
+test("idle Windows prompts report their current directory", () => {
+  const cmd = makeAddon(buffer([line("C:\\Users\\Boden>")]));
+  cmd.promptCalls = [];
+  cmd.onPromptDirectory = text => cmd.promptCalls.push(text);
+  cmd._reportPromptDirectory();
+
+  const powershell = makeAddon(buffer([line("PS D:\\work\\Sessions> ")]));
+  powershell.promptCalls = [];
+  powershell.onPromptDirectory = text => powershell.promptCalls.push(text);
+  powershell._reportPromptDirectory();
+
+  assert.deepEqual(cmd.promptCalls, ["C:\\Users\\Boden"]);
+  assert.deepEqual(powershell.promptCalls, ["D:\\work\\Sessions"]);
+});
+
+test("prompt reporting rejects output and reports the same directory on a new line", () => {
+  const lines = [line("build > artifact.txt")];
+  const active = buffer(lines);
+  const addon = makeAddon(active);
+  addon.promptCalls = [];
+  addon.onPromptDirectory = text => addon.promptCalls.push(text);
+  addon._reportPromptDirectory();
+  assert.deepEqual(addon.promptCalls, []);
+
+  lines[0] = line("C:\\work>");
+  lines[1] = line("C:\\work>");
+  addon._reportPromptDirectory();
+  active.cursorY = 1;
+  addon._reportPromptDirectory();
+  assert.deepEqual(addon.promptCalls, ["C:\\work", "C:\\work"]);
+});

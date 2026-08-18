@@ -23,14 +23,16 @@ public static class AgentAdapterDialog
                  + "title, and (for local tabs) the processes in the tab's own job. Detection can "
                  + "say which agent is running, but only the agent itself can say it is waiting for "
                  + "you. Installing one of these snippets on a target upgrades its tabs from a guess "
-                 + "to reported working / needs-approval / complete states.",
+                 + "to reported idle / working / needs-approval / complete states. The Codex adapter "
+                 + "uses Codex's lifecycle hooks; review and trust it from Codex with /hooks.",
         });
         panel.Children.Add(new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
             Opacity = 0.75,
             Text = "Nothing here is installed for you, on this machine or any remote host. "
-                 + "Copy what you want, where you want it; delete the lines to remove it.",
+                 + "Copy what you want, where you want it; delete the lines to remove it. The hooks "
+                 + "only report status to the terminal. They never approve a request or send input.",
         });
 
         foreach (var snippet in AgentAdapters.All)

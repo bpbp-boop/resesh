@@ -10,6 +10,17 @@ namespace Sessions.Core.Tests;
 /// </summary>
 public sealed class CommandTitleTests
 {
+    [Fact]
+    public void IsLocalExecutableTitle_MatchesExpandedPathWithoutCaseSensitivity()
+    {
+        var executable = @"%SystemRoot%\System32\cmd.exe";
+        var title = Environment.ExpandEnvironmentVariables(executable).ToUpperInvariant();
+
+        Assert.True(CommandTitle.IsLocalExecutableTitle(title, executable));
+        Assert.True(CommandTitle.IsLocalExecutableTitle($"\"{title}\"", executable));
+        Assert.False(CommandTitle.IsLocalExecutableTitle(@"C:\work", executable));
+    }
+
     [Theory]
     [InlineData("htop", "htop")]
     [InlineData("  htop  -d 10 ", "htop")]
