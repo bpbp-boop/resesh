@@ -281,7 +281,7 @@
                                 x:Name="FilterBox"
                                 Grid.Column="1"
                                 Margin="5,0,0,0"
-                                Padding="0"
+                                Padding="0,0,30,0"
                                 MinHeight="0"
                                 VerticalAlignment="Center"
                                 PlaceholderText="Filter sessions"
@@ -291,6 +291,7 @@
                                 VerticalContentAlignment="Center"
                                 TextChanged="FilterBox_TextChanged"
                                 KeyDown="FilterBox_KeyDown"
+                                Loaded="FilterBox_Loaded"
                                 GotFocus="FilterBox_GotFocus"
                                 LostFocus="FilterBox_LostFocus">
                                 <!-- The containing Border owns all filter-field chrome. Keep the
@@ -312,6 +313,22 @@
                                     <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
                                 </TextBox.Resources>
                             </TextBox>
+                            <Button
+                                x:Name="ClearFilterButton"
+                                Grid.Column="1"
+                                Width="30"
+                                Height="28"
+                                Padding="0"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Visibility="Collapsed"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Click="ClearFilterButton_Click"
+                                ToolTipService.ToolTip="Clear filter"
+                                AutomationProperties.Name="Clear filter">
+                                <FontIcon Glyph="&#xE711;" FontSize="10" />
+                            </Button>
                         </Grid>
                     </Border>
                     <!-- Fluent UI System Icons (MIT): chevron_up_down / chevron_down_up, 16px

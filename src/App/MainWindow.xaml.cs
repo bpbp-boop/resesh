@@ -1288,10 +1288,45 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void FilterBox_TextChanged(object sender, TextChangedEventArgs e)
     {
+        ClearFilterButton.Visibility = string.IsNullOrEmpty(FilterBox.Text)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
         _filterDebounce ??= CreateFilterDebounce();
         _filterDebounce.Stop();
         _filterDebounce.Start();
     }
+
+    private void FilterBox_Loaded(object sender, RoutedEventArgs e)
+    {
+        // The stock TextBox template shows its own clear button while focused.
+        // This field has a persistent clear button, so remove the template button
+        // to avoid two slightly offset X glyphs occupying the same space.
+        if (FindFilterBoxTemplateElement(FilterBox, "DeleteButton") is Button deleteButton)
+        {
+            deleteButton.Opacity = 0;
+            deleteButton.IsHitTestVisible = false;
+            deleteButton.Width = 0;
+            deleteButton.MinWidth = 0;
+        }
+    }
+
+    private static FrameworkElement? FindFilterBoxTemplateElement(DependencyObject root, string name)
+    {
+        for (var index = 0; index < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, index);
+            if (child is FrameworkElement { Name: var childName } element && childName == name)
+                return element;
+
+            if (FindFilterBoxTemplateElement(child, name) is { } descendant)
+                return descendant;
+        }
+
+        return null;
+    }
+
+    private void ClearFilterButton_Click(object sender, RoutedEventArgs e) => ClearFilter();
 
     private Microsoft.UI.Dispatching.DispatcherQueueTimer CreateFilterDebounce()
     {
