@@ -64,6 +64,9 @@ public sealed class TreeNodeViewModel : ObservableObject
         _ => Session.Port == 22 ? Session.Host : $"{Session.Host}:{Session.Port}",
     };
 
+    /// <summary>The active tree filter, used only to highlight matching session names.</summary>
+    public string HighlightQuery { get; init; } = "";
+
     /// <summary>Per-session color tag as a renderable color; transparent when unset.</summary>
     public Windows.UI.Color TagColor => ParseColor(Session?.ColorTag);
 
@@ -101,8 +104,8 @@ public sealed class TreeNodeViewModel : ObservableObject
     public static TreeNodeViewModel ForFolder(string fullPath, bool isExpanded, bool isLocalScope = false)
         => new(null, fullPath, isLocalScope) { IsExpanded = isExpanded };
 
-    public static TreeNodeViewModel ForSession(Session session)
-        => new(session, session.FolderPath, session.IsLocal);
+    public static TreeNodeViewModel ForSession(Session session, string highlightQuery = "")
+        => new(session, session.FolderPath, session.IsLocal) { HighlightQuery = highlightQuery };
 
     public static TreeNodeViewModel ForLocalRoot(bool isExpanded)
         => new(null, "", isLocalScope: true, isLocalRoot: true) { IsExpanded = isExpanded };

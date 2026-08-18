@@ -15,6 +15,7 @@ public sealed class MainViewModel : ObservableObject
     // Folder expansion is keyed by TreeNodeViewModel.ExpansionKey (path, with a reserved
     // prefix for the Local scope) so it survives tree rebuilds. Default: expanded.
     private readonly Dictionary<string, bool> _expansion = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, bool> _filterExpansion = new(StringComparer.OrdinalIgnoreCase);
 
     private static string ExpansionKeyFor(string folderPath, SessionKind kind) =>
         kind == SessionKind.Local ? "\u0000local\u0000" + folderPath : folderPath;
@@ -42,12 +43,27 @@ public sealed class MainViewModel : ObservableObject
         get => _searchText;
         set
         {
+            var wasSearching = IsSearching;
             if (SetProperty(ref _searchText, value))
+            {
+                if (!wasSearching && IsSearching)
+                    _filterExpansion.Clear();
                 RebuildTree();
+            }
         }
     }
 
     public bool IsSearching => !string.IsNullOrWhiteSpace(_searchText);
+
+    public bool IsFiltering => IsSearching;
+
+    public int TotalSessionCount => VisibleSessions.Count();
+
+    public int MatchCount { get; private set; }
+
+    public string MatchSummary => MatchCount == 0
+        ? "No matching sessions"
+        : $"{MatchCount} of {TotalSessionCount} sessions";
 
     /// <summary>The group that receives sessions opened from the tree (last-focused).</summary>
     public TabGroupViewModel FocusedGroup
@@ -245,9 +261,9 @@ public sealed class MainViewModel : ObservableObject
 
     public void NoteExpansion(TreeNodeViewModel node, bool expanded)
     {
-        if (node.IsFolder && !IsSearching && _currentNodes.Contains(node))
+        if (node.IsFolder && _currentNodes.Contains(node))
         {
-            _expansion[node.ExpansionKey] = expanded;
+            (IsSearching ? _filterExpansion : _expansion)[node.ExpansionKey] = expanded;
             node.IsExpanded = expanded; // keep the VM in sync; the view binding is OneWay
         }
     }
@@ -258,8 +274,7 @@ public sealed class MainViewModel : ObservableObject
         if (!node.IsFolder)
             return;
         node.IsExpanded = expanded;
-        if (!IsSearching)
-            _expansion[node.ExpansionKey] = expanded;
+        (IsSearching ? _filterExpansion : _expansion)[node.ExpansionKey] = expanded;
         foreach (var child in node.Children)
             SetExpansionUnder(child, expanded);
     }
@@ -276,13 +291,33 @@ public sealed class MainViewModel : ObservableObject
 
     public void RebuildTree()
     {
-        var sessions = SessionSearch.Filter(VisibleSessions, _searchText);
+        var allSessions = VisibleSessions.ToList();
+        var query = _searchText.Trim();
+
+        // A matching folder reveals its complete subtree. Otherwise only matching leaves
+        // and their ancestors are projected into the filtered view.
+        var matchingSshFolders = IsSearching
+            ? MatchingFolders(_store.FoldersOf(SessionKind.Ssh), query)
+            : [];
+        var matchingLocalFolders = IsSearching
+            ? MatchingFolders(_store.FoldersOf(SessionKind.Local), query)
+            : [];
+        var localRootMatches = IsSearching && "Local".Contains(query, StringComparison.OrdinalIgnoreCase);
+        var sessions = !IsSearching
+            ? allSessions
+            : allSessions.Where(s => SessionSearch.Matches(s, query)
+                || (s.IsLocal && localRootMatches)
+                || IsUnderMatchingFolder(s, s.IsLocal ? matchingLocalFolders : matchingSshFolders)).ToList();
+        MatchCount = sessions.Count;
         var localSessions = sessions.Where(s => s.IsLocal).ToList();
         var sshSessions = sessions.Where(s => !s.IsLocal).ToList();
 
-        // While searching, show only folders that contain a match (ancestors included), all expanded.
+        // While searching, project matching folders/leaves plus the ancestors needed to reach them.
         IEnumerable<string> FoldersFor(SessionKind kind, IEnumerable<Session> matched) => IsSearching
-            ? matched.SelectMany(s => FolderPaths.SelfAndAncestors(s.FolderPath)).Distinct(StringComparer.OrdinalIgnoreCase)
+            ? matched.SelectMany(s => FolderPaths.SelfAndAncestors(s.FolderPath))
+                .Concat((kind == SessionKind.Local ? matchingLocalFolders : matchingSshFolders)
+                    .SelectMany(FolderPaths.SelfAndAncestors))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
             : _store.FoldersOf(kind);
 
         _currentNodes.Clear();
@@ -290,10 +325,10 @@ public sealed class MainViewModel : ObservableObject
 
         // The permanent virtual Local root sits first while browsing. While filtering it
         // follows normal match rules: no matching local profile, no Local node.
-        if (!IsSearching || localSessions.Count > 0)
+        if (!IsSearching || localSessions.Count > 0 || matchingLocalFolders.Count > 0 || localRootMatches)
         {
             var localRoot = TreeNodeViewModel.ForLocalRoot(
-                IsSearching || _expansion.GetValueOrDefault(ExpansionKeyFor("", SessionKind.Local), true));
+                ExpansionFor(ExpansionKeyFor("", SessionKind.Local)));
             _currentNodes.Add(localRoot);
             var localTree = SessionTreeBuilder.Build(localSessions, FoldersFor(SessionKind.Local, localSessions));
             foreach (var child in BuildChildren(localTree, isLocalScope: true))
@@ -307,15 +342,28 @@ public sealed class MainViewModel : ObservableObject
 
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(IsSearching));
+        OnPropertyChanged(nameof(IsFiltering));
+        OnPropertyChanged(nameof(MatchCount));
+        OnPropertyChanged(nameof(MatchSummary));
         TreeRebuilt?.Invoke();
     }
+
+    private static List<string> MatchingFolders(IEnumerable<string> folders, string query) =>
+        folders.Where(path => path.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private static bool IsUnderMatchingFolder(Session session, IEnumerable<string> folders) =>
+        folders.Any(folder => FolderPaths.IsSelfOrDescendant(session.FolderPath, folder));
+
+    private bool ExpansionFor(string key) => IsSearching
+        ? _filterExpansion.GetValueOrDefault(key, true)
+        : _expansion.GetValueOrDefault(key, true);
 
     private IEnumerable<TreeNodeViewModel> BuildChildren(FolderNode folder, bool isLocalScope)
     {
         foreach (var sub in folder.Folders)
         {
             var kind = isLocalScope ? SessionKind.Local : SessionKind.Ssh;
-            var expanded = IsSearching || _expansion.GetValueOrDefault(ExpansionKeyFor(sub.FullPath, kind), true);
+            var expanded = ExpansionFor(ExpansionKeyFor(sub.FullPath, kind));
             var node = TreeNodeViewModel.ForFolder(sub.FullPath, expanded, isLocalScope);
             _currentNodes.Add(node);
             foreach (var child in BuildChildren(sub, isLocalScope))
@@ -324,6 +372,6 @@ public sealed class MainViewModel : ObservableObject
         }
 
         foreach (var session in folder.Sessions)
-            yield return TreeNodeViewModel.ForSession(session);
+            yield return TreeNodeViewModel.ForSession(session, IsSearching ? _searchText.Trim() : "");
     }
 }

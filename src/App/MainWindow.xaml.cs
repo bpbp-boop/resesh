@@ -20,6 +20,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private readonly SplitLayout<TabGroupViewModel> _groupLayout;
     private bool _closeConfirmed;
     private bool _closePromptOpen;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
 
     public MainWindow()
     {
@@ -110,6 +111,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             e.Handled = true;
             QuickConnectBox.Focus(FocusState.Programmatic);
         };
+        var focusFilter = new KeyboardAccelerator { Key = VirtualKey.F, Modifiers = VirtualKeyModifiers.Control };
+        focusFilter.Invoked += (_, e) =>
+        {
+            e.Handled = true;
+            FilterBox.Focus(FocusState.Programmatic);
+            FilterBox.SelectAll();
+        };
         // Ctrl+Shift+T: open the default local profile (also forwarded by the xterm page).
         var newLocalTab = new KeyboardAccelerator
         {
@@ -125,6 +133,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         Root.KeyboardAccelerators.Add(split);
         Root.KeyboardAccelerators.Add(filePane);
         Root.KeyboardAccelerators.Add(quickConnect);
+        Root.KeyboardAccelerators.Add(focusFilter);
         Root.KeyboardAccelerators.Add(newLocalTab);
     }
 
@@ -1082,8 +1091,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
     }
 
-    private void SyncEmptyState() =>
-        EmptyState.Visibility = App.Store.Sessions.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    private void SyncEmptyState()
+    {
+        EmptyState.Visibility = App.Store.Sessions.Count == 0 && !ViewModel.IsFiltering
+            ? Visibility.Visible : Visibility.Collapsed;
+        NoFilterMatchesState.Visibility = ViewModel.IsFiltering && ViewModel.MatchCount == 0
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     // ---- tree pane persistence ----
 
@@ -1204,26 +1218,70 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     // ---- Filter ----
 
-    private void FilterBox_TextChanged(object sender, TextChangedEventArgs e) =>
+    private void FilterBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        _filterDebounce ??= CreateFilterDebounce();
+        _filterDebounce.Stop();
+        _filterDebounce.Start();
+    }
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer CreateFilterDebounce()
+    {
+        var timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(150);
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) => ApplyFilterNow();
+        return timer;
+    }
+
+    private void ApplyFilterNow()
+    {
+        _filterDebounce?.Stop();
         ViewModel.SearchText = FilterBox.Text;
+    }
+
+    private void ClearFilter()
+    {
+        FilterBox.Text = "";
+        ApplyFilterNow();
+        FilterBox.Focus(FocusState.Programmatic);
+    }
+
+    private void FilterBox_GotFocus(object sender, RoutedEventArgs e) =>
+        FilterFieldBorder.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSplitterHoverBrush"];
+
+    private void FilterBox_LostFocus(object sender, RoutedEventArgs e) =>
+        FilterFieldBorder.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ControlStrokeColorDefaultBrush"];
 
     private void FilterBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key == VirtualKey.Enter)
         {
-            // Enter connects the best match and clears the filter.
-            if (ViewModel.RankedMatches(FilterBox.Text).FirstOrDefault() is { } target)
-            {
-                ConnectSession(target);
-                FilterBox.Text = "";
-            }
+            // Filtering narrows the view only; Enter must never launch a session.
             e.Handled = true;
         }
         else if (e.Key == VirtualKey.Escape)
         {
-            FilterBox.Text = "";
+            if (FilterBox.Text.Length > 0)
+                ClearFilter();
+            else
+                FocusFirstTreeItem();
             e.Handled = true;
         }
+        else if (e.Key == VirtualKey.Down)
+        {
+            FocusFirstTreeItem();
+            e.Handled = true;
+        }
+    }
+
+    private void FocusFirstTreeItem()
+    {
+        if (ViewModel.RootNodes.FirstOrDefault() is { } first
+            && SessionTree.ContainerFromItem(first) is TreeViewItem item)
+            item.Focus(FocusState.Keyboard);
+        else
+            SessionTree.Focus(FocusState.Keyboard);
     }
 
     // ---- Toolbar / root context menu ----

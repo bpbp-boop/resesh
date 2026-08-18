@@ -22,7 +22,7 @@
                     ContextRequested="TreeNode_ContextRequested">
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <FontIcon Glyph="&#xE8B7;" FontSize="14" />
-                        <TextBlock Text="{x:Bind Name}" />
+                        <TextBlock Text="{x:Bind Name}" Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                     </StackPanel>
                 </TreeViewItem>
             </DataTemplate>
@@ -47,10 +47,13 @@
                             VerticalAlignment="Center"
                             Visibility="{x:Bind IconVisibility}" />
                         <FontIcon Glyph="&#xE756;" FontSize="14" Visibility="{x:Bind DefaultIconVisibility}" />
-                        <TextBlock Text="{x:Bind Name}" />
+                        <TextBlock
+                            local:MatchHighlighter.Text="{x:Bind Name}"
+                            local:MatchHighlighter.Query="{x:Bind HighlightQuery}"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
                         <TextBlock
                             Text="{x:Bind HostSummary}"
-                            Opacity="0.55"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                             FontSize="12"
                             VerticalAlignment="Center" />
                     </StackPanel>
@@ -245,24 +248,96 @@
                 <ColumnDefinition Width="*" MinWidth="320" />
             </Grid.ColumnDefinitions>
 
-            <!-- Left pane: filter on top, session tree below -->
-            <Grid Grid.Column="0">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-
-                <TextBox
-                    x:Name="FilterBox"
+            <!-- Left pane: dedicated tree-filter chrome above the session tree. -->
+            <Grid Grid.Column="0" RowDefinitions="Auto,Auto,*">
+                <Grid
                     Grid.Row="0"
-                    Margin="0,0,0,8"
-                    PlaceholderText="Filter sessions"
-                    TextChanged="FilterBox_TextChanged"
-                    KeyDown="FilterBox_KeyDown" />
+                    ColumnDefinitions="*,Auto,Auto"
+                    Padding="8"
+                    ColumnSpacing="6"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    BorderThickness="0,0,0,1">
+                    <Border
+                        x:Name="FilterFieldBorder"
+                        Grid.Column="0"
+                        Height="30"
+                        Background="{ThemeResource ControlFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="3">
+                        <Grid ColumnDefinitions="14,*" Padding="8,0,0,0">
+                            <FontIcon
+                                Grid.Column="0"
+                                Glyph="&#xE71C;"
+                                Width="14"
+                                FontSize="12"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <TextBox
+                                x:Name="FilterBox"
+                                Grid.Column="1"
+                                Margin="5,0,0,0"
+                                Padding="0,3,0,0"
+                                PlaceholderText="Filter sessions"
+                                PlaceholderForeground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                VerticalContentAlignment="Center"
+                                TextChanged="FilterBox_TextChanged"
+                                KeyDown="FilterBox_KeyDown"
+                                GotFocus="FilterBox_GotFocus"
+                                LostFocus="FilterBox_LostFocus">
+                                <!-- The containing Border owns all filter-field chrome. Keep the
+                                     TextBox template transparent in every interaction state. -->
+                                <TextBox.Resources>
+                                    <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
+                                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                    <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                    <SolidColorBrush x:Key="TextControlBackgroundDisabled" Color="Transparent" />
+                                    <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                                    <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                                    <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                                </TextBox.Resources>
+                            </TextBox>
+                        </Grid>
+                    </Border>
+                    <Button
+                        Grid.Column="1"
+                        Width="30"
+                        Height="30"
+                        Padding="0"
+                        Click="ExpandAll_Click"
+                        ToolTipService.ToolTip="Expand all"
+                        AutomationProperties.Name="Expand all">
+                        <FontIcon Glyph="&#xE70D;" FontSize="12">
+                            <FontIcon.RenderTransform><RotateTransform Angle="180" CenterX="6" CenterY="6" /></FontIcon.RenderTransform>
+                        </FontIcon>
+                    </Button>
+                    <Button
+                        Grid.Column="2"
+                        Width="30"
+                        Height="30"
+                        Padding="0"
+                        Click="CollapseAll_Click"
+                        ToolTipService.ToolTip="Collapse all"
+                        AutomationProperties.Name="Collapse all">
+                        <FontIcon Glyph="&#xE70D;" FontSize="12" />
+                    </Button>
+                </Grid>
+
+                <TextBlock
+                    Grid.Row="1"
+                    Margin="12,6,12,4"
+                    FontSize="11"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Visibility="{x:Bind ViewModel.IsFiltering, Mode=OneWay}"
+                    Text="{x:Bind ViewModel.MatchSummary, Mode=OneWay}" />
 
                 <TreeView
                     x:Name="SessionTree"
-                    Grid.Row="1"
+                    Grid.Row="2"
                     ItemsSource="{x:Bind ViewModel.RootNodes}"
                     ItemTemplateSelector="{StaticResource TreeNodeTemplateSelector}"
                     SelectionMode="None"
@@ -292,10 +367,20 @@
                     </TreeView.ContextFlyout>
                 </TreeView>
 
+                <TextBlock
+                    x:Name="NoFilterMatchesState"
+                    Grid.Row="2"
+                    Margin="16"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Text="No sessions match this filter."
+                    Visibility="Collapsed" />
+
                 <!-- First-run empty state -->
                 <StackPanel
                     x:Name="EmptyState"
-                    Grid.Row="1"
+                    Grid.Row="2"
                     Margin="16"
                     VerticalAlignment="Center"
                     Spacing="12"
