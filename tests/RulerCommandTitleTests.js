@@ -159,3 +159,37 @@ test("a bracketed line without the Nokia identity prompt is not a device context
 
   assert.deepEqual(addon.promptCalls, []);
 });
+
+test("Junos login and edit prompts report mode, hierarchy, and routing-engine role", () => {
+  const lines = [line("--- JUNOS 24.4R1.9 built 2025-01-10"), line("boden@mx-1>")];
+  const active = buffer(lines);
+  active.cursorY = 1;
+  const addon = makeAddon(active);
+  addon.promptCalls = [];
+  addon.onPromptContext = (text, platform) => addon.promptCalls.push([text, platform]);
+
+  addon._reportPromptContext();
+  lines[0] = line("{master:0}[edit protocols bgp group core]");
+  lines[1] = line("boden@mx-1#");
+  addon._reportPromptContext();
+  lines[0] = line("{master:0}");
+  lines[1] = line("boden@mx-1>");
+  addon._reportPromptContext();
+
+  assert.deepEqual(addon.promptCalls, [
+    ["operational", "juniper"],
+    ["master:0 \u00b7 configure \u00b7 /protocols bgp group core", "juniper"],
+    ["master:0 \u00b7 operational", "juniper"],
+  ]);
+});
+
+test("a user-at-host operational prompt alone does not claim to be Junos", () => {
+  const active = buffer([line("admin@PA-VM>")]);
+  const addon = makeAddon(active);
+  addon.promptCalls = [];
+  addon.onPromptContext = (text, platform) => addon.promptCalls.push([text, platform]);
+
+  addon._reportPromptContext();
+
+  assert.deepEqual(addon.promptCalls, []);
+});

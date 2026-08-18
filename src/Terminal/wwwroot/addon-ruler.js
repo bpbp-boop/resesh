@@ -108,6 +108,13 @@
   var NOKIA_MD_CLI_MODES = {
     gl: "global", ex: "exclusive", pr: "private", ro: "read-only"
   };
+  // Junos uses user@host> in operational mode. That shape alone is not vendor-safe
+  // (PAN-OS can look the same), so icon detection also requires a JUNOS login banner,
+  // a routing-engine role marker, or the configuration hierarchy banner.
+  var JUNOS_PROMPT_RE = /^[^@\s]+@[^\s#>]+([#>])\s*$/;
+  var JUNOS_EDIT_CONTEXT_RE = /^(?:\{([^}\r\n]{1,100})\}\s*)?\[edit(?:\s+([^\]\r\n]{1,400}))?\]\s*$/;
+  var JUNOS_ROLE_RE = /^\{((?:master|backup|primary|secondary)(?::[^}\s]+)?)\}\s*$/i;
+  var JUNOS_BANNER_RE = /^---\s*JUNOS\b/i;
 
   function RulerAddon() {
     this._term = null;
@@ -143,6 +150,7 @@
     this.onRunningCommand = null; // page hook: (text, epoch?) on start, ("") on 133;D
     this.onPromptContext = null; // page hook: (label, platform?) when a known prompt is idle
     this._lastPromptSignature = null;
+    this._promptPlatform = null; // strong prompt evidence persists across later mode changes
 
     this._timeWrites = [];    // serialized xterm writes: { data, unixMs|null }
     this._timeWriteActive = false;
@@ -683,6 +691,35 @@
             + " \u00b7 " + label;
         }
         platform = "nokia";
+        this._promptPlatform = platform;
+      }
+    } else {
+      var junosPrompt = JUNOS_PROMPT_RE.exec(promptText);
+      if (junosPrompt) {
+        var previousLine = start > 0 ? buf.getLine(start - 1) : null;
+        var previousText = previousLine && !previousLine.isWrapped
+          ? previousLine.translateToString(true) : "";
+        var editContext = JUNOS_EDIT_CONTEXT_RE.exec(previousText);
+        if (junosPrompt[1] === "#" && editContext) {
+          var hierarchy = editContext[2] ? "/" + editContext[2] : "/";
+          label = (editContext[1] ? editContext[1] + " \u00b7 " : "")
+            + "configure \u00b7 " + hierarchy;
+          platform = "juniper";
+          this._promptPlatform = platform;
+        } else if (junosPrompt[1] === ">") {
+          var role = JUNOS_ROLE_RE.exec(previousText);
+          var junosKnown = this._promptPlatform === "juniper" || !!role;
+          for (var scan = start - 1; !junosKnown && scan >= Math.max(0, start - 40); scan--) {
+            var scanLine = buf.getLine(scan);
+            if (scanLine && JUNOS_BANNER_RE.test(scanLine.translateToString(true)))
+              junosKnown = true;
+          }
+          if (junosKnown) {
+            label = (role ? role[1] + " \u00b7 " : "") + "operational";
+            platform = "juniper";
+            this._promptPlatform = platform;
+          }
+        }
       }
     }
     if (!label) return;

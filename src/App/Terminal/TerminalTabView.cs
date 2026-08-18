@@ -113,8 +113,8 @@ public sealed class TerminalTabView : Grid, IDisposable
             DispatcherQueue.TryEnqueue(() =>
             {
                 _tab.ApplyPromptContext(context);
-                if (platform == "nokia" && Session.Icon is null)
-                    IconSuggested?.Invoke("nokia");
+                if (platform is "nokia" or "juniper" && Session.Icon is null)
+                    IconSuggested?.Invoke(platform);
             });
         _terminal.CloseTabRequested += () => DispatcherQueue.TryEnqueue(() => CloseRequested?.Invoke());
         _terminal.SplitRequested += () => DispatcherQueue.TryEnqueue(() => SplitRequested?.Invoke());
