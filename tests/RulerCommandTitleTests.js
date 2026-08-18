@@ -1,0 +1,99 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
+const vm = require("node:vm");
+
+const source = fs.readFileSync(
+  path.join(__dirname, "..", "src", "Terminal", "wwwroot", "addon-ruler.js"),
+  "utf8");
+
+// The command-title paths run through setTimeout (echo-settle probe); a queue the
+// tests drain by hand keeps them deterministic instead of clock-dependent.
+const pendingTimers = [];
+const window = { devicePixelRatio: 1 };
+vm.runInNewContext(source, {
+  window, Map, Math, RegExp, Set,
+  requestAnimationFrame() {},
+  setTimeout(fn) { pendingTimers.push(fn); return pendingTimers.length; },
+  clearTimeout() {},
+});
+const RulerAddon = window.RulerAddon.RulerAddon;
+const runPendingTimers = () => pendingTimers.splice(0).forEach(fn => fn());
+
+const line = (text, wrapped) => ({ isWrapped: !!wrapped, translateToString: () => text });
+const buffer = (lines, type) =>
+  ({ type: type || "normal", baseY: 0, cursorY: 0, cursorX: 0, getLine: r => lines[r] });
+
+function makeAddon(active, normal) {
+  const addon = new RulerAddon();
+  let markers = 0;
+  addon._term = {
+    buffer: { active, normal: normal || active },
+    registerMarker() {
+      markers++;
+      return { line: 0, isDisposed: false, dispose() { this.isDisposed = true; }, onDispose() {} };
+    },
+  };
+  addon.markerCount = () => markers;
+  addon._paintQueued = true; // no canvas here; keep _queuePaint inert
+  addon.calls = [];
+  addon.onCommand = (text, epoch) => addon.calls.push([text, epoch]);
+  return addon;
+}
+
+test("_cmdText slices from the 133;B column and follows soft wraps", () => {
+  const addon = makeAddon(buffer([
+    line("u@h:~$ tail -f /var/lo"),
+    line("g/syslog", true),
+    line("out", false),
+  ]));
+  assert.equal(addon._cmdText(addon._term.buffer.active, 0, 7), "tail -f /var/log/syslog");
+});
+
+test("_cmdText falls back to the prompt regex when the column is unknown", () => {
+  const addon = makeAddon(buffer([line("sw1#show version")]));
+  assert.equal(addon._cmdText(addon._term.buffer.active, 0, -1), "show version");
+});
+
+test("OSC 133 B remembers the input start, C reports the text, D reports the end", () => {
+  const lines = [line("")];
+  const active = buffer(lines);
+  const addon = makeAddon(active);
+  addon._onOsc133("A");
+  active.cursorX = 7; // prompt painted, cursor at the input start
+  addon._onOsc133("B");
+  lines[0] = line("u@h:~$ htop -d 10");
+  active.cursorY = 1; // Enter echoed
+  addon._onOsc133("C");
+  addon._onOsc133("D;0");
+  assert.deepEqual(addon.calls, [["htop -d 10", undefined], ["", undefined]]);
+});
+
+test("discovery reports the command with the page's epoch and commits a mark", () => {
+  const addon = makeAddon(buffer([line("u@h:~$ htop")]));
+  addon.notifyEnter(42);
+  runPendingTimers(); // echo-settle probe
+  assert.deepEqual(addon.calls, [["htop", 42]]);
+  assert.equal(addon.markerCount(), 2); // the probe plus the committed mark
+});
+
+test("discovery still titles a full-screen app that took the alternate screen, without a mark", () => {
+  const normal = buffer([line("u@h:~$ vim notes.txt")]);
+  const active = buffer([line("~")], "normal"); // normal at Enter time...
+  const addon = makeAddon(active, normal);
+  addon.notifyEnter(7);
+  active.type = "alternate"; // ...the app flips the screen before the probe fires
+  runPendingTimers(); // settle attempt: title fires, mark withheld, retry queued
+  runPendingTimers(); // retry: still alternate, probe gives up
+  assert.deepEqual(addon.calls, [["vim notes.txt", 7]]);
+  assert.equal(addon.markerCount(), 1); // the probe only — no mark on the alternate screen
+});
+
+test("discovery stays quiet on a line without a prompt shape", () => {
+  const addon = makeAddon(buffer([line("Password:")]));
+  addon.notifyEnter(1);
+  runPendingTimers();
+  runPendingTimers();
+  assert.equal(addon.calls.length, 0);
+});

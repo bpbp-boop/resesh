@@ -431,6 +431,23 @@ and command tooltip composition, plus a rendered xterm harness (tooltip text and
 - Tabs split out of a group can be dragged back into another group's tab strip. ✅ fixed 2026-08-18
 - Session content and tabs have a subtle theme-aware gray frame, similar to VS Code. ✅ fixed 2026-08-18
 
+### Tab subtitle on plain (non-tmux) hosts
+- The subtitle stuck at the login cwd ("~"): stock PS1s refresh the OSC title only when
+  the NEXT prompt is drawn, and interactive programs almost never set one, so nothing ever
+  said what was running. The ruler's Phase 9.4 command sources now also report the command
+  TEXT (Enter-gated discovery, and OSC 133;B/C exactly), the page posts it as a `command`
+  message, and the tab shows its program name (`CommandTitle`: VAR=/sudo/env prefixes
+  skipped, path stripped) until a prompt-shaped title or 133;D says it ended. A title that
+  arrives between Enter and the discovery probe supersedes the guess (fast commands finish
+  first; full-screen apps title themselves) — the page drops stale-epoch discoveries.
+  Discovery probes the normal buffer, so a full-screen app that already took the alternate
+  screen still gets titled (the mark stays normal-screen-only, as before). Subtitle
+  precedence: program-set title → running command → prompt cwd → endpoint.
+  ✅ fixed 2026-08-18 (browser-harness + node tests; live SSH pass still pending)
+- Follow-ups promoted to the backlog: the opt-in shell-integration snippet (exact commands
+  and exit codes through this same path) and the foreground-process side channel
+  (tmux-grade names with zero shell cooperation).
+
 ---
 
 ## Backlog — "what else" (unordered candidates)
@@ -451,6 +468,19 @@ to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
   tmux-persistent.
 - **Per-session color schemes** — extend Phase 0.1 overrides + the two hardcoded palettes
   in `terminal.html`; `Session.ColorTag` already exists as the tab accent.
+- **Shell-integration snippet (opt-in)** — the `.bashrc`/zsh snippet Phases 9.4 and 3.2
+  already anticipate: emit OSC 133 A/B/C/D (exact command marks, exit codes, exact
+  running-command titles — discovery stops guessing the moment the shell speaks) and OSC 7
+  (cwd for the file pane). Ship "copy snippet" UX first; auto-typing it at connect works
+  (the tmux bootstrap shows the pattern, incl. history scrubbing) but echoes briefly and
+  races slow logins, so per-session opt-in only, if ever.
+- **Foreground-process title side channel** — tmux-grade `pane_current_command` on plain
+  sessions with zero shell cooperation: each tab owns its SSH connection, so an exec
+  channel can locate the shell channel's process ($PPID → our sshd child → its child
+  holding a tty), then watch `/proc/<shell>/stat` tpgid → `/proc/<tpgid>/comm`. Sees
+  nested children (make → cc) and survives fancy prompts; Linux/procfs only, adds polling,
+  and assumes one shell per connection. Back pocket unless discovery + the snippet prove
+  insufficient.
 
 ---
 

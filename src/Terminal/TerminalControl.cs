@@ -54,6 +54,12 @@ public sealed class TerminalControl : Grid, IDisposable
     /// <summary>Fires once when the xterm page is loaded and measured (initial cols/rows).</summary>
     public event Action<int, int>? Ready;
 
+    /// <summary>OSC 0/2 window title set by the remote shell or a full-screen program.</summary>
+    public event Action<string>? TitleChanged;
+
+    /// <summary>Command the page saw start (ruler discovery / OSC 133); "" = it ended.</summary>
+    public event Action<string>? CommandChanged;
+
     public int Columns { get; private set; } = 80;
     public int Rows { get; private set; } = 24;
 
@@ -152,6 +158,24 @@ public sealed class TerminalControl : Grid, IDisposable
                     break;
                 case "newLocalTab":
                     NewLocalTabRequested?.Invoke();
+                    break;
+                case "title":
+                    if (root.TryGetProperty("title", out var title))
+                    {
+                        // Traced because "the tab's second line never changes" is
+                        // indistinguishable from "the host never sent a title" without it.
+                        var text = title.GetString() ?? "";
+                        TraceHook?.Invoke($"title: {text}");
+                        TitleChanged?.Invoke(text);
+                    }
+                    break;
+                case "command":
+                    if (root.TryGetProperty("text", out var command))
+                    {
+                        var text = command.GetString() ?? "";
+                        TraceHook?.Invoke($"command: {text}");
+                        CommandChanged?.Invoke(text);
+                    }
                     break;
                 case "pageError":
                     if (root.TryGetProperty("message", out var err))

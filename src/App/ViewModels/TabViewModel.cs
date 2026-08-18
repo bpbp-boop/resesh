@@ -1,5 +1,7 @@
+using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.UI.Xaml;
+using Sessions.Core.Backend;
 using Sessions.Core.Models;
 
 namespace Sessions.App.ViewModels;
@@ -57,6 +59,7 @@ public sealed class TabViewModel : ObservableObject
             {
                 OnPropertyChanged(nameof(Header));
                 OnPropertyChanged(nameof(Endpoint));
+                OnPropertyChanged(nameof(Subtitle));
                 OnPropertyChanged(nameof(IconSource));
                 OnPropertyChanged(nameof(IconVisibility));
             }
@@ -88,6 +91,13 @@ public sealed class TabViewModel : ObservableObject
         {
             if (SetProperty(ref _state, value))
             {
+                // A reconnecting or dead tab must not keep advertising the last program it
+                // ran; the next prompt or full-screen app sets a fresh title.
+                if (value != TabConnectionState.Connected)
+                {
+                    TerminalTitle = null;
+                    RunningCommand = null;
+                }
                 OnPropertyChanged(nameof(StateText));
                 OnPropertyChanged(nameof(StateColor));
             }
@@ -237,6 +247,102 @@ public sealed class TabViewModel : ObservableObject
     }
 
     public string Header => TitleOverride ?? Session.Name;
+
+    // ---- second tab line (tells tabs of the same session apart) ----
+
+    private string? _terminalTitle;
+
+    /// <summary>Stock .bashrc's per-prompt title: "user@host: cwd". The shape means "sitting at
+    /// a prompt", so the cwd is the useful half; any other title was set by what's running.</summary>
+    private static readonly Regex PromptTitle =
+        new(@"^[^@\s]+@[^:\s]+:\s*(?<cwd>\S.*)$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// OSC 0/2 title reported by the terminal page — the only process hint a host without
+    /// tmux gives us for free. Null until something sets one.
+    /// </summary>
+    public string? TerminalTitle
+    {
+        get => _terminalTitle;
+        private set
+        {
+            if (SetProperty(ref _terminalTitle, value))
+                OnPropertyChanged(nameof(Subtitle));
+        }
+    }
+
+    /// <summary>Called (UI thread) when the terminal page reports a new window title.</summary>
+    public void ApplyTerminalTitle(string? title)
+    {
+        var trimmed = title?.Trim();
+        // A tmux older than 2.6 has no #{==:} and sends our set-titles-string back verbatim;
+        // that is noise, not a title, and the endpoint fallback beats showing it.
+        if (string.IsNullOrEmpty(trimmed) || trimmed.Contains("#{", StringComparison.Ordinal))
+            TerminalTitle = null;
+        else
+            TerminalTitle = trimmed;
+        // A prompt-shaped title means the shell is drawing a prompt again: whatever
+        // command was running is over. This is the only end signal hosts without
+        // OSC 133 ever send.
+        if (TerminalTitle is { } t && PromptTitle.IsMatch(t))
+            RunningCommand = null;
+    }
+
+    private string? _runningCommand;
+
+    /// <summary>
+    /// Program name of the command the terminal page saw start (Enter-gated discovery or
+    /// OSC 133;C), shown while no fresher title exists: stock PS1s refresh the title only
+    /// when the NEXT prompt is drawn, so mid-command the title still says the old cwd.
+    /// </summary>
+    public string? RunningCommand
+    {
+        get => _runningCommand;
+        private set
+        {
+            if (SetProperty(ref _runningCommand, value))
+                OnPropertyChanged(nameof(Subtitle));
+        }
+    }
+
+    /// <summary>Called (UI thread) when the page reports a command starting ("" = ended).</summary>
+    public void ApplyRunningCommand(string? commandLine) =>
+        RunningCommand = CommandTitle.ProgramName(commandLine);
+
+    /// <summary>
+    /// The tab's second line, best available: what a program set as the title, else the
+    /// running command the page saw start, else the cwd from a prompt-shaped title, else
+    /// the endpoint. The endpoint is always known, so this never returns empty — a blank
+    /// second line would leave a visible gap in the strip.
+    /// </summary>
+    public string Subtitle
+    {
+        get
+        {
+            if (TerminalTitle is not { } title)
+                return RunningCommand ?? FallbackSubtitle;
+            var match = PromptTitle.Match(title);
+            if (!match.Success)
+                return title; // a program's own title beats a guessed command name
+            return RunningCommand ?? match.Groups["cwd"].Value;
+        }
+    }
+
+    /// <summary>Shown until a title arrives, and on hosts that never send one (network gear).</summary>
+    private string FallbackSubtitle
+    {
+        get
+        {
+            if (IsLocal)
+            {
+                var exe = System.IO.Path.GetFileName(Session.Local?.Executable ?? "");
+                return string.IsNullOrEmpty(exe) ? "local" : exe;
+            }
+            return string.IsNullOrEmpty(Session.Username)
+                ? Session.Host
+                : $"{Session.Username}@{Session.Host}";
+        }
+    }
 
     /// <summary>Session icon for the tab strip; null collapses the Image.</summary>
     public Microsoft.UI.Xaml.Media.ImageSource? IconSource =>

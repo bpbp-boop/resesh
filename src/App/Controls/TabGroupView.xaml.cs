@@ -179,6 +179,29 @@ public sealed partial class TabGroupView : UserControl
             await _host.RequestCloseTabAsync(tab);
     }
 
+    /// <summary>
+    /// Floor for the subtitle so a short session name ("db2") still leaves room for a few
+    /// characters instead of an ellipsis on its own.
+    /// </summary>
+    private const double MinSubtitleWidth = 60;
+
+    /// <summary>
+    /// Keeps the session name in charge of the tab's width. The subtitle is free text from
+    /// the host — Claude Code reports "[ . ] Action Required | ansible-playbooks" — and in a
+    /// SizeToContent strip it would stretch every tab to whatever the remote tool decided to
+    /// call itself. Clamping it to the name's width means the strip measures exactly as it
+    /// did before the second line existed; the subtitle ellipsises into what's left.
+    /// </summary>
+    private void TabTitleText_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (sender is FrameworkElement title
+            && title.Parent is FrameworkElement stack
+            && stack.FindName("TabSubtitleText") is FrameworkElement subtitle)
+        {
+            subtitle.MaxWidth = Math.Max(e.NewSize.Width, MinSubtitleWidth);
+        }
+    }
+
     private void TabHeader_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is TabViewModel tab)

@@ -90,6 +90,8 @@ public sealed class TerminalTabView : Grid, IDisposable
 
         _terminal.Ready += (_, _) => DispatcherQueue.TryEnqueue(() =>
             _ = ConnectAsync(isReconnect: false));
+        _terminal.TitleChanged += title => DispatcherQueue.TryEnqueue(() => _tab.ApplyTerminalTitle(title));
+        _terminal.CommandChanged += text => DispatcherQueue.TryEnqueue(() => _tab.ApplyRunningCommand(text));
         _terminal.CloseTabRequested += () => DispatcherQueue.TryEnqueue(() => CloseRequested?.Invoke());
         _terminal.SplitRequested += () => DispatcherQueue.TryEnqueue(() => SplitRequested?.Invoke());
         _terminal.FilePaneRequested += () => DispatcherQueue.TryEnqueue(ToggleFilePane);
