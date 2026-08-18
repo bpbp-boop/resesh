@@ -16,6 +16,7 @@ public sealed class MainViewModel : ObservableObject
     // prefix for the Local scope) so it survives tree rebuilds. Default: expanded.
     private readonly Dictionary<string, bool> _expansion = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, bool> _filterExpansion = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<Guid, TreeNodeViewModel> _sessionNodes = [];
 
     private static string ExpansionKeyFor(string folderPath, SessionKind kind) =>
         kind == SessionKind.Local ? "\u0000local\u0000" + folderPath : folderPath;
@@ -200,6 +201,7 @@ public sealed class MainViewModel : ObservableObject
 
     public void UpdateSession(Session session, string? password)
     {
+        var previous = _store.Find(session.Id);
         _store.Update(session);
         if (!string.IsNullOrEmpty(password))
             _credentials.Write(session.Id, password);
@@ -209,8 +211,28 @@ public sealed class MainViewModel : ObservableObject
             // Appearance overrides take effect immediately; connection fields apply on next connect.
             (tab.View as Terminal.TerminalTabView)?.ApplySettings(App.Settings.Current);
         }
-        RebuildTree();
+        // Preserve realized containers for presentation-only edits (icon, color, endpoint,
+        // terminal settings, etc.). Rebuild only when membership, hierarchy, ordering, or
+        // the active filter projection may have changed.
+        var needsRebuild = previous is null
+            || previous.Kind != session.Kind
+            || !previous.FolderPath.Equals(session.FolderPath, StringComparison.OrdinalIgnoreCase)
+            || !previous.Name.Equals(session.Name, StringComparison.OrdinalIgnoreCase)
+            || IsVisible(previous) != IsVisible(session)
+            || (IsSearching && SearchableFieldsChanged(previous, session));
+
+        if (needsRebuild || !_sessionNodes.TryGetValue(session.Id, out var node))
+            RebuildTree();
+        else
+            node.UpdateSession(session);
     }
+
+    private static bool SearchableFieldsChanged(Session before, Session after) =>
+        before.Name != after.Name
+        || before.Host != after.Host
+        || before.Username != after.Username
+        || before.FolderPath != after.FolderPath
+        || before.Notes != after.Notes;
 
     public void DeleteSession(Session session)
     {
@@ -321,6 +343,7 @@ public sealed class MainViewModel : ObservableObject
             : _store.FoldersOf(kind);
 
         _currentNodes.Clear();
+        _sessionNodes.Clear();
         RootNodes.Clear();
 
         // The permanent virtual Local root sits first while browsing. While filtering it
@@ -372,6 +395,10 @@ public sealed class MainViewModel : ObservableObject
         }
 
         foreach (var session in folder.Sessions)
-            yield return TreeNodeViewModel.ForSession(session, IsSearching ? _searchText.Trim() : "");
+        {
+            var node = TreeNodeViewModel.ForSession(session, IsSearching ? _searchText.Trim() : "");
+            _sessionNodes[session.Id] = node;
+            yield return node;
+        }
     }
 }

@@ -1238,6 +1238,23 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         });
     }
 
+    /// <summary>
+    /// TreeView virtualizes rows outside the viewport. Those rows can be realized long
+    /// after the bounded rebuild sync has finished, and WinUI does not reliably apply an
+    /// IsExpanded binding before the item's children exist. Re-apply the VM state whenever
+    /// a folder row enters the visual tree so scrolling cannot reveal a stale collapse.
+    /// </summary>
+    private void FolderTreeViewItem_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is TreeViewItem item
+            && item.DataContext is TreeNodeViewModel { IsFolder: true } node
+            && item.IsExpanded != node.IsExpanded)
+        {
+            Trace($"realized: '{node.FolderPath}' container={item.IsExpanded} vm={node.IsExpanded} -> pushing");
+            item.IsExpanded = node.IsExpanded;
+        }
+    }
+
     private static TreeNodeViewModel? NodeOf(object sender) =>
         (sender as FrameworkElement)?.DataContext as TreeNodeViewModel;
 
