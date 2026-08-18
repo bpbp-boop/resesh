@@ -193,3 +193,69 @@ test("a user-at-host operational prompt alone does not claim to be Junos", () =>
 
   assert.deepEqual(addon.promptCalls, []);
 });
+
+test("Cisco IOS and IOS XE prompts report EXEC and configuration submodes", () => {
+  const lines = [line("Cisco IOS XE Software, Version 17.12.4"), line("edge-1>")];
+  const active = buffer(lines);
+  active.cursorY = 1;
+  const addon = makeAddon(active);
+  addon.promptCalls = [];
+  addon.onPromptContext = (text, platform) => addon.promptCalls.push([text, platform]);
+
+  addon._reportPromptContext();
+  lines[1] = line("edge-1#");
+  addon._reportPromptContext();
+  lines[1] = line("edge-1(config-if)#");
+  addon._reportPromptContext();
+
+  assert.deepEqual(addon.promptCalls, [
+    ["user EXEC", "cisco"],
+    ["privileged EXEC", "cisco"],
+    ["configure \u00b7 interface", "cisco"],
+  ]);
+});
+
+test("a saved Cisco platform hint enables a bare IOS prompt", () => {
+  const addon = makeAddon(buffer([line("core-1#")]));
+  addon.promptCalls = [];
+  addon.onPromptContext = (text, platform) => addon.promptCalls.push([text, platform]);
+
+  addon.setPromptPlatform("cisco");
+  addon._reportPromptContext();
+
+  assert.deepEqual(addon.promptCalls, [["privileged EXEC", "cisco"]]);
+});
+
+test("Cisco IOS XR prompts report route processor, EXEC, and candidate submode", () => {
+  const lines = [line("RP/0/RSP0/CPU0:core-1#")];
+  const active = buffer(lines);
+  const addon = makeAddon(active);
+  addon.promptCalls = [];
+  addon.onPromptContext = (text, platform) => addon.promptCalls.push([text, platform]);
+
+  addon._reportPromptContext();
+  lines[0] = line("RP/0/RSP0/CPU0:core-1(config-bgp-af)#");
+  addon._reportPromptContext();
+  lines[0] = line("RP/0/RSP0/CPU0:core-1(admin-config)#");
+  addon._reportPromptContext();
+
+  assert.deepEqual(addon.promptCalls, [
+    ["RP/0/RSP0/CPU0 \u00b7 EXEC", "cisco"],
+    ["RP/0/RSP0/CPU0 \u00b7 configure \u00b7 BGP address family", "cisco"],
+    ["RP/0/RSP0/CPU0 \u00b7 administration \u00b7 configure", "cisco"],
+  ]);
+});
+
+test("Cisco-shaped prompts avoid false icon and root-shell detection", () => {
+  const lines = [line("leaf-1(config-router)#")];
+  const active = buffer(lines);
+  const addon = makeAddon(active);
+  addon.promptCalls = [];
+  addon.onPromptContext = (text, platform) => addon.promptCalls.push([text, platform]);
+
+  addon._reportPromptContext();
+  lines[0] = line("server#");
+  addon._reportPromptContext();
+
+  assert.deepEqual(addon.promptCalls, [["configure \u00b7 routing", null]]);
+});

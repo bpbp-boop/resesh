@@ -480,6 +480,9 @@
         case "setRulerPresentation":
           ruler.setPresentation(msg.isSplit === true, msg.isGroupFocused !== false);
           break;
+        case "setPromptPlatform":
+          ruler.setPromptPlatform(msg.platform);
+          break;
         case "focus":
           term.focus();
           break;

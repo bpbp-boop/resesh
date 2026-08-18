@@ -115,6 +115,45 @@
   var JUNOS_EDIT_CONTEXT_RE = /^(?:\{([^}\r\n]{1,100})\}\s*)?\[edit(?:\s+([^\]\r\n]{1,400}))?\]\s*$/;
   var JUNOS_ROLE_RE = /^\{((?:master|backup|primary|secondary)(?::[^}\s]+)?)\}\s*$/i;
   var JUNOS_BANNER_RE = /^---\s*JUNOS\b/i;
+  // IOS and IOS XE share hostname[(mode)]#/>, while IOS XR prefixes the prompt
+  // with its active route-processor location. A bare hostname# is also a common root
+  // shell, so it needs a Cisco banner/platform hint; a (config-*) mode is useful generic
+  // network context even without one, but does not suggest the Cisco icon by itself.
+  var CISCO_IOS_PROMPT_RE = /^([A-Za-z0-9][A-Za-z0-9._-]{0,100})(?:\(([^()\r\n]{1,100})\))?([#>])\s*$/;
+  var CISCO_XR_PROMPT_RE = /^(RP\/\d+\/(?:RP|RSP)\d+\/CPU\d+):([^()\s#>]+)(?:\(([^()\r\n]{1,100})\))?([#>])\s*$/i;
+  var CISCO_BANNER_RE = /\b(?:Cisco IOS(?: XE| XR)? Software|Cisco Internetwork Operating System Software)\b/i;
+  var CISCO_SUBMODE_NAMES = {
+    "if": "interface", "if-pre": "preconfigured interface", "subif": "subinterface",
+    "router": "routing", "line": "line", "vlan": "VLAN", "vrf": "VRF",
+    "std-nacl": "standard ACL", "ext-nacl": "extended ACL", "bgp": "BGP",
+    "bgp-af": "BGP address family", "bgp-nbr": "BGP neighbor",
+    "bgp-nbr-af": "BGP neighbor address family"
+  };
+
+  function recentLineMatches(buf, start, pattern, limit) {
+    for (var scan = start - 1; scan >= Math.max(0, start - limit); scan--) {
+      var scanLine = buf.getLine(scan);
+      if (scanLine && pattern.test(scanLine.translateToString(true))) return true;
+    }
+    return false;
+  }
+
+  function ciscoModeParts(mode, terminator, isXr) {
+    if (!mode) return [terminator === ">" ? "user EXEC" : (isXr ? "EXEC" : "privileged EXEC")];
+    if (mode === "admin") return ["administration"];
+    if (mode === "admin-config") return ["administration", "configure"];
+    if (mode.indexOf("admin-config-") === 0) {
+      var adminSubmode = mode.slice(13);
+      return ["administration", "configure",
+        CISCO_SUBMODE_NAMES[adminSubmode] || adminSubmode.replace(/-/g, " ")];
+    }
+    if (mode === "config") return ["configure"];
+    if (mode.indexOf("config-") === 0) {
+      var submode = mode.slice(7);
+      return ["configure", CISCO_SUBMODE_NAMES[submode] || submode.replace(/-/g, " ")];
+    }
+    return [mode.replace(/-/g, " ")];
+  }
 
   function RulerAddon() {
     this._term = null;
@@ -650,6 +689,15 @@
     }
   };
 
+  /** Native host hint from a saved icon or SSH version banner. It only permits prompt
+   * interpretation; screen evidence still owns the displayed context. */
+  RulerAddon.prototype.setPromptPlatform = function (platform) {
+    if (platform === "cisco" || platform === "juniper" || platform === "nokia") {
+      this._promptPlatform = platform;
+      this._reportPromptContext(); // the initial prompt can arrive before the SSH banner hint
+    }
+  };
+
   /** Reports the best current-location label from a completed known prompt. The absolute
    * cursor line is part of the signature, so returning to the same context after a command
    * still reports that the command ended. */
@@ -709,15 +757,34 @@
         } else if (junosPrompt[1] === ">") {
           var role = JUNOS_ROLE_RE.exec(previousText);
           var junosKnown = this._promptPlatform === "juniper" || !!role;
-          for (var scan = start - 1; !junosKnown && scan >= Math.max(0, start - 40); scan--) {
-            var scanLine = buf.getLine(scan);
-            if (scanLine && JUNOS_BANNER_RE.test(scanLine.translateToString(true)))
-              junosKnown = true;
-          }
+          if (!junosKnown) junosKnown = recentLineMatches(buf, start, JUNOS_BANNER_RE, 40);
           if (junosKnown) {
             label = (role ? role[1] + " \u00b7 " : "") + "operational";
             platform = "juniper";
             this._promptPlatform = platform;
+          }
+        }
+      }
+      if (!label) {
+        var xrPrompt = CISCO_XR_PROMPT_RE.exec(promptText);
+        var iosPrompt = xrPrompt ? null : CISCO_IOS_PROMPT_RE.exec(promptText);
+        if (xrPrompt || iosPrompt) {
+          var isXr = !!xrPrompt;
+          var location = isXr ? xrPrompt[1] : "";
+          var mode = isXr ? xrPrompt[3] : iosPrompt[2];
+          var terminator = isXr ? xrPrompt[4] : iosPrompt[3];
+          var ciscoKnown = isXr || this._promptPlatform === "cisco"
+            || recentLineMatches(buf, start, CISCO_BANNER_RE, 60);
+          // A mode suffix is safe shared network-CLI context. Bare EXEC prompts need
+          // Cisco evidence so "server#" remains an ordinary Unix root prompt.
+          if (mode || ciscoKnown) {
+            var modeParts = ciscoModeParts(mode, terminator, isXr);
+            if (location) modeParts.unshift(location);
+            label = modeParts.join(" \u00b7 ");
+            if (ciscoKnown) {
+              platform = "cisco";
+              this._promptPlatform = platform;
+            }
           }
         }
       }

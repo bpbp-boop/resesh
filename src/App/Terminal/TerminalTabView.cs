@@ -104,6 +104,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             initial.FontSize, initial.FontFamily, initial.Theme,
             initial.CopyOnSelect, initial.RightClickPaste, initial.Scrollback,
             BuildHighlightPayload());
+        _terminal.SetPromptPlatform(Session.Icon);
 
         _terminal.Ready += (_, _) => DispatcherQueue.TryEnqueue(() =>
             _ = ConnectAsync(isReconnect: false));
@@ -113,7 +114,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             DispatcherQueue.TryEnqueue(() =>
             {
                 _tab.ApplyPromptContext(context);
-                if (platform is "nokia" or "juniper" && Session.Icon is null)
+                if (platform is "nokia" or "juniper" or "cisco" && Session.Icon is null)
                     IconSuggested?.Invoke(platform);
             });
         _terminal.CloseTabRequested += () => DispatcherQueue.TryEnqueue(() => CloseRequested?.Invoke());
@@ -400,8 +401,12 @@ public sealed class TerminalTabView : Grid, IDisposable
 
             // Icon auto-suggest: only for sessions where the user never chose anything
             // (null; an explicit "none" also blocks this).
-            if (Session.Icon is null && SessionIcons.SuggestFromBanner(session.ServerBanner) is { } suggestedIcon)
-                IconSuggested?.Invoke(suggestedIcon);
+            if (SessionIcons.SuggestFromBanner(session.ServerBanner) is { } suggestedIcon)
+            {
+                _terminal.SetPromptPlatform(suggestedIcon);
+                if (Session.Icon is null)
+                    IconSuggested?.Invoke(suggestedIcon);
+            }
         }
         catch (SshSessionException ex)
         {

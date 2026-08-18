@@ -31,6 +31,7 @@ public sealed class TerminalControl : Grid, IDisposable
     private bool _disposed;
     private bool _rulerIsSplit;
     private bool _rulerIsGroupFocused = true;
+    private string? _promptPlatform;
 
     /// <summary>Debug diagnostics sink (same pattern as SshTerminalSession.TraceHook).</summary>
     public static Action<string>? TraceHook { get; set; }
@@ -151,6 +152,7 @@ public sealed class TerminalControl : Grid, IDisposable
                     Rows = root.GetProperty("rows").GetInt32();
                     _pageReady = true;
                     PostRulerPresentation();
+                    PostPromptPlatform();
                     Ready?.Invoke(Columns, Rows);
                     break;
                 case "input":
@@ -335,6 +337,17 @@ public sealed class TerminalControl : Grid, IDisposable
         isSplit = _rulerIsSplit,
         isGroupFocused = _rulerIsGroupFocused,
     });
+
+    /// <summary>Gives the page a vendor hint from trusted session metadata or the SSH
+    /// version banner. The page still requires a matching prompt before it reports context.</summary>
+    public void SetPromptPlatform(string? platform)
+    {
+        _promptPlatform = platform;
+        if (_pageReady)
+            PostPromptPlatform();
+    }
+
+    private void PostPromptPlatform() => Post(new { type = "setPromptPlatform", platform = _promptPlatform });
 
     /// <summary>Options the page's terminal is constructed with. Must be set before
     /// <see cref="InitializeAsync"/>; later changes go through <see cref="ApplyOptions"/>.</summary>
