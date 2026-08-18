@@ -279,7 +279,9 @@
                                 x:Name="FilterBox"
                                 Grid.Column="1"
                                 Margin="5,0,0,0"
-                                Padding="0,3,0,0"
+                                Padding="0"
+                                MinHeight="0"
+                                VerticalAlignment="Center"
                                 PlaceholderText="Filter sessions"
                                 PlaceholderForeground="{ThemeResource TextFillColorSecondaryBrush}"
                                 Background="Transparent"
@@ -290,7 +292,14 @@
                                 GotFocus="FilterBox_GotFocus"
                                 LostFocus="FilterBox_LostFocus">
                                 <!-- The containing Border owns all filter-field chrome. Keep the
-                                     TextBox template transparent in every interaction state. -->
+                                     TextBox template transparent in every interaction state.
+                                     MinHeight must be cleared too: the default (32) exceeds this
+                                     28px slot, so the box overflows. With MinHeight and Padding
+                                     gone the box collapses to one line of text, and centring the
+                                     box centres the text, which is the only thing that lines the
+                                     placeholder up. The template hands VerticalContentAlignment
+                                     to ContentElement but not to PlaceholderTextContentPresenter,
+                                     so the placeholder is always drawn at the box's top edge. -->
                                 <TextBox.Resources>
                                     <SolidColorBrush x:Key="TextControlBackground" Color="Transparent" />
                                     <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
@@ -303,6 +312,9 @@
                             </TextBox>
                         </Grid>
                     </Border>
+                    <!-- Fluent UI System Icons (MIT): chevron_up_down / chevron_down_up, 16px
+                         regular variants used at their native 16-unit scale. The 24px assets
+                         would need downscaling, which thins their strokes below a pixel here. -->
                     <Button
                         Grid.Column="1"
                         Width="30"
@@ -311,9 +323,7 @@
                         Click="ExpandAll_Click"
                         ToolTipService.ToolTip="Expand all"
                         AutomationProperties.Name="Expand all">
-                        <FontIcon Glyph="&#xE70D;" FontSize="12">
-                            <FontIcon.RenderTransform><RotateTransform Angle="180" CenterX="6" CenterY="6" /></FontIcon.RenderTransform>
-                        </FontIcon>
+                        <PathIcon Data="M0.19527 4.40237C0.39053 4.59764 0.70711 4.59764 0.90237 4.40237L4.04882 1.25593L7.19522 4.40237C7.39052 4.59764 7.70712 4.59764 7.90242 4.40237C8.09762 4.20711 8.09762 3.89053 7.90242 3.69527L4.40237 0.19527C4.20711 0 3.89053 0 3.69527 0.19527L0.19527 3.69527C0 3.89053 0 4.20711 0.19527 4.40237ZM0.19527 7.69527C0.39053 7.5 0.70711 7.5 0.90237 7.69527L4.04882 10.84172L7.19522 7.69527C7.39052 7.5 7.70712 7.5 7.90242 7.69527C8.09762 7.89053 8.09762 8.20712 7.90242 8.40242L4.40237 11.90242C4.20711 12.09762 3.89053 12.09762 3.69527 11.90242L0.19527 8.40242C0 8.20712 0 7.89053 0.19527 7.69527Z" />
                     </Button>
                     <Button
                         Grid.Column="2"
@@ -323,7 +333,7 @@
                         Click="CollapseAll_Click"
                         ToolTipService.ToolTip="Collapse all"
                         AutomationProperties.Name="Collapse all">
-                        <FontIcon Glyph="&#xE70D;" FontSize="12" />
+                        <PathIcon Data="M7.90242 0.90237L4.40237 4.40237C4.20711 4.59764 3.89053 4.59764 3.69527 4.40237L0.19527 0.90237C0 0.70711 0 0.39053 0.19527 0.19527C0.39053 0 0.70711 0 0.90237 0.19527L4.04882 3.34171L7.19522 0.19527C7.39052 0 7.70712 0 7.90242 0.19527C8.09762 0.39053 8.09762 0.70711 7.90242 0.90237ZM7.90242 10.19522L4.40237 6.69527C4.20711 6.5 3.89053 6.5 3.69527 6.69527L0.19527 10.19522C0 10.39052 0 10.70712 0.19527 10.90242C0.39053 11.09762 0.70711 11.09762 0.90237 10.90242L4.04882 7.75592L7.19522 10.90242C7.39052 11.09762 7.70712 11.09762 7.90242 10.90242C8.09762 10.70712 8.09762 10.39052 7.90242 10.19522Z" />
                     </Button>
                 </Grid>
 
