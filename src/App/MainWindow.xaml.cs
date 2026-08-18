@@ -8,6 +8,8 @@ using Sessions.App.ViewModels;
 using Sessions.Core.Layout;
 using Sessions.Core.Models;
 using Sessions.Core.Storage;
+using Microsoft.UI.Windowing;
+using Windows.Graphics;
 using Windows.System;
 
 namespace Sessions.App;
@@ -21,12 +23,15 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private bool _closeConfirmed;
     private bool _closePromptOpen;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
+    private RectInt32? _normalWindowBounds;
 
     public MainWindow()
     {
         ViewModel = new MainViewModel(App.Store, App.Credentials);
         _groupLayout = new SplitLayout<TabGroupViewModel>(ViewModel.Groups[0]);
         InitializeComponent();
+        RestoreWindowPlacement();
+        AppWindow.Changed += AppWindow_Changed;
         ConfigureSplitter(TreeSplitter, TreeSplitterLine);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
         InitializeTitleBar();
@@ -60,6 +65,47 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             SaveTreePaneWidth();
             ViewModel.CloseAllTabs(); // tear down live SSH sessions without hanging
         };
+    }
+
+    private void RestoreWindowPlacement()
+    {
+        if (App.Settings.Current.WindowPlacement is not { Width: >= 320, Height: >= 240 } placement)
+            return;
+
+        var requested = new RectInt32(placement.X, placement.Y, placement.Width, placement.Height);
+        var workArea = DisplayArea.GetFromRect(requested, DisplayAreaFallback.Nearest).WorkArea;
+        var width = Math.Min(requested.Width, workArea.Width);
+        var height = Math.Min(requested.Height, workArea.Height);
+        var x = Math.Clamp(requested.X, workArea.X, workArea.X + workArea.Width - width);
+        var y = Math.Clamp(requested.Y, workArea.Y, workArea.Y + workArea.Height - height);
+        _normalWindowBounds = new RectInt32(x, y, width, height);
+        AppWindow.MoveAndResize(_normalWindowBounds.Value);
+
+        if (placement.IsMaximized && AppWindow.Presenter is OverlappedPresenter presenter)
+            presenter.Maximize();
+    }
+
+    private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if ((args.DidPositionChange || args.DidSizeChange)
+            && sender.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Restored })
+        {
+            _normalWindowBounds = new RectInt32(sender.Position.X, sender.Position.Y, sender.Size.Width, sender.Size.Height);
+        }
+    }
+
+    private void SaveWindowPlacement()
+    {
+        var maximized = AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Maximized };
+        var bounds = _normalWindowBounds
+            ?? new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
+        if (bounds.Width < 320 || bounds.Height < 240)
+            return;
+
+        App.Settings.Save(App.Settings.Current with
+        {
+            WindowPlacement = new WindowPlacement(bounds.X, bounds.Y, bounds.Width, bounds.Height, maximized),
+        });
     }
 
     private TabGroupView AttachGroupView(TabGroupViewModel group)
@@ -292,6 +338,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private void AppWindow_Closing(Microsoft.UI.Windowing.AppWindow sender,
         Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
     {
+        // Save before potentially cancelling this event for the open-tabs confirmation.
+        // Calling Close() after that dialog is accepted does not reliably raise a second
+        // AppWindow.Closing event, so waiting for the confirmed pass can lose the bounds.
+        SaveWindowPlacement();
+
         if (_closeConfirmed || !ViewModel.AllTabs.Any())
             return;
 
