@@ -130,6 +130,21 @@ On-disk format remains `%APPDATA%\Sessions\` (`sessions.json`, `settings.json`,
 
 ## Phase 5 — Connectivity: tunnels, jump hosts, SSH agent
 
+### 5.0 First-class private-key management ✅ shipped 2026-08-18
+Private keys are shared registered resources, not file paths copied into every session.
+`ssh-keys.json` stores a stable id, user-facing name, external path, algorithm, public
+fingerprint, encryption state, and public key. Sessions keep only the key id. The app never
+copies, moves, or deletes the private-key file; **Locate** repairs a moved path, and a changed
+public fingerprint requires typed confirmation before use. Passphrases are stored once per key
+in Windows Credential Manager and may stay in memory only when the user does not save them.
+
+Existing path-based sessions migrate by normalized path without moving files. Backup schema 2
+includes referenced key metadata and assignments, but never private-key files; optional encrypted
+backups may include key passphrases. The session editor selects a registered key, while **File →
+SSH Keys** adds, renames, locates, reports use, copies the public key, and safely removes unused
+references. Password keyboard-interactive fallback now shows every server challenge in a real
+visible/secret field instead of sending the saved password to every prompt.
+
 ### 5.1 Port forwarding
 SSH.NET has `ForwardedPortLocal/Remote/Dynamic` built in. Per-session tunnel list in the
 session editor (type, bind address/port, destination), started with the connection, with
@@ -515,8 +530,9 @@ Phase 4 export archive.
   host-key, and tmux dialogs from colliding. ✅ fixed 2026-08-18
 
 ### Credentials
-- Design first-class private-key management so users do not have to choose a key file for every
-  session. Decide storage, session assignment, passphrase handling, and migration behavior first.
+- First-class external private-key registry, shared key assignments, key-scoped passphrases,
+  safe legacy migration, backup metadata, fingerprint-change warning, and explicit
+  keyboard-interactive prompts. ✅ fixed 2026-08-18
 
 ### Tabs and framing
 - Tabs split out of a group can be dragged back into another group's tab strip. ✅ fixed 2026-08-18

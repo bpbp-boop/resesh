@@ -36,7 +36,7 @@ public sealed class SessionsBackupTests : IDisposable
 
         var path = Path.Combine(_dir.FullName, "filtered.sessionsbackup");
         SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
-            source.KnownHosts, source.Highlights, source.Credentials,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
             new BackupExportOptions { Scope = new BackupScope(SessionKind.Ssh, "Ops") });
 
         Assert.False(SessionsBackup.IsEncrypted(path));
@@ -63,7 +63,7 @@ public sealed class SessionsBackupTests : IDisposable
         var path = Path.Combine(_dir.FullName, "secret.sessionsbackup");
 
         SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
-            source.KnownHosts, source.Highlights, source.Credentials,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
             new BackupExportOptions { IncludeSecrets = true, Passphrase = "long test passphrase" });
 
         Assert.True(SessionsBackup.IsEncrypted(path));
@@ -92,7 +92,7 @@ public sealed class SessionsBackupTests : IDisposable
 
         var path = Path.Combine(_dir.FullName, "merge.sessionsbackup");
         SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
-            source.KnownHosts, source.Highlights, source.Credentials,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
             new BackupExportOptions { IncludeSecrets = true, Passphrase = "merge passphrase" });
         var package = SessionsBackup.Read(path, "merge passphrase");
 
@@ -109,7 +109,7 @@ public sealed class SessionsBackupTests : IDisposable
         Assert.Contains(conflicts, c => c.Imported.Id == endpointMatch.Id && c.Match == BackupConflictMatch.Endpoint);
 
         var result = SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
-            target.KnownHosts, target.Highlights, target.Credentials,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
             new Dictionary<Guid, BackupConflictResolution>
             {
                 [replacement.Id] = BackupConflictResolution.Replace,
@@ -128,6 +128,47 @@ public sealed class SessionsBackupTests : IDisposable
         Assert.Equal([duplicate.Id], target.Settings.Current.PinnedSessionIds);
         Assert.Equal(19, target.Settings.Current.FontSize);
         Assert.Equal("existing-key", target.KnownHosts.Lookup("same.example", 22)?.Sha256);
+    }
+
+    [Fact]
+    public void ExportImport_PreservesReferencedKeyMetadataAndEncryptedKeyPassphrase()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "key-source"));
+        var key = new SshKeyReference
+        {
+            Name = "Operations",
+            Path = @"C:\Users\operator\.ssh\id_ed25519",
+            Algorithm = "ssh-ed25519",
+            Fingerprint = "SHA256:key-fingerprint",
+            IsEncrypted = true,
+        };
+        source.SshKeys.MergeImport([key]);
+        var session = Ssh("Key session", "key.example", "") with
+        {
+            AuthMethod = AuthMethod.PrivateKey,
+            PrivateKeyId = key.Id,
+        };
+        source.Sessions.Add(session);
+        source.Credentials.WriteKey(key.Id, "key passphrase");
+        var path = Path.Combine(_dir.FullName, "key.sessionsbackup");
+
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
+            new BackupExportOptions { IncludeSecrets = true, Passphrase = "backup passphrase" });
+
+        var package = SessionsBackup.Read(path, "backup passphrase");
+        Assert.Equal(key.Id, Assert.Single(package.SshKeys).Id);
+        Assert.Equal("key passphrase", package.KeySecrets[key.Id]);
+
+        var target = CreateStores(Path.Combine(_dir.FullName, "key-target"));
+        SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>());
+
+        var importedKey = Assert.Single(target.SshKeys.Keys);
+        Assert.Equal("SHA256:key-fingerprint", importedKey.Fingerprint);
+        Assert.Equal(importedKey.Id, Assert.Single(target.Sessions.Sessions).PrivateKeyId);
+        Assert.Equal("key passphrase", target.Credentials.ReadKey(importedKey.Id));
     }
 
     public void Dispose() => _dir.Delete(recursive: true);
@@ -151,7 +192,9 @@ public sealed class SessionsBackupTests : IDisposable
         knownHosts.Load();
         var highlights = new HighlightsStore(Path.Combine(directory, "highlights.json"));
         highlights.Load();
-        return new TestStores(directory, sessions, settings, knownHosts, highlights, new FakeCredentials());
+        var sshKeys = new SshKeyStore(Path.Combine(directory, "ssh-keys.json"));
+        sshKeys.Load();
+        return new TestStores(directory, sessions, settings, knownHosts, highlights, sshKeys, new FakeCredentials());
     }
 
     private sealed record TestStores(
@@ -160,13 +203,18 @@ public sealed class SessionsBackupTests : IDisposable
         SettingsStore Settings,
         KnownHostsStore KnownHosts,
         HighlightsStore Highlights,
+        SshKeyStore SshKeys,
         FakeCredentials Credentials);
 
     private sealed class FakeCredentials : ICredentialService
     {
         private readonly Dictionary<Guid, string> _secrets = [];
+        private readonly Dictionary<Guid, string> _keySecrets = [];
         public string? Read(Guid sessionId) => _secrets.GetValueOrDefault(sessionId);
         public void Write(Guid sessionId, string secret) => _secrets[sessionId] = secret;
         public void Delete(Guid sessionId) => _secrets.Remove(sessionId);
+        public string? ReadKey(Guid keyId) => _keySecrets.GetValueOrDefault(keyId);
+        public void WriteKey(Guid keyId, string secret) => _keySecrets[keyId] = secret;
+        public void DeleteKey(Guid keyId) => _keySecrets.Remove(keyId);
     }
 }

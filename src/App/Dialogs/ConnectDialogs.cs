@@ -48,6 +48,81 @@ public static class ConnectDialogs
             : null;
     }
 
+    /// <summary>Shows each keyboard-interactive challenge and returns its explicit response.</summary>
+    public static async Task<IReadOnlyList<string>?> PromptKeyboardInteractiveAsync(
+        XamlRoot xamlRoot,
+        string title,
+        IReadOnlyList<KeyboardInteractivePrompt> prompts)
+    {
+        var inputs = new List<Control>();
+        var panel = new StackPanel { Spacing = 10, MinWidth = 420 };
+        foreach (var prompt in prompts)
+        {
+            Control input = prompt.IsSecret
+                ? new PasswordBox { Header = prompt.Text }
+                : new TextBox { Header = prompt.Text };
+            inputs.Add(input);
+            panel.Children.Add(input);
+        }
+        var dialog = new ContentDialog
+        {
+            Title = title,
+            Content = panel,
+            PrimaryButtonText = "Continue",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = xamlRoot,
+        };
+        if (await ShowAsync(dialog) != ContentDialogResult.Primary)
+            return null;
+        return inputs.Select(input => input switch
+        {
+            PasswordBox password => password.Password,
+            TextBox text => text.Text,
+            _ => "",
+        }).ToList();
+    }
+
+    /// <summary>Warns when a registered key path now contains a different public key.</summary>
+    public static async Task<bool> ConfirmChangedPrivateKeyAsync(
+        XamlRoot xamlRoot, SshKeyChangedException change)
+    {
+        var confirm = new TextBox
+        {
+            Header = $"Type the key name ({change.KeyName}) to accept the replacement",
+            PlaceholderText = change.KeyName,
+        };
+        var dialog = new ContentDialog
+        {
+            Title = "SSH Key Has Changed",
+            Content = new StackPanel
+            {
+                Spacing = 8,
+                MinWidth = 460,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "The file at the registered path now contains a different public key. "
+                            + "Only continue if you expected this key rotation.",
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                    new TextBlock { Text = $"Previous: {change.PreviousFingerprint}", IsTextSelectionEnabled = true },
+                    new TextBlock { Text = $"Current:  {change.CurrentFingerprint}", IsTextSelectionEnabled = true },
+                    confirm,
+                },
+            },
+            PrimaryButtonText = "Accept New Key",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            IsPrimaryButtonEnabled = false,
+            XamlRoot = xamlRoot,
+        };
+        confirm.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled =
+            confirm.Text.Trim().Equals(change.KeyName, StringComparison.Ordinal);
+        return await ShowAsync(dialog) == ContentDialogResult.Primary;
+    }
+
     /// <summary>Lets the user choose an existing persistent shell or start a new one.</summary>
     public static async Task<int?> SelectTmuxSessionAsync(
         XamlRoot xamlRoot, IReadOnlyList<TmuxSessionInfo> sessions, int newSlot)

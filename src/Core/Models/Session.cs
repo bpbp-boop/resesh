@@ -107,8 +107,17 @@ public sealed record Session
 
     public AuthMethod AuthMethod { get; init; } = AuthMethod.Password;
 
+    /// <summary>The registered SSH key used by private-key authentication. The key registry
+    /// owns the file reference and public fingerprint; sessions only keep this stable id.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? PrivateKeyId { get; init; }
+
+    /// <summary>Legacy per-session key path. New records use <see cref="PrivateKeyId"/>.
+    /// Kept only so existing sessions can be migrated without losing their key reference.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PrivateKeyPath { get; init; }
 
+    /// <summary>Legacy per-session encryption hint. The key registry now inspects the file.</summary>
     public bool PassphraseRequired { get; init; }
 
     public string TerminalType { get; init; } = "xterm-256color";

@@ -10,6 +10,7 @@ public partial class App : Application
     private Window? _window;
 
     public static SessionStore Store { get; } = new(SessionStore.DefaultPath);
+    public static SshKeyStore SshKeys { get; } = new(SshKeyStore.DefaultPath);
     public static ICredentialService Credentials { get; } = new WindowsCredentialService();
     public static KnownHostsStore KnownHosts { get; } = new(KnownHostsStore.DefaultPath);
     public static SettingsStore Settings { get; } = new(SettingsStore.DefaultPath);
@@ -54,8 +55,17 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         Store.Load();
+        SshKeys.Load();
         KnownHosts.Load();
         Highlights.Load();
+        try
+        {
+            SshKeys.MigrateLegacySessions(Store, Credentials);
+        }
+        catch (Exception ex)
+        {
+            LogCrash(ex); // keep legacy session data usable if key-registry migration fails
+        }
         try
         {
             // Adds newly discovered shells as built-in local profiles (stable ids) and

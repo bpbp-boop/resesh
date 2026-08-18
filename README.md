@@ -63,8 +63,8 @@ tests/Core.Tests
 
 Verified against a real Linux host (2026-08-14): full-screen `htop`/`vim` rendering with colors,
 split view with two live sessions, ed25519 host keys. Still unverified: private-key auth and the
-keyboard-interactive fallback. Everything else was exercised live against the local test server
-below.
+explicit keyboard-interactive prompt flow. Everything else was exercised live against the local
+test server below.
 
 ## Local test SSH server
 

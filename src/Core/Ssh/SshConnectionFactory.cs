@@ -4,6 +4,8 @@ using Session = Sessions.Core.Models.Session;
 
 namespace Sessions.Core.Ssh;
 
+public sealed record KeyboardInteractivePrompt(string Text, bool IsSecret);
+
 /// <summary>
 /// Connection plumbing shared by the terminal (SshClient) and the file pane (SftpClient):
 /// auth-method construction, failure classification, and the fast TCP preflight.
@@ -11,7 +13,10 @@ namespace Sessions.Core.Ssh;
 /// </summary>
 internal static class SshConnectionFactory
 {
-    internal static AuthenticationMethod[] BuildAuthMethods(Session session, string? secret)
+    internal static AuthenticationMethod[] BuildAuthMethods(
+        Session session,
+        string? secret,
+        Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder = null)
     {
         var user = session.Username;
         switch (session.AuthMethod)
@@ -19,12 +24,19 @@ internal static class SshConnectionFactory
             case Models.AuthMethod.Password:
             {
                 var password = new PasswordAuthenticationMethod(user, secret ?? "");
-                // Some servers demand keyboard-interactive; answer prompts with the same password once.
+                // Some servers demand keyboard-interactive. Every prompt must be answered
+                // explicitly; never send the saved password to an arbitrary challenge.
                 var interactive = new KeyboardInteractiveAuthenticationMethod(user);
                 interactive.AuthenticationPrompt += (_, e) =>
                 {
-                    foreach (var prompt in e.Prompts)
-                        prompt.Response = secret ?? "";
+                    var requests = e.Prompts
+                        .Select(prompt => new KeyboardInteractivePrompt(prompt.Request, !prompt.IsEchoed))
+                        .ToList();
+                    var responses = interactiveResponder?.Invoke(requests);
+                    if (responses is null || responses.Count != e.Prompts.Count)
+                        return;
+                    for (var index = 0; index < e.Prompts.Count; index++)
+                        e.Prompts[index].Response = responses[index];
                 };
                 return [password, interactive];
             }

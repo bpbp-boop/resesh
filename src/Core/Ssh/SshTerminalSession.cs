@@ -92,7 +92,8 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
     /// </summary>
     public void Connect(Session session, string? secret, string terminalType, int columns, int rows,
         string? bootstrapCommand = null,
-        Func<SshTerminalSession, string?>? bootstrapCommandFactory = null)
+        Func<SshTerminalSession, string?>? bootstrapCommandFactory = null,
+        Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder = null)
     {
         if (_client is not null)
             throw new InvalidOperationException("Session already used; create a new instance per connection.");
@@ -103,7 +104,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         // generous timeout because the first-connect host key dialog sits inside the handshake.
         SshConnectionFactory.PreflightTcp(session.Host, session.Port, TimeSpan.FromSeconds(10));
 
-        var auth = SshConnectionFactory.BuildAuthMethods(session, secret);
+        var auth = SshConnectionFactory.BuildAuthMethods(session, secret, interactiveResponder);
         var connectionInfo = new ConnectionInfo(session.Host, session.Port, session.Username, auth)
         {
             Timeout = TimeSpan.FromMinutes(2),

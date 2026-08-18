@@ -601,7 +601,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             .Where(other => other != tab && other.Session.Id == session.Id)
             .Select(other => other.TmuxSlot)
             .ToHashSet();
-        var view = new TerminalTabView(tab, App.Credentials, App.KnownHosts, tmuxSlotsAlreadyOpen);
+        var view = new TerminalTabView(
+            tab, App.Credentials, App.KnownHosts, App.SshKeys, tmuxSlotsAlreadyOpen);
         view.CloseRequested += () => _ = RequestCloseTabAsync(tab);
         view.NewLocalTabRequested += OpenDefaultLocalProfile;
         view.UnlockRequested += () => _ = HandleUnlockAsync(tab, view);
@@ -1039,7 +1040,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var notice = tab.State == TabConnectionState.Connected
             ? "This tab is connected — changes to host, port, or authentication apply on the next connect."
             : null;
-        var dialog = new SessionEditDialog(ViewModel.FolderPathsForPicker, current, current.FolderPath, notice)
+        var dialog = new SessionEditDialog(
+            ViewModel.FolderPathsForPicker, current, current.FolderPath, App.SshKeys, notice)
         {
             XamlRoot = Root.XamlRoot,
         };
@@ -1170,6 +1172,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     }
 
     // ---- settings ----
+
+    private async void SshKeys_Click(object sender, RoutedEventArgs e) =>
+        await Dialogs.SshKeyManagerDialog.ShowAsync(Root.XamlRoot, App.SshKeys, App.Store, App.Credentials);
 
     private async void Settings_Click(object sender, RoutedEventArgs e)
     {
@@ -1571,6 +1576,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 App.Settings,
                 App.KnownHosts,
                 App.Highlights,
+                App.SshKeys,
                 App.Credentials,
                 options));
 
@@ -1628,6 +1634,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 App.Settings,
                 App.KnownHosts,
                 App.Highlights,
+                App.SshKeys,
                 App.Credentials,
                 resolutions));
 
@@ -2164,7 +2171,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private async Task OpenSessionEditorAsync(Session? existing, string defaultFolder)
     {
-        var dialog = new SessionEditDialog(ViewModel.FolderPathsForPicker, existing, defaultFolder)
+        var dialog = new SessionEditDialog(ViewModel.FolderPathsForPicker, existing, defaultFolder, App.SshKeys)
         {
             XamlRoot = Root.XamlRoot,
         };

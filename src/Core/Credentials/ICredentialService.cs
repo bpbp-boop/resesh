@@ -13,4 +13,12 @@ public interface ICredentialService
 
     /// <summary>Deletes the secret; no-op if absent.</summary>
     void Delete(Guid sessionId);
+
+    /// <summary>Returns the passphrase shared by every session that uses this SSH key.</summary>
+    string? ReadKey(Guid keyId) => Read(keyId);
+
+    void WriteKey(Guid keyId, string secret) => Write(keyId, secret);
+
+    /// <summary>Deletes a key passphrase; no-op if absent.</summary>
+    void DeleteKey(Guid keyId) => Delete(keyId);
 }

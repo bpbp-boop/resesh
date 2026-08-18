@@ -71,13 +71,15 @@ public sealed record BackupPackage
     public required HighlightBackupData Highlights { get; init; }
     public required IReadOnlyDictionary<string, byte[]> Icons { get; init; }
     public required IReadOnlyDictionary<Guid, string> Secrets { get; init; }
+    public required IReadOnlyList<SshKeyReference> SshKeys { get; init; }
+    public required IReadOnlyDictionary<Guid, string> KeySecrets { get; init; }
     public byte[]? Workspaces { get; init; }
 }
 
 /// <summary>Creates and merges versioned .sessionsbackup archives.</summary>
 public static class SessionsBackup
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
 
     private const int Pbkdf2Iterations = 600_000;
     private const int MaxEntryCount = 10_000;
@@ -106,6 +108,7 @@ public static class SessionsBackup
         SettingsStore settings,
         KnownHostsStore knownHosts,
         HighlightsStore highlights,
+        SshKeyStore sshKeys,
         ICredentialService credentials,
         BackupExportOptions options)
     {
@@ -114,6 +117,10 @@ public static class SessionsBackup
 
         var selected = SelectSessions(sessions.Sessions, options.Scope).ToList();
         var selectedIds = selected.Select(s => s.Id).ToHashSet();
+        var selectedKeyIds = selected.Where(session => session.PrivateKeyId is not null)
+            .Select(session => session.PrivateKeyId!.Value)
+            .ToHashSet();
+        var selectedKeys = sshKeys.Keys.Where(key => selectedKeyIds.Contains(key.Id)).ToList();
         var sessionData = new BackupSessionData
         {
             Sessions = selected,
@@ -136,6 +143,7 @@ public static class SessionsBackup
             WriteJson(zip, "settings.json", settings.Current);
             WriteJson(zip, "known_hosts.json", knownHosts.Entries);
             WriteJson(zip, "highlights.json", highlights.ExportBackup());
+            WriteJson(zip, "ssh-keys.json", selectedKeys);
 
             var iconsDirectory = Path.Combine(dataDirectory, "icons");
             if (Directory.Exists(iconsDirectory))
@@ -166,6 +174,11 @@ public static class SessionsBackup
                     .Where(item => item.Secret is not null)
                     .ToDictionary(item => item.Id, item => item.Secret!);
                 WriteJson(zip, "secrets.json", secretData);
+                var keySecretData = selectedKeyIds
+                    .Select(id => (Id: id, Secret: credentials.ReadKey(id)))
+                    .Where(item => item.Secret is not null)
+                    .ToDictionary(item => item.Id, item => item.Secret!);
+                WriteJson(zip, "key-secrets.json", keySecretData);
             }
         }
 
@@ -224,8 +237,27 @@ public static class SessionsBackup
             if (sessionData.Sessions.Select(s => s.Id).Distinct().Count() != sessionData.Sessions.Count)
                 throw new InvalidDataException("The backup contains duplicate session ids.");
             var secrets = ReadOptional<Dictionary<Guid, string>>(zip, "secrets.json") ?? [];
+            var keySecrets = ReadOptional<Dictionary<Guid, string>>(zip, "key-secrets.json") ?? [];
+            var sshKeys = ReadOptional<List<SshKeyReference>>(zip, "ssh-keys.json") ?? [];
+            if (sshKeys.Select(key => key.Id).Distinct().Count() != sshKeys.Count)
+                throw new InvalidDataException("The backup contains duplicate SSH key ids.");
+            var sshKeyIds = sshKeys.Select(key => key.Id).ToHashSet();
+            if (keySecrets.Keys.Any(keyId => !sshKeyIds.Contains(keyId)))
+                throw new InvalidDataException("The backup contains a passphrase for an unknown SSH key.");
+            if (manifest.SchemaVersion >= 2 && sessionData.Sessions
+                .Where(session => session.PrivateKeyId is not null)
+                .Any(session => !sshKeyIds.Contains(session.PrivateKeyId!.Value)))
+            {
+                throw new InvalidDataException("The backup contains a session with an unknown SSH key.");
+            }
             if (manifest.IncludesSecrets != (zip.GetEntry("secrets.json") is not null))
                 throw new InvalidDataException("The backup secret metadata is inconsistent.");
+            if ((!manifest.IncludesSecrets && zip.GetEntry("key-secrets.json") is not null)
+                || (manifest.SchemaVersion >= 2 && manifest.IncludesSecrets
+                    && zip.GetEntry("key-secrets.json") is null))
+            {
+                throw new InvalidDataException("The backup SSH key secret metadata is inconsistent.");
+            }
             if (manifest.IncludesSecrets && !encrypted)
                 throw new InvalidDataException("A backup that contains secrets must be encrypted.");
 
@@ -253,6 +285,8 @@ public static class SessionsBackup
                 Highlights = ReadOptional<HighlightBackupData>(zip, "highlights.json") ?? new HighlightBackupData(),
                 Icons = icons,
                 Secrets = secrets,
+                SshKeys = sshKeys,
+                KeySecrets = keySecrets,
                 Workspaces = ReadOptionalBytes(zip, "workspaces.json"),
             };
         }
@@ -315,10 +349,18 @@ public static class SessionsBackup
         SettingsStore settingsStore,
         KnownHostsStore knownHostsStore,
         HighlightsStore highlightsStore,
+        SshKeyStore sshKeyStore,
         ICredentialService credentials,
         IReadOnlyDictionary<Guid, BackupConflictResolution> resolutions)
     {
-        var conflicts = FindConflicts(sessionStore, package).ToDictionary(c => c.Imported.Id);
+        var keyIdMap = sshKeyStore.MergeImport(package.SshKeys);
+        var mappedPackage = package with
+        {
+            Sessions = package.Sessions.Select(session => session.PrivateKeyId is { } keyId
+                ? session with { PrivateKeyId = keyIdMap.GetValueOrDefault(keyId, keyId) }
+                : session).ToList(),
+        };
+        var conflicts = FindConflicts(sessionStore, mappedPackage).ToDictionary(c => c.Imported.Id);
         var sessions = new List<Session>();
         var idMap = new Dictionary<Guid, Guid>();
         var importedCount = 0;
@@ -327,7 +369,7 @@ public static class SessionsBackup
         var kept = 0;
         var secretsImported = 0;
 
-        foreach (var imported in package.Sessions)
+        foreach (var imported in mappedPackage.Sessions)
         {
             Session target;
             if (!conflicts.TryGetValue(imported.Id, out var conflict))
@@ -366,6 +408,12 @@ public static class SessionsBackup
         }
 
         sessionStore.ApplyImport(sessions, package.Folders, package.LocalFolders);
+
+        foreach (var (sourceKeyId, secret) in package.KeySecrets)
+        {
+            credentials.WriteKey(keyIdMap.GetValueOrDefault(sourceKeyId, sourceKeyId), secret);
+            secretsImported++;
+        }
 
         var validSessionIds = sessionStore.Sessions.Select(s => s.Id).ToHashSet();
         var importedSettings = package.Settings with

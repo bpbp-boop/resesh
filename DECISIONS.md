@@ -466,3 +466,24 @@ keyboard-interactive fallback.
   badge from job membership, then an amber needs-approval badge from its own OSC 7377
   event, then no icon at all once Ctrl+C killed it; over SSH, typing `claude --resume` at
   the prompt raised the icon and `ls -la` retired it.
+
+## 2026-08-18 - First-class SSH key registry (5.0)
+- A private key stays in the user-selected location. Sessions registers its external path and
+  public metadata in `ssh-keys.json`; it never copies, moves, or deletes the private-key file.
+  This avoids a second source of truth for OpenSSH, Git, agents, scripts, and key rotation.
+- SSH sessions reference one stable key id. A registered key may serve many sessions, and its
+  passphrase has one `Sessions:Key:<id>` Windows Credential Manager entry. Password credentials
+  remain session-scoped. A passphrase that is not saved stays only in the live tab.
+- Registration records the public algorithm, key size, SHA-256 fingerprint, encryption state,
+  and public-key line when available. Every connection opens the current file and checks its
+  fingerprint. A replacement key requires typed confirmation before the stored fingerprint is
+  updated. Missing keys remain registered and can be repaired with Locate.
+- Existing `PrivateKeyPath` sessions group by normalized path and migrate to shared references
+  without copying files. A found legacy passphrase is copied to the key-scoped credential; the
+  old session credential is retained as a safe fallback during migration.
+- Backup schema 2 carries key metadata and key-to-session assignments, never private-key files.
+  The explicit encrypted-secret option may also carry key passphrases. Imported paths that do
+  not exist remain unavailable until the user locates the key on that computer.
+- Keyboard-interactive authentication no longer sends a saved password to every server prompt.
+  Each challenge is marshalled to a serialized UI dialog, with visible or secret input based on
+  the server's echo flag. This supports password-plus-OTP and Duo-style flows without guessing.

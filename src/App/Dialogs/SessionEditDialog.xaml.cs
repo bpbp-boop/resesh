@@ -7,6 +7,12 @@ namespace Sessions.App.Dialogs;
 
 public sealed partial class SessionEditDialog : ContentDialog
 {
+    private sealed class KeyChoice
+    {
+        public Guid Id { get; init; }
+        public string Label { get; init; } = "";
+    }
+
     private static readonly (string Name, string? Hex)[] ColorChoices =
     [
         ("None", null),
@@ -19,17 +25,20 @@ public sealed partial class SessionEditDialog : ContentDialog
     ];
 
     private readonly Session? _existing;
+    private readonly SshKeyStore _keyStore;
 
     /// <summary>The saved session, or null if the dialog was cancelled.</summary>
     public Session? Result { get; private set; }
 
-    /// <summary>New password/passphrase to store, or null to leave the stored credential untouched.</summary>
+    /// <summary>New password to store, or null to leave the stored credential untouched.</summary>
     public string? Password { get; private set; }
 
-    public SessionEditDialog(IEnumerable<string> folderPaths, Session? existing, string defaultFolder, string? notice = null)
+    public SessionEditDialog(IEnumerable<string> folderPaths, Session? existing, string defaultFolder,
+        SshKeyStore keyStore, string? notice = null)
     {
         InitializeComponent();
         _existing = existing;
+        _keyStore = keyStore;
         Title = existing is null ? "New Session" : "Edit Session";
         PasswordHint.Text = existing is null
             ? "Stored in Windows Credential Manager"
@@ -49,6 +58,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         ColorBox.SelectedIndex = Math.Max(0, Array.FindIndex(ColorChoices, c => c.Hex == existing?.ColorTag));
 
         PopulateIconPicker(existing?.Icon);
+        PopulateKeyChoices(existing?.PrivateKeyId);
 
         if (existing is not null)
         {
@@ -57,9 +67,6 @@ public sealed partial class SessionEditDialog : ContentDialog
             PortBox.Value = existing.Port;
             UsernameBox.Text = existing.Username;
             AuthBox.SelectedIndex = (int)existing.AuthMethod;
-            KeyPathBox.Text = existing.PrivateKeyPath ?? "";
-            PassphraseCheck.IsChecked = existing.PassphraseRequired;
-
             var terminalIndex = TerminalTypeBox.Items.IndexOf(existing.TerminalType);
             if (terminalIndex >= 0)
                 TerminalTypeBox.SelectedIndex = terminalIndex;
@@ -84,6 +91,21 @@ public sealed partial class SessionEditDialog : ContentDialog
     }
 
     private AuthMethod SelectedAuth => (AuthMethod)Math.Max(0, AuthBox.SelectedIndex);
+
+    private Guid? SelectedKeyId => (KeyBox.SelectedItem as KeyChoice)?.Id;
+
+    private void PopulateKeyChoices(Guid? selectedId)
+    {
+        KeyBox.Items.Clear();
+        foreach (var key in _keyStore.Keys)
+        {
+            var detail = key.IsAvailable ? key.Algorithm ?? "SSH key" : "unavailable";
+            var choice = new KeyChoice { Id = key.Id, Label = $"{key.Name} — {detail}" };
+            KeyBox.Items.Add(choice);
+            if (key.Id == selectedId)
+                KeyBox.SelectedItem = choice;
+        }
+    }
 
     // ---- icon picker ----
 
@@ -139,26 +161,37 @@ public sealed partial class SessionEditDialog : ContentDialog
     private void UpdateAuthFieldVisibility()
     {
         // SelectionChanged fires mid-InitializeComponent, before later controls exist.
-        if (PasswordPanel is null || KeyPathPanel is null || PassphraseCheck is null)
+        if (PasswordPanel is null || KeyPathPanel is null || KeyHint is null)
             return;
 
         var auth = SelectedAuth;
-        PasswordPanel.Visibility = auth == AuthMethod.None ? Visibility.Collapsed : Visibility.Visible;
-        PasswordBox.Header = auth == AuthMethod.PrivateKey ? "Key passphrase" : "Password";
+        PasswordPanel.Visibility = auth == AuthMethod.Password ? Visibility.Visible : Visibility.Collapsed;
         KeyPathPanel.Visibility = auth == AuthMethod.PrivateKey ? Visibility.Visible : Visibility.Collapsed;
-        PassphraseCheck.Visibility = auth == AuthMethod.PrivateKey ? Visibility.Visible : Visibility.Collapsed;
+        KeyHint.Visibility = auth == AuthMethod.PrivateKey ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // Keeps the key picker's last-used folder separate from other pickers in the app.
     private static readonly Guid KeyPickerClientId = new("b3f9c1e4-8f6a-4d2b-9c0e-5a7d31e8b246");
 
-    private void BrowseKey_Click(object sender, RoutedEventArgs e)
+    private void AddKey_Click(object sender, RoutedEventArgs e)
     {
         var hwnd = Microsoft.UI.Win32Interop.GetWindowFromWindowId(XamlRoot.ContentIslandEnvironment.AppWindowId);
         var sshDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh");
         var path = Interop.Win32FileDialog.PickFile(hwnd, KeyPickerClientId, sshDir, "Select private key file");
-        if (path is not null)
-            KeyPathBox.Text = path;
+        if (path is null)
+            return;
+        try
+        {
+            var key = _keyStore.RegisterExternal(path);
+            PopulateKeyChoices(key.Id);
+            NoticeBar.IsOpen = false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            NoticeBar.Severity = InfoBarSeverity.Error;
+            NoticeBar.Message = ex.Message;
+            NoticeBar.IsOpen = true;
+        }
     }
 
     private void OnPrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
@@ -168,8 +201,8 @@ public sealed partial class SessionEditDialog : ContentDialog
             errors.Add("Name is required.");
         if (string.IsNullOrWhiteSpace(HostBox.Text))
             errors.Add("Host is required.");
-        if (SelectedAuth == AuthMethod.PrivateKey && string.IsNullOrWhiteSpace(KeyPathBox.Text))
-            errors.Add("Private key file is required for key authentication.");
+        if (SelectedAuth == AuthMethod.PrivateKey && SelectedKeyId is null)
+            errors.Add("Select an SSH key for key authentication.");
 
         if (errors.Count > 0)
         {
@@ -202,8 +235,9 @@ public sealed partial class SessionEditDialog : ContentDialog
             Port = Math.Clamp(port, 1, 65535),
             Username = UsernameBox.Text.Trim(),
             AuthMethod = SelectedAuth,
-            PrivateKeyPath = SelectedAuth == AuthMethod.PrivateKey ? KeyPathBox.Text.Trim() : null,
-            PassphraseRequired = SelectedAuth == AuthMethod.PrivateKey && PassphraseCheck.IsChecked == true,
+            PrivateKeyId = SelectedAuth == AuthMethod.PrivateKey ? SelectedKeyId : null,
+            PrivateKeyPath = null,
+            PassphraseRequired = false,
             TerminalType = string.IsNullOrWhiteSpace(TerminalTypeBox.Text) ? "xterm-256color" : TerminalTypeBox.Text.Trim(),
             Persistent = PersistentToggle.IsOn,
             Notes = NotesBox.Text,
@@ -212,6 +246,8 @@ public sealed partial class SessionEditDialog : ContentDialog
             CredentialNeeded = _existing?.CredentialNeeded ?? false,
             Overrides = overrides.IsEmpty ? null : overrides,
         };
-        Password = PasswordBox.Password.Length > 0 ? PasswordBox.Password : null;
+        Password = SelectedAuth == AuthMethod.Password && PasswordBox.Password.Length > 0
+            ? PasswordBox.Password
+            : null;
     }
 }

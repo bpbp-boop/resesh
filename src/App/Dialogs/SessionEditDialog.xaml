@@ -80,16 +80,18 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBox
-                        x:Name="KeyPathBox"
+                    <ComboBox
+                        x:Name="KeyBox"
                         Grid.Column="0"
-                        Header="Private key file"
-                        PlaceholderText="C:\Users\you\.ssh\id_ed25519" />
+                        Header="SSH key"
+                        DisplayMemberPath="Label"
+                        PlaceholderText="Select a registered key"
+                        HorizontalAlignment="Stretch" />
                     <Button
                         Grid.Column="1"
-                        Content="Browse…"
+                        Content="Add…"
                         VerticalAlignment="Bottom"
-                        Click="BrowseKey_Click" />
+                        Click="AddKey_Click" />
                 </Grid>
 
                 <StackPanel x:Name="PasswordPanel" Spacing="4">
@@ -102,7 +104,13 @@
                         TextWrapping="Wrap" />
                 </StackPanel>
 
-                <CheckBox x:Name="PassphraseCheck" Content="Key requires a passphrase" Visibility="Collapsed" />
+                <TextBlock
+                    x:Name="KeyHint"
+                    Style="{ThemeResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="Sessions keeps a reference to the key in its current location. Manage registered keys from the File menu."
+                    TextWrapping="Wrap"
+                    Visibility="Collapsed" />
             </StackPanel>
 
             <StackPanel x:Name="TerminalPanel" Spacing="12" Visibility="Collapsed">

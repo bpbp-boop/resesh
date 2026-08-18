@@ -11,6 +11,7 @@ using Sessions.Core.Local;
 using Sessions.Core.Models;
 using Sessions.Core.Sftp;
 using Sessions.Core.Ssh;
+using Sessions.Core.Storage;
 using Sessions.Terminal;
 
 namespace Sessions.App.Terminal;
@@ -26,6 +27,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     private readonly TabViewModel _tab;
     private readonly ICredentialService _credentials;
     private readonly KnownHostsStore _knownHosts;
+    private readonly SshKeyStore _sshKeys;
     private readonly IReadOnlySet<int> _tmuxSlotsAlreadyOpen;
     private readonly TerminalControl _terminal = new();
     private readonly ProgressRing _spinner = new() { IsActive = false, Width = 48, Height = 48 };
@@ -47,6 +49,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     private CommunityToolkit.WinUI.Controls.GridSplitter? _paneSplitter;
     private Border? _paneSplitterLine;
     private string? _secret;
+    private Session? _resolvedSshSession;
     private const double DefaultFilePaneWidth = 340;
 
     private Session Session => _tab.Session;
@@ -73,11 +76,13 @@ public sealed class TerminalTabView : Grid, IDisposable
     public event Action<TabViewModel, AgentSnapshot>? AgentAlert;
 
     public TerminalTabView(TabViewModel tab, ICredentialService credentials, KnownHostsStore knownHosts,
+        SshKeyStore sshKeys,
         IReadOnlySet<int>? tmuxSlotsAlreadyOpen = null)
     {
         _tab = tab;
         _credentials = credentials;
         _knownHosts = knownHosts;
+        _sshKeys = sshKeys;
         _tmuxSlotsAlreadyOpen = tmuxSlotsAlreadyOpen ?? new HashSet<int>();
 
         // Column 0: terminal; column 1: splitter (collapsed); column 2: file pane (width 0
@@ -350,14 +355,16 @@ public sealed class TerminalTabView : Grid, IDisposable
                 return;
             }
 
-            var secret = await ResolveSecretAsync();
-            if (secret is null && NeedsSecret())
+            var resolved = await ResolveSshCredentialAsync();
+            if (resolved is null)
             {
                 _tab.State = TabConnectionState.Disconnected;
                 _terminal.NotifyDisconnected("No credential provided.");
                 return;
             }
+            var (connectionSession, secret) = resolved;
             _secret = secret; // reused by the file pane's SFTP connection
+            _resolvedSshSession = connectionSession;
 
             if (isReconnect)
                 _terminal.WriteDivider();
@@ -388,8 +395,9 @@ public sealed class TerminalTabView : Grid, IDisposable
                 ? connected => SelectTmuxBootstrapBlocking(connected, isReconnect)
                 : null;
             await Task.Run(() => session.Connect(
-                Session, secret, Session.TerminalType, cols, rows,
-                bootstrapCommandFactory: bootstrapFactory));
+                connectionSession, secret, Session.TerminalType, cols, rows,
+                bootstrapCommandFactory: bootstrapFactory,
+                interactiveResponder: PromptKeyboardInteractiveBlocking));
 
             _backend = session;
             _ssh = session;
@@ -476,33 +484,118 @@ public sealed class TerminalTabView : Grid, IDisposable
             ?? throw new OperationCanceledException("tmux session selection was cancelled.");
     }
 
-    private bool NeedsSecret() =>
-        Session.AuthMethod == AuthMethod.Password
-        || (Session.AuthMethod == AuthMethod.PrivateKey && Session.PassphraseRequired);
+    private sealed record ResolvedSshCredential(Session Session, string Secret);
 
-    /// <summary>Stored credential, or a prompt; null if the user cancelled. Empty string = no secret needed.</summary>
-    private async Task<string?> ResolveSecretAsync()
+    /// <summary>Resolves a session password or a registered key plus its shared passphrase.</summary>
+    private async Task<ResolvedSshCredential?> ResolveSshCredentialAsync()
     {
-        if (!NeedsSecret())
-            return "";
+        if (Session.AuthMethod == AuthMethod.None)
+            return new ResolvedSshCredential(Session, "");
+
+        if (Session.AuthMethod == AuthMethod.PrivateKey)
+            return await ResolvePrivateKeyAsync();
 
         var stored = _credentials.Read(Session.Id);
         if (!string.IsNullOrEmpty(stored))
-            return stored;
+            return new ResolvedSshCredential(Session, stored);
 
-        var isPassphrase = Session.AuthMethod == AuthMethod.PrivateKey;
         var result = await ConnectDialogs.PromptCredentialAsync(
             XamlRoot,
             $"Connect to {Session.Name}",
-            isPassphrase
-                ? $"Passphrase for {Session.PrivateKeyPath}"
-                : $"Password for {Session.Username}@{Session.Host}");
+            $"Password for {Session.Username}@{Session.Host}");
         if (result is not { } cred)
             return null;
 
         if (cred.Save && cred.Secret.Length > 0)
             _credentials.Write(Session.Id, cred.Secret);
-        return cred.Secret;
+        return new ResolvedSshCredential(Session, cred.Secret);
+    }
+
+    private async Task<ResolvedSshCredential?> ResolvePrivateKeyAsync()
+    {
+        if (Session.PrivateKeyId is not { } keyId || _sshKeys.Find(keyId) is not { } key)
+            throw new InvalidOperationException("The session does not have a registered SSH key.");
+        if (!key.IsAvailable)
+            throw new FileNotFoundException(
+                $"The SSH key '{key.Name}' is unavailable. Use File > SSH Keys to locate it.", key.Path);
+
+        var secret = key.IsEncrypted == true
+            ? _credentials.ReadKey(keyId) ?? _credentials.Read(Session.Id)
+            : null;
+
+        SshKeyReference validated;
+        if (key.IsEncrypted == true && string.IsNullOrEmpty(secret))
+        {
+            var prompted = await PromptAndValidateKeyAsync(key);
+            if (prompted is null)
+                return null;
+            (validated, secret) = prompted.Value;
+        }
+        else
+        {
+            try
+            {
+                validated = await ValidateKeyAsync(keyId, secret);
+                if (validated.IsEncrypted == true && string.IsNullOrEmpty(secret))
+                {
+                    var prompted = await PromptAndValidateKeyAsync(validated);
+                    if (prompted is null)
+                        return null;
+                    (validated, secret) = prompted.Value;
+                }
+            }
+            catch (SshKeyPassphraseException)
+            {
+                var prompted = await PromptAndValidateKeyAsync(
+                    key, "The stored passphrase was not accepted.");
+                if (prompted is null)
+                    return null;
+                (validated, secret) = prompted.Value;
+            }
+        }
+
+        return new ResolvedSshCredential(
+            Session with { PrivateKeyPath = validated.Path, PassphraseRequired = validated.IsEncrypted == true },
+            secret ?? "");
+    }
+
+    private async Task<(SshKeyReference Key, string Secret)?> PromptAndValidateKeyAsync(
+        SshKeyReference key, string? notice = null)
+    {
+        while (true)
+        {
+            var prompted = await ConnectDialogs.PromptCredentialAsync(
+                XamlRoot,
+                $"Unlock {key.Name}",
+                notice is null ? $"Passphrase for {key.Name}" : $"{notice} Passphrase for {key.Name}");
+            if (prompted is null)
+                return null;
+            try
+            {
+                var validated = await ValidateKeyAsync(key.Id, prompted.Value.Secret);
+                if (prompted.Value.Save && prompted.Value.Secret.Length > 0)
+                    _credentials.WriteKey(key.Id, prompted.Value.Secret);
+                return (validated, prompted.Value.Secret);
+            }
+            catch (SshKeyPassphraseException)
+            {
+                notice = "The passphrase was not accepted.";
+            }
+        }
+    }
+
+    private async Task<SshKeyReference> ValidateKeyAsync(Guid keyId, string? passphrase)
+    {
+        try
+        {
+            return await Task.Run(() => _sshKeys.Validate(keyId, passphrase));
+        }
+        catch (SshKeyChangedException change)
+        {
+            if (!await ConnectDialogs.ConfirmChangedPrivateKeyAsync(XamlRoot, change))
+                throw new OperationCanceledException("SSH key replacement was not accepted.");
+            return await Task.Run(() => _sshKeys.Validate(keyId, passphrase, acceptChanged: true));
+        }
     }
 
     /// <summary>Marshals the host-key decision onto the UI thread; called from the connect thread.</summary>
@@ -520,6 +613,29 @@ public sealed class TerminalTabView : Grid, IDisposable
                 tcs.TrySetException(ex);
             }
         });
+        return tcs.Task.GetAwaiter().GetResult();
+    }
+
+    /// <summary>Marshals server keyboard-interactive challenges onto the UI thread.</summary>
+    private IReadOnlyList<string>? PromptKeyboardInteractiveBlocking(
+        IReadOnlyList<KeyboardInteractivePrompt> prompts)
+    {
+        var tcs = new TaskCompletionSource<IReadOnlyList<string>?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!DispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                tcs.TrySetResult(await ConnectDialogs.PromptKeyboardInteractiveAsync(
+                    XamlRoot, $"Authenticate to {Session.Name}", prompts));
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        }))
+        {
+            return null;
+        }
         return tcs.Task.GetAwaiter().GetResult();
     }
 
@@ -735,7 +851,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// the pane surfaces failures.</summary>
     private async Task OpenInExplorerAsync(string remotePath)
     {
-        var session = Session;
+        var session = _resolvedSshSession ?? Session;
         string root;
         if (session.AuthMethod == AuthMethod.PrivateKey)
         {
@@ -760,14 +876,18 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// (prompting only if the tab never connected) and the shared host-key trust.</summary>
     private async Task<SftpSession> CreateSftpSessionAsync()
     {
-        var secret = _secret ?? await ResolveSecretAsync();
-        if (secret is null)
+        var resolved = _resolvedSshSession is { } active
+            ? new ResolvedSshCredential(active, _secret ?? "")
+            : await ResolveSshCredentialAsync();
+        if (resolved is null)
             throw new SshSessionException(SshFailureKind.AuthenticationFailed, "No credential provided.");
+        var (session, secret) = resolved;
         _secret = secret;
+        _resolvedSshSession = session;
         var sftp = new SftpSession(_knownHosts);
         try
         {
-            await Task.Run(() => sftp.Connect(Session, secret));
+            await Task.Run(() => sftp.Connect(session, secret, PromptKeyboardInteractiveBlocking));
         }
         catch
         {

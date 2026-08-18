@@ -9,7 +9,7 @@
 
     <StackPanel Spacing="12" MinWidth="500">
         <TextBlock
-            Text="The backup includes sessions, folders, settings, known hosts, highlight rules, custom icons, and workspaces when present. Recordings are not included."
+            Text="The backup includes sessions, folders, settings, known hosts, registered SSH key references, highlight rules, custom icons, and workspaces when present. Private-key files and recordings are not included."
             TextWrapping="Wrap" />
         <ComboBox
             x:Name="ScopeBox"

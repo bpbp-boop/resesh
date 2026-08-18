@@ -205,6 +205,8 @@ public sealed class MainViewModel : ObservableObject
         _store.Update(session);
         if (!string.IsNullOrEmpty(password))
             _credentials.Write(session.Id, password);
+        else if (previous?.AuthMethod == AuthMethod.Password && session.AuthMethod != AuthMethod.Password)
+            _credentials.Delete(session.Id);
         foreach (var tab in AllTabs.Where(t => t.Session.Id == session.Id))
         {
             tab.Session = session;

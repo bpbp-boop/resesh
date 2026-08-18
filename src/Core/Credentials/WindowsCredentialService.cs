@@ -12,14 +12,19 @@ namespace Sessions.Core.Credentials;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsCredentialService : ICredentialService
 {
-    private const string TargetPrefix = "Sessions:";
+    private const string SessionTargetPrefix = "Sessions:";
+    private const string KeyTargetPrefix = "Sessions:Key:";
     private const int CredTypeGeneric = 1;
     private const int CredPersistLocalMachine = 2;
     private const int ErrorNotFound = 1168;
 
-    public string? Read(Guid sessionId)
+    public string? Read(Guid sessionId) => ReadTarget(SessionTarget(sessionId));
+
+    public string? ReadKey(Guid keyId) => ReadTarget(KeyTarget(keyId));
+
+    private static string? ReadTarget(string target)
     {
-        if (!CredRead(Target(sessionId), CredTypeGeneric, 0, out var credPtr))
+        if (!CredRead(target, CredTypeGeneric, 0, out var credPtr))
         {
             var error = Marshal.GetLastWin32Error();
             if (error == ErrorNotFound)
@@ -42,7 +47,11 @@ public sealed class WindowsCredentialService : ICredentialService
         }
     }
 
-    public void Write(Guid sessionId, string secret)
+    public void Write(Guid sessionId, string secret) => WriteTarget(SessionTarget(sessionId), sessionId, secret);
+
+    public void WriteKey(Guid keyId, string secret) => WriteTarget(KeyTarget(keyId), keyId, secret);
+
+    private static void WriteTarget(string target, Guid id, string secret)
     {
         var blob = Encoding.Unicode.GetBytes(secret);
         var blobPtr = Marshal.AllocHGlobal(blob.Length);
@@ -52,11 +61,11 @@ public sealed class WindowsCredentialService : ICredentialService
             var cred = new CREDENTIAL
             {
                 Type = CredTypeGeneric,
-                TargetName = Target(sessionId),
+                TargetName = target,
                 CredentialBlob = blobPtr,
                 CredentialBlobSize = (uint)blob.Length,
                 Persist = CredPersistLocalMachine,
-                UserName = sessionId.ToString("D"),
+                UserName = id.ToString("D"),
             };
             if (!CredWrite(ref cred, 0))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -67,9 +76,13 @@ public sealed class WindowsCredentialService : ICredentialService
         }
     }
 
-    public void Delete(Guid sessionId)
+    public void Delete(Guid sessionId) => DeleteTarget(SessionTarget(sessionId));
+
+    public void DeleteKey(Guid keyId) => DeleteTarget(KeyTarget(keyId));
+
+    private static void DeleteTarget(string target)
     {
-        if (!CredDelete(Target(sessionId), CredTypeGeneric, 0))
+        if (!CredDelete(target, CredTypeGeneric, 0))
         {
             var error = Marshal.GetLastWin32Error();
             if (error != ErrorNotFound)
@@ -77,7 +90,9 @@ public sealed class WindowsCredentialService : ICredentialService
         }
     }
 
-    private static string Target(Guid sessionId) => TargetPrefix + sessionId.ToString("D");
+    private static string SessionTarget(Guid sessionId) => SessionTargetPrefix + sessionId.ToString("D");
+
+    private static string KeyTarget(Guid keyId) => KeyTargetPrefix + keyId.ToString("D");
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct CREDENTIAL

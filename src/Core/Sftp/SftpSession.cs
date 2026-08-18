@@ -37,14 +37,15 @@ public sealed class SftpSession : IDisposable
     /// already accepted through the terminal path — an unknown or changed key fails here
     /// instead of raising a second surprise dialog.
     /// </summary>
-    public void Connect(Session session, string? secret)
+    public void Connect(Session session, string? secret,
+        Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder = null)
     {
         if (_client is not null)
             throw new InvalidOperationException("Session already used; create a new instance per connection.");
 
         SshConnectionFactory.PreflightTcp(session.Host, session.Port, TimeSpan.FromSeconds(10));
 
-        var auth = SshConnectionFactory.BuildAuthMethods(session, secret);
+        var auth = SshConnectionFactory.BuildAuthMethods(session, secret, interactiveResponder);
         var connectionInfo = new ConnectionInfo(session.Host, session.Port, session.Username, auth)
         {
             Timeout = TimeSpan.FromSeconds(30),
