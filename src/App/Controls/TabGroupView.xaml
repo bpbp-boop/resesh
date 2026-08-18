@@ -76,27 +76,31 @@
         </Grid.RowDefinitions>
 
         <!-- Tab strip only; terminals render in TerminalHost so WebView2 gets real space. -->
-        <TabView
-            x:Name="Tabs"
+        <Grid
+            x:Name="TabStripHost"
             Grid.Row="0"
-            Height="35"
-            Margin="0"
-            Padding="0"
-            HorizontalAlignment="Stretch"
-            VerticalAlignment="Top"
-            Loaded="Tabs_Loaded"
-            TabItemsSource="{x:Bind Group.Tabs}"
-            SelectedItem="{x:Bind Group.SelectedTab, Mode=TwoWay}"
-            SelectionChanged="Tabs_SelectionChanged"
-            IsAddTabButtonVisible="False"
-            TabWidthMode="SizeToContent"
-            CanDragTabs="True"
-            CanReorderTabs="True"
-            TabCloseRequested="Tabs_TabCloseRequested"
-            TabDragStarting="Tabs_TabDragStarting"
-            TabDragCompleted="Tabs_TabDragCompleted"
-            TabStripDragOver="Tabs_TabStripDragOver"
-            TabStripDrop="Tabs_TabStripDrop">
+            Background="Transparent"
+            AllowDrop="True">
+            <TabView
+                x:Name="Tabs"
+                Height="35"
+                Margin="0"
+                Padding="0"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Top"
+                Loaded="Tabs_Loaded"
+                TabItemsSource="{x:Bind Group.Tabs}"
+                SelectedItem="{x:Bind Group.SelectedTab, Mode=TwoWay}"
+                SelectionChanged="Tabs_SelectionChanged"
+                IsAddTabButtonVisible="False"
+                TabWidthMode="SizeToContent"
+                CanDragTabs="True"
+                CanReorderTabs="True"
+                TabCloseRequested="Tabs_TabCloseRequested"
+                TabDragStarting="Tabs_TabDragStarting"
+                TabDragCompleted="Tabs_TabDragCompleted"
+                TabStripDragOver="Tabs_TabStripDragOver"
+                TabStripDrop="Tabs_TabStripDrop">
             <TabView.TabItemTemplate>
                 <DataTemplate x:DataType="vm:TabViewModel">
                     <TabViewItem
@@ -191,7 +195,8 @@
                     </TabViewItem>
                 </DataTemplate>
             </TabView.TabItemTemplate>
-        </TabView>
+            </TabView>
+        </Grid>
 
         <Grid x:Name="TerminalHost" Grid.Row="1" />
 

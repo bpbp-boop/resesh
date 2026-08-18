@@ -768,9 +768,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 continue;
 
             if (isColumns)
-                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(7) });
             else
-                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(7) });
 
             var splitterLine = new Border
             {
@@ -791,8 +791,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 VerticalAlignment = isColumns ? VerticalAlignment.Stretch : VerticalAlignment.Center,
                 Width = isColumns ? 7 : double.NaN,
                 Height = isColumns ? double.NaN : 7,
-                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSurfaceBrush"],
             };
+            // Keep the splitter above the WebView2-backed terminal content. Its grid track
+            // is the full seven-pixel hit target so it does not overlap a terminal scrollbar;
+            // the separate centered border preserves the one-pixel visual divider.
+            Canvas.SetZIndex(splitter, 1);
             if (isColumns)
             {
                 Grid.SetColumn(splitterLine, gridIndex + 1);

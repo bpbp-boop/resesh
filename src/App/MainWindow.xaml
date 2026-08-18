@@ -92,7 +92,7 @@
         <Grid x:Name="AppTitleBar" Grid.Row="0" Height="48">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="TitleBarLeftPadding" Width="0" />
-                <ColumnDefinition Width="1" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />

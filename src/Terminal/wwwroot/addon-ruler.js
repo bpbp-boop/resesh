@@ -150,7 +150,11 @@
     var canvas = document.createElement("canvas");
     canvas.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;";
     strip.appendChild(canvas);
-    term.element.appendChild(strip);
+    // xterm's element is only as tall as its whole character rows, which can leave
+    // unused pixels below it after fitting. Mount the ruler in the full-height host
+    // so the scrollbar reaches the actual bottom edge of the content pane.
+    var host = term.element.parentElement || term.element;
+    host.appendChild(strip);
     this._strip = strip;
     this._canvas = canvas;
 
@@ -161,7 +165,7 @@
       "font-family:'Cascadia Mono',Consolas,monospace;font-size:12px;line-height:16px;" +
       "white-space:normal;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,0.35);" +
       "pointer-events:none;";
-    term.element.appendChild(tooltip);
+    host.appendChild(tooltip);
     this._tooltip = tooltip;
 
     this._disposables.push(term.onScroll(function () { self._queuePaint(); }));

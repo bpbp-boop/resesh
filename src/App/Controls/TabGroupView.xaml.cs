@@ -76,6 +76,12 @@ public sealed partial class TabGroupView : UserControl
         Tabs.AddHandler(PointerPressedEvent, new PointerEventHandler(Tabs_PointerPressed), true);
         Tabs.AddHandler(PointerReleasedEvent, new PointerEventHandler(Tabs_PointerReleased), true);
         Tabs.AddHandler(RightTappedEvent, new RightTappedEventHandler(Tabs_RightTapped), true);
+
+        // TabView consumes drag events over parts of its strip without raising TabStripDrop.
+        // Listen on the surrounding row even for handled events so its unused space remains
+        // a cross-group drop target.
+        TabStripHost.AddHandler(DragOverEvent, new DragEventHandler(TabStripHost_DragOver), true);
+        TabStripHost.AddHandler(DropEvent, new DragEventHandler(TabStripHost_Drop), true);
     }
 
     // ---- terminal hosting ----
@@ -481,16 +487,38 @@ public sealed partial class TabGroupView : UserControl
         if (_draggedTab is not { } tab || _dragSource == this)
             return; // reorders within a group are handled natively by the TabView
 
-        // Insert at the position the tab was dropped.
+        MoveDraggedTabIntoGroup(tab, e.GetPosition(Tabs).X);
+        EndTabDrag();
+    }
+
+    private void TabStripHost_DragOver(object sender, DragEventArgs e)
+    {
+        if (_draggedTab is not null && _dragSource != this)
+            e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
+    }
+
+    private void TabStripHost_Drop(object sender, DragEventArgs e)
+    {
+        if (_draggedTab is not { } tab || _dragSource == this)
+            return;
+
+        MoveDraggedTabIntoGroup(tab, e.GetPosition(Tabs).X);
+        EndTabDrag();
+    }
+
+    private void MoveDraggedTabIntoGroup(TabViewModel tab, double pointerX)
+    {
+        // Insert at the position the tab was dropped. The surrounding TabStripHost also
+        // receives drops over the unused portion of the strip, where WinUI's TabStripDrop
+        // is not raised; in that case the loop naturally appends the tab.
         var index = Group.Tabs.Count;
-        var position = e.GetPosition(Tabs);
         for (var i = 0; i < Group.Tabs.Count; i++)
         {
             if (Tabs.ContainerFromIndex(i) is TabViewItem item)
             {
                 var bounds = item.TransformToVisual(Tabs).TransformBounds(
                     new Windows.Foundation.Rect(0, 0, item.ActualWidth, item.ActualHeight));
-                if (position.X < bounds.X + bounds.Width / 2)
+                if (pointerX < bounds.X + bounds.Width / 2)
                 {
                     index = i;
                     break;
@@ -500,7 +528,6 @@ public sealed partial class TabGroupView : UserControl
 
         // Never land in front of the target group's pinned tabs.
         _host.MoveTabBetweenGroups(tab, Group, Math.Max(index, Group.Tabs.Count(t => t.IsPinned)));
-        EndTabDrag();
     }
 
     private void ContentDropSurface_DragOver(object sender, DragEventArgs e)

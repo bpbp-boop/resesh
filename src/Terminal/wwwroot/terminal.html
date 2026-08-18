@@ -6,7 +6,13 @@
 <link rel="stylesheet" href="xterm.css">
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #0c0c0c; overflow: hidden; }
-  #term { height: 100%; width: 100%; }
+  #term {
+    position: relative;
+    box-sizing: border-box;
+    height: 100%;
+    width: 100%;
+    padding-left: 6px;
+  }
   .xterm .xterm-viewport { overflow-y: auto; }
   /* The annotated ruler (addon-ruler.js) replaces the native scrollbar. */
   .xterm .xterm-viewport::-webkit-scrollbar { display: none; }

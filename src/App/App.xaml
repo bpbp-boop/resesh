@@ -9,10 +9,12 @@
             </ResourceDictionary.MergedDictionaries>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="SessionSurfaceBrush" Color="#181818" />
                     <SolidColorBrush x:Key="SessionFrameBrush" Color="#3C3C3C" />
                     <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="#0078D4" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="SessionSurfaceBrush" Color="#F3F3F3" />
                     <SolidColorBrush x:Key="SessionFrameBrush" Color="#C8C8C8" />
                     <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="#0078D4" />
                 </ResourceDictionary>
