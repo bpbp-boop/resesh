@@ -372,7 +372,7 @@ keyboard-interactive fallback.
   Object, then resumes; Stop/Dispose terminates the job, so the entire descendant tree
   dies with the tab. Verified by test (interactive cmd killed, no Exited event on
   user-initiated stop).
-- **Discovery.** pwsh (Program Files/PATH), Windows PowerShell, cmd, WSL distros (Lxss
+- **Discovery.** pwsh (Program Files/PATH), PowerShell 5.1, cmd, WSL distros (Lxss
   registry, no wsl.exe spawn), Git Bash (GitForWindows registry). Ids are MD5-derived
   stable GUIDs of the discovery key ("sessions-local:cmd"), so pins survive restarts;
   sync adds missing built-ins but never overwrites user edits, and built-ins whose shell

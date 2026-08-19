@@ -45,10 +45,17 @@
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
+            <!-- Browser-style sizing: tabs stay at the normal 240px width until the strip
+                 needs the space, then shrink together to a usable 100px floor. Beyond that,
+                 TabView keeps the minimum and exposes its built-in horizontal scrolling. -->
+            <x:Double x:Key="TabViewItemMaxWidth">240</x:Double>
+            <x:Double x:Key="TabViewItemMinWidth">100</x:Double>
+
             <!-- Minimal TabViewItem template: no chrome, no insets — the header
                  DataTemplate paints the entire tab, edge to edge. -->
             <Style x:Key="CodeTabStyle" TargetType="TabViewItem">
-                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinWidth" Value="{ThemeResource TabViewItemMinWidth}" />
+                <Setter Property="MaxWidth" Value="{ThemeResource TabViewItemMaxWidth}" />
                 <Setter Property="MinHeight" Value="0" />
                 <Setter Property="Padding" Value="0" />
                 <Setter Property="Margin" Value="0" />
@@ -93,7 +100,7 @@
                 SelectedItem="{x:Bind Group.SelectedTab, Mode=TwoWay}"
                 SelectionChanged="Tabs_SelectionChanged"
                 IsAddTabButtonVisible="False"
-                TabWidthMode="SizeToContent"
+                TabWidthMode="Equal"
                 CanDragTabs="True"
                 CanReorderTabs="True"
                 TabCloseRequested="Tabs_TabCloseRequested"
@@ -125,14 +132,23 @@
                                     VerticalAlignment="Top"
                                     HorizontalAlignment="Stretch"
                                     Visibility="{x:Bind AccentVisibility, Mode=OneWay}" />
-                                <StackPanel
-                                    Orientation="Horizontal"
-                                    Spacing="6"
+                                <Grid
                                     Margin="10,0,6,0"
                                     VerticalAlignment="Center">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
                                     <Rectangle
+                                        Grid.Column="0"
                                         Width="3"
                                         Height="22"
+                                        Margin="0,0,6,0"
                                         RadiusX="1.5"
                                         RadiusY="1.5"
                                         VerticalAlignment="Center">
@@ -141,9 +157,10 @@
                                         </Rectangle.Fill>
                                     </Rectangle>
                                     <Ellipse
+                                        Grid.Column="1"
                                         Width="7"
                                         Height="7"
-                                        Margin="-3,0,3,0"
+                                        Margin="0,0,6,0"
                                         VerticalAlignment="Center"
                                         ToolTipService.ToolTip="{x:Bind StateText, Mode=OneWay}">
                                         <Ellipse.Fill>
@@ -153,8 +170,10 @@
                                     <!-- One identity slot: an active agent replaces the session
                                          icon. The attention badge stays attached to that icon. -->
                                     <Grid
+                                        Grid.Column="2"
                                         Width="16"
                                         Height="16"
+                                        Margin="0,0,6,0"
                                         VerticalAlignment="Center"
                                         ToolTipService.ToolTip="{x:Bind AgentTooltip, Mode=OneWay}"
                                         Visibility="{x:Bind IconVisibility, Mode=OneWay}">
@@ -186,22 +205,30 @@
                                         </Border>
                                     </Grid>
                                     <FontIcon
+                                        Grid.Column="3"
                                         Glyph="&#xE840;"
                                         FontSize="11"
+                                        Margin="0,0,6,0"
                                         VerticalAlignment="Center"
                                         ToolTipService.ToolTip="Pinned"
                                         Foreground="{x:Bind HeaderForeground, Mode=OneWay}"
                                         Visibility="{x:Bind PinIconVisibility, Mode=OneWay}" />
                                     <FontIcon
+                                        Grid.Column="4"
                                         Glyph="&#xE72E;"
                                         FontSize="11"
+                                        Margin="0,0,6,0"
                                         VerticalAlignment="Center"
                                         Foreground="{x:Bind HeaderForeground, Mode=OneWay}"
                                         Visibility="{x:Bind LockIconVisibility, Mode=OneWay}" />
                                     <!-- Two lines: the session name, and whatever best identifies
                                          this particular tab (running program, cwd, or endpoint) —
                                          so several tabs of one host aren't interchangeable. -->
-                                    <StackPanel VerticalAlignment="Center" Spacing="0">
+                                    <StackPanel
+                                        Grid.Column="5"
+                                        MinWidth="0"
+                                        VerticalAlignment="Center"
+                                        Spacing="0">
                                         <!-- Explicit line heights: the default leading on two
                                              stacked lines is what makes the strip look tall. -->
                                         <TextBlock
@@ -211,11 +238,9 @@
                                             LineHeight="17"
                                             LineStackingStrategy="BlockLineHeight"
                                             FontWeight="{x:Bind HeaderFontWeight, Mode=OneWay}"
-                                            SizeChanged="TabTitleText_SizeChanged"
+                                            TextTrimming="CharacterEllipsis"
+                                            ToolTipService.ToolTip="{x:Bind Header, Mode=OneWay}"
                                             Foreground="{x:Bind HeaderForeground, Mode=OneWay}" />
-                                        <!-- MaxWidth is set from the title's width in code-behind:
-                                             the subtitle is free text from the host and must never
-                                             be what decides how wide the tab is. -->
                                         <TextBlock
                                             x:Name="TabSubtitleText"
                                             Text="{x:Bind Subtitle, Mode=OneWay}"
@@ -228,9 +253,10 @@
                                             Foreground="{x:Bind HeaderForeground, Mode=OneWay}" />
                                     </StackPanel>
                                     <Button
+                                        Grid.Column="6"
                                         Click="TabCloseGlyph_Click"
                                         Padding="3"
-                                        Margin="2,0,0,0"
+                                        Margin="6,0,0,0"
                                         Background="Transparent"
                                         BorderThickness="0"
                                         CornerRadius="3"
@@ -242,7 +268,7 @@
                                             FontSize="10"
                                             Foreground="{x:Bind HeaderForeground, Mode=OneWay}" />
                                     </Button>
-                                </StackPanel>
+                                </Grid>
                             </Grid>
                         </TabViewItem.Header>
                     </TabViewItem>

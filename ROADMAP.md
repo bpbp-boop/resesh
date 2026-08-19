@@ -193,7 +193,7 @@ in search, tabs, splits, pinning, highlighting, the overview ruler, recording, a
 in the same way as SSH profiles.
 
 **Built-in profiles and tree behavior:**
-- Discover PowerShell 7 (`pwsh.exe`), Command Prompt, Windows PowerShell 5.1, installed WSL
+- Discover PowerShell 7 (`pwsh.exe`), Command Prompt, PowerShell 5.1, installed WSL
   distributions, and Git Bash when present. Hide unavailable shells.
 - Give discovered profiles stable identities so pinned tabs and workspaces can reference them.
   Users may edit or reset built-in profile defaults, and may create, rename, delete, and organize

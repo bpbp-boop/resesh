@@ -31,6 +31,38 @@ public class LocalShellDiscoveryTests
     }
 
     [Fact]
+    public void SyncBuiltIns_RenamesLegacyPowerShellLabel_AndPreservesUserEdit()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"sessions-test-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new SessionStore(path);
+            store.Load();
+            var id = LocalShellDiscovery.StableId("powershell");
+            store.Add(new Session
+            {
+                Id = id,
+                Kind = SessionKind.Local,
+                BuiltIn = true,
+                Name = "Windows PowerShell",
+                Local = new LocalTarget { Executable = "powershell.exe" },
+            });
+
+            LocalShellDiscovery.SyncBuiltIns(store);
+            Assert.Equal("PowerShell 5.1", store.Find(id)!.Name);
+
+            store.Update(store.Find(id)! with { Name = "My Legacy Shell" });
+            LocalShellDiscovery.SyncBuiltIns(store);
+            Assert.Equal("My Legacy Shell", store.Find(id)!.Name);
+        }
+        finally
+        {
+            File.Delete(path);
+            File.Delete(path + ".bak");
+        }
+    }
+
+    [Fact]
     public void SyncBuiltIns_AddsOnce_AndPreservesUserEdits()
     {
         var path = Path.Combine(Path.GetTempPath(), $"sessions-test-{Guid.NewGuid():N}.json");

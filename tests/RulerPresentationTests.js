@@ -60,13 +60,13 @@ test("single-pane ruler keeps the full presentation", () => {
   assert.equal(operationsWithColor(result, "#2ea043")[0].alpha, 1);
 });
 
-test("focused split ruler uses the narrow Calm hierarchy and merges nearby marks", () => {
+test("focused split ruler keeps full width, uses the Calm hierarchy, and merges marks", () => {
   const result = paintPresentation(true, true);
   const routine = operationsWithColor(result, "#9e9e9e");
 
   assert.equal(result.presentation, "calm-focused");
   assert.deepEqual(result.operations[0],
-    { x: 4, y: 0, width: 10, height: 100, color: "#0c0c0c", alpha: 1 });
+    { x: 0, y: 0, width: 14, height: 100, color: "#0c0c0c", alpha: 1 });
   assert.equal(routine.length, 2);
   assert.equal(routine[0].alpha, 0.42);
   assert.equal(routine[0].y, routine[1].y);
@@ -83,13 +83,55 @@ test("inactive split ruler dims important and routine marks further", () => {
   assert.equal(operationsWithColor(result, "#61d6d6")[0].alpha, 0.62);
 });
 
-test("hover restores the full width, colors, and opacity", () => {
+test("hover keeps the full width and restores mark colors and opacity", () => {
   const result = paintPresentation(true, false, true);
 
   assert.equal(result.presentation, "full");
   assert.equal(result.operations[0].x, 0);
   assert.equal(result.operations[0].width, 14);
   assert.equal(operationsWithColor(result, "#2ea043")[0].alpha, 1);
+});
+
+function dragHarness() {
+  const released = [];
+  const scrolled = [];
+  const addon = new RulerAddon();
+  addon._strip = {
+    clientHeight: 100,
+    releasePointerCapture(pointerId) { released.push(pointerId); },
+  };
+  addon._term = {
+    rows: 20,
+    buffer: { active: { length: 100 } },
+    scrollToLine(line) { scrolled.push(line); },
+  };
+  addon._drag = { pointerId: 7, startY: 10, moved: false };
+  return { addon, released, scrolled };
+}
+
+test("ruler cancels a stale drag when the primary button is no longer down", () => {
+  const { addon, released, scrolled } = dragHarness();
+
+  addon._onPointerMove({ pointerId: 7, buttons: 0, offsetY: 80 });
+
+  assert.equal(addon._drag, null);
+  assert.deepEqual(released, [7]);
+  assert.deepEqual(scrolled, []);
+});
+
+test("ruler cancellation ignores a different pointer", () => {
+  const { addon, released } = dragHarness();
+
+  addon._cancelDrag(8);
+
+  assert.notEqual(addon._drag, null);
+  assert.deepEqual(released, []);
+});
+
+test("ruler listens for capture loss, cancellation, and window deactivation", () => {
+  assert.match(source, /addEventListener\("pointercancel"/);
+  assert.match(source, /addEventListener\("lostpointercapture"/);
+  assert.match(source, /window\.addEventListener\("blur"/);
 });
 
 function timestampHarness(lines, cursorLine) {

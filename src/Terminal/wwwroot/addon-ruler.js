@@ -65,7 +65,6 @@
   "use strict";
 
   var WIDTH = 14;           // CSS px
-  var CALM_WIDTH = 10;      // visible CSS px; the pointer target remains WIDTH
   var SCAN_SLICE = 4096;    // lines per animation-frame slice
   var RESCAN_DEBOUNCE = 250;
   var HOVER_DELAY = 150;
@@ -214,7 +213,8 @@
     this._hlScanScheduled = false;
 
     this._paintQueued = false;
-    this._drag = null;        // { startY, moved }
+    this._drag = null;        // { pointerId, startY, moved }
+    this._windowBlurHandler = null;
     this._hoverTimer = null;
     this._flash = null;       // { deco, marker, timer }
     this._isSplit = false;
@@ -290,6 +290,10 @@
     strip.addEventListener("pointerdown", function (e) { self._onPointerDown(e); });
     strip.addEventListener("pointermove", function (e) { self._onPointerMove(e); });
     strip.addEventListener("pointerup", function (e) { self._onPointerUp(e); });
+    strip.addEventListener("pointercancel", function (e) { self._cancelDrag(e.pointerId); });
+    strip.addEventListener("lostpointercapture", function (e) {
+      self._cancelDrag(e.pointerId, false);
+    });
     strip.addEventListener("pointerleave", function () {
       self._isPointerOver = false;
       self._hideTooltip();
@@ -301,6 +305,12 @@
       self._term.scrollLines(lines);
     }, { passive: false });
 
+    // WebView2 can lose pointer capture when its host window deactivates. Chromium does
+    // not always deliver the matching pointerup in that case, so do not retain a drag
+    // when the user leaves the window and later returns.
+    this._windowBlurHandler = function () { self._cancelDrag(); };
+    window.addEventListener("blur", this._windowBlurHandler);
+
     this._resizeObserver = new ResizeObserver(function () { self._queuePaint(); });
     this._resizeObserver.observe(strip);
 
@@ -308,6 +318,11 @@
   };
 
   RulerAddon.prototype.dispose = function () {
+    this._cancelDrag();
+    if (this._windowBlurHandler) {
+      window.removeEventListener("blur", this._windowBlurHandler);
+      this._windowBlurHandler = null;
+    }
     for (var i = 0; i < this._disposables.length; i++) this._disposables[i].dispose();
     this._disposables = [];
     for (var b = 0; b < this._bookmarks.length; b++) this._bookmarks[b].marker.dispose();
@@ -337,8 +352,8 @@
     this._queuePaint();
   };
 
-  /** Full presentation in one group; a quieter, narrower rail in split mode.
-   * Hover always restores full detail so marks remain easy to inspect. */
+  /** Full presentation in one group; quieter marks in split mode.
+   * Hover restores full mark detail without changing the rail geometry. */
   RulerAddon.prototype.setPresentation = function (isSplit, isGroupFocused) {
     this._isSplit = isSplit === true;
     this._isGroupFocused = isGroupFocused !== false;
@@ -1110,12 +1125,18 @@
     if (e.button !== 0) return;
     e.preventDefault(); // keep focus in the terminal
     this._hideTooltip();
-    this._drag = { startY: e.offsetY, moved: false };
+    this._drag = { pointerId: e.pointerId, startY: e.offsetY, moved: false };
     try { this._strip.setPointerCapture(e.pointerId); } catch (err) {}
   };
 
   RulerAddon.prototype._onPointerMove = function (e) {
     if (this._drag) {
+      if (e.pointerId !== this._drag.pointerId) return;
+      // Recover even if WebView2 missed pointerup, pointercancel, and window blur.
+      if (typeof e.buttons === "number" && (e.buttons & 1) === 0) {
+        this._cancelDrag(e.pointerId);
+        return;
+      }
       if (!this._drag.moved && Math.abs(e.offsetY - this._drag.startY) < DRAG_THRESHOLD) return;
       this._drag.moved = true;
       this._scrollLineToCenter(this._lineAtY(e.offsetY));
@@ -1125,10 +1146,9 @@
   };
 
   RulerAddon.prototype._onPointerUp = function (e) {
-    if (!this._drag) return;
+    if (!this._drag || e.pointerId !== this._drag.pointerId) return;
     var wasClick = !this._drag.moved;
-    this._drag = null;
-    try { this._strip.releasePointerCapture(e.pointerId); } catch (err) {}
+    this._cancelDrag(e.pointerId);
     if (!wasClick) return;
 
     var line = this._lineAtY(e.offsetY);
@@ -1137,6 +1157,15 @@
     this._scrollLineToCenter(line);
     this._flashLine(line);
     this._term.focus();
+  };
+
+  RulerAddon.prototype._cancelDrag = function (pointerId, releaseCapture) {
+    if (!this._drag) return;
+    if (typeof pointerId === "number" && pointerId !== this._drag.pointerId) return;
+    var capturedPointerId = this._drag.pointerId;
+    this._drag = null;
+    if (releaseCapture === false || !this._strip) return;
+    try { this._strip.releasePointerCapture(capturedPointerId); } catch (err) {}
   };
 
   /** Nearest bookmark, match, or highlight-hit line within SNAP_PX of the pointer, or -1. */
@@ -1389,7 +1418,7 @@
     var ordinaryAlpha = calm ? (this._isGroupFocused ? 0.42 : 0.25) : 1;
     var importantAlpha = calm ? (this._isGroupFocused ? 0.90 : 0.62) : 1;
     var searchAlpha = calm ? (this._isGroupFocused ? 0.75 : 0.50) : 1;
-    var visualWidth = Math.round((calm ? CALM_WIDTH : WIDTH) * dpr);
+    var visualWidth = Math.round(WIDTH * dpr);
     var visualLeft = devW - visualWidth;
 
     this._strip.dataset.presentation = calm
@@ -1421,7 +1450,7 @@
       return rows;
     }
 
-    var laneRx = visualLeft + Math.round((calm ? 5 : 6) * dpr);
+    var laneRx = visualLeft + Math.round(6 * dpr);
     var laneRw = devW - laneRx - Math.round(1 * dpr);
 
     // Right (content) lane underlay: highlight-rule hits in dimmed rule colors.
@@ -1462,7 +1491,7 @@
 
     if (this._activeLine >= 0) {
       var ay = markerRow(this._activeLine);
-      var activeExpand = Math.round((calm ? 1 : 2) * dpr);
+      var activeExpand = Math.round(2 * dpr);
       ctx.fillStyle = c.activeMatch;
       ctx.globalAlpha = importantAlpha;
       ctx.fillRect(laneRx - activeExpand, ay, laneRw + activeExpand, tickH);
@@ -1474,7 +1503,7 @@
     // commands paint in a second pass so an overlapping success can never bury
     // a red tick: the lane answers "where did it break".
     var laneLx = visualLeft + Math.round(1 * dpr);
-    var laneLw = Math.round((calm ? 3 : 4) * dpr);
+    var laneLw = Math.round(4 * dpr);
     for (var pass = 0; pass < 2; pass++) {
       for (var m = 0; m < this._cmdMarks.length; m++) {
         var cm = this._cmdMarks[m];

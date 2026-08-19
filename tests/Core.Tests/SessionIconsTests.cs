@@ -23,17 +23,26 @@ public class SessionIconsTests
     [Fact]
     public void EveryBuiltInIconHasABundledAsset()
     {
-        // Repo layout: tests/Core.Tests -> ../../src/App/Assets/SessionIcons
-        // bin/Debug/net8.0 -> Core.Tests -> tests -> repo root
-        var dir = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "App", "Assets", "SessionIcons"));
-        Assert.True(Directory.Exists(dir), $"icon asset directory not found at {dir}");
+        var dir = FindSessionIconAssetDirectory();
         foreach (var info in SessionIcons.BuiltIn)
         {
             Assert.True(
                 File.Exists(Path.Combine(dir, info.Key + ".svg")) || File.Exists(Path.Combine(dir, info.Key + ".png")),
                 $"no bundled asset for built-in icon '{info.Key}'");
         }
+    }
+
+    private static string FindSessionIconAssetDirectory()
+    {
+        for (var current = new DirectoryInfo(AppContext.BaseDirectory); current is not null; current = current.Parent)
+        {
+            var candidate = Path.Combine(current.FullName, "src", "App", "Assets", "SessionIcons");
+            if (Directory.Exists(candidate))
+                return candidate;
+        }
+
+        throw new DirectoryNotFoundException(
+            $"icon asset directory not found above {AppContext.BaseDirectory}");
     }
 
     [Theory]

@@ -11,11 +11,13 @@
                 <ResourceDictionary x:Key="Default">
                     <SolidColorBrush x:Key="SessionSurfaceBrush" Color="#181818" />
                     <SolidColorBrush x:Key="SessionFrameBrush" Color="#3C3C3C" />
+                    <SolidColorBrush x:Key="SessionDividerBrush" Color="#424242" />
                     <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="#0078D4" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="SessionSurfaceBrush" Color="#F3F3F3" />
                     <SolidColorBrush x:Key="SessionFrameBrush" Color="#C8C8C8" />
+                    <SolidColorBrush x:Key="SessionDividerBrush" Color="#E6E6E6" />
                     <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="#0078D4" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>

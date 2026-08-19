@@ -763,16 +763,16 @@ public sealed class TerminalTabView : Grid, IDisposable
             };
             _paneSplitterLine = new Border
             {
-                Width = 1,
+                Width = 2,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionFrameBrush"],
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionDividerBrush"],
                 IsHitTestVisible = false,
             };
             _paneSplitter.PointerEntered += (_, _) => SetPaneSplitterActive(active: true);
             _paneSplitter.PointerExited += (_, _) => SetPaneSplitterActive(active: false);
             _paneSplitter.ManipulationStarted += (_, _) => SetPaneSplitterActive(active: true);
             _paneSplitter.ManipulationCompleted += (_, _) => SetPaneSplitterActive(active: false);
-            ColumnDefinitions[1].Width = new GridLength(1);
+            ColumnDefinitions[1].Width = new GridLength(2);
             Grid.SetColumn(_paneSplitterLine, 1);
             Children.Add(_paneSplitterLine);
             Grid.SetColumn(_paneSplitter, 1);
@@ -795,9 +795,9 @@ public sealed class TerminalTabView : Grid, IDisposable
     {
         if (_paneSplitterLine is null)
             return;
-        var resource = active ? "SessionSplitterHoverBrush" : "SessionFrameBrush";
+        var resource = active ? "SessionSplitterHoverBrush" : "SessionDividerBrush";
         _paneSplitterLine.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[resource];
-        _paneSplitterLine.Width = active ? 3 : 1;
+        _paneSplitterLine.Width = active ? 3 : 2;
     }
 
     public void HideFilePane()

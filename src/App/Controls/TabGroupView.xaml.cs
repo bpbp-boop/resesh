@@ -46,6 +46,7 @@ public sealed partial class TabGroupView : UserControl
     private TabViewModel? _menuTab;
     private TabViewModel? _middleClickTab;
     private SplitDirection _dropDirection = SplitDirection.Right;
+    private bool _tabWidthRefreshQueued;
 
     public TabGroupViewModel Group { get; }
 
@@ -55,6 +56,13 @@ public sealed partial class TabGroupView : UserControl
         _host = host;
         InitializeComponent();
         _tabMenu = BuildTabMenu();
+
+        // Equal-width tabs must recalculate in both directions. Queue the refresh after
+        // TabView has handled the collection change, so closing or moving a tab lets all
+        // remaining tabs grow back toward the 240px browser width. Size changes cover a
+        // group that gains space when a neighboring split is removed or resized.
+        Group.Tabs.CollectionChanged += (_, _) => QueueTabWidthRefresh();
+        Tabs.SizeChanged += (_, _) => QueueTabWidthRefresh();
 
         // Focus tracking: interacting anywhere in this group focuses it.
         AddHandler(PointerPressedEvent, new PointerEventHandler((_, _) => _host.FocusGroup(Group)), true);
@@ -124,6 +132,21 @@ public sealed partial class TabGroupView : UserControl
                 scrollViewerGrid.ColumnDefinitions[0].MinWidth = 0;
             }
         }
+
+        QueueTabWidthRefresh();
+    }
+
+    private void QueueTabWidthRefresh()
+    {
+        if (_tabWidthRefreshQueued)
+            return;
+
+        _tabWidthRefreshQueued = DispatcherQueue.TryEnqueue(() =>
+        {
+            _tabWidthRefreshQueued = false;
+            FindDescendant(Tabs, "TabsItemsPresenter")?.InvalidateMeasure();
+            Tabs.InvalidateMeasure();
+        });
     }
 
     private static FrameworkElement? FindDescendant(DependencyObject root, string name)
@@ -183,29 +206,6 @@ public sealed partial class TabGroupView : UserControl
     {
         if ((sender as FrameworkElement)?.DataContext is TabViewModel tab)
             await _host.RequestCloseTabAsync(tab);
-    }
-
-    /// <summary>
-    /// Floor for the subtitle so a short session name ("db2") still leaves room for a few
-    /// characters instead of an ellipsis on its own.
-    /// </summary>
-    private const double MinSubtitleWidth = 60;
-
-    /// <summary>
-    /// Keeps the session name in charge of the tab's width. The subtitle is free text from
-    /// the host — Claude Code reports "[ . ] Action Required | ansible-playbooks" — and in a
-    /// SizeToContent strip it would stretch every tab to whatever the remote tool decided to
-    /// call itself. Clamping it to the name's width means the strip measures exactly as it
-    /// did before the second line existed; the subtitle ellipsises into what's left.
-    /// </summary>
-    private void TabTitleText_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (sender is FrameworkElement title
-            && title.Parent is FrameworkElement stack
-            && stack.FindName("TabSubtitleText") is FrameworkElement subtitle)
-        {
-            subtitle.MaxWidth = Math.Max(e.NewSize.Width, MinSubtitleWidth);
-        }
     }
 
     private void TabHeader_PointerEntered(object sender, PointerRoutedEventArgs e)
