@@ -436,7 +436,7 @@
                 Grid.Column="1"
                 Width="1"
                 HorizontalAlignment="Center"
-                Background="{ThemeResource SessionFrameBrush}"
+                Background="{ThemeResource SessionDividerBrush}"
                 IsHitTestVisible="False" />
 
             <toolkit:GridSplitter

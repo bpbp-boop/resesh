@@ -372,7 +372,7 @@ keyboard-interactive fallback.
   Object, then resumes; Stop/Dispose terminates the job, so the entire descendant tree
   dies with the tab. Verified by test (interactive cmd killed, no Exited event on
   user-initiated stop).
-- **Discovery.** pwsh (Program Files/PATH), Windows PowerShell, cmd, WSL distros (Lxss
+- **Discovery.** pwsh (Program Files/PATH), PowerShell 5.1, cmd, WSL distros (Lxss
   registry, no wsl.exe spawn), Git Bash (GitForWindows registry). Ids are MD5-derived
   stable GUIDs of the discovery key ("sessions-local:cmd"), so pins survive restarts;
   sync adds missing built-ins but never overwrites user edits, and built-ins whose shell
@@ -487,3 +487,24 @@ keyboard-interactive fallback.
 - Keyboard-interactive authentication no longer sends a saved password to every server prompt.
   Each challenge is marshalled to a serialized UI dialog, with visible or secret input based on
   the server's echo flag. This supports password-plus-OTP and Duo-style flows without guessing.
+
+## 2026-08-19 - Stock OSC 3008 context support
+- Treat UAPI.15 context data as optional evidence. Parse a maximum 4096-byte payload,
+  enforce the 64-byte context ID and 255-byte text limits, decode only the specified
+  semicolon and backslash escapes, and ignore invalid or unknown metadata fields.
+- A validated `shell` or `command` cwd feeds the same host-aware working-directory
+  tracker as OSC 7. This gives the file pane useful stock-host data without letting a
+  nested SSH shell select an unrelated host path.
+- The stock systemd Bash hook does not send command text. Keep Enter-gated prompt
+  discovery active, attach the OSC 3008 command ID to its probe, and use the matching
+  end event only to add the exact exit result. If OSC 133 is present, it stays the
+  authoritative command-mark protocol.
+- Keep at most 64 pending command contexts. OSC 3008 support must not reduce behavior
+  on older Debian, CentOS, Rocky, minimal VM, or LXC images where the hook is absent.
+- Never probe an SSH endpoint for Bash and never type shell-integration code
+  automatically. A live test showed that PTY echo settings can change during startup and
+  expose the complete setup line. More importantly, an unknown SSH endpoint can be a
+  network device rather than a Unix shell. Passive standards support must not send input.
+- A future shell-integration helper can only show or copy an explicit opt-in snippet.
+  Keep Enter-gated command discovery because OSC 3008 gives identity and result but not
+  command text.

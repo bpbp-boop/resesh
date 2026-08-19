@@ -42,7 +42,7 @@ public static class LocalShellDiscovery
         var powershell = Path.Combine(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
         if (File.Exists(powershell))
         {
-            shells.Add(new DiscoveredShell(StableId("powershell"), "Windows PowerShell",
+            shells.Add(new DiscoveredShell(StableId("powershell"), "PowerShell 5.1",
                 new LocalTarget { Executable = @"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe", Arguments = ["-NoLogo"] },
                 "windows"));
         }
@@ -86,7 +86,8 @@ public static class LocalShellDiscovery
         var available = discovered.Select(s => s.Id).ToHashSet();
         foreach (var shell in discovered)
         {
-            if (store.Find(shell.Id) is null)
+            var existing = store.Find(shell.Id);
+            if (existing is null)
             {
                 store.Add(new Session
                 {
@@ -97,6 +98,13 @@ public static class LocalShellDiscovery
                     Local = shell.Target,
                     Icon = shell.Icon,
                 });
+            }
+            else if (shell.Id == StableId("powershell")
+                && existing.BuiltIn
+                && existing.Name == "Windows PowerShell")
+            {
+                // Migrate the old default label, but preserve user-edited names.
+                store.Update(existing with { Name = shell.Name });
             }
         }
         return available;

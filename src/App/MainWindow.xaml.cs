@@ -938,7 +938,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
             var splitterLine = new Border
             {
-                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionFrameBrush"],
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionDividerBrush"],
                 IsHitTestVisible = false,
                 HorizontalAlignment = isColumns ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
                 VerticalAlignment = isColumns ? VerticalAlignment.Stretch : VerticalAlignment.Center,
@@ -955,7 +955,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 VerticalAlignment = isColumns ? VerticalAlignment.Stretch : VerticalAlignment.Center,
                 Width = isColumns ? 7 : double.NaN,
                 Height = isColumns ? double.NaN : 7,
-                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSurfaceBrush"],
+                // The separate Border below supplies the visible one-pixel divider.
+                // Keep this wider resize target transparent so it cannot cover that line.
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
             };
             // Keep the splitter above the WebView2-backed terminal content. Its grid track
             // is the full seven-pixel hit target so it does not overlap a terminal scrollbar;
@@ -1315,7 +1317,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (sender is CommunityToolkit.WinUI.Controls.GridSplitter splitter
             && _splitterLines.TryGetValue(splitter, out var line))
         {
-            var resource = active ? "SessionSplitterHoverBrush" : "SessionFrameBrush";
+            var resource = active ? "SessionSplitterHoverBrush" : "SessionDividerBrush";
             line.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[resource];
             if (splitter.ResizeDirection == CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns)
                 line.Width = active ? 3 : 1;

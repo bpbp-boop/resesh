@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -46,6 +47,9 @@ public sealed partial class TabGroupView : UserControl
     private TabViewModel? _menuTab;
     private TabViewModel? _middleClickTab;
     private SplitDirection _dropDirection = SplitDirection.Right;
+    private bool _tabWidthRefreshQueued;
+    private TabViewModel? _filePaneButtonTab;
+    private Terminal.TerminalTabView? _filePaneButtonView;
 
     public TabGroupViewModel Group { get; }
 
@@ -55,6 +59,14 @@ public sealed partial class TabGroupView : UserControl
         _host = host;
         InitializeComponent();
         _tabMenu = BuildTabMenu();
+        ObserveFilePaneButtonTab();
+
+        // Equal-width tabs must recalculate in both directions. Queue the refresh after
+        // TabView has handled the collection change, so closing or moving a tab lets all
+        // remaining tabs grow back toward the 240px browser width. Size changes cover a
+        // group that gains space when a neighboring split is removed or resized.
+        Group.Tabs.CollectionChanged += (_, _) => QueueTabWidthRefresh();
+        Tabs.SizeChanged += (_, _) => QueueTabWidthRefresh();
 
         // Focus tracking: interacting anywhere in this group focuses it.
         AddHandler(PointerPressedEvent, new PointerEventHandler((_, _) => _host.FocusGroup(Group)), true);
@@ -71,6 +83,7 @@ public sealed partial class TabGroupView : UserControl
             {
                 SyncTerminalVisibility();
                 _host.ViewModel.NotifyActiveTabChanged();
+                ObserveFilePaneButtonTab();
                 FocusTerminal(Group.SelectedTab);
             }
         };
@@ -124,6 +137,21 @@ public sealed partial class TabGroupView : UserControl
                 scrollViewerGrid.ColumnDefinitions[0].MinWidth = 0;
             }
         }
+
+        QueueTabWidthRefresh();
+    }
+
+    private void QueueTabWidthRefresh()
+    {
+        if (_tabWidthRefreshQueued)
+            return;
+
+        _tabWidthRefreshQueued = DispatcherQueue.TryEnqueue(() =>
+        {
+            _tabWidthRefreshQueued = false;
+            FindDescendant(Tabs, "TabsItemsPresenter")?.InvalidateMeasure();
+            Tabs.InvalidateMeasure();
+        });
     }
 
     private static FrameworkElement? FindDescendant(DependencyObject root, string name)
@@ -155,6 +183,64 @@ public sealed partial class TabGroupView : UserControl
             child.Visibility = ReferenceEquals(child, selected) ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    // ---- tab-bar file pane toggle ----
+
+    private void ObserveFilePaneButtonTab()
+    {
+        if (_filePaneButtonTab is not null)
+            _filePaneButtonTab.PropertyChanged -= FilePaneButtonTab_PropertyChanged;
+        if (_filePaneButtonView is not null)
+            _filePaneButtonView.FilePaneOpenChanged -= FilePaneButtonView_FilePaneOpenChanged;
+
+        _filePaneButtonTab = Group.SelectedTab;
+        _filePaneButtonView = _filePaneButtonTab?.View as Terminal.TerminalTabView;
+
+        if (_filePaneButtonTab is not null)
+            _filePaneButtonTab.PropertyChanged += FilePaneButtonTab_PropertyChanged;
+        if (_filePaneButtonView is not null)
+            _filePaneButtonView.FilePaneOpenChanged += FilePaneButtonView_FilePaneOpenChanged;
+
+        UpdateFilePaneButton();
+    }
+
+    private void FilePaneButtonTab_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(TabViewModel.View))
+            ObserveFilePaneButtonTab();
+        else if (e.PropertyName is nameof(TabViewModel.Session) or nameof(TabViewModel.IsLocked) or nameof(TabViewModel.State))
+            UpdateFilePaneButton();
+    }
+
+    private void FilePaneButtonView_FilePaneOpenChanged() => UpdateFilePaneButton();
+
+    private void UpdateFilePaneButton()
+    {
+        var tab = Group.SelectedTab;
+        var isOpen = tab?.View is Terminal.TerminalTabView { IsFilePaneOpen: true };
+        FilePaneToggle.IsEnabled = tab?.Capabilities.RemoteFiles == true && !tab.IsLocked;
+        CurrentFolderButton.IsEnabled = tab?.Capabilities.RemoteFiles == true &&
+            tab.State == TabConnectionState.Connected && !tab.IsLocked;
+        FilePaneToggle.IsChecked = isOpen;
+
+        var label = isOpen ? "Hide file pane" : "Show file pane";
+        ToolTipService.SetToolTip(FilePaneToggle, $"{label} (Ctrl+Shift+E)");
+        AutomationProperties.SetName(FilePaneToggle, label);
+        AutomationProperties.SetName(CurrentFolderButton, "Open file pane at terminal folder");
+    }
+
+    private async void CurrentFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (Group.SelectedTab is { } tab)
+            await _host.OpenFilePaneAtCurrentFolderAsync(tab);
+    }
+
+    private void FilePaneToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (Group.SelectedTab is { } tab)
+            _host.ToggleFilePane(tab);
+        UpdateFilePaneButton();
+    }
+
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         MainWindow.Trace($"Tabs_SelectionChanged: control={((e.AddedItems.Count > 0 ? e.AddedItems[0] : null) as TabViewModel)?.Header ?? "(none)"} vm={Group.SelectedTab?.Header ?? "(null)"}");
@@ -183,29 +269,6 @@ public sealed partial class TabGroupView : UserControl
     {
         if ((sender as FrameworkElement)?.DataContext is TabViewModel tab)
             await _host.RequestCloseTabAsync(tab);
-    }
-
-    /// <summary>
-    /// Floor for the subtitle so a short session name ("db2") still leaves room for a few
-    /// characters instead of an ellipsis on its own.
-    /// </summary>
-    private const double MinSubtitleWidth = 60;
-
-    /// <summary>
-    /// Keeps the session name in charge of the tab's width. The subtitle is free text from
-    /// the host — Claude Code reports "[ . ] Action Required | ansible-playbooks" — and in a
-    /// SizeToContent strip it would stretch every tab to whatever the remote tool decided to
-    /// call itself. Clamping it to the name's width means the strip measures exactly as it
-    /// did before the second line existed; the subtitle ellipsises into what's left.
-    /// </summary>
-    private void TabTitleText_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (sender is FrameworkElement title
-            && title.Parent is FrameworkElement stack
-            && stack.FindName("TabSubtitleText") is FrameworkElement subtitle)
-        {
-            subtitle.MaxWidth = Math.Max(e.NewSize.Width, MinSubtitleWidth);
-        }
     }
 
     private void TabHeader_PointerEntered(object sender, PointerRoutedEventArgs e)
@@ -318,7 +381,7 @@ public sealed partial class TabGroupView : UserControl
         _endRemote = Item("End Remote Session…", tab => _ = _host.EndRemoteSessionAsync(tab));
         _filePane = Item("File Pane", tab => _host.ToggleFilePane(tab));
         _filePane.KeyboardAcceleratorTextOverride = "Ctrl+Shift+E";
-        _filePaneCwd = Item("Open File Pane at Current Folder", tab => _ = _host.OpenFilePaneAtCurrentFolderAsync(tab));
+        _filePaneCwd = Item("Open File Pane at Terminal Folder", tab => _ = _host.OpenFilePaneAtCurrentFolderAsync(tab));
         _workingFolder = Item("Open Working Folder", tab => _host.OpenWorkingFolder(tab));
         _close = Item("Close", tab => _ = _host.RequestCloseTabAsync(tab));
         _close.KeyboardAcceleratorTextOverride = "Ctrl+F4";
@@ -402,8 +465,7 @@ public sealed partial class TabGroupView : UserControl
         _splitDown.IsEnabled = Group.Tabs.Count > 1;
         _filePane.Visibility = caps.RemoteFiles ? Visibility.Visible : Visibility.Collapsed;
         _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
-        // cwd tracking rides the tmux side-channel; plain sessions would just open at home.
-        var filePaneCwd = caps.RemoteFiles && tab.Session.Persistent;
+        var filePaneCwd = caps.RemoteFiles;
         _filePaneCwd.Visibility = filePaneCwd ? Visibility.Visible : Visibility.Collapsed;
         _filePaneCwd.IsEnabled = filePaneCwd && tab.State == TabConnectionState.Connected;
         _workingFolder.Visibility = caps.LocalWorkingFolder ? Visibility.Visible : Visibility.Collapsed;

@@ -94,12 +94,15 @@ upload/download with progress, drag-drop from Explorer in, drag-out via temp fil
 "download & open", rename/delete/mkdir/chmod. Separate `SftpClient` connection reusing the
 session's credentials/host-key trust.
 
-### 3.2 "Follow the terminal" current-directory tracking
+### 3.2 "Follow the terminal" current-directory tracking ✅ shipped 2026-08-19
 "Open file pane at current folder" needs the remote cwd:
 - **Persistent (tmux) sessions:** trivial — `tmux display -p '#{pane_current_path}'` over
   the existing side-channel (`TryRunCommand`).
-- **Plain sessions:** OSC 7 reporting if the user's shell emits it (offer a one-line
-  snippet to add to `.bashrc`); otherwise fall back to home dir.
+- **Plain sessions:** validated OSC 7 reporting when the user's shell emits it, then a
+  zero-input Linux `/proc` query over a separate SSH channel, then a path-shaped prompt
+  fallback, then the home directory. A compact tab-bar action opens the pane at the best
+  current path. Host changes (for example, nested SSH) and a foreground non-shell process
+  block stale-path fallback instead of opening the wrong folder.
 
 ### 3.3 Real Explorer window (optional integration)
 If **SSHFS-Win/WinFsp** is installed, "Open in Explorer" launches
@@ -193,7 +196,7 @@ in search, tabs, splits, pinning, highlighting, the overview ruler, recording, a
 in the same way as SSH profiles.
 
 **Built-in profiles and tree behavior:**
-- Discover PowerShell 7 (`pwsh.exe`), Command Prompt, Windows PowerShell 5.1, installed WSL
+- Discover PowerShell 7 (`pwsh.exe`), Command Prompt, PowerShell 5.1, installed WSL
   distributions, and Git Bash when present. Hide unavailable shells.
 - Give discovered profiles stable identities so pinned tabs and workspaces can reference them.
   Users may edit or reset built-in profile defaults, and may create, rename, delete, and organize
@@ -434,8 +437,8 @@ click-snap includes hits. Verified pixel-exact in the stubbed harness (tick blen
 trim/re-anchor/prune, rule swap, alt buffer, resize) AND live via the CDP rig
 (negative-states ticks + tooltip with rule name, proving the C# payload plumbing).
 
-### 9.4 Command marks — OSC 133 + Enter-gated prompt discovery ✅ shipped 2026-08-16
-Two sources feed one left-lane (bookmarks paint over them — explicit beats inferred):
+### 9.4 Command marks — OSC 133 + OSC 3008 + Enter-gated prompt discovery ✅ shipped 2026-08-16; OSC 3008 added 2026-08-19
+Three sources feed one left-lane (bookmarks paint over them — explicit beats inferred):
 - **Exact — OSC 133 (FinalTerm)**: A/B remember the prompt line, C commits a mark
   there (a command actually ran), D;exit colors the tick (green ok / red fail).
   Shells emitting A/D but never C still commit on D (empty Enters indistinguishable
@@ -453,12 +456,24 @@ Two sources feed one left-lane (bookmarks paint over them — explicit beats inf
   requires a command after the terminator (empty prompt never marks); walks back soft
   wraps to the prompt row. Neutral gray ticks (no exit knowledge). First OSC 133
   sequence in a session disables discovery — the shell knows better than the regex.
+- **Stock systemd — OSC 3008 (UAPI.15)**: systemd 258+ can install a Bash profile
+  hook that reports shell/command contexts without a user bashrc change. Sessions
+  accepts bounded context payloads, validates cwd/host metadata, and uses shell or
+  command cwd as another current-folder signal. A command context ID links its exact
+  exit status to the existing Enter-gated mark; it does not replace prompt discovery
+  because the stock hook does not include command text. OSC 133 stays authoritative
+  when both standards are present. Older and minimal VM/LXC images keep all existing
+  title, OSC 7, prompt, and Enter-gated fallbacks.
+- **No automatic remote setup**: Sessions never probes for Bash and never types a
+  context hook into an interactive shell. OSC 3008 is passive input from hosts that
+  already provide it. Older Linux hosts and network devices keep the existing no-input
+  title, prompt, OSC 7, and Enter-gated discovery paths.
 Ctrl+Shift+Up/Down jump prev/next command from the viewport center, with flash.
 Tooltip: "exit N" / "command" / "N commands"; sample falls back to the command line.
 tmux replay limit stands: capture-pane preserves neither OSC marks nor keystrokes, so
-the command lane starts fresh on reattach. The opt-in `.bashrc` snippet UX (shared
-with the Phase 3.2 OSC 7 plan) is still pending — discovery covers unprovisioned
-hosts, which was the point. Verified in the stubbed harness (both tiers, slow-echo
+the command lane starts fresh on reattach. Discovery stays active because the stock
+OSC 3008 hook does not include command text. Verified
+in the stubbed harness (both tiers, slow-echo
 probe, traps, jump keys via synthetic keydown, exit-color pixels) and live against
 local-test (real SSH echo → discovered gray ticks, pixel-exact). Real human
 accelerator keypresses remain untried (standing item). Next/prev **error** jump
@@ -554,9 +569,8 @@ Phase 4 export archive.
 - Spaced Bash prompts such as `user@host ~ $` are also recognized. Their cwd replaces the
   endpoint while idle and reports the return to the prompt, so a detected command does not
   stay in the subtitle after it ends. Fixed 2026-08-18.
-- Follow-ups promoted to the backlog: the opt-in shell-integration snippet (exact commands
-  and exit codes through this same path) and the foreground-process side channel
-  (tmux-grade names with zero shell cooperation).
+- The foreground-process side channel remains in the backlog for tmux-grade names with
+  zero shell cooperation.
 
 ---
 
@@ -585,18 +599,14 @@ to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
   tmux-persistent.
 - **Per-session color schemes** — extend Phase 0.1 overrides + the two hardcoded palettes
   in `terminal.html`; `Session.ColorTag` already exists as the tab accent.
-- **Shell-integration snippet (opt-in)** — the `.bashrc`/zsh snippet Phases 9.4 and 3.2
-  already anticipate: emit OSC 133 A/B/C/D (exact command marks, exit codes, exact
-  running-command titles — discovery stops guessing the moment the shell speaks) and OSC 7
-  (cwd for the file pane). Ship "copy snippet" UX first; auto-typing it at connect works
-  (the tmux bootstrap shows the pattern, incl. history scrubbing) but echoes briefly and
-  races slow logins, so per-session opt-in only, if ever.
+- **Manual shell-integration snippet** — optionally show and copy OSC 133/OSC 7 setup
+  for users who choose to install it. Sessions must never send setup code automatically.
 - **Foreground-process title side channel** — tmux-grade `pane_current_command` on plain
   sessions with zero shell cooperation: each tab owns its SSH connection, so an exec
   channel can locate the shell channel's process ($PPID → our sshd child → its child
   holding a tty), then watch `/proc/<shell>/stat` tpgid → `/proc/<tpgid>/comm`. Sees
   nested children (make → cc) and survives fancy prompts; Linux/procfs only, adds polling,
-  and assumes one shell per connection. Back pocket unless discovery + the snippet prove
+  and assumes one shell per connection. Back pocket unless discovery + stock context data prove
   insufficient.
 
 ---

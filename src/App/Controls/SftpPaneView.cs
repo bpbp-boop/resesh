@@ -344,7 +344,8 @@ public sealed class SftpPaneView : UserControl, IDisposable
         try
         {
             var sftp = await EnsureConnectedAsync();
-            var target = RemotePath.Normalize(path ?? sftp.HomeDirectory);
+            var target = RemotePath.ResolveShellPath(path, sftp.HomeDirectory) ??
+                throw new InvalidOperationException("The terminal did not report an absolute remote path.");
             var entries = await Task.Run(() => sftp.ListDirectory(target));
             _currentPath = target;
             _pathBox.Text = target;

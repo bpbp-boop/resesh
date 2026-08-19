@@ -417,11 +417,16 @@ public sealed class TabViewModel : ObservableObject
         }
     }
 
+    /// <summary>The prompt parser's platform key. A network CLI context is a label, not
+    /// an SFTP path, so current-folder fallback uses this value to exclude it.</summary>
+    public string? PromptContextPlatform { get; private set; }
+
     /// <summary>A recognized prompt means the shell is idle in this location.</summary>
-    public void ApplyPromptContext(string? context)
+    public void ApplyPromptContext(string? context, string? platform = null)
     {
         var trimmed = context?.Trim();
         PromptContext = string.IsNullOrEmpty(trimmed) ? null : trimmed;
+        PromptContextPlatform = string.IsNullOrWhiteSpace(platform) ? null : platform;
         RunningCommand = null;
     }
 

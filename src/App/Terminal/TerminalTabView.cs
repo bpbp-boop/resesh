@@ -36,6 +36,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     private SshTerminalSession? _ssh; // set when _backend is the SSH implementation
     private bool _connecting;
     private bool _disposed;
+    private readonly Osc7WorkingDirectoryTracker _workingDirectory = new();
 
     // Agent awareness (Phase 6.2). One tracker per tab, fed only by this tab's own page
     // and backend — a session cannot describe another tab's agent, whatever it writes.
@@ -74,6 +75,9 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// on. The window decides whether anything is shown — an agent event may change UI
     /// state and draw attention, never send input or approve anything.</summary>
     public event Action<TabViewModel, AgentSnapshot>? AgentAlert;
+
+    /// <summary>Raised when the file pane opens or closes so group chrome can follow it.</summary>
+    public event Action? FilePaneOpenChanged;
 
     public TerminalTabView(TabViewModel tab, ICredentialService credentials, KnownHostsStore knownHosts,
         SshKeyStore sshKeys,
@@ -118,10 +122,24 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.PromptContextChanged += (context, platform) =>
             DispatcherQueue.TryEnqueue(() =>
             {
-                _tab.ApplyPromptContext(context);
+                _tab.ApplyPromptContext(context, platform);
                 if (platform is "nokia" or "juniper" or "cisco" && Session.Icon is null)
                     IconSuggested?.Invoke(platform);
             });
+        _terminal.WorkingDirectoryReported += payload => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (Osc7WorkingDirectoryParser.TryParse(payload, out var report) && report is not null)
+                _workingDirectory.Observe(report);
+        });
+        _terminal.ContextReported += payload => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (Osc3008ContextParser.TryParse(payload, out var context) && context is
+                { Action: Osc3008ContextAction.Start, Type: "shell" or "command", WorkingDirectory: not null })
+            {
+                _workingDirectory.Observe(new Osc7WorkingDirectory(
+                    context.Hostname ?? "", context.WorkingDirectory));
+            }
+        });
         _terminal.CloseTabRequested += () => DispatcherQueue.TryEnqueue(() => CloseRequested?.Invoke());
         _terminal.SplitRequested += () => DispatcherQueue.TryEnqueue(() => SplitRequested?.Invoke());
         _terminal.FilePaneRequested += () => DispatcherQueue.TryEnqueue(ToggleFilePane);
@@ -272,6 +290,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         _connecting = true;
         _spinner.IsActive = true;
         _tab.State = TabConnectionState.Connecting;
+        _workingDirectory.Reset();
 
         // Tear down the previous (dead) backend so its blocked reader thread is released.
         var stale = _backend;
@@ -746,6 +765,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     {
         if (_disposed || !_tab.Capabilities.RemoteFiles)
             return;
+        var wasOpen = IsFilePaneOpen;
         if (_filePane is null)
         {
             _filePane = new SftpPaneView(() => Session, CreateSftpSessionAsync, OpenInExplorerAsync);
@@ -765,7 +785,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             {
                 Width = 1,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionFrameBrush"],
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionDividerBrush"],
                 IsHitTestVisible = false,
             };
             _paneSplitter.PointerEntered += (_, _) => SetPaneSplitterActive(active: true);
@@ -787,6 +807,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         _paneSplitter!.Visibility = Visibility.Visible;
         _paneSplitterLine!.Visibility = Visibility.Visible;
         _filePane.Visibility = Visibility.Visible;
+        if (!wasOpen)
+            FilePaneOpenChanged?.Invoke();
         if (initialPath is not null || _filePane.IsLoaded)
             _ = _filePane.NavigateAsync(initialPath ?? _filePane.CurrentPath, notice);
     }
@@ -795,7 +817,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     {
         if (_paneSplitterLine is null)
             return;
-        var resource = active ? "SessionSplitterHoverBrush" : "SessionFrameBrush";
+        var resource = active ? "SessionSplitterHoverBrush" : "SessionDividerBrush";
         _paneSplitterLine.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[resource];
         _paneSplitterLine.Width = active ? 3 : 1;
     }
@@ -808,13 +830,14 @@ public sealed class TerminalTabView : Grid, IDisposable
         ColumnDefinitions[2].Width = new GridLength(0);
         _paneSplitter!.Visibility = Visibility.Collapsed;
         _paneSplitterLine!.Visibility = Visibility.Collapsed;
+        FilePaneOpenChanged?.Invoke();
         _terminal.FocusTerminal();
     }
 
     /// <summary>
-    /// "Open file pane at current folder": persistent (tmux) sessions report their cwd over
-    /// the exec side-channel; plain sessions fall back to the remote home directory. When
-    /// the query fails, the pane says WHY it opened at home instead of failing silently.
+    /// "Open file pane at terminal folder": use the persistent-session side channel first,
+    /// then a validated OSC 7 report, a zero-input Linux process query, and a path-shaped
+    /// shell prompt. If all sources fail, the pane says why it opened at home.
     /// </summary>
     public async Task OpenFilePaneAtCurrentFolderAsync()
     {
@@ -822,6 +845,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             return;
         string? path = null;
         string? failure = null;
+        var canUsePromptFallback = true;
         var session = _ssh;
         if (Session.Persistent && session is not null && session.IsConnected)
         {
@@ -839,6 +863,50 @@ public sealed class TerminalTabView : Grid, IDisposable
                     failure = "no matching persistent session in the reply";
             }
         }
+
+        if (path is null && _workingDirectory.Path is { } reportedPath)
+            path = reportedPath;
+
+        if (path is null && _workingDirectory.HostMismatch)
+        {
+            failure = "the shell reported a folder from another host";
+            canUsePromptFallback = false;
+        }
+
+        // A plain Linux session can report its foreground shell's cwd through /proc on
+        // a separate SSH channel. This sends no terminal input and changes no remote file.
+        if (path is null && canUsePromptFallback && !Session.Persistent &&
+            session is not null && session.IsConnected)
+        {
+            var commandResult = await Task.Run(() => session.RunCommand(RemoteWorkingDirectoryProbe.Command));
+            var probe = commandResult is { Success: true }
+                ? RemoteWorkingDirectoryProbe.Parse(commandResult.Output)
+                : new RemoteWorkingDirectoryProbeResult(RemoteWorkingDirectoryProbeStatus.Unavailable);
+            if (probe.Status == RemoteWorkingDirectoryProbeStatus.Path)
+            {
+                path = probe.Path;
+            }
+            else if (probe.Status == RemoteWorkingDirectoryProbeStatus.NotAtShell)
+            {
+                canUsePromptFallback = false;
+                failure = probe.Process is { } process
+                    ? $"the terminal is running {process}, not waiting at a shell prompt"
+                    : "the terminal is not waiting at a shell prompt";
+            }
+        }
+
+        if (path is null && canUsePromptFallback && _tab.RunningCommand is null &&
+            string.IsNullOrEmpty(_tab.PromptContextPlatform) &&
+            _tab.PromptContext is { } promptPath &&
+            (promptPath == "~" || promptPath.StartsWith("~/", StringComparison.Ordinal) ||
+             promptPath.StartsWith("/", StringComparison.Ordinal)))
+        {
+            path = promptPath;
+        }
+
+        if (path is null)
+            failure ??= "the shell did not report a current folder";
+
         ShowFilePane(path, failure is null ? null : $"Couldn't read the current folder ({failure}) — opened home instead.");
     }
 
