@@ -131,6 +131,15 @@ public sealed class TerminalTabView : Grid, IDisposable
             if (Osc7WorkingDirectoryParser.TryParse(payload, out var report) && report is not null)
                 _workingDirectory.Observe(report);
         });
+        _terminal.ContextReported += payload => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (Osc3008ContextParser.TryParse(payload, out var context) && context is
+                { Action: Osc3008ContextAction.Start, Type: "shell" or "command", WorkingDirectory: not null })
+            {
+                _workingDirectory.Observe(new Osc7WorkingDirectory(
+                    context.Hostname ?? "", context.WorkingDirectory));
+            }
+        });
         _terminal.CloseTabRequested += () => DispatcherQueue.TryEnqueue(() => CloseRequested?.Invoke());
         _terminal.SplitRequested += () => DispatcherQueue.TryEnqueue(() => SplitRequested?.Invoke());
         _terminal.FilePaneRequested += () => DispatcherQueue.TryEnqueue(ToggleFilePane);

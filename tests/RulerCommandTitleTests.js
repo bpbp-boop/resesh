@@ -75,6 +75,40 @@ test("OSC 133 B remembers the input start, C reports the text, D reports the end
   assert.deepEqual(addon.calls, [["htop -d 10", undefined], ["", undefined]]);
 });
 
+test("OSC 3008 adds the stock systemd command result to a discovered mark", () => {
+  const addon = makeAddon(buffer([line("u@h:~$ false")]));
+  addon.notifyEnter(17);
+  addon._onOsc3008("start=cmd-1;type=command;hostname=h;cwd=/home/u");
+  addon._onOsc3008("end=cmd-1;exit=failure;status=1");
+  runPendingTimers();
+
+  assert.deepEqual(addon.calls, [["false", 17]]);
+  assert.equal(addon._cmdMarks.length, 1);
+  assert.equal(addon._cmdMarks[0].exit, 1);
+  assert.equal(addon._cmdOscSeen, false); // 3008 complements discovery; it does not disable it.
+});
+
+test("OSC 3008 success without a status colors a discovered mark as exit zero", () => {
+  const addon = makeAddon(buffer([line("u@h:~$ true")]));
+  addon.notifyEnter(18);
+  addon._onOsc3008("start=cmd-2;type=command");
+  runPendingTimers();
+  addon._onOsc3008("end=cmd-2;exit=success");
+
+  assert.equal(addon._cmdMarks[0].exit, 0);
+});
+
+test("OSC 3008 accepts escaped context-ID separators", () => {
+  const addon = makeAddon(buffer([line("u@h:~$ true")]));
+  const parsed = addon._parseOsc3008("start=part\\x3bone\\x5ctwo;type=command");
+  assert.equal(parsed.id, "part;one\\two");
+});
+
+test("OSC 3008 rejects an oversize payload instead of accepting its prefix", () => {
+  const addon = makeAddon(buffer([line("u@h:~$ true")]));
+  assert.equal(addon._parseOsc3008("start=id;type=command;x=" + "a".repeat(4096)), null);
+});
+
 test("discovery reports the command with the page's epoch and commits a mark", () => {
   const addon = makeAddon(buffer([line("u@h:~$ htop")]));
   addon.notifyEnter(42);

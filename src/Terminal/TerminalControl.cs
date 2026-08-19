@@ -69,6 +69,9 @@ public sealed class TerminalControl : Grid, IDisposable
     /// <summary>Raw OSC 7 payload. The app validates it before it can select an SFTP path.</summary>
     public event Action<string>? WorkingDirectoryReported;
 
+    /// <summary>Raw OSC 3008 payload. The app validates this auxiliary context signal.</summary>
+    public event Action<string>? ContextReported;
+
     // ---- agent-awareness evidence (Phase 6.2); raw, unmapped, from this tab's page only ----
 
     /// <summary>An OSC sequence we watch for agent events: the code and its payload.</summary>
@@ -227,6 +230,10 @@ public sealed class TerminalControl : Grid, IDisposable
                 case "workingDirectory":
                     if (root.TryGetProperty("data", out var workingDirectory))
                         WorkingDirectoryReported?.Invoke(workingDirectory.GetString() ?? "");
+                    break;
+                case "osc3008":
+                    if (root.TryGetProperty("data", out var context))
+                        ContextReported?.Invoke(context.GetString() ?? "");
                     break;
                 case "pageError":
                     if (root.TryGetProperty("message", out var err))

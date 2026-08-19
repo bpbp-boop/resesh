@@ -32,11 +32,13 @@
  *     anchor marker line) stays constant for a given line. Resize reflow, rule changes,
  *     and losing the sentinel to a trim flood all invalidate the index and rebuild it,
  *     painting a faint veil over the not-yet-indexed span while catching up.
- *   - Command marks (Phase 9.4) have two sources feeding one lane:
+ *   - Command marks (Phase 9.4) have three sources feeding one lane:
  *       exact — OSC 133 (FinalTerm) sequences from an integrated shell. A/B remember
  *       the prompt line, C commits a mark there (a command actually ran), D attaches
  *       the exit code, which colors the tick (ok/fail). Shells that emit A/D but no C
  *       still get marks committed on D.
+ *       stock context — OSC 3008 command IDs attach exact systemd-reported results
+ *       to discovered marks, but do not replace discovery because no text is sent.
  *       discovered — for the fleet of VMs and network devices that will never get a
  *       custom bashrc: when the user presses Enter (the page forwards it from
  *       term.onData), a probe marker anchors the cursor row and, once the remote echo
@@ -192,7 +194,10 @@
     this._cmdPromptCol = -1;  // cursor column at OSC 133;B — where the typed command starts
     this._cmdPending = null;  // mark committed by C, awaiting its D exit code
     this._cmdObserver = null; // page hook: commands as they are marked (agent detection)
+    this._cmdEnterProbes = []; // Enter markers waiting for echo / an OSC 3008 command ID
+    this._osc3008Commands = new Map(); // bounded command ID -> probe, mark, and result
     this.onRunningCommand = null; // page hook: (text, epoch?) on start, ("") on 133;D
+    this.onContext = null; // page hook: bounded raw OSC 3008 payload for native validation
     this.onPromptContext = null; // page hook: (label, platform?) when a known prompt is idle
     this._lastPromptSignature = null;
     this._promptPlatform = null; // strong prompt evidence persists across later mode changes
@@ -280,6 +285,17 @@
           self._onOsc133(data);
         } catch (err) {
           if (window.__pageTrace) window.__pageTrace("ruler osc133: " + (err && err.message));
+        }
+        return true;
+      }));
+      this._disposables.push(term.parser.registerOscHandler(3008, function (data) {
+        try {
+          var value = String(data || "");
+          var raw = value.length <= 4096 ? value : "";
+          self._onOsc3008(raw);
+          if (self.onContext) self.onContext(raw);
+        } catch (err) {
+          if (window.__pageTrace) window.__pageTrace("ruler osc3008: " + (err && err.message));
         }
         return true;
       }));
@@ -687,6 +703,83 @@
     }
   };
 
+  /** UAPI.15 context signals are auxiliary. The stock systemd Bash hook does not
+   * send command text, so the Enter-gated probe still owns command discovery.
+   * OSC 3008 adds a stable command ID and an exact result to that mark. */
+  RulerAddon.prototype._onOsc3008 = function (data) {
+    var parsed = this._parseOsc3008(data);
+    if (!parsed || this._cmdOscSeen) return;
+
+    if (parsed.action === "start") {
+      if (parsed.type !== "command") return;
+      var record = { probe: null, entry: null, ended: false, exit: null };
+      this._osc3008Commands.set(parsed.id, record);
+      while (this._osc3008Commands.size > 64) {
+        this._osc3008Commands.delete(this._osc3008Commands.keys().next().value);
+      }
+      for (var i = 0; i < this._cmdEnterProbes.length; i++) {
+        var probe = this._cmdEnterProbes[i];
+        if (!probe.isDisposed && !probe._osc3008Id) {
+          probe._osc3008Id = parsed.id;
+          record.probe = probe;
+          break;
+        }
+      }
+      return;
+    }
+
+    var current = this._osc3008Commands.get(parsed.id);
+    if (!current) return;
+    current.ended = true;
+    current.exit = parsed.status !== null ? parsed.status : (parsed.exit === "success" ? 0 : null);
+    if (current.entry) {
+      if (current.exit !== null) current.entry.exit = current.exit;
+      this._osc3008Commands.delete(parsed.id);
+      this._queuePaint();
+    } else if (!current.probe || current.probe.isDisposed) {
+      this._osc3008Commands.delete(parsed.id);
+    }
+  };
+
+  RulerAddon.prototype._parseOsc3008 = function (data) {
+    if (typeof data !== "string" || data.length === 0 || data.length > 4096 || /[\x00-\x1f\x7f]/.test(data))
+      return null;
+    var fields = data.split(";");
+    var first = /^(start|end)=(.*)$/.exec(fields[0]);
+    if (!first || first[2].length === 0 || first[2].length > 256) return null;
+    var id = "";
+    for (var idIndex = 0; idIndex < first[2].length; idIndex++) {
+      var character = first[2][idIndex];
+      if (character !== "\\") {
+        if (character.charCodeAt(0) < 32 || character.charCodeAt(0) > 126) return null;
+        id += character;
+        continue;
+      }
+      var escape = first[2].slice(idIndex, idIndex + 4);
+      if (escape === "\\x3b") id += ";";
+      else if (escape === "\\x5c") id += "\\";
+      else return null;
+      idIndex += 3;
+    }
+    if (id.length === 0 || id.length > 64) return null;
+    var result = { action: first[1], id: id, type: null, exit: null, status: null };
+    for (var i = 1; i < fields.length; i++) {
+      var separator = fields[i].indexOf("=");
+      if (separator <= 0) continue;
+      var key = fields[i].slice(0, separator);
+      var value = fields[i].slice(separator + 1);
+      if (key === "type" && /^(service|session|shell|command|vm|container|elevate|chpriv|subcontext|remote|boot|app)$/.test(value))
+        result.type = value;
+      else if (key === "exit" && /^(success|failure|crash|interrupt)$/.test(value))
+        result.exit = value;
+      else if (key === "status" && /^[0-9]{1,20}$/.test(value)) {
+        var status = parseInt(value, 10);
+        if (status <= 255) result.status = status;
+      }
+    }
+    return result;
+  };
+
   /** First logical line of the buffer starting at (row, col), following soft wraps —
    * the command text for the running-command title. col -1 means "unknown" (no 133;B):
    * fall back to the prompt regex. Capped: a title needs a name, not the whole paste. */
@@ -846,11 +939,16 @@
     var marker = this._term.registerMarker(0);
     if (!marker) return;
     var self = this;
+    this._cmdEnterProbes.push(marker);
     var attempts = 0;
     var reported = false;
     function evaluate() {
-      if (marker.isDisposed) return; // trimmed away while waiting
-      if (self._cmdOscSeen || !self._term) { marker.dispose(); return; }
+      if (marker.isDisposed) { self._finishCommandProbe(marker); return; }
+      if (self._cmdOscSeen || !self._term) {
+        marker.dispose();
+        self._finishCommandProbe(marker);
+        return;
+      }
       attempts++;
       // Probe the NORMAL buffer: the marker lives there, and a full-screen app may
       // have taken the alternate screen before the probe fired — that app IS the
@@ -873,26 +971,41 @@
           self._fireCommand(self._cmdText(norm, row, lineText.length - m[2].length), epoch);
         }
         if (self._term.buffer.active.type !== "alternate") {
-          self._cmdCommit(row, null, "guess");
+          self._cmdCommit(row, null, "guess", marker._osc3008Id);
           marker.dispose();
+          self._finishCommandProbe(marker);
           return;
         }
       }
       if (attempts < 2) setTimeout(evaluate, CMD_ECHO_RETRY_MS);
-      else marker.dispose();
+      else {
+        marker.dispose();
+        self._finishCommandProbe(marker);
+      }
     }
     setTimeout(evaluate, CMD_ECHO_SETTLE_MS);
   };
 
+  RulerAddon.prototype._finishCommandProbe = function (marker) {
+    var index = this._cmdEnterProbes.indexOf(marker);
+    if (index >= 0) this._cmdEnterProbes.splice(index, 1);
+    if (!marker._osc3008Id) return;
+    var record = this._osc3008Commands.get(marker._osc3008Id);
+    if (!record) return;
+    record.probe = null;
+    if (record.ended && !record.entry) this._osc3008Commands.delete(marker._osc3008Id);
+  };
+
   /** Adds a command mark at an absolute line (idempotent per line; an exit code
    * updates an existing mark in place). Markers keep marks trim-safe for free. */
-  RulerAddon.prototype._cmdCommit = function (line, exit, src) {
+  RulerAddon.prototype._cmdCommit = function (line, exit, src, contextId) {
     for (var i = 0; i < this._cmdMarks.length; i++) {
       if (this._cmdMarks[i].marker.line === line) {
         if (exit !== null) {
           this._cmdMarks[i].exit = exit;
           this._queuePaint();
         }
+        this._associateOsc3008(contextId, this._cmdMarks[i]);
         return this._cmdMarks[i];
       }
     }
@@ -908,9 +1021,21 @@
       self._queuePaint();
     });
     this._cmdMarks.push(entry);
+    this._associateOsc3008(contextId, entry);
     this._notifyCommand(line);
     this._queuePaint();
     return entry;
+  };
+
+  RulerAddon.prototype._associateOsc3008 = function (contextId, entry) {
+    if (!contextId) return;
+    var record = this._osc3008Commands.get(contextId);
+    if (!record) return;
+    record.entry = entry;
+    record.probe = null;
+    if (!record.ended) return;
+    if (record.exit !== null) entry.exit = record.exit;
+    this._osc3008Commands.delete(contextId);
   };
 
   /** Register a listener for commands as they are marked (Phase 6.2 agent detection).
