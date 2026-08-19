@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -178,6 +179,21 @@ public sealed class TerminalControl : Grid, IDisposable
                     break;
                 case "newLocalTab":
                     NewLocalTabRequested?.Invoke();
+                    break;
+                case "openLink":
+                    if (root.TryGetProperty("uri", out var uriProperty) &&
+                        Uri.TryCreate(uriProperty.GetString(), UriKind.Absolute, out var uri) &&
+                        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+                    {
+                        try
+                        {
+                            Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+                        }
+                        catch (Exception exception)
+                        {
+                            TraceHook?.Invoke($"openLink failed: {exception.Message}");
+                        }
+                    }
                     break;
                 case "agentOsc":
                     if (root.TryGetProperty("code", out var oscCode))

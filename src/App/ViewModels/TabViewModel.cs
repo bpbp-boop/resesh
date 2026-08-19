@@ -463,9 +463,8 @@ public sealed class TabViewModel : ObservableObject
         }
     }
 
-    /// <summary>The active agent icon, or the session icon when no agent is active.</summary>
-    public Microsoft.UI.Xaml.Media.ImageSource? IconSource =>
-        AgentIconSource ?? App.Icons.GetImage(Session.Icon, Icons.SessionIconCatalog.ListIconSize);
+    /// <summary>The active agent icon. Ordinary tabs deliberately have no icon.</summary>
+    public Microsoft.UI.Xaml.Media.ImageSource? IconSource => AgentIconSource;
 
     public Visibility IconVisibility => IconSource is null ? Visibility.Collapsed : Visibility.Visible;
 

@@ -150,8 +150,8 @@
                                             <SolidColorBrush Color="{x:Bind StateColor, Mode=OneWay}" />
                                         </Ellipse.Fill>
                                     </Ellipse>
-                                    <!-- One identity slot: an active agent replaces the session
-                                         icon. The attention badge stays attached to that icon. -->
+                                    <!-- Tabs stay icon-free unless an agent is active. The
+                                         attention badge stays attached to the agent icon. -->
                                     <Grid
                                         Width="16"
                                         Height="16"

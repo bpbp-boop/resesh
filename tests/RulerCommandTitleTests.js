@@ -136,6 +136,16 @@ test("an idle spaced Bash prompt reports its current directory", () => {
   assert.deepEqual(addon.promptCalls, [["~/work", null]]);
 });
 
+test("an idle bracketed CentOS prompt reports its current directory without the bracket", () => {
+  const addon = makeAddon(buffer([line("[root@couchdb02 ~]# ")]));
+  addon.promptCalls = [];
+  addon.onPromptContext = (text, platform) => addon.promptCalls.push([text, platform]);
+
+  addon._reportPromptContext();
+
+  assert.deepEqual(addon.promptCalls, [["~", null]]);
+});
+
 test("prompt reporting rejects output and reports the same directory on a new line", () => {
   const lines = [line("build > artifact.txt")];
   const active = buffer(lines);

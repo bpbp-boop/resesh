@@ -146,7 +146,9 @@
     });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon.WebLinksAddon());
+    term.loadAddon(new WebLinksAddon.WebLinksAddon(function (_event, uri) {
+      host.postMessage({ type: "openLink", uri: uri });
+    }));
     const search = new SearchAddon.SearchAddon();
     term.loadAddon(search);
     const highlighter = new HighlightAddon.HighlightAddon();

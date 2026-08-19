@@ -107,6 +107,10 @@
   // leave the endpoint fallback while idle and clears a discovered command on return.
   var UNIX_SPACED_IDLE_PROMPT_RE =
     /^[^@\s$#%>]{1,100}@[^\s$#%>]{1,100}\s+([^\r\n$#%>]{1,160}?)\s*[$#%>]\s*$/;
+  // CentOS/RHEL commonly wraps that same user, host, and cwd shape in brackets:
+  // "[root@server ~]#". Capture only the cwd so the tab never displays "~]".
+  var UNIX_BRACKETED_IDLE_PROMPT_RE =
+    /^\[[^@\]\s]{1,100}@[^\]\s]{1,100}\s+([^\]\r\n]{1,160}?)\]\s*[$#%>]\s*$/;
   // Nokia SR OS MD-CLI uses a two-line prompt. The first line carries the current
   // cli-path and candidate mode; the second carries the active CPM, user, and node.
   // Requiring both lines keeps a bracketed output line from being mistaken for a prompt.
@@ -731,6 +735,8 @@
     var match = WINDOWS_IDLE_PROMPT_RE.exec(promptText);
     if (match) {
       label = match[1];
+    } else if ((match = UNIX_BRACKETED_IDLE_PROMPT_RE.exec(promptText))) {
+      label = match[1].trim();
     } else if ((match = UNIX_SPACED_IDLE_PROMPT_RE.exec(promptText))) {
       label = match[1].trim();
     } else if (NOKIA_MD_CLI_PROMPT_RE.test(promptText) && start > 0) {
