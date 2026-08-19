@@ -942,8 +942,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 IsHitTestVisible = false,
                 HorizontalAlignment = isColumns ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
                 VerticalAlignment = isColumns ? VerticalAlignment.Stretch : VerticalAlignment.Center,
-                Width = isColumns ? 2 : double.NaN,
-                Height = isColumns ? double.NaN : 2,
+                Width = isColumns ? 1 : double.NaN,
+                Height = isColumns ? double.NaN : 1,
             };
             var splitter = new CommunityToolkit.WinUI.Controls.GridSplitter
             {
@@ -955,13 +955,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 VerticalAlignment = isColumns ? VerticalAlignment.Stretch : VerticalAlignment.Center,
                 Width = isColumns ? 7 : double.NaN,
                 Height = isColumns ? double.NaN : 7,
-                // The separate Border below supplies the visible two-pixel divider.
+                // The separate Border below supplies the visible one-pixel divider.
                 // Keep this wider resize target transparent so it cannot cover that line.
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
             };
             // Keep the splitter above the WebView2-backed terminal content. Its grid track
             // is the full seven-pixel hit target so it does not overlap a terminal scrollbar;
-            // the separate centered border preserves the two-pixel visual divider.
+            // the separate centered border preserves the one-pixel visual divider.
             Canvas.SetZIndex(splitter, 1);
             if (isColumns)
             {
@@ -1320,9 +1320,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             var resource = active ? "SessionSplitterHoverBrush" : "SessionDividerBrush";
             line.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[resource];
             if (splitter.ResizeDirection == CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns)
-                line.Width = active ? 3 : 2;
+                line.Width = active ? 3 : 1;
             else
-                line.Height = active ? 3 : 2;
+                line.Height = active ? 3 : 1;
         }
     }
 

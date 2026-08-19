@@ -37,6 +37,15 @@ public sealed class RemotePathTests
     public void FileName_returns_last_segment(string path, string expected) =>
         Assert.Equal(expected, RemotePath.FileName(path));
 
+    [Theory]
+    [InlineData(null, "/home/boden", "/home/boden")]
+    [InlineData("~", "/home/boden", "/home/boden")]
+    [InlineData("~/work", "/home/boden", "/home/boden/work")]
+    [InlineData("/var/log", "/home/boden", "/var/log")]
+    [InlineData("relative/path", "/home/boden", null)]
+    public void ResolveShellPath_accepts_only_home_or_absolute_paths(string? path, string home, string? expected) =>
+        Assert.Equal(expected, RemotePath.ResolveShellPath(path, home));
+
     [Fact]
     public void UniqueName_returns_original_when_free()
     {

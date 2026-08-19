@@ -21,6 +21,21 @@ public static class RemotePath
         return dir == "/" ? "/" + name : dir + "/" + name;
     }
 
+    /// <summary>Resolves an absolute shell path or a path below '~' against the SFTP home.
+    /// Other relative text is not a safe remote directory and returns null.</summary>
+    public static string? ResolveShellPath(string? path, string homeDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return Normalize(homeDirectory);
+
+        var trimmed = path.Trim();
+        if (trimmed == "~")
+            return Normalize(homeDirectory);
+        if (trimmed.StartsWith("~/", StringComparison.Ordinal))
+            return Join(homeDirectory, trimmed[2..]);
+        return trimmed.StartsWith('/') ? Normalize(trimmed) : null;
+    }
+
     /// <summary>Parent directory; the parent of root is root.</summary>
     public static string Parent(string path)
     {

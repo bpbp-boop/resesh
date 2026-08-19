@@ -254,6 +254,12 @@
         platform: typeof platform === "string" ? platform.slice(0, 32) : "",
       });
     };
+    ruler.onWorkingDirectory = function (data) {
+      host.postMessage({
+        type: "workingDirectory",
+        data: typeof data === "string" ? data.slice(0, 2048) : "",
+      });
+    };
 
     term.onSelectionChange(function () {
       // Find selects each match it lands on; don't let copy-on-select clobber the clipboard.

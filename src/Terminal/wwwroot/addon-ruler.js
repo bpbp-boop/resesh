@@ -267,6 +267,14 @@
       self._hlKick();
     }));
     if (term.parser && term.parser.registerOscHandler) {
+      this._disposables.push(term.parser.registerOscHandler(7, function (data) {
+        try {
+          if (self.onWorkingDirectory) self.onWorkingDirectory(String(data || "").slice(0, 2048));
+        } catch (err) {
+          if (window.__pageTrace) window.__pageTrace("ruler osc7: " + (err && err.message));
+        }
+        return true;
+      }));
       this._disposables.push(term.parser.registerOscHandler(133, function (data) {
         try {
           self._onOsc133(data);

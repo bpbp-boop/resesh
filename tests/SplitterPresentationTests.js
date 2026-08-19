@@ -13,13 +13,13 @@ const terminalHtml = fs.readFileSync(
   path.join(__dirname, "..", "src", "Terminal", "wwwroot", "terminal.html"),
   "utf8");
 
-test("session splitters keep a visible two-pixel divider under a transparent hit target", () => {
+test("session splitters keep a visible one-pixel divider under a transparent hit target", () => {
   const layoutBuilder = source.match(
     /private FrameworkElement BuildGroupLayoutElement[\s\S]*?\n    }\r?\n\r?\n    public void CloneSession/)?.[0] ?? "";
 
   assert.match(layoutBuilder, /Background = .*Resources\["SessionDividerBrush"\]/);
-  assert.match(layoutBuilder, /Width = isColumns \? 2 : double\.NaN/);
-  assert.match(layoutBuilder, /Height = isColumns \? double\.NaN : 2/);
+  assert.match(layoutBuilder, /Width = isColumns \? 1 : double\.NaN/);
+  assert.match(layoutBuilder, /Height = isColumns \? double\.NaN : 1/);
   assert.match(layoutBuilder,
     /Background = new Microsoft\.UI\.Xaml\.Media\.SolidColorBrush\(Microsoft\.UI\.Colors\.Transparent\)/);
   assert.doesNotMatch(layoutBuilder, /Background = .*Resources\["SessionSurfaceBrush"\]/);

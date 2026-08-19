@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -47,6 +48,8 @@ public sealed partial class TabGroupView : UserControl
     private TabViewModel? _middleClickTab;
     private SplitDirection _dropDirection = SplitDirection.Right;
     private bool _tabWidthRefreshQueued;
+    private TabViewModel? _filePaneButtonTab;
+    private Terminal.TerminalTabView? _filePaneButtonView;
 
     public TabGroupViewModel Group { get; }
 
@@ -56,6 +59,7 @@ public sealed partial class TabGroupView : UserControl
         _host = host;
         InitializeComponent();
         _tabMenu = BuildTabMenu();
+        ObserveFilePaneButtonTab();
 
         // Equal-width tabs must recalculate in both directions. Queue the refresh after
         // TabView has handled the collection change, so closing or moving a tab lets all
@@ -79,6 +83,7 @@ public sealed partial class TabGroupView : UserControl
             {
                 SyncTerminalVisibility();
                 _host.ViewModel.NotifyActiveTabChanged();
+                ObserveFilePaneButtonTab();
                 FocusTerminal(Group.SelectedTab);
             }
         };
@@ -176,6 +181,64 @@ public sealed partial class TabGroupView : UserControl
         MainWindow.Trace($"SyncTerminalVisibility: selected='{Group.SelectedTab?.Header}' children={TerminalHost.Children.Count}");
         foreach (var child in TerminalHost.Children)
             child.Visibility = ReferenceEquals(child, selected) ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ---- tab-bar file pane toggle ----
+
+    private void ObserveFilePaneButtonTab()
+    {
+        if (_filePaneButtonTab is not null)
+            _filePaneButtonTab.PropertyChanged -= FilePaneButtonTab_PropertyChanged;
+        if (_filePaneButtonView is not null)
+            _filePaneButtonView.FilePaneOpenChanged -= FilePaneButtonView_FilePaneOpenChanged;
+
+        _filePaneButtonTab = Group.SelectedTab;
+        _filePaneButtonView = _filePaneButtonTab?.View as Terminal.TerminalTabView;
+
+        if (_filePaneButtonTab is not null)
+            _filePaneButtonTab.PropertyChanged += FilePaneButtonTab_PropertyChanged;
+        if (_filePaneButtonView is not null)
+            _filePaneButtonView.FilePaneOpenChanged += FilePaneButtonView_FilePaneOpenChanged;
+
+        UpdateFilePaneButton();
+    }
+
+    private void FilePaneButtonTab_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(TabViewModel.View))
+            ObserveFilePaneButtonTab();
+        else if (e.PropertyName is nameof(TabViewModel.Session) or nameof(TabViewModel.IsLocked) or nameof(TabViewModel.State))
+            UpdateFilePaneButton();
+    }
+
+    private void FilePaneButtonView_FilePaneOpenChanged() => UpdateFilePaneButton();
+
+    private void UpdateFilePaneButton()
+    {
+        var tab = Group.SelectedTab;
+        var isOpen = tab?.View is Terminal.TerminalTabView { IsFilePaneOpen: true };
+        FilePaneToggle.IsEnabled = tab?.Capabilities.RemoteFiles == true && !tab.IsLocked;
+        CurrentFolderButton.IsEnabled = tab?.Capabilities.RemoteFiles == true &&
+            tab.State == TabConnectionState.Connected && !tab.IsLocked;
+        FilePaneToggle.IsChecked = isOpen;
+
+        var label = isOpen ? "Hide file pane" : "Show file pane";
+        ToolTipService.SetToolTip(FilePaneToggle, $"{label} (Ctrl+Shift+E)");
+        AutomationProperties.SetName(FilePaneToggle, label);
+        AutomationProperties.SetName(CurrentFolderButton, "Open file pane at terminal folder");
+    }
+
+    private async void CurrentFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (Group.SelectedTab is { } tab)
+            await _host.OpenFilePaneAtCurrentFolderAsync(tab);
+    }
+
+    private void FilePaneToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (Group.SelectedTab is { } tab)
+            _host.ToggleFilePane(tab);
+        UpdateFilePaneButton();
     }
 
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -318,7 +381,7 @@ public sealed partial class TabGroupView : UserControl
         _endRemote = Item("End Remote Session…", tab => _ = _host.EndRemoteSessionAsync(tab));
         _filePane = Item("File Pane", tab => _host.ToggleFilePane(tab));
         _filePane.KeyboardAcceleratorTextOverride = "Ctrl+Shift+E";
-        _filePaneCwd = Item("Open File Pane at Current Folder", tab => _ = _host.OpenFilePaneAtCurrentFolderAsync(tab));
+        _filePaneCwd = Item("Open File Pane at Terminal Folder", tab => _ = _host.OpenFilePaneAtCurrentFolderAsync(tab));
         _workingFolder = Item("Open Working Folder", tab => _host.OpenWorkingFolder(tab));
         _close = Item("Close", tab => _ = _host.RequestCloseTabAsync(tab));
         _close.KeyboardAcceleratorTextOverride = "Ctrl+F4";
@@ -402,8 +465,7 @@ public sealed partial class TabGroupView : UserControl
         _splitDown.IsEnabled = Group.Tabs.Count > 1;
         _filePane.Visibility = caps.RemoteFiles ? Visibility.Visible : Visibility.Collapsed;
         _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
-        // cwd tracking rides the tmux side-channel; plain sessions would just open at home.
-        var filePaneCwd = caps.RemoteFiles && tab.Session.Persistent;
+        var filePaneCwd = caps.RemoteFiles;
         _filePaneCwd.Visibility = filePaneCwd ? Visibility.Visible : Visibility.Collapsed;
         _filePaneCwd.IsEnabled = filePaneCwd && tab.State == TabConnectionState.Connected;
         _workingFolder.Visibility = caps.LocalWorkingFolder ? Visibility.Visible : Visibility.Collapsed;

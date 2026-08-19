@@ -66,6 +66,9 @@ public sealed class TerminalControl : Grid, IDisposable
     /// platform key. Examples: a Windows directory or a Nokia MD-CLI cli-path.</summary>
     public event Action<string, string?>? PromptContextChanged;
 
+    /// <summary>Raw OSC 7 payload. The app validates it before it can select an SFTP path.</summary>
+    public event Action<string>? WorkingDirectoryReported;
+
     // ---- agent-awareness evidence (Phase 6.2); raw, unmapped, from this tab's page only ----
 
     /// <summary>An OSC sequence we watch for agent events: the code and its payload.</summary>
@@ -220,6 +223,10 @@ public sealed class TerminalControl : Grid, IDisposable
                             : null;
                         PromptContextChanged?.Invoke(promptContext.GetString() ?? "", platform);
                     }
+                    break;
+                case "workingDirectory":
+                    if (root.TryGetProperty("data", out var workingDirectory))
+                        WorkingDirectoryReported?.Invoke(workingDirectory.GetString() ?? "");
                     break;
                 case "pageError":
                     if (root.TryGetProperty("message", out var err))

@@ -94,12 +94,15 @@ upload/download with progress, drag-drop from Explorer in, drag-out via temp fil
 "download & open", rename/delete/mkdir/chmod. Separate `SftpClient` connection reusing the
 session's credentials/host-key trust.
 
-### 3.2 "Follow the terminal" current-directory tracking
+### 3.2 "Follow the terminal" current-directory tracking ✅ shipped 2026-08-19
 "Open file pane at current folder" needs the remote cwd:
 - **Persistent (tmux) sessions:** trivial — `tmux display -p '#{pane_current_path}'` over
   the existing side-channel (`TryRunCommand`).
-- **Plain sessions:** OSC 7 reporting if the user's shell emits it (offer a one-line
-  snippet to add to `.bashrc`); otherwise fall back to home dir.
+- **Plain sessions:** validated OSC 7 reporting when the user's shell emits it, then a
+  zero-input Linux `/proc` query over a separate SSH channel, then a path-shaped prompt
+  fallback, then the home directory. A compact tab-bar action opens the pane at the best
+  current path. Host changes (for example, nested SSH) and a foreground non-shell process
+  block stale-path fallback instead of opening the wrong folder.
 
 ### 3.3 Real Explorer window (optional integration)
 If **SSHFS-Win/WinFsp** is installed, "Open in Explorer" launches
@@ -456,9 +459,9 @@ Two sources feed one left-lane (bookmarks paint over them — explicit beats inf
 Ctrl+Shift+Up/Down jump prev/next command from the viewport center, with flash.
 Tooltip: "exit N" / "command" / "N commands"; sample falls back to the command line.
 tmux replay limit stands: capture-pane preserves neither OSC marks nor keystrokes, so
-the command lane starts fresh on reattach. The opt-in `.bashrc` snippet UX (shared
-with the Phase 3.2 OSC 7 plan) is still pending — discovery covers unprovisioned
-hosts, which was the point. Verified in the stubbed harness (both tiers, slow-echo
+the command lane starts fresh on reattach. Opt-in OSC 7 and OSC 133 setup is deferred;
+discovery and the zero-input current-folder probe cover unprovisioned hosts. Verified
+in the stubbed harness (both tiers, slow-echo
 probe, traps, jump keys via synthetic keydown, exit-color pixels) and live against
 local-test (real SSH echo → discovered gray ticks, pixel-exact). Real human
 accelerator keypresses remain untried (standing item). Next/prev **error** jump
@@ -585,10 +588,9 @@ to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
   tmux-persistent.
 - **Per-session color schemes** — extend Phase 0.1 overrides + the two hardcoded palettes
   in `terminal.html`; `Session.ColorTag` already exists as the tab accent.
-- **Shell-integration snippet (opt-in)** — the `.bashrc`/zsh snippet Phases 9.4 and 3.2
-  already anticipate: emit OSC 133 A/B/C/D (exact command marks, exit codes, exact
-  running-command titles — discovery stops guessing the moment the shell speaks) and OSC 7
-  (cwd for the file pane). Ship "copy snippet" UX first; auto-typing it at connect works
+- **Shell-integration snippet (opt-in)** — add OSC 133 exact command marks, exit codes,
+  and running-command titles plus OSC 7 current-folder reports for unsupported hosts.
+  Discovery and the Linux side-channel work without setup. Auto-typing setup at connect works
   (the tmux bootstrap shows the pattern, incl. history scrubbing) but echoes briefly and
   races slow logins, so per-session opt-in only, if ever.
 - **Foreground-process title side channel** — tmux-grade `pane_current_command` on plain
