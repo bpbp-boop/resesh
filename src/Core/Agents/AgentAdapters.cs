@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace Sessions.Core.Agents;
@@ -78,7 +79,9 @@ public static class AgentAdapters
                 description = "Sessions tab status for Codex. Reports state only; never approves or sends input.",
                 hooks,
             },
-            new JsonSerializerOptions { WriteIndented = true });
+            // Relaxed escaping so the quotes inside the commands stay readable (\" instead
+            // of ") — this text is copied into a config file the user should review.
+            new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
     }
 
     private static string CodexPosixCommand(string state) =>

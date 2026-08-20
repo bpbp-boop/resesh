@@ -4,11 +4,11 @@ using Sessions.Core.Models;
 namespace Sessions.Core.Storage;
 
 /// <summary>
-/// Highlight-rule state in highlights.json: global enable/disable deltas for built-in
-/// rules plus full user-defined custom rules. Built-in rule definitions live in code
-/// (<see cref="BuiltinHighlights"/>) so app updates can fix or extend packs; only the
-/// user's deviations from the defaults are persisted. Writes are atomic with .bak
-/// rotation, mirroring SessionStore.
+/// Highlight-rule state in highlights.json: global enable/disable deltas and definition
+/// overrides for built-in rules, plus full user-defined custom rules. Built-in rule
+/// definitions live in code (<see cref="BuiltinHighlights"/>) so app updates can fix or
+/// extend packs; only the user's deviations from the defaults are persisted. Writes are
+/// atomic with .bak rotation, mirroring SessionStore.
 /// </summary>
 public sealed class HighlightsStore
 {
@@ -25,6 +25,7 @@ public sealed class HighlightsStore
     private HashSet<string> _enabled = new(StringComparer.Ordinal);
     private HashSet<string> _disabled = new(StringComparer.Ordinal);
     private List<HighlightRule> _custom = [];
+    private Dictionary<string, HighlightRule> _overrides = new(StringComparer.Ordinal);
 
     public HighlightsStore(string path)
     {
@@ -45,11 +46,18 @@ public sealed class HighlightsStore
             // A custom rule with an invalid regex is kept on disk but never offered/applied;
             // dropping it silently would delete user data over a typo we let through.
             _custom = (data.CustomRules ?? []).Where(r => !string.IsNullOrWhiteSpace(r.Id)).ToList();
+            // Same stance for overrides of built-in ids this build doesn't know (e.g. from
+            // a newer app's file): kept and re-saved, just never applied.
+            _overrides = (data.BuiltinOverrides ?? [])
+                .Where(r => !string.IsNullOrWhiteSpace(r.Id))
+                .GroupBy(r => r.Id, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Last(), StringComparer.Ordinal);
         }
     }
 
-    /// <summary>All rules — built-ins with the global deltas applied, then custom rules —
-    /// in application order (later rules win on overlapping matches).</summary>
+    /// <summary>All rules — built-ins with the user's definition overrides and the global
+    /// enable deltas applied, then custom rules — in application order (later rules win on
+    /// overlapping matches).</summary>
     public IReadOnlyList<HighlightRule> AllRules
     {
         get
@@ -57,7 +65,7 @@ public sealed class HighlightsStore
             lock (_gate)
             {
                 return BuiltinHighlights.Rules
-                    .Select(r => r with { Enabled = EffectiveGlobal(r) })
+                    .Select(r => Merged(r) with { Enabled = EffectiveGlobal(r) })
                     .Concat(_custom.Select(r => r with { Pack = "custom" }))
                     .ToList();
             }
@@ -74,6 +82,7 @@ public sealed class HighlightsStore
                 EnabledRules = _enabled.OrderBy(s => s, StringComparer.Ordinal).ToList(),
                 DisabledRules = _disabled.OrderBy(s => s, StringComparer.Ordinal).ToList(),
                 CustomRules = _custom.ToList(),
+                BuiltinOverrides = _overrides.Values.OrderBy(r => r.Id, StringComparer.Ordinal).ToList(),
             };
         }
     }
@@ -104,6 +113,23 @@ public sealed class HighlightsStore
                     _custom[index] = normalized;
                 else
                     _custom.Add(normalized);
+            }
+            foreach (var rule in imported.BuiltinOverrides.Where(r => !string.IsNullOrWhiteSpace(r.Id)))
+            {
+                // Known builtin: normalize (and drop a default-identical override); unknown
+                // id: keep raw so a newer app's data survives the round trip.
+                if (BuiltinHighlights.Rules.FirstOrDefault(r => r.Id == rule.Id) is { } builtin)
+                {
+                    var normalized = rule with { Id = builtin.Id, Pack = builtin.Pack, Enabled = builtin.Enabled };
+                    if (normalized == builtin)
+                        _overrides.Remove(builtin.Id);
+                    else
+                        _overrides[builtin.Id] = normalized;
+                }
+                else
+                {
+                    _overrides[rule.Id] = rule;
+                }
             }
             Save();
         }
@@ -165,6 +191,47 @@ public sealed class HighlightsStore
         }
     }
 
+    /// <summary>Replaces a built-in rule's definition (name, pattern, style). Enabled state
+    /// stays with the delta system (<see cref="SetEnabled"/>) — the override's Enabled field
+    /// is ignored. An override matching the shipped definition is removed again rather than
+    /// stored, same as an enabled delta that returns to the default.</summary>
+    public void SaveBuiltinOverride(HighlightRule rule)
+    {
+        lock (_gate)
+        {
+            if (BuiltinHighlights.Rules.FirstOrDefault(r => r.Id == rule.Id) is not { } builtin)
+                throw new ArgumentException($"No built-in rule '{rule.Id}'.", nameof(rule));
+            var normalized = rule with { Id = builtin.Id, Pack = builtin.Pack, Enabled = builtin.Enabled };
+            if (normalized == builtin)
+                _overrides.Remove(builtin.Id);
+            else
+                _overrides[builtin.Id] = normalized;
+            Save();
+        }
+    }
+
+    /// <summary>Drops a built-in rule's definition override, restoring the shipped
+    /// definition. The enabled state is untouched — that's the checkbox's job.</summary>
+    public bool ResetBuiltin(string id)
+    {
+        lock (_gate)
+        {
+            var removed = _overrides.Remove(id);
+            if (removed)
+                Save();
+            return removed;
+        }
+    }
+
+    /// <summary>Whether a built-in rule's definition deviates from the shipped default.</summary>
+    public bool IsOverridden(string id)
+    {
+        lock (_gate)
+        {
+            return _overrides.ContainsKey(id);
+        }
+    }
+
     /// <summary>The enabled rules for a session: global state with the session's
     /// enable/disable deltas layered on top. This is what gets sent to the page.</summary>
     public IReadOnlyList<HighlightRule> ResolveForSession(TerminalOverrides? overrides)
@@ -180,6 +247,14 @@ public sealed class HighlightsStore
     private bool EffectiveGlobal(HighlightRule builtin) =>
         !_disabled.Contains(builtin.Id) && (builtin.Enabled || _enabled.Contains(builtin.Id));
 
+    /// <summary>The built-in rule with the user's definition override applied, if any.
+    /// Id and pack always come from the shipped rule so an override can't detach a rule
+    /// from its identity.</summary>
+    private HighlightRule Merged(HighlightRule builtin) =>
+        _overrides.TryGetValue(builtin.Id, out var over)
+            ? over with { Id = builtin.Id, Pack = builtin.Pack }
+            : builtin;
+
     private void Save()
     {
         var data = new StoreData
@@ -187,6 +262,7 @@ public sealed class HighlightsStore
             EnabledRules = _enabled.OrderBy(s => s, StringComparer.Ordinal).ToList(),
             DisabledRules = _disabled.OrderBy(s => s, StringComparer.Ordinal).ToList(),
             CustomRules = _custom,
+            BuiltinOverrides = _overrides.Values.OrderBy(r => r.Id, StringComparer.Ordinal).ToList(),
         };
         var json = JsonSerializer.Serialize(data, JsonOptions);
 
@@ -219,6 +295,7 @@ public sealed class HighlightsStore
         public List<string>? EnabledRules { get; set; }
         public List<string>? DisabledRules { get; set; }
         public List<HighlightRule>? CustomRules { get; set; }
+        public List<HighlightRule>? BuiltinOverrides { get; set; }
     }
 }
 
@@ -227,4 +304,5 @@ public sealed record HighlightBackupData
     public IReadOnlyList<string> EnabledRules { get; init; } = [];
     public IReadOnlyList<string> DisabledRules { get; init; } = [];
     public IReadOnlyList<HighlightRule> CustomRules { get; init; } = [];
+    public IReadOnlyList<HighlightRule> BuiltinOverrides { get; init; } = [];
 }

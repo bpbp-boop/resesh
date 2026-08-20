@@ -10,22 +10,24 @@ using Sessions.Core.Models;
 namespace Sessions.App.Dialogs;
 
 /// <summary>
-/// Global keyword-highlighting editor: per-rule enable toggles for the built-in packs
-/// and CRUD (with live regex preview) for custom rules. Changes are persisted to the
-/// highlights store immediately and pushed live to open terminals via
-/// <paramref name="onChanged"/>; there is no cancel — same model as the tab toggles.
+/// Global keyword-highlighting editor, hosted inline in the Settings dialog's Highlighting
+/// tab: per-rule enable toggles, CRUD (with live regex preview) for custom rules, and the
+/// same editing for built-in rules — stored as overrides with a per-rule "Reset to default"
+/// path back to the shipped definition. Changes are persisted to the highlights store
+/// immediately and pushed live to open terminals via <c>onChanged</c>; there is no cancel —
+/// same model as the tab toggles. Add/Edit swaps the list for the rule form in place, and
+/// the standing preview renders an editable sample against every enabled rule.
 /// </summary>
-public static class HighlightEditorDialog
+public static class HighlightEditorPanel
 {
     private const string DefaultSample =
         "GigabitEthernet0/0/1 is up, eth0 is down — 10.0.0.1/24 fe80::1 00:1a:2b:3c:4d:5e ospf uptime 1w2d";
 
-    public static async Task ShowAsync(XamlRoot xamlRoot, Action onChanged)
+    public static UIElement Create(Action onChanged)
     {
         var list = new ListView
         {
             SelectionMode = ListViewSelectionMode.Single,
-            MaxHeight = 300,
         };
 
         var addButton = new Button { Content = "Add custom rule" };
@@ -37,9 +39,53 @@ public static class HighlightEditorDialog
             Spacing = 8,
             Children = { addButton, editButton, deleteButton },
         };
-        var listPanel = new StackPanel { Spacing = 10, Children = { list, listButtons } };
 
-        // ---- custom-rule form (swapped in place of the list; nested dialogs are not allowed) ----
+        // Standing preview: an editable sample line with every enabled rule applied,
+        // matching the terminal's overlap resolution (later rule wins). Paste a line from
+        // your own terminal to see how the current rules treat it.
+        var listSample = new TextBox
+        {
+            Header = "Preview sample",
+            Text = DefaultSample,
+            AcceptsReturn = false,
+        };
+        var combinedPreview = new TextBlock
+        {
+            FontFamily = new FontFamily("Cascadia Mono, Consolas"),
+            FontSize = 13,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        var combinedPanel = new StackPanel
+        {
+            Spacing = 8,
+            Children =
+            {
+                listSample,
+                new Border
+                {
+                    Padding = new Thickness(12, 10, 12, 10),
+                    CornerRadius = new CornerRadius(4),
+                    BorderThickness = new Thickness(1),
+                    BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(48, 128, 128, 128)),
+                    Background = new SolidColorBrush(Windows.UI.Color.FromArgb(18, 128, 128, 128)),
+                    Child = combinedPreview,
+                },
+            },
+        };
+        // The list takes the star row so it expands to whatever height the host grants the
+        // panel; the buttons and the preview section stay pinned below it.
+        var listPanel = new Grid { RowSpacing = 10 };
+        listPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        listPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        listPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        Grid.SetRow(list, 0);
+        Grid.SetRow(listButtons, 1);
+        Grid.SetRow(combinedPanel, 2);
+        listPanel.Children.Add(list);
+        listPanel.Children.Add(listButtons);
+        listPanel.Children.Add(combinedPanel);
+
+        // ---- custom-rule form (swapped in place of the list) ----
 
         var nameBox = new TextBox { Header = "Name", PlaceholderText = "e.g. Customer VRF names" };
         var patternBox = new TextBox
@@ -70,34 +116,82 @@ public static class HighlightEditorDialog
         var formStatus = new TextBlock { Foreground = new SolidColorBrush(Colors.IndianRed), TextWrapping = TextWrapping.Wrap };
         var saveButton = new Button { Content = "Save rule", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
         var cancelButton = new Button { Content = "Cancel" };
+        var resetButton = new Button { Content = "Reset to default", Margin = new Thickness(16, 0, 0, 0) };
         var formButtons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8,
-            Children = { saveButton, cancelButton },
+            Children = { saveButton, cancelButton, resetButton },
         };
         var formPanel = new StackPanel
         {
             Spacing = 10,
-            Visibility = Visibility.Collapsed,
             Children = { nameBox, patternBox, colorRow, boldCheck, underlineCheck, matchCaseCheck, overviewCheck, sampleBox, preview, formStatus, formButtons },
         };
-
-        var dialog = new ContentDialog
+        // The form keeps its natural height inside its own scroller, so a long wrapped
+        // preview or error text can never clip against the panel's fixed height.
+        var formHost = new ScrollViewer
         {
-            Title = "Keyword Highlighting",
-            Content = new ScrollViewer
-            {
-                MaxHeight = 560,
-                Content = new StackPanel { MinWidth = 460, Children = { listPanel, formPanel } },
-            },
-            CloseButtonText = "Done",
-            XamlRoot = xamlRoot,
+            Content = formPanel,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Visibility = Visibility.Collapsed,
         };
 
-        string? editingId = null; // null = adding
+        var root = new Grid { Children = { listPanel, formHost } };
+
+        HighlightRule? editing = null; // null = adding a new custom rule
 
         // ---- list plumbing ----
+
+        void RefreshCombinedPreview()
+        {
+            combinedPreview.Inlines.Clear();
+            var sample = listSample.Text;
+            var rules = App.Highlights.AllRules.Where(r => r.Enabled).ToList();
+            var winner = new int[sample.Length];
+            Array.Fill(winner, -1);
+            for (var r = 0; r < rules.Count; r++)
+            {
+                try
+                {
+                    var options = rules[r].MatchCase ? RegexOptions.None : RegexOptions.IgnoreCase;
+                    var regex = new Regex(rules[r].Pattern, options, TimeSpan.FromMilliseconds(200));
+                    foreach (Match m in regex.Matches(sample))
+                        for (var c = m.Index; c < m.Index + m.Length; c++)
+                            winner[c] = r;
+                }
+                catch (Exception ex) when (ex is ArgumentException or RegexMatchTimeoutException)
+                {
+                    // A broken stored pattern just doesn't paint the preview.
+                }
+            }
+
+            var start = 0;
+            for (var i = 1; i <= sample.Length; i++)
+            {
+                if (i < sample.Length && winner[i] == winner[start])
+                    continue;
+                var run = new Run { Text = sample[start..i] };
+                if (winner[start] >= 0)
+                {
+                    var rule = rules[winner[start]];
+                    run.Foreground = new SolidColorBrush(TryParseColor(rule.Color) ?? Colors.White);
+                    if (rule.Bold)
+                        run.FontWeight = FontWeights.Bold;
+                    if (rule.Underline)
+                        run.TextDecorations = Windows.UI.Text.TextDecorations.Underline;
+                }
+                combinedPreview.Inlines.Add(run);
+                start = i;
+            }
+        }
+
+        void Changed()
+        {
+            RefreshCombinedPreview();
+            onChanged();
+        }
 
         void RefreshList()
         {
@@ -111,10 +205,13 @@ public static class HighlightEditorDialog
                     VerticalAlignment = VerticalAlignment.Center,
                 };
                 var id = rule.Id;
-                check.Checked += (_, _) => { App.Highlights.SetEnabled(id, true); onChanged(); };
-                check.Unchecked += (_, _) => { App.Highlights.SetEnabled(id, false); onChanged(); };
+                check.Checked += (_, _) => { App.Highlights.SetEnabled(id, true); Changed(); };
+                check.Unchecked += (_, _) => { App.Highlights.SetEnabled(id, false); Changed(); };
 
                 var color = TryParseColor(rule.Color) ?? Colors.White;
+                var packTag = rule.IsBuiltin
+                    ? App.Highlights.IsOverridden(rule.Id) ? rule.Pack + " · edited" : rule.Pack
+                    : "custom";
                 var row = new StackPanel
                 {
                     Orientation = Orientation.Horizontal,
@@ -138,7 +235,7 @@ public static class HighlightEditorDialog
                         },
                         new TextBlock
                         {
-                            Text = rule.IsBuiltin ? rule.Pack : "custom",
+                            Text = packTag,
                             Opacity = 0.6,
                             FontSize = 12,
                             VerticalAlignment = VerticalAlignment.Center,
@@ -153,16 +250,15 @@ public static class HighlightEditorDialog
 
         list.SelectionChanged += (_, _) =>
         {
-            var custom = SelectedRule() is { IsBuiltin: false };
-            editButton.IsEnabled = custom;
-            deleteButton.IsEnabled = custom;
+            editButton.IsEnabled = SelectedRule() is not null;
+            deleteButton.IsEnabled = SelectedRule() is { IsBuiltin: false };
         };
 
         // ---- form plumbing ----
 
         void ShowForm(HighlightRule? existing)
         {
-            editingId = existing?.Id;
+            editing = existing;
             nameBox.Text = existing?.Name ?? "";
             patternBox.Text = existing?.Pattern ?? "";
             colorBox.Text = existing?.Color ?? "#e5c07b";
@@ -170,15 +266,19 @@ public static class HighlightEditorDialog
             underlineCheck.IsChecked = existing?.Underline ?? false;
             matchCaseCheck.IsChecked = existing?.MatchCase ?? false;
             overviewCheck.IsChecked = existing?.ShowInOverview ?? false;
+            sampleBox.Text = listSample.Text;
+            resetButton.Visibility = existing is { IsBuiltin: true } ? Visibility.Visible : Visibility.Collapsed;
+            resetButton.IsEnabled = existing is not null && App.Highlights.IsOverridden(existing.Id);
             formStatus.Text = "";
             listPanel.Visibility = Visibility.Collapsed;
-            formPanel.Visibility = Visibility.Visible;
+            formHost.Visibility = Visibility.Visible;
+            formHost.ChangeView(null, 0, null, disableAnimation: true);
             UpdatePreview();
         }
 
         void HideForm()
         {
-            formPanel.Visibility = Visibility.Collapsed;
+            formHost.Visibility = Visibility.Collapsed;
             listPanel.Visibility = Visibility.Visible;
         }
 
@@ -237,7 +337,10 @@ public static class HighlightEditorDialog
         }
 
         patternBox.TextChanged += (_, _) => UpdatePreview();
-        sampleBox.TextChanged += (_, _) => UpdatePreview();
+        // One logical sample: the form's box and the list's box mirror each other (the two
+        // are never visible at once), so a pasted line survives the form round-trip.
+        sampleBox.TextChanged += (_, _) => { UpdatePreview(); listSample.Text = sampleBox.Text; };
+        listSample.TextChanged += (_, _) => RefreshCombinedPreview();
         colorBox.TextChanged += (_, _) => UpdatePreview();
         boldCheck.Click += (_, _) => UpdatePreview();
         underlineCheck.Click += (_, _) => UpdatePreview();
@@ -246,7 +349,7 @@ public static class HighlightEditorDialog
         addButton.Click += (_, _) => ShowForm(null);
         editButton.Click += (_, _) =>
         {
-            if (SelectedRule() is { IsBuiltin: false } rule)
+            if (SelectedRule() is { } rule)
                 ShowForm(rule);
         };
         deleteButton.Click += (_, _) =>
@@ -255,10 +358,19 @@ public static class HighlightEditorDialog
             {
                 App.Highlights.RemoveCustom(rule.Id);
                 RefreshList();
-                onChanged();
+                Changed();
             }
         };
         cancelButton.Click += (_, _) => HideForm();
+        resetButton.Click += (_, _) =>
+        {
+            if (editing is { IsBuiltin: true } rule && App.Highlights.ResetBuiltin(rule.Id))
+            {
+                HideForm();
+                RefreshList();
+                Changed();
+            }
+        };
         saveButton.Click += (_, _) =>
         {
             var name = nameBox.Text.Trim();
@@ -287,25 +399,42 @@ public static class HighlightEditorDialog
                 return;
             }
 
-            App.Highlights.SaveCustom(new HighlightRule
+            if (editing is { IsBuiltin: true } builtin)
             {
-                Id = editingId ?? $"custom-{Guid.NewGuid():N}"[..15],
-                Name = name,
-                Pattern = pattern,
-                Color = color.ToLowerInvariant(),
-                Bold = boldCheck.IsChecked == true,
-                Underline = underlineCheck.IsChecked == true,
-                MatchCase = matchCaseCheck.IsChecked == true,
-                ShowInOverview = overviewCheck.IsChecked == true,
-                Enabled = true,
-            });
+                App.Highlights.SaveBuiltinOverride(builtin with
+                {
+                    Name = name,
+                    Pattern = pattern,
+                    Color = color.ToLowerInvariant(),
+                    Bold = boldCheck.IsChecked == true,
+                    Underline = underlineCheck.IsChecked == true,
+                    MatchCase = matchCaseCheck.IsChecked == true,
+                    ShowInOverview = overviewCheck.IsChecked == true,
+                });
+            }
+            else
+            {
+                App.Highlights.SaveCustom(new HighlightRule
+                {
+                    Id = editing?.Id ?? $"custom-{Guid.NewGuid():N}"[..15],
+                    Name = name,
+                    Pattern = pattern,
+                    Color = color.ToLowerInvariant(),
+                    Bold = boldCheck.IsChecked == true,
+                    Underline = underlineCheck.IsChecked == true,
+                    MatchCase = matchCaseCheck.IsChecked == true,
+                    ShowInOverview = overviewCheck.IsChecked == true,
+                    Enabled = true,
+                });
+            }
             HideForm();
             RefreshList();
-            onChanged();
+            Changed();
         };
 
         RefreshList();
-        await dialog.ShowAsync();
+        RefreshCombinedPreview();
+        return root;
     }
 
     private static Windows.UI.Color? TryParseColor(string text)

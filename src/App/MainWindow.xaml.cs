@@ -668,7 +668,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ViewModel.UpdateSession(session with { Agent = key }, null);
     }
 
-    public Task ShowAgentAdaptersAsync() => Dialogs.AgentAdapterDialog.ShowAsync(Root.XamlRoot);
+    public Task ShowAgentAdaptersAsync() => ShowSettingsAsync(GlobalSettingsTab.Agents);
 
     // ---- ITabGroupHost ----
 
@@ -1178,96 +1178,30 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private async void SshKeys_Click(object sender, RoutedEventArgs e) =>
         await Dialogs.SshKeyManagerDialog.ShowAsync(Root.XamlRoot, App.SshKeys, App.Store, App.Credentials);
 
-    private async void Settings_Click(object sender, RoutedEventArgs e)
+    private async void Settings_Click(object sender, RoutedEventArgs e) =>
+        await ShowSettingsAsync(GlobalSettingsTab.General);
+
+    /// <summary>Shows the tabbed Settings dialog. Highlighting edits persist immediately from
+    /// inside the dialog; everything else lands here on Save. Only the dialog's own fields are
+    /// rebased onto the live settings, so anything saved while the dialog sat open (pane
+    /// widths, pinned tabs, window placement) survives.</summary>
+    private async Task ShowSettingsAsync(GlobalSettingsTab tab)
     {
-        var current = App.Settings.Current;
-        var theme = new ComboBox
-        {
-            Header = "Theme",
-            ItemsSource = new[] { "dark", "light" },
-            SelectedItem = current.Theme == "light" ? "light" : "dark",
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-        };
-        var fontFamily = new TextBox { Header = "Terminal font family", Text = current.FontFamily };
-        var fontSize = new NumberBox
-        {
-            Header = "Font size",
-            Value = current.FontSize,
-            Minimum = 8,
-            Maximum = 32,
-            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
-        };
-        var scrollback = new NumberBox
-        {
-            Header = "Scrollback lines",
-            Value = current.Scrollback,
-            Minimum = 1000,
-            Maximum = 100000,
-            SmallChange = 1000,
-            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
-        };
-        var copyOnSelect = new ToggleSwitch { Header = "Copy on select", IsOn = current.CopyOnSelect };
-        var rightClickPaste = new ToggleSwitch { Header = "Right-click paste", IsOn = current.RightClickPaste };
-        var highlighting = new Button { Content = "Keyword highlighting…" };
-        var agentIcons = new ToggleSwitch { Header = "Use agent icons on tabs", IsOn = current.ShowAgentIcons };
-        var agentFlash = new ToggleSwitch
-        {
-            Header = "Flash the taskbar when a background agent needs you",
-            IsOn = current.AgentAlertFlash,
-        };
-        var agentSound = new ToggleSwitch { Header = "…and play the notification sound", IsOn = current.AgentAlertSound };
-        var agentAdapters = new Button { Content = "Agent adapters…" };
-
-        var dialog = new ContentDialog
-        {
-            Title = "Settings",
-            Content = new ScrollViewer
-            {
-                MaxHeight = 520,
-                Content = new StackPanel
-                {
-                    Spacing = 12,
-                    MinWidth = 380,
-                    Children =
-                    {
-                        theme, fontFamily, fontSize, scrollback, copyOnSelect, rightClickPaste,
-                        highlighting, agentIcons, agentFlash, agentSound, agentAdapters,
-                    },
-                },
-            },
-            PrimaryButtonText = "Save",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = Root.XamlRoot,
-        };
-        // Only one ContentDialog may be open at a time: leave Settings, run the editor.
-        // Highlight changes apply/persist immediately, so abandoning Settings loses nothing.
-        highlighting.Click += async (_, _) =>
-        {
-            dialog.Hide();
-            await Dialogs.HighlightEditorDialog.ShowAsync(Root.XamlRoot, ApplySettingsToApp);
-        };
-        agentAdapters.Click += async (_, _) =>
-        {
-            dialog.Hide(); // one ContentDialog at a time; the snippets are read-only anyway
-            await Dialogs.AgentAdapterDialog.ShowAsync(Root.XamlRoot);
-        };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        var updated = await GlobalSettingsDialog.ShowAsync(Root.XamlRoot, App.Settings.Current, ApplySettingsToApp, tab);
+        if (updated is null)
             return;
-
-        var updated = current with
+        App.Settings.Save(App.Settings.Current with
         {
-            Theme = theme.SelectedItem as string ?? "dark",
-            FontFamily = string.IsNullOrWhiteSpace(fontFamily.Text) ? current.FontFamily : fontFamily.Text.Trim(),
-            FontSize = double.IsNaN(fontSize.Value) ? current.FontSize : (int)fontSize.Value,
-            Scrollback = double.IsNaN(scrollback.Value) ? current.Scrollback : (int)scrollback.Value,
-            CopyOnSelect = copyOnSelect.IsOn,
-            RightClickPaste = rightClickPaste.IsOn,
-            ShowAgentIcons = agentIcons.IsOn,
-            AgentAlertFlash = agentFlash.IsOn,
-            AgentAlertSound = agentSound.IsOn,
-        };
-        App.Settings.Save(updated);
+            Theme = updated.Theme,
+            FontFamily = updated.FontFamily,
+            FontSize = updated.FontSize,
+            Scrollback = updated.Scrollback,
+            CopyOnSelect = updated.CopyOnSelect,
+            RightClickPaste = updated.RightClickPaste,
+            ShowAgentIcons = updated.ShowAgentIcons,
+            AgentAlertFlash = updated.AgentAlertFlash,
+            AgentAlertSound = updated.AgentAlertSound,
+        });
         ApplySettingsToApp();
     }
 

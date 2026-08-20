@@ -124,6 +124,90 @@ public sealed class HighlightsStoreTests : IDisposable
         Assert.False(NewStore().AllRules.Single(r => r.Id == "custom-1").Enabled);
     }
 
+    // ---- builtin definition overrides ----
+
+    [Fact]
+    public void SaveBuiltinOverride_ChangesDefinition_AndReloads()
+    {
+        var store = NewStore();
+        var shipped = BuiltinHighlights.Rules.Single(r => r.Id == "ipv4");
+        store.SaveBuiltinOverride(shipped with { Name = "IPs", Color = "#ff0000" });
+
+        var reloaded = NewStore();
+        var rule = reloaded.AllRules.Single(r => r.Id == "ipv4");
+        Assert.Equal("IPs", rule.Name);
+        Assert.Equal("#ff0000", rule.Color);
+        Assert.Equal(shipped.Pack, rule.Pack);
+        Assert.True(rule.IsBuiltin);
+        Assert.True(reloaded.IsOverridden("ipv4"));
+        Assert.Equal(BuiltinHighlights.Rules.Count, reloaded.AllRules.Count(r => r.IsBuiltin));
+    }
+
+    [Fact]
+    public void SaveBuiltinOverride_LeavesEnabledWithTheDeltaSystem()
+    {
+        var store = NewStore();
+        store.SetEnabled("ipv4", false);
+        var shipped = BuiltinHighlights.Rules.Single(r => r.Id == "ipv4");
+        store.SaveBuiltinOverride(shipped with { Color = "#ff0000", Enabled = true });
+
+        Assert.False(store.AllRules.Single(r => r.Id == "ipv4").Enabled); // delta wins
+        store.SetEnabled("ipv4", true);
+        var rule = store.AllRules.Single(r => r.Id == "ipv4");
+        Assert.True(rule.Enabled);
+        Assert.Equal("#ff0000", rule.Color); // override survives the toggle
+    }
+
+    [Fact]
+    public void SaveBuiltinOverride_MatchingShippedDefault_RemovesOverride()
+    {
+        var store = NewStore();
+        var shipped = BuiltinHighlights.Rules.Single(r => r.Id == "ipv4");
+        store.SaveBuiltinOverride(shipped with { Color = "#ff0000" });
+        store.SaveBuiltinOverride(shipped); // back to the shipped definition
+
+        Assert.False(store.IsOverridden("ipv4"));
+        Assert.DoesNotContain("#ff0000", File.ReadAllText(StorePath));
+    }
+
+    [Fact]
+    public void ResetBuiltin_RestoresShippedDefinition()
+    {
+        var store = NewStore();
+        var shipped = BuiltinHighlights.Rules.Single(r => r.Id == "mac");
+        store.SaveBuiltinOverride(shipped with { Color = "#123456" });
+
+        Assert.True(store.ResetBuiltin("mac"));
+        Assert.False(store.ResetBuiltin("mac"));
+        Assert.False(store.IsOverridden("mac"));
+        Assert.Equal(shipped.Color, NewStore().AllRules.Single(r => r.Id == "mac").Color);
+    }
+
+    [Fact]
+    public void SaveBuiltinOverride_UnknownId_Throws()
+    {
+        var store = NewStore();
+        Assert.Throws<ArgumentException>(() =>
+            store.SaveBuiltinOverride(new HighlightRule { Id = "no-such-rule", Name = "x", Pattern = "x" }));
+    }
+
+    [Fact]
+    public void BuiltinOverrides_RoundTripThroughBackup()
+    {
+        var store = NewStore();
+        var shipped = BuiltinHighlights.Rules.Single(r => r.Id == "ipv4");
+        store.MergeBackup(new HighlightBackupData
+        {
+            BuiltinOverrides = [shipped with { Color = "#123456" }],
+        });
+        Assert.Equal("#123456", store.AllRules.Single(r => r.Id == "ipv4").Color);
+        Assert.Contains(store.ExportBackup().BuiltinOverrides, r => r.Id == "ipv4");
+
+        // An imported override identical to the shipped definition normalizes away.
+        store.MergeBackup(new HighlightBackupData { BuiltinOverrides = [shipped] });
+        Assert.False(store.IsOverridden("ipv4"));
+    }
+
     // ---- corrupt file ----
 
     [Fact]
