@@ -7,9 +7,8 @@ namespace Sessions.App.ViewModels;
 /// <summary>A node in the session tree: either a folder or a session leaf.</summary>
 public sealed class TreeNodeViewModel : ObservableObject
 {
-    // Theme-agnostic selection fill (mid-gray at low alpha reads correctly on dark and light).
     private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush SelectedBrush =
-        new(Windows.UI.Color.FromArgb(0x33, 0x80, 0x80, 0x80));
+        new(Windows.UI.Color.FromArgb(255, 0x26, 0x4F, 0x78));
 
     private bool _isExpanded;
     private bool _isSelected;
@@ -32,6 +31,9 @@ public sealed class TreeNodeViewModel : ObservableObject
     }
 
     public Microsoft.UI.Xaml.Media.Brush? SelectionBackground => _isSelected ? SelectedBrush : null;
+
+    /// <summary>Keeps the shared selected-row surface aligned with the active terminal theme.</summary>
+    internal static void ApplySelectionTheme(Windows.UI.Color color) => SelectedBrush.Color = color;
 
     /// <summary>Null for folders. Session leaves can replace their immutable model in place
     /// when an edit does not change tree structure or ordering.</summary>

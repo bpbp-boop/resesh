@@ -1222,6 +1222,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         FilterBar.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Shell);
         FilterFieldBorder.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Input);
         FilterFieldBorder.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Divider);
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Root.Resources["SessionTreeForegroundBrush"]).Color = palette.TreeForeground;
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Root.Resources["SessionTreeMutedForegroundBrush"]).Color = palette.TreeMutedForeground;
+        TreeNodeViewModel.ApplySelectionTheme(palette.TreeSelection);
         QuickConnectBox.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Input);
         ExpandAllButton.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Input);
         CollapseAllButton.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Input);

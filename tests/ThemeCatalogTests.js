@@ -50,6 +50,40 @@ test("custom themes recolor the app shell and tab strip", () => {
   assert.match(tabGroup, /Resources\["TabViewBorderBrush"\] = divider/);
 });
 
+test("each theme gives the session tree its terminal foreground and selection colors", () => {
+  const expected = {
+    light: ["383A42", "BFCEFF"],
+    "solarized-dark": ["839496", "274852"],
+    "solarized-light": ["657B83", "EEE8D5"],
+    dracula: ["F8F8F2", "44475A"],
+    "one-dark": ["ABB2BF", "3E4451"],
+    nord: ["D8DEE9", "434C5E"],
+    "gruvbox-dark": ["EBDBB2", "504945"],
+    monokai: ["F8F8F2", "49483E"],
+    "tokyo-night": ["C0CAF5", "33467C"],
+    "catppuccin-mocha": ["CDD6F4", "45475A"],
+  };
+
+  for (const [id, [foreground, selection]] of Object.entries(expected)) {
+    assert.match(
+      visualPalette,
+      new RegExp(`"${id}"\\s*=>\\s*New\\([^\\n]*0x${foreground},\\s*0x${selection}\\)`),
+      id,
+    );
+  }
+  assert.match(visualPalette, /_ => New\([^\n]*0xCCCCCC, 0x264F78\)/);
+});
+
+test("live theme changes recolor session-tree labels, details, icons, and selection", () => {
+  assert.match(mainWindowXaml, /x:Key="SessionTreeForegroundBrush"/);
+  assert.match(mainWindowXaml, /x:Key="SessionTreeMutedForegroundBrush"/);
+  assert.match(mainWindowXaml, /x:Name="SessionTree"[\s\S]*?Foreground="\{StaticResource SessionTreeForegroundBrush\}"/);
+  assert.match(mainWindowXaml, /Text="\{x:Bind HostSummary, Mode=OneWay\}"[\s\S]*?Foreground="\{StaticResource SessionTreeMutedForegroundBrush\}"/);
+  assert.match(mainWindow, /SessionTreeForegroundBrush"\]\)\.Color = palette\.TreeForeground/);
+  assert.match(mainWindow, /SessionTreeMutedForegroundBrush"\]\)\.Color = palette\.TreeMutedForeground/);
+  assert.match(mainWindow, /TreeNodeViewModel\.ApplySelectionTheme\(palette\.TreeSelection\)/);
+});
+
 test("new split groups start with the live app palette", () => {
   assert.match(mainWindow, /private TabGroupView AttachGroupView[\s\S]*?view\.ApplyTheme\(_themePalette\)/);
 });
@@ -91,7 +125,7 @@ test("live theme changes recolor the retained right-edge divider brush", () => {
 });
 
 test("Sessions Dark keeps its original divider and bypasses stale Fluent strokes", () => {
-  assert.match(visualPalette, /_ => New\(0x0C0C0C, 0x181818, 0x2B2B2B\)/);
+  assert.match(visualPalette, /_ => New\(0x0C0C0C, 0x181818, 0x2B2B2B,/);
   assert.match(tabGroup, /Resources\["TabViewBorderBrush"\] = divider/);
   assert.match(tabGroup, /ActualThemeChanged \+= \(_, _\) => QueueTabTemplateRefresh\(\)/);
 });
