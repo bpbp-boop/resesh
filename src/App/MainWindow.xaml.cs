@@ -494,7 +494,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
         if (text.Length > 0)
         {
-            items.AddRange(ViewModel.RankedMatches(text).Take(8).Select(s => new QuickConnectSuggestion
+            items.AddRange(ViewModel.RankedMatches(text).Select(s => new QuickConnectSuggestion
             {
                 Display = s.Name,
                 Detail = s.IsLocal

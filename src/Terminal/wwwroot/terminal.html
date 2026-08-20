@@ -276,11 +276,28 @@
       }
     });
 
+    // Keyboard input makes xterm return to the live cursor when the user has
+    // scrolled back. Paste is input too, but not every paste route passes through
+    // xterm's key handler (notably right-click and Ctrl+Shift+V), so do that
+    // explicitly for all of them.
+    function returnToLiveInput() {
+      term.scrollToBottom();
+    }
+
+    function pasteText(text) {
+      if (!text || !connected) return;
+      returnToLiveInput();
+      host.postMessage({ type: "input", data: strToB64(text) });
+    }
+
+    // Runs before xterm consumes a regular browser/textarea paste event.
+    container.addEventListener("paste", returnToLiveInput, true);
+
     container.addEventListener("contextmenu", function (e) {
       e.preventDefault();
       if (rightClickPaste) {
         navigator.clipboard.readText().then(function (text) {
-          if (text && connected) host.postMessage({ type: "input", data: strToB64(text) });
+          pasteText(text);
         }).catch(function () {});
       }
     });
@@ -413,7 +430,7 @@
         }
         if (e.code === "KeyV") {
           navigator.clipboard.readText().then(function (text) {
-            if (text && connected) host.postMessage({ type: "input", data: strToB64(text) });
+            pasteText(text);
           }).catch(function () {});
           return false;
         }

@@ -591,6 +591,8 @@ to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
 
 - **Command snippets** — saved commands with placeholders, per-folder scoping, send on
   click; optional "startup command" per session.
+- **Copy output since last command** — copy the terminal output produced after the most
+  recently submitted command, without manually selecting the scrollback range.
 - **Quick connect** — `user@host[:port]` box in the title bar creating an ad-hoc session,
   with "save as session" afterward.
 - **More importers** — PuTTY registry, mRemoteNG, OpenSSH `~/.ssh/config` (the config

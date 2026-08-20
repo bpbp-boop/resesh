@@ -302,8 +302,9 @@ keyboard-interactive fallback.
   backgrounds + theme-matched foregrounds and is re-run from ApplySettingsToApp() on theme
   change. Win10 guard: if AppWindowTitleBar.IsCustomizationSupported() is false the row
   stays a plain toolbar under the stock title bar.
-- Quick connect semantics: plain text searches saved sessions (SessionSearch.Rank, top 8
-  as suggestions; Enter = connect best match, same as the filter box). "user@host[:port]"
+- Quick connect semantics: plain text searches saved sessions (SessionSearch.Rank, with all
+  matches available in a scrollable suggestion list; Enter = connect best match, same as
+  the filter box). "user@host[:port]"
   or an explicit "ssh " prefix adds a "Connect to ..." suggestion that builds an ad-hoc
   Session (not saved; username defaults to the local user) and opens it through the normal
   ConnectSession path, which already tolerates not-in-store sessions. A bare hostname only
