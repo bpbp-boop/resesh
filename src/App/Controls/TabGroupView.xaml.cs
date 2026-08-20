@@ -48,6 +48,9 @@ public sealed partial class TabGroupView : UserControl
     private TabViewModel? _middleClickTab;
     private SplitDirection _dropDirection = SplitDirection.Right;
     private bool _tabWidthRefreshQueued;
+    private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.Settings.Current.Theme);
+    private readonly SolidColorBrush _tabBackgroundBrush;
+    private readonly SolidColorBrush _tabDividerBrush;
     private TabViewModel? _filePaneButtonTab;
     private Terminal.TerminalTabView? _filePaneButtonView;
 
@@ -57,6 +60,8 @@ public sealed partial class TabGroupView : UserControl
     {
         Group = group;
         _host = host;
+        _tabBackgroundBrush = new SolidColorBrush(_themePalette.InactiveTab);
+        _tabDividerBrush = new SolidColorBrush(_themePalette.Divider);
         InitializeComponent();
         _tabMenu = BuildTabMenu();
         ObserveFilePaneButtonTab();
@@ -95,6 +100,7 @@ public sealed partial class TabGroupView : UserControl
         // TabView can keep keyboard focus on an already-selected header after a click. In
         // that state xterm cannot see Enter, so retain its stopped-terminal shortcut here.
         Tabs.AddHandler(KeyDownEvent, new KeyEventHandler(Tabs_KeyDown), true);
+        ActualThemeChanged += (_, _) => QueueTabTemplateRefresh();
 
         // TabView consumes drag events over parts of its strip without raising TabStripDrop.
         // Listen on the surrounding row even for handled events so its unused space remains
@@ -112,6 +118,13 @@ public sealed partial class TabGroupView : UserControl
     }
 
     private void Tabs_Loaded(object sender, RoutedEventArgs e)
+    {
+        NormalizeTabStripTemplate();
+        ApplyTabStripDivider();
+        QueueTabWidthRefresh();
+    }
+
+    private void NormalizeTabStripTemplate()
     {
         // TabView reserves a 2px minimum column for TabStripHeader even when it is null.
         if (FindDescendant(Tabs, "TabContainerGrid") is Grid tabContainerGrid &&
@@ -137,8 +150,52 @@ public sealed partial class TabGroupView : UserControl
                 scrollViewerGrid.ColumnDefinitions[0].MinWidth = 0;
             }
         }
+    }
 
-        QueueTabWidthRefresh();
+    internal void ApplyTheme(ThemeVisualPalette palette)
+    {
+        _themePalette = palette;
+        // Keep these brush instances stable. WinUI's TabView template can retain the
+        // brush used by its small RightBottomBorderLine after a live theme change.
+        // Replacing the resource leaves a two-pixel fragment in the previous colour;
+        // updating the brush recolours both the old and rebuilt template elements.
+        _tabBackgroundBrush.Color = palette.InactiveTab;
+        _tabDividerBrush.Color = palette.Divider;
+        var background = _tabBackgroundBrush;
+        var divider = _tabDividerBrush;
+        Tabs.Background = background;
+        TabStripActions.Background = background;
+        TabStripActions.BorderBrush = divider;
+        Resources["TabViewBackground"] = background;
+        Resources["TabViewBorderBrush"] = divider;
+        Resources["CodeTabSeparatorBrush"] = divider;
+        ApplyTabStripDivider();
+        QueueTabTemplateRefresh();
+    }
+
+    private void QueueTabTemplateRefresh()
+    {
+        // RequestedTheme can rebuild TabView after ApplyTheme returns. Run after that
+        // layout pass so WinUI's hidden header width and presenter padding stay removed.
+        DispatcherQueue.TryEnqueue(() => DispatcherQueue.TryEnqueue(() =>
+        {
+            NormalizeTabStripTemplate();
+            ApplyTabStripDivider();
+            QueueTabWidthRefresh();
+        }));
+    }
+
+    private void ApplyTabStripDivider()
+    {
+        var divider = _tabDividerBrush;
+        if (FindDescendant(Tabs, "LeftBottomBorderLine") is Border left)
+            left.Background = divider;
+        if (FindDescendant(Tabs, "RightBottomBorderLine") is Border right)
+        {
+            right.Background = divider;
+            right.Margin = new Thickness(-1, 0, 0, 0);
+        }
+        TabStripActions.BorderBrush = divider;
     }
 
     private void QueueTabWidthRefresh()

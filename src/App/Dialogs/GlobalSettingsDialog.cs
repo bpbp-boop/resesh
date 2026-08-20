@@ -30,16 +30,21 @@ public static class GlobalSettingsDialog
     public static async Task<AppSettings?> ShowAsync(
         XamlRoot xamlRoot,
         AppSettings current,
-        Action onHighlightsChanged,
+        Action<AppSettings> applyPreview,
         GlobalSettingsTab initialTab = GlobalSettingsTab.General)
     {
         var theme = new ComboBox
         {
             Header = "Theme",
-            ItemsSource = new[] { "Dark", "Light" },
-            SelectedItem = current.Theme == "light" ? "Light" : "Dark",
+            ItemsSource = ThemeCatalog.All,
+            SelectedItem = ThemeCatalog.Find(current.Theme),
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
+        AppSettings PreviewSettings() => current with
+        {
+            Theme = (theme.SelectedItem as ThemeChoice)?.Id ?? current.Theme,
+        };
+        theme.SelectionChanged += (_, _) => applyPreview(PreviewSettings());
         var fontFamily = new TextBox { Header = "Terminal font family", Text = current.FontFamily };
         var fontSize = new NumberBox
         {
@@ -120,7 +125,7 @@ public static class GlobalSettingsDialog
         highlightingTab.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         highlightingTab.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var highlightingDesc = Description("Enable the built-in network rules, and create or edit custom regular-expression rules.");
-        var highlightingEditor = HighlightEditorPanel.Create(onHighlightsChanged);
+        var highlightingEditor = HighlightEditorPanel.Create(() => applyPreview(PreviewSettings()));
         var highlightingCaption = Caption("Highlighting changes apply immediately and push to open terminals. Save below applies to the other tabs.");
         Grid.SetRow(highlightingDesc, 0);
         Grid.SetRow((FrameworkElement)highlightingEditor, 1);
@@ -212,11 +217,14 @@ public static class GlobalSettingsDialog
         dialog.Resources["ContentDialogMaxHeight"] = 960d;
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            applyPreview(current);
             return null;
+        }
 
         return current with
         {
-            Theme = (theme.SelectedItem as string)?.ToLowerInvariant() ?? "dark",
+            Theme = (theme.SelectedItem as ThemeChoice)?.Id ?? "dark",
             FontFamily = string.IsNullOrWhiteSpace(fontFamily.Text) ? current.FontFamily : fontFamily.Text.Trim(),
             FontSize = double.IsNaN(fontSize.Value) ? current.FontSize : (int)fontSize.Value,
             Scrollback = double.IsNaN(scrollback.Value) ? current.Scrollback : (int)scrollback.Value,

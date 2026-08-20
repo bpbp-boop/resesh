@@ -25,6 +25,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private bool _closePromptOpen;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
     private RectInt32? _normalWindowBounds;
+    private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.Settings.Current.Theme);
 
     public MainWindow()
     {
@@ -112,6 +113,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private TabGroupView AttachGroupView(TabGroupViewModel group)
     {
         var view = new TabGroupView(group, this);
+        // The initial app-wide theme pass has already run when a user creates a split.
+        // Apply the live palette now so the new strip does not start with Fluent defaults.
+        view.ApplyTheme(_themePalette);
         _groupViews[group] = view;
         return view;
     }
@@ -287,7 +291,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (!Microsoft.UI.Windowing.AppWindowTitleBar.IsCustomizationSupported())
             return;
         var tb = AppWindow.TitleBar;
-        var dark = App.Settings.Current.Theme != "light";
+        var dark = !ThemeCatalog.IsLight(App.Settings.Current.Theme);
         var fg = dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
         tb.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
         tb.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
@@ -938,7 +942,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
             var splitterLine = new Border
             {
-                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionDividerBrush"],
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(_themePalette.Divider),
                 IsHitTestVisible = false,
                 HorizontalAlignment = isColumns ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
                 VerticalAlignment = isColumns ? VerticalAlignment.Stretch : VerticalAlignment.Center,
@@ -1206,15 +1210,33 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     }
 
     /// <summary>Applies the persisted settings to the shell theme and every open terminal.</summary>
-    private void ApplySettingsToApp()
+    private void ApplySettingsToApp() => ApplySettingsToApp(App.Settings.Current);
+
+    /// <summary>Applies either saved settings or a reversible Settings-dialog preview.</summary>
+    private void ApplySettingsToApp(AppSettings settings)
     {
-        var settings = App.Settings.Current;
-        Root.RequestedTheme = settings.Theme == "light" ? ElementTheme.Light : ElementTheme.Dark;
+        Root.RequestedTheme = ThemeCatalog.IsLight(settings.Theme) ? ElementTheme.Light : ElementTheme.Dark;
+        var palette = ThemeVisualPalette.For(settings.Theme);
+        _themePalette = palette;
+        Root.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Shell);
+        FilterBar.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Shell);
+        FilterFieldBorder.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Input);
+        FilterFieldBorder.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Divider);
+        QuickConnectBox.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Input);
+        ExpandAllButton.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Input);
+        CollapseAllButton.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Input);
+        TitleBarDivider.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Frame);
+        StatusBar.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Frame);
+        foreach (var (splitter, line) in _splitterLines)
+            line.Background = SplitterBrush(_activeSplitters.Contains(splitter));
+        foreach (var groupView in _groupViews.Values)
+            groupView.ApplyTheme(palette);
         ApplyTitleBarButtonColors(); // caption buttons don't follow XAML theming
         foreach (var tab in ViewModel.AllTabs)
         {
             if (tab.View is TerminalTabView view)
                 view.ApplySettings(settings);
+            tab.ApplyAppTheme(settings.Theme);
             tab.NotifyAgentVisuals(); // the agent icon/badge is gated on a setting
         }
     }
@@ -1230,6 +1252,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     // ---- tree pane persistence ----
 
     private readonly Dictionary<CommunityToolkit.WinUI.Controls.GridSplitter, Border> _splitterLines = [];
+    private readonly HashSet<CommunityToolkit.WinUI.Controls.GridSplitter> _activeSplitters = [];
 
     private void ConfigureSplitter(CommunityToolkit.WinUI.Controls.GridSplitter splitter, Border line)
     {
@@ -1251,14 +1274,21 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (sender is CommunityToolkit.WinUI.Controls.GridSplitter splitter
             && _splitterLines.TryGetValue(splitter, out var line))
         {
-            var resource = active ? "SessionSplitterHoverBrush" : "SessionDividerBrush";
-            line.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[resource];
+            if (active)
+                _activeSplitters.Add(splitter);
+            else
+                _activeSplitters.Remove(splitter);
+            line.Background = SplitterBrush(active);
             if (splitter.ResizeDirection == CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns)
                 line.Width = active ? 3 : 1;
             else
                 line.Height = active ? 3 : 1;
         }
     }
+
+    private Microsoft.UI.Xaml.Media.Brush SplitterBrush(bool active) => active
+        ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSplitterHoverBrush"]
+        : new Microsoft.UI.Xaml.Media.SolidColorBrush(_themePalette.Divider);
 
     private void SaveTreePaneWidth()
     {
@@ -1431,7 +1461,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         FilterFieldBorder.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSplitterHoverBrush"];
 
     private void FilterBox_LostFocus(object sender, RoutedEventArgs e) =>
-        FilterFieldBorder.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["ControlStrokeColorDefaultBrush"];
+        FilterFieldBorder.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(_themePalette.Divider);
 
     private void FilterBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {

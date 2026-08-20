@@ -26,7 +26,7 @@ public partial class App : Application
         // Application-level theme must be set before any UI exists; it also themes
         // popups/dialogs, which don't inherit element-level RequestedTheme.
         Settings.Load();
-        RequestedTheme = Settings.Current.Theme == "light" ? ApplicationTheme.Light : ApplicationTheme.Dark;
+        RequestedTheme = ThemeCatalog.IsLight(Settings.Current.Theme) ? ApplicationTheme.Light : ApplicationTheme.Dark;
 
         InitializeComponent();
         UnhandledException += (_, e) =>

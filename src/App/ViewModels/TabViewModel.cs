@@ -30,10 +30,12 @@ public sealed class TabViewModel : ObservableObject
     private TabConnectionState _state = TabConnectionState.Connecting;
     private string _connectionSummary = "";
     private object? _view;
+    private string _appTheme;
 
     public TabViewModel(Session session)
     {
         _session = session;
+        _appTheme = App.Settings.Current.Theme;
     }
 
     /// <summary>What this tab's target kind supports; drives menu naming and visibility.</summary>
@@ -278,6 +280,7 @@ public sealed class TabViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(AccentVisibility));
         OnPropertyChanged(nameof(HeaderBackground));
+        OnPropertyChanged(nameof(HeaderBorderBrush));
         OnPropertyChanged(nameof(HeaderForeground));
         OnPropertyChanged(nameof(CloseOpacity));
         OnPropertyChanged(nameof(CloseInteractive));
@@ -290,25 +293,36 @@ public sealed class TabViewModel : ObservableObject
 
     public bool CloseInteractive => !IsPinned && (IsActive || IsPointerOver);
 
-    private static bool IsDark =>
-        Microsoft.UI.Xaml.Application.Current.RequestedTheme == Microsoft.UI.Xaml.ApplicationTheme.Dark;
+    private bool IsDark => !Sessions.Core.Storage.ThemeCatalog.IsLight(_appTheme);
+
+    /// <summary>Applies a saved or previewed app theme to this tab's chrome.</summary>
+    public void ApplyAppTheme(string theme)
+    {
+        _appTheme = theme;
+        NotifyTabVisuals();
+    }
 
     public Microsoft.UI.Xaml.Media.Brush HeaderBackground
     {
         get
         {
-            // VS Code Dark Modern: inactive tabs share the strip background; the active
-            // tab matches the editor (here: the terminal); hover gets a subtle tint.
+            // In split view, only the focused group's selected tab matches the terminal.
+            // A selected tab in another group stays on the inactive strip surface so the
+            // focused group remains clear; pointer hover still gets a subtle tint.
             Windows.UI.Color color;
-            if (IsActive)
-                color = IsDark ? Windows.UI.Color.FromArgb(255, 0x0C, 0x0C, 0x0C) : Windows.UI.Color.FromArgb(255, 0xFF, 0xFF, 0xFF);
+            var palette = ThemeVisualPalette.For(_appTheme);
+            if (IsActive && IsGroupFocused)
+                color = palette.ActiveTab;
             else if (IsPointerOver)
-                color = IsDark ? Windows.UI.Color.FromArgb(255, 0x20, 0x20, 0x20) : Windows.UI.Color.FromArgb(255, 0xE8, 0xE8, 0xE8);
+                color = palette.HoverTab;
             else
-                color = IsDark ? Windows.UI.Color.FromArgb(255, 0x18, 0x18, 0x18) : Windows.UI.Color.FromArgb(255, 0xF3, 0xF3, 0xF3);
+                color = palette.InactiveTab;
             return new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
         }
     }
+
+    public Microsoft.UI.Xaml.Media.Brush HeaderBorderBrush =>
+        new Microsoft.UI.Xaml.Media.SolidColorBrush(ThemeVisualPalette.For(_appTheme).Divider);
 
     public Microsoft.UI.Xaml.Media.Brush HeaderForeground => new Microsoft.UI.Xaml.Media.SolidColorBrush(
         IsActive

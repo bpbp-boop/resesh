@@ -105,6 +105,7 @@
             </Grid.ColumnDefinitions>
 
             <Border
+                x:Name="TitleBarDivider"
                 Grid.ColumnSpan="6"
                 Height="1"
                 VerticalAlignment="Bottom"
@@ -257,6 +258,7 @@
             <!-- Left pane: dedicated tree-filter chrome above the session tree. -->
             <Grid Grid.Column="0" RowDefinitions="Auto,Auto,*">
                 <Grid
+                    x:Name="FilterBar"
                     Grid.Row="0"
                     ColumnDefinitions="*,Auto,Auto"
                     Padding="8"
@@ -339,6 +341,7 @@
                          regular variants used at their native 16-unit scale. The 24px assets
                          would need downscaling, which thins their strokes below a pixel here. -->
                     <Button
+                        x:Name="ExpandAllButton"
                         Grid.Column="1"
                         Width="30"
                         Height="30"
@@ -349,6 +352,7 @@
                         <PathIcon Data="M0.19527 4.40237C0.39053 4.59764 0.70711 4.59764 0.90237 4.40237L4.04882 1.25593L7.19522 4.40237C7.39052 4.59764 7.70712 4.59764 7.90242 4.40237C8.09762 4.20711 8.09762 3.89053 7.90242 3.69527L4.40237 0.19527C4.20711 0 3.89053 0 3.69527 0.19527L0.19527 3.69527C0 3.89053 0 4.20711 0.19527 4.40237ZM0.19527 7.69527C0.39053 7.5 0.70711 7.5 0.90237 7.69527L4.04882 10.84172L7.19522 7.69527C7.39052 7.5 7.70712 7.5 7.90242 7.69527C8.09762 7.89053 8.09762 8.20712 7.90242 8.40242L4.40237 11.90242C4.20711 12.09762 3.89053 12.09762 3.69527 11.90242L0.19527 8.40242C0 8.20712 0 7.89053 0.19527 7.69527Z" />
                     </Button>
                     <Button
+                        x:Name="CollapseAllButton"
                         Grid.Column="2"
                         Width="30"
                         Height="30"
@@ -458,6 +462,7 @@
 
         <!-- Status bar -->
         <Border
+            x:Name="StatusBar"
             Grid.Row="2"
             Padding="12,6"
             Background="{ThemeResource LayerFillColorDefaultBrush}"

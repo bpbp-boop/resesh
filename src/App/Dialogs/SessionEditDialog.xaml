@@ -203,11 +203,7 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <ComboBox x:Name="OverrideThemeBox" Grid.Column="0" Header="Theme" SelectedIndex="0" HorizontalAlignment="Stretch">
-                        <ComboBoxItem Content="(app setting)" />
-                        <ComboBoxItem Content="dark" />
-                        <ComboBoxItem Content="light" />
-                    </ComboBox>
+                    <ComboBox x:Name="OverrideThemeBox" Grid.Column="0" Header="Theme" SelectedIndex="0" HorizontalAlignment="Stretch" />
                     <TextBox x:Name="OverrideFontFamilyBox" Grid.Column="1" Header="Terminal font family" PlaceholderText="(app setting)" />
                 </Grid>
 

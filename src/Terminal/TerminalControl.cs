@@ -385,18 +385,38 @@ public sealed class TerminalControl : Grid, IDisposable
         int fontSize, string fontFamily, string theme,
         bool copyOnSelect, bool rightClickPaste, int scrollback,
         IReadOnlyList<object>? highlights = null)
-        => _initialOptions = new
+    {
+        _webView.DefaultBackgroundColor = ThemeBackground(theme);
+        _initialOptions = new
         {
             type = "initOptions", fontSize, fontFamily, theme, copyOnSelect, rightClickPaste, scrollback, highlights,
         };
+    }
 
     public void ApplyOptions(
         int? fontSize = null, string? fontFamily = null, string? theme = null,
         bool? copyOnSelect = null, bool? rightClickPaste = null, int? scrollback = null)
     {
+        if (theme is not null)
+            _webView.DefaultBackgroundColor = ThemeBackground(theme);
         TraceHook?.Invoke($"ApplyOptions theme={theme} fontSize={fontSize} pageReady={_pageReady}");
         Post(new { type = "setOptions", fontSize, fontFamily, theme, copyOnSelect, rightClickPaste, scrollback });
     }
+
+    private static Windows.UI.Color ThemeBackground(string theme) => theme.ToLowerInvariant() switch
+    {
+        "light" => Windows.UI.Color.FromArgb(255, 0xFF, 0xFF, 0xFF),
+        "solarized-dark" => Windows.UI.Color.FromArgb(255, 0x00, 0x2B, 0x36),
+        "solarized-light" => Windows.UI.Color.FromArgb(255, 0xFD, 0xF6, 0xE3),
+        "dracula" => Windows.UI.Color.FromArgb(255, 0x28, 0x2A, 0x36),
+        "one-dark" => Windows.UI.Color.FromArgb(255, 0x28, 0x2C, 0x34),
+        "nord" => Windows.UI.Color.FromArgb(255, 0x2E, 0x34, 0x40),
+        "gruvbox-dark" => Windows.UI.Color.FromArgb(255, 0x28, 0x28, 0x28),
+        "monokai" => Windows.UI.Color.FromArgb(255, 0x27, 0x28, 0x22),
+        "tokyo-night" => Windows.UI.Color.FromArgb(255, 0x1A, 0x1B, 0x26),
+        "catppuccin-mocha" => Windows.UI.Color.FromArgb(255, 0x1E, 0x1E, 0x2E),
+        _ => Windows.UI.Color.FromArgb(255, 0x0C, 0x0C, 0x0C),
+    };
 
     /// <summary>Replaces the page's active highlight rule set (enabled rules only,
     /// already resolved for the session). The page recompiles and rescans the viewport.</summary>

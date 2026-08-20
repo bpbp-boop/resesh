@@ -128,7 +128,7 @@
                                 Margin="0"
                                 Background="{x:Bind HeaderBackground, Mode=OneWay}"
                                 BorderThickness="0,0,1,0"
-                                BorderBrush="{ThemeResource CodeTabSeparatorBrush}"
+                                BorderBrush="{x:Bind HeaderBorderBrush, Mode=OneWay}"
                                 PointerEntered="TabHeader_PointerEntered"
                                 PointerExited="TabHeader_PointerExited">
                                 <Rectangle
@@ -281,8 +281,10 @@
             </TabView.TabItemTemplate>
             </TabView>
             <Grid
+                x:Name="TabStripActions"
                 Grid.Column="1"
                 Height="40"
+                BorderThickness="0,0,0,1"
                 Background="{ThemeResource TabViewBackground}">
                 <StackPanel
                     Orientation="Horizontal"

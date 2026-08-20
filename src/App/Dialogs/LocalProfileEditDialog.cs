@@ -49,7 +49,7 @@ public sealed class LocalProfileEditDialog : ContentDialog
     private readonly ComboBox _overrideTheme = new()
     {
         Header = "Theme override",
-        ItemsSource = new[] { "Use app setting", "dark", "light" },
+        ItemsSource = new[] { new ThemeChoice("", "Use app setting") }.Concat(ThemeCatalog.All).ToList(),
         SelectedIndex = 0,
         HorizontalAlignment = HorizontalAlignment.Stretch,
     };
@@ -126,7 +126,8 @@ public sealed class LocalProfileEditDialog : ContentDialog
                 : string.Join(Environment.NewLine, target.Environment.Select(kv => $"{kv.Key}={kv.Value}"));
             if (existing.Overrides is { } overrides)
             {
-                _overrideTheme.SelectedIndex = overrides.Theme switch { "dark" => 1, "light" => 2, _ => 0 };
+                _overrideTheme.SelectedItem = ThemeCatalog.All.FirstOrDefault(theme => theme.Id == overrides.Theme)
+                    ?? _overrideTheme.Items[0];
                 _overrideFontFamily.Text = overrides.FontFamily ?? "";
                 if (overrides.FontSize is { } fontSize)
                     _overrideFontSize.Value = fontSize;
@@ -199,7 +200,7 @@ public sealed class LocalProfileEditDialog : ContentDialog
 
         var overrides = new TerminalOverrides
         {
-            Theme = _overrideTheme.SelectedIndex switch { 1 => "dark", 2 => "light", _ => null },
+            Theme = (_overrideTheme.SelectedItem as ThemeChoice)?.Id is { Length: > 0 } theme ? theme : null,
             FontFamily = string.IsNullOrWhiteSpace(_overrideFontFamily.Text) ? null : _overrideFontFamily.Text.Trim(),
             FontSize = double.IsNaN(_overrideFontSize.Value) ? null : (int)_overrideFontSize.Value,
             Scrollback = double.IsNaN(_overrideScrollback.Value) ? null : (int)_overrideScrollback.Value,

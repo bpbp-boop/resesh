@@ -49,6 +49,8 @@ public sealed class TerminalTabView : Grid, IDisposable
     private SftpPaneView? _filePane;
     private CommunityToolkit.WinUI.Controls.GridSplitter? _paneSplitter;
     private Border? _paneSplitterLine;
+    private ThemeVisualPalette _chromePalette = ThemeVisualPalette.For(App.Settings.Current.Theme);
+    private bool _paneSplitterActive;
     private string? _secret;
     private Session? _resolvedSshSession;
     private const double DefaultFilePaneWidth = 340;
@@ -662,6 +664,8 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// with this session's overrides layered on top.</summary>
     public void ApplySettings(Core.Storage.AppSettings settings)
     {
+        _chromePalette = ThemeVisualPalette.For(settings.Theme);
+        ApplyPaneSplitterTheme();
         var effective = settings.WithOverrides(Session.Overrides);
         _terminal.ApplyOptions(
             fontSize: effective.FontSize,
@@ -785,7 +789,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             {
                 Width = 1,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionDividerBrush"],
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(_chromePalette.Divider),
                 IsHitTestVisible = false,
             };
             _paneSplitter.PointerEntered += (_, _) => SetPaneSplitterActive(active: true);
@@ -817,9 +821,18 @@ public sealed class TerminalTabView : Grid, IDisposable
     {
         if (_paneSplitterLine is null)
             return;
-        var resource = active ? "SessionSplitterHoverBrush" : "SessionDividerBrush";
-        _paneSplitterLine.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources[resource];
+        _paneSplitterActive = active;
+        ApplyPaneSplitterTheme();
         _paneSplitterLine.Width = active ? 3 : 1;
+    }
+
+    private void ApplyPaneSplitterTheme()
+    {
+        if (_paneSplitterLine is null)
+            return;
+        _paneSplitterLine.Background = _paneSplitterActive
+            ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSplitterHoverBrush"]
+            : new Microsoft.UI.Xaml.Media.SolidColorBrush(_chromePalette.Divider);
     }
 
     public void HideFilePane()

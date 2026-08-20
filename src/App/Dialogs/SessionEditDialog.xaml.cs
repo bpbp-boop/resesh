@@ -37,6 +37,8 @@ public sealed partial class SessionEditDialog : ContentDialog
         SshKeyStore keyStore, string? notice = null)
     {
         InitializeComponent();
+        OverrideThemeBox.ItemsSource = new[] { new ThemeChoice("", "Use app setting") }
+            .Concat(ThemeCatalog.All).ToList();
         _existing = existing;
         _keyStore = keyStore;
         Title = existing is null ? "New Session" : "Edit Session";
@@ -78,7 +80,8 @@ public sealed partial class SessionEditDialog : ContentDialog
 
             if (existing.Overrides is { } overrides)
             {
-                OverrideThemeBox.SelectedIndex = overrides.Theme switch { "dark" => 1, "light" => 2, _ => 0 };
+                OverrideThemeBox.SelectedItem = ThemeCatalog.All.FirstOrDefault(theme => theme.Id == overrides.Theme)
+                    ?? OverrideThemeBox.Items[0];
                 OverrideFontFamilyBox.Text = overrides.FontFamily ?? "";
                 if (overrides.FontSize is { } fontSize)
                     OverrideFontSizeBox.Value = fontSize;
@@ -218,7 +221,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         // An all-null overrides object is stored as null so sessions.json stays clean.
         var overrides = new TerminalOverrides
         {
-            Theme = OverrideThemeBox.SelectedIndex switch { 1 => "dark", 2 => "light", _ => null },
+            Theme = (OverrideThemeBox.SelectedItem as ThemeChoice)?.Id is { Length: > 0 } theme ? theme : null,
             FontFamily = string.IsNullOrWhiteSpace(OverrideFontFamilyBox.Text) ? null : OverrideFontFamilyBox.Text.Trim(),
             FontSize = double.IsNaN(OverrideFontSizeBox.Value) ? null : (int)OverrideFontSizeBox.Value,
             Scrollback = double.IsNaN(OverrideScrollbackBox.Value) ? null : (int)OverrideScrollbackBox.Value,
