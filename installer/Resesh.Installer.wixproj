@@ -1,0 +1,27 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+  <PropertyGroup>
+    <InstallerPlatform Condition="'$(InstallerPlatform)' == ''">x64</InstallerPlatform>
+    <IntermediateOutputPath>obj\$(InstallerPlatform)\$(Configuration)\</IntermediateOutputPath>
+    <OutputName>Resesh-$(ProductVersion)-windows-$(InstallerPlatform)</OutputName>
+    <OutputType>Package</OutputType>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
+    <DefineConstants>$(DefineConstants);ProductVersion=$(ProductVersion)</DefineConstants>
+    <DebugType>none</DebugType>
+    <SuppressIces>$(SuppressIces);ICE03</SuppressIces>
+    <!-- Bundle.wxs in this directory belongs to Resesh.Bundle.wixproj. -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Package.wxs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <BindPath Include="$(PayloadDir)" BindName="Payload" />
+  </ItemGroup>
+
+  <Target Name="ValidateInstallerInputs" BeforeTargets="Build">
+    <Error Condition="'$(PayloadDir)' == ''" Text="PayloadDir must point to a Resesh release build." />
+    <Error Condition="!Exists('$(PayloadDir)\Resesh.App.exe')" Text="PayloadDir does not contain Resesh.App.exe." />
+  </Target>
+</Project>

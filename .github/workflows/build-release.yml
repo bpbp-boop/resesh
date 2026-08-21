@@ -1,0 +1,245 @@
+name: Build and release
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  DOTNET_NOLOGO: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: windows-2022
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Select .NET 8 SDK
+        run: dotnet new globaljson --sdk-version 8.0.100 --roll-forward latestFeature --force
+
+      - name: Run .NET tests
+        run: >-
+          dotnet test tests/Core.Tests/Resesh.Core.Tests.csproj
+          --configuration Release
+          --
+          RunConfiguration.MaxCpuCount=1
+
+      - name: Run terminal tests
+        run: node --test tests/*.js
+
+  build:
+    name: Build ${{ matrix.asset_architecture }}
+    needs: test
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x64
+            runtime: win-x64
+            asset_architecture: x64
+            installer_platform: x64
+          - platform: ARM64
+            runtime: win-arm64
+            asset_architecture: arm64
+            installer_platform: arm64
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Select .NET 8 SDK
+        run: dotnet new globaljson --sdk-version 8.0.100 --roll-forward latestFeature --force
+
+      - name: Set build version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          }
+          else {
+            $version = "0.0.$env:GITHUB_RUN_NUMBER"
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Release tags must use the form v1.2.3. MSI versions must be numeric."
+          }
+
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Build self-contained app
+        shell: pwsh
+        run: |
+          dotnet build src/App/Resesh.App.csproj `
+            --configuration Release `
+            --runtime "${{ matrix.runtime }}" `
+            --self-contained true `
+            -p:Platform="${{ matrix.platform }}" `
+            -p:DebugSymbols=false `
+            -p:DebugType=None
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Build failed with exit code $LASTEXITCODE."
+          }
+
+          $searchRoot = "src/App/bin/${{ matrix.platform }}/Release"
+          $appExe = Get-ChildItem $searchRoot -Recurse -Filter Resesh.App.exe -File |
+            Where-Object {
+              Test-Path (Join-Path $_.Directory.FullName "Resesh.App.runtimeconfig.json")
+            } |
+            Select-Object -First 1
+
+          if ($null -eq $appExe) {
+            throw "Build did not produce Resesh.App.exe."
+          }
+
+          # Self-contained markers: coreclr.dll (.NET) and Microsoft.ui.xaml.dll (Windows App SDK).
+          $requiredFiles = @(
+            "coreclr.dll",
+            "Microsoft.ui.xaml.dll"
+          )
+
+          foreach ($fileName in $requiredFiles) {
+            if (-not (Test-Path (Join-Path $appExe.Directory.FullName $fileName))) {
+              throw "Self-contained build is missing runtime file $fileName."
+            }
+          }
+
+          $unexpectedFiles = @(
+            "DirectML.dll",
+            "onnxruntime.dll",
+            "Microsoft.Windows.Search.dll",
+            "Microsoft.Windows.Widgets.dll"
+          )
+
+          foreach ($fileName in $unexpectedFiles) {
+            if (Test-Path (Join-Path $appExe.Directory.FullName $fileName)) {
+              throw "Build contains unexpected runtime file $fileName."
+            }
+          }
+
+          "APP_OUTPUT_DIR=$($appExe.Directory.FullName)" >> $env:GITHUB_ENV
+
+      - name: Create MSI, setup bundle, and portable ZIP
+        shell: pwsh
+        run: |
+          $outputDir = Join-Path $env:GITHUB_WORKSPACE "release-assets"
+          $assetPrefix = "Resesh-$env:VERSION-windows-${{ matrix.asset_architecture }}"
+          $zipPath = Join-Path $outputDir "$assetPrefix-portable.zip"
+
+          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+          Compress-Archive -Path "$env:APP_OUTPUT_DIR\*" -DestinationPath $zipPath -CompressionLevel Optimal
+
+          dotnet build installer/Resesh.Installer.wixproj `
+            --configuration Release `
+            -p:InstallerPlatform="${{ matrix.installer_platform }}" `
+            -p:PayloadDir="$env:APP_OUTPUT_DIR" `
+            -p:ProductVersion="$env:VERSION" `
+            -p:OutputPath="$outputDir"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSI build failed with exit code $LASTEXITCODE."
+          }
+
+          $msiPath = Join-Path $outputDir "$assetPrefix.msi"
+          if (-not (Test-Path $msiPath)) {
+            throw "MSI build did not produce $msiPath."
+          }
+
+          ./installer/download-prereqs.ps1 -Arch "${{ matrix.asset_architecture }}"
+
+          dotnet build installer/Resesh.Bundle.wixproj `
+            --configuration Release `
+            -p:InstallerPlatform="${{ matrix.installer_platform }}" `
+            -p:ProductVersion="$env:VERSION" `
+            -p:MsiPath="$msiPath" `
+            -p:OutputPath="$outputDir"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Bundle build failed with exit code $LASTEXITCODE."
+          }
+
+          $setupPath = Join-Path $outputDir "$assetPrefix-setup.exe"
+          if (-not (Test-Path $setupPath)) {
+            throw "Bundle build did not produce $setupPath."
+          }
+
+      - name: Upload build assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: resesh-${{ matrix.asset_architecture }}
+          path: |
+            release-assets/*.msi
+            release-assets/*-setup.exe
+            release-assets/*-portable.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Create GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-2022
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download build assets
+        uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create checksums
+        shell: pwsh
+        run: |
+          $lines = Get-ChildItem release-assets -File |
+            Sort-Object Name |
+            ForEach-Object {
+              $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              "$hash  $($_.Name)"
+            }
+
+          $lines | Set-Content release-assets/SHA256SUMS.txt -Encoding utf8NoBOM
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $assets = Get-ChildItem release-assets -File | ForEach-Object FullName
+          gh release view $env:GITHUB_REF_NAME *> $null
+
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:GITHUB_REF_NAME @assets --clobber
+          }
+          else {
+            gh release create $env:GITHUB_REF_NAME @assets `
+              --verify-tag `
+              --generate-notes `
+              --title "Resesh $env:GITHUB_REF_NAME"
+          }

@@ -1,0 +1,29 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+  <PropertyGroup>
+    <InstallerPlatform Condition="'$(InstallerPlatform)' == ''">x64</InstallerPlatform>
+    <IntermediateOutputPath>obj\bundle\$(InstallerPlatform)\$(Configuration)\</IntermediateOutputPath>
+    <OutputName>Resesh-$(ProductVersion)-windows-$(InstallerPlatform)-setup</OutputName>
+    <OutputType>Bundle</OutputType>
+    <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
+    <DefineConstants>$(DefineConstants);ProductVersion=$(ProductVersion);Arch=$(InstallerPlatform);MsiPath=$(MsiPath)</DefineConstants>
+    <DebugType>none</DebugType>
+    <!-- Package.wxs in this directory belongs to Resesh.Installer.wixproj. -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Bundle.wxs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Bal.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+
+  <Target Name="ValidateBundleInputs" BeforeTargets="Build">
+    <Error Condition="'$(MsiPath)' == ''" Text="MsiPath must point to the built Resesh MSI." />
+    <Error Condition="'$(MsiPath)' != '' And !Exists('$(MsiPath)')" Text="MsiPath does not exist: $(MsiPath)" />
+    <Error Condition="!Exists('prereqs\vc_redist.$(InstallerPlatform).exe')" Text="Missing prereqs\vc_redist.$(InstallerPlatform).exe. Run installer\download-prereqs.ps1 -Arch $(InstallerPlatform) first." />
+    <Error Condition="!Exists('prereqs\MicrosoftEdgeWebView2Setup.exe')" Text="Missing prereqs\MicrosoftEdgeWebView2Setup.exe. Run installer\download-prereqs.ps1 first." />
+  </Target>
+</Project>
