@@ -295,6 +295,29 @@
     })
     .catch(function () {});
 })();
+
+(function () {
+  // Click a screenshot to view it full-size; click or Esc closes.
+  function close() {
+    var box = document.querySelector(".lightbox");
+    if (box) { box.remove(); }
+  }
+  document.querySelectorAll("img.shot").forEach(function (img) {
+    img.addEventListener("click", function () {
+      var box = document.createElement("div");
+      box.className = "lightbox";
+      var full = document.createElement("img");
+      full.src = img.src;
+      full.alt = img.alt;
+      box.appendChild(full);
+      box.addEventListener("click", close);
+      document.body.appendChild(box);
+    });
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") { close(); }
+  });
+})();
 </script>
 
 </body>
