@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resesh — a fast SSH client for Windows</title>
+<link rel="canonical" href="https://resesh.net/">
+<meta name="description" content="Resesh is a fast SSH client for Windows. Keep your servers in one tree, open them in tabs, and do your work in one window.">
+<link rel="icon" href="assets/favicon.ico">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <a class="brand" href="#home"><img src="assets/favicon-32.png" alt="">Resesh</a>
+    <div class="nav-links">
+      <a href="#home">Home</a>
+      <a href="#features">Features</a>
+      <a href="#faq">FAQ</a>
+      <a href="#downloads">Downloads</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ================= HOME ================= -->
+<section id="home">
+  <div class="wrap">
+    <h1>Resesh</h1>
+    <p class="lead">Rethinking the connection mananger</p>
+    <p class="sub">Keep all your servers in one tree. Open them in tabs. Do your work in one window.</p>
+    <div class="cta">
+      <a class="btn btn-primary" href="#downloads">Download</a>
+      <a class="btn btn-ghost" href="#features">See the features</a>
+    </div>
+    <img class="shot" src="assets/hero.png" alt="The Resesh main window. The session tree is on the left. Two terminals are open side by side.">
+    <p class="shot-caption">Split view with two live connections. The tree, quick connect, and tabs stay in one window.</p>
+  </div>
+</section>
+
+<!-- ================= FEATURES ================= -->
+<section id="features" class="section-pad">
+  <div class="wrap">
+    <p class="kicker">Features</p>
+    <h2>Made for daily work on many hosts</h2>
+
+    <div class="feature">
+      <div class="feature-text">
+        <h3>One tree for all your servers</h3>
+        <p>Put your sessions in folders. Give each one an icon and a color.</p>
+        <p>Type in the filter box to find a session. Press <kbd>Enter</kbd> to connect.</p>
+        <p>Quick connect is always at the top. Press <kbd>Ctrl+K</kbd> and type a name, or <span style="font-family:'Cascadia Mono',Consolas,monospace">user@host</span>.</p>
+      </div>
+      <div class="feature-media">
+        <img class="shot" src="assets/search.png" alt="The session tree, filtered by the text db. Three sessions match." style="max-width:340px">
+      </div>
+    </div>
+
+    <div class="feature flip">
+      <div class="feature-text">
+        <h3>Tabs and split view</h3>
+        <p>Open many sessions in tabs. Each tab shows its state — a green dot for connected, a blue dot for output you have not seen yet.</p>
+        <p>Split tabs side-by-side or vertically. You can add three, four or any number of splits as needed.</p>
+      </div>
+      <div class="feature-media">
+        <img class="shot" src="assets/tabs.png" alt="The Resesh window in split view. Three tabs on the left show two web servers and a switch. The right pane shows a database server.">
+      </div>
+    </div>
+
+    <div class="feature">
+      <div class="feature-text">
+        <h3>Keyword highlighting</h3>
+        <p>Interface names, IP addresses, and up or down states get their own colors.</p>
+        <p>The built-in rules know network output. You can add your own rules with a regular expression.</p>
+      </div>
+      <div class="feature-media">
+        <img class="shot" src="assets/highlight.png" alt="A terminal with Cisco switch output. Interface names, IP addresses, and states show in different colors.">
+      </div>
+    </div>
+
+    <div class="feature flip">
+      <div class="feature-text">
+        <h3>A scrollbar that knows your output</h3>
+        <p>The scrollbar shows a mark for each command, error, and search match. Click a mark to go to that line.</p>
+        <p>A red mark shows a command that failed. Press <kbd>Ctrl+Shift+F</kbd> to search the output.</p>
+      </div>
+      <div class="feature-media">
+        <img class="shot" src="assets/ruler.png" alt="The find bar with the search text down, and the scrollbar with colored marks.">
+      </div>
+    </div>
+
+    <div class="feature">
+      <div class="feature-text">
+        <h3>Every command in one list</h3>
+        <p>The commands panel lists each command from the session, with a green dot for success and a red dot for a failure.</p>
+        <p>Click a command to jump to its output. Copy the full output of any command with one click — also from the scrollbar tooltip.</p>
+        <p>Works with shell integration on the host, or without it: press <kbd>Enter</kbd> and Resesh finds the command itself.</p>
+      </div>
+      <div class="feature-media">
+        <img class="shot" src="assets/commands.png" alt="A session on a database server. The commands panel on the right lists nine commands. Two have a red dot.">
+      </div>
+    </div>
+
+    <div class="feature flip">
+      <div class="feature-text">
+        <h3>Agent-aware tabs</h3>
+        <p>Run Codex, Claude Code or another AI agent in a tab. The tab shows the agent and its state.</p>
+        <p>A badge tells you when the agent waits for you.</p>
+      </div>
+      <div class="feature-media">
+        <img class="shot" src="assets/agents.png" alt="The tab strip. Two tabs show the Claude icon with a state badge.">
+      </div>
+    </div>
+
+    <div class="feature">
+      <div class="feature-text">
+        <h3>Remote files next to the terminal</h3>
+        <p>The file pane shows the files on the host over SFTP. Upload and download with drag and drop, or with the toolbar.</p>
+        <p>One click opens the pane at the folder your terminal is in.</p>
+        <p>With <a href="https://github.com/winfsp/sshfs-win">SSHFS-Win</a> installed, one more click mounts the same folder in Explorer.</p>
+      </div>
+      <div class="feature-media">
+        <img class="shot" src="assets/file-pane.png" alt="A session on a web server. The file pane on the right lists the folders and files in /srv/app.">
+      </div>
+    </div>
+
+    <div class="feature flip">
+      <div class="feature-text">
+        <h3>Your rules, your colors</h3>
+        <p>Turn each highlight rule on or off. Change a built-in rule, or add a new one.</p>
+        <p>The preview shows the result immediately.</p>
+      </div>
+      <div class="feature-media">
+        <img class="shot" src="assets/settings.png" alt="The settings window with the list of highlight rules and a colored preview line.">
+      </div>
+    </div>
+
+    <div class="feature">
+      <div class="feature-text">
+        <h3>Eleven themes</h3>
+        <p>Pick a theme. The tree, the tabs, and the terminal follow it.</p>
+        <p>Each session can also keep its own theme, font, and highlight rules.</p>
+      </div>
+      <div class="feature-media theme-pair">
+        <img class="shot" src="assets/theme-tokyo.png" alt="The app in the Tokyo Night theme.">
+        <img class="shot" src="assets/theme-light.png" alt="The app in the Solarized Light theme.">
+      </div>
+    </div>
+
+    <div class="feature flip">
+      <div class="feature-text">
+        <h3>Local shells in the same window</h3>
+        <p>PowerShell, Command Prompt, WSL, and Git Bash — Resesh finds the shells on your PC and puts them under <em>Local</em>.</p>
+        <p>A local tab works like any other tab. Split it, search it, give it a theme. <kbd>Ctrl+Shift+T</kbd> opens your default shell.</p>
+      </div>
+      <div class="feature-media">
+        <img class="shot" src="assets/local-shells.png" alt="Three local tabs: PowerShell, Command Prompt, and Git Bash. The PowerShell tab shows command output.">
+      </div>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Persistent sessions</h3>
+        <p>A lost connection does not stop your work. Resesh attaches again and shows the output you missed. tmux on the host makes it possible.</p>
+      </div>
+      <div class="card">
+        <h3>Import from SecureCRT</h3>
+        <p>Import your saved SecureCRT sessions in one step.</p>
+      </div>
+      <div class="card">
+        <h3>Secrets stay safe</h3>
+        <p>Passwords and key passphrases go into Windows Credential Manager only. They never go into files on disk.</p>
+      </div>
+      <div class="card">
+        <h3>One list for your SSH keys</h3>
+        <p>Register a private key one time. Use it in many sessions. Resesh never moves the key file.</p>
+      </div>
+      <div class="card">
+        <h3>Backups</h3>
+        <p>Export one file with your sessions, settings, and known hosts. Import it on a new PC. Backups with secrets are encrypted.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FAQ ================= -->
+<section id="faq" class="section-pad">
+  <div class="wrap">
+    <p class="kicker">FAQ</p>
+    <h2>Questions and answers</h2>
+
+    <div class="faq-list">
+      <div class="faq-item">
+        <h3>Which Windows versions can run Resesh?</h3>
+        <p>Windows 10 21H2 or later, and Windows 11. Resesh runs on x64 and Arm64.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Is Resesh free?</h3>
+        <p>Yes. Resesh is free while it is in beta.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Where does Resesh keep my passwords?</h3>
+        <p>In Windows Credential Manager. Passwords never go into files on disk.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Can I use SSH keys?</h3>
+        <p>Yes. Register a private key one time and use it in many sessions. Resesh points to the key file and never moves it.</p>
+      </div>
+      <div class="faq-item">
+        <h3>What do persistent sessions need?</h3>
+        <p>The host needs tmux. Turn on <em>Persistent</em> in the session options. Resesh does the rest.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Can I move my data to a new PC?</h3>
+        <p>Yes. Export a backup file on the old PC. Import it on the new PC.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Does Resesh send my data anywhere?</h3>
+        <p>No. Resesh has no cloud part. Your data stays on your PC.</p>
+      </div>
+      <div class="faq-item">
+        <h3>How do I report a problem?</h3>
+        <p>Open an issue on <a href="https://github.com/bpbp-boop/resesh/issues">GitHub</a>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DOWNLOADS ================= -->
+<section id="downloads" class="section-pad">
+  <div class="wrap">
+    <p class="kicker">Downloads</p>
+    <h2>Get Resesh</h2>
+    <p class="lead">Resesh is in beta. New builds come to GitHub first.</p>
+
+    <div class="downloads">
+      <div class="download-card">
+        <h3>Installer</h3>
+        <span class="arch">Windows x64</span>
+        <a class="btn btn-primary" href="https://github.com/bpbp-boop/resesh/releases">Download</a>
+      </div>
+      <div class="download-card">
+        <h3>Installer</h3>
+        <span class="arch">Windows Arm64</span>
+        <a class="btn btn-primary" href="https://github.com/bpbp-boop/resesh/releases">Download</a>
+      </div>
+      <div class="download-card">
+        <h3>Portable ZIP</h3>
+        <span class="arch">no install</span>
+        <a class="btn btn-primary" href="https://github.com/bpbp-boop/resesh/releases">Download</a>
+      </div>
+    </div>
+
+    <div class="requirements">
+      <h3>You need</h3>
+      <ul>
+        <li>Windows 10 21H2 or later, or Windows 11</li>
+        <li>An x64 or Arm64 PC</li>
+        <li>300 MB of free space</li>
+      </ul>
+    </div>
+
+    <p style="margin-top:28px;color:var(--muted)">You can also build Resesh from the <a href="https://github.com/bpbp-boop/resesh">source code</a>.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-inner">
+    <span>Resesh — an SSH client for Windows</span>
+    <span>The screenshots show demo data. · <a href="https://github.com/bpbp-boop/resesh">GitHub</a></span>
+  </div>
+</footer>
+
+</body>
+</html>
