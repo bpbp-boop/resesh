@@ -236,22 +236,23 @@
     <p class="kicker">Downloads</p>
     <h2>Get Resesh</h2>
     <p class="lead">Resesh is in beta. New builds come to GitHub first.</p>
+    <p id="release-version" class="sub">Latest release: v0.1.0</p>
 
     <div class="downloads">
       <div class="download-card">
         <h3>Installer</h3>
         <span class="arch">Windows x64</span>
-        <a class="btn btn-primary" href="https://github.com/bpbp-boop/resesh/releases">Download</a>
+        <a class="btn btn-primary" data-asset-suffix="-x64-setup.exe" href="https://github.com/bpbp-boop/resesh/releases/download/v0.1.0/Resesh-0.1.0-windows-x64-setup.exe">Download</a>
       </div>
       <div class="download-card">
         <h3>Installer</h3>
         <span class="arch">Windows Arm64</span>
-        <a class="btn btn-primary" href="https://github.com/bpbp-boop/resesh/releases">Download</a>
+        <a class="btn btn-primary" data-asset-suffix="-arm64-setup.exe" href="https://github.com/bpbp-boop/resesh/releases/download/v0.1.0/Resesh-0.1.0-windows-arm64-setup.exe">Download</a>
       </div>
       <div class="download-card">
         <h3>Portable ZIP</h3>
-        <span class="arch">no install</span>
-        <a class="btn btn-primary" href="https://github.com/bpbp-boop/resesh/releases">Download</a>
+        <span class="arch">Windows x64 · no install</span>
+        <a class="btn btn-primary" data-asset-suffix="-x64-portable.zip" href="https://github.com/bpbp-boop/resesh/releases/download/v0.1.0/Resesh-0.1.0-windows-x64-portable.zip">Download</a>
       </div>
     </div>
 
@@ -264,7 +265,9 @@
       </ul>
     </div>
 
-    <p style="margin-top:28px;color:var(--muted)">You can also build Resesh from the <a href="https://github.com/bpbp-boop/resesh">source code</a>.</p>
+    <p style="margin-top:28px;color:var(--muted)">All builds, Arm64 portable ZIPs, and SHA-256 checksums are on the
+      <a href="https://github.com/bpbp-boop/resesh/releases/latest">releases page</a>.
+      You can also build Resesh from the <a href="https://github.com/bpbp-boop/resesh">source code</a>.</p>
   </div>
 </section>
 
@@ -274,6 +277,25 @@
     <span>The screenshots show demo data. · <a href="https://github.com/bpbp-boop/resesh">GitHub</a></span>
   </div>
 </footer>
+
+<script>
+(function () {
+  // Point the download buttons at the newest release; the static v0.1.0
+  // links remain the fallback if the API is unreachable.
+  fetch("https://api.github.com/repos/bpbp-boop/resesh/releases/latest")
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+    .then(function (release) {
+      document.querySelectorAll("[data-asset-suffix]").forEach(function (link) {
+        var suffix = link.getAttribute("data-asset-suffix");
+        var asset = (release.assets || []).find(function (a) { return a.name.endsWith(suffix); });
+        if (asset) { link.href = asset.browser_download_url; }
+      });
+      var note = document.getElementById("release-version");
+      if (note && release.tag_name) { note.textContent = "Latest release: " + release.tag_name; }
+    })
+    .catch(function () {});
+})();
+</script>
 
 </body>
 </html>
