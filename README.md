@@ -80,3 +80,7 @@ dotnet run --project tools/TestSshServer
 
 Listens on `127.0.0.1:2200`, accepts `test` / `test123`. The seeded session **Lab/local-test**
 connects to it. Commands: `big` (10 MB dump), `bye` (server-side close); anything else echoes.
+
+## License
+
+[GPL-2.0](LICENSE)
