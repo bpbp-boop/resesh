@@ -4,15 +4,15 @@ A tabbed SSH client for Windows, built to replace SecureCRT for daily use: a fol
 sessions with fast search on top, tabbed xterm.js terminals, and one-time import of existing
 SecureCRT sessions.
 
-See [ssh-client-v1-plan.md](ssh-client-v1-plan.md) for the full v1 plan and
-[DECISIONS.md](DECISIONS.md) for version-specific findings.
+See [ROADMAP.md](ROADMAP.md) for planned work and [DECISIONS.md](DECISIONS.md) for
+version-specific findings and design decisions.
 
 ## Stack
 
 - WinUI 3 (Windows App SDK 2.4.0), C#, .NET 8
 - SSH.NET for transport
 - WebView2 + xterm.js (bundled) as the terminal surface
-- Unpackaged, framework-dependent deployment
+- Unpackaged deployment; release builds are self-contained
 
 ## Build & run
 
@@ -53,8 +53,8 @@ dotnet test tests/Core.Tests
 | --- | --- |
 | Sessions + folders | `%APPDATA%\Resesh\sessions.json` (atomic writes, one `.bak` rotation) |
 | Secrets (passwords, key passphrases) | Windows Credential Manager, `Resesh:{session-guid}` |
-| Accepted host keys | `%APPDATA%\Resesh\known_hosts.json` (M2) |
-| Exported backups | User-selected `*.reseshbackup` file (Phase 4) |
+| Accepted host keys | `%APPDATA%\Resesh\known_hosts.json` |
+| Exported backups | User-selected `*.reseshbackup` file |
 | Crash log | `%LOCALAPPDATA%\Resesh\crash.log` |
 
 Secrets are **never** written to the normal JSON store. They are excluded from backups by
@@ -65,22 +65,9 @@ default. When included, the complete backup is encrypted with its passphrase.
 ```
 src/App        WinUI 3 app (views, viewmodels)
 src/Core       models, session store, importer, credential service — no UI dependencies
-src/Terminal   WebView2 host + xterm.js assets (M2)
+src/Terminal   WebView2 host + xterm.js assets
 tests/Core.Tests
 ```
-
-## Milestones
-
-- **M1 — Shell:** tree + search + tabs + JSON store with CRUD and drag-and-drop foldering ✅
-- **M2 — Terminal:** SSH.NET + WebView2/xterm.js bridge, host keys, credentials ✅
-- **M3 — SecureCRT import** ✅
-- **M4 — Tab groups & tab context menu** ✅
-- **M5 — Polish:** themes, settings, icon, empty state ✅
-
-Verified against a real Linux host (2026-08-14): full-screen `htop`/`vim` rendering with colors,
-split view with two live sessions, ed25519 host keys. Still unverified: private-key auth and the
-explicit keyboard-interactive prompt flow. Everything else was exercised live against the local
-test server below.
 
 ## Local test SSH server
 
