@@ -34,7 +34,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
     private long _lastOutputTicks;
     private volatile bool _disposed;
 
-    public event Action<byte[]>? OutputReceived;
+    public event TerminalOutputHandler? OutputReceived;
 
     /// <summary>Raised once when the process ends on its own, with its exit code.
     /// Never raised for a local <see cref="Stop"/>/<see cref="Dispose"/>.</summary>
@@ -180,7 +180,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
                     break; // conhost closed its write end: the console is gone
                 Interlocked.Exchange(ref _lastOutputTicks, Environment.TickCount64);
                 if (!_disposed)
-                    OutputReceived?.Invoke(buffer[..read]);
+                    OutputReceived?.Invoke(buffer.AsSpan(0, read));
             }
         }
         catch (Exception e) when (e is IOException or ObjectDisposedException or OperationCanceledException)

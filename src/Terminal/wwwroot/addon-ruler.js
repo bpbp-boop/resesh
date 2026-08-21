@@ -227,6 +227,7 @@
     this._promptPlatform = null; // strong prompt evidence persists across later mode changes
 
     this._timeWrites = [];    // serialized xterm writes: { data, unixMs|null }
+    this._timeWriteHead = 0;  // avoids Array.shift() copying a queued backlog on every write
     this._timeWriteActive = false;
     this._timeActiveUnixMs = null;
     this._timeIndex = new Map(); // virtual logical-line start -> Unix milliseconds
@@ -463,6 +464,7 @@
     this._cmdMarks = [];
     this._cmdPending = null;
     this._timeWrites = [];
+    this._timeWriteHead = 0;
     this._timeWriteActive = false;
     this._timeActiveUnixMs = null;
     this._timeIndex.clear();
@@ -525,9 +527,13 @@
   };
 
   RulerAddon.prototype._timeDrainWrites = function () {
-    if (this._timeWriteActive || !this._term || this._timeWrites.length === 0) return;
+    if (this._timeWriteActive || !this._term || this._timeWriteHead >= this._timeWrites.length) return;
     var self = this;
-    var next = this._timeWrites.shift();
+    var next = this._timeWrites[this._timeWriteHead++];
+    if (this._timeWriteHead === this._timeWrites.length) {
+      this._timeWrites = [];
+      this._timeWriteHead = 0;
+    }
     this._timeWriteActive = true;
     this._timeActiveUnixMs = next.unixMs;
     this._timeStampCurrent();

@@ -25,9 +25,11 @@ public sealed class TerminalControl : Grid, IDisposable
     private readonly WebView2 _webView = new();
     private object? _initialOptions;
     private readonly object _outputGate = new();
-    private MemoryStream _pendingOutput = new();
+    private readonly MemoryStream _pendingOutput = new(FlushThresholdBytes);
     private List<OutputIngest> _pendingIngest = [];
     private DispatcherQueueTimer? _flushTimer;
+    private bool _flushDispatchPending;
+    private bool _flushTimerPending;
     private bool _pageReady;
     private bool _disposed;
     private bool _rulerIsSplit;
@@ -270,35 +272,55 @@ public sealed class TerminalControl : Grid, IDisposable
 
     // ---- SSH -> UI (batched; callable from any thread) ----
 
-    public void WriteOutput(byte[] data)
+    public void WriteOutput(ReadOnlySpan<byte> data)
     {
-        if (_disposed || data.Length == 0)
+        if (_disposed || data.IsEmpty)
             return;
 
-        // Capture arrival time before the UI batch combines independent SSH reads.
+        // Capture arrival time before the UI batch combines independent backend reads.
         // The page uses the byte offsets to restore each read's time while parsing.
         var unixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        bool queueDispatch;
+        lock (_outputGate)
+        {
+            if (_pendingIngest.Count == 0 || _pendingIngest[^1].UnixMs != unixMs)
+                _pendingIngest.Add(new OutputIngest((int)_pendingOutput.Length, unixMs));
+            _pendingOutput.Write(data);
+            var thresholdReached = _pendingOutput.Length >= FlushThresholdBytes;
+            queueDispatch = !_flushDispatchPending && (!_flushTimerPending || thresholdReached);
+            if (queueDispatch)
+                _flushDispatchPending = true;
+        }
+
+        if (queueDispatch && !DispatcherQueue.TryEnqueue(ScheduleOutputFlush))
+        {
+            lock (_outputGate)
+                _flushDispatchPending = false;
+        }
+    }
+
+    private void ScheduleOutputFlush()
+    {
         bool flushNow;
         lock (_outputGate)
         {
-            _pendingIngest.Add(new OutputIngest((int)_pendingOutput.Length, unixMs));
-            _pendingOutput.Write(data);
+            _flushDispatchPending = false;
+            if (_pendingOutput.Length == 0)
+                return;
             flushNow = _pendingOutput.Length >= FlushThresholdBytes;
+            if (!flushNow)
+                _flushTimerPending = true;
         }
 
-        DispatcherQueue.TryEnqueue(() =>
+        if (flushNow)
         {
-            if (flushNow)
-            {
-                FlushOutput();
-            }
-            else
-            {
-                _flushTimer ??= CreateFlushTimer();
-                if (!_flushTimer.IsRunning)
-                    _flushTimer.Start();
-            }
-        });
+            FlushOutput();
+            return;
+        }
+
+        _flushTimer ??= CreateFlushTimer();
+        if (!_flushTimer.IsRunning)
+            _flushTimer.Start();
     }
 
     private DispatcherQueueTimer CreateFlushTimer()
@@ -312,18 +334,24 @@ public sealed class TerminalControl : Grid, IDisposable
 
     private void FlushOutput()
     {
-        byte[] chunk;
+        _flushTimer?.Stop();
+        string data;
         List<OutputIngest> ingest;
         lock (_outputGate)
         {
+            _flushDispatchPending = false;
+            _flushTimerPending = false;
             if (_pendingOutput.Length == 0)
                 return;
-            chunk = _pendingOutput.ToArray();
-            _pendingOutput = new MemoryStream();
+
+            data = Convert.ToBase64String(
+                _pendingOutput.GetBuffer(), 0, checked((int)_pendingOutput.Length));
+            _pendingOutput.SetLength(0);
+            _pendingOutput.Position = 0;
             ingest = _pendingIngest;
             _pendingIngest = [];
         }
-        Post(new { type = "output", data = Convert.ToBase64String(chunk), ingest });
+        Post(new { type = "output", data, ingest });
     }
 
     private readonly record struct OutputIngest(int Offset, long UnixMs);

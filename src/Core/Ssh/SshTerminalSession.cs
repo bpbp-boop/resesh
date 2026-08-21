@@ -43,7 +43,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
     private int _closedRaised;
     private volatile bool _disposed;
 
-    public event Action<byte[]>? OutputReceived;
+    public event Backend.TerminalOutputHandler? OutputReceived;
 
     /// <summary>Raised once when the connection ends, with null for a clean local disconnect.</summary>
     public event Action<Exception?>? Closed;
@@ -228,7 +228,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
                     _tracedBytes += read;
                     TraceHook.Invoke("raw: " + EscapeControls(buffer.AsSpan(0, Math.Min(read, 4096))));
                 }
-                OutputReceived?.Invoke(buffer[..read]);
+                OutputReceived?.Invoke(buffer.AsSpan(0, read));
             }
         }
         catch (Exception ex) when (!token.IsCancellationRequested)
