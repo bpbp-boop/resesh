@@ -8,6 +8,7 @@ using Resesh.App.ViewModels;
 using Resesh.Core.Backup;
 using Resesh.Core.Layout;
 using Resesh.Core.Models;
+using Resesh.Core.Recording;
 using Resesh.Core.Storage;
 using Microsoft.UI.Windowing;
 using Windows.Graphics;
@@ -449,19 +450,19 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void CloneMenu_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.ActiveTab is { } tab)
+        if (ViewModel.ActiveTab is { IsPlayback: false } tab)
             CloneSession(tab);
     }
 
     private void PinTabMenu_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.ActiveTab is { } tab)
+        if (ViewModel.ActiveTab is { IsPlayback: false } tab)
             TogglePin(tab);
     }
 
     private void SessionOptionsMenu_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.ActiveTab is { } tab)
+        if (ViewModel.ActiveTab is { IsPlayback: false } tab)
             _ = OpenSessionOptionsAsync(tab);
     }
 
@@ -628,6 +629,67 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         view.SetRulerPresentation(ViewModel.IsSplit, tab.IsGroupFocused);
         return tab;
     }
+
+    private async void OpenRecording_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker
+            {
+                SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+                ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
+            };
+            picker.FileTypeFilter.Add(".cast");
+            WinRT.Interop.InitializeWithWindow.Initialize(
+                picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var file = await picker.PickSingleFileAsync();
+            if (file is null)
+                return;
+
+            var recording = await Task.Run(() => AsciicastReader.Read(file.Path));
+            OpenRecording(recording, file.Path);
+        }
+        catch (Exception exception)
+        {
+            await new ContentDialog
+            {
+                Title = "Recording could not open",
+                Content = exception.Message,
+                CloseButtonText = "OK",
+                XamlRoot = Root.XamlRoot,
+            }.ShowAsync();
+        }
+    }
+
+    private TabViewModel OpenRecording(TerminalRecording recording, string path)
+    {
+        var name = string.IsNullOrWhiteSpace(recording.Title)
+            ? Path.GetFileNameWithoutExtension(path)
+            : recording.Title;
+        var session = new Session
+        {
+            Name = name,
+            Kind = SessionKind.Local,
+            Local = new LocalTarget
+            {
+                StartingDirectory = Path.GetDirectoryName(path) ?? "",
+            },
+        };
+        var tab = ViewModel.Connect(session);
+        tab.PlaybackPath = path;
+        tab.State = TabConnectionState.Playback;
+        tab.ConnectionSummary = "read-only asciicast";
+
+        var player = new TerminalPlayerView(recording);
+        player.CloseRequested += () => _ = RequestCloseTabAsync(tab);
+        tab.View = player;
+        _groupViews[ViewModel.GroupOf(tab)].AddTerminal(player);
+        return tab;
+    }
+
+    /// <summary>Launch-time entry for recording playback and the automated smoke rig.</summary>
+    public void OpenRecordingFromLaunch(string path) =>
+        OpenRecording(AsciicastReader.Read(path), Path.GetFullPath(path));
 
     // ---- agent awareness (Phase 6.2) ----
 
@@ -1177,6 +1239,33 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             view.OpenWorkingFolder();
     }
 
+    public async Task OpenRecordingsLocationAsync()
+    {
+        try
+        {
+            var directory = Path.GetFullPath(
+                Environment.ExpandEnvironmentVariables(App.Settings.Current.RecordingDirectory));
+            Directory.CreateDirectory(directory);
+            var startInfo = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                UseShellExecute = false,
+            };
+            startInfo.ArgumentList.Add(directory);
+            _ = System.Diagnostics.Process.Start(startInfo);
+        }
+        catch (Exception exception)
+        {
+            await new ContentDialog
+            {
+                Title = "Recordings location could not open",
+                Content = exception.Message,
+                CloseButtonText = "OK",
+                XamlRoot = Root.XamlRoot,
+            }.ShowAsync();
+        }
+    }
+
     // ---- settings ----
 
     private async void SshKeys_Click(object sender, RoutedEventArgs e) =>
@@ -1202,6 +1291,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             Scrollback = updated.Scrollback,
             CopyOnSelect = updated.CopyOnSelect,
             RightClickPaste = updated.RightClickPaste,
+            AlwaysRecord = updated.AlwaysRecord,
+            RecordingDirectory = updated.RecordingDirectory,
+            RewindMinutes = updated.RewindMinutes,
+            RewindMegabytes = updated.RewindMegabytes,
             ShowAgentIcons = updated.ShowAgentIcons,
             AgentAlertFlash = updated.AgentAlertFlash,
             AgentAlertSound = updated.AgentAlertSound,

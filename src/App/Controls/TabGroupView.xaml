@@ -90,7 +90,7 @@
             AllowDrop="True">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="108" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <TabView
                 x:Name="Tabs"
@@ -161,17 +161,29 @@
                                             <SolidColorBrush Color="{x:Bind TagColor}" />
                                         </Rectangle.Fill>
                                     </Rectangle>
-                                    <Ellipse
+                                    <StackPanel
                                         Grid.Column="1"
-                                        Width="7"
-                                        Height="7"
+                                        Orientation="Horizontal"
+                                        Spacing="5"
                                         Margin="0,0,6,0"
-                                        VerticalAlignment="Center"
-                                        ToolTipService.ToolTip="{x:Bind StateText, Mode=OneWay}">
-                                        <Ellipse.Fill>
-                                            <SolidColorBrush Color="{x:Bind StateColor, Mode=OneWay}" />
-                                        </Ellipse.Fill>
-                                    </Ellipse>
+                                        VerticalAlignment="Center">
+                                        <Ellipse
+                                            Width="7"
+                                            Height="7"
+                                            VerticalAlignment="Center"
+                                            ToolTipService.ToolTip="{x:Bind StateText, Mode=OneWay}">
+                                            <Ellipse.Fill>
+                                                <SolidColorBrush Color="{x:Bind StateColor, Mode=OneWay}" />
+                                            </Ellipse.Fill>
+                                        </Ellipse>
+                                        <Ellipse
+                                            Width="7"
+                                            Height="7"
+                                            Fill="#E74856"
+                                            VerticalAlignment="Center"
+                                            Visibility="{x:Bind RecordingIndicatorVisibility, Mode=OneWay}"
+                                            ToolTipService.ToolTip="{x:Bind RecordingTooltip, Mode=OneWay}" />
+                                    </StackPanel>
                                     <!-- Tabs stay icon-free unless an agent is active. The
                                          attention badge stays attached to the agent icon. -->
                                     <Grid
@@ -328,6 +340,38 @@
                     Spacing="6"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">
+                    <ToggleButton
+                        x:Name="RecordButton"
+                        Width="30"
+                        Height="30"
+                        Padding="0"
+                        Click="RecordButton_Click"
+                        ToolTipService.ToolTip="Start recording">
+                        <Grid Width="10" Height="10">
+                            <Ellipse
+                                x:Name="RecordStartIcon"
+                                Width="10"
+                                Height="10"
+                                Fill="#E74856" />
+                            <Rectangle
+                                x:Name="RecordStopIcon"
+                                Width="10"
+                                Height="10"
+                                RadiusX="1"
+                                RadiusY="1"
+                                Fill="#E74856"
+                                Visibility="Collapsed" />
+                        </Grid>
+                    </ToggleButton>
+                    <ToggleButton
+                        x:Name="RewindButton"
+                        Width="30"
+                        Height="30"
+                        Padding="0"
+                        Click="RewindButton_Click"
+                        ToolTipService.ToolTip="Instant rewind">
+                        <FontIcon Glyph="&#xE81C;" FontSize="14" />
+                    </ToggleButton>
                     <ToggleButton
                         x:Name="ShowCommandsButton"
                         Width="30"

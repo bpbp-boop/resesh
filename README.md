@@ -1,8 +1,8 @@
 # Resesh
 
-A tabbed SSH client for Windows, built to replace SecureCRT for daily use: a folder tree of saved
-sessions with fast search on top, tabbed xterm.js terminals, and one-time import of existing
-SecureCRT sessions.
+A tabbed SSH and local-terminal client for Windows, built to replace SecureCRT for daily use:
+a folder tree of saved sessions, fast search, tabbed xterm.js terminals, paired asciicast
+and timestamped plain-text recording with instant rewind, `.cast` playback, and SecureCRT import.
 
 See [ROADMAP.md](ROADMAP.md) for planned work and [DECISIONS.md](DECISIONS.md) for
 version-specific findings and design decisions.

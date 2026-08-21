@@ -143,6 +143,7 @@
                     <MenuFlyoutItem Text="New SSH Session…" Click="NewSession_Click" />
                     <MenuFlyoutItem Text="New Local Profile…" Click="NewLocalProfile_Click" />
                     <MenuFlyoutItem Text="New Folder…" Click="NewFolder_Click" />
+                    <MenuFlyoutItem Text="Open Recording…" Click="OpenRecording_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Import from SecureCRT…" Click="Import_Click" />
                     <MenuFlyoutItem Text="SSH Keys…" Click="SshKeys_Click" />

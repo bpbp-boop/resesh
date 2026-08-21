@@ -28,6 +28,9 @@ and the git history.
   search matches, highlight-rule hits, bookmarks, command marks (OSC 133, OSC 3008,
   Enter-gated prompt discovery) with exit-status colors, per-line timestamps, and a
   commands panel with jump / copy-output actions.
+- **Recording & rewind** — bounded in-memory rewind with xterm state keyframes, paired
+  asciicast v2 and timestamped plain logs rendered from terminal output, plus `.cast` playback with
+  pause, speed, and seek controls.
 
 ---
 
@@ -77,56 +80,6 @@ New auth option `Agent`: talk to the Windows OpenSSH agent named pipe
 (`\\.\pipe\openssh-ssh-agent`, SSH agent protocol) and Pageant's shared-memory protocol.
 List agent keys in the session editor, try-all or pin a specific key. Removes the need to
 store key passphrases in Credential Manager.
-
----
-
-## Session recording & instant rewind
-
-One capture spine, one player, three surfaces: rewind the live session (iTerm2
-Instant Replay-style), record to disk for audit, and play back `.cast` files. The timing
-spine already exists — the ruler's timestamp index records wall-clock time per SSH read
-*before* the 16 ms/32 KB WebView2 batching, so timing is faithful and capture works even
-for backgrounded tabs.
-
-**Event shape everywhere: asciicast v2** (JSON-lines, per-event timestamps, resize events
-included) — the in-memory ring and the on-disk file share one format, and disk recordings
-interoperate with the whole asciinema ecosystem.
-
-### Instant rewind
-"What did htop look like 10 minutes ago." Rewind is about **screen state, not scrollback**:
-for streaming output, scrollback + the overview ruler already answer history better. Rewind
-earns its keep exactly where they can't — alternate-buffer apps, cleared screens, TUIs that
-overwrite in place — which is also where the ruler bows out (it hides on alt buffer), so
-the features are complementary, not overlapping. Judge it on that turf.
-- **Always-on bounded ring buffer** at the capture point: timestamped output + resize
-  events, capped by bytes and/or minutes, trimmed from the tail. In-memory only, dies with
-  the tab — the secrets caveat below doesn't apply (no disk, no export).
-- **Keyframes for seeking:** an event stream gives state-at-T only by replaying everything
-  before T. Snapshot full terminal state every N seconds / M bytes (check whether the
-  vendored xterm.js includes the **serialize addon** — the search addon and ruler renderer
-  were both already in the bundle); seek = nearest keyframe + replay the delta. Keyframes
-  also let the ring drop raw events older than the last snapshot, keeping the cap honest.
-- **Frozen-view UI:** enter rewind (freeze the tab or overlay a read-only twin), scrub a
-  timeline with real wall-clock labels, jump back to live. Live output keeps
-  accumulating into the ring while rewinding — viewing a snapshot, not pausing the session.
-- **Fidelity rule:** replay by feeding bytes through xterm.js itself (resizes replayed from
-  the stream) — never diff screen text.
-- **tmux limit** (same as the command lane): capture-pane replay reconstructs content, not
-  history — the ring starts at attach and covers the attached lifetime.
-
-### Recording to disk
-- **Controls:** record button on the tab (with a visible recording indicator), plus a
-  per-session "always record" toggle via the settings-override layer. Files auto-named
-  `{session}-{timestamp}.cast` in a configurable directory.
-- **Formats:** asciicast v2, plus a plain-text option (ANSI-stripped) for greppable logs.
-- **Caveat to surface in UI:** recordings capture everything echoed to the terminal,
-  including secrets a server echoes back — the recording indicator must be obvious.
-
-### Playback
-The same player as instant rewind with a second source: open a `.cast` in a read-only
-terminal tab, replay through xterm.js with pause/speed/seek (keyframes built on load for
-scrubbing). Build the player once — rewind and playback ship as siblings; asciinema
-tooling covers file playback in the interim if rewind lands first.
 
 ---
 
@@ -252,10 +205,9 @@ have `synchronize-panes` if they truly want it.
 | 1 | **GSSAPI spike** (parallel with anything) | S | **High — do early** |
 | 2 | Connectivity (tunnels → agent → jump hosts) | M–L | Medium |
 | 3 | Telnet & serial consoles (telnet → serial) | S–M | Low |
-| 4 | Recording & rewind (ring/rewind → disk → playback) | M | Low |
-| 5 | Workspaces (saved layouts) | M | Low |
-| 6 | GSSAPI productization (path chosen by spike) | M | Depends on spike |
-| 7 | Backlog picks | — | — |
+| 4 | Workspaces (saved layouts) | M | Low |
+| 5 | GSSAPI productization (path chosen by spike) | M | Depends on spike |
+| 6 | Backlog picks | — | — |
 
 Within connectivity, tunnels come first (pure SSH.NET), then agent auth, then jump hosts
 (which build on the tunnel channel code). Telnet/serial rides directly behind connectivity:

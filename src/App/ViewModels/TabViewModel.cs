@@ -20,6 +20,9 @@ public enum TabConnectionState
 
     /// <summary>Local process ended normally — neutral, keeps the tab open with the exit code.</summary>
     Exited,
+
+    /// <summary>Read-only playback of a recording; no backend process or connection.</summary>
+    Playback,
 }
 
 /// <summary>One open tab: a session plus its terminal view and connection state.</summary>
@@ -42,6 +45,25 @@ public sealed class TabViewModel : ObservableObject
     public SessionCapabilities Capabilities => SessionCapabilities.For(Session);
 
     public bool IsLocal => Session.IsLocal;
+
+    private string? _playbackPath;
+
+    /// <summary>Non-null for an ephemeral, read-only asciicast playback tab.</summary>
+    public string? PlaybackPath
+    {
+        get => _playbackPath;
+        set
+        {
+            if (SetProperty(ref _playbackPath, value))
+            {
+                OnPropertyChanged(nameof(IsPlayback));
+                OnPropertyChanged(nameof(Subtitle));
+                OnPropertyChanged(nameof(Endpoint));
+            }
+        }
+    }
+
+    public bool IsPlayback => PlaybackPath is not null;
 
     /// <summary>Exit code of the last local process run, shown while <see cref="State"/> is Exited.</summary>
     public int? ExitCode { get; set; }
@@ -107,6 +129,31 @@ public sealed class TabViewModel : ObservableObject
             }
         }
     }
+
+    private bool _isRecording;
+    private bool _hasRewind;
+
+    public bool IsRecording
+    {
+        get => _isRecording;
+        set
+        {
+            if (SetProperty(ref _isRecording, value))
+            {
+                OnPropertyChanged(nameof(RecordingIndicatorVisibility));
+                OnPropertyChanged(nameof(RecordingTooltip));
+            }
+        }
+    }
+
+    public bool HasRewind
+    {
+        get => _hasRewind;
+        set => SetProperty(ref _hasRewind, value);
+    }
+
+    public Visibility RecordingIndicatorVisibility => IsRecording ? Visibility.Visible : Visibility.Collapsed;
+    public string RecordingTooltip => IsRecording ? "Recording terminal output" : "";
 
     // ---- VS Code-style tab visuals (the header content paints the whole tab) ----
 
@@ -342,6 +389,7 @@ public sealed class TabViewModel : ObservableObject
                 TabConnectionState.Connected => Windows.UI.Color.FromArgb(255, 0x16, 0xC6, 0x0C),
                 TabConnectionState.Connecting => Windows.UI.Color.FromArgb(255, 0xFF, 0xB9, 0x00),
                 TabConnectionState.Exited => Windows.UI.Color.FromArgb(255, 0x8A, 0x8A, 0x8A),
+                TabConnectionState.Playback => Windows.UI.Color.FromArgb(255, 0x00, 0x78, 0xD4),
                 _ => Windows.UI.Color.FromArgb(255, 0xE7, 0x48, 0x56),
             };
 
@@ -468,6 +516,8 @@ public sealed class TabViewModel : ObservableObject
     {
         get
         {
+            if (PlaybackPath is not null)
+                return Path.GetFileName(PlaybackPath);
             if (IsLocal)
             {
                 var directory = Environment.ExpandEnvironmentVariables(
@@ -496,6 +546,7 @@ public sealed class TabViewModel : ObservableObject
         TabConnectionState.Connecting => IsLocal ? "starting…" : "connecting…",
         TabConnectionState.Connected when IsLocal => HasUnseenOutput ? "running — new output" : "running",
         TabConnectionState.Connected => HasUnseenOutput ? "connected — new output" : "connected",
+        TabConnectionState.Playback => "recording playback",
         TabConnectionState.Exited => ExitCode is { } code ? $"exited (code {code})" : "exited",
         _ => IsLocal ? "failed" : "disconnected",
     };

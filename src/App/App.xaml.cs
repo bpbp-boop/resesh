@@ -132,6 +132,17 @@ public partial class App : Application
             {
                 window.OpenSessionFromLaunch(session);
             }
+            else if (args2[i] == "--open-recording")
+            {
+                try
+                {
+                    window.OpenRecordingFromLaunch(args2[i + 1]);
+                }
+                catch (Exception ex)
+                {
+                    LogCrash(ex);
+                }
+            }
         }
     }
 }

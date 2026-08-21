@@ -113,7 +113,12 @@
                     Visibility="Collapsed" />
             </StackPanel>
 
-            <StackPanel x:Name="TerminalPanel" Spacing="12" Visibility="Collapsed">
+            <ScrollViewer
+                x:Name="TerminalPanel"
+                VerticalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Disabled"
+                Visibility="Collapsed">
+                <StackPanel Spacing="12" Padding="0,0,12,0">
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -230,7 +235,17 @@
                         SmallChange="1000"
                         SpinButtonPlacementMode="Compact" />
                 </Grid>
-            </StackPanel>
+                <ComboBox
+                    x:Name="OverrideRecordingBox"
+                    Header="Automatic recording"
+                    SelectedIndex="0"
+                    HorizontalAlignment="Stretch">
+                    <x:String>Use app setting</x:String>
+                    <x:String>Always record</x:String>
+                    <x:String>Never record</x:String>
+                </ComboBox>
+                </StackPanel>
+            </ScrollViewer>
 
             <TextBox
                 x:Name="NotesBox"

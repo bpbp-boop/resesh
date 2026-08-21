@@ -87,6 +87,12 @@ public sealed partial class SessionEditDialog : ContentDialog
                     OverrideFontSizeBox.Value = fontSize;
                 if (overrides.Scrollback is { } scrollback)
                     OverrideScrollbackBox.Value = scrollback;
+                OverrideRecordingBox.SelectedIndex = overrides.AlwaysRecord switch
+                {
+                    true => 1,
+                    false => 2,
+                    null => 0,
+                };
             }
         }
 
@@ -225,6 +231,12 @@ public sealed partial class SessionEditDialog : ContentDialog
             FontFamily = string.IsNullOrWhiteSpace(OverrideFontFamilyBox.Text) ? null : OverrideFontFamilyBox.Text.Trim(),
             FontSize = double.IsNaN(OverrideFontSizeBox.Value) ? null : (int)OverrideFontSizeBox.Value,
             Scrollback = double.IsNaN(OverrideScrollbackBox.Value) ? null : (int)OverrideScrollbackBox.Value,
+            AlwaysRecord = OverrideRecordingBox.SelectedIndex switch
+            {
+                1 => true,
+                2 => false,
+                _ => null,
+            },
             // Highlight deltas are edited from the tab's Highlighting menu, not here — carry them through.
             EnabledRules = _existing?.Overrides?.EnabledRules,
             DisabledRules = _existing?.Overrides?.DisabledRules,

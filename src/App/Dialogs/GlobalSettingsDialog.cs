@@ -9,6 +9,7 @@ namespace Resesh.App.Dialogs;
 public enum GlobalSettingsTab
 {
     General,
+    Recording,
     Highlighting,
     Agents,
 }
@@ -68,6 +69,36 @@ public static class GlobalSettingsDialog
         var copyOnSelect = new ToggleSwitch { Header = "Copy selected text", IsOn = current.CopyOnSelect };
         var rightClickPaste = new ToggleSwitch { Header = "Paste with right-click", IsOn = current.RightClickPaste };
 
+        var recordingDirectory = new TextBox
+        {
+            Header = "Recording directory",
+            Text = current.RecordingDirectory,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        var alwaysRecord = new ToggleSwitch
+        {
+            Header = WrappingHeader("Record new sessions automatically"),
+            IsOn = current.AlwaysRecord,
+        };
+        var rewindMinutes = new NumberBox
+        {
+            Header = "Rewind history (minutes)",
+            Value = current.RewindMinutes,
+            Minimum = 1,
+            Maximum = 1440,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        var rewindMegabytes = new NumberBox
+        {
+            Header = "Memory limit per tab (MiB)",
+            Value = current.RewindMegabytes,
+            Minimum = 1,
+            Maximum = 1024,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+
         var agentIcons = new ToggleSwitch
         {
             Header = WrappingHeader("Show agent icons"),
@@ -121,6 +152,34 @@ public static class GlobalSettingsDialog
             {
                 Description("These settings apply throughout Resesh. A saved session can override supported terminal and highlighting defaults."),
                 generalColumns,
+            },
+        };
+
+        // ---- Recording ----
+
+        var rewindGrid = new Grid { ColumnSpacing = 12 };
+        rewindGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        rewindGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(rewindMinutes, 0);
+        Grid.SetColumn(rewindMegabytes, 1);
+        rewindGrid.Children.Add(rewindMinutes);
+        rewindGrid.Children.Add(rewindMegabytes);
+
+        var recordingTab = new StackPanel
+        {
+            Spacing = 16,
+            Children =
+            {
+                Description("Record terminal output to disk, or keep bounded in-memory history for instant rewind."),
+                SectionCard(
+                    "Disk recording",
+                    "Each recording writes an asciicast .cast file and a timestamped .log rendered from committed terminal lines. Both can include secrets that a server prints.",
+                    recordingDirectory,
+                    alwaysRecord),
+                SectionCard(
+                    "Instant rewind",
+                    "Rewind data stays in memory and is deleted when the tab closes.",
+                    rewindGrid),
             },
         };
 
@@ -182,7 +241,7 @@ public static class GlobalSettingsDialog
         // swapped (not visibility-toggled) so each tab gets a fresh measure — a TextBox
         // measured while collapsed keeps a stale one-line text layout when merely unhidden. ----
 
-        var tabPanels = new UIElement[] { generalTab, highlightingTab, agentsTab };
+        var tabPanels = new UIElement[] { generalTab, recordingTab, highlightingTab, agentsTab };
         var host = new ScrollViewer
         {
             Width = DialogWidth,
@@ -195,6 +254,7 @@ public static class GlobalSettingsDialog
         var barItems = new[]
         {
             new SelectorBarItem { Text = "General" },
+            new SelectorBarItem { Text = "Recording" },
             new SelectorBarItem { Text = "Highlighting" },
             new SelectorBarItem { Text = "Agents" },
         };
@@ -245,6 +305,12 @@ public static class GlobalSettingsDialog
             Scrollback = double.IsNaN(scrollback.Value) ? current.Scrollback : (int)scrollback.Value,
             CopyOnSelect = copyOnSelect.IsOn,
             RightClickPaste = rightClickPaste.IsOn,
+            AlwaysRecord = alwaysRecord.IsOn,
+            RecordingDirectory = string.IsNullOrWhiteSpace(recordingDirectory.Text)
+                ? current.RecordingDirectory
+                : recordingDirectory.Text.Trim(),
+            RewindMinutes = double.IsNaN(rewindMinutes.Value) ? current.RewindMinutes : (int)rewindMinutes.Value,
+            RewindMegabytes = double.IsNaN(rewindMegabytes.Value) ? current.RewindMegabytes : (int)rewindMegabytes.Value,
             ShowAgentIcons = agentIcons.IsOn,
             AgentAlertFlash = agentFlash.IsOn,
             AgentAlertSound = agentSound.IsOn,

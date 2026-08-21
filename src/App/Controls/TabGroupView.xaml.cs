@@ -31,6 +31,7 @@ public interface ITabGroupHost
     void ToggleFilePane(TabViewModel tab);
     Task OpenFilePaneAtCurrentFolderAsync(TabViewModel tab);
     void OpenWorkingFolder(TabViewModel tab);
+    Task OpenRecordingsLocationAsync();
     void SetTabAgent(TabViewModel tab, string? key);
     void SaveTabAgentAsSessionDefault(TabViewModel tab);
     Task ShowAgentAdaptersAsync();
@@ -256,6 +257,7 @@ public sealed partial class TabGroupView : UserControl
         {
             _filePaneButtonView.FilePaneOpenChanged -= ActionButtonView_StateChanged;
             _filePaneButtonView.CommandsPanelOpenChanged -= ActionButtonView_StateChanged;
+            _filePaneButtonView.CaptureStateChanged -= ActionButtonView_StateChanged;
         }
 
         _filePaneButtonTab = Group.SelectedTab;
@@ -267,6 +269,7 @@ public sealed partial class TabGroupView : UserControl
         {
             _filePaneButtonView.FilePaneOpenChanged += ActionButtonView_StateChanged;
             _filePaneButtonView.CommandsPanelOpenChanged += ActionButtonView_StateChanged;
+            _filePaneButtonView.CaptureStateChanged += ActionButtonView_StateChanged;
         }
 
         UpdateTabActionButtons();
@@ -290,12 +293,20 @@ public sealed partial class TabGroupView : UserControl
         var tab = Group.SelectedTab;
         var isOpen = tab?.View is Terminal.TerminalTabView { IsFilePaneOpen: true };
         var commandsOpen = tab?.View is Terminal.TerminalTabView { IsCommandsPanelOpen: true };
+        var recording = tab?.View is Terminal.TerminalTabView { IsRecording: true };
+        var rewinding = tab?.View is Terminal.TerminalTabView { IsRewinding: true };
         ShowCommandsButton.IsEnabled = tab is not null && !tab.IsLocked;
         FilePaneToggle.IsEnabled = tab?.Capabilities.RemoteFiles == true && !tab.IsLocked;
         CurrentFolderButton.IsEnabled = tab?.Capabilities.RemoteFiles == true &&
             tab.State == TabConnectionState.Connected && !tab.IsLocked;
+        RecordButton.IsEnabled = tab?.View is Terminal.TerminalTabView { CanRecord: true } && !tab.IsLocked;
+        RewindButton.IsEnabled = tab?.View is Terminal.TerminalTabView { CanRewind: true } && !tab.IsLocked;
         FilePaneToggle.IsChecked = isOpen;
         ShowCommandsButton.IsChecked = commandsOpen;
+        RecordButton.IsChecked = recording;
+        RecordStartIcon.Visibility = recording ? Visibility.Collapsed : Visibility.Visible;
+        RecordStopIcon.Visibility = recording ? Visibility.Visible : Visibility.Collapsed;
+        RewindButton.IsChecked = rewinding;
 
         var label = isOpen ? "Hide file pane" : "Show file pane";
         ToolTipService.SetToolTip(FilePaneToggle, $"{label} (Ctrl+Shift+E)");
@@ -304,6 +315,25 @@ public sealed partial class TabGroupView : UserControl
         var commandsLabel = commandsOpen ? "Hide commands" : "Show commands";
         ToolTipService.SetToolTip(ShowCommandsButton, $"{commandsLabel} (Ctrl+Shift+O)");
         AutomationProperties.SetName(ShowCommandsButton, commandsLabel);
+        var recordingLabel = recording ? "Finish recording" : "Start recording";
+        ToolTipService.SetToolTip(RecordButton, recordingLabel);
+        AutomationProperties.SetName(RecordButton, recordingLabel);
+        ToolTipService.SetToolTip(RewindButton, rewinding ? "Return to live terminal" : "Instant rewind");
+        AutomationProperties.SetName(RewindButton, rewinding ? "Return to live terminal" : "Instant rewind");
+    }
+
+    private async void RecordButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (Group.SelectedTab?.View is Terminal.TerminalTabView view)
+            await view.ToggleRecordingAsync();
+        UpdateTabActionButtons();
+    }
+
+    private async void RewindButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (Group.SelectedTab?.View is Terminal.TerminalTabView view)
+            await view.ToggleRewindAsync();
+        UpdateTabActionButtons();
     }
 
     private void ShowCommandsButton_Click(object sender, RoutedEventArgs e)
@@ -446,7 +476,7 @@ public sealed partial class TabGroupView : UserControl
         _close = null!, _closeDisconnected = null!, _closeOthers = null!, _closeRight = null!,
         _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _splitDown = null!,
         _options = null!,
-        _filePane = null!, _filePaneCwd = null!, _workingFolder = null!;
+        _filePane = null!, _filePaneCwd = null!, _workingFolder = null!, _recordingsLocation = null!;
     private MenuFlyoutSubItem _highlight = null!, _agent = null!;
 
     private MenuFlyout BuildTabMenu()
@@ -471,6 +501,7 @@ public sealed partial class TabGroupView : UserControl
         _filePane.KeyboardAcceleratorTextOverride = "Ctrl+Shift+E";
         _filePaneCwd = Item("Open File Pane at Terminal Folder", tab => _ = _host.OpenFilePaneAtCurrentFolderAsync(tab));
         _workingFolder = Item("Open Working Folder", tab => _host.OpenWorkingFolder(tab));
+        _recordingsLocation = Item("Open Recordings Location", tab => _ = _host.OpenRecordingsLocationAsync());
         _close = Item("Close", tab => _ = _host.RequestCloseTabAsync(tab));
         _close.KeyboardAcceleratorTextOverride = "Ctrl+F4";
         _closeDisconnected = Item("Close Disconnected Tabs", tab =>
@@ -519,6 +550,7 @@ public sealed partial class TabGroupView : UserControl
         menu.Items.Add(_filePane);
         menu.Items.Add(_filePaneCwd);
         menu.Items.Add(_workingFolder);
+        menu.Items.Add(_recordingsLocation);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_highlight);
         menu.Items.Add(_agent);
@@ -547,7 +579,9 @@ public sealed partial class TabGroupView : UserControl
         _closeOthers.IsEnabled = Group.Tabs.Any(t => t != tab && !t.IsPinned);
         _closeRight.IsEnabled = Group.Tabs.Skip(Group.Tabs.IndexOf(tab) + 1).Any(t => !t.IsPinned);
         _pin.Text = tab.IsPinned ? "Unpin Tab" : "Pin Tab";
-        _lock.IsEnabled = !tab.IsLocked;
+        _clone.IsEnabled = !tab.IsPlayback;
+        _pin.IsEnabled = !tab.IsPlayback;
+        _lock.IsEnabled = !tab.IsPlayback && !tab.IsLocked;
         // Splitting a lone tab would leave an empty group that immediately collapses — pointless.
         _split.IsEnabled = Group.Tabs.Count > 1;
         _splitDown.IsEnabled = Group.Tabs.Count > 1;
@@ -556,7 +590,9 @@ public sealed partial class TabGroupView : UserControl
         var filePaneCwd = caps.RemoteFiles;
         _filePaneCwd.Visibility = filePaneCwd ? Visibility.Visible : Visibility.Collapsed;
         _filePaneCwd.IsEnabled = filePaneCwd && tab.State == TabConnectionState.Connected;
-        _workingFolder.Visibility = caps.LocalWorkingFolder ? Visibility.Visible : Visibility.Collapsed;
+        _workingFolder.Visibility = caps.LocalWorkingFolder && !tab.IsPlayback
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         // Session Options is disabled when the saved session was deleted while connected.
         var sessionExists = _host.ViewModel.RankedMatches("").Any(s => s.Id == tab.Session.Id);
         _options.IsEnabled = sessionExists;

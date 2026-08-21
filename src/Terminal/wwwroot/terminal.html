@@ -48,6 +48,7 @@
 <script src="addon-web-links.js"></script>
 <script src="addon-search.js"></script>
 <script src="addon-highlight.js"></script>
+<script src="addon-serialize.js"></script>
 <script src="addon-ruler.js"></script>
 </head>
 <body>
@@ -223,6 +224,7 @@
     let copyOnSelect = typeof init.copyOnSelect === "boolean" ? init.copyOnSelect : true;
     let rightClickPaste = typeof init.rightClickPaste === "boolean" ? init.rightClickPaste : true;
     let connected = false;
+    const readOnly = init.readOnly === true;
 
     term.open(container);
     document.body.style.background = term.options.theme.background;
@@ -233,6 +235,42 @@
     term.loadAddon(ruler);
     ruler.setTheme(getRuler(init.theme));
     if (Array.isArray(init.highlights)) ruler.setHighlightRules(init.highlights);
+
+    // Full VT state snapshots make bounded rewind seekable without approximating the screen.
+    // Serialize after xterm has parsed a write, every 10 seconds or 1 MiB of host output.
+    const serializer = new SerializeAddon.SerializeAddon();
+    term.loadAddon(serializer);
+    let keyframeBytes = 0;
+    let lastKeyframeAt = Date.now();
+    let keyframePending = false;
+
+    function captureKeyframe() {
+      if (readOnly) return;
+      keyframePending = false;
+      try {
+        host.postMessage({
+          type: "keyframe",
+          data: strToB64(serializer.serialize()),
+          unixMs: Date.now(),
+          cols: term.cols,
+          rows: term.rows
+        });
+        keyframeBytes = 0;
+        lastKeyframeAt = Date.now();
+      } catch (err) {
+        pageTrace("keyframe: " + (err && err.message));
+      }
+    }
+
+    function noteOutputForKeyframe(byteCount) {
+      if (readOnly) return;
+      keyframeBytes += byteCount;
+      if (keyframePending || (keyframeBytes < 1024 * 1024 && Date.now() - lastKeyframeAt < 10000)) return;
+      keyframePending = true;
+      // xterm parses writes asynchronously. A short delay places serialization after its
+      // write queue without adding any delay to live rendering.
+      setTimeout(captureKeyframe, 50);
+    }
 
     // ---- agent awareness (ROADMAP Phase 6.2) ----
     // The page only forwards evidence; every mapping decision (which agent, which
@@ -263,6 +301,7 @@
     // host batch. Parse each original byte range with its pre-batch arrival time.
     function writeHostOutput(msg) {
       const bytes = b64ToBytes(msg.data);
+      noteOutputForKeyframe(bytes.length);
       const ingest = Array.isArray(msg.ingest) ? msg.ingest : [];
       if (ingest.length === 0) {
         ruler.writeOutput(bytes, null); // compatibility with an older native host
@@ -279,6 +318,7 @@
 
     // UI -> SSH
     term.onData(function (data) {
+      if (readOnly) return;
       if (connected) {
         // Enter on a prompt-shaped line becomes a discovered command mark (Phase 9.4).
         // Checked before the input round-trips: the typed command is already echoed on
@@ -519,15 +559,164 @@
     }
 
     let fitPending = null;
-    new ResizeObserver(function () {
-      if (fitPending) clearTimeout(fitPending);
-      fitPending = setTimeout(function () {
-        fitPending = null;
-        fitPreservingTimestamps();
-        reportSize();
-      }, 40);
-    }).observe(container);
+    if (!readOnly) {
+      new ResizeObserver(function () {
+        if (fitPending) clearTimeout(fitPending);
+        fitPending = setTimeout(function () {
+          fitPending = null;
+          fitPreservingTimestamps();
+          reportSize();
+        }, 40);
+      }).observe(container);
+    }
 
+
+    // A write fence drains any older replay before reset. This makes rapid scrubbing
+    // atomic even though xterm parses writes asynchronously.
+    let replayGeneration = 0;
+    function showReplay(msg) {
+      const generation = ++replayGeneration;
+      term.write("", function () {
+        if (generation !== replayGeneration) return;
+        term.reset();
+        const columns = Math.max(1, msg.columns | 0);
+        const rows = Math.max(1, msg.rows | 0);
+        term.resize(columns, rows);
+        const items = [];
+        if (typeof msg.keyframe === "string") {
+          items.push({ type: "o", data: msg.keyframe });
+        }
+        if (Array.isArray(msg.events)) {
+          for (let i = 0; i < msg.events.length; i++) items.push(msg.events[i]);
+        }
+        let index = 0;
+        function next() {
+          if (generation !== replayGeneration || index >= items.length) return;
+          const item = items[index++];
+          if (item.type === "r") {
+            const match = /^(\d+)x(\d+)$/.exec(String(item.data || ""));
+            if (match) term.resize(Math.max(1, +match[1]), Math.max(1, +match[2]));
+            next();
+          } else if (item.type === "o") {
+            term.write(b64ToBytes(item.data || ""), next);
+          } else {
+            next();
+          }
+        }
+        next();
+      });
+    }
+
+    let playback = null;
+    let pendingPlaybackSeek = 0;
+    let playbackBuildGeneration = 0;
+
+    function loadPlayback(msg) {
+      const buildGeneration = ++playbackBuildGeneration;
+      ++replayGeneration;
+      playback = null;
+      const columns = Math.max(1, msg.columns | 0);
+      const rows = Math.max(1, msg.rows | 0);
+      const events = Array.isArray(msg.events) ? msg.events : [];
+      const frames = [{ time: 0, index: 0, columns: columns, rows: rows, state: "" }];
+      let currentColumns = columns;
+      let currentRows = rows;
+      let index = 0;
+      let lastFrameTime = 0;
+      let bytesSinceFrame = 0;
+      if (term.element) term.element.style.visibility = "hidden";
+
+      term.write("", function () {
+        if (buildGeneration !== playbackBuildGeneration) return;
+        term.reset();
+        term.resize(columns, rows);
+
+        function next() {
+          if (buildGeneration !== playbackBuildGeneration) return;
+          if (index >= events.length) {
+            playback = { columns: columns, rows: rows, events: events, frames: frames };
+            if (term.element) term.element.style.visibility = "visible";
+            seekPlayback(pendingPlaybackSeek);
+            return;
+          }
+
+          const item = events[index++];
+          if (item.type === "r") {
+            const match = /^(\d+)x(\d+)$/.exec(String(item.data || ""));
+            if (match) {
+              currentColumns = Math.max(1, +match[1]);
+              currentRows = Math.max(1, +match[2]);
+              term.resize(currentColumns, currentRows);
+            }
+            next();
+            return;
+          }
+          if (item.type !== "o") {
+            next();
+            return;
+          }
+
+          const bytes = b64ToBytes(item.data || "");
+          bytesSinceFrame += bytes.length;
+          term.write(bytes, function () {
+            const time = Number(item.time) || 0;
+            if (time - lastFrameTime >= 10 || bytesSinceFrame >= 1024 * 1024) {
+              frames.push({
+                time: time,
+                index: index,
+                columns: currentColumns,
+                rows: currentRows,
+                state: serializer.serialize()
+              });
+              lastFrameTime = time;
+              bytesSinceFrame = 0;
+            }
+            next();
+          });
+        }
+        next();
+      });
+    }
+
+    function seekPlayback(time) {
+      pendingPlaybackSeek = Math.max(0, Number(time) || 0);
+      if (!playback) return;
+      const target = pendingPlaybackSeek;
+      let frame = playback.frames[0];
+      for (let i = playback.frames.length - 1; i >= 0; i--) {
+        if (playback.frames[i].time <= target) {
+          frame = playback.frames[i];
+          break;
+        }
+      }
+
+      const generation = ++replayGeneration;
+      term.write("", function () {
+        if (generation !== replayGeneration) return;
+        term.reset();
+        term.resize(frame.columns, frame.rows);
+        let index = frame.index;
+
+        function replayNext() {
+          if (generation !== replayGeneration || index >= playback.events.length) return;
+          const item = playback.events[index];
+          if ((Number(item.time) || 0) > target) return;
+          index++;
+          if (item.type === "r") {
+            const match = /^(\d+)x(\d+)$/.exec(String(item.data || ""));
+            if (match) term.resize(Math.max(1, +match[1]), Math.max(1, +match[2]));
+            replayNext();
+          } else if (item.type === "o") {
+            term.write(b64ToBytes(item.data || ""), replayNext);
+          } else {
+            replayNext();
+          }
+        }
+
+        if (frame.state) term.write(frame.state, replayNext);
+        else replayNext();
+      });
+    }
     // SSH/host -> UI
     // Rolling log of option pushes, inspectable via DevTools/CDP when diagnosing theme issues.
     window.__msgLog = [];
@@ -542,6 +731,15 @@
           break;
         case "connected":
           connected = true;
+          break;
+        case "showReplay":
+          showReplay(msg);
+          break;
+        case "loadPlayback":
+          loadPlayback(msg);
+          break;
+        case "seekPlayback":
+          seekPlayback(msg.time);
           break;
         case "disconnected":
           connected = false;
@@ -605,6 +803,7 @@
     fitPreservingTimestamps();
     term.focus();
     host.postMessage({ type: "ready", cols: term.cols, rows: term.rows });
+    if (!readOnly) setTimeout(captureKeyframe, 0);
   }
 })();
 </script>

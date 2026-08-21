@@ -30,6 +30,17 @@ public sealed record AppSettings
     public bool CopyOnSelect { get; init; } = true;
     public bool RightClickPaste { get; init; } = true;
 
+    /// <summary>Automatically start a disk recording for each new terminal tab.</summary>
+    public bool AlwaysRecord { get; init; }
+
+    public string RecordingDirectory { get; init; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Resesh Recordings");
+
+
+    /// <summary>Age and memory caps for each tab's always-on in-memory rewind stream.</summary>
+    public int RewindMinutes { get; init; } = 30;
+    public int RewindMegabytes { get; init; } = 32;
+
     /// <summary>Show the agent icon and attention badge on tabs (Phase 6.2).</summary>
     public bool ShowAgentIcons { get; init; } = true;
 
@@ -49,6 +60,7 @@ public sealed record AppSettings
                 FontFamily = overrides.FontFamily ?? FontFamily,
                 FontSize = overrides.FontSize ?? FontSize,
                 Scrollback = overrides.Scrollback ?? Scrollback,
+                AlwaysRecord = overrides.AlwaysRecord ?? AlwaysRecord,
             };
 }
 

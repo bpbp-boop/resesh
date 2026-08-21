@@ -73,6 +73,13 @@ public sealed class LocalProfileEditDialog : ContentDialog
         PlaceholderText = "App setting",
         SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
     };
+    private readonly ComboBox _overrideRecording = new()
+    {
+        Header = "Automatic recording",
+        ItemsSource = new[] { "Use app setting", "Always record", "Never record" },
+        SelectedIndex = 0,
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+    };
     private readonly CheckBox _makeDefault = new() { Content = "Make this the default local profile (+ Session, Ctrl+Shift+T)" };
     private readonly TextBlock _validation = new()
     {
@@ -133,6 +140,12 @@ public sealed class LocalProfileEditDialog : ContentDialog
                     _overrideFontSize.Value = fontSize;
                 if (overrides.Scrollback is { } scrollback)
                     _overrideScrollback.Value = scrollback;
+                _overrideRecording.SelectedIndex = overrides.AlwaysRecord switch
+                {
+                    true => 1,
+                    false => 2,
+                    null => 0,
+                };
             }
         }
 
@@ -150,6 +163,7 @@ public sealed class LocalProfileEditDialog : ContentDialog
         panel.Children.Add(_overrideFontFamily);
         panel.Children.Add(_overrideFontSize);
         panel.Children.Add(_overrideScrollback);
+        panel.Children.Add(_overrideRecording);
         panel.Children.Add(_makeDefault);
 
         if (existing is { BuiltIn: true })
@@ -204,6 +218,12 @@ public sealed class LocalProfileEditDialog : ContentDialog
             FontFamily = string.IsNullOrWhiteSpace(_overrideFontFamily.Text) ? null : _overrideFontFamily.Text.Trim(),
             FontSize = double.IsNaN(_overrideFontSize.Value) ? null : (int)_overrideFontSize.Value,
             Scrollback = double.IsNaN(_overrideScrollback.Value) ? null : (int)_overrideScrollback.Value,
+            AlwaysRecord = _overrideRecording.SelectedIndex switch
+            {
+                1 => true,
+                2 => false,
+                _ => null,
+            },
             EnabledRules = _existing?.Overrides?.EnabledRules,
             DisabledRules = _existing?.Overrides?.DisabledRules,
         };

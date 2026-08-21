@@ -9,6 +9,7 @@ using Resesh.Core.Backend;
 using Resesh.Core.Credentials;
 using Resesh.Core.Local;
 using Resesh.Core.Models;
+using Resesh.Core.Recording;
 using Resesh.Core.Sftp;
 using Resesh.Core.Ssh;
 using Resesh.Core.Storage;
@@ -36,6 +37,9 @@ public sealed class TerminalTabView : Grid, IDisposable
     private SshTerminalSession? _ssh; // set when _backend is the SSH implementation
     private bool _connecting;
     private bool _disposed;
+    private TerminalCapture? _capture;
+    private TerminalPlayerView? _rewindPlayer;
+    private bool _rewindAvailable;
     private readonly Osc7WorkingDirectoryTracker _workingDirectory = new();
 
     // Agent awareness (Phase 6.2). One tracker per tab, fed only by this tab's own page
@@ -89,6 +93,15 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// button can mirror it.</summary>
     public event Action? CommandsPanelOpenChanged;
 
+    /// <summary>Raised when recording or rewind availability changes.</summary>
+    public event Action? CaptureStateChanged;
+
+    public bool IsRecording => _capture?.IsRecording == true;
+    public bool CanRecord => _capture is not null && !_disposed;
+    public bool IsRewinding => _rewindPlayer is not null;
+    public bool CanRewind => _rewindAvailable;
+    public string? RecordingPath => _capture?.RecordingPath;
+
     public TerminalTabView(TabViewModel tab, ICredentialService credentials, KnownHostsStore knownHosts,
         SshKeyStore sshKeys,
         IReadOnlySet<int>? tmuxSlotsAlreadyOpen = null)
@@ -114,7 +127,14 @@ public sealed class TerminalTabView : Grid, IDisposable
             // Answering is what unblocks a waiting agent, so input clears a sticky badge.
             ApplyAgent(tracker => tracker.ObserveUserInput());
         };
-        _terminal.Resized += (cols, rows) => _backend?.Resize(cols, rows);
+        _terminal.Resized += (cols, rows) =>
+        {
+            _backend?.Resize(cols, rows);
+            _capture?.CaptureResize(cols, rows, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        };
+        _terminal.OutputObserved += (data, unixMs) => _capture?.CaptureOutput(data, unixMs);
+        _terminal.KeyframeCaptured += (state, cols, rows, unixMs) =>
+            _capture?.CaptureKeyframe(state, cols, rows, unixMs);
         _terminal.ReconnectRequested += () => DispatcherQueue.TryEnqueue(() => _ = ConnectAsync(isReconnect: true));
         // The page's terminal is constructed with these (init handshake), so it opens
         // with the right theme/fonts instead of restyling just after first paint.
@@ -125,8 +145,13 @@ public sealed class TerminalTabView : Grid, IDisposable
             BuildHighlightPayload());
         _terminal.SetPromptPlatform(Session.Icon);
 
-        _terminal.Ready += (_, _) => DispatcherQueue.TryEnqueue(() =>
-            _ = ConnectAsync(isReconnect: false));
+        _terminal.Ready += (cols, rows) => DispatcherQueue.TryEnqueue(() =>
+        {
+            EnsureCapture(cols, rows);
+            if (initial.AlwaysRecord)
+                TryStartAutomaticRecording();
+            _ = ConnectAsync(isReconnect: false);
+        });
         _terminal.TitleChanged += title => DispatcherQueue.TryEnqueue(() => _tab.ApplyTerminalTitle(title));
         _terminal.CommandChanged += text => DispatcherQueue.TryEnqueue(() => _tab.ApplyRunningCommand(text));
         _terminal.PromptContextChanged += (context, platform) =>
@@ -168,6 +193,132 @@ public sealed class TerminalTabView : Grid, IDisposable
             if (_backend is null && !_connecting)
                 await _terminal.InitializeAsync(); // Ready fires when the page is up
         };
+    }
+
+    private void EnsureCapture(int columns, int rows)
+    {
+        if (_capture is not null)
+            return;
+        var settings = App.Settings.Current;
+        _capture = new TerminalCapture(
+            columns,
+            rows,
+            maximumAge: TimeSpan.FromMinutes(Math.Clamp(settings.RewindMinutes, 1, 24 * 60)),
+            maximumBytes: Math.Clamp(settings.RewindMegabytes, 1, 1024) * 1024L * 1024L);
+        _capture.Changed += OnCaptureChanged;
+        _capture.RecordingChanged += (_, _) =>
+            DispatcherQueue.TryEnqueue(SyncCaptureState);
+        SyncCaptureState();
+    }
+
+    private void OnCaptureChanged()
+    {
+        if (_rewindAvailable || _capture is null)
+            return;
+        var snapshot = _capture.Snapshot();
+        if (snapshot.Keyframe is null && snapshot.Events.Count == 0)
+            return;
+        _rewindAvailable = true;
+        DispatcherQueue.TryEnqueue(SyncCaptureState);
+    }
+
+    private void SyncCaptureState()
+    {
+        _tab.IsRecording = IsRecording;
+        _tab.HasRewind = CanRewind;
+        CaptureStateChanged?.Invoke();
+    }
+
+    private void TryStartAutomaticRecording()
+    {
+        try
+        {
+            StartRecordingCore();
+        }
+        catch (Exception exception)
+        {
+            _terminal.WriteNotice($"Automatic recording could not start: {exception.Message}");
+        }
+    }
+
+    private string StartRecordingCore()
+    {
+        var capture = _capture ?? throw new InvalidOperationException("The terminal is not ready.");
+        var settings = App.Settings.Current;
+        return capture.StartRecording(
+            settings.RecordingDirectory, Session.Name, Session.TerminalType);
+    }
+
+    public async Task ToggleRecordingAsync()
+    {
+        if (_capture is null)
+            return;
+        if (_capture.IsRecording)
+        {
+            _capture.StopRecording();
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            Title = "Start recording?",
+            Content = "The recording captures all output echoed to this terminal. It can include secrets that a server prints.",
+            PrimaryButtonText = "Start recording",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot,
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            return;
+        try
+        {
+            StartRecordingCore();
+        }
+        catch (Exception exception)
+        {
+            await new ContentDialog
+            {
+                Title = "Recording could not start",
+                Content = exception.Message,
+                CloseButtonText = "OK",
+                XamlRoot = XamlRoot,
+            }.ShowAsync();
+        }
+    }
+
+    public Task ToggleRewindAsync()
+    {
+        if (_rewindPlayer is not null)
+        {
+            ReturnToLive();
+            return Task.CompletedTask;
+        }
+        if (_capture is null || !CanRewind)
+            return Task.CompletedTask;
+
+        var player = new TerminalPlayerView(_capture);
+        player.CloseRequested += ReturnToLive;
+        _rewindPlayer = player;
+        Grid.SetColumnSpan(player, 3);
+        Children.Add(player);
+        _terminal.SetInputEnabled(false);
+        SyncCaptureState();
+        return Task.CompletedTask;
+    }
+
+    private void ReturnToLive()
+    {
+        if (_rewindPlayer is not { } player)
+            return;
+        _rewindPlayer = null;
+        Children.Remove(player);
+        player.Dispose();
+        if (!_tab.IsLocked)
+        {
+            _terminal.SetInputEnabled(true);
+            _terminal.FocusTerminal();
+        }
+        SyncCaptureState();
     }
 
     // ---- agent awareness (Phase 6.2) ----
@@ -1069,11 +1220,15 @@ public sealed class TerminalTabView : Grid, IDisposable
         _filePane = null;
         _sshfsMount?.Dispose(); // killing the sshfs process unmounts the drive
         _sshfsMount = null;
+        _rewindPlayer?.Dispose();
+        _rewindPlayer = null;
         // Plan-mandated order: reader â†’ shell â†’ client (inside Stop) â†’ WebView2.
         // For local tabs, Stop kills the process tree via the job object — no orphans.
         _backend?.Stop();
         _backend = null;
         _ssh = null;
         _terminal.Dispose();
+        _capture?.Dispose();
+        _capture = null;
     }
 }

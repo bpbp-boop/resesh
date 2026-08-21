@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Resesh — Rethinking the session and connection manager</title>
 <link rel="canonical" href="https://resesh.net/">
-<meta name="description" content="Resesh is a fast SSH client for Windows. Keep your servers in one tree, open them in tabs, and do your work in one window.">
+<meta name="description" content="Resesh is a fast SSH and local terminal client for Windows with tabs, split views, session recording, instant rewind, and asciicast playback.">
 <link rel="icon" href="assets/favicon.ico">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -172,6 +172,10 @@
 
     <div class="cards">
       <div class="card">
+        <h3>Record, rewind, and replay</h3>
+        <p>Record any SSH or local tab to paired asciicast and timestamped plain-text files. Rewind a live terminal, or open a cast with pause, speed, and seek controls.</p>
+      </div>
+      <div class="card">
         <h3>Persistent sessions</h3>
         <p>A lost connection does not stop your work. Resesh attaches again and shows the output you missed. tmux on the host makes it possible.</p>
       </div>
@@ -225,6 +229,10 @@
       <div class="faq-item">
         <h3>Can I move my data to a new PC?</h3>
         <p>Yes. Export a backup file on the old PC. Import it on the new PC.</p>
+      </div>
+      <div class="faq-item">
+        <h3>What does session recording save?</h3>
+        <p>Each recording creates an asciicast <code>.cast</code> file for exact playback and a timestamped plain-text <code>.log</code>. Output printed by the terminal can include secrets, so Resesh always shows when recording is active.</p>
       </div>
       <div class="faq-item">
         <h3>Does Resesh send my data anywhere?</h3>

@@ -33,11 +33,17 @@ test("tabs remeasure after close, move, or newly available group space", () => {
   assert.match(code, /Tabs\.InvalidateMeasure\(\)/);
 });
 
-test("each tab bar keeps compact current-folder and file-pane buttons at its far right", () => {
+test("each tab bar reserves the measured width of every action button", () => {
   const strip = xaml.match(/x:Name="TabStripHost"[\s\S]*?<\/Grid>\r?\n\r?\n        <Grid x:Name="TerminalHost"/)?.[0] ?? "";
 
-  assert.match(strip, /<ColumnDefinition Width="\*" \/>[\s\S]*?<ColumnDefinition Width="108" \/>/);
+  assert.match(strip, /<ColumnDefinition Width="\*" \/>[\s\S]*?<ColumnDefinition Width="Auto" \/>/);
   assert.match(strip, /x:Name="Tabs"[\s\S]*?Grid\.Column="0"/);
+  assert.match(strip, /Grid\.Column="1"[\s\S]*?x:Name="RecordButton"/);
+  assert.match(strip, /x:Name="RecordButton"[\s\S]*?Width="30"[\s\S]*?Height="30"/);
+  assert.match(strip, /x:Name="RewindButton"[\s\S]*?Width="30"[\s\S]*?Height="30"/);
+  assert.match(xaml, /x:Name="RecordStartIcon"[\s\S]*?x:Name="RecordStopIcon"/);
+  assert.match(code, /RecordStartIcon\.Visibility = recording \? Visibility\.Collapsed : Visibility\.Visible/);
+  assert.match(code, /RecordStopIcon\.Visibility = recording \? Visibility\.Visible : Visibility\.Collapsed/);
   assert.match(strip, /Grid\.Column="1"[\s\S]*?x:Name="CurrentFolderButton"/);
   assert.match(strip, /x:Name="CurrentFolderButton"[\s\S]*?Width="30"[\s\S]*?Height="30"[\s\S]*?Padding="0"/);
   assert.doesNotMatch(strip, /x:Name="CurrentFolderButton"[\s\S]*?Background="Transparent"/);
