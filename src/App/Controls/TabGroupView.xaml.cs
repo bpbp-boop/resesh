@@ -70,7 +70,13 @@ public sealed partial class TabGroupView : UserControl
         // TabView has handled the collection change, so closing or moving a tab lets all
         // remaining tabs grow back toward the 240px browser width. Size changes cover a
         // group that gains space when a neighboring split is removed or resized.
-        Group.Tabs.CollectionChanged += (_, _) => QueueTabWidthRefresh();
+        // The action-button cluster also follows the count: hidden at zero tabs, and
+        // SelectedTab does not change when the first tab arrives in an empty group.
+        Group.Tabs.CollectionChanged += (_, _) =>
+        {
+            QueueTabWidthRefresh();
+            UpdateTabActionButtons();
+        };
         Tabs.SizeChanged += (_, _) => QueueTabWidthRefresh();
 
         // Focus tracking: interacting anywhere in this group focuses it.
@@ -240,14 +246,17 @@ public sealed partial class TabGroupView : UserControl
             child.Visibility = ReferenceEquals(child, selected) ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    // ---- tab-bar file pane toggle ----
+    // ---- tab-bar action buttons (show commands, current folder, file pane) ----
 
     private void ObserveFilePaneButtonTab()
     {
         if (_filePaneButtonTab is not null)
             _filePaneButtonTab.PropertyChanged -= FilePaneButtonTab_PropertyChanged;
         if (_filePaneButtonView is not null)
-            _filePaneButtonView.FilePaneOpenChanged -= FilePaneButtonView_FilePaneOpenChanged;
+        {
+            _filePaneButtonView.FilePaneOpenChanged -= ActionButtonView_StateChanged;
+            _filePaneButtonView.CommandsPanelOpenChanged -= ActionButtonView_StateChanged;
+        }
 
         _filePaneButtonTab = Group.SelectedTab;
         _filePaneButtonView = _filePaneButtonTab?.View as Terminal.TerminalTabView;
@@ -255,9 +264,12 @@ public sealed partial class TabGroupView : UserControl
         if (_filePaneButtonTab is not null)
             _filePaneButtonTab.PropertyChanged += FilePaneButtonTab_PropertyChanged;
         if (_filePaneButtonView is not null)
-            _filePaneButtonView.FilePaneOpenChanged += FilePaneButtonView_FilePaneOpenChanged;
+        {
+            _filePaneButtonView.FilePaneOpenChanged += ActionButtonView_StateChanged;
+            _filePaneButtonView.CommandsPanelOpenChanged += ActionButtonView_StateChanged;
+        }
 
-        UpdateFilePaneButton();
+        UpdateTabActionButtons();
     }
 
     private void FilePaneButtonTab_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -265,24 +277,43 @@ public sealed partial class TabGroupView : UserControl
         if (e.PropertyName == nameof(TabViewModel.View))
             ObserveFilePaneButtonTab();
         else if (e.PropertyName is nameof(TabViewModel.Session) or nameof(TabViewModel.IsLocked) or nameof(TabViewModel.State))
-            UpdateFilePaneButton();
+            UpdateTabActionButtons();
     }
 
-    private void FilePaneButtonView_FilePaneOpenChanged() => UpdateFilePaneButton();
+    private void ActionButtonView_StateChanged() => UpdateTabActionButtons();
 
-    private void UpdateFilePaneButton()
+    private void UpdateTabActionButtons()
     {
+        // An empty group has nothing the buttons could act on: hide the whole cluster.
+        TabStripActions.Visibility = Group.Tabs.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
         var tab = Group.SelectedTab;
         var isOpen = tab?.View is Terminal.TerminalTabView { IsFilePaneOpen: true };
+        var commandsOpen = tab?.View is Terminal.TerminalTabView { IsCommandsPanelOpen: true };
+        ShowCommandsButton.IsEnabled = tab is not null && !tab.IsLocked;
         FilePaneToggle.IsEnabled = tab?.Capabilities.RemoteFiles == true && !tab.IsLocked;
         CurrentFolderButton.IsEnabled = tab?.Capabilities.RemoteFiles == true &&
             tab.State == TabConnectionState.Connected && !tab.IsLocked;
         FilePaneToggle.IsChecked = isOpen;
+        ShowCommandsButton.IsChecked = commandsOpen;
 
         var label = isOpen ? "Hide file pane" : "Show file pane";
         ToolTipService.SetToolTip(FilePaneToggle, $"{label} (Ctrl+Shift+E)");
         AutomationProperties.SetName(FilePaneToggle, label);
         AutomationProperties.SetName(CurrentFolderButton, "Open file pane at terminal folder");
+        var commandsLabel = commandsOpen ? "Hide commands" : "Show commands";
+        ToolTipService.SetToolTip(ShowCommandsButton, $"{commandsLabel} (Ctrl+Shift+O)");
+        AutomationProperties.SetName(ShowCommandsButton, commandsLabel);
+    }
+
+    private void ShowCommandsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (Group.SelectedTab?.View is Terminal.TerminalTabView view)
+        {
+            view.ToggleCommandsPanel();
+            // Keep keystrokes flowing to the terminal (panel rows refocus it likewise).
+            view.FocusTerminal();
+        }
     }
 
     private async void CurrentFolderButton_Click(object sender, RoutedEventArgs e)
@@ -295,7 +326,7 @@ public sealed partial class TabGroupView : UserControl
     {
         if (Group.SelectedTab is { } tab)
             _host.ToggleFilePane(tab);
-        UpdateFilePaneButton();
+        UpdateTabActionButtons();
     }
 
     private void Tabs_SelectionChanged(object sender, SelectionChangedEventArgs e)

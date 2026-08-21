@@ -12,6 +12,18 @@
  * Interaction: click jumps (snapping to a nearby mark and flashing the target line),
  * drag scrubs like a scrollbar, wheel forwards to terminal scroll, hover shows a
  * tooltip (~150ms) with the region's line number, mark counts, and first match text.
+ * When the hovered region holds a command mark the tooltip becomes interactive: a
+ * short grace delay lets the pointer reach its "Jump to" and "Copy output" buttons,
+ * which act on the region's nearest mark. The commands panel lists every command
+ * mark — click a row to jump, or its copy button for that command's output. It is
+ * opened by the host's native tab-strip button (a "toggleCommands" page message)
+ * or Ctrl+Shift+O forwarded by the page; an open find bar shifts it down a step.
+ * A copied "output" leads with the command's own prompt line (a paste reads like a
+ * transcript), then the buffer text up to the next command mark,
+ * soft wraps joined; trailing blank lines and empty-Enter prompt lines (recognized
+ * by equality with a neighboring mark's prompt, never by shape alone — output like
+ * "</html>" parses as a bare prompt shape) are dropped, and the live idle prompt
+ * (the cursor's logical line) is excluded the same way.
  *
  * Data notes:
  *   - Match positions come from the addon's OWN line-level buffer scan (same query and
@@ -192,17 +204,25 @@
 
     this._bookmarks = [];     // [{ marker }] — marker.line stays current through trim/reflow
 
-    this._cmdMarks = [];      // [{ marker, exit, src }] src "osc"|"guess"; exit int or null
+    this._cmdMarks = [];      // [{ marker, exit, src, text }] src "osc"|"guess"; exit int or null
     this._cmdOscSeen = false; // a shell spoke OSC 133: discovery defers to it from then on
     this._cmdPromptLine = -1; // absolute line of the last OSC 133;A/B prompt start
     this._cmdPromptCol = -1;  // cursor column at OSC 133;B — where the typed command starts
     this._cmdPending = null;  // mark committed by C, awaiting its D exit code
     this._cmdObserver = null; // page hook: commands as they are marked (agent detection)
+    this._cmdPanel = null;    // commands panel: every command mark as a clickable list
+    this._cmdPanelList = null;
+    this._cmdPanelCount = null;
+    this._cmdPanelOpen = false;
+    this._cmdPanelRefreshQueued = false;
+    this._tooltipCommand = null;   // command entry the tooltip's action buttons act on
+    this._tooltipHideTimer = null; // grace period so the pointer can reach those buttons
     this._cmdEnterProbes = []; // Enter markers waiting for echo / an OSC 3008 command ID
     this._osc3008Commands = new Map(); // bounded command ID -> probe, mark, and result
     this.onRunningCommand = null; // page hook: (text, epoch?) on start, ("") on 133;D
     this.onContext = null; // page hook: bounded raw OSC 3008 payload for native validation
     this.onPromptContext = null; // page hook: (label, platform?) when a known prompt is idle
+    this.onCommandsPanelChanged = null; // page hook: (open) — the host's button mirrors it
     this._lastPromptSignature = null;
     this._promptPlatform = null; // strong prompt evidence persists across later mode changes
 
@@ -231,9 +251,54 @@
     this._isPointerOver = false;
   }
 
+  // Hover styling for the ruler's interactive chrome (tooltip action buttons and
+  // the commands panel) needs real CSS rules; colors come from the active ruler
+  // palette through custom properties set on the host element. The panel's open
+  // control is the host's native tab-strip button, not page chrome.
+  var CHROME_CSS =
+    ".scroll-ruler-panel{position:absolute;top:8px;right:" + (WIDTH + 6) + "px;z-index:32;" +
+      "display:none;flex-direction:column;width:400px;max-width:70%;" +
+      "max-height:calc(100% - 28px);overflow:hidden;border-radius:6px;" +
+      "box-shadow:0 6px 18px rgba(0,0,0,0.35);background:var(--sr-bg);color:var(--sr-fg);" +
+      "border:1px solid var(--sr-border);" +
+      "font-family:'Cascadia Mono',Consolas,monospace;font-size:12px;line-height:16px;}" +
+    ".scroll-ruler-panel .srp-head{display:flex;align-items:center;gap:6px;flex:none;" +
+      "padding:5px 6px 5px 10px;border-bottom:1px solid var(--sr-border);color:var(--sr-muted);" +
+      "font-family:'Segoe UI',sans-serif;}" +
+    ".scroll-ruler-panel .srp-title{font-weight:600;color:var(--sr-fg);}" +
+    ".scroll-ruler-panel .srp-close{margin-left:auto;width:20px;height:20px;border:none;" +
+      "border-radius:3px;background:transparent;color:var(--sr-muted);font-size:11px;cursor:pointer;}" +
+    ".scroll-ruler-panel .srp-close:hover{background:rgba(128,128,128,0.25);color:var(--sr-fg);}" +
+    ".scroll-ruler-panel .srp-list{overflow-y:auto;overflow-x:hidden;padding:3px 0;}" +
+    ".scroll-ruler-panel .srp-empty{padding:8px 10px;color:var(--sr-muted);}" +
+    ".scroll-ruler-panel .srp-row{display:flex;align-items:center;gap:7px;" +
+      "padding:2px 6px 2px 10px;cursor:pointer;}" +
+    ".scroll-ruler-panel .srp-row:hover{background:rgba(128,128,128,0.16);}" +
+    ".scroll-ruler-panel .srp-dot{flex:none;width:7px;height:7px;border-radius:50%;}" +
+    ".scroll-ruler-panel .srp-cmd{flex:1 1 auto;white-space:nowrap;overflow:hidden;" +
+      "text-overflow:ellipsis;}" +
+    ".scroll-ruler-panel .srp-time{flex:none;color:var(--sr-muted);font-size:11px;}" +
+    ".scroll-ruler-panel .srp-copy{flex:none;visibility:hidden;min-width:20px;height:18px;" +
+      "border:none;border-radius:3px;background:transparent;color:var(--sr-muted);" +
+      "font-size:12px;cursor:pointer;padding:0 3px;font-family:inherit;}" +
+    ".scroll-ruler-panel .srp-row:hover .srp-copy{visibility:visible;}" +
+    ".scroll-ruler-panel .srp-copy:hover{background:rgba(128,128,128,0.3);color:var(--sr-fg);}" +
+    ".scroll-ruler-tooltip .srt-actions{display:flex;gap:6px;margin-top:5px;}" +
+    ".scroll-ruler-tooltip .srt-btn{border:1px solid var(--sr-border);border-radius:4px;" +
+      "padding:1px 8px;background:transparent;color:var(--sr-fg);font-family:inherit;" +
+      "font-size:11px;line-height:15px;cursor:pointer;}" +
+    ".scroll-ruler-tooltip .srt-btn:hover{background:rgba(128,128,128,0.25);}";
+
   RulerAddon.prototype.activate = function (term) {
     var self = this;
     this._term = term;
+
+    if (!document.getElementById("scroll-ruler-style")) {
+      var chromeStyle = document.createElement("style");
+      chromeStyle.id = "scroll-ruler-style";
+      chromeStyle.textContent = CHROME_CSS;
+      document.head.appendChild(chromeStyle);
+    }
 
     var strip = document.createElement("div");
     strip.className = "scroll-ruler";
@@ -257,8 +322,43 @@
       "font-family:'Cascadia Mono',Consolas,monospace;font-size:12px;line-height:16px;" +
       "white-space:normal;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,0.35);" +
       "pointer-events:none;";
+    // Only a tooltip with action buttons gets pointer-events back (in _showTooltip);
+    // the purely informational card must never eat clicks aimed at the terminal.
+    tooltip.addEventListener("pointerenter", function () { self._cancelTooltipHide(); });
+    tooltip.addEventListener("pointerleave", function () { self._scheduleTooltipHide(); });
     host.appendChild(tooltip);
     this._tooltip = tooltip;
+
+    var panel = document.createElement("div");
+    panel.className = "scroll-ruler-panel";
+    var panelHead = document.createElement("div");
+    panelHead.className = "srp-head";
+    var panelTitle = document.createElement("span");
+    panelTitle.className = "srp-title";
+    panelTitle.textContent = "Commands";
+    var panelCount = document.createElement("span");
+    panelCount.className = "srp-count";
+    var panelClose = document.createElement("button");
+    panelClose.className = "srp-close";
+    panelClose.title = "Close";
+    panelClose.textContent = "✕";
+    panelClose.addEventListener("click", function () {
+      self.toggleCommandsPanel(false);
+      self._term.focus();
+    });
+    panelHead.appendChild(panelTitle);
+    panelHead.appendChild(panelCount);
+    panelHead.appendChild(panelClose);
+    var panelList = document.createElement("div");
+    panelList.className = "srp-list";
+    panel.appendChild(panelHead);
+    panel.appendChild(panelList);
+    host.appendChild(panel);
+    this._cmdPanel = panel;
+    this._cmdPanelList = panelList;
+    this._cmdPanelCount = panelCount;
+
+    this._applyChromeTheme();
 
     this._disposables.push(term.onScroll(function () { self._queuePaint(); }));
     this._disposables.push(term.onResize(function () {
@@ -313,6 +413,7 @@
 
     strip.addEventListener("pointerenter", function () {
       self._isPointerOver = true;
+      self._cancelTooltipHide();
       self._queuePaint();
     });
     strip.addEventListener("pointerdown", function (e) { self._onPointerDown(e); });
@@ -324,7 +425,9 @@
     });
     strip.addEventListener("pointerleave", function () {
       self._isPointerOver = false;
-      self._hideTooltip();
+      // Grace delay instead of an instant hide: the pointer crosses a 6px gap on
+      // its way from the strip to an interactive tooltip's action buttons.
+      self._scheduleTooltipHide();
       self._queuePaint();
     });
     strip.addEventListener("wheel", function (e) {
@@ -368,16 +471,37 @@
     this._hlIndex.clear();
     if (this._hlAnchor) { var anchor = this._hlAnchor; this._hlAnchor = null; anchor.marker.dispose(); }
     this._clearFlash();
+    this._cancelTooltipHide();
     if (this._resizeObserver) this._resizeObserver.disconnect();
     if (this._strip && this._strip.parentElement) this._strip.parentElement.removeChild(this._strip);
     if (this._tooltip && this._tooltip.parentElement) this._tooltip.parentElement.removeChild(this._tooltip);
+    if (this._cmdPanel && this._cmdPanel.parentElement) this._cmdPanel.parentElement.removeChild(this._cmdPanel);
+    this._cmdPanel = null;
+    this._cmdPanelList = null;
+    this._cmdPanelCount = null;
+    this._cmdPanelOpen = false;
+    this._tooltipCommand = null;
     this._term = null;
   };
 
   /** Partial override of the color set; keys as in the constructor default. */
   RulerAddon.prototype.setTheme = function (colors) {
     for (var k in colors) this._colors[k] = colors[k];
+    this._applyChromeTheme();
     this._queuePaint();
+    this._queuePanelRefresh(); // open-panel row dots repaint in the new palette
+  };
+
+  /** Feed the ruler palette to the CSS of the interactive chrome (toggle, panel,
+   * tooltip buttons) via custom properties on the host, so :hover rules can exist. */
+  RulerAddon.prototype._applyChromeTheme = function () {
+    var hostEl = this._strip && this._strip.parentElement;
+    if (!hostEl || !hostEl.style || !hostEl.style.setProperty) return;
+    var c = this._colors;
+    hostEl.style.setProperty("--sr-bg", c.tooltipBg);
+    hostEl.style.setProperty("--sr-fg", c.tooltipFg);
+    hostEl.style.setProperty("--sr-muted", c.tooltipMuted);
+    hostEl.style.setProperty("--sr-border", c.tooltipBorder);
   };
 
   /** Full presentation in one group; quieter marks in split mode.
@@ -686,7 +810,7 @@
       if (this._cmdPromptLine >= 0) {
         var text = this._cmdText(buf, this._cmdPromptLine, this._cmdPromptCol);
         if (text) this._fireCommand(text, undefined);
-        this._cmdPending = this._cmdCommit(this._cmdPromptLine, null, "osc");
+        this._cmdPending = this._cmdCommit(this._cmdPromptLine, null, "osc", undefined, text);
         this._cmdPromptLine = -1;
         this._cmdPromptCol = -1;
       }
@@ -697,10 +821,12 @@
         this._cmdPending.exit = exit;
         this._cmdPending = null;
         this._queuePaint();
+        this._queuePanelRefresh();
       } else if (this._cmdPromptLine >= 0) {
         // Shell emits A/D but never C: this D still belongs to whatever was typed
         // at the last prompt (empty Enters get a mark too — indistinguishable).
-        this._cmdCommit(this._cmdPromptLine, exit, "osc");
+        this._cmdCommit(this._cmdPromptLine, exit, "osc", undefined,
+          this._cmdText(buf, this._cmdPromptLine, this._cmdPromptCol));
         this._cmdPromptLine = -1;
       }
       this._fireCommand("", undefined); // the command is over, whatever it was
@@ -740,6 +866,7 @@
       if (current.exit !== null) current.entry.exit = current.exit;
       this._osc3008Commands.delete(parsed.id);
       this._queuePaint();
+      this._queuePanelRefresh();
     } else if (!current.probe || current.probe.isDisposed) {
       this._osc3008Commands.delete(parsed.id);
     }
@@ -972,12 +1099,13 @@
       // where the command starts, so the title slices at the column the mark used.
       var m = CMD_PROMPT_RE.test(lineText) ? CMD_SPLIT_RE.exec(lineText) : null;
       if (m) {
+        var commandText = self._cmdText(norm, row, lineText.length - m[2].length);
         if (!reported) {
           reported = true;
-          self._fireCommand(self._cmdText(norm, row, lineText.length - m[2].length), epoch);
+          self._fireCommand(commandText, epoch);
         }
         if (self._term.buffer.active.type !== "alternate") {
-          self._cmdCommit(row, null, "guess", marker._osc3008Id);
+          self._cmdCommit(row, null, "guess", marker._osc3008Id, commandText);
           marker.dispose();
           self._finishCommandProbe(marker);
           return;
@@ -1003,15 +1131,20 @@
   };
 
   /** Adds a command mark at an absolute line (idempotent per line; an exit code
-   * updates an existing mark in place). Markers keep marks trim-safe for free. */
-  RulerAddon.prototype._cmdCommit = function (line, exit, src, contextId) {
+   * updates an existing mark in place). Markers keep marks trim-safe for free.
+   * The command text rides along for the panel and popover — the line's prompt can
+   * be re-parsed later, but only the OSC 133;B column knows where a fancy
+   * shell-integration prompt ends. */
+  RulerAddon.prototype._cmdCommit = function (line, exit, src, contextId, text) {
     for (var i = 0; i < this._cmdMarks.length; i++) {
       if (this._cmdMarks[i].marker.line === line) {
         if (exit !== null) {
           this._cmdMarks[i].exit = exit;
           this._queuePaint();
         }
+        if (text && !this._cmdMarks[i].text) this._cmdMarks[i].text = text;
         this._associateOsc3008(contextId, this._cmdMarks[i]);
+        this._queuePanelRefresh();
         return this._cmdMarks[i];
       }
     }
@@ -1019,17 +1152,19 @@
     var marker = this._term.registerMarker(line - (buf.baseY + buf.cursorY));
     if (!marker) return null;
     var self = this;
-    var entry = { marker: marker, exit: exit, src: src };
+    var entry = { marker: marker, exit: exit, src: src, text: text || "" };
     marker.onDispose(function () {
       var idx = self._cmdMarks.indexOf(entry);
       if (idx >= 0) self._cmdMarks.splice(idx, 1);
       if (self._cmdPending === entry) self._cmdPending = null;
       self._queuePaint();
+      self._queuePanelRefresh();
     });
     this._cmdMarks.push(entry);
     this._associateOsc3008(contextId, entry);
     this._notifyCommand(line);
     this._queuePaint();
+    this._queuePanelRefresh();
     return entry;
   };
 
@@ -1087,6 +1222,234 @@
     this._scrollLineToCenter(best);
     this._flashLine(best);
     return true;
+  };
+
+  // ---- commands panel + popover actions ----
+
+  /** One command mark as plain data. Stored text wins; otherwise the mark's line is
+   * re-parsed, falling back to the raw line for prompts the regex does not know. */
+  RulerAddon.prototype._commandInfo = function (entry) {
+    var buf = this._term.buffer.normal || this._term.buffer.active;
+    var line = entry.marker.line;
+    var text = entry.text || this._cmdText(buf, line, -1);
+    if (!text) {
+      var bufLine = buf.getLine(line);
+      text = bufLine ? bufLine.translateToString(true).trim().slice(0, 256) : "";
+    }
+    return {
+      line: line, exit: entry.exit, src: entry.src, text: text,
+      unixMs: this._timeForLine(line)
+    };
+  };
+
+  /** All command marks, ascending by buffer line: { line, exit, src, text, unixMs }. */
+  RulerAddon.prototype.getCommands = function () {
+    if (!this._term) return [];
+    var marks = this._cmdMarks.slice().sort(function (a, b) {
+      return a.marker.line - b.marker.line;
+    });
+    var result = [];
+    for (var i = 0; i < marks.length; i++) result.push(this._commandInfo(marks[i]));
+    return result;
+  };
+
+  /** The output of the command marked at an absolute line, led by the command's own
+   * prompt line so a paste reads like a transcript: buffer text between the command's
+   * logical line and the next command mark, soft wraps joined. The live idle prompt
+   * (the cursor's logical line) is excluded, and trailing blank lines plus
+   * empty-Enter prompt lines are dropped — the latter recognized by equality with
+   * this or the next mark's prompt, never by shape alone, because output such as
+   * "</html>" parses as a bare prompt shape. A command with no surviving output
+   * returns "" (the copy buttons report "No output" instead of a lone header). */
+  RulerAddon.prototype.getCommandOutput = function (line) {
+    var term = this._term;
+    if (!term) return "";
+    var buf = term.buffer.normal || term.buffer.active;
+
+    function promptAt(row) {
+      var promptLine = buf.getLine(row);
+      if (!promptLine) return null;
+      var m = CMD_SPLIT_RE.exec(promptLine.translateToString(true));
+      return m ? m[1] : null;
+    }
+
+    var start = line + 1;
+    var startLine;
+    while ((startLine = buf.getLine(start)) && startLine.isWrapped) start++;
+
+    var end = buf.length;
+    var nextMarkLine = -1;
+    for (var i = 0; i < this._cmdMarks.length; i++) {
+      var markLine = this._cmdMarks[i].marker.line;
+      if (markLine > line && markLine < end) { end = markLine; nextMarkLine = markLine; }
+    }
+    var cursor = buf.baseY + buf.cursorY;
+    var cursorLine = buf.getLine(cursor);
+    while (cursorLine && cursorLine.isWrapped && cursor > 0) {
+      cursor--;
+      cursorLine = buf.getLine(cursor);
+    }
+    if (cursor > line && cursor < end) end = cursor;
+
+    var out = [];
+    for (var r = start; r < end; r++) {
+      var bufLine = buf.getLine(r);
+      if (!bufLine) continue;
+      var text = bufLine.translateToString(true);
+      if (bufLine.isWrapped && out.length > 0) out[out.length - 1] += text;
+      else out.push(text);
+    }
+    var ownPrompt = promptAt(line);
+    var nextPrompt = nextMarkLine >= 0 ? promptAt(nextMarkLine) : null;
+    while (out.length > 0) {
+      var last = out[out.length - 1];
+      if (last !== "" && last !== ownPrompt && last !== nextPrompt) break;
+      out.pop();
+    }
+    if (out.length === 0) return "";
+
+    // Lead with the command's own line; rows line+1..start-1 are its soft wraps.
+    var head = buf.getLine(line);
+    var headText = head ? head.translateToString(true) : "";
+    for (var w = line + 1; w < start; w++) {
+      var wrapRow = buf.getLine(w);
+      if (wrapRow) headText += wrapRow.translateToString(true);
+    }
+    if (headText) out.unshift(headText);
+    return out.join("\n");
+  };
+
+  /** Center and flash a command's line (panel rows and the tooltip's Jump to). */
+  RulerAddon.prototype.jumpToCommand = function (line) {
+    if (!this._term || this._term.buffer.active.type === "alternate") return false;
+    this._scrollLineToCenter(line);
+    this._flashLine(line);
+    return true;
+  };
+
+  RulerAddon.prototype._copyCommandOutput = function (line, button, doneLabel, emptyLabel) {
+    var output = this.getCommandOutput(line);
+    // Never clobber the clipboard with nothing; say so on the button instead.
+    if (output && typeof navigator !== "undefined" && navigator.clipboard) {
+      navigator.clipboard.writeText(output).catch(function () {});
+    }
+    if (!button) return;
+    var restore = button.textContent;
+    button.textContent = output ? doneLabel : emptyLabel;
+    setTimeout(function () {
+      // The panel rebuilds rows on refresh; a stale button just fades away.
+      button.textContent = restore;
+    }, 1200);
+  };
+
+  /** Open/close the commands panel ("show commands"). Boolean forces a state.
+   * Called by the page for Ctrl+Shift+O and the host's "toggleCommands" message.
+   * Every state change (this includes the panel's own ✕) reports back through
+   * onCommandsPanelChanged so the host's toggle button can stay truthful. */
+  RulerAddon.prototype.toggleCommandsPanel = function (open) {
+    var next = typeof open === "boolean" ? open : !this._cmdPanelOpen;
+    this._cmdPanelOpen = next;
+    if (this.onCommandsPanelChanged) {
+      try {
+        this.onCommandsPanelChanged(next);
+      } catch (err) {
+        if (window.__pageTrace) window.__pageTrace("ruler onCommandsPanelChanged: " + (err && err.message));
+      }
+    }
+    if (!this._cmdPanel) return;
+    this._cmdPanel.style.display = next ? "flex" : "none";
+    if (next) {
+      this._refreshCommandsPanel();
+      if (this._cmdPanelList) this._cmdPanelList.scrollTop = this._cmdPanelList.scrollHeight;
+    }
+  };
+
+  /** Coalesced refresh, a no-op while the panel is closed. Every mark mutation site
+   * calls this — commit, exit updates from 133;D / OSC 3008, and trim disposal. */
+  RulerAddon.prototype._queuePanelRefresh = function () {
+    if (!this._cmdPanelOpen || this._cmdPanelRefreshQueued) return;
+    var self = this;
+    this._cmdPanelRefreshQueued = true;
+    requestAnimationFrame(function () {
+      self._cmdPanelRefreshQueued = false;
+      if (!self._cmdPanelOpen) return;
+      try {
+        self._refreshCommandsPanel();
+      } catch (err) {
+        if (window.__pageTrace) window.__pageTrace("ruler panel: " + (err && err.message));
+      }
+    });
+  };
+
+  /** Rebuild the panel rows from the live mark set. DOM via textContent only —
+   * command text is untrusted terminal output. Rows close over the ENTRY, not its
+   * line number: markers shift with scrollback trimming, so the line is read fresh
+   * on click. */
+  RulerAddon.prototype._refreshCommandsPanel = function () {
+    var list = this._cmdPanelList;
+    if (!list || !list.ownerDocument || !this._term) return;
+    var doc = list.ownerDocument;
+    var self = this;
+    var marks = this._cmdMarks.slice().sort(function (a, b) {
+      return a.marker.line - b.marker.line;
+    });
+    if (this._cmdPanelCount)
+      this._cmdPanelCount.textContent = marks.length === 0 ? "" : String(marks.length);
+    var stick = list.scrollHeight - list.scrollTop - list.clientHeight < 4;
+    list.textContent = "";
+    if (marks.length === 0) {
+      var empty = doc.createElement("div");
+      empty.className = "srp-empty";
+      empty.textContent = "No commands in this session yet.";
+      list.appendChild(empty);
+      return;
+    }
+    var c = this._colors;
+    for (var i = 0; i < marks.length; i++) {
+      (function (entry) {
+        var info = self._commandInfo(entry);
+        var row = doc.createElement("div");
+        row.className = "srp-row";
+        var dot = doc.createElement("span");
+        dot.className = "srp-dot";
+        dot.style.background =
+          info.exit === null ? c.cmdUnknown : (info.exit === 0 ? c.cmdOk : c.cmdFail);
+        if (info.exit !== null) dot.title = "exit " + info.exit;
+        var text = doc.createElement("span");
+        text.className = "srp-cmd";
+        text.textContent = info.text || "(command)";
+        text.title = info.text || "";
+        var time = doc.createElement("span");
+        time.className = "srp-time";
+        var stamp = self._formatTimestamp(info.unixMs);
+        if (stamp) {
+          time.textContent = stamp.clock;
+          time.title = stamp.clock + " · " + stamp.relative;
+        }
+        var copy = doc.createElement("button");
+        copy.className = "srp-copy";
+        copy.title = "Copy output";
+        copy.textContent = "⧉";
+        row.appendChild(dot);
+        row.appendChild(text);
+        row.appendChild(time);
+        row.appendChild(copy);
+        if (row.addEventListener) {
+          row.addEventListener("click", function () {
+            if (entry.marker.isDisposed) return;
+            self.jumpToCommand(entry.marker.line);
+            self._term.focus();
+          });
+          copy.addEventListener("click", function (e) {
+            if (e && e.stopPropagation) e.stopPropagation();
+            if (entry.marker.isDisposed) return;
+            self._copyCommandOutput(entry.marker.line, copy, "✓", "∅");
+          });
+        }
+        list.appendChild(row);
+      })(marks[i]);
+    }
+    if (stick) list.scrollTop = list.scrollHeight;
   };
 
   // ---- highlight index (Phase 9.3 content lane) ----
@@ -1411,24 +1774,30 @@
       });
     }
 
-    var commands = 0, soleCommand = null;
+    // The action buttons (and the sample fallback) target the mark NEAREST to the
+    // pointer — with several commands in the region, "Jump to" must not surprise.
+    var commands = 0, nearestCommand = null, nearestDist = Infinity;
     for (var cm = 0; cm < this._cmdMarks.length; cm++) {
       var cl = this._cmdMarks[cm].marker.line;
       if (cl >= lo && cl <= hi) {
         commands++;
-        soleCommand = this._cmdMarks[cm];
+        var commandDist = Math.abs(cl - line);
+        if (commandDist < nearestDist) {
+          nearestDist = commandDist;
+          nearestCommand = this._cmdMarks[cm];
+        }
       }
     }
 
     var sampleLine = firstMatch >= 0 ? firstMatch
       : firstHl >= 0 ? firstHl
-      : soleCommand ? soleCommand.marker.line
+      : nearestCommand ? nearestCommand.marker.line
       : line;
 
     var metadata = [];
     function addMetadata(text, color) { metadata.push({ text: text, color: color || null }); }
     if (commands === 1) {
-      addMetadata(soleCommand.exit === null ? "command" : "exit " + soleCommand.exit);
+      addMetadata(nearestCommand.exit === null ? "command" : "exit " + nearestCommand.exit);
     } else if (commands > 1) {
       addMetadata(commands + " commands");
     }
@@ -1451,21 +1820,44 @@
     if (!sample) sample = "line " + Math.min(line + 1, total);
     else if (commands === 0) metadata.unshift({ text: "line " + Math.min(line + 1, total), color: null });
 
+    this._tooltipCommand = nearestCommand;
+    var actions = null;
+    if (nearestCommand) {
+      var self = this;
+      actions = [
+        { label: "Jump to", run: function () {
+            var target = self._tooltipCommand;
+            if (!target || target.marker.isDisposed) return;
+            self.jumpToCommand(target.marker.line);
+            self._hideTooltip();
+            self._term.focus();
+          } },
+        { label: "Copy output", run: function (button) {
+            var target = self._tooltipCommand;
+            if (!target || target.marker.isDisposed) return;
+            self._copyCommandOutput(target.marker.line, button, "Copied", "No output");
+          } }
+      ];
+    }
+
     var c = this._colors;
     var tip = this._tooltip;
-    this._renderTooltip(tip, sample, metadata);
+    this._renderTooltip(tip, sample, metadata, actions);
     tip.style.background = c.tooltipBg;
     tip.style.color = c.tooltipFg;
     tip.style.border = "1px solid " + c.tooltipBorder;
+    // Only a card with buttons is allowed to catch the pointer; see activate().
+    tip.style.pointerEvents = actions ? "auto" : "none";
     tip.style.display = "block";
     var tipH = tip.offsetHeight;
     tip.style.top = Math.max(0, Math.min(y - tipH / 2, h - tipH)) + "px";
   };
 
-  /** Render the tooltip as a compact command card: command/sample first, metadata below.
+  /** Render the tooltip as a compact command card: command/sample first, metadata below,
+   * then any action buttons ("Jump to" / "Copy output" when a command mark is near).
    * Build DOM with textContent only; terminal output is untrusted. Plain-object test doubles
-   * use the newline fallback. */
-  RulerAddon.prototype._renderTooltip = function (tip, sample, metadata) {
+   * use the newline fallback (and are never interactive, so actions are dropped there). */
+  RulerAddon.prototype._renderTooltip = function (tip, sample, metadata, actions) {
     var prompt = "", command = sample;
     var match = sample.match(CMD_SPLIT_RE);
     if (match) { prompt = match[1]; command = match[2]; }
@@ -1505,11 +1897,54 @@
       }
       tip.appendChild(bottom);
     }
+
+    if (actions && actions.length > 0) {
+      var actionRow = doc.createElement("div");
+      actionRow.className = "srt-actions";
+      for (var a = 0; a < actions.length; a++) {
+        (function (action) {
+          var button = doc.createElement("button");
+          button.className = "srt-btn";
+          button.textContent = action.label;
+          if (button.addEventListener) {
+            button.addEventListener("click", function (e) {
+              if (e && e.stopPropagation) e.stopPropagation();
+              action.run(button);
+            });
+          }
+          actionRow.appendChild(button);
+        })(actions[a]);
+      }
+      tip.appendChild(actionRow);
+    }
   };
 
   RulerAddon.prototype._hideTooltip = function () {
+    this._cancelTooltipHide();
     if (this._hoverTimer) { clearTimeout(this._hoverTimer); this._hoverTimer = null; }
-    if (this._tooltip) this._tooltip.style.display = "none";
+    this._tooltipCommand = null;
+    if (this._tooltip) {
+      this._tooltip.style.display = "none";
+      this._tooltip.style.pointerEvents = "none";
+    }
+  };
+
+  /** Delayed hide with a cancel, so leaving the strip toward the tooltip's action
+   * buttons (a 6px gap) does not dismiss them mid-flight. */
+  RulerAddon.prototype._scheduleTooltipHide = function () {
+    var self = this;
+    this._cancelTooltipHide();
+    this._tooltipHideTimer = setTimeout(function () {
+      self._tooltipHideTimer = null;
+      self._hideTooltip();
+    }, 250);
+  };
+
+  RulerAddon.prototype._cancelTooltipHide = function () {
+    if (this._tooltipHideTimer) {
+      clearTimeout(this._tooltipHideTimer);
+      this._tooltipHideTimer = null;
+    }
   };
 
   // ---- painting ----
@@ -1535,9 +1970,11 @@
 
     if (buf.type === "alternate") {
       this._strip.style.display = "none";
+      if (this._cmdPanel) this._cmdPanel.style.display = "none";
       return;
     }
     this._strip.style.display = "block";
+    if (this._cmdPanel) this._cmdPanel.style.display = this._cmdPanelOpen ? "flex" : "none";
 
     var cssW = WIDTH;
     var cssH = this._strip.clientHeight;

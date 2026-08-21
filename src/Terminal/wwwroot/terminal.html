@@ -39,6 +39,9 @@
   #findbar button:hover { background: rgba(128, 128, 128, 0.25); }
   #findbar button.on { background: #007fd4; color: #ffffff; }
   #find-count { min-width: 52px; text-align: center; opacity: 0.8; white-space: nowrap; }
+  /* The ruler's commands panel hugs the top-right corner the find bar opens into;
+     while the find bar is up, the panel steps down below it instead of fighting it. */
+  body.find-open .scroll-ruler-panel { top: 38px; }
 </style>
 <script src="xterm.js"></script>
 <script src="addon-fit.js"></script>
@@ -330,6 +333,11 @@
         data: typeof data === "string" ? data.slice(0, 4096) : "",
       });
     };
+    // Covers every way the panel state can change (host button, Ctrl+Shift+O, the
+    // panel's own close button), so the native toggle button tracks the truth.
+    ruler.onCommandsPanelChanged = function (open) {
+      host.postMessage({ type: "commandsPanel", open: open === true });
+    };
 
     term.onSelectionChange(function () {
       // Find selects each match it lands on; don't let copy-on-select clobber the clipboard.
@@ -418,6 +426,7 @@
 
     function openFind() {
       findbar.style.display = "flex";
+      document.body.classList.add("find-open");
       if (term.hasSelection()) {
         const sel = term.getSelection().trim();
         if (sel && sel.indexOf("\n") < 0) findInput.value = sel;
@@ -429,6 +438,7 @@
 
     function closeFind() {
       findbar.style.display = "none";
+      document.body.classList.remove("find-open");
       search.clearDecorations();
       ruler.clearSearch();
       findCount.textContent = "";
@@ -478,6 +488,10 @@
       }
       if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyM") {
         ruler.toggleBookmark();
+        return false;
+      }
+      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyO") {
+        ruler.toggleCommandsPanel();
         return false;
       }
       if (e.type === "keydown" && e.ctrlKey && e.shiftKey &&
@@ -574,6 +588,10 @@
           break;
         case "setPromptPlatform":
           ruler.setPromptPlatform(msg.platform);
+          break;
+        case "toggleCommands":
+          // The native tab-strip button; Ctrl+Shift+O inside the page does the same.
+          ruler.toggleCommandsPanel();
           break;
         case "focus":
           term.focus();

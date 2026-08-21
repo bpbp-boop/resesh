@@ -90,7 +90,7 @@
             AllowDrop="True">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="72" />
+                <ColumnDefinition Width="108" />
             </Grid.ColumnDefinitions>
             <TabView
                 x:Name="Tabs"
@@ -286,11 +286,61 @@
                 Height="40"
                 BorderThickness="0,0,0,1"
                 Background="{ThemeResource TabViewBackground}">
+                <Grid.Resources>
+                    <!-- Lightweight styling for the action buttons only: an active toggle
+                         (commands panel / file pane open) keeps its normal background and
+                         says so with an accent-colored glyph instead; pressing flashes the
+                         glyph the same way. Aliases live in ThemeDictionaries so they
+                         re-resolve with the theme and the user's Windows accent. -->
+                    <ResourceDictionary>
+                        <ResourceDictionary.ThemeDictionaries>
+                            <ResourceDictionary x:Key="Default">
+                                <StaticResource x:Key="ToggleButtonForegroundChecked" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ToggleButtonForegroundCheckedPointerOver" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ToggleButtonForegroundCheckedPressed" ResourceKey="AccentTextFillColorSecondaryBrush" />
+                                <StaticResource x:Key="ToggleButtonForegroundPressed" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundChecked" ResourceKey="ToggleButtonBackground" />
+                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPointerOver" ResourceKey="ToggleButtonBackgroundPointerOver" />
+                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPressed" ResourceKey="ToggleButtonBackgroundPressed" />
+                                <StaticResource x:Key="ToggleButtonBorderBrushChecked" ResourceKey="ToggleButtonBorderBrush" />
+                                <StaticResource x:Key="ToggleButtonBorderBrushCheckedPointerOver" ResourceKey="ToggleButtonBorderBrushPointerOver" />
+                                <StaticResource x:Key="ToggleButtonBorderBrushCheckedPressed" ResourceKey="ToggleButtonBorderBrushPressed" />
+                            </ResourceDictionary>
+                            <ResourceDictionary x:Key="Light">
+                                <StaticResource x:Key="ToggleButtonForegroundChecked" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ToggleButtonForegroundCheckedPointerOver" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ToggleButtonForegroundCheckedPressed" ResourceKey="AccentTextFillColorSecondaryBrush" />
+                                <StaticResource x:Key="ToggleButtonForegroundPressed" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundChecked" ResourceKey="ToggleButtonBackground" />
+                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPointerOver" ResourceKey="ToggleButtonBackgroundPointerOver" />
+                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPressed" ResourceKey="ToggleButtonBackgroundPressed" />
+                                <StaticResource x:Key="ToggleButtonBorderBrushChecked" ResourceKey="ToggleButtonBorderBrush" />
+                                <StaticResource x:Key="ToggleButtonBorderBrushCheckedPointerOver" ResourceKey="ToggleButtonBorderBrushPointerOver" />
+                                <StaticResource x:Key="ToggleButtonBorderBrushCheckedPressed" ResourceKey="ToggleButtonBorderBrushPressed" />
+                            </ResourceDictionary>
+                        </ResourceDictionary.ThemeDictionaries>
+                    </ResourceDictionary>
+                </Grid.Resources>
                 <StackPanel
                     Orientation="Horizontal"
                     Spacing="6"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">
+                    <ToggleButton
+                        x:Name="ShowCommandsButton"
+                        Width="30"
+                        Height="30"
+                        Padding="0"
+                        Click="ShowCommandsButton_Click"
+                        ToolTipService.ToolTip="Show commands (Ctrl+Shift+O)">
+                        <!-- Segoe CommandPrompt glyph: the terminal page's typed-command
+                             overview panel (annotated-scrollbar command marks). Checked
+                             follows the page's reported panel state, not just clicks:
+                             Ctrl+Shift+O and the panel's ✕ change it page-side. -->
+                        <FontIcon Glyph="&#xE756;" FontSize="14" />
+                    </ToggleButton>
                     <Button
                         x:Name="CurrentFolderButton"
                         Width="30"

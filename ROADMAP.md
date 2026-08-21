@@ -489,6 +489,52 @@ happen" (`exit 2 · 14:32 · 3h ago`). This is also the timing spine Phase 7 rec
 Verified with focused tests for async write ordering, wrapped lines, trimming, reflow, formatting,
 and command tooltip composition, plus a rendered xterm harness (tooltip text and resize reflow).
 
+### 9.6 Commands panel + popover actions ✅ shipped 2026-08-21 (native button same day)
+Two affordances on top of the 9.4 command marks:
+- **Show commands**: a native WinUI ToggleButton in the tab strip's action cluster
+  (Segoe CommandPrompt glyph, leftmost of show-commands / current-folder / file-pane)
+  posts `toggleCommands` to the page (TabGroupView → TerminalTabView →
+  TerminalControl.Post), which opens the page-side panel listing every command mark —
+  exit-colored status dot, command text, ingest-time clock (9.5 data). Ctrl+Shift+O
+  inside the terminal does the same, and every panel state change (host button, the
+  key, the panel's ✕) reports back as a `commandsPanel` page message so the button's
+  checked state and Show/Hide label stay truthful per tab. Active toggles (commands
+  panel, file pane) show as an ACCENT-COLORED GLYPH on the native background — never
+  an accent fill: lightweight-styling aliases scoped to `TabStripActions` map the
+  checked background/border brushes back to the rest/hover/pressed ones and the
+  checked/pressed foregrounds to `AccentTextFillColor*` (theme- and Windows-accent-
+  aware, per-theme dictionaries). The whole action cluster collapses when the group
+  has no tabs; the commands button disables while the session is locked, and the
+  panel hides with the strip on the alternate screen. An open find bar shifts the
+  panel down a step (`body.find-open`) instead of colliding with it. Click a row
+  to jump + flash; hover reveals a per-row copy-output button. Rows close over the
+  mark ENTRY, not its line number, so clicks stay correct through scrollback
+  trimming; the panel refreshes on commit/exit/dispose (rAF-coalesced) and pins to
+  the newest row. (First cut shipped a page-side "≡" toggle above the ruler;
+  replaced same day by the native button on user feedback.)
+- **Interactive popover**: when the ruler hover region holds a command mark, the
+  tooltip card gains "Jump to" and "Copy output" buttons acting on the NEAREST mark
+  (pointer-events restored only then; a 250 ms hide grace lets the pointer cross the
+  6 px gap to the buttons — informational tooltips stay click-transparent).
+- **Command text** rides on the mark from both sources (133;B column slice or the
+  discovery probe's split) because only the shell knows where a fancy prompt ends;
+  the panel re-parses the buffer line as fallback. **"Copy output"** leads with the
+  command's own prompt line (a paste reads like a transcript), then the buffer text
+  up to the next mark, soft wraps joined, live idle prompt (cursor's logical line)
+  excluded, trailing blanks + empty-Enter prompts dropped — the latter by EQUALITY
+  with a neighboring mark's prompt, never by shape ("</html>" parses as a bare
+  prompt shape and must survive). A command with no surviving output never clobbers
+  the clipboard; the button says "No output" instead of copying a lone header.
+Verified: 14 node tests (106 total green, incl. the native wiring chain) and live in
+the stubbed browser harness (real OSC 133 ingest → panel rows/colors/count/timestamps,
+row jump centers viewportY + flash decoration, copy via clipboard capture byte-exact
+for all marks, popover buttons + hide-grace timing, `toggleCommands` message open/
+close, find-bar panel shift, live theme swap incl. solarized-light). Untried: a real
+click of the native button in the running app, a human Ctrl+Shift+O, and the
+empty-group hidden state on screen. Known limit: an extreme mid-session reflow (~10-col transient) can
+shift a marker onto a wrapped row and leave a prompt fragment in one copy — accepted,
+matches OSC 133 marker drift elsewhere.
+
 ---
 
 ## Phase 10 — Telnet & serial consoles

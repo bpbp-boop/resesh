@@ -86,6 +86,11 @@ public sealed class TerminalControl : Grid, IDisposable
     /// which the subtitle needs. <see cref="TitleChanged"/> feeds agent tracking as well.</summary>
     public event Action<string>? CommandObserved;
 
+    /// <summary>Raised when the page's commands panel opens or closes — from the host's
+    /// toggle button, Ctrl+Shift+O, or the panel's own close button — so the native
+    /// toggle button can mirror the true state.</summary>
+    public event Action<bool>? CommandsPanelOpenChanged;
+
     public int Columns { get; private set; } = 80;
     public int Rows { get; private set; } = 24;
 
@@ -251,6 +256,10 @@ public sealed class TerminalControl : Grid, IDisposable
                     if (root.TryGetProperty("data", out var context))
                         ContextReported?.Invoke(context.GetString() ?? "");
                     break;
+                case "commandsPanel":
+                    if (root.TryGetProperty("open", out var panelOpen))
+                        CommandsPanelOpenChanged?.Invoke(panelOpen.ValueKind == JsonValueKind.True);
+                    break;
                 case "pageError":
                     if (root.TryGetProperty("message", out var err))
                         TraceHook?.Invoke($"pageError: {err.GetString()}");
@@ -347,6 +356,10 @@ public sealed class TerminalControl : Grid, IDisposable
     /// <summary>Blocks or restores pointer input to the page (used by session lock).
     /// Callers must also move keyboard focus off the terminal (the lock overlay does).</summary>
     public void SetInputEnabled(bool enabled) => _webView.IsHitTestVisible = enabled;
+
+    /// <summary>Opens or closes the page's commands panel (the annotated scrollbar's
+    /// command-mark list). Same action as Ctrl+Shift+O inside the terminal.</summary>
+    public void ToggleCommandsPanel() => Post(new { type = "toggleCommands" });
 
     /// <summary>Uses the quieter ruler presentation while two terminal groups are visible.
     /// The inactive group is dimmer, but pointer hover restores the full presentation.</summary>

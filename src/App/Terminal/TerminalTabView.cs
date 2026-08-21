@@ -81,6 +81,14 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// <summary>Raised when the file pane opens or closes so group chrome can follow it.</summary>
     public event Action? FilePaneOpenChanged;
 
+    /// <summary>True while the terminal page's commands panel is open. Kept from page
+    /// reports because Ctrl+Shift+O and the panel's ✕ change the state page-side.</summary>
+    public bool IsCommandsPanelOpen { get; private set; }
+
+    /// <summary>Raised when the commands panel opens or closes so the tab-strip toggle
+    /// button can mirror it.</summary>
+    public event Action? CommandsPanelOpenChanged;
+
     public TerminalTabView(TabViewModel tab, ICredentialService credentials, KnownHostsStore knownHosts,
         SshKeyStore sshKeys,
         IReadOnlySet<int>? tmuxSlotsAlreadyOpen = null)
@@ -145,6 +153,11 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.CloseTabRequested += () => DispatcherQueue.TryEnqueue(() => CloseRequested?.Invoke());
         _terminal.SplitRequested += () => DispatcherQueue.TryEnqueue(() => SplitRequested?.Invoke());
         _terminal.FilePaneRequested += () => DispatcherQueue.TryEnqueue(ToggleFilePane);
+        _terminal.CommandsPanelOpenChanged += open => DispatcherQueue.TryEnqueue(() =>
+        {
+            IsCommandsPanelOpen = open;
+            CommandsPanelOpenChanged?.Invoke();
+        });
         _terminal.NewLocalTabRequested += () => DispatcherQueue.TryEnqueue(() => NewLocalTabRequested?.Invoke());
 
         _agent = new AgentTracker(Session.Agent);
@@ -282,6 +295,13 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// <summary>Adjusts the annotated scrollbar for the current group layout and focus.</summary>
     public void SetRulerPresentation(bool isSplit, bool isGroupFocused) =>
         _terminal.SetRulerPresentation(isSplit, isGroupFocused);
+
+    /// <summary>Opens or closes the terminal's typed-commands panel (tab-strip button).</summary>
+    public void ToggleCommandsPanel()
+    {
+        if (!_disposed && !_tab.IsLocked)
+            _terminal.ToggleCommandsPanel();
+    }
 
     /// <summary>Kicks off a fresh connection/launch using the terminal's current size.</summary>
     public async Task ConnectAsync(bool isReconnect)
