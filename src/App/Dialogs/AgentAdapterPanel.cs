@@ -16,52 +16,38 @@ public static class AgentAdapterPanel
 {
     public static UIElement Create()
     {
-        var panel = new StackPanel { Spacing = 12 };
-        panel.Children.Add(new TextBlock
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(new InfoBar
         {
-            TextWrapping = TextWrapping.Wrap,
-            Text = "Resesh detects agents on its own — from the command you run, the terminal "
-                 + "title, and (for local tabs) the processes in the tab's own job. Detection can "
-                 + "say which agent is running, but only the agent itself can say it is waiting for "
-                 + "you. Installing one of these snippets on a target upgrades its tabs from a guess "
-                 + "to reported idle / working / needs-approval / complete states. The Codex adapter "
-                 + "uses Codex's lifecycle hooks; review and trust it from Codex with /hooks.",
+            IsOpen = true,
+            IsClosable = false,
+            Severity = InfoBarSeverity.Informational,
+            Title = "Manual setup",
+            Message = "Resesh does not install adapters or change any host. An adapter only reports status to its terminal; it cannot approve requests or send input.",
         });
         panel.Children.Add(new TextBlock
         {
-            TextWrapping = TextWrapping.Wrap,
-            Opacity = 0.75,
-            Text = "Nothing here is installed for you, on this machine or any remote host. "
-                 + "Copy what you want, where you want it; delete the lines to remove it. The hooks "
-                 + "only report status to the terminal. They never approve a request or send input.",
-        });
-
-        var first = true;
-        foreach (var snippet in AgentAdapters.All)
-        {
-            panel.Children.Add(SnippetExpander(snippet, first));
-            first = false;
-        }
-
-        panel.Children.Add(new TextBlock
-        {
-            Text = "Escape sequence",
+            Text = "Choose an adapter",
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Margin = new Thickness(0, 4, 0, 0),
         });
-        panel.Children.Add(CodeBlock(AgentAdapters.SequenceReference, wrap: true));
+
+        foreach (var snippet in AgentAdapters.All)
+            panel.Children.Add(SnippetExpander(snippet));
+
+        panel.Children.Add(ProtocolReference());
         return panel;
     }
 
-    /// <summary>One adapter as a collapsible row: title + target always visible, the
-    /// description and snippet text behind the chevron. Copy works without expanding; the
-    /// button floats over the header because an Expander header does not reliably stretch.</summary>
-    private static UIElement SnippetExpander(AgentAdapterSnippet snippet, bool expanded)
+    /// <summary>One adapter as a compact card. Its destination stays visible, while the
+    /// explanation and code stay behind the chevron. Copy remains available without
+    /// expanding the card.</summary>
+    private static UIElement SnippetExpander(AgentAdapterSnippet snippet)
     {
         var header = new StackPanel
         {
-            Spacing = 2,
-            Margin = new Thickness(0, 10, 0, 10),
+            Spacing = 3,
+            Margin = new Thickness(0, 8, 88, 8),
             Children =
             {
                 new TextBlock
@@ -72,7 +58,8 @@ public static class AgentAdapterPanel
                 new TextBlock
                 {
                     Text = snippet.Target,
-                    Opacity = 0.65,
+                    TextWrapping = TextWrapping.Wrap,
+                    Opacity = 0.62,
                     FontFamily = new FontFamily("Cascadia Mono, Consolas"),
                     FontSize = 12,
                 },
@@ -82,15 +69,20 @@ public static class AgentAdapterPanel
         var expander = new Expander
         {
             Header = header,
-            IsExpanded = expanded,
+            IsExpanded = false,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Content = new StackPanel
             {
-                Spacing = 8,
+                Spacing = 10,
                 Children =
                 {
-                    new TextBlock { Text = snippet.Description, TextWrapping = TextWrapping.Wrap, Opacity = 0.8 },
+                    new TextBlock
+                    {
+                        Text = snippet.Description,
+                        TextWrapping = TextWrapping.Wrap,
+                        Opacity = 0.78,
+                    },
                     CodeBlock(snippet.Text, wrap: false),
                 },
             },
@@ -99,9 +91,10 @@ public static class AgentAdapterPanel
         var copy = new Button
         {
             Content = "Copy",
+            MinWidth = 72,
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(0, 14, 48, 0), // clear of the expand chevron
+            Margin = new Thickness(0, 10, 42, 0),
         };
         copy.Click += (_, _) =>
         {
@@ -111,8 +104,47 @@ public static class AgentAdapterPanel
             copy.Content = "Copied";
         };
 
-        return new Grid { Children = { expander, copy } };
+        return RowCard(new Grid { Children = { expander, copy } });
     }
+
+    private static UIElement ProtocolReference()
+    {
+        var expander = new Expander
+        {
+            Header = new StackPanel
+            {
+                Spacing = 3,
+                Margin = new Thickness(0, 8, 0, 8),
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Protocol reference",
+                        FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    },
+                    new TextBlock
+                    {
+                        Text = "For custom integrations",
+                        Opacity = 0.62,
+                        FontSize = 12,
+                    },
+                },
+            },
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Content = CodeBlock(AgentAdapters.SequenceReference, wrap: true),
+        };
+        return RowCard(expander);
+    }
+
+    private static Border RowCard(UIElement child) => new()
+    {
+        CornerRadius = new CornerRadius(6),
+        BorderThickness = new Thickness(1),
+        BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(42, 128, 128, 128)),
+        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(12, 128, 128, 128)),
+        Child = child,
+    };
 
     /// <summary>Read-only code block: a selectable TextBlock, not a TextBox — a TextBox
     /// measures programmatically-set multi-line text as a single line here.</summary>

@@ -71,15 +71,24 @@ test("built-in rules are editable with a reset back to the shipped defaults", ()
   assert.match(store, /BuiltinOverrides/);
 });
 
-test("agent adapters live inline in the Agents tab as collapsible snippet rows", () => {
+test("the Agents tab groups controls and keeps adapter details collapsed", () => {
+  assert.match(dialog, /SectionCard\(\s*"Tab display"/);
+  assert.match(dialog, /SectionCard\(\s*"Background alerts"/);
+  assert.match(dialog, /SectionCard\(\s*"Agent adapters"/);
   assert.match(dialog, /AgentAdapterPanel\.Create\(\)/);
-  assert.match(agentPanel, /class AgentAdapterPanel/);
-  assert.match(agentPanel, /new Expander/);
+  assert.match(agentPanel, /new InfoBar/);
+  assert.match(agentPanel, /IsExpanded = false/);
   assert.match(agentPanel, /Content = "Copy"/);
-  assert.match(agentPanel, /AgentAdapters\.SequenceReference/);
+  assert.match(agentPanel, /ProtocolReference\(\)/);
   assert.ok(
     !fs.existsSync(path.join(__dirname, "..", "src", "App", "Dialogs", "AgentAdapterDialog.cs")),
     "the standalone agent adapter dialog should be gone");
+});
+
+test("background alert choices are unavailable when agent icons are off", () => {
+  assert.match(dialog, /agentFlash\.IsEnabled = agentIcons\.IsOn/);
+  assert.match(dialog, /agentSound\.IsEnabled = agentIcons\.IsOn/);
+  assert.match(dialog, /agentIcons\.Toggled \+= \(_, _\) => SyncAgentAlertControls\(\)/);
 });
 
 test("saving rebases only the dialog's fields onto the live settings", () => {

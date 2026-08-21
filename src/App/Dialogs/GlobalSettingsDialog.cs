@@ -70,12 +70,12 @@ public static class GlobalSettingsDialog
 
         var agentIcons = new ToggleSwitch
         {
-            Header = WrappingHeader("Show agent icons on tabs"),
+            Header = WrappingHeader("Show agent icons"),
             IsOn = current.ShowAgentIcons,
         };
         var agentFlash = new ToggleSwitch
         {
-            Header = WrappingHeader("Flash the taskbar when a background agent needs you"),
+            Header = WrappingHeader("Flash the taskbar"),
             IsOn = current.AgentAlertFlash,
         };
         var agentSound = new ToggleSwitch
@@ -83,6 +83,14 @@ public static class GlobalSettingsDialog
             Header = WrappingHeader("Play the notification sound"),
             IsOn = current.AgentAlertSound,
         };
+
+        void SyncAgentAlertControls()
+        {
+            agentFlash.IsEnabled = agentIcons.IsOn;
+            agentSound.IsEnabled = agentIcons.IsOn;
+        }
+        agentIcons.Toggled += (_, _) => SyncAgentAlertControls();
+        SyncAgentAlertControls();
 
         // ---- General ----
 
@@ -136,30 +144,37 @@ public static class GlobalSettingsDialog
 
         // ---- Agents ----
 
-        var agentToggles = new Grid { ColumnSpacing = 16 };
-        for (var i = 0; i < 3; i++)
-            agentToggles.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        foreach (var (toggle, column) in new[] { (agentIcons, 0), (agentFlash, 1), (agentSound, 2) })
-        {
-            toggle.VerticalAlignment = VerticalAlignment.Top;
-            Grid.SetColumn(toggle, column);
-            agentToggles.Children.Add(toggle);
-        }
+        var agentColumns = new Grid { ColumnSpacing = 16 };
+        agentColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        agentColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var tabStatusCard = SectionCard(
+            "Tab display",
+            "Replace a session icon while Resesh recognizes a supported agent in that tab.",
+            agentIcons);
+        var alertCard = SectionCard(
+            "Background alerts",
+            "Get your attention when an agent waits for a response. Turn on agent icons to use alerts.",
+            agentFlash,
+            agentSound);
+        tabStatusCard.VerticalAlignment = VerticalAlignment.Stretch;
+        alertCard.VerticalAlignment = VerticalAlignment.Stretch;
+        Grid.SetColumn(tabStatusCard, 0);
+        Grid.SetColumn(alertCard, 1);
+        agentColumns.Children.Add(tabStatusCard);
+        agentColumns.Children.Add(alertCard);
 
         var agentsTab = new StackPanel
         {
-            Spacing = 12,
+            Spacing = 16,
             Children =
             {
-                Description("Show agent identity and attention in tabs. Adapters add reported agent status."),
-                agentToggles,
-                new Border
-                {
-                    Height = 1,
-                    Background = new SolidColorBrush(Windows.UI.Color.FromArgb(30, 128, 128, 128)),
-                    Margin = new Thickness(0, 4, 0, 4),
-                },
-                AgentAdapterPanel.Create(),
+                Description("Track supported coding agents in each terminal tab. Resesh can notify you when an agent needs a response."),
+                agentColumns,
+                SectionCard(
+                    "Agent adapters",
+                    "Resesh identifies supported agents automatically. Add an adapter only for exact working, waiting, and finished states.",
+                    AgentAdapterPanel.Create()),
             },
         };
 

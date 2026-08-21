@@ -35,9 +35,9 @@ public static class AgentAdapters
     /// the hook JSON from stdin, write only to the controlling terminal, and return no hook
     /// output, so they can report state without changing an approval or agent decision.</summary>
     public static AgentAdapterSnippet Codex() => new(
-        "Codex — Windows / Linux / macOS",
-        "~/.codex/hooks.json (then review and trust it with /hooks)",
-        "Uses Codex lifecycle hooks for exact idle / working / needs-approval / complete / exit states.",
+        "Codex",
+        "~/.codex/hooks.json · Windows, Linux, macOS",
+        "Adds exact lifecycle states from Codex hooks. After you add the file, review and trust it with /hooks.",
         CodexHooksJson());
 
     private static string CodexHooksJson()
@@ -96,9 +96,9 @@ public static class AgentAdapters
     /// <summary>Claude Code hooks on a POSIX host (Linux/macOS/WSL). Writes straight to the
     /// tty so the sequence reaches the terminal instead of the hook's captured stdout.</summary>
     public static AgentAdapterSnippet ClaudeCodePosix() => new(
-        "Claude Code — Linux / macOS",
-        "~/.claude/settings.json on the remote host",
-        "Reports working / needs-approval / complete / exit from Claude Code's own hooks.",
+        "Claude Code",
+        "~/.claude/settings.json · Linux, macOS, WSL",
+        "Reports working, approval, finished, and exit states from Claude Code hooks.",
         """
         {
           "hooks": {
@@ -114,9 +114,9 @@ public static class AgentAdapters
     /// <summary>Claude Code hooks on Windows. A hook process inherits the tab's
     /// pseudoconsole, so writing to the console reaches the terminal directly.</summary>
     public static AgentAdapterSnippet ClaudeCodeWindows() => new(
-        "Claude Code — Windows",
-        "%USERPROFILE%\\.claude\\settings.json",
-        "Same events as the POSIX adapter, written to the tab's pseudoconsole.",
+        "Claude Code",
+        "%USERPROFILE%\\.claude\\settings.json · Windows",
+        "Reports the same lifecycle states through the Windows pseudoconsole.",
         """
         {
           "hooks": {
@@ -132,9 +132,9 @@ public static class AgentAdapters
     /// <summary>A shell helper for agents with no hook system: wrap the run, and report
     /// its start, end and exit status by hand.</summary>
     public static AgentAdapterSnippet ShellFunction() => new(
-        "Any agent — shell wrapper",
-        "~/.bashrc or ~/.zshrc on the remote host",
-        "Reports working on launch and complete/failed on exit for an agent you wrap yourself.",
+        "Shell wrapper",
+        "~/.bashrc or ~/.zshrc · Any command-line agent",
+        "Reports working, finished, and failed states for an agent command that you wrap.",
         """
         # Resesh agent status: resesh_agent <id> <state> [label]
         resesh_agent() { printf '\033]7377;agent;id=%s;state=%s;label=%s\007' "$1" "$2" "${3:-}" > /dev/tty; }
