@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Core\Sessions.Core.csproj" />
+    <ProjectReference Include="..\..\src\Core\Resesh.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>

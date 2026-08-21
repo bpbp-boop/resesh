@@ -1,20 +1,20 @@
 ﻿using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Sessions.App.Controls;
-using Sessions.App.Dialogs;
-using Sessions.App.ViewModels;
-using Sessions.Core.Agents;
-using Sessions.Core.Backend;
-using Sessions.Core.Credentials;
-using Sessions.Core.Local;
-using Sessions.Core.Models;
-using Sessions.Core.Sftp;
-using Sessions.Core.Ssh;
-using Sessions.Core.Storage;
-using Sessions.Terminal;
+using Resesh.App.Controls;
+using Resesh.App.Dialogs;
+using Resesh.App.ViewModels;
+using Resesh.Core.Agents;
+using Resesh.Core.Backend;
+using Resesh.Core.Credentials;
+using Resesh.Core.Local;
+using Resesh.Core.Models;
+using Resesh.Core.Sftp;
+using Resesh.Core.Ssh;
+using Resesh.Core.Storage;
+using Resesh.Terminal;
 
-namespace Sessions.App.Terminal;
+namespace Resesh.App.Terminal;
 
 /// <summary>
 /// The content of one tab: a TerminalControl plus the shell lifecycle for either target

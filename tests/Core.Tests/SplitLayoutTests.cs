@@ -1,6 +1,6 @@
-using Sessions.Core.Layout;
+using Resesh.Core.Layout;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 public class SplitLayoutTests
 {

@@ -1,4 +1,4 @@
-namespace Sessions.Core.Sftp;
+namespace Resesh.Core.Sftp;
 
 /// <summary>One entry of a remote directory listing, decoupled from SSH.NET's ISftpFile.</summary>
 public sealed record RemoteFileEntry(

@@ -1,8 +1,8 @@
-using Sessions.Core.Credentials;
-using Sessions.Core.Models;
-using Sessions.Core.Storage;
+using Resesh.Core.Credentials;
+using Resesh.Core.Models;
+using Resesh.Core.Storage;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 public sealed class SshKeyStoreTests : IDisposable
 {

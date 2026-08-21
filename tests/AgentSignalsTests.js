@@ -86,7 +86,7 @@ test("a throwing listener cannot break command marking", () => {
 });
 
 test("the page forwards agent evidence and nothing else", () => {
-  // OSC 7377 (Sessions structured events) plus the two generic notification sequences.
+  // OSC 7377 (Resesh structured events) plus the two generic notification sequences.
   assert.match(pageSource, /\[7377, 9, 777\]\.forEach/);
   assert.match(pageSource, /type: "agentOsc"/);
   assert.match(pageSource, /type: "agentBell"/);

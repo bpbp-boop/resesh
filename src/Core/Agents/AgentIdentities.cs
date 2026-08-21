@@ -1,4 +1,4 @@
-namespace Sessions.Core.Agents;
+namespace Resesh.Core.Agents;
 
 /// <summary>
 /// One agent identity: its stable key (also the bundled SVG filename, without extension),

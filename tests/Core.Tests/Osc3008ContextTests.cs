@@ -1,6 +1,6 @@
-using Sessions.Core.Sftp;
+using Resesh.Core.Sftp;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 public sealed class Osc3008ContextTests
 {

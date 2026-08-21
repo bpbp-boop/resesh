@@ -1,4 +1,4 @@
-namespace Sessions.Core.Sftp;
+namespace Resesh.Core.Sftp;
 
 /// <summary>
 /// Converts between the three-digit "octal-as-decimal" permission form SSH.NET uses

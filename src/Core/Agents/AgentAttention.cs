@@ -1,4 +1,4 @@
-namespace Sessions.Core.Agents;
+namespace Resesh.Core.Agents;
 
 /// <summary>
 /// What the agent in a tab wants from the user. Ordered from quiet to loud; the badge

@@ -2,13 +2,13 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Sessions.App.Interop;
-using Sessions.Core.Models;
-using Sessions.Core.Sftp;
-using Sessions.Core.Ssh;
+using Resesh.App.Interop;
+using Resesh.Core.Models;
+using Resesh.Core.Sftp;
+using Resesh.Core.Ssh;
 using Windows.ApplicationModel.DataTransfer;
 
-namespace Sessions.App.Controls;
+namespace Resesh.App.Controls;
 
 /// <summary>
 /// The per-tab SFTP file pane: remote listing, navigation, transfers with progress,
@@ -642,7 +642,7 @@ public sealed class SftpPaneView : UserControl, IDisposable
         if (entry is null || entry.IsDirectory)
             return;
         // Per-download temp folder so simultaneous "open" of same-named files never collide.
-        var tempDir = Path.Combine(Path.GetTempPath(), "Sessions", "opened", Guid.NewGuid().ToString("N")[..8]);
+        var tempDir = Path.Combine(Path.GetTempPath(), "Resesh", "opened", Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(tempDir);
         await DownloadEntriesAsync([entry], tempDir, openAfter: true);
     }

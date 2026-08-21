@@ -1,4 +1,4 @@
-namespace Sessions.Core.Agents;
+namespace Resesh.Core.Agents;
 
 /// <summary>
 /// The guessing half of agent awareness: map a command line, a terminal title, or a

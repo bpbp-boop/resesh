@@ -1,4 +1,4 @@
-namespace Sessions.Core.Sftp;
+namespace Resesh.Core.Sftp;
 
 /// <summary>
 /// Pure helpers for POSIX-style remote paths (always forward slashes, "/" = root).

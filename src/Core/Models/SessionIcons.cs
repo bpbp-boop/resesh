@@ -1,4 +1,4 @@
-namespace Sessions.Core.Models;
+namespace Resesh.Core.Models;
 
 /// <summary>One built-in session icon: its stable key (also the bundled SVG filename,
 /// without extension), display name, and picker group.</summary>

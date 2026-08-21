@@ -3,24 +3,31 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text;
 
-namespace Sessions.Core.Credentials;
+namespace Resesh.Core.Credentials;
 
 /// <summary>
 /// Windows Credential Manager backend (CredRead/CredWrite/CredDelete P/Invoke).
-/// Secrets are stored as generic credentials named "Sessions:{sessionId}".
+/// Secrets are stored as generic credentials named "Resesh:{sessionId}".
+/// Reads fall back to the pre-rename "Sessions:" targets so existing secrets keep working.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class WindowsCredentialService : ICredentialService
 {
-    private const string SessionTargetPrefix = "Sessions:";
-    private const string KeyTargetPrefix = "Sessions:Key:";
+    private const string SessionTargetPrefix = "Resesh:";
+    private const string KeyTargetPrefix = "Resesh:Key:";
+    private const string LegacySessionTargetPrefix = "Sessions:";
+    private const string LegacyKeyTargetPrefix = "Sessions:Key:";
     private const int CredTypeGeneric = 1;
     private const int CredPersistLocalMachine = 2;
     private const int ErrorNotFound = 1168;
 
-    public string? Read(Guid sessionId) => ReadTarget(SessionTarget(sessionId));
+    public string? Read(Guid sessionId) =>
+        ReadTarget(SessionTarget(sessionId))
+        ?? ReadTarget(LegacySessionTargetPrefix + sessionId.ToString("D"));
 
-    public string? ReadKey(Guid keyId) => ReadTarget(KeyTarget(keyId));
+    public string? ReadKey(Guid keyId) =>
+        ReadTarget(KeyTarget(keyId))
+        ?? ReadTarget(LegacyKeyTargetPrefix + keyId.ToString("D"));
 
     private static string? ReadTarget(string target)
     {
@@ -76,9 +83,17 @@ public sealed class WindowsCredentialService : ICredentialService
         }
     }
 
-    public void Delete(Guid sessionId) => DeleteTarget(SessionTarget(sessionId));
+    public void Delete(Guid sessionId)
+    {
+        DeleteTarget(SessionTarget(sessionId));
+        DeleteTarget(LegacySessionTargetPrefix + sessionId.ToString("D"));
+    }
 
-    public void DeleteKey(Guid keyId) => DeleteTarget(KeyTarget(keyId));
+    public void DeleteKey(Guid keyId)
+    {
+        DeleteTarget(KeyTarget(keyId));
+        DeleteTarget(LegacyKeyTargetPrefix + keyId.ToString("D"));
+    }
 
     private static void DeleteTarget(string target)
     {

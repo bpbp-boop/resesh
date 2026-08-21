@@ -1,11 +1,11 @@
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.UI.Xaml;
-using Sessions.Core.Agents;
-using Sessions.Core.Backend;
-using Sessions.Core.Models;
+using Resesh.Core.Agents;
+using Resesh.Core.Backend;
+using Resesh.Core.Models;
 
-namespace Sessions.App.ViewModels;
+namespace Resesh.App.ViewModels;
 
 public enum TabConnectionState
 {
@@ -293,7 +293,7 @@ public sealed class TabViewModel : ObservableObject
 
     public bool CloseInteractive => !IsPinned && (IsActive || IsPointerOver);
 
-    private bool IsDark => !Sessions.Core.Storage.ThemeCatalog.IsLight(_appTheme);
+    private bool IsDark => !Resesh.Core.Storage.ThemeCatalog.IsLight(_appTheme);
 
     /// <summary>Applies a saved or previewed app theme to this tab's chrome.</summary>
     public void ApplyAppTheme(string theme)

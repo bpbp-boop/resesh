@@ -1,19 +1,19 @@
 ﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using Sessions.App.Controls;
-using Sessions.App.Dialogs;
-using Sessions.App.Terminal;
-using Sessions.App.ViewModels;
-using Sessions.Core.Backup;
-using Sessions.Core.Layout;
-using Sessions.Core.Models;
-using Sessions.Core.Storage;
+using Resesh.App.Controls;
+using Resesh.App.Dialogs;
+using Resesh.App.Terminal;
+using Resesh.App.ViewModels;
+using Resesh.Core.Backup;
+using Resesh.Core.Layout;
+using Resesh.Core.Models;
+using Resesh.Core.Storage;
 using Microsoft.UI.Windowing;
 using Windows.Graphics;
 using Windows.System;
 
-namespace Sessions.App;
+namespace Resesh.App;
 
 public sealed partial class MainWindow : Window, ITabGroupHost
 {
@@ -378,7 +378,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             var pronoun = count == 1 ? "it" : "them";
             var dialog = new ContentDialog
             {
-                Title = "Exit Sessions?",
+                Title = "Exit Resesh?",
                 Content = $"Are you sure you want to exit? You have {count} open {sessionText}. Exiting will close {pronoun}.",
                 PrimaryButtonText = "Exit",
                 CloseButtonText = "Cancel",
@@ -637,7 +637,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     /// a taskbar flash and the system sound when the window itself is in the background.
     /// Content never leaves the app: the OS-level signals carry no agent text at all.
     /// </summary>
-    private void OnAgentAlert(TabViewModel tab, Sessions.Core.Agents.AgentSnapshot snapshot)
+    private void OnAgentAlert(TabViewModel tab, Resesh.Core.Agents.AgentSnapshot snapshot)
     {
         var settings = App.Settings.Current;
         if (!settings.ShowAgentIcons)
@@ -1375,7 +1375,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         try
         {
-            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sessions");
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Resesh");
             Directory.CreateDirectory(dir);
             // TraceHook producers (SSH/ConPTY read loops) call this off the UI thread, and a
             // second app instance or a log tail may hold the file — so serialize in-process,
@@ -1529,9 +1529,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             var picker = new Windows.Storage.Pickers.FileSavePicker
             {
                 SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
-                SuggestedFileName = $"Sessions backup {DateTime.Now:yyyy-MM-dd}",
+                SuggestedFileName = $"Resesh backup {DateTime.Now:yyyy-MM-dd}",
             };
-            picker.FileTypeChoices.Add("Sessions backup", [".sessionsbackup"]);
+            picker.FileTypeChoices.Add("Resesh backup", [".reseshbackup"]);
             WinRT.Interop.InitializeWithWindow.Initialize(
                 picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
             var file = await picker.PickSaveFileAsync();
@@ -1574,7 +1574,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
                 ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
             };
-            picker.FileTypeFilter.Add(".sessionsbackup");
+            picker.FileTypeFilter.Add(".reseshbackup");
+            picker.FileTypeFilter.Add(".sessionsbackup"); // pre-rename backups still import
             WinRT.Interop.InitializeWithWindow.Initialize(
                 picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
             var file = await picker.PickSingleFileAsync();

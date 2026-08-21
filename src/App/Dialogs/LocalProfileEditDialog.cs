@@ -1,10 +1,10 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Sessions.Core.Local;
-using Sessions.Core.Models;
-using Sessions.Core.Storage;
+using Resesh.Core.Local;
+using Resesh.Core.Models;
+using Resesh.Core.Storage;
 
-namespace Sessions.App.Dialogs;
+namespace Resesh.App.Dialogs;
 
 /// <summary>
 /// Editor for local shell profiles: identity (name, folder under Local, icon, color),

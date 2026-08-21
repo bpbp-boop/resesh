@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Sessions.Core.Agents;
+namespace Resesh.Core.Agents;
 
 /// <summary>Where a piece of agent evidence came from, weakest to strongest.</summary>
 public enum AgentSource
@@ -37,7 +37,7 @@ public sealed record AgentEvent(
     bool Ended = false);
 
 /// <summary>
-/// The escape-sequence side of agent awareness: the Sessions structured event, plus the
+/// The escape-sequence side of agent awareness: the Resesh structured event, plus the
 /// generic notification sequences we accept as low-confidence fallbacks.
 ///
 /// Structured form (what adapters emit):
@@ -46,7 +46,7 @@ public sealed record AgentEvent(
 /// </summary>
 public static class AgentOsc
 {
-    /// <summary>Sessions' own OSC code ("SESS" on a phone keypad). Chosen clear of the
+    /// <summary>Resesh's OSC code (7377, "SESS" from the pre-rename name) ("SESS" on a phone keypad). Chosen clear of the
     /// sequences already in the wild: 0/1/2 title, 7 cwd, 8 links, 9 notify, 52 clipboard,
     /// 133 shell integration, 633 VS Code, 777 rxvt notify, 1337 iTerm2.</summary>
     public const int SessionsCode = 7377;
@@ -69,13 +69,13 @@ public static class AgentOsc
         _ => null,
     };
 
-    /// <summary>The Sessions structured event: <c>agent;id=…;state=…;label=…</c>.</summary>
+    /// <summary>The Resesh structured event: <c>agent;id=…;state=…;label=…</c>.</summary>
     public static AgentEvent? ParseStructured(string? payload)
     {
         if (string.IsNullOrEmpty(payload))
             return null;
         var parts = payload.Split(';');
-        // Namespaced so 7377 can carry other Sessions subprotocols later.
+        // Namespaced so 7377 can carry other Resesh subprotocols later.
         if (!parts[0].Trim().Equals("agent", StringComparison.OrdinalIgnoreCase))
             return null;
 

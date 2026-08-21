@@ -1,13 +1,13 @@
 using System.Text;
-using Sessions.Core.Local;
-using Sessions.Core.Models;
-using Sessions.Core.Search;
-using Sessions.Core.Storage;
+using Resesh.Core.Local;
+using Resesh.Core.Models;
+using Resesh.Core.Search;
+using Resesh.Core.Storage;
 
 // The suite only runs on Windows (ConPTY, registry); silences CA1416 for the Windows-only APIs.
 [assembly: System.Runtime.Versioning.SupportedOSPlatform("windows")]
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 public class LocalShellDiscoveryTests
 {

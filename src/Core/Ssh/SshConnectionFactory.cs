@@ -1,8 +1,8 @@
 using Renci.SshNet;
 using Renci.SshNet.Common;
-using Session = Sessions.Core.Models.Session;
+using Session = Resesh.Core.Models.Session;
 
-namespace Sessions.Core.Ssh;
+namespace Resesh.Core.Ssh;
 
 public sealed record KeyboardInteractivePrompt(string Text, bool IsSecret);
 

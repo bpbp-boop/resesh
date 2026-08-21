@@ -1,8 +1,8 @@
 <ContentDialog
-    x:Class="Sessions.App.Dialogs.SessionEditDialog"
+    x:Class="Resesh.App.Dialogs.SessionEditDialog"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:icons="using:Sessions.App.Icons"
+    xmlns:icons="using:Resesh.App.Icons"
     PrimaryButtonText="Save"
     CloseButtonText="Cancel"
     DefaultButton="Primary"
@@ -108,7 +108,7 @@
                     x:Name="KeyHint"
                     Style="{ThemeResource CaptionTextBlockStyle}"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="Sessions keeps a reference to the key in its current location. Manage registered keys from the File menu."
+                    Text="Resesh keeps a reference to the key in its current location. Manage registered keys from the File menu."
                     TextWrapping="Wrap"
                     Visibility="Collapsed" />
             </StackPanel>
@@ -173,7 +173,7 @@
                         Grid.Column="1"
                         Style="{ThemeResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Drop your own PNG/SVG files into %APPDATA%\Sessions\icons\ and they appear in the picker."
+                        Text="Drop your own PNG/SVG files into %APPDATA%\Resesh\icons\ and they appear in the picker."
                         TextWrapping="Wrap"
                         VerticalAlignment="Bottom" />
                 </Grid>

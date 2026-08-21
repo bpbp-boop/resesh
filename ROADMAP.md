@@ -1,4 +1,4 @@
-# Sessions — v2 Roadmap
+# Resesh — v2 Roadmap
 
 v1 (M1–M5, plus tmux persistence) is complete — see `ssh-client-v1-plan.md` and `DECISIONS.md`.
 This roadmap covers the next tranche. Phases are ordered by dependency and value; the GSSAPI
@@ -32,7 +32,7 @@ Regex-rule highlighting in the terminal, modeled on netOS-cli's SecureCRT keywor
 (<https://github.com/h-lopez/netOS-cli>) but first-class: built-in packs, per-rule toggles,
 user-defined rules, all controllable **per session**.
 
-**Rule model** (`highlights.json` in `%APPDATA%\Sessions\`):
+**Rule model** (`highlights.json` in `%APPDATA%\Resesh\`):
 ```json
 { "id": "state-negative", "name": "Down/error states", "pack": "builtin:network",
   "pattern": "\\b(down|disabled|shutdown|failed|error|denied)\\b",
@@ -114,10 +114,10 @@ driver.
 
 ## Phase 4 — Export / import & backup ✅ shipped 2026-08-16
 
-On-disk format remains `%APPDATA%\Sessions\` (`sessions.json`, `settings.json`,
+On-disk format remains `%APPDATA%\Resesh\` (`sessions.json`, `settings.json`,
 `known_hosts.json`), human-editable JSON, with atomic writes. Shipped work:
 
-- **Export archive** (`*.sessionsbackup`, a zip): sessions + folders + settings +
+- **Export archive** (`*.reseshbackup`, a zip): sessions + folders + settings +
   known hosts + highlight rules + custom icons + workspaces (Phase 8). Optional filter (export a folder subtree
   only). Recordings are excluded (large; they live in their own configurable directory).
 - **Secrets:** Credential Manager entries are machine-bound and never in the on-disk JSON
@@ -181,7 +181,7 @@ Per-session icon shown in the tree, tab strip, and title bar (alongside the exis
 - **Network OS:** Cisco (IOS/NX-OS), Juniper, Arista, Nokia (SR OS), Palo Alto, Fortinet,
   MikroTik, VyOS, HPE/Aruba — plus generic router/switch/firewall/server glyphs for the
   unbranded case.
-- **Custom:** user drops PNG/SVG files into `%APPDATA%\Sessions\icons\`; they appear in the
+- **Custom:** user drops PNG/SVG files into `%APPDATA%\Resesh\icons\`; they appear in the
   picker automatically (icon key = filename). Included in the Phase 4 export archive.
 
 **Nice-to-have:** auto-suggest an icon on first connect from the SSH server banner /
@@ -189,7 +189,7 @@ detected OS (e.g. `Cisco-1.25`, `OpenSSH_… Ubuntu`), never overriding a manual
 
 ### 6.1 Local terminal profiles ✅ shipped 2026-08-16
 
-Make local shells first-class Sessions targets instead of requiring a loopback SSH session or
+Make local shells first-class Resesh targets instead of requiring a loopback SSH session or
 an external terminal. Add a permanent, virtual **Local** root at the top of the session tree.
 It is expanded by default and cannot be renamed, deleted, or moved. Local profiles participate
 in search, tabs, splits, pinning, highlighting, the overview ruler, recording, and workspaces
@@ -280,7 +280,7 @@ Codex requires the user to review and trust the hook definition with `/hooks`.
 
 **Detection and adapters:** prefer explicit lifecycle events over terminal-screen guessing.
 Provide small adapters for each supported agent using its hooks, extensions, notification
-events, or terminal notification protocol. Normalize them to one minimal Sessions event
+events, or terminal notification protocol. Normalize them to one minimal Resesh event
 containing agent identity, attention state, and a short non-sensitive label. Accept OSC 9 and
 BEL as generic fallbacks; pattern matching and quiet-output heuristics are low-confidence only
 and must not claim that input is definitely required.
@@ -294,7 +294,7 @@ local or remote target is explicit, previewed, and reversible.
 
 **Later integration:** agents that expose ACP or a similar structured runtime can get richer
 status and controls in a later phase. The first version remains a terminal integration rather
-than turning Sessions into an agent IDE.
+than turning Resesh into an agent IDE.
 
 ---
 
@@ -355,7 +355,7 @@ open sessions — which sessions, in which tab groups, in what order, which tabs
 and which tab is active — reopened with one click ("morning: jump box, both app servers,
 the DB, side by side").
 
-**Model** (`workspaces.json` in `%APPDATA%\Sessions\`, same atomic-write/`.bak` treatment):
+**Model** (`workspaces.json` in `%APPDATA%\Resesh\`, same atomic-write/`.bak` treatment):
 - `Workspace`: id, name, ordered list of groups; each group is an ordered list of
   `{ sessionId, pinned }` plus the active-tab index. References sessions by id — a
   workspace is a *layout*, never a copy of session data. Deleted sessions are skipped on
@@ -367,7 +367,7 @@ the DB, side by side").
 - "Save current layout as workspace…" + a workspaces section in the tree (or a title-bar
   dropdown) listing them; click to open, right-click to rename/update/delete.
 - **Open semantics:** default replaces the current layout (prompting if tabs are open);
-  modifier/context option to open *additively* into the current window. Sessions already
+  modifier/context option to open *additively* into the current window. Resesh already
   connected aren't reconnected — tabs are adopted into position.
 - **Restore on launch:** "Reopen last layout at startup" setting — the always-on companion
   feature (continuum to resurrect). Persist the live layout on clean exit; pairs especially
@@ -457,14 +457,14 @@ Three sources feed one left-lane (bookmarks paint over them — explicit beats i
   wraps to the prompt row. Neutral gray ticks (no exit knowledge). First OSC 133
   sequence in a session disables discovery — the shell knows better than the regex.
 - **Stock systemd — OSC 3008 (UAPI.15)**: systemd 258+ can install a Bash profile
-  hook that reports shell/command contexts without a user bashrc change. Sessions
+  hook that reports shell/command contexts without a user bashrc change. Resesh
   accepts bounded context payloads, validates cwd/host metadata, and uses shell or
   command cwd as another current-folder signal. A command context ID links its exact
   exit status to the existing Enter-gated mark; it does not replace prompt discovery
   because the stock hook does not include command text. OSC 133 stays authoritative
   when both standards are present. Older and minimal VM/LXC images keep all existing
   title, OSC 7, prompt, and Enter-gated fallbacks.
-- **No automatic remote setup**: Sessions never probes for Bash and never types a
+- **No automatic remote setup**: Resesh never probes for Bash and never types a
   context hook into an interactive shell. OSC 3008 is passive input from hosts that
   already provide it. Older Linux hosts and network devices keep the existing no-input
   title, prompt, OSC 7, and Enter-gated discovery paths.
@@ -622,7 +622,7 @@ Phase 4 export archive.
 
 ## Backlog — "what else" (unordered candidates)
 
-**Non-goal — scripting/automation API (decided 2026-08-16):** Sessions is the interactive
+**Non-goal — scripting/automation API (decided 2026-08-16):** Resesh is the interactive
 layer; fleet automation belongs in Ansible/Netmiko-class tooling run from a trusted host,
 where it's versioned and reviewed. No embedded scripting language, ever. Command snippets
 stay in scope — interactive-shaped, not automation-shaped. **Broadcast input is cut too**
@@ -648,7 +648,7 @@ to every prompt, which breaks 2FA/Duo — needs a real prompt dialog.
 - **Per-session color schemes** — extend Phase 0.1 overrides + the two hardcoded palettes
   in `terminal.html`; `Session.ColorTag` already exists as the tab accent.
 - **Manual shell-integration snippet** — optionally show and copy OSC 133/OSC 7 setup
-  for users who choose to install it. Sessions must never send setup code automatically.
+  for users who choose to install it. Resesh must never send setup code automatically.
 - **Foreground-process title side channel** — tmux-grade `pane_current_command` on plain
   sessions with zero shell cooperation: each tab owns its SSH connection, so an exec
   channel can locate the shell channel's process ($PPID → our sshd child → its child

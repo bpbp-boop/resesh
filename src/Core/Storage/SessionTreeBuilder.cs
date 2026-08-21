@@ -1,6 +1,6 @@
-using Sessions.Core.Models;
+using Resesh.Core.Models;
 
-namespace Sessions.Core.Storage;
+namespace Resesh.Core.Storage;
 
 public sealed class FolderNode
 {

@@ -24,7 +24,7 @@ test("the shared close dialog confirms exit unless no sessions remain", () => {
     /private async Task ConfirmWindowCloseAsync[\s\S]*?\n    }\r?\n\r?\n    private void PinButton_Click/)?.[0] ?? "";
 
   assert.match(method, /if \(count == 0\)[\s\S]*?_closeConfirmed = true;[\s\S]*?Close\(\);[\s\S]*?return;/);
-  assert.match(method, /Title = "Exit Sessions\?"/);
+  assert.match(method, /Title = "Exit Resesh\?"/);
   assert.match(method, /Content = \$"Are you sure you want to exit\?/);
   assert.match(method, /PrimaryButtonText = "Exit"/);
   assert.match(method, /DefaultButton = ContentDialogButton\.Close/);

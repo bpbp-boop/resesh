@@ -1,4 +1,4 @@
-namespace Sessions.Core.Credentials;
+namespace Resesh.Core.Credentials;
 
 /// <summary>
 /// Stores per-session secrets (password or key passphrase) outside the JSON store.

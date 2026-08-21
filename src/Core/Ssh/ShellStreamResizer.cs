@@ -1,7 +1,7 @@
 using System.Reflection;
 using Renci.SshNet;
 
-namespace Sessions.Core.Ssh;
+namespace Resesh.Core.Ssh;
 
 /// <summary>
 /// SSH.NET (as of the pinned version) exposes no public window-change request on

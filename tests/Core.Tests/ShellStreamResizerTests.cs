@@ -1,8 +1,8 @@
 using System.Reflection;
 using Renci.SshNet;
-using Sessions.Core.Ssh;
+using Resesh.Core.Ssh;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 /// <summary>
 /// Pins the SSH.NET private members the resize reflection helper depends on.

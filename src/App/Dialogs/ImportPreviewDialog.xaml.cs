@@ -1,9 +1,9 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Sessions.Core.Import;
+using Resesh.Core.Import;
 
-namespace Sessions.App.Dialogs;
+namespace Resesh.App.Dialogs;
 
 public sealed class ImportCandidateVm : ObservableObject
 {

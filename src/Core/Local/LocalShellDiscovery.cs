@@ -1,9 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
-using Sessions.Core.Models;
-using Sessions.Core.Storage;
+using Resesh.Core.Models;
+using Resesh.Core.Storage;
 
-namespace Sessions.Core.Local;
+namespace Resesh.Core.Local;
 
 /// <summary>
 /// Finds the local shells installed on this machine and syncs them into the profile

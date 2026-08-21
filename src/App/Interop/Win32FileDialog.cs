@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Sessions.App.Interop;
+namespace Resesh.App.Interop;
 
 /// <summary>
 /// Win32 open-file dialog (IFileOpenDialog). Used instead of the WinRT FileOpenPicker

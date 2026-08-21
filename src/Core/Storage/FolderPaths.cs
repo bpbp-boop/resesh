@@ -1,4 +1,4 @@
-namespace Sessions.Core.Storage;
+namespace Resesh.Core.Storage;
 
 /// <summary>
 /// Helpers for the forward-slash folder path strings used by <see cref="Models.Session.FolderPath"/>.

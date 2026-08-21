@@ -1,7 +1,7 @@
-using Sessions.Core.Sftp;
-using Sessions.Core.Ssh;
+using Resesh.Core.Sftp;
+using Resesh.Core.Ssh;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 public sealed class RemotePathTests
 {
@@ -141,7 +141,7 @@ public sealed class TmuxCurrentPathTests
     public void CurrentPathCommand_lists_all_panes_on_the_private_socket()
     {
         Assert.Equal(
-            "tmux -L sessions-app list-panes -a -F '#{session_name} #{pane_active} #{pane_current_path}'",
+            "tmux -L resesh-app list-panes -a -F '#{session_name} #{pane_active} #{pane_current_path}'",
             TmuxPersistence.CurrentPathCommand());
     }
 
@@ -170,7 +170,7 @@ public sealed class TmuxCurrentPathTests
     [InlineData("sother000000 1 /etc")]                // wrong session
     [InlineData("saabbccddeeff 0 /etc")]               // no active pane line
     [InlineData("saabbccddeeff 1 relative/not/rooted")] // not an absolute path
-    [InlineData("no session option: sessions-app")]     // tmux error text on stdout
+    [InlineData("no session option: resesh-app")]     // tmux error text on stdout
     public void ParseCurrentPath_returns_null_when_absent_or_malformed(string output) =>
         Assert.Null(TmuxPersistence.ParseCurrentPath(output, Id, 0));
 
@@ -178,7 +178,7 @@ public sealed class TmuxCurrentPathTests
     public void DiscoveryCommand_lists_tmux_metadata_on_the_private_socket()
     {
         Assert.Equal(
-            "tmux -L sessions-app list-panes -a -F '#{session_name}|#{pane_active}|#{session_attached}|#{pane_current_path}'",
+            "tmux -L resesh-app list-panes -a -F '#{session_name}|#{pane_active}|#{session_attached}|#{pane_current_path}'",
             TmuxPersistence.DiscoveryCommand());
     }
 

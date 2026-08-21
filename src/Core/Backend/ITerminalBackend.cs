@@ -1,4 +1,4 @@
-namespace Sessions.Core.Backend;
+namespace Resesh.Core.Backend;
 
 /// <summary>
 /// The input/output/resize/teardown surface a terminal tab needs from whatever hosts

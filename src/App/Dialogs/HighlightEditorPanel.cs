@@ -5,9 +5,9 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
-using Sessions.Core.Models;
+using Resesh.Core.Models;
 
-namespace Sessions.App.Dialogs;
+namespace Resesh.App.Dialogs;
 
 /// <summary>
 /// Global keyword-highlighting editor, hosted inline in the Settings dialog's Highlighting

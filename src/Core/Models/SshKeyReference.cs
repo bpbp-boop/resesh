@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Sessions.Core.Models;
+namespace Resesh.Core.Models;
 
 /// <summary>
 /// One private-key file registered with Sessions. The file stays where the user put it;

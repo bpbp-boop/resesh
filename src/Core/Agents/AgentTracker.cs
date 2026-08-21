@@ -1,4 +1,4 @@
-namespace Sessions.Core.Agents;
+namespace Resesh.Core.Agents;
 
 /// <summary>What a tab currently shows for its agent: identity, attention, and the
 /// evidence behind it. Immutable so views can diff two snapshots cheaply.</summary>

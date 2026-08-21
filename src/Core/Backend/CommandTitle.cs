@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace Sessions.Core.Backend;
+namespace Resesh.Core.Backend;
 
 /// <summary>
 /// Turns a captured shell command line into the short program name a tab subtitle can

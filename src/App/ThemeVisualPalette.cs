@@ -1,4 +1,4 @@
-namespace Sessions.App;
+namespace Resesh.App;
 
 internal sealed record ThemeVisualPalette(
     Windows.UI.Color Shell,

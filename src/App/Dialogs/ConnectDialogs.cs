@@ -1,9 +1,9 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Sessions.Core.Ssh;
+using Resesh.Core.Ssh;
 using System.Runtime.CompilerServices;
 
-namespace Sessions.App.Dialogs;
+namespace Resesh.App.Dialogs;
 
 /// <summary>Small code-built dialogs used during the connect workflow.</summary>
 public static class ConnectDialogs

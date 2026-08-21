@@ -1,6 +1,6 @@
-using Sessions.Core.Models;
+using Resesh.Core.Models;
 
-namespace Sessions.Core.Search;
+namespace Resesh.Core.Search;
 
 /// <summary>
 /// Case-insensitive substring search over name, host, username, folder path, and notes.

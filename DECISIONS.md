@@ -21,7 +21,7 @@ performed is discarded by the rebuild. Folders are not draggable in v1 (cancelle
 `DragItemsStarting`).
 
 ## 2026-08-14 — TreeView expansion state across rebuilds
-Two-layered problem, diagnosed with a trace log (`%LOCALAPPDATA%\Sessions\trace.log`, DEBUG only):
+Two-layered problem, diagnosed with a trace log (`%LOCALAPPDATA%\Resesh\trace.log`, DEBUG only):
 
 1. `Collapsed` can be raised for nodes being *removed* during a rebuild (sometimes after the
    rebuild returns), which corrupted the persisted expansion map. Fix: expansion changes are only
@@ -118,7 +118,7 @@ keyboard-interactive fallback.
   (they carry Last-Modified but no Cache-Control), so a rebuilt terminal.html can be served
   STALE - the new find bar silently missing while the exe is current. Fix:
   `Profile.ClearBrowsingDataAsync(DiskCache)` before Navigate (assets are local; re-read is
-  free). Also killed lingering msedgewebview2 processes lock %LOCALAPPDATA%\Sessions\WebView2.
+  free). Also killed lingering msedgewebview2 processes lock %LOCALAPPDATA%\Resesh\WebView2.
 - Debug diagnostics: TerminalControl.TraceHook mirrors SshTerminalSession's (wired to
   trace.log); the page reports JS errors via `pageError` messages and keeps a rolling
   `window.__msgLog` of option pushes.
@@ -161,7 +161,7 @@ keyboard-interactive fallback.
 
 ## 2026-08-15 - Phase 3: file transfer & remote browsing (SFTP pane)
 
-- New `Sessions.Core.Sftp`: `SftpSession` wraps SSH.NET's `SftpClient` as a second,
+- New `Resesh.Core.Sftp`: `SftpSession` wraps SSH.NET's `SftpClient` as a second,
   independent connection per tab. Shared plumbing was extracted from `SshTerminalSession`
   into `SshConnectionFactory` (auth methods incl. the keyboard-interactive quirk, failure
   classification, TCP preflight) rather than duplicated. Auth methods are stateful in
@@ -273,7 +273,7 @@ keyboard-interactive fallback.
   Simple Icons, their site favicons are composed onto white badges as PNGs (aruba's favicon
   is HPE's mark, which is correct — the entry is "HPE / Aruba"); **windows** + the generic
   router/switch/firewall/server glyphs are hand-drawn SVGs.
-- Custom icons: files dropped in `%APPDATA%\Sessions\icons\` appear in the picker, key =
+- Custom icons: files dropped in `%APPDATA%\Resesh\icons\` appear in the picker, key =
   filename. Built-in keys contain no dot, custom keys always do, so they can't collide.
   A session whose custom icon file was deleted round-trips its key through the editor
   ("(missing)" entry) instead of silently losing it.
@@ -389,13 +389,13 @@ keyboard-interactive fallback.
   nothing re-ran when the write-back landed. Fix: TabGroupView also subscribes to the
   group VM's SelectedTab PropertyChanged and re-syncs visibility/status/focus there.
   Surfaced by 6.1 only by coincidence (ssh + local, close local); the race was
-  kind-agnostic. Verified by the hands-off UI rig: `Sessions.App.exe --open <name>`
+  kind-agnostic. Verified by the hands-off UI rig: `Resesh.App.exe --open <name>`
   (new launch arg) + UIA-only invokes + PrintWindow(PW_RENDERFULLCONTENT) screenshots —
   no synthetic keyboard/mouse, safe to run while the user works. UIA gotcha: the window
   caption's X is also a Button named "Close"; scope dialog-button searches by position.
 
 ## 2026-08-16 - Export, import, and backup (Phase 4)
-- A plain `.sessionsbackup` is a versioned ZIP with `manifest.json`, the session/folder
+- A plain `.reseshbackup` (né `.sessionsbackup`) is a versioned ZIP with `manifest.json`, the session/folder
   snapshot, settings, known hosts, highlight state, PNG/SVG custom icons, and
   `workspaces.json` when present. Recordings remain outside the archive. A folder-scoped
   export limits only the session tree; global settings and shared assets stay complete.
@@ -431,7 +431,7 @@ keyboard-interactive fallback.
 - ConEmu's `OSC 9;4` progress form is explicitly NOT a notification: PowerShell 7 emits it
   for ordinary progress bars, which would otherwise light up every long-running tab.
 - Structured events use `OSC 7377 ; agent ; id=… ; state=… ; label=…` ("SESS" on a phone
-  keypad), namespaced after the code so 7377 can carry other Sessions subprotocols. Chosen
+  keypad), namespaced after the code so 7377 can carry other Resesh subprotocols. Chosen
   clear of 0/1/2, 7, 8, 9, 52, 133, 633, 777 and 1337. Labels are percent-decoded, then
   stripped of control/format characters and truncated to 80 chars — terminal output is
   untrusted, and a label never leaves the app (taskbar flash and beep carry no content).
@@ -469,11 +469,11 @@ keyboard-interactive fallback.
   the prompt raised the icon and `ls -la` retired it.
 
 ## 2026-08-18 - First-class SSH key registry (5.0)
-- A private key stays in the user-selected location. Sessions registers its external path and
+- A private key stays in the user-selected location. Resesh registers its external path and
   public metadata in `ssh-keys.json`; it never copies, moves, or deletes the private-key file.
   This avoids a second source of truth for OpenSSH, Git, agents, scripts, and key rotation.
 - SSH sessions reference one stable key id. A registered key may serve many sessions, and its
-  passphrase has one `Sessions:Key:<id>` Windows Credential Manager entry. Password credentials
+  passphrase has one `Resesh:Key:<id>` Windows Credential Manager entry. Password credentials
   remain session-scoped. A passphrase that is not saved stays only in the live tab.
 - Registration records the public algorithm, key size, SHA-256 fingerprint, encryption state,
   and public-key line when available. Every connection opens the current file and checks its

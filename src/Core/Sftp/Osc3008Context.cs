@@ -1,4 +1,4 @@
-namespace Sessions.Core.Sftp;
+namespace Resesh.Core.Sftp;
 
 public enum Osc3008ContextAction
 {

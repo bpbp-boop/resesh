@@ -1,5 +1,5 @@
 /**
- * Annotated-scrollbar addon for xterm.js (Sessions' own, not vendored) — ROADMAP Phase 9.2.
+ * Annotated-scrollbar addon for xterm.js (Resesh's own, not vendored) — ROADMAP Phase 9.2.
  *
  * A 14px interactive overview ruler on the terminal's right edge, replacing both the
  * viewport's native scrollbar (hidden in terminal.html CSS) and xterm's built-in

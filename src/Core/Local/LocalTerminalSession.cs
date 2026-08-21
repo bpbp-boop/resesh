@@ -2,10 +2,10 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
-using Sessions.Core.Backend;
-using Sessions.Core.Models;
+using Resesh.Core.Backend;
+using Resesh.Core.Models;
 
-namespace Sessions.Core.Local;
+namespace Resesh.Core.Local;
 
 /// <summary>Launch of a local shell failed (bad executable, missing directory, Win32 error).</summary>
 public sealed class LocalSessionException(string message, Exception? inner = null)

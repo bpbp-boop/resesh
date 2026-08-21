@@ -1,6 +1,6 @@
-using Sessions.Core.Backend;
+using Resesh.Core.Backend;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 /// <summary>
 /// The subtitle's running-command name comes from a captured shell line, not a process

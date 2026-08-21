@@ -1,10 +1,10 @@
 using System.Security.Cryptography;
 using Renci.SshNet;
 using Renci.SshNet.Common;
-using Sessions.Core.Models;
-using Session = Sessions.Core.Models.Session;
+using Resesh.Core.Models;
+using Session = Resesh.Core.Models.Session;
 
-namespace Sessions.Core.Ssh;
+namespace Resesh.Core.Ssh;
 
 public sealed record HostKeyInfo(
     string Host, int Port, string KeyType, string Sha256Fingerprint, HostKeyVerdict Verdict,

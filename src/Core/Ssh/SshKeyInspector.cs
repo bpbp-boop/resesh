@@ -4,7 +4,7 @@ using System.Text;
 using Renci.SshNet;
 using Renci.SshNet.Common;
 
-namespace Sessions.Core.Ssh;
+namespace Resesh.Core.Ssh;
 
 public sealed record SshKeyInspection(
     string? Algorithm,

@@ -2,9 +2,9 @@ using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Sessions.Core.Storage;
+using Resesh.Core.Storage;
 
-namespace Sessions.App.Dialogs;
+namespace Resesh.App.Dialogs;
 
 public enum GlobalSettingsTab
 {
@@ -111,7 +111,7 @@ public static class GlobalSettingsDialog
             Spacing = 16,
             Children =
             {
-                Description("These settings apply throughout Sessions. A saved session can override supported terminal and highlighting defaults."),
+                Description("These settings apply throughout Resesh. A saved session can override supported terminal and highlighting defaults."),
                 generalColumns,
             },
         };

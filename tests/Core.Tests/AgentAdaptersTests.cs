@@ -1,7 +1,7 @@
 using System.Text.Json;
-using Sessions.Core.Agents;
+using Resesh.Core.Agents;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 public class AgentAdaptersTests
 {

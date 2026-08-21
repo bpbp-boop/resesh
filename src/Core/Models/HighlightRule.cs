@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Sessions.Core.Models;
+namespace Resesh.Core.Models;
 
 /// <summary>
 /// One keyword-highlight rule: a regex applied per terminal row, painting its matches.

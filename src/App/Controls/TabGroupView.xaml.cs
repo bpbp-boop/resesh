@@ -3,11 +3,11 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Sessions.App.ViewModels;
-using Sessions.Core.Layout;
-using Sessions.Core.Models;
+using Resesh.App.ViewModels;
+using Resesh.Core.Layout;
+using Resesh.Core.Models;
 
-namespace Sessions.App.Controls;
+namespace Resesh.App.Controls;
 
 /// <summary>What a tab group needs from the window: dialogs, group management, the single close pathway.</summary>
 public interface ITabGroupHost
@@ -565,7 +565,7 @@ public sealed partial class TabGroupView : UserControl
     }
 
     /// <summary>
-    /// Rebuilds the Agent submenu: what Sessions thinks is running here, an explicit
+    /// Rebuilds the Agent submenu: what Resesh thinks is running here, an explicit
     /// override (or "auto"), and the adapter snippets. A manual choice is exactly that —
     /// detection never overwrites it, and it never touches the session icon.
     /// </summary>
@@ -590,9 +590,9 @@ public sealed partial class TabGroupView : UserControl
         _agent.Items.Add(new MenuFlyoutItem { Text = $"Running: {detected}", IsEnabled = false });
         _agent.Items.Add(new MenuFlyoutSeparator());
         _agent.Items.Add(Choice("Auto-detect", null));
-        foreach (var identity in Sessions.Core.Agents.AgentIdentities.All.Where(a => a.IsAgent))
+        foreach (var identity in Resesh.Core.Agents.AgentIdentities.All.Where(a => a.IsAgent))
             _agent.Items.Add(Choice(identity.Name, identity.Key));
-        _agent.Items.Add(Choice("No agent icon", Sessions.Core.Agents.AgentIdentities.None));
+        _agent.Items.Add(Choice("No agent icon", Resesh.Core.Agents.AgentIdentities.None));
         _agent.Items.Add(new MenuFlyoutSeparator());
 
         var saveDefault = new MenuFlyoutItem

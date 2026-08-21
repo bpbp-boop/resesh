@@ -1,8 +1,8 @@
-using Sessions.Core.Agents;
-using Sessions.Core.Local;
-using Sessions.Core.Models;
+using Resesh.Core.Agents;
+using Resesh.Core.Local;
+using Resesh.Core.Models;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 /// <summary>
 /// The local half of agent awareness end to end: a real ConPTY shell, a real child process

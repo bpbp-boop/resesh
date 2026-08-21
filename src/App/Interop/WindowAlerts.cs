@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Sessions.App.Interop;
+namespace Resesh.App.Interop;
 
 /// <summary>
 /// Background attention signals for agent alerts (Phase 6.2): flash the taskbar button,

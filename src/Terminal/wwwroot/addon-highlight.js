@@ -1,5 +1,5 @@
 /**
- * Keyword-highlight addon for xterm.js (Sessions' own, not vendored).
+ * Keyword-highlight addon for xterm.js (Resesh's own, not vendored).
  *
  * Scans only the rows currently in the viewport — never the raw output stream —
  * and paints regex matches via the decorations API. Rows are cached by absolute

@@ -1,4 +1,4 @@
-namespace Sessions.Core.Sftp;
+namespace Resesh.Core.Sftp;
 
 /// <summary>A validated OSC 7 file URI reported by a shell.</summary>
 public sealed record Osc7WorkingDirectory(string Host, string Path);

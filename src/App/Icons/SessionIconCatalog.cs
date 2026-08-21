@@ -1,8 +1,8 @@
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Sessions.Core.Models;
+using Resesh.Core.Models;
 
-namespace Sessions.App.Icons;
+namespace Resesh.App.Icons;
 
 /// <summary>One entry in the icon picker: a key plus its display name and image.
 /// Key is null for the "Auto-detect" choice and <see cref="SessionIcons.None"/> for "No icon".</summary>
@@ -11,7 +11,7 @@ public sealed record IconChoice(string? Key, string Name, ImageSource? Image, st
 /// <summary>
 /// Resolves icon keys to renderable images: built-in badges bundled under
 /// Assets\SessionIcons (SVG or PNG), plus user files dropped into
-/// %APPDATA%\Sessions\icons\ (icon key = filename). Loaded images are cached and
+/// %APPDATA%\Resesh\icons\ (icon key = filename). Loaded images are cached and
 /// shared by every view; UI-thread only.
 /// </summary>
 public sealed class SessionIconCatalog
@@ -42,7 +42,7 @@ public sealed class SessionIconCatalog
     }
 
     public static string CustomIconsDirectory =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sessions", "icons");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "icons");
 
     private static string BuiltInDirectory => Path.Combine(AppContext.BaseDirectory, "Assets", "SessionIcons");
 
@@ -70,7 +70,7 @@ public sealed class SessionIconCatalog
     /// </summary>
     public ImageSource? GetAgentImage(string? key, double logicalSize)
     {
-        if (!Sessions.Core.Agents.AgentIdentities.IsAgentKey(key))
+        if (!Resesh.Core.Agents.AgentIdentities.IsAgentKey(key))
             return null;
         var cacheKey = ("agent:" + key!.ToLowerInvariant(), PhysicalPixels(logicalSize));
         if (_cache.TryGetValue(cacheKey, out var cached))

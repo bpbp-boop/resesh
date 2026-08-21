@@ -1,9 +1,9 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Sessions.Core.Backup;
-using Sessions.Core.Models;
+using Resesh.Core.Backup;
+using Resesh.Core.Models;
 
-namespace Sessions.App.Dialogs;
+namespace Resesh.App.Dialogs;
 
 public sealed class BackupScopeChoice
 {

@@ -1,14 +1,14 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
 
-namespace Sessions.Core.Agents;
+namespace Resesh.Core.Agents;
 
 /// <summary>An adapter snippet the user can install on a target to upgrade a tab from
 /// guessed identity to reported lifecycle events.</summary>
 public sealed record AgentAdapterSnippet(string Title, string Target, string Description, string Text);
 
 /// <summary>
-/// Text for the opt-in adapters. Sessions never installs these itself: the tab menu shows
+/// Text for the opt-in adapters. Resesh never installs these itself: the tab menu shows
 /// the exact text, the user copies it to the target they choose, and removing it is
 /// deleting the lines again. Nothing here can send input to a session — an adapter's only
 /// power is to emit one escape sequence describing what the agent is doing.
@@ -76,7 +76,7 @@ public static class AgentAdapters
         return JsonSerializer.Serialize(
             new
             {
-                description = "Sessions tab status for Codex. Reports state only; never approves or sends input.",
+                description = "Resesh tab status for Codex. Reports state only; never approves or sends input.",
                 hooks,
             },
             // Relaxed escaping so the quotes inside the commands stay readable (\" instead
@@ -136,16 +136,16 @@ public static class AgentAdapters
         "~/.bashrc or ~/.zshrc on the remote host",
         "Reports working on launch and complete/failed on exit for an agent you wrap yourself.",
         """
-        # Sessions agent status: sessions_agent <id> <state> [label]
-        sessions_agent() { printf '\033]7377;agent;id=%s;state=%s;label=%s\007' "$1" "$2" "${3:-}" > /dev/tty; }
+        # Resesh agent status: resesh_agent <id> <state> [label]
+        resesh_agent() { printf '\033]7377;agent;id=%s;state=%s;label=%s\007' "$1" "$2" "${3:-}" > /dev/tty; }
 
         # Example wrapper — `agentrun claude` reports the run's lifecycle to the tab.
         agentrun() {
           local id="$1"; shift
-          sessions_agent "$id" working
+          resesh_agent "$id" working
           "$id" "$@"; local rc=$?
-          [ $rc -eq 0 ] && sessions_agent "$id" complete || sessions_agent "$id" failed
-          sessions_agent "$id" exit
+          [ $rc -eq 0 ] && resesh_agent "$id" complete || resesh_agent "$id" failed
+          resesh_agent "$id" exit
           return $rc
         }
         """);

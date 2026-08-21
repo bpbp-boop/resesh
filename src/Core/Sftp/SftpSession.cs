@@ -2,10 +2,10 @@ using System.Security.Cryptography;
 using Renci.SshNet;
 using Renci.SshNet.Common;
 using Renci.SshNet.Sftp;
-using Sessions.Core.Ssh;
-using Session = Sessions.Core.Models.Session;
+using Resesh.Core.Ssh;
+using Session = Resesh.Core.Models.Session;
 
-namespace Sessions.Core.Sftp;
+namespace Resesh.Core.Sftp;
 
 /// <summary>
 /// One live SFTP connection for a session's file pane — a second, independent connection

@@ -1,7 +1,7 @@
-using Sessions.Core.Import;
-using Sessions.Core.Storage;
+using Resesh.Core.Import;
+using Resesh.Core.Storage;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 public sealed class SecureCrtImporterTests
 {

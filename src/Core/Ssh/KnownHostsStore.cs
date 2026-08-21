@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace Sessions.Core.Ssh;
+namespace Resesh.Core.Ssh;
 
 public enum HostKeyVerdict
 {
@@ -29,7 +29,7 @@ public sealed class KnownHostsStore
     }
 
     public static string DefaultPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sessions", "known_hosts.json");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "known_hosts.json");
 
     public void Load()
     {

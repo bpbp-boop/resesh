@@ -1,4 +1,4 @@
-# Sessions
+# Resesh
 
 A tabbed SSH client for Windows, built to replace SecureCRT for daily use: a folder tree of saved
 sessions with fast search on top, tabbed xterm.js terminals, and one-time import of existing
@@ -19,8 +19,8 @@ See [ssh-client-v1-plan.md](ssh-client-v1-plan.md) for the full v1 plan and
 Requires the .NET SDK (8+) on Windows 10 21H2 or later.
 
 ```
-dotnet build src/App/Sessions.App.csproj -p:Platform=x64
-src/App/bin/x64/Debug/net8.0-windows10.0.19041.0/Sessions.App.exe
+dotnet build src/App/Resesh.App.csproj -p:Platform=x64
+src/App/bin/x64/Debug/net8.0-windows10.0.19041.0/Resesh.App.exe
 ```
 
 On ARM64, substitute `-p:Platform=ARM64`.
@@ -35,11 +35,11 @@ dotnet test tests/Core.Tests
 
 | What | Where |
 | --- | --- |
-| Sessions + folders | `%APPDATA%\Sessions\sessions.json` (atomic writes, one `.bak` rotation) |
-| Secrets (passwords, key passphrases) | Windows Credential Manager, `Sessions:{session-guid}` |
-| Accepted host keys | `%APPDATA%\Sessions\known_hosts.json` (M2) |
-| Exported backups | User-selected `*.sessionsbackup` file (Phase 4) |
-| Crash log | `%LOCALAPPDATA%\Sessions\crash.log` |
+| Sessions + folders | `%APPDATA%\Resesh\sessions.json` (atomic writes, one `.bak` rotation) |
+| Secrets (passwords, key passphrases) | Windows Credential Manager, `Resesh:{session-guid}` |
+| Accepted host keys | `%APPDATA%\Resesh\known_hosts.json` (M2) |
+| Exported backups | User-selected `*.reseshbackup` file (Phase 4) |
+| Crash log | `%LOCALAPPDATA%\Resesh\crash.log` |
 
 Secrets are **never** written to the normal JSON store. They are excluded from backups by
 default. When included, the complete backup is encrypted with its passphrase.

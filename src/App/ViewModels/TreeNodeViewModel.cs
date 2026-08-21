@@ -1,8 +1,8 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
-using Sessions.Core.Models;
+using Resesh.Core.Models;
 
-namespace Sessions.App.ViewModels;
+namespace Resesh.App.ViewModels;
 
 /// <summary>A node in the session tree: either a folder or a session leaf.</summary>
 public sealed class TreeNodeViewModel : ObservableObject
@@ -58,7 +58,7 @@ public sealed class TreeNodeViewModel : ObservableObject
 
     public string Name => IsLocalRoot
         ? "Local"
-        : Session?.Name ?? Sessions.Core.Storage.FolderPaths.Name(FolderPath);
+        : Session?.Name ?? Resesh.Core.Storage.FolderPaths.Name(FolderPath);
 
     public string HostSummary => Session switch
     {

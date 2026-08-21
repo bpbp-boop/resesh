@@ -1,8 +1,8 @@
 using System.Globalization;
-using Sessions.Core.Models;
-using Sessions.Core.Storage;
+using Resesh.Core.Models;
+using Resesh.Core.Storage;
 
-namespace Sessions.Core.Import;
+namespace Resesh.Core.Import;
 
 /// <summary>One SecureCRT session found on disk.</summary>
 public sealed record ImportCandidate

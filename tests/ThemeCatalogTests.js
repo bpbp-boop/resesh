@@ -124,7 +124,7 @@ test("live theme changes recolor the retained right-edge divider brush", () => {
   assert.match(tabGroup, /private void ApplyTabStripDivider\(\)[\s\S]*?var divider = _tabDividerBrush/);
 });
 
-test("Sessions Dark keeps its original divider and bypasses stale Fluent strokes", () => {
+test("Resesh Dark keeps its original divider and bypasses stale Fluent strokes", () => {
   assert.match(visualPalette, /_ => New\(0x0C0C0C, 0x181818, 0x2B2B2B,/);
   assert.match(tabGroup, /Resources\["TabViewBorderBrush"\] = divider/);
   assert.match(tabGroup, /ActualThemeChanged \+= \(_, _\) => QueueTabTemplateRefresh\(\)/);

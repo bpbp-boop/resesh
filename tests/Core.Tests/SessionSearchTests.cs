@@ -1,7 +1,7 @@
-using Sessions.Core.Models;
-using Sessions.Core.Search;
+using Resesh.Core.Models;
+using Resesh.Core.Search;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 public sealed class SessionSearchTests
 {

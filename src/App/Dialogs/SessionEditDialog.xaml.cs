@@ -1,9 +1,9 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Sessions.Core.Models;
-using Sessions.Core.Storage;
+using Resesh.Core.Models;
+using Resesh.Core.Storage;
 
-namespace Sessions.App.Dialogs;
+namespace Resesh.App.Dialogs;
 
 public sealed partial class SessionEditDialog : ContentDialog
 {

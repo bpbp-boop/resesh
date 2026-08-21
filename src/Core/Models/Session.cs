@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace Sessions.Core.Models;
+namespace Resesh.Core.Models;
 
 public enum AuthMethod
 {

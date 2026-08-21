@@ -1,4 +1,4 @@
-namespace Sessions.Core.Ssh;
+namespace Resesh.Core.Ssh;
 
 /// <summary>
 /// Builds the shell bootstrap that runs a persistent session inside an "invisible" tmux:
@@ -12,7 +12,7 @@ namespace Sessions.Core.Ssh;
 /// </summary>
 public static class TmuxPersistence
 {
-    private const string Socket = "sessions-app";
+    private const string Socket = "resesh-app";
 
     /// <summary>Kept in tmux history so re-attach replay covers long disconnects.</summary>
     private const int HistoryLimit = 50000;
@@ -105,10 +105,10 @@ public static class TmuxPersistence
             + "fi; "
             + "else "
             + "if type history >/dev/null 2>&1; then "
-            + "case \"$(history 1)\" in *sessions-tmux-bootstrap*) "
+            + "case \"$(history 1)\" in *resesh-tmux-bootstrap*) "
             + "history -d \"$(history 1 | awk '{print $1;exit}')\" >/dev/null 2>&1;; esac; fi; "
-            + "printf '\\n[Sessions] tmux not found on this host - continuing without persistence.\\n\\n'; "
-            + "fi # sessions-tmux-bootstrap";
+            + "printf '\\n[Resesh] tmux not found on this host - continuing without persistence.\\n\\n'; "
+            + "fi # resesh-tmux-bootstrap";
     }
 
     public static string KillCommand(Guid id, int slot) =>

@@ -1,10 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Sessions.Core.Credentials;
-using Sessions.Core.Models;
-using Sessions.Core.Ssh;
+using Resesh.Core.Credentials;
+using Resesh.Core.Models;
+using Resesh.Core.Ssh;
 
-namespace Sessions.Core.Storage;
+namespace Resesh.Core.Storage;
 
 /// <summary>Atomic JSON store for external SSH private-key references and public metadata.</summary>
 public sealed class SshKeyStore
@@ -28,7 +28,7 @@ public sealed class SshKeyStore
     }
 
     public static string DefaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sessions", "ssh-keys.json");
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "ssh-keys.json");
 
     public IReadOnlyList<SshKeyReference> Keys
     {

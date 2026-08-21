@@ -4,12 +4,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Sessions.Core.Credentials;
-using Sessions.Core.Models;
-using Sessions.Core.Ssh;
-using Sessions.Core.Storage;
+using Resesh.Core.Credentials;
+using Resesh.Core.Models;
+using Resesh.Core.Ssh;
+using Resesh.Core.Storage;
 
-namespace Sessions.Core.Backup;
+namespace Resesh.Core.Backup;
 
 public enum BackupConflictResolution
 {
@@ -76,7 +76,7 @@ public sealed record BackupPackage
     public byte[]? Workspaces { get; init; }
 }
 
-/// <summary>Creates and merges versioned .sessionsbackup archives.</summary>
+/// <summary>Creates and merges versioned .reseshbackup archives (pre-rename .sessionsbackup files import unchanged).</summary>
 public static class SessionsBackup
 {
     public const int CurrentSchemaVersion = 2;

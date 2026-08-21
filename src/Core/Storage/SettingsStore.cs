@@ -1,8 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Sessions.Core.Models;
+using Resesh.Core.Models;
 
-namespace Sessions.Core.Storage;
+namespace Resesh.Core.Storage;
 
 /// <summary>App-wide shell and terminal settings.</summary>
 public sealed record AppSettings
@@ -74,7 +74,7 @@ public sealed class SettingsStore
     }
 
     public static string DefaultPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sessions", "settings.json");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "settings.json");
 
     public void Load()
     {

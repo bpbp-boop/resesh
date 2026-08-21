@@ -5,7 +5,7 @@
     <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
-    <RootNamespace>Sessions.App</RootNamespace>
+    <RootNamespace>Resesh.App</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x64;ARM64</Platforms>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
@@ -32,8 +32,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Core\Sessions.Core.csproj" />
-    <ProjectReference Include="..\Terminal\Sessions.Terminal.csproj" />
+    <ProjectReference Include="..\Core\Resesh.Core.csproj" />
+    <ProjectReference Include="..\Terminal\Resesh.Terminal.csproj" />
   </ItemGroup>
 
 </Project>

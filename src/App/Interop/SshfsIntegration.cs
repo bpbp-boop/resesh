@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using Sessions.Core.Models;
+using Resesh.Core.Models;
 
-namespace Sessions.App.Interop;
+namespace Resesh.App.Interop;
 
 /// <summary>
 /// A live sshfs.exe drive mount (key-auth sessions). The child process holds the mount;

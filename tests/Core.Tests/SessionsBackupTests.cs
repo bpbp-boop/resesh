@@ -1,12 +1,12 @@
 using System.Text;
 using System.IO.Compression;
-using Sessions.Core.Backup;
-using Sessions.Core.Credentials;
-using Sessions.Core.Models;
-using Sessions.Core.Ssh;
-using Sessions.Core.Storage;
+using Resesh.Core.Backup;
+using Resesh.Core.Credentials;
+using Resesh.Core.Models;
+using Resesh.Core.Ssh;
+using Resesh.Core.Storage;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 public sealed class SessionsBackupTests : IDisposable
 {
@@ -34,7 +34,7 @@ public sealed class SessionsBackupTests : IDisposable
         File.WriteAllText(Path.Combine(source.Directory, "recording.cast"), "must not be exported");
         File.WriteAllText(Path.Combine(source.Directory, "workspaces.json"), "{\"workspaces\":[]}");
 
-        var path = Path.Combine(_dir.FullName, "filtered.sessionsbackup");
+        var path = Path.Combine(_dir.FullName, "filtered.reseshbackup");
         SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
             source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
             new BackupExportOptions { Scope = new BackupScope(SessionKind.Ssh, "Ops") });
@@ -60,7 +60,7 @@ public sealed class SessionsBackupTests : IDisposable
         var session = Ssh("Secret", "secret.example", "");
         source.Sessions.Add(session);
         source.Credentials.Write(session.Id, "correct horse battery staple");
-        var path = Path.Combine(_dir.FullName, "secret.sessionsbackup");
+        var path = Path.Combine(_dir.FullName, "secret.reseshbackup");
 
         SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
             source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
@@ -90,7 +90,7 @@ public sealed class SessionsBackupTests : IDisposable
         source.Credentials.Write(endpointMatch.Id, "duplicate secret");
         source.KnownHosts.Accept("same.example", 22, "ssh-ed25519", "imported-key");
 
-        var path = Path.Combine(_dir.FullName, "merge.sessionsbackup");
+        var path = Path.Combine(_dir.FullName, "merge.reseshbackup");
         SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
             source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
             new BackupExportOptions { IncludeSecrets = true, Passphrase = "merge passphrase" });
@@ -150,7 +150,7 @@ public sealed class SessionsBackupTests : IDisposable
         };
         source.Sessions.Add(session);
         source.Credentials.WriteKey(key.Id, "key passphrase");
-        var path = Path.Combine(_dir.FullName, "key.sessionsbackup");
+        var path = Path.Combine(_dir.FullName, "key.reseshbackup");
 
         SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
             source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,

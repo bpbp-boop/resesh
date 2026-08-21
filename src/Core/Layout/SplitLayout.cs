@@ -1,4 +1,4 @@
-namespace Sessions.Core.Layout;
+namespace Resesh.Core.Layout;
 
 public enum SplitDirection
 {

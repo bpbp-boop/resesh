@@ -1,7 +1,7 @@
 using System.Text.Json;
-using Sessions.Core.Models;
+using Resesh.Core.Models;
 
-namespace Sessions.Core.Storage;
+namespace Resesh.Core.Storage;
 
 /// <summary>
 /// Highlight-rule state in highlights.json: global enable/disable deltas and definition
@@ -34,7 +34,7 @@ public sealed class HighlightsStore
     }
 
     public static string DefaultPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sessions", "highlights.json");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "highlights.json");
 
     public void Load()
     {

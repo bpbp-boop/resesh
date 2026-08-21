@@ -1,6 +1,6 @@
-using Sessions.Core.Ssh;
+using Resesh.Core.Ssh;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 /// <summary>
 /// set-titles is off by default in tmux, so a bootstrap that forgets it produces panes that

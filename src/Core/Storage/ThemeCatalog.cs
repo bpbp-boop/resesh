@@ -1,4 +1,4 @@
-namespace Sessions.Core.Storage;
+namespace Resesh.Core.Storage;
 
 public sealed record ThemeChoice(string Id, string Name, bool IsLight = false)
 {
@@ -10,8 +10,8 @@ public static class ThemeCatalog
 {
     public static IReadOnlyList<ThemeChoice> All { get; } =
     [
-        new("dark", "Sessions Dark"),
-        new("light", "Sessions Light", true),
+        new("dark", "Resesh Dark"),
+        new("light", "Resesh Light", true),
         new("solarized-dark", "Solarized Dark"),
         new("solarized-light", "Solarized Light", true),
         new("dracula", "Dracula"),

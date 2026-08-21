@@ -1,6 +1,6 @@
-using Sessions.Core.Ssh;
+using Resesh.Core.Ssh;
 
-namespace Sessions.Core.Tests;
+namespace Resesh.Core.Tests;
 
 public sealed class KnownHostsStoreTests : IDisposable
 {

@@ -1,12 +1,12 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Sessions.Core.Credentials;
-using Sessions.Core.Models;
-using Sessions.Core.Ssh;
-using Sessions.Core.Storage;
+using Resesh.Core.Credentials;
+using Resesh.Core.Models;
+using Resesh.Core.Ssh;
+using Resesh.Core.Storage;
 using Windows.ApplicationModel.DataTransfer;
 
-namespace Sessions.App.Dialogs;
+namespace Resesh.App.Dialogs;
 
 /// <summary>Manages references to private keys. It never copies, moves, or deletes key files.</summary>
 public static class SshKeyManagerDialog
@@ -179,7 +179,7 @@ public static class SshKeyManagerDialog
                 {
                     new TextBlock
                     {
-                        Text = "Sessions records where each key is stored. It does not copy or move private-key files.",
+                        Text = "Resesh records where each key is stored. It does not copy or move private-key files.",
                         TextWrapping = TextWrapping.Wrap,
                     },
                     status,

@@ -1,8 +1,8 @@
 <ContentDialog
-    x:Class="Sessions.App.Dialogs.ImportBackupDialog"
+    x:Class="Resesh.App.Dialogs.ImportBackupDialog"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:local="using:Sessions.App.Dialogs"
+    xmlns:local="using:Resesh.App.Dialogs"
     Title="Import backup"
     PrimaryButtonText="Import"
     CloseButtonText="Cancel"

@@ -1,8 +1,8 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Sessions.App.ViewModels;
+using Resesh.App.ViewModels;
 
-namespace Sessions.App;
+namespace Resesh.App;
 
 public sealed partial class TreeNodeTemplateSelector : DataTemplateSelector
 {

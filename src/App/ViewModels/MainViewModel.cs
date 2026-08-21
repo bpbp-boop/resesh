@@ -1,11 +1,11 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
-using Sessions.Core.Credentials;
-using Sessions.Core.Models;
-using Sessions.Core.Search;
-using Sessions.Core.Storage;
+using Resesh.Core.Credentials;
+using Resesh.Core.Models;
+using Resesh.Core.Search;
+using Resesh.Core.Storage;
 
-namespace Sessions.App.ViewModels;
+namespace Resesh.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {

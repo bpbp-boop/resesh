@@ -5,7 +5,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Web.WebView2.Core;
 
-namespace Sessions.Terminal;
+namespace Resesh.Terminal;
 
 /// <summary>
 /// WebView2 hosting the bundled xterm.js page and marshalling bytes both ways.
@@ -105,7 +105,7 @@ public sealed class TerminalControl : Grid, IDisposable
     public async Task InitializeAsync()
     {
         var userDataFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Sessions", "WebView2");
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Resesh", "WebView2");
         var environment = await CoreWebView2Environment.CreateWithOptionsAsync(
             null, userDataFolder, new CoreWebView2EnvironmentOptions());
         await _webView.EnsureCoreWebView2Async(environment);
@@ -121,7 +121,7 @@ public sealed class TerminalControl : Grid, IDisposable
 #endif
 
         // WinUI library content lands under "<ProjectName>\wwwroot" in the app output.
-        var wwwroot = Path.Combine(AppContext.BaseDirectory, "Sessions.Terminal", "wwwroot");
+        var wwwroot = Path.Combine(AppContext.BaseDirectory, "Resesh.Terminal", "wwwroot");
         if (!Directory.Exists(wwwroot))
             wwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
         core.SetVirtualHostNameToFolderMapping(VirtualHost, wwwroot, CoreWebView2HostResourceAccessKind.Allow);

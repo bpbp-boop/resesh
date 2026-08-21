@@ -4,7 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 
-namespace Sessions.App;
+namespace Resesh.App;
 
 /// <summary>Builds TextBlock inlines with case-insensitive filter matches emphasized.</summary>
 public static class MatchHighlighter

@@ -1,7 +1,7 @@
 using System.Text;
-using Sessions.Core.Sftp;
+using Resesh.Core.Sftp;
 
-namespace Sessions.Core.Ssh;
+namespace Resesh.Core.Ssh;
 
 public enum RemoteWorkingDirectoryProbeStatus
 {

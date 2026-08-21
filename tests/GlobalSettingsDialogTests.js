@@ -27,7 +27,7 @@ test("the tab host keeps a fixed height so switching tabs doesn't resize the dia
 test("the general tab keeps the grouped two-column layout and global-scope text", () => {
   assert.match(dialog, /SectionCard\("Appearance"/);
   assert.match(dialog, /SectionCard\("Terminal interaction"/);
-  assert.match(dialog, /These settings apply throughout Sessions/);
+  assert.match(dialog, /These settings apply throughout Resesh/);
 });
 
 test("the highlight editor lives inline in the Highlighting tab", () => {

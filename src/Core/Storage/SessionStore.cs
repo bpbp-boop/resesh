@@ -1,8 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Sessions.Core.Models;
+using Resesh.Core.Models;
 
-namespace Sessions.Core.Storage;
+namespace Resesh.Core.Storage;
 
 /// <summary>
 /// JSON-file-backed store for sessions and explicitly-created (possibly empty) folders.
@@ -36,7 +36,7 @@ public sealed class SessionStore
     }
 
     public static string DefaultPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Sessions", "sessions.json");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "sessions.json");
 
     public IReadOnlyList<Session> Sessions
     {

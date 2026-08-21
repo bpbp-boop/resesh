@@ -1,4 +1,4 @@
-namespace Sessions.Core.Models;
+namespace Resesh.Core.Models;
 
 /// <summary>
 /// What a session's target kind supports, so the UI adapts through one surface instead

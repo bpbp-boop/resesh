@@ -1,13 +1,13 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Sessions.Core.Agents;
+using Resesh.Core.Agents;
 
-namespace Sessions.App.Dialogs;
+namespace Resesh.App.Dialogs;
 
 /// <summary>
 /// The opt-in adapter snippets (Phase 6.2), hosted inline in the Settings dialog's Agents
-/// tab. Sessions deliberately installs nothing: the exact text is shown here, the user
+/// tab. Resesh deliberately installs nothing: the exact text is shown here, the user
 /// copies it to a target they choose, and removing it is deleting the lines again. An
 /// adapter's only power is to emit one escape sequence describing what the agent is doing —
 /// it can never send input or approve anything.
@@ -20,7 +20,7 @@ public static class AgentAdapterPanel
         panel.Children.Add(new TextBlock
         {
             TextWrapping = TextWrapping.Wrap,
-            Text = "Sessions detects agents on its own — from the command you run, the terminal "
+            Text = "Resesh detects agents on its own — from the command you run, the terminal "
                  + "title, and (for local tabs) the processes in the tab's own job. Detection can "
                  + "say which agent is running, but only the agent itself can say it is waiting for "
                  + "you. Installing one of these snippets on a target upgrades its tabs from a guess "

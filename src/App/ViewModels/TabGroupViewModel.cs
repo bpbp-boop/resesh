@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 
-namespace Sessions.App.ViewModels;
+namespace Resesh.App.ViewModels;
 
 /// <summary>One tab group (SecureCRT-style): its tabs and selection.</summary>
 public sealed class TabGroupViewModel : ObservableObject
