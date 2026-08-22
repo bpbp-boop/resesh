@@ -961,7 +961,7 @@
   /** Reports the best current-location label from a completed known prompt. The absolute
    * cursor line is part of the signature, so returning to the same context after a command
    * still reports that the command ended. */
-  RulerAddon.prototype._reportPromptContext = function () {
+  RulerAddon.prototype._reportPromptContext = function (force) {
     if (!this.onPromptContext || !this._term) return;
     var buf = this._term.buffer.active;
     if (!buf || buf.type === "alternate") return;
@@ -1055,7 +1055,7 @@
     }
     if (!label) return;
     var signature = row + ":" + platform + ":" + label;
-    if (signature === this._lastPromptSignature) return;
+    if (!force && signature === this._lastPromptSignature) return;
     this._lastPromptSignature = signature;
     try {
       this.onPromptContext(label, platform);

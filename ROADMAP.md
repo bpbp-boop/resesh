@@ -12,9 +12,10 @@ and the git history.
   host-key mismatch override dialog.
 - **Keyword highlighting** — regex rule packs (interfaces, IPs, MACs, up/down states,
   routing protocols, …) with per-session toggles and a custom-rule editor.
-- **File transfer & remote browsing** — in-app SFTP pane, "follow the terminal"
-  current-directory tracking (tmux, OSC 7, `/proc` probe, prompt fallback), and an
-  "Open in Explorer" link when SSHFS-Win is installed.
+- **File transfer & browsing** — in-app local and SFTP file panes, "follow the terminal"
+  current-directory tracking (cmd/PowerShell prompts, tmux, OSC 7, `/proc` probe, and
+  prompt fallback), direct Explorer access for local folders, and SSHFS-Win access for
+  remote folders when installed.
 - **Export / import & backup** — `*.reseshbackup` archives with merge-on-import,
   optional passphrase-encrypted secrets, and a versioned schema.
 - **SSH key registry** — private keys as shared named resources with fingerprint

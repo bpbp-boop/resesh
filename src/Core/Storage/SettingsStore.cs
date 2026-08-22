@@ -13,7 +13,7 @@ public sealed record AppSettings
     /// <summary>Session tree pane width in pixels; null = default.</summary>
     public double? TreePaneWidth { get; init; }
 
-    /// <summary>SFTP file pane width in pixels; null = default.</summary>
+    /// <summary>Per-tab file pane width in pixels; null = default.</summary>
     public double? FilePaneWidth { get; init; }
 
     /// <summary>Sessions pinned in the tab strip, in display order; reopened automatically on launch.</summary>

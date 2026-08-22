@@ -296,8 +296,8 @@ public sealed partial class TabGroupView : UserControl
         var recording = tab?.View is Terminal.TerminalTabView { IsRecording: true };
         var rewinding = tab?.View is Terminal.TerminalTabView { IsRewinding: true };
         ShowCommandsButton.IsEnabled = tab is not null && !tab.IsLocked;
-        FilePaneToggle.IsEnabled = tab?.Capabilities.RemoteFiles == true && !tab.IsLocked;
-        CurrentFolderButton.IsEnabled = tab?.Capabilities.RemoteFiles == true &&
+        FilePaneToggle.IsEnabled = tab?.Capabilities.FilePane == true && !tab.IsLocked;
+        CurrentFolderButton.IsEnabled = tab?.Capabilities.FilePane == true &&
             tab.State == TabConnectionState.Connected && !tab.IsLocked;
         RecordButton.IsEnabled = tab?.View is Terminal.TerminalTabView { CanRecord: true } && !tab.IsLocked;
         RewindButton.IsEnabled = tab?.View is Terminal.TerminalTabView { CanRewind: true } && !tab.IsLocked;
@@ -585,9 +585,9 @@ public sealed partial class TabGroupView : UserControl
         // Splitting a lone tab would leave an empty group that immediately collapses — pointless.
         _split.IsEnabled = Group.Tabs.Count > 1;
         _splitDown.IsEnabled = Group.Tabs.Count > 1;
-        _filePane.Visibility = caps.RemoteFiles ? Visibility.Visible : Visibility.Collapsed;
+        _filePane.Visibility = caps.FilePane ? Visibility.Visible : Visibility.Collapsed;
         _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
-        var filePaneCwd = caps.RemoteFiles;
+        var filePaneCwd = caps.FilePane;
         _filePaneCwd.Visibility = filePaneCwd ? Visibility.Visible : Visibility.Collapsed;
         _filePaneCwd.IsEnabled = filePaneCwd && tab.State == TabConnectionState.Connected;
         _workingFolder.Visibility = caps.LocalWorkingFolder && !tab.IsPlayback

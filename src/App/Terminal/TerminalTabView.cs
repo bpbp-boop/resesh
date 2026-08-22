@@ -48,9 +48,9 @@ public sealed class TerminalTabView : Grid, IDisposable
     private DispatcherQueueTimer? _agentPoll;
     private bool _agentPollBusy;
 
-    // File pane (Phase 3): lives in column 2 behind a splitter; the resolved connect
-    // secret is kept for the tab's lifetime so the SFTP channel never re-prompts.
-    private SftpPaneView? _filePane;
+    // File pane: local sessions use the Windows filesystem; SSH sessions keep the
+    // resolved secret for a separate SFTP channel.
+    private FilePaneView? _filePane;
     private CommunityToolkit.WinUI.Controls.GridSplitter? _paneSplitter;
     private Border? _paneSplitterLine;
     private ThemeVisualPalette _chromePalette = ThemeVisualPalette.For(App.Settings.Current.Theme);
@@ -901,22 +901,22 @@ public sealed class TerminalTabView : Grid, IDisposable
         }
     }
 
-    /// <summary>Opens the local profile's starting directory in Explorer (local tabs'
-    /// stand-in for the remote file pane until a local files provider exists).</summary>
+    /// <summary>Opens the local profile's starting directory in Explorer.</summary>
     public void OpenWorkingFolder()
     {
-        var directory = Environment.ExpandEnvironmentVariables(Session.Local?.StartingDirectory?.Trim() ?? "");
-        if (directory.Length == 0)
-            directory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (Directory.Exists(directory))
+        var directory = new LocalFileSystem(Session.Local?.StartingDirectory).HomeDirectory;
+        OpenLocalDirectoryInExplorer(directory);
+    }
+
+    private static void OpenLocalDirectoryInExplorer(string directory)
+    {
+        var startInfo = new System.Diagnostics.ProcessStartInfo
         {
-            _ = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "explorer.exe",
-                Arguments = $"\"{directory}\"",
-                UseShellExecute = false,
-            });
-        }
+            FileName = "explorer.exe",
+            UseShellExecute = false,
+        };
+        startInfo.ArgumentList.Add(directory);
+        _ = System.Diagnostics.Process.Start(startInfo);
     }
 
     // ---- file pane (Phase 3) ----
@@ -925,8 +925,8 @@ public sealed class TerminalTabView : Grid, IDisposable
 
     public void ToggleFilePane()
     {
-        if (!_tab.Capabilities.RemoteFiles)
-            return; // remote-only surface; local tabs use Open Working Folder instead
+        if (!_tab.Capabilities.FilePane)
+            return;
         if (IsFilePaneOpen)
             HideFilePane();
         else
@@ -938,12 +938,14 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// line once the listing lands (instead of the item count).</summary>
     public void ShowFilePane(string? initialPath = null, string? notice = null)
     {
-        if (_disposed || !_tab.Capabilities.RemoteFiles)
+        if (_disposed || !_tab.Capabilities.FilePane)
             return;
         var wasOpen = IsFilePaneOpen;
         if (_filePane is null)
         {
-            _filePane = new SftpPaneView(() => Session, CreateSftpSessionAsync, OpenInExplorerAsync);
+            _filePane = Session.IsLocal
+                ? new FilePaneView(() => Session, OpenInExplorerAsync)
+                : new FilePaneView(() => Session, CreateSftpSessionAsync, OpenInExplorerAsync);
             _filePane.CloseRequested += HideFilePane;
             Grid.SetColumn(_filePane, 2);
             Children.Add(_filePane);
@@ -984,8 +986,10 @@ public sealed class TerminalTabView : Grid, IDisposable
         _filePane.Visibility = Visibility.Visible;
         if (!wasOpen)
             FilePaneOpenChanged?.Invoke();
-        if (initialPath is not null || _filePane.IsLoaded)
-            _ = _filePane.NavigateAsync(initialPath ?? _filePane.CurrentPath, notice);
+        if (initialPath is not null || notice is not null)
+            _ = _filePane.NavigateAsync(initialPath, notice);
+        else if (_filePane.IsLoaded)
+            _ = _filePane.NavigateAsync(_filePane.CurrentPath);
     }
 
     private void SetPaneSplitterActive(bool active)
@@ -1019,14 +1023,24 @@ public sealed class TerminalTabView : Grid, IDisposable
     }
 
     /// <summary>
-    /// "Open file pane at terminal folder": use the persistent-session side channel first,
-    /// then a validated OSC 7 report, a zero-input Linux process query, and a path-shaped
-    /// shell prompt. If all sources fail, the pane says why it opened at home.
+    /// Opens the file pane at the terminal folder. Local sessions use OSC 7 or a known
+    /// cmd/PowerShell prompt. SSH sessions use the remote query and prompt fallbacks.
     /// </summary>
     public async Task OpenFilePaneAtCurrentFolderAsync()
     {
-        if (!_tab.Capabilities.RemoteFiles)
+        if (!_tab.Capabilities.FilePane)
             return;
+        if (Session.IsLocal)
+        {
+            var reported = await _terminal.RequestPromptContextAsync();
+            var requestedPrompt = reported is { Platform: null } ? reported.Value.Context : null;
+            var localPath = ResolveLocalTerminalDirectory(requestedPrompt, out var localFailure);
+            ShowFilePane(localPath, localFailure is null
+                ? null
+                : $"Couldn't read the current folder ({localFailure}) — opened the profile folder instead.");
+            return;
+        }
+
         string? path = null;
         string? failure = null;
         var canUsePromptFallback = true;
@@ -1094,15 +1108,54 @@ public sealed class TerminalTabView : Grid, IDisposable
         ShowFilePane(path, failure is null ? null : $"Couldn't read the current folder ({failure}) — opened home instead.");
     }
 
+    private string? ResolveLocalTerminalDirectory(string? requestedPrompt, out string? failure)
+    {
+        failure = null;
+        var files = new LocalFileSystem(Session.Local?.StartingDirectory);
+        var candidates = new List<string>();
+        if (requestedPrompt is not null)
+            candidates.Add(requestedPrompt);
+        if (!_workingDirectory.HostMismatch && _workingDirectory.Path is { } reportedPath)
+            candidates.Add(reportedPath);
+        if (_tab.RunningCommand is null && string.IsNullOrEmpty(_tab.PromptContextPlatform) &&
+            _tab.PromptContext is { } promptPath)
+            candidates.Add(promptPath);
+
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                return files.ResolveDirectory(candidate);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                failure = ex.Message;
+            }
+        }
+
+        // cmd updates the process directory. PowerShell keeps a separate provider
+        // location, so its prompt report above must have priority over this fallback.
+        if (_backend is LocalTerminalSession local &&
+            local.TryGetCurrentDirectory() is { } processDirectory)
+            return processDirectory;
+
+        if (_workingDirectory.HostMismatch)
+            failure = "the shell reported a folder from another host";
+        failure ??= "the shell did not report a current folder";
+        return null;
+    }
+
     private Interop.SshfsMount? _sshfsMount;
 
-    /// <summary>Mount the remote filesystem, then open Explorer on it. Password sessions
-    /// use the sshfs UNC provider (mounted first — Explorer alone can't authenticate a UNC
-    /// argument and silently opens Documents); key sessions spawn sshfs.exe directly with
-    /// the session's key, since the UNC API cannot carry one. Runs on a background thread;
-    /// the pane surfaces failures.</summary>
-    private async Task OpenInExplorerAsync(string remotePath)
+    /// <summary>Opens a local directory directly. Remote sessions mount the SFTP path
+    /// through SSHFS first.</summary>
+    private async Task OpenInExplorerAsync(string path)
     {
+        if (Session.IsLocal)
+        {
+            OpenLocalDirectoryInExplorer(path);
+            return;
+        }
         var session = _resolvedSshSession ?? Session;
         string root;
         if (session.AuthMethod == AuthMethod.PrivateKey)
@@ -1121,7 +1174,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             var password = session.AuthMethod == AuthMethod.Password ? _secret : null;
             root = await Task.Run(() => Interop.SshfsIntegration.Connect(session, password));
         }
-        Interop.SshfsIntegration.OpenInExplorer(root, remotePath);
+        Interop.SshfsIntegration.OpenInExplorer(root, path);
     }
 
     /// <summary>Connect factory handed to the pane: reuses the tab's resolved secret

@@ -223,6 +223,7 @@ public class LocalTargetModelTests
     public void Capabilities_FollowTargetKind()
     {
         var ssh = SessionCapabilities.For(new Session { Host = "h" });
+        Assert.True(ssh.FilePane);
         Assert.True(ssh.RemoteFiles);
         Assert.True(ssh.HostKeys);
         Assert.True(ssh.RemoteSession);
@@ -231,6 +232,7 @@ public class LocalTargetModelTests
         Assert.Equal("Reconnect", ssh.StartAgainVerb);
 
         var local = SessionCapabilities.For(new Session { Kind = SessionKind.Local, Local = new LocalTarget() });
+        Assert.True(local.FilePane);
         Assert.False(local.RemoteFiles);
         Assert.False(local.HostKeys);
         Assert.False(local.RemoteSession);
@@ -294,6 +296,44 @@ public class LocalTerminalSessionTests
         }
         lock (output)
             Assert.Contains("conpty-roundtrip", output.ToString());
+    }
+
+    [Fact]
+    public async Task CurrentDirectory_FollowsInteractiveCmdChanges()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "resesh-cwd-" + Guid.NewGuid().ToString("N"));
+        var child = Directory.CreateDirectory(Path.Combine(root, "child")).FullName;
+        using var local = new LocalTerminalSession();
+        try
+        {
+            var session = new Session
+            {
+                Kind = SessionKind.Local,
+                Name = "cwd-test",
+                Local = new LocalTarget
+                {
+                    Executable = @"%SystemRoot%\System32\cmd.exe",
+                    StartingDirectory = root,
+                },
+            };
+            local.Start(session, 80, 24);
+
+            Assert.Equal(root, local.TryGetCurrentDirectory(), ignoreCase: true);
+            local.Write(Encoding.UTF8.GetBytes($"cd /d \"{child}\"\r"));
+
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (DateTime.UtcNow < deadline &&
+                   !string.Equals(local.TryGetCurrentDirectory(), child, StringComparison.OrdinalIgnoreCase))
+                await Task.Delay(50);
+
+            Assert.Equal(child, local.TryGetCurrentDirectory(), ignoreCase: true);
+        }
+        finally
+        {
+            local.Stop();
+            await Task.Delay(100);
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]

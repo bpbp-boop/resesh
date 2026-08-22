@@ -179,10 +179,10 @@ keyboard-interactive fallback.
   path/permission/collision logic so it unit-tests without a server (TestSshServer speaks
   neither SFTP nor exec channels; live verification needs a real host). Permission modes
   use SSH.NET's octal-as-decimal `short` convention (755 = rwxr-xr-x).
-- Pane UI (`SftpPaneView`) is fully code-built (HighlightEditorDialog precedent): composed
+- Pane UI (`FilePaneView`) is fully code-built (HighlightEditorDialog precedent): composed
   ListView rows with `Tag` carrying the entry, compact 26px rows, toolbar
-  (up/home/path/refresh/mkdir/upload/close), context menu, Explorer drag-IN via
-  StorageItems. Drag-OUT (temp-file materialization on DragStarting) is deferred -
+  (up/home/path/refresh/mkdir/upload/Explorer/close), context menu, direct local filesystem
+  access, and remote Explorer drag-IN via StorageItems. Drag-OUT is deferred -
   "Download & Open" covers the common case.
 - Layout: `TerminalTabView` grew columns [terminal | splitter | pane]; the lock overlay
   spans all three. Pane width persists as `AppSettings.FilePaneWidth`. Ctrl+Shift+E

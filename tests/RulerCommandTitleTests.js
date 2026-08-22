@@ -158,6 +158,11 @@ test("idle Windows prompts report their current directory", () => {
 
   assert.deepEqual(cmd.promptCalls, [["C:\\Users\\Boden", null]]);
   assert.deepEqual(powershell.promptCalls, [["D:\\work\\Sessions", null]]);
+
+  cmd._reportPromptContext();
+  assert.equal(cmd.promptCalls.length, 1);
+  cmd._reportPromptContext(true);
+  assert.deepEqual(cmd.promptCalls[1], ["C:\\Users\\Boden", null]);
 });
 
 test("an idle spaced Bash prompt reports its current directory", () => {

@@ -6,7 +6,10 @@ namespace Resesh.Core.Models;
 /// </summary>
 public sealed record SessionCapabilities
 {
-    /// <summary>SFTP file pane, SSHFS "open in Explorer", remote cwd tracking.</summary>
+    /// <summary>A browsable per-tab file pane applies.</summary>
+    public bool FilePane { get; init; }
+
+    /// <summary>SFTP, SSHFS, and remote cwd queries apply.</summary>
     public bool RemoteFiles { get; init; }
 
     /// <summary>Host-key trust and connection-security summary apply.</summary>
@@ -26,6 +29,7 @@ public sealed record SessionCapabilities
 
     private static readonly SessionCapabilities Ssh = new()
     {
+        FilePane = true,
         RemoteFiles = true,
         HostKeys = true,
         RemoteSession = true,
@@ -35,6 +39,7 @@ public sealed record SessionCapabilities
 
     private static readonly SessionCapabilities Local = new()
     {
+        FilePane = true,
         LocalWorkingFolder = true,
         StopVerb = "Stop",
         StartAgainVerb = "Restart",

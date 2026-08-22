@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Resesh.Core.Local;
 using Resesh.App.Interop;
 using Resesh.Core.Models;
 using Resesh.Core.Sftp;
@@ -11,16 +12,16 @@ using Windows.ApplicationModel.DataTransfer;
 namespace Resesh.App.Controls;
 
 /// <summary>
-/// The per-tab SFTP file pane: remote listing, navigation, transfers with progress,
-/// rename/delete/mkdir/chmod, and Explorer drag-in. Entirely code-built (the codebase
-/// convention for composed dialogs/panes). One remote operation runs at a time; the
-/// pane owns its SftpSession, created lazily by the factory the tab supplies.
+/// The per-tab file pane. Local sessions use the Windows filesystem directly. SSH
+/// sessions use a lazily connected SFTP channel and optional SSHFS Explorer access.
+/// One operation runs at a time.
 /// </summary>
-public sealed class SftpPaneView : UserControl, IDisposable
+public sealed class FilePaneView : UserControl, IDisposable
 {
     private readonly Func<Session> _session;
-    private readonly Func<Task<SftpSession>> _connectFactory;
+    private readonly Func<Task<SftpSession>>? _connectFactory;
     private readonly Func<string, Task> _openInExplorer;
+    private readonly LocalFileSystem? _localFiles;
 
     private readonly TextBox _pathBox = new()
     {
@@ -70,13 +71,29 @@ public sealed class SftpPaneView : UserControl, IDisposable
 
     public string CurrentPath => _currentPath;
 
-    public SftpPaneView(
+    public FilePaneView(
         Func<Session> session, Func<Task<SftpSession>> connectFactory, Func<string, Task> openInExplorer)
+        : this(session, connectFactory, openInExplorer, localFiles: null)
+    {
+    }
+
+    public FilePaneView(Func<Session> session, Func<string, Task> openInExplorer)
+        : this(session, connectFactory: null, openInExplorer,
+            new LocalFileSystem(session().Local?.StartingDirectory))
+    {
+    }
+
+    private FilePaneView(
+        Func<Session> session,
+        Func<Task<SftpSession>>? connectFactory,
+        Func<string, Task> openInExplorer,
+        LocalFileSystem? localFiles)
     {
         _session = session;
         _connectFactory = connectFactory;
         _openInExplorer = openInExplorer;
-
+        _localFiles = localFiles;
+        _pathBox.PlaceholderText = localFiles is null ? "/" : @"C:\";
         // Compact rows in the codebase's tree style (default ListViewItems are 40px tall).
         var itemStyle = new Style(typeof(ListViewItem));
         itemStyle.Setters.Add(new Setter(Control.MinHeightProperty, 26d));
@@ -91,7 +108,7 @@ public sealed class SftpPaneView : UserControl, IDisposable
             if (e.Key == Windows.System.VirtualKey.Back)
             {
                 e.Handled = true;
-                _ = NavigateAsync(RemotePath.Parent(_currentPath));
+                _ = NavigateAsync(ParentPath(_currentPath));
             }
         };
 
@@ -151,21 +168,25 @@ public sealed class SftpPaneView : UserControl, IDisposable
 
         BuildMenu();
 
-        // Explorer drag-in: dropped files/folders upload into the current directory.
-        AllowDrop = true;
-        DragOver += (_, e) =>
+        // Remote panes accept Explorer drag-in as uploads. Local panes already display
+        // the same filesystem, so a drop must not copy a path onto itself.
+        if (_localFiles is null)
         {
-            if (e.DataView.Contains(StandardDataFormats.StorageItems) && !_busy)
+            AllowDrop = true;
+            DragOver += (_, e) =>
             {
-                e.AcceptedOperation = DataPackageOperation.Copy;
-                e.DragUIOverride.Caption = $"Upload to {_currentPath}";
-            }
-        };
-        Drop += Pane_Drop;
+                if (e.DataView.Contains(StandardDataFormats.StorageItems) && !_busy)
+                {
+                    e.AcceptedOperation = DataPackageOperation.Copy;
+                    e.DragUIOverride.Caption = $"Upload to {_currentPath}";
+                }
+            };
+            Drop += Pane_Drop;
+        }
 
         Loaded += (_, _) =>
         {
-            if (_sftp is null)
+            if (_list.Items.Count == 0)
                 _ = NavigateAsync(null);
         };
     }
@@ -183,7 +204,7 @@ public sealed class SftpPaneView : UserControl, IDisposable
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
-        var up = IconButton("", "Up one folder", () => _ = NavigateAsync(RemotePath.Parent(_currentPath)));
+        var up = IconButton("", "Up one folder", () => _ = NavigateAsync(ParentPath(_currentPath)));
         var home = IconButton("", "Home folder", () => _ = NavigateAsync(null));
         Grid.SetColumn(home, 1);
         _pathBox.KeyDown += (_, e) =>
@@ -199,9 +220,13 @@ public sealed class SftpPaneView : UserControl, IDisposable
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
         actions.Children.Add(IconButton("", "Refresh", () => _ = NavigateAsync(_currentPath)));
         actions.Children.Add(IconButton("", "New folder", () => _ = CreateFolderAsync()));
-        actions.Children.Add(IconButton("", "Upload files…", () => _ = PickAndUploadAsync()));
-        if (SshfsIntegration.IsInstalled)
-            actions.Children.Add(IconButton("", "Open in Explorer (SSHFS-Win)", () => _ = OpenInExplorerAsync()));
+        if (_localFiles is null)
+            actions.Children.Add(IconButton("", "Upload files…", () => _ = PickAndUploadAsync()));
+        if (_localFiles is not null || SshfsIntegration.IsInstalled)
+        {
+            var tooltip = _localFiles is null ? "Open in Explorer (SSHFS-Win)" : "Open in Explorer";
+            actions.Children.Add(IconButton("", tooltip, () => _ = OpenInExplorerAsync()));
+        }
         actions.Children.Add(IconButton("", "Close file pane", () => CloseRequested?.Invoke()));
         Grid.SetColumn(actions, 3);
 
@@ -241,7 +266,7 @@ public sealed class SftpPaneView : UserControl, IDisposable
         _open = Item("Open", () =>
         {
             if (_menuEntry is { } entry)
-                _ = NavigateAsync(entry.FullPath);
+                OpenEntry(entry);
         });
         _download = Item("Download…", () => _ = DownloadSelectionAsync());
         _downloadOpen = Item("Download && Open", () => _ = DownloadAndOpenAsync());
@@ -253,15 +278,20 @@ public sealed class SftpPaneView : UserControl, IDisposable
         _refresh = Item("Refresh", () => _ = NavigateAsync(_currentPath));
 
         _menu.Items.Add(_open);
-        _menu.Items.Add(_download);
-        _menu.Items.Add(_downloadOpen);
+        if (_localFiles is null)
+        {
+            _menu.Items.Add(_download);
+            _menu.Items.Add(_downloadOpen);
+        }
         _menu.Items.Add(new MenuFlyoutSeparator());
         _menu.Items.Add(_rename);
-        _menu.Items.Add(_permissions);
+        if (_localFiles is null)
+            _menu.Items.Add(_permissions);
         _menu.Items.Add(_delete);
         _menu.Items.Add(new MenuFlyoutSeparator());
         _menu.Items.Add(_mkdir);
-        _menu.Items.Add(_uploadFiles);
+        if (_localFiles is null)
+            _menu.Items.Add(_uploadFiles);
         _menu.Items.Add(_refresh);
     }
 
@@ -281,7 +311,9 @@ public sealed class SftpPaneView : UserControl, IDisposable
 
         var selection = SelectedEntries();
         var single = selection.Count == 1 ? selection[0] : null;
-        _open.Visibility = single?.IsDirectory == true ? Visibility.Visible : Visibility.Collapsed;
+        _open.Visibility = single is not null && (_localFiles is not null || single.IsDirectory)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         _download.IsEnabled = selection.Count > 0 && !_busy;
         _downloadOpen.Visibility = single is { IsDirectory: false } ? Visibility.Visible : Visibility.Collapsed;
         _downloadOpen.IsEnabled = !_busy;
@@ -313,11 +345,39 @@ public sealed class SftpPaneView : UserControl, IDisposable
             .OfType<RemoteFileEntry>()
             .ToList();
 
-    /// <summary>Mounts the sshfs UNC (with the tab's credentials) and opens Explorer there.
-    /// The mount can take several seconds — sshfs connects inside it — so status is shown.</summary>
+    private string ParentPath(string path)
+    {
+        if (_localFiles is null)
+            return RemotePath.Parent(path);
+        return Directory.GetParent(path)?.FullName ?? path;
+    }
+
+    private void OpenEntry(RemoteFileEntry entry)
+    {
+        if (_localFiles is null || entry.IsDirectory || Directory.Exists(entry.FullPath))
+        {
+            _ = NavigateAsync(entry.FullPath);
+            return;
+        }
+
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(entry.FullPath)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or InvalidOperationException)
+        {
+            ShowStatus($"Open failed: {ex.Message}", isError: true);
+        }
+    }
+
+    /// <summary>Opens the current local directory directly, or mounts the remote directory
+    /// through SSHFS before opening it.</summary>
     private async Task OpenInExplorerAsync()
     {
-        ShowStatus("Connecting Explorer view (sshfs)…", isError: false);
+        ShowStatus(_localFiles is null ? "Connecting Explorer view (sshfs)…" : "Opening Explorer…", isError: false);
         try
         {
             await _openInExplorer(_currentPath);
@@ -331,9 +391,8 @@ public sealed class SftpPaneView : UserControl, IDisposable
 
     // ---- connection + navigation ----
 
-    /// <summary>Navigates to a directory (null = remote home) and refreshes the listing.
-    /// A non-null <paramref name="notice"/> replaces the item-count status on success —
-    /// used to explain a home fallback without the listing overwriting the message.</summary>
+    /// <summary>Navigates to a directory (null = profile home) and refreshes the listing.
+    /// A notice replaces the item-count status after a successful fallback.</summary>
     public async Task NavigateAsync(string? path, string? notice = null)
     {
         if (_busy || _disposed)
@@ -343,10 +402,20 @@ public sealed class SftpPaneView : UserControl, IDisposable
         _errorPanel.Visibility = Visibility.Collapsed;
         try
         {
-            var sftp = await EnsureConnectedAsync();
-            var target = RemotePath.ResolveShellPath(path, sftp.HomeDirectory) ??
-                throw new InvalidOperationException("The terminal did not report an absolute remote path.");
-            var entries = await Task.Run(() => sftp.ListDirectory(target));
+            string target;
+            IReadOnlyList<RemoteFileEntry> entries;
+            if (_localFiles is { } localFiles)
+            {
+                target = localFiles.ResolveDirectory(path, _currentPath);
+                entries = await Task.Run(() => localFiles.ListDirectory(target));
+            }
+            else
+            {
+                var sftp = await EnsureConnectedAsync();
+                target = RemotePath.ResolveShellPath(path, sftp.HomeDirectory) ??
+                    throw new InvalidOperationException("The terminal did not report an absolute remote path.");
+                entries = await Task.Run(() => sftp.ListDirectory(target));
+            }
             _currentPath = target;
             _pathBox.Text = target;
             PopulateList(entries);
@@ -382,7 +451,8 @@ public sealed class SftpPaneView : UserControl, IDisposable
             return _sftp;
         _sftp?.Dispose();
         _sftp = null;
-        _sftp = await _connectFactory();
+        _sftp = await (_connectFactory?.Invoke()
+            ?? throw new InvalidOperationException("This pane has no SFTP connection factory."));
         return _sftp;
     }
 
@@ -414,7 +484,10 @@ public sealed class SftpPaneView : UserControl, IDisposable
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        ToolTipService.SetToolTip(row, $"{entry.Name}\n{entry.PermissionText}  {entry.Modified:yyyy-MM-dd HH:mm}");
+        var details = _localFiles is null
+            ? $"{entry.PermissionText}  {entry.Modified:yyyy-MM-dd HH:mm}"
+            : entry.Modified.ToString("yyyy-MM-dd HH:mm");
+        ToolTipService.SetToolTip(row, $"{entry.Name}\n{details}");
         var size = new TextBlock
         {
             Text = entry.IsDirectory ? "" : FormatSize(entry.Size),
@@ -441,7 +514,9 @@ public sealed class SftpPaneView : UserControl, IDisposable
         row.DoubleTapped += (_, e) =>
         {
             e.Handled = true;
-            if (entry.IsDirectory || entry.IsSymlink)
+            if (_localFiles is not null)
+                OpenEntry(entry);
+            else if (entry.IsDirectory || entry.IsSymlink)
                 _ = NavigateAsync(entry.FullPath); // symlink-to-file navigation fails with a status line
             else
                 _ = DownloadAndOpenAsync(entry);
@@ -705,6 +780,30 @@ public sealed class SftpPaneView : UserControl, IDisposable
         }
     }
 
+    private async Task RunLocalOperationAsync(string failurePrefix, Action<LocalFileSystem> work)
+    {
+        if (_busy || _disposed || _localFiles is not { } localFiles)
+            return;
+        _busy = true;
+        try
+        {
+            await Task.Run(() => work(localFiles));
+        }
+        catch (Exception ex) when (IsExpected(ex))
+        {
+            ShowStatus($"{failurePrefix}: {ex.Message}", isError: true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+        if (!_disposed)
+            await NavigateAsync(_currentPath);
+    }
+
+    private bool IsInvalidName(string name) =>
+        _localFiles is null ? name.Contains('/') : name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0;
+
     // ---- rename / delete / mkdir / chmod ----
 
     private async Task RenameAsync()
@@ -714,13 +813,20 @@ public sealed class SftpPaneView : UserControl, IDisposable
         var newName = await PromptAsync("Rename", "New name", entry.Name);
         if (string.IsNullOrWhiteSpace(newName) || newName == entry.Name)
             return;
-        if (newName.Contains('/'))
+        if (IsInvalidName(newName))
         {
-            ShowStatus("Names cannot contain '/'.", isError: true);
+            ShowStatus("The name contains an invalid character.", isError: true);
+            return;
+        }
+        var trimmed = newName.Trim();
+        if (_localFiles is not null)
+        {
+            await RunLocalOperationAsync("Rename failed", files =>
+                files.Rename(entry, Path.Combine(ParentPath(entry.FullPath), trimmed)));
             return;
         }
         await RunOperationAsync("Rename failed", (sftp, _) =>
-            Task.Run(() => sftp.Rename(entry.FullPath, RemotePath.Join(RemotePath.Parent(entry.FullPath), newName.Trim()))));
+            Task.Run(() => sftp.Rename(entry.FullPath, RemotePath.Join(RemotePath.Parent(entry.FullPath), trimmed))));
     }
 
     private async Task DeleteSelectionAsync()
@@ -731,10 +837,22 @@ public sealed class SftpPaneView : UserControl, IDisposable
         var what = selection.Count == 1
             ? $"\"{selection[0].Name}\""
             : $"{selection.Count} items";
+        var isLocal = _localFiles is not null;
+        var title = isLocal ? "Delete Local Files" : "Delete From Server";
+        var location = isLocal ? _currentPath : _session().Host;
         if (!await ConfirmAsync(
-                "Delete From Server",
-                $"Permanently delete {what} from {_session().Host}? Folders are deleted with everything in them. This cannot be undone."))
+                title,
+                $"Permanently delete {what} from {location}? Folders are deleted with everything in them. This cannot be undone."))
             return;
+        if (isLocal)
+        {
+            await RunLocalOperationAsync("Delete failed", files =>
+            {
+                foreach (var entry in selection)
+                    files.Delete(entry);
+            });
+            return;
+        }
         await RunOperationAsync("Delete failed", (sftp, token) => Task.Run(() =>
         {
             foreach (var entry in selection)
@@ -747,12 +865,19 @@ public sealed class SftpPaneView : UserControl, IDisposable
         var name = await PromptAsync("New Folder", "Folder name", "");
         if (string.IsNullOrWhiteSpace(name))
             return;
-        if (name.Contains('/'))
+        if (IsInvalidName(name))
         {
-            ShowStatus("Names cannot contain '/'.", isError: true);
+            ShowStatus("The name contains an invalid character.", isError: true);
             return;
         }
-        var path = RemotePath.Join(_currentPath, name.Trim());
+        var trimmed = name.Trim();
+        if (_localFiles is not null)
+        {
+            await RunLocalOperationAsync("Create folder failed", files =>
+                files.CreateDirectory(Path.Combine(_currentPath, trimmed)));
+            return;
+        }
+        var path = RemotePath.Join(_currentPath, trimmed);
         await RunOperationAsync("Create folder failed", (sftp, _) => Task.Run(() => sftp.CreateDirectory(path)));
     }
 

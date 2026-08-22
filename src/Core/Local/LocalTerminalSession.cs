@@ -283,6 +283,69 @@ public sealed class LocalTerminalSession : ITerminalBackend
         return names;
     }
 
+    /// <summary>Reads the shell process's live Windows current directory. This does not
+    /// send terminal input, so it works for cmd and PowerShell without shell integration.</summary>
+    public string? TryGetCurrentDirectory()
+    {
+        var process = _process;
+        if (_disposed || process == IntPtr.Zero || IntPtr.Size != 8)
+            return null;
+
+        if (NtQueryInformationProcess(
+                process, ProcessBasicInformation, out var basic, Marshal.SizeOf<PROCESS_BASIC_INFORMATION>(),
+                out _) != 0 ||
+            basic.PebBaseAddress == IntPtr.Zero)
+            return null;
+
+        // The supported x64 and ARM64 Windows targets use the same native structure
+        // offsets: PEB.ProcessParameters at 0x20, then CurrentDirectory at 0x38.
+        if (!TryReadPointer(process, basic.PebBaseAddress + PebProcessParametersOffset, out var parameters) ||
+            parameters == IntPtr.Zero)
+            return null;
+
+        var descriptor = new byte[UnicodeString64Size];
+        if (!ReadProcessMemory(
+                process, parameters + ProcessParametersCurrentDirectoryOffset,
+                descriptor, descriptor.Length, out var descriptorBytes) ||
+            descriptorBytes != (nuint)descriptor.Length)
+            return null;
+
+        var byteLength = BitConverter.ToUInt16(descriptor, 0);
+        var buffer = new IntPtr(BitConverter.ToInt64(descriptor, UnicodeString64BufferOffset));
+        if (byteLength == 0 || (byteLength & 1) != 0 || buffer == IntPtr.Zero)
+            return null;
+
+        var pathBytes = new byte[byteLength];
+        if (!ReadProcessMemory(process, buffer, pathBytes, pathBytes.Length, out var pathByteCount) ||
+            pathByteCount != (nuint)pathBytes.Length)
+            return null;
+
+        var path = Encoding.Unicode.GetString(pathBytes).TrimEnd('\0');
+        try
+        {
+            return Path.IsPathFullyQualified(path) && Directory.Exists(path)
+                ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(path))
+                : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static bool TryReadPointer(IntPtr process, IntPtr address, out IntPtr value)
+    {
+        var bytes = new byte[IntPtr.Size];
+        if (!ReadProcessMemory(process, address, bytes, bytes.Length, out var read) ||
+            read != (nuint)bytes.Length)
+        {
+            value = IntPtr.Zero;
+            return false;
+        }
+        value = new IntPtr(BitConverter.ToInt64(bytes));
+        return true;
+    }
+
     private IReadOnlyList<int> GetJobProcessIds()
     {
         lock (_jobGate)
@@ -433,6 +496,11 @@ public sealed class LocalTerminalSession : ITerminalBackend
     private const int JobObjectBasicProcessIdList = 3;
     private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
     private const uint INFINITE = 0xFFFFFFFF;
+    private const int ProcessBasicInformation = 0;
+    private const int PebProcessParametersOffset = 0x20;
+    private const int ProcessParametersCurrentDirectoryOffset = 0x38;
+    private const int UnicodeString64Size = 16;
+    private const int UnicodeString64BufferOffset = 8;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct COORD
@@ -481,6 +549,17 @@ public sealed class LocalTerminalSession : ITerminalBackend
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct PROCESS_BASIC_INFORMATION
+    {
+        public IntPtr Reserved1;
+        public IntPtr PebBaseAddress;
+        public IntPtr Reserved2_0;
+        public IntPtr Reserved2_1;
+        public IntPtr UniqueProcessId;
+        public IntPtr Reserved3;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct JOBOBJECT_BASIC_LIMIT_INFORMATION
     {
         public long PerProcessUserTimeLimit;
@@ -515,6 +594,16 @@ public sealed class LocalTerminalSession : ITerminalBackend
         public UIntPtr PeakProcessMemoryUsed;
         public UIntPtr PeakJobMemoryUsed;
     }
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtQueryInformationProcess(
+        IntPtr processHandle, int processInformationClass,
+        out PROCESS_BASIC_INFORMATION processInformation, int processInformationLength,
+        out int returnLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool ReadProcessMemory(
+        IntPtr process, IntPtr baseAddress, [Out] byte[] buffer, int size, out nuint bytesRead);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CreatePipe(

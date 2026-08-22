@@ -15,6 +15,12 @@ test("OSC 7 crosses the terminal boundary as bounded raw data", () => {
   assert.match(tab, /Osc7WorkingDirectoryParser\.TryParse[\s\S]*?_workingDirectory\.Observe/);
 });
 
+test("local current-folder requests rescan the live prompt before process fallback", () => {
+  assert.match(page, /case "requestPromptContext":[\s\S]*?_reportPromptContext\(true\)/);
+  assert.match(control, /RequestPromptContextAsync\(\)[\s\S]*?type = "requestPromptContext"/);
+  assert.match(tab, /await _terminal\.RequestPromptContextAsync\(\)[\s\S]*?ResolveLocalTerminalDirectory\(requestedPrompt/);
+});
+
 test("terminal-folder selection has the required source priority", () => {
   const start = tab.indexOf("public async Task OpenFilePaneAtCurrentFolderAsync()");
   const end = tab.indexOf("private Interop.SshfsMount", start);

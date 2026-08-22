@@ -796,6 +796,9 @@
           // The native tab-strip button; Ctrl+Shift+O inside the page does the same.
           ruler.toggleCommandsPanel();
           break;
+        case "requestPromptContext":
+          ruler._reportPromptContext(true);
+          break;
         case "focus":
           term.focus();
           break;

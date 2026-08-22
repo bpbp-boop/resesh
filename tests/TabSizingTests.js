@@ -12,6 +12,10 @@ const code = fs.readFileSync(
 const terminalView = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"),
   "utf8");
+const filePaneView = fs.readFileSync(
+  path.join(__dirname, "..", "src", "App", "Controls", "FilePaneView.cs"),
+  "utf8");
+
 
 test("tabs use one browser-style width and shrink only when the strip is crowded", () => {
   assert.match(xaml, /x:Key="TabViewItemMaxWidth">220</);
@@ -59,8 +63,14 @@ test("each tab bar reserves the measured width of every action button", () => {
 });
 
 test("the current-folder button is connected-only and uses the host action", () => {
-  assert.match(code, /CurrentFolderButton\.IsEnabled = tab\?\.Capabilities\.RemoteFiles == true[\s\S]*?TabConnectionState\.Connected[\s\S]*?!tab\.IsLocked/);
+  assert.match(code, /CurrentFolderButton\.IsEnabled = tab\?\.Capabilities\.FilePane == true[\s\S]*?TabConnectionState\.Connected[\s\S]*?!tab\.IsLocked/);
   assert.match(code, /CurrentFolderButton_Click[\s\S]*?await _host\.OpenFilePaneAtCurrentFolderAsync\(tab\)/);
+});
+
+test("local sessions use the direct filesystem pane and Explorer path", () => {
+  assert.match(terminalView, /Session\.IsLocal[\s\S]*?new FilePaneView\(\(\) => Session, OpenInExplorerAsync\)/);
+  assert.match(terminalView, /OpenInExplorerAsync\(string path\)[\s\S]*?Session\.IsLocal[\s\S]*?OpenLocalDirectoryInExplorer\(path\)[\s\S]*?SshfsIntegration/);
+  assert.match(filePaneView, /_localFiles is not null \\|\\| SshfsIntegration\.IsInstalled/);
 });
 
 test("the tab-bar toggle follows selection and all file-pane open and close routes", () => {

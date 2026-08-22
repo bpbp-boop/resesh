@@ -506,6 +506,32 @@ public sealed class TerminalControl : Grid, IDisposable
     public void ApplyHighlights(IReadOnlyList<object> rules) =>
         Post(new { type = "setHighlights", rules });
 
+    /// <summary>Asks the live terminal buffer to identify its current idle prompt.
+    /// This catches cmd and PowerShell locations even when no later output triggered a scan.</summary>
+    public async Task<(string Context, string? Platform)?> RequestPromptContextAsync()
+    {
+        if (_disposed || !_pageReady || _webView.CoreWebView2 is null)
+            return null;
+
+        var completion = new TaskCompletionSource<(string, string?)>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        void Reported(string context, string? platform) => completion.TrySetResult((context, platform));
+        PromptContextChanged += Reported;
+        try
+        {
+            Post(new { type = "requestPromptContext" });
+            var completed = await Task.WhenAny(completion.Task, Task.Delay(500));
+            if (completed != completion.Task)
+                return null;
+            var (context, platform) = await completion.Task;
+            return (context, platform);
+        }
+        finally
+        {
+            PromptContextChanged -= Reported;
+        }
+    }
+
     /// <summary>Atomically resets a read-only terminal and replays one state slice.</summary>
     public void ShowReplay(
         int columns,
