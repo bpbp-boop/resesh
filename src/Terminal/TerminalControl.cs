@@ -497,6 +497,7 @@ public sealed class TerminalControl : Grid, IDisposable
         "monokai" => Windows.UI.Color.FromArgb(255, 0x27, 0x28, 0x22),
         "tokyo-night" => Windows.UI.Color.FromArgb(255, 0x1A, 0x1B, 0x26),
         "catppuccin-mocha" => Windows.UI.Color.FromArgb(255, 0x1E, 0x1E, 0x2E),
+        "phthalo-green" => Windows.UI.Color.FromArgb(255, 0x12, 0x35, 0x24),
         _ => Windows.UI.Color.FromArgb(255, 0x0C, 0x0C, 0x0C),
     };
 

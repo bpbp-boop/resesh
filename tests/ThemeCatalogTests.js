@@ -24,6 +24,15 @@ test("each catalog theme has a terminal palette", () => {
   }
 });
 
+test("Phthalo Green uses its green shell and terminal palette", () => {
+  assert.match(catalog, /new\("phthalo-green", "Phthalo Green"\)/);
+  assert.match(
+    terminal,
+    /"phthalo-green": \{\s*background: "#123524", foreground: "#d7eee5", cursor: "#72e0ad", selectionBackground: "#245a46"/,
+  );
+  assert.match(visualPalette, /"phthalo-green" => New\(0x123524, 0x0B2118, 0x2D5A48, 0xD7EEE5, 0x245A46\)/);
+});
+
 test("global and per-session theme pickers use the shared catalog", () => {
   assert.match(globalDialog, /ItemsSource = ThemeCatalog\.All/);
   assert.match(sessionDialog, /Concat\(ThemeCatalog\.All\)/);
@@ -62,6 +71,7 @@ test("each theme gives the session tree its terminal foreground and selection co
     monokai: ["F8F8F2", "49483E"],
     "tokyo-night": ["C0CAF5", "33467C"],
     "catppuccin-mocha": ["CDD6F4", "45475A"],
+    "phthalo-green": ["D7EEE5", "245A46"],
   };
 
   for (const [id, [foreground, selection]] of Object.entries(expected)) {
@@ -91,6 +101,7 @@ test("new split groups start with the live app palette", () => {
 test("terminal startup and the complete tab-row divider use the selected palette", () => {
   assert.match(terminalControl, /SetInitialOptions[\s\S]*?_webView\.DefaultBackgroundColor = ThemeBackground\(theme\)/);
   assert.match(terminalControl, /"solarized-light" => Windows\.UI\.Color\.FromArgb\(255, 0xFD, 0xF6, 0xE3\)/);
+  assert.match(terminalControl, /"phthalo-green" => Windows\.UI\.Color\.FromArgb\(255, 0x12, 0x35, 0x24\)/);
   assert.match(tabGroup, /FindDescendant\(Tabs, "RightBottomBorderLine"\)/);
   assert.match(tabGroup, /right\.Margin = new Thickness\(-1, 0, 0, 0\)/);
   assert.match(tabGroup, /TabStripActions\.BorderBrush = divider/);

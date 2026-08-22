@@ -21,6 +21,7 @@ public static class ThemeCatalog
         new("monokai", "Monokai"),
         new("tokyo-night", "Tokyo Night"),
         new("catppuccin-mocha", "Catppuccin Mocha"),
+        new("phthalo-green", "Phthalo Green"),
     ];
 
     public static ThemeChoice Find(string? id) =>
