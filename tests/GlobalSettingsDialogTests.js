@@ -9,13 +9,14 @@ const highlightPanel = read("src", "App", "Dialogs", "HighlightEditorPanel.cs");
 const agentPanel = read("src", "App", "Dialogs", "AgentAdapterPanel.cs");
 const windowCode = read("src", "App", "MainWindow.xaml.cs");
 
-test("settings is one tabbed dialog: General / Highlighting / Agents", () => {
+test("settings is one targeted dialog with General / Recording / Highlighting / Agents tabs", () => {
   assert.match(dialog, /new SelectorBar\(\)/);
   assert.match(dialog, /SelectorBarItem \{ Text = "General" \}/);
+  assert.match(dialog, /SelectorBarItem \{ Text = "Recording" \}/);
   assert.match(dialog, /SelectorBarItem \{ Text = "Highlighting" \}/);
   assert.match(dialog, /SelectorBarItem \{ Text = "Agents" \}/);
-  assert.match(dialog, /enum GlobalSettingsTab/);
-  assert.match(dialog, /GlobalSettingsTab initialTab/);
+  assert.match(dialog, /enum GlobalSettingsTarget/);
+  assert.match(dialog, /GlobalSettingsTarget initialTarget/);
 });
 
 test("the tab host keeps a fixed height so switching tabs doesn't resize the dialog", () => {
@@ -100,5 +101,5 @@ test("saving rebases only the dialog's fields onto the live settings", () => {
 });
 
 test("the tab strip's adapter snippets entry opens Settings on the Agents tab", () => {
-  assert.match(windowCode, /ShowAgentAdaptersAsync\(\) => ShowSettingsAsync\(GlobalSettingsTab\.Agents\)/);
+  assert.match(windowCode, /ShowAgentAdaptersAsync\(\) => ShowSettingsAsync\(GlobalSettingsTarget\.Agents\)/);
 });

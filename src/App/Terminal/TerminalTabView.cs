@@ -73,6 +73,9 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// <summary>Ctrl+Shift+T inside the terminal (open the default local profile).</summary>
     public event Action? NewLocalTabRequested;
 
+    /// <summary>Ctrl+Shift+P inside the terminal (open the app command palette).</summary>
+    public event Action? CommandPaletteRequested;
+
     /// <summary>Raised (UI thread) when a connect to a session with no icon set identified
     /// the OS/vendor from the server banner. The window decides whether to persist it.</summary>
     public event Action<string>? IconSuggested;
@@ -184,6 +187,8 @@ public sealed class TerminalTabView : Grid, IDisposable
             CommandsPanelOpenChanged?.Invoke();
         });
         _terminal.NewLocalTabRequested += () => DispatcherQueue.TryEnqueue(() => NewLocalTabRequested?.Invoke());
+        _terminal.CommandPaletteRequested += () =>
+            DispatcherQueue.TryEnqueue(() => CommandPaletteRequested?.Invoke());
 
         _agent = new AgentTracker(Session.Agent);
         WireAgentSignals();

@@ -509,3 +509,19 @@ keyboard-interactive fallback.
 - A future shell-integration helper can only show or copy an explicit opt-in snippet.
   Keep Enter-gated command discovery because OSC 3008 gives identity and result but not
   command text.
+
+## 2026-08-22 - Keyboard command palette
+- Ctrl+Shift+P opens one native command palette for app actions, tab actions, global
+  settings, and saved-session settings. Whitespace-separated terms match titles,
+  categories, and explicit keywords; Up/Down changes the selected result while focus
+  stays in the search field.
+- Setting commands open the existing editor at the correct section and focus the target
+  control. The palette does not duplicate validation, preview, Save, or Cancel behavior.
+- Per-session terminal values are labeled Session Settings. They persist on the saved
+  profile and affect its open and future tabs; Resesh still has no transient tab-only
+  appearance layer.
+- WebView2 does not forward window accelerators. The terminal page captures Ctrl+Shift+P
+  at the window boundary and uses the existing page-to-host message path, including when
+  the terminal find field has focus.
+- Escape or a backdrop click closes the palette. A terminal-opened palette restores xterm
+  focus so the next keystroke returns to terminal input.

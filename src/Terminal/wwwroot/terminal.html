@@ -509,6 +509,16 @@
     document.getElementById("find-next").addEventListener("click", function () { runFind("next", false); findInput.focus(); });
     document.getElementById("find-close").addEventListener("click", closeFind);
 
+    // Capture at the page boundary so the app palette also opens while xterm's find
+    // field has focus. WebView2 does not forward the window KeyboardAccelerator.
+    window.addEventListener("keydown", function (e) {
+      if (e.ctrlKey && e.shiftKey && !e.altKey && e.code === "KeyP") {
+        host.postMessage({ type: "commandPalette" });
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+
     // Ctrl+Shift+C / Ctrl+Shift+V, Ctrl+F4 (close tab — handled by the app shell)
     term.attachCustomKeyEventHandler(function (e) {
       if (e.type === "keydown" && e.ctrlKey && !e.shiftKey && e.code === "F4") {

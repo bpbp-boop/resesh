@@ -66,6 +66,9 @@ public sealed class TerminalControl : Grid, IDisposable
     /// <summary>Ctrl+Shift+T pressed inside the terminal page (open default local profile).</summary>
     public event Action? NewLocalTabRequested;
 
+    /// <summary>Ctrl+Shift+P pressed inside the terminal page.</summary>
+    public event Action? CommandPaletteRequested;
+
     /// <summary>Fires once when the xterm page is loaded and measured (initial cols/rows).</summary>
     public event Action<int, int>? Ready;
 
@@ -222,6 +225,9 @@ public sealed class TerminalControl : Grid, IDisposable
                     break;
                 case "newLocalTab":
                     NewLocalTabRequested?.Invoke();
+                    break;
+                case "commandPalette":
+                    CommandPaletteRequested?.Invoke();
                     break;
                 case "openLink":
                     if (root.TryGetProperty("uri", out var uriProperty) &&

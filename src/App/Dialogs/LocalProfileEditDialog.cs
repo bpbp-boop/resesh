@@ -94,7 +94,8 @@ public sealed class LocalProfileEditDialog : ContentDialog
     /// <summary>Whether "Make default" was checked when saved.</summary>
     public bool MakeDefault => _makeDefault.IsChecked == true;
 
-    public LocalProfileEditDialog(IEnumerable<string> localFolderPaths, Session? existing, string defaultFolder, bool isCurrentDefault)
+    public LocalProfileEditDialog(IEnumerable<string> localFolderPaths, Session? existing, string defaultFolder,
+        bool isCurrentDefault, SessionSettingsTarget initialTarget = SessionSettingsTarget.General)
     {
         _existing = existing;
         Title = existing is null ? "New Local Profile" : "Edit Local Profile";
@@ -184,7 +185,19 @@ public sealed class LocalProfileEditDialog : ContentDialog
         }
 
         Content = new ScrollViewer { MaxHeight = 560, Content = panel };
+        Opened += (_, _) => DispatcherQueue.TryEnqueue(() =>
+            InitialFocus(initialTarget)?.Focus(FocusState.Programmatic));
     }
+
+    private Control? InitialFocus(SessionSettingsTarget target) => target switch
+    {
+        SessionSettingsTarget.Theme => _overrideTheme,
+        SessionSettingsTarget.FontFamily => _overrideFontFamily,
+        SessionSettingsTarget.FontSize => _overrideFontSize,
+        SessionSettingsTarget.Scrollback => _overrideScrollback,
+        SessionSettingsTarget.AlwaysRecord => _overrideRecording,
+        _ => null,
+    };
 
     private void OnPrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
     {

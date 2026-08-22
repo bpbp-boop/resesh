@@ -27,12 +27,16 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
     private RectInt32? _normalWindowBounds;
     private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.Settings.Current.Theme);
+    private DependencyObject? _palettePreviousFocus;
+    private bool _paletteOpenedFromTerminal;
 
     public MainWindow()
     {
         ViewModel = new MainViewModel(App.Store, App.Credentials);
         _groupLayout = new SplitLayout<TabGroupViewModel>(ViewModel.Groups[0]);
         InitializeComponent();
+        CommandPalette.CloseRequested += CloseCommandPalette;
+        CommandPalette.CommandInvoked += command => _ = ExecuteCommandPaletteEntryAsync(command);
         RestoreWindowPlacement();
         AppWindow.Changed += AppWindow_Changed;
         ConfigureSplitter(TreeSplitter, TreeSplitterLine);
@@ -181,12 +185,227 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             e.Handled = true;
             OpenDefaultLocalProfile();
         };
+        var commandPalette = new KeyboardAccelerator
+        {
+            Key = VirtualKey.P,
+            Modifiers = VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift,
+        };
+        commandPalette.Invoked += (_, e) =>
+        {
+            e.Handled = true;
+            ShowCommandPalette();
+        };
         Root.KeyboardAccelerators.Add(closeTab);
         Root.KeyboardAccelerators.Add(split);
         Root.KeyboardAccelerators.Add(filePane);
         Root.KeyboardAccelerators.Add(quickConnect);
         Root.KeyboardAccelerators.Add(focusFilter);
         Root.KeyboardAccelerators.Add(newLocalTab);
+        Root.KeyboardAccelerators.Add(commandPalette);
+    }
+
+    private void ShowCommandPalette(bool openedFromTerminal = false)
+    {
+        if (CommandPalette.IsOpen)
+            return;
+
+        _paletteOpenedFromTerminal = openedFromTerminal;
+        _palettePreviousFocus = openedFromTerminal
+            ? null
+            : FocusManager.GetFocusedElement(Root.XamlRoot) as DependencyObject;
+        CommandPalette.Open(BuildCommandPalette());
+    }
+
+    private void CloseCommandPalette()
+    {
+        if (!CommandPalette.IsOpen)
+            return;
+
+        CommandPalette.Close();
+        RestorePaletteFocus();
+    }
+
+    private async Task ExecuteCommandPaletteEntryAsync(CommandPaletteEntry command)
+    {
+        CommandPalette.Close();
+        try
+        {
+            await command.ExecuteAsync();
+        }
+        catch (Exception exception)
+        {
+            await new ContentDialog
+            {
+                Title = "Command could not run",
+                Content = exception.Message,
+                CloseButtonText = "OK",
+                XamlRoot = Root.XamlRoot,
+            }.ShowAsync();
+        }
+        finally
+        {
+            if (!command.KeepActionFocus)
+                FocusActiveTerminal();
+            _palettePreviousFocus = null;
+            _paletteOpenedFromTerminal = false;
+        }
+    }
+
+    private void RestorePaletteFocus()
+    {
+        if (_paletteOpenedFromTerminal)
+        {
+            FocusActiveTerminal();
+        }
+        else if (_palettePreviousFocus is { } previous)
+        {
+            _ = FocusManager.TryFocusAsync(previous, FocusState.Programmatic);
+        }
+
+        _palettePreviousFocus = null;
+        _paletteOpenedFromTerminal = false;
+    }
+
+    private void FocusActiveTerminal()
+    {
+        if (ViewModel.ActiveTab?.View is TerminalTabView view)
+            DispatcherQueue.TryEnqueue(view.FocusTerminal);
+    }
+
+    private IReadOnlyList<CommandPaletteEntry> BuildCommandPalette()
+    {
+        var commands = new List<CommandPaletteEntry>();
+
+        void Add(
+            string category,
+            string title,
+            string keywords,
+            Func<Task> execute,
+            string shortcut = "",
+            bool keepActionFocus = false) =>
+            commands.Add(new CommandPaletteEntry
+            {
+                Category = category,
+                Title = title,
+                Keywords = keywords,
+                Shortcut = shortcut,
+                ExecuteAsync = execute,
+                KeepActionFocus = keepActionFocus,
+            });
+
+        static Func<Task> Sync(Action action) => () =>
+        {
+            action();
+            return Task.CompletedTask;
+        };
+
+        Add("Application", "Open Default Local Terminal", "new session shell tab",
+            Sync(OpenDefaultLocalProfile), "Ctrl+Shift+T");
+        Add("Application", "Quick Connect", "ssh search sessions connect",
+            Sync(() => QuickConnectBox.Focus(FocusState.Programmatic)), "Ctrl+K", keepActionFocus: true);
+        Add("View", "Filter Sessions", "search tree",
+            Sync(() =>
+            {
+                FilterBox.Focus(FocusState.Programmatic);
+                FilterBox.SelectAll();
+            }), "Ctrl+F", keepActionFocus: true);
+        Add("View", "Expand All Session Folders", "tree folders",
+            Sync(() =>
+            {
+                ViewModel.SetExpansionAll(true);
+                ScheduleExpansionSync();
+            }));
+        Add("View", "Collapse All Session Folders", "tree folders",
+            Sync(() =>
+            {
+                ViewModel.SetExpansionAll(false);
+                ScheduleExpansionSync();
+            }));
+
+        Add("Global Settings", "Open Settings", "preferences options",
+            () => ShowSettingsAsync(GlobalSettingsTarget.General));
+        Add("Global Settings", "Theme", "appearance color scheme",
+            () => ShowSettingsAsync(GlobalSettingsTarget.Theme));
+        Add("Global Settings", "Terminal Font Family", "appearance typeface",
+            () => ShowSettingsAsync(GlobalSettingsTarget.FontFamily));
+        Add("Global Settings", "Font Size", "appearance terminal text",
+            () => ShowSettingsAsync(GlobalSettingsTarget.FontSize));
+        Add("Global Settings", "Scrollback Lines", "terminal history buffer",
+            () => ShowSettingsAsync(GlobalSettingsTarget.Scrollback));
+        Add("Global Settings", "Copy Selected Text", "clipboard copy on select",
+            () => ShowSettingsAsync(GlobalSettingsTarget.CopyOnSelect));
+        Add("Global Settings", "Paste With Right-Click", "clipboard mouse",
+            () => ShowSettingsAsync(GlobalSettingsTarget.RightClickPaste));
+        Add("Global Settings", "Automatic Recording", "record sessions disk",
+            () => ShowSettingsAsync(GlobalSettingsTarget.AlwaysRecord));
+        Add("Global Settings", "Recording Directory", "record sessions path folder",
+            () => ShowSettingsAsync(GlobalSettingsTarget.RecordingDirectory));
+        Add("Global Settings", "Rewind History", "minutes terminal capture",
+            () => ShowSettingsAsync(GlobalSettingsTarget.RewindMinutes));
+        Add("Global Settings", "Rewind Memory Limit", "megabytes terminal capture",
+            () => ShowSettingsAsync(GlobalSettingsTarget.RewindMegabytes));
+        Add("Global Settings", "Highlighting", "rules regex colors",
+            () => ShowSettingsAsync(GlobalSettingsTarget.Highlighting));
+        Add("Global Settings", "Agent Display", "icons tab coding agents",
+            () => ShowSettingsAsync(GlobalSettingsTarget.ShowAgentIcons));
+        Add("Global Settings", "Agent Taskbar Alerts", "flash notification",
+            () => ShowSettingsAsync(GlobalSettingsTarget.AgentAlertFlash));
+        Add("Global Settings", "Agent Notification Sound", "alert audio",
+            () => ShowSettingsAsync(GlobalSettingsTarget.AgentAlertSound));
+
+        if (ViewModel.ActiveTab is not { } tab)
+            return commands;
+
+        if (!tab.IsPlayback && App.Store.Find(tab.Session.Id) is not null)
+        {
+            Add("Session Settings", "Open Session Options", "current active tab profile",
+                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.General));
+            Add("Session Settings", "Theme Override", "current active tab appearance inherit",
+                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.Theme));
+            Add("Session Settings", "Terminal Font Family Override", "current active tab appearance inherit",
+                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.FontFamily));
+            Add("Session Settings", "Font Size Override", "current active tab appearance inherit",
+                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.FontSize));
+            Add("Session Settings", "Scrollback Lines Override", "current active tab history inherit",
+                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.Scrollback));
+            Add("Session Settings", "Automatic Recording Override", "current active tab inherit",
+                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.AlwaysRecord));
+        }
+
+        var group = ViewModel.GroupOf(tab);
+        if (tab.State is TabConnectionState.Disconnected or TabConnectionState.Exited)
+            Add("Tab", $"{tab.Capabilities.StartAgainVerb} Tab", "current active session",
+                Sync(() => ReconnectTab(tab)));
+        if (tab.State == TabConnectionState.Connected)
+            Add("Tab", $"{tab.Capabilities.StopVerb} Tab", "current active session",
+                Sync(() => DisconnectTab(tab)));
+        if (!tab.IsPlayback)
+        {
+            Add("Tab", "Clone Tab", "duplicate current active session",
+                Sync(() => CloneSession(tab)));
+            Add("Tab", tab.IsPinned ? "Unpin Tab" : "Pin Tab", "current active keep",
+                Sync(() => TogglePin(tab)));
+        }
+        if (group.Tabs.Count > 1)
+        {
+            Add("Tab", "Split Right", "current active move group",
+                Sync(() => SplitRight(tab)), "Ctrl+Shift+\\");
+            Add("Tab", "Split Down", "current active move group",
+                Sync(() => SplitDown(tab)));
+        }
+        if (tab.View is TerminalTabView terminalView && !tab.IsLocked)
+        {
+            Add("Tab", terminalView.IsCommandsPanelOpen ? "Hide Commands Panel" : "Show Commands Panel",
+                "current active terminal history", Sync(terminalView.ToggleCommandsPanel), "Ctrl+Shift+O");
+            if (tab.Capabilities.FilePane)
+            {
+                Add("Tab", terminalView.IsFilePaneOpen ? "Hide File Pane" : "Show File Pane",
+                    "current active files browser", Sync(() => ToggleFilePane(tab)), "Ctrl+Shift+E");
+            }
+        }
+        Add("Tab", "Close Tab", "current active session", () => RequestCloseTabAsync(tab), "Ctrl+F4");
+
+        return commands;
     }
 
     // ---- Local profiles: default launch + split-button menu ----
@@ -233,10 +452,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private async void NewLocalProfile_Click(object sender, RoutedEventArgs e) =>
         await OpenLocalProfileEditorAsync(existing: null, defaultFolder: "");
 
-    private async Task OpenLocalProfileEditorAsync(Session? existing, string defaultFolder)
+    private async Task OpenLocalProfileEditorAsync(
+        Session? existing,
+        string defaultFolder,
+        SessionSettingsTarget initialTarget = SessionSettingsTarget.General)
     {
         var isCurrentDefault = existing is not null && App.Settings.Current.DefaultLocalProfileId == existing.Id;
-        var dialog = new LocalProfileEditDialog(ViewModel.LocalFolderPathsForPicker, existing, defaultFolder, isCurrentDefault)
+        var dialog = new LocalProfileEditDialog(
+            ViewModel.LocalFolderPathsForPicker, existing, defaultFolder, isCurrentDefault, initialTarget)
         {
             XamlRoot = Root.XamlRoot,
         };
@@ -414,6 +637,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             ? Visibility.Visible
             : Visibility.Collapsed;
     }
+
+    private void CommandPaletteMenu_Click(object sender, RoutedEventArgs e) => ShowCommandPalette();
 
     // Menu items act on the focused group's selected tab; they no-op when idle.
     private void SplitRightMenu_Click(object sender, RoutedEventArgs e)
@@ -610,6 +835,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             tab, App.Credentials, App.KnownHosts, App.SshKeys, tmuxSlotsAlreadyOpen);
         view.CloseRequested += () => _ = RequestCloseTabAsync(tab);
         view.NewLocalTabRequested += OpenDefaultLocalProfile;
+        view.CommandPaletteRequested += () => ShowCommandPalette(openedFromTerminal: true);
         view.UnlockRequested += () => _ = HandleUnlockAsync(tab, view);
         view.IconSuggested += key =>
         {
@@ -734,7 +960,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ViewModel.UpdateSession(session with { Agent = key }, null);
     }
 
-    public Task ShowAgentAdaptersAsync() => ShowSettingsAsync(GlobalSettingsTab.Agents);
+    public Task ShowAgentAdaptersAsync() => ShowSettingsAsync(GlobalSettingsTarget.Agents);
 
     // ---- ITabGroupHost ----
 
@@ -1095,21 +1321,24 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             App.Settings.Save(App.Settings.Current with { PinnedSessionIds = restored });
     }
 
-    public async Task OpenSessionOptionsAsync(TabViewModel tab)
+    public Task OpenSessionOptionsAsync(TabViewModel tab) =>
+        OpenSessionSettingsAsync(tab, SessionSettingsTarget.General);
+
+    private async Task OpenSessionSettingsAsync(TabViewModel tab, SessionSettingsTarget initialTarget)
     {
         var current = App.Store.Find(tab.Session.Id);
         if (current is null)
             return;
         if (current.IsLocal)
         {
-            await OpenLocalProfileEditorAsync(current, current.FolderPath);
+            await OpenLocalProfileEditorAsync(current, current.FolderPath, initialTarget);
             return;
         }
         var notice = tab.State == TabConnectionState.Connected
             ? "This tab is connected — changes to host, port, or authentication apply on the next connect."
             : null;
         var dialog = new SessionEditDialog(
-            ViewModel.FolderPathsForPicker, current, current.FolderPath, App.SshKeys, notice)
+            ViewModel.FolderPathsForPicker, current, current.FolderPath, App.SshKeys, notice, initialTarget)
         {
             XamlRoot = Root.XamlRoot,
         };
@@ -1272,15 +1501,16 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         await Dialogs.SshKeyManagerDialog.ShowAsync(Root.XamlRoot, App.SshKeys, App.Store, App.Credentials);
 
     private async void Settings_Click(object sender, RoutedEventArgs e) =>
-        await ShowSettingsAsync(GlobalSettingsTab.General);
+        await ShowSettingsAsync(GlobalSettingsTarget.General);
 
     /// <summary>Shows the tabbed Settings dialog. Highlighting edits persist immediately from
     /// inside the dialog; everything else lands here on Save. Only the dialog's own fields are
     /// rebased onto the live settings, so anything saved while the dialog sat open (pane
     /// widths, pinned tabs, window placement) survives.</summary>
-    private async Task ShowSettingsAsync(GlobalSettingsTab tab)
+    private async Task ShowSettingsAsync(GlobalSettingsTarget target)
     {
-        var updated = await GlobalSettingsDialog.ShowAsync(Root.XamlRoot, App.Settings.Current, ApplySettingsToApp, tab);
+        var updated = await GlobalSettingsDialog.ShowAsync(
+            Root.XamlRoot, App.Settings.Current, ApplySettingsToApp, target);
         if (updated is null)
             return;
         App.Settings.Save(App.Settings.Current with

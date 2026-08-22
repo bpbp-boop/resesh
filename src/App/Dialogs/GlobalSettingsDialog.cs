@@ -6,12 +6,25 @@ using Resesh.Core.Storage;
 
 namespace Resesh.App.Dialogs;
 
-public enum GlobalSettingsTab
+public enum GlobalSettingsTarget
 {
     General,
+    Theme,
+    FontFamily,
+    FontSize,
+    Scrollback,
+    CopyOnSelect,
+    RightClickPaste,
     Recording,
+    RecordingDirectory,
+    AlwaysRecord,
+    RewindMinutes,
+    RewindMegabytes,
     Highlighting,
     Agents,
+    ShowAgentIcons,
+    AgentAlertFlash,
+    AgentAlertSound,
 }
 
 /// <summary>
@@ -32,7 +45,7 @@ public static class GlobalSettingsDialog
         XamlRoot xamlRoot,
         AppSettings current,
         Action<AppSettings> applyPreview,
-        GlobalSettingsTab initialTab = GlobalSettingsTab.General)
+        GlobalSettingsTarget initialTarget = GlobalSettingsTarget.General)
     {
         var theme = new ComboBox
         {
@@ -241,6 +254,34 @@ public static class GlobalSettingsDialog
         // swapped (not visibility-toggled) so each tab gets a fresh measure — a TextBox
         // measured while collapsed keeps a stale one-line text layout when merely unhidden. ----
 
+        var initialTab = initialTarget switch
+        {
+            GlobalSettingsTarget.Recording or GlobalSettingsTarget.RecordingDirectory
+                or GlobalSettingsTarget.AlwaysRecord or GlobalSettingsTarget.RewindMinutes
+                or GlobalSettingsTarget.RewindMegabytes => 1,
+            GlobalSettingsTarget.Highlighting => 2,
+            GlobalSettingsTarget.Agents or GlobalSettingsTarget.ShowAgentIcons
+                or GlobalSettingsTarget.AgentAlertFlash or GlobalSettingsTarget.AgentAlertSound => 3,
+            _ => 0,
+        };
+        Control? initialFocus = initialTarget switch
+        {
+            GlobalSettingsTarget.Theme => theme,
+            GlobalSettingsTarget.FontFamily => fontFamily,
+            GlobalSettingsTarget.FontSize => fontSize,
+            GlobalSettingsTarget.Scrollback => scrollback,
+            GlobalSettingsTarget.CopyOnSelect => copyOnSelect,
+            GlobalSettingsTarget.RightClickPaste => rightClickPaste,
+            GlobalSettingsTarget.RecordingDirectory => recordingDirectory,
+            GlobalSettingsTarget.AlwaysRecord => alwaysRecord,
+            GlobalSettingsTarget.RewindMinutes => rewindMinutes,
+            GlobalSettingsTarget.RewindMegabytes => rewindMegabytes,
+            GlobalSettingsTarget.ShowAgentIcons => agentIcons,
+            GlobalSettingsTarget.AgentAlertFlash => agentFlash,
+            GlobalSettingsTarget.AgentAlertSound => agentSound,
+            _ => null,
+        };
+
         var tabPanels = new UIElement[] { generalTab, recordingTab, highlightingTab, agentsTab };
         var host = new ScrollViewer
         {
@@ -269,8 +310,8 @@ public static class GlobalSettingsDialog
             if (index >= 0)
                 ShowTab(index);
         };
-        bar.SelectedItem = barItems[(int)initialTab];
-        ShowTab((int)initialTab);
+        bar.SelectedItem = barItems[initialTab];
+        ShowTab(initialTab);
 
         var content = new StackPanel
         {
@@ -288,6 +329,8 @@ public static class GlobalSettingsDialog
             CloseButtonText = "Cancel",
             XamlRoot = xamlRoot,
         };
+        dialog.Opened += (_, _) =>
+            initialFocus?.DispatcherQueue.TryEnqueue(() => initialFocus.Focus(FocusState.Programmatic));
         dialog.Resources["ContentDialogMaxWidth"] = DialogWidth + 48;
         dialog.Resources["ContentDialogMaxHeight"] = 960d;
 

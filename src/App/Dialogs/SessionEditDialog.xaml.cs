@@ -5,6 +5,16 @@ using Resesh.Core.Storage;
 
 namespace Resesh.App.Dialogs;
 
+public enum SessionSettingsTarget
+{
+    General,
+    Theme,
+    FontFamily,
+    FontSize,
+    Scrollback,
+    AlwaysRecord,
+}
+
 public sealed partial class SessionEditDialog : ContentDialog
 {
     private sealed class KeyChoice
@@ -34,7 +44,8 @@ public sealed partial class SessionEditDialog : ContentDialog
     public string? Password { get; private set; }
 
     public SessionEditDialog(IEnumerable<string> folderPaths, Session? existing, string defaultFolder,
-        SshKeyStore keyStore, string? notice = null)
+        SshKeyStore keyStore, string? notice = null,
+        SessionSettingsTarget initialTarget = SessionSettingsTarget.General)
     {
         InitializeComponent();
         OverrideThemeBox.ItemsSource = new[] { new ThemeChoice("", "Use app setting") }
@@ -97,11 +108,25 @@ public sealed partial class SessionEditDialog : ContentDialog
         }
 
         UpdateAuthFieldVisibility();
+        if (initialTarget != SessionSettingsTarget.General)
+            SectionBar.SelectedItem = TerminalSection;
+        Opened += (_, _) => DispatcherQueue.TryEnqueue(() =>
+            InitialFocus(initialTarget)?.Focus(FocusState.Programmatic));
     }
 
     private AuthMethod SelectedAuth => (AuthMethod)Math.Max(0, AuthBox.SelectedIndex);
 
     private Guid? SelectedKeyId => (KeyBox.SelectedItem as KeyChoice)?.Id;
+
+    private Control? InitialFocus(SessionSettingsTarget target) => target switch
+    {
+        SessionSettingsTarget.Theme => OverrideThemeBox,
+        SessionSettingsTarget.FontFamily => OverrideFontFamilyBox,
+        SessionSettingsTarget.FontSize => OverrideFontSizeBox,
+        SessionSettingsTarget.Scrollback => OverrideScrollbackBox,
+        SessionSettingsTarget.AlwaysRecord => OverrideRecordingBox,
+        _ => null,
+    };
 
     private void PopulateKeyChoices(Guid? selectedId)
     {
