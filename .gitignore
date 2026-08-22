@@ -6,3 +6,5 @@ TestResults/
 .dotnet-*/
 installer/prereqs/
 Properties/PublishProfiles/
+.env
+.wrangler/
