@@ -2,6 +2,8 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Resesh.App.Controls;
 using Resesh.App.Dialogs;
 using Resesh.App.Terminal;
@@ -38,6 +40,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private bool _sessionsPaneOpen;
     private double _sessionsPaneWidth = 280;
     private int _recordingsLoadVersion;
+    private Storyboard? _sessionsPaneStoryboard;
+    private FrameworkElement? _animatedSessionsPane;
+    private int _sessionsPaneAnimationVersion;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _sessionsPaneLayoutTimer;
 
     public MainWindow()
     {
@@ -1697,12 +1703,21 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void SelectSessionsRailTab(string tab)
     {
-        if (_sessionsPaneOpen && TreeColumn.ActualWidth >= 180)
+        var normalized = NormalizeRailTab(tab);
+        var tabChanged = normalized != _selectedRailTab;
+        var wasOpen = _sessionsPaneOpen;
+        if (wasOpen && TreeColumn.ActualWidth >= 180)
             _sessionsPaneWidth = TreeColumn.ActualWidth;
-        _selectedRailTab = NormalizeRailTab(tab);
+
+        _selectedRailTab = normalized;
         _sessionsPaneOpen = true;
         ApplySessionsRailLayout();
         PersistSessionsRailState();
+
+        if (!wasOpen)
+            StartSessionsPaneAnimation(opening: true);
+        else if (tabChanged)
+            StartSessionsPaneAnimation(opening: true, distance: 24, animateChrome: false);
 
         if (_selectedRailTab == "recent")
             RefreshRecentSessions();
@@ -1712,14 +1727,190 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void SetSessionsPaneOpen(bool open)
     {
+        if (_sessionsPaneOpen == open)
+        {
+            SessionsPaneMenuItem.IsChecked = open;
+            return;
+        }
+
         if (_sessionsPaneOpen && !open && TreeColumn.ActualWidth >= 180)
             _sessionsPaneWidth = TreeColumn.ActualWidth;
         _sessionsPaneOpen = open;
-        ApplySessionsRailLayout();
         PersistSessionsRailState();
 
-        if (open && _selectedRailTab == "recordings")
-            _ = RefreshRecordingsAsync();
+        if (open)
+        {
+            ApplySessionsRailLayout();
+            StartSessionsPaneAnimation(opening: true);
+            if (_selectedRailTab == "recordings")
+                _ = RefreshRecordingsAsync();
+        }
+        else
+        {
+            SessionsPaneMenuItem.IsChecked = false;
+            StartSessionsPaneAnimation(opening: false);
+        }
+    }
+
+    private FrameworkElement SelectedSessionsPane() => _selectedRailTab switch
+    {
+        "recent" => RecentPane,
+        "recordings" => RecordingsPane,
+        _ => SessionsPane,
+    };
+
+    private void StartSessionsPaneAnimation(
+        bool opening,
+        double? distance = null,
+        bool animateChrome = true)
+    {
+        var animationVersion = ++_sessionsPaneAnimationVersion;
+        _sessionsPaneStoryboard?.Stop();
+        if (_animatedSessionsPane is { } previousPane)
+        {
+            previousPane.Opacity = 1;
+            if (previousPane.RenderTransform is TranslateTransform previousTransform)
+                previousTransform.X = 0;
+        }
+        TreeSplitter.Opacity = 1;
+        TreeSplitterLine.Opacity = 1;
+
+        var pane = SelectedSessionsPane();
+        var transform = pane.RenderTransform as TranslateTransform;
+        if (transform is null)
+        {
+            transform = new TranslateTransform();
+            pane.RenderTransform = transform;
+        }
+        _animatedSessionsPane = pane;
+
+        var travel = distance ?? Math.Min(_sessionsPaneWidth, 320);
+        var duration = TimeSpan.FromMilliseconds(opening ? 200 : 170);
+        var easing = new CubicEase
+        {
+            EasingMode = opening ? EasingMode.EaseOut : EasingMode.EaseIn,
+        };
+
+        if (animateChrome)
+            StartSessionsPaneLayoutAnimation(opening, duration);
+
+        transform.X = opening ? -travel : 0;
+        pane.Opacity = opening ? 0.7 : 1;
+        if (animateChrome)
+        {
+            TreeSplitter.Opacity = opening ? 0 : 1;
+            TreeSplitterLine.Opacity = opening ? 0 : 1;
+        }
+
+        var slide = new DoubleAnimation
+        {
+            From = transform.X,
+            To = opening ? 0 : -travel,
+            Duration = duration,
+            EasingFunction = easing,
+        };
+        Storyboard.SetTarget(slide, transform);
+        Storyboard.SetTargetProperty(slide, nameof(TranslateTransform.X));
+
+        var fade = new DoubleAnimation
+        {
+            From = pane.Opacity,
+            To = opening ? 1 : 0.7,
+            Duration = duration,
+            EasingFunction = easing,
+        };
+        Storyboard.SetTarget(fade, pane);
+        Storyboard.SetTargetProperty(fade, nameof(UIElement.Opacity));
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(slide);
+        storyboard.Children.Add(fade);
+        if (animateChrome)
+        {
+            var chromeFade = new DoubleAnimation
+            {
+                From = TreeSplitter.Opacity,
+                To = opening ? 1 : 0,
+                Duration = duration,
+                EasingFunction = easing,
+            };
+            Storyboard.SetTarget(chromeFade, TreeSplitter);
+            Storyboard.SetTargetProperty(chromeFade, nameof(UIElement.Opacity));
+            storyboard.Children.Add(chromeFade);
+
+            var lineFade = new DoubleAnimation
+            {
+                From = TreeSplitterLine.Opacity,
+                To = opening ? 1 : 0,
+                Duration = duration,
+                EasingFunction = easing,
+            };
+            Storyboard.SetTarget(lineFade, TreeSplitterLine);
+            Storyboard.SetTargetProperty(lineFade, nameof(UIElement.Opacity));
+            storyboard.Children.Add(lineFade);
+        }
+
+        storyboard.Completed += (_, _) =>
+        {
+            if (animationVersion != _sessionsPaneAnimationVersion)
+                return;
+            if (animateChrome)
+            {
+                _sessionsPaneLayoutTimer?.Stop();
+                _sessionsPaneLayoutTimer = null;
+                TreeColumn.Width = new GridLength(opening ? _sessionsPaneWidth : 0);
+                TreeColumn.MinWidth = opening ? 180 : 0;
+            }
+            storyboard.Stop();
+            pane.Opacity = 1;
+            transform.X = 0;
+            TreeSplitter.Opacity = 1;
+            TreeSplitterLine.Opacity = 1;
+            _sessionsPaneStoryboard = null;
+            _animatedSessionsPane = null;
+            if (!opening && !_sessionsPaneOpen)
+                ApplySessionsRailLayout();
+        };
+        _sessionsPaneStoryboard = storyboard;
+        storyboard.Begin();
+    }
+
+    private void StartSessionsPaneLayoutAnimation(bool opening, TimeSpan duration)
+    {
+        _sessionsPaneLayoutTimer?.Stop();
+
+        var startWidth = Math.Clamp(TreeColumn.ActualWidth, 0, _sessionsPaneWidth);
+        var targetWidth = opening ? _sessionsPaneWidth : 0;
+        TreeColumn.MinWidth = 0;
+        TreeColumn.Width = new GridLength(startWidth);
+
+        var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        var timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(16);
+        timer.IsRepeating = true;
+        timer.Tick += (_, _) =>
+        {
+            var progress = Math.Clamp(
+                System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds
+                    / duration.TotalMilliseconds,
+                0,
+                1);
+            var eased = opening
+                ? 1 - Math.Pow(1 - progress, 3)
+                : progress * progress * progress;
+            TreeColumn.Width = new GridLength(
+                startWidth + ((targetWidth - startWidth) * eased));
+
+            if (progress < 1)
+                return;
+            timer.Stop();
+            if (ReferenceEquals(_sessionsPaneLayoutTimer, timer))
+                _sessionsPaneLayoutTimer = null;
+            TreeColumn.Width = new GridLength(targetWidth);
+            TreeColumn.MinWidth = opening ? 180 : 0;
+        };
+        _sessionsPaneLayoutTimer = timer;
+        timer.Start();
     }
 
     private void PersistSessionsRailState() =>

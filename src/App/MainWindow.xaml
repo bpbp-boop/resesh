@@ -292,6 +292,7 @@
                  collapses that pane without removing access to the three tools. -->
             <Border
                 Grid.Column="0"
+                Canvas.ZIndex="2"
                 Background="{StaticResource SessionShellBrush}"
                 BorderBrush="{StaticResource SessionChromeFrameBrush}"
                 BorderThickness="0,0,1,0">
