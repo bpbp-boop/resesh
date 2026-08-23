@@ -1,4 +1,5 @@
-﻿using Microsoft.UI.Xaml;
+﻿using System.Collections.ObjectModel;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Resesh.App.Controls;
@@ -20,6 +21,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 {
     public MainViewModel ViewModel { get; }
 
+    public ObservableCollection<TreeNodeViewModel> RecentSessions { get; } = [];
+    public ObservableCollection<RecordingItemViewModel> Recordings { get; } = [];
+
     private readonly Dictionary<TabGroupViewModel, TabGroupView> _groupViews = [];
     private readonly SplitLayout<TabGroupViewModel> _groupLayout;
     private bool _closeConfirmed;
@@ -30,6 +34,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private int _themeApplyVersion;
     private DependencyObject? _palettePreviousFocus;
     private bool _paletteOpenedFromTerminal;
+    private string _selectedRailTab = "sessions";
+    private bool _sessionsPaneOpen;
+    private double _sessionsPaneWidth = 280;
+    private int _recordingsLoadVersion;
 
     public MainWindow()
     {
@@ -53,6 +61,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             ClearSelection(); // rebuild recreates every node; stale references would leak
             ScheduleExpansionSync();
             SyncEmptyState();
+            RefreshRecentSessions();
         };
         // The Session menubar renames its verbs per the active tab's capabilities
         // (Disconnect/Stop, Reconnect/Restart) and hides remote-only entries.
@@ -65,8 +74,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         SyncEmptyState();
         ApplySettingsToApp();
         RegisterAccelerators();
-        if (App.Settings.Current.TreePaneWidth is { } treeWidth)
-            TreeColumn.Width = new GridLength(Math.Clamp(treeWidth, 180, 800));
+        InitializeSessionsRail();
         AppWindow.Closing += AppWindow_Closing;
         Closed += (_, _) =>
         {
@@ -172,6 +180,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         focusFilter.Invoked += (_, e) =>
         {
             e.Handled = true;
+            if (!_sessionsPaneOpen || _selectedRailTab != "sessions")
+                SelectSessionsRailTab("sessions");
             FilterBox.Focus(FocusState.Programmatic);
             FilterBox.SelectAll();
         };
@@ -307,6 +317,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         Add("View", "Filter Sessions", "search tree",
             Sync(() =>
             {
+                if (!_sessionsPaneOpen || _selectedRailTab != "sessions")
+                    SelectSessionsRailTab("sessions");
                 FilterBox.Focus(FocusState.Programmatic);
                 FilterBox.SelectAll();
             }), "Ctrl+F", keepActionFocus: true);
@@ -322,6 +334,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 ViewModel.SetExpansionAll(false);
                 ScheduleExpansionSync();
             }));
+        Add("View", _sessionsPaneOpen ? "Hide Sessions Pane" : "Show Sessions Pane",
+            "sidebar rail sessions recent recordings",
+            Sync(() => SetSessionsPaneOpen(!_sessionsPaneOpen)));
+        Add("View", "Show Recent Sessions", "sidebar rail history",
+            Sync(() => SelectSessionsRailTab("recent")));
+        Add("View", "Show Recordings", "sidebar rail playback asciicast",
+            Sync(() => SelectSessionsRailTab("recordings")));
 
         Add("Global Settings", "Open Settings", "preferences options",
             () => ShowSettingsAsync(GlobalSettingsTarget.General));
@@ -825,7 +844,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     /// <summary>Opens a tab for the session and starts its terminal + shell lifecycle
     /// (SSH connect or local ConPTY launch, per the session's kind).</summary>
-    private TabViewModel ConnectSession(Session session, TabGroupViewModel? group = null)
+    private TabViewModel ConnectSession(
+        Session session,
+        TabGroupViewModel? group = null,
+        bool trackRecent = true)
     {
         var tab = ViewModel.Connect(session, group);
         var tmuxSlotsAlreadyOpen = ViewModel.AllTabs
@@ -854,6 +876,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         tab.View = view;
         _groupViews[ViewModel.GroupOf(tab)].AddTerminal(view);
         view.SetRulerPresentation(ViewModel.IsSplit, tab.IsGroupFocused);
+        if (trackRecent && App.Store.Find(session.Id) is not null)
+        {
+            App.Settings.RecordRecentSession(session.Id);
+            RefreshRecentSessions();
+        }
         return tab;
     }
 
@@ -873,8 +900,27 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             if (file is null)
                 return;
 
-            var recording = await Task.Run(() => AsciicastReader.Read(file.Path));
-            OpenRecording(recording, file.Path);
+            await OpenRecordingPathAsync(file.Path);
+        }
+        catch (Exception exception)
+        {
+            await new ContentDialog
+            {
+                Title = "Recording could not open",
+                Content = exception.Message,
+                CloseButtonText = "OK",
+                XamlRoot = Root.XamlRoot,
+            }.ShowAsync();
+        }
+    }
+
+    private async Task OpenRecordingPathAsync(string path)
+    {
+        try
+        {
+            var fullPath = Path.GetFullPath(path);
+            var recording = await Task.Run(() => AsciicastReader.Read(fullPath));
+            OpenRecording(recording, fullPath);
         }
         catch (Exception exception)
         {
@@ -1313,7 +1359,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         {
             if (App.Store.Find(id) is { } session)
             {
-                ConnectSession(session).IsPinned = true;
+                ConnectSession(session, trackRecent: false).IsPinned = true;
                 restored.Add(id);
             }
         }
@@ -1531,6 +1577,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             AgentAlertSound = updated.AgentAlertSound,
         });
         ApplySettingsToApp();
+        if (_sessionsPaneOpen && _selectedRailTab == "recordings")
+            _ = RefreshRecordingsAsync();
     }
 
     /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
@@ -1604,6 +1652,181 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    // ---- compact sessions rail ----
+
+    private void InitializeSessionsRail()
+    {
+        var settings = App.Settings.Current;
+        _sessionsPaneWidth = Math.Clamp(settings.TreePaneWidth ?? 280, 180, 800);
+        _selectedRailTab = NormalizeRailTab(settings.SessionsRailTab);
+        _sessionsPaneOpen = settings.SessionsPaneOpen;
+        ApplySessionsRailLayout();
+        RefreshRecentSessions();
+        if (_sessionsPaneOpen && _selectedRailTab == "recordings")
+            _ = RefreshRecordingsAsync();
+    }
+
+    private static string NormalizeRailTab(string? tab) => tab switch
+    {
+        "recent" => "recent",
+        "recordings" => "recordings",
+        _ => "sessions",
+    };
+
+    private void ApplySessionsRailLayout()
+    {
+        var visible = _sessionsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
+        SessionsPane.Visibility = _selectedRailTab == "sessions" ? visible : Visibility.Collapsed;
+        RecentPane.Visibility = _selectedRailTab == "recent" ? visible : Visibility.Collapsed;
+        RecordingsPane.Visibility = _selectedRailTab == "recordings" ? visible : Visibility.Collapsed;
+
+        TreeColumn.MinWidth = _sessionsPaneOpen ? 180 : 0;
+        TreeColumn.Width = new GridLength(_sessionsPaneOpen ? _sessionsPaneWidth : 0);
+        TreeSplitterColumn.Width = new GridLength(_sessionsPaneOpen ? 1 : 0);
+        TreeSplitter.Visibility = visible;
+        TreeSplitterLine.Visibility = visible;
+
+        SessionsRail.SelectedItem = _selectedRailTab switch
+        {
+            "recent" => RecentRailItem,
+            "recordings" => RecordingsRailItem,
+            _ => SessionsRailItem,
+        };
+        SessionsPaneMenuItem.IsChecked = _sessionsPaneOpen;
+    }
+
+    private void SelectSessionsRailTab(string tab)
+    {
+        if (_sessionsPaneOpen && TreeColumn.ActualWidth >= 180)
+            _sessionsPaneWidth = TreeColumn.ActualWidth;
+        _selectedRailTab = NormalizeRailTab(tab);
+        _sessionsPaneOpen = true;
+        ApplySessionsRailLayout();
+        PersistSessionsRailState();
+
+        if (_selectedRailTab == "recent")
+            RefreshRecentSessions();
+        else if (_selectedRailTab == "recordings")
+            _ = RefreshRecordingsAsync();
+    }
+
+    private void SetSessionsPaneOpen(bool open)
+    {
+        if (_sessionsPaneOpen && !open && TreeColumn.ActualWidth >= 180)
+            _sessionsPaneWidth = TreeColumn.ActualWidth;
+        _sessionsPaneOpen = open;
+        ApplySessionsRailLayout();
+        PersistSessionsRailState();
+
+        if (open && _selectedRailTab == "recordings")
+            _ = RefreshRecordingsAsync();
+    }
+
+    private void PersistSessionsRailState() =>
+        App.Settings.Save(App.Settings.Current with
+        {
+            TreePaneWidth = _sessionsPaneWidth,
+            SessionsPaneOpen = _sessionsPaneOpen,
+            SessionsRailTab = _selectedRailTab,
+        });
+
+    private void SessionsPaneToggle_Click(object sender, RoutedEventArgs e) =>
+        SetSessionsPaneOpen(!_sessionsPaneOpen);
+
+    private void SessionsPaneMenu_Click(object sender, RoutedEventArgs e) =>
+        SetSessionsPaneOpen(SessionsPaneMenuItem.IsChecked);
+
+    private void SessionsRail_SelectionChanged(
+        NavigationView sender,
+        NavigationViewSelectionChangedEventArgs e)
+    {
+        if (e.SelectedItemContainer?.Tag is string tab && tab != _selectedRailTab)
+            SelectSessionsRailTab(tab);
+    }
+
+    private void RefreshRecentSessions()
+    {
+        var persisted = App.Settings.Current.RecentSessionIds
+            .Where(id => App.Store.Find(id) is not null)
+            .Distinct()
+            .Take(12)
+            .ToList();
+        var visible = ViewModel.VisibleSessions.ToDictionary(session => session.Id);
+
+        RecentSessions.Clear();
+        foreach (var id in persisted)
+        {
+            if (visible.TryGetValue(id, out var session))
+                RecentSessions.Add(TreeNodeViewModel.ForSession(session));
+        }
+        NoRecentSessionsState.Visibility = RecentSessions.Count == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        if (!persisted.SequenceEqual(App.Settings.Current.RecentSessionIds))
+            App.Settings.Save(App.Settings.Current with { RecentSessionIds = persisted });
+    }
+
+    private void RecentSessionList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is TreeNodeViewModel { Session: { } session })
+            ConnectSession(session);
+    }
+
+    private async Task RefreshRecordingsAsync()
+    {
+        var loadVersion = ++_recordingsLoadVersion;
+        NoRecordingsState.Text = "Loading recordings…";
+        NoRecordingsState.Visibility = Recordings.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        try
+        {
+            var directory = Path.GetFullPath(
+                Environment.ExpandEnvironmentVariables(App.Settings.Current.RecordingDirectory));
+            var items = await Task.Run(() =>
+            {
+                var folder = new DirectoryInfo(directory);
+                if (!folder.Exists)
+                    return new List<RecordingItemViewModel>();
+                return folder.EnumerateFiles("*.cast", SearchOption.TopDirectoryOnly)
+                    .OrderByDescending(file => file.LastWriteTimeUtc)
+                    .Take(200)
+                    .Select(RecordingItemViewModel.FromFile)
+                    .ToList();
+            });
+            if (loadVersion != _recordingsLoadVersion)
+                return;
+
+            Recordings.Clear();
+            foreach (var item in items)
+                Recordings.Add(item);
+            NoRecordingsState.Text = "No recordings found in the configured folder.";
+            NoRecordingsState.Visibility = Recordings.Count == 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+        catch (Exception exception)
+        {
+            if (loadVersion != _recordingsLoadVersion)
+                return;
+            Recordings.Clear();
+            NoRecordingsState.Text = $"Recordings could not be listed.\n{exception.Message}";
+            NoRecordingsState.Visibility = Visibility.Visible;
+        }
+    }
+
+    private async void RefreshRecordings_Click(object sender, RoutedEventArgs e) =>
+        await RefreshRecordingsAsync();
+
+    private async void OpenRecordingsFolder_Click(object sender, RoutedEventArgs e) =>
+        await OpenRecordingsLocationAsync();
+
+    private async void RecordingList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is RecordingItemViewModel item)
+            await OpenRecordingPathAsync(item.FilePath);
+    }
+
     // ---- tree pane persistence ----
 
     private readonly Dictionary<CommunityToolkit.WinUI.Controls.GridSplitter, Border> _splitterLines = [];
@@ -1647,8 +1870,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void SaveTreePaneWidth()
     {
-        if (TreeColumn.ActualWidth > 0)
-            App.Settings.Save(App.Settings.Current with { TreePaneWidth = TreeColumn.ActualWidth });
+        if (!_sessionsPaneOpen || TreeColumn.ActualWidth < 180)
+            return;
+        _sessionsPaneWidth = TreeColumn.ActualWidth;
+        App.Settings.Save(App.Settings.Current with { TreePaneWidth = _sessionsPaneWidth });
     }
 
     /// <summary>

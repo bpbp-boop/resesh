@@ -18,6 +18,15 @@ public sealed record AppSettings
 
     /// <summary>Sessions pinned in the tab strip, in display order; reopened automatically on launch.</summary>
     public IReadOnlyList<Guid> PinnedSessionIds { get; init; } = [];
+    /// <summary>Saved sessions opened most recently, newest first.</summary>
+    public IReadOnlyList<Guid> RecentSessionIds { get; init; } = [];
+
+    /// <summary>Whether the content pane beside the compact sessions rail is open.</summary>
+    public bool SessionsPaneOpen { get; init; } = true;
+
+    /// <summary>The selected compact-rail tab: sessions, recent, or recordings.</summary>
+    public string SessionsRailTab { get; init; } = "sessions";
+
 
     /// <summary>The local profile "+ Session" / Ctrl+Shift+T opens; null = highest-priority
     /// discovered shell (see LocalShellDiscovery.DefaultProfile).</summary>
@@ -116,6 +125,30 @@ public sealed class SettingsStore
                 File.Replace(tmp, _path, null);
             else
                 File.Move(tmp, _path);
+        }
+    }
+
+    /// <summary>Moves a saved session to the front of the bounded recent list.</summary>
+    public void RecordRecentSession(Guid sessionId, int maximumCount = 12)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(maximumCount, 1);
+        if (sessionId == Guid.Empty)
+            return;
+
+        lock (_gate)
+        {
+            var recent = new List<Guid>(Math.Min(maximumCount, Current.RecentSessionIds.Count + 1))
+            {
+                sessionId,
+            };
+            foreach (var id in Current.RecentSessionIds)
+            {
+                if (id != sessionId)
+                    recent.Add(id);
+                if (recent.Count == maximumCount)
+                    break;
+            }
+            Save(Current with { RecentSessionIds = recent });
         }
     }
 }

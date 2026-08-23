@@ -156,6 +156,12 @@
                     <MenuFlyoutItem Text="Exit" Click="Exit_Click" />
                 </MenuBarItem>
                 <MenuBarItem Title="View">
+                    <ToggleMenuFlyoutItem
+                        x:Name="SessionsPaneMenuItem"
+                        Text="Sessions pane"
+                        IsChecked="True"
+                        Click="SessionsPaneMenu_Click" />
+                    <MenuFlyoutSeparator />
                     <MenuFlyoutItem
                         Text="Command Palette…"
                         Click="CommandPaletteMenu_Click"
@@ -276,13 +282,90 @@
         <!-- Main area: tree | splitter | tabs -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="44" />
                 <ColumnDefinition x:Name="TreeColumn" Width="280" MinWidth="180" />
-                <ColumnDefinition Width="1" />
+                <ColumnDefinition x:Name="TreeSplitterColumn" Width="1" />
                 <ColumnDefinition Width="*" MinWidth="320" />
             </Grid.ColumnDefinitions>
 
+            <!-- Compact tool rail. Its tabs select the adjacent pane; the top button
+                 collapses that pane without removing access to the three tools. -->
+            <Border
+                Grid.Column="0"
+                Background="{StaticResource SessionShellBrush}"
+                BorderBrush="{StaticResource SessionChromeFrameBrush}"
+                BorderThickness="0,0,1,0">
+                <Grid RowDefinitions="Auto,Auto,*">
+                    <Button
+                        Width="44"
+                        Height="44"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Click="SessionsPaneToggle_Click"
+                        ToolTipService.ToolTip="Show or hide the sessions pane"
+                        AutomationProperties.Name="Show or hide the sessions pane">
+                        <FontIcon Glyph="&#xE700;" FontSize="16" />
+                    </Button>
+                    <Rectangle
+                        Grid.Row="1"
+                        Height="1"
+                        Margin="8,0"
+                        Fill="{StaticResource SessionChromeFrameBrush}" />
+                    <NavigationView
+                        x:Name="SessionsRail"
+                        Grid.Row="2"
+                        Width="44"
+                        Margin="0,4,0,0"
+                        HorizontalAlignment="Left"
+                        PaneDisplayMode="LeftCompact"
+                        CompactPaneLength="44"
+                        OpenPaneLength="44"
+                        IsPaneOpen="False"
+                        IsPaneToggleButtonVisible="False"
+                        IsBackButtonVisible="Collapsed"
+                        IsSettingsVisible="False"
+                        AlwaysShowHeader="False"
+                        Background="Transparent"
+                        SelectionChanged="SessionsRail_SelectionChanged">
+                        <NavigationView.MenuItems>
+                            <NavigationViewItem
+                                x:Name="SessionsRailItem"
+                                Content="Sessions"
+                                Tag="sessions"
+                                ToolTipService.ToolTip="Sessions"
+                                AutomationProperties.Name="Sessions">
+                                <NavigationViewItem.Icon>
+                                    <FontIcon Glyph="&#xE8B7;" FontSize="16" />
+                                </NavigationViewItem.Icon>
+                            </NavigationViewItem>
+                            <NavigationViewItem
+                                x:Name="RecentRailItem"
+                                Content="Recent sessions"
+                                Tag="recent"
+                                ToolTipService.ToolTip="Recent sessions"
+                                AutomationProperties.Name="Recent sessions">
+                                <NavigationViewItem.Icon>
+                                    <FontIcon Glyph="&#xE823;" FontSize="16" />
+                                </NavigationViewItem.Icon>
+                            </NavigationViewItem>
+                            <NavigationViewItem
+                                x:Name="RecordingsRailItem"
+                                Content="Recordings"
+                                Tag="recordings"
+                                ToolTipService.ToolTip="Recordings"
+                                AutomationProperties.Name="Recordings">
+                                <NavigationViewItem.Icon>
+                                    <FontIcon Glyph="&#xE8B2;" FontSize="16" />
+                                </NavigationViewItem.Icon>
+                            </NavigationViewItem>
+                        </NavigationView.MenuItems>
+                    </NavigationView>
+                </Grid>
+            </Border>
+
             <!-- Left pane: dedicated tree-filter chrome above the session tree. -->
-            <Grid Grid.Column="0" RowDefinitions="Auto,Auto,*">
+            <Grid x:Name="SessionsPane" Grid.Column="1" RowDefinitions="Auto,Auto,*">
                 <Grid
                     x:Name="FilterBar"
                     Grid.Row="0"
@@ -480,9 +563,174 @@
                 </StackPanel>
             </Grid>
 
+            <Grid
+                x:Name="RecentPane"
+                Grid.Column="1"
+                RowDefinitions="Auto,*"
+                Visibility="Collapsed">
+                <Border
+                    Grid.Row="0"
+                    Padding="12,10"
+                    Background="{StaticResource SessionShellBrush}"
+                    BorderBrush="{StaticResource SessionChromeFrameBrush}"
+                    BorderThickness="0,0,0,1">
+                    <StackPanel Spacing="2">
+                        <TextBlock
+                            Text="Recent sessions"
+                            FontWeight="SemiBold"
+                            Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                        <TextBlock
+                            Text="Saved sessions opened most recently"
+                            FontSize="11"
+                            Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                    </StackPanel>
+                </Border>
+                <ListView
+                    x:Name="RecentSessionList"
+                    Grid.Row="1"
+                    ItemsSource="{x:Bind RecentSessions}"
+                    SelectionMode="None"
+                    IsItemClickEnabled="True"
+                    ItemClick="RecentSessionList_ItemClick">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <Grid ColumnDefinitions="3,20,*" ColumnSpacing="8" Padding="4,5">
+                                <Rectangle Grid.Column="0" RadiusX="1.5" RadiusY="1.5">
+                                    <Rectangle.Fill>
+                                        <SolidColorBrush Color="{Binding TagColor}" />
+                                    </Rectangle.Fill>
+                                </Rectangle>
+                                <Grid Grid.Column="1">
+                                    <Image
+                                        Source="{Binding IconSource}"
+                                        Width="16"
+                                        Height="16"
+                                        Visibility="{Binding IconVisibility}" />
+                                    <FontIcon
+                                        Glyph="&#xEDA2;"
+                                        FontSize="14"
+                                        Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                        Visibility="{Binding DefaultIconVisibility}" />
+                                </Grid>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock
+                                        Text="{Binding Name}"
+                                        TextTrimming="CharacterEllipsis"
+                                        Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                                    <TextBlock
+                                        Text="{Binding HostSummary}"
+                                        FontSize="11"
+                                        TextTrimming="CharacterEllipsis"
+                                        Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+                <TextBlock
+                    x:Name="NoRecentSessionsState"
+                    Grid.Row="1"
+                    Margin="20"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Text="Open a saved session to add it here."
+                    TextWrapping="Wrap"
+                    TextAlignment="Center"
+                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+            </Grid>
+
+            <Grid
+                x:Name="RecordingsPane"
+                Grid.Column="1"
+                RowDefinitions="Auto,*,Auto"
+                Visibility="Collapsed">
+                <Grid
+                    Grid.Row="0"
+                    ColumnDefinitions="*,Auto,Auto"
+                    Padding="12,7,6,7"
+                    Background="{StaticResource SessionShellBrush}"
+                    BorderBrush="{StaticResource SessionChromeFrameBrush}"
+                    BorderThickness="0,0,0,1">
+                    <TextBlock
+                        Text="Recordings"
+                        FontWeight="SemiBold"
+                        VerticalAlignment="Center"
+                        Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                    <Button
+                        Grid.Column="1"
+                        Width="30"
+                        Height="30"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Click="RefreshRecordings_Click"
+                        ToolTipService.ToolTip="Refresh recordings"
+                        AutomationProperties.Name="Refresh recordings">
+                        <FontIcon Glyph="&#xE72C;" FontSize="13" />
+                    </Button>
+                    <Button
+                        Grid.Column="2"
+                        Width="30"
+                        Height="30"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Click="OpenRecordingsFolder_Click"
+                        ToolTipService.ToolTip="Open recordings folder"
+                        AutomationProperties.Name="Open recordings folder">
+                        <FontIcon Glyph="&#xE8B7;" FontSize="14" />
+                    </Button>
+                </Grid>
+                <ListView
+                    x:Name="RecordingList"
+                    Grid.Row="1"
+                    ItemsSource="{x:Bind Recordings}"
+                    SelectionMode="None"
+                    IsItemClickEnabled="True"
+                    ItemClick="RecordingList_ItemClick">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <Grid ColumnDefinitions="20,*" ColumnSpacing="8" Padding="4,5">
+                                <FontIcon
+                                    Glyph="&#xE8B2;"
+                                    FontSize="14"
+                                    Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock
+                                        Text="{Binding Name}"
+                                        TextTrimming="CharacterEllipsis"
+                                        Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                                    <TextBlock
+                                        Text="{Binding Detail}"
+                                        FontSize="11"
+                                        TextTrimming="CharacterEllipsis"
+                                        Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+                <TextBlock
+                    x:Name="NoRecordingsState"
+                    Grid.Row="1"
+                    Margin="20"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Text="No recordings found in the configured folder."
+                    TextWrapping="Wrap"
+                    TextAlignment="Center"
+                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                <Button
+                    Grid.Row="2"
+                    Margin="8"
+                    HorizontalAlignment="Stretch"
+                    Content="Open recording…"
+                    Click="OpenRecording_Click" />
+            </Grid>
+
             <Border
                 x:Name="TreeSplitterLine"
-                Grid.Column="1"
+                Grid.Column="2"
                 Width="1"
                 HorizontalAlignment="Center"
                 Background="{ThemeResource SessionDividerBrush}"
@@ -490,7 +738,7 @@
 
             <toolkit:GridSplitter
                 x:Name="TreeSplitter"
-                Grid.Column="1"
+                Grid.Column="2"
                 Width="7"
                 Canvas.ZIndex="1"
                 HorizontalAlignment="Center"
@@ -501,7 +749,7 @@
 
             <!-- Recursive tab-group layout. Code builds equal row/column siblings and
                  inserts a GridSplitter between each pair. -->
-            <Grid x:Name="GroupArea" Grid.Column="2" />
+            <Grid x:Name="GroupArea" Grid.Column="3" />
         </Grid>
 
         <!-- Status bar -->

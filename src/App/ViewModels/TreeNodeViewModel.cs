@@ -68,7 +68,7 @@ public sealed class TreeNodeViewModel : ObservableObject
     };
 
     /// <summary>The active tree filter, used only to highlight matching session names.</summary>
-    public string HighlightQuery { get; init; } = "";
+    public string HighlightQuery { get; set; } = "";
 
     /// <summary>Per-session color tag as a renderable color; transparent when unset.</summary>
     public Windows.UI.Color TagColor => ParseColor(Session?.ColorTag);
