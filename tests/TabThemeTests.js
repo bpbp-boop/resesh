@@ -29,6 +29,6 @@ test("a selected tab in an unfocused split uses the inactive tab surface", () =>
 
 test("saved and previewed theme changes refresh every open tab palette", () => {
   assert.match(viewModel, /public void ApplyAppTheme\(string theme\)[\s\S]*?_appTheme = theme;[\s\S]*?NotifyTabVisuals\(\)/);
-  assert.match(mainWindow, /foreach \(var tab in ViewModel\.AllTabs\)[\s\S]*?tab\.ApplyAppTheme\(settings\.Theme\)/);
+  assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)[\s\S]*?foreach \(var tab in ViewModel\.AllTabs\)[\s\S]*?tab\.ApplyAppTheme\(theme\)/);
   assert.match(viewModel, /OnPropertyChanged\(nameof\(HeaderBorderBrush\)\)/);
 });

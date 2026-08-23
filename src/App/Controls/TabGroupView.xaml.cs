@@ -177,7 +177,6 @@ public sealed partial class TabGroupView : UserControl
         Resources["TabViewBorderBrush"] = divider;
         Resources["CodeTabSeparatorBrush"] = divider;
         ApplyTabStripDivider();
-        QueueTabTemplateRefresh();
     }
 
     private void QueueTabTemplateRefresh()

@@ -44,7 +44,8 @@ public static class GlobalSettingsDialog
     public static async Task<AppSettings?> ShowAsync(
         XamlRoot xamlRoot,
         AppSettings current,
-        Action<AppSettings> applyPreview,
+        Action<string> applyThemePreview,
+        Action applyHighlightChanges,
         GlobalSettingsTarget initialTarget = GlobalSettingsTarget.General)
     {
         var theme = new ComboBox
@@ -54,11 +55,8 @@ public static class GlobalSettingsDialog
             SelectedItem = ThemeCatalog.Find(current.Theme),
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
-        AppSettings PreviewSettings() => current with
-        {
-            Theme = (theme.SelectedItem as ThemeChoice)?.Id ?? current.Theme,
-        };
-        theme.SelectionChanged += (_, _) => applyPreview(PreviewSettings());
+        string PreviewTheme() => (theme.SelectedItem as ThemeChoice)?.Id ?? current.Theme;
+        theme.SelectionChanged += (_, _) => applyThemePreview(PreviewTheme());
         var fontFamily = new TextBox { Header = "Terminal font family", Text = current.FontFamily };
         var fontSize = new NumberBox
         {
@@ -205,7 +203,7 @@ public static class GlobalSettingsDialog
         highlightingTab.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         highlightingTab.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var highlightingDesc = Description("Enable the built-in network rules, and create or edit custom regular-expression rules.");
-        var highlightingEditor = HighlightEditorPanel.Create(() => applyPreview(PreviewSettings()));
+        var highlightingEditor = HighlightEditorPanel.Create(applyHighlightChanges);
         var highlightingCaption = Caption("Highlighting changes apply immediately and push to open terminals. Save below applies to the other tabs.");
         Grid.SetRow(highlightingDesc, 0);
         Grid.SetRow((FrameworkElement)highlightingEditor, 1);
@@ -336,7 +334,7 @@ public static class GlobalSettingsDialog
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
         {
-            applyPreview(current);
+            applyThemePreview(current.Theme);
             return null;
         }
 

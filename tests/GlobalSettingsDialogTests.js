@@ -32,7 +32,7 @@ test("the general tab keeps the grouped two-column layout and global-scope text"
 });
 
 test("the highlight editor lives inline in the Highlighting tab", () => {
-  assert.match(dialog, /HighlightEditorPanel\.Create\(\(\) => applyPreview\(PreviewSettings\(\)\)\)/);
+  assert.match(dialog, /HighlightEditorPanel\.Create\(applyHighlightChanges\)/);
   assert.match(dialog, /apply immediately/);
   assert.match(highlightPanel, /class HighlightEditorPanel/);
   assert.match(highlightPanel, /Add custom rule/);

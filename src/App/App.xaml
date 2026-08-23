@@ -7,6 +7,11 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
+            <!-- Stable instances avoid WinUI's implicit brush transitions during a live
+                 light/dark change. MainWindow mutates their colors before the frame draws. -->
+            <SolidColorBrush x:Key="SessionShellBrush" Color="#181818" />
+            <SolidColorBrush x:Key="SessionInputBrush" Color="#121212" />
+            <SolidColorBrush x:Key="SessionChromeFrameBrush" Color="#2B2B2B" />
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Default">
                     <SolidColorBrush x:Key="SessionSurfaceBrush" Color="#181818" />

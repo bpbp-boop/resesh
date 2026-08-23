@@ -211,7 +211,11 @@ public sealed class MainViewModel : ObservableObject
         {
             tab.Session = session;
             // Appearance overrides take effect immediately; connection fields apply on next connect.
-            (tab.View as Terminal.TerminalTabView)?.ApplySettings(App.Settings.Current);
+            if (tab.View is Terminal.TerminalTabView view)
+            {
+                view.ApplyTheme(App.Settings.Current.Theme);
+                view.ApplyNonThemeSettings(App.Settings.Current);
+            }
         }
         // Preserve realized containers for presentation-only edits (icon, color, endpoint,
         // terminal settings, etc.). Rebuild only when membership, hierarchy, ordering, or

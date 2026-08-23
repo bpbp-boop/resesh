@@ -11,7 +11,7 @@
     <Grid
         x:Name="Root"
         KeyboardAcceleratorPlacementMode="Hidden"
-        Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        Background="{StaticResource SessionShellBrush}">
         <Grid.Resources>
             <!-- These shared brushes are mutated during live theme previews. StaticResource
                  keeps every realized and virtualized tree row on the same brush instance. -->
@@ -128,7 +128,7 @@
                 Grid.ColumnSpan="6"
                 Height="1"
                 VerticalAlignment="Bottom"
-                Background="{ThemeResource SessionFrameBrush}"
+                Background="{StaticResource SessionChromeFrameBrush}"
                 IsHitTestVisible="False" />
 
             <Image
@@ -204,7 +204,8 @@
                     QuerySubmitted="QuickConnect_QuerySubmitted"
                     GotFocus="QuickConnect_FocusChanged"
                     LostFocus="QuickConnect_FocusChanged"
-                    KeyDown="QuickConnect_KeyDown">
+                    KeyDown="QuickConnect_KeyDown"
+                    Background="{StaticResource SessionInputBrush}">
                     <AutoSuggestBox.ItemTemplate>
                         <DataTemplate x:DataType="local:QuickConnectSuggestion">
                             <StackPanel Orientation="Horizontal" Spacing="8" Padding="0,4">
@@ -288,15 +289,15 @@
                     ColumnDefinitions="*,Auto,Auto"
                     Padding="8"
                     ColumnSpacing="6"
-                    Background="{ThemeResource LayerFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Background="{StaticResource SessionShellBrush}"
+                    BorderBrush="{StaticResource SessionChromeFrameBrush}"
                     BorderThickness="0,0,0,1">
                     <Border
                         x:Name="FilterFieldBorder"
                         Grid.Column="0"
                         Height="30"
-                        Background="{ThemeResource ControlFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                        Background="{StaticResource SessionInputBrush}"
+                        BorderBrush="{StaticResource SessionChromeFrameBrush}"
                         BorderThickness="1"
                         CornerRadius="3">
                         <Grid ColumnDefinitions="14,*" Padding="8,0,0,0">
@@ -375,6 +376,7 @@
                         Width="30"
                         Height="30"
                         Padding="0"
+                        Background="{StaticResource SessionInputBrush}"
                         Click="ExpandAll_Click"
                         ToolTipService.ToolTip="Expand all"
                         AutomationProperties.Name="Expand all">
@@ -388,6 +390,7 @@
                         Width="30"
                         Height="30"
                         Padding="0"
+                        Background="{StaticResource SessionInputBrush}"
                         Click="CollapseAll_Click"
                         ToolTipService.ToolTip="Collapse all"
                         AutomationProperties.Name="Collapse all">
@@ -507,7 +510,7 @@
             Grid.Row="2"
             Padding="12,6"
             Background="{ThemeResource LayerFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource SessionFrameBrush}"
+            BorderBrush="{StaticResource SessionChromeFrameBrush}"
             BorderThickness="0,1,0,0">
             <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" FontSize="12" Opacity="0.8" />
         </Border>

@@ -27,6 +27,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
     private RectInt32? _normalWindowBounds;
     private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.Settings.Current.Theme);
+    private int _themeApplyVersion;
     private DependencyObject? _palettePreviousFocus;
     private bool _paletteOpenedFromTerminal;
 
@@ -494,7 +495,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         // fallback drag region across the top strip; without it nothing is draggable.
         ExtendsContentIntoTitleBar = true;
         AppWindow.TitleBar.PreferredHeightOption = Microsoft.UI.Windowing.TitleBarHeightOption.Tall;
-        ApplyTitleBarButtonColors();
+        ApplyTitleBarButtonColors(App.Settings.Current.Theme);
         TitleBarIcon.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(
             new Uri(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico")));
         AppTitleBar.Loaded += (_, _) => UpdateTitleBarRegions();
@@ -510,12 +511,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     }
 
     /// <summary>Caption buttons live outside XAML theming; keep them in sync with the app theme.</summary>
-    private void ApplyTitleBarButtonColors()
+    private void ApplyTitleBarButtonColors(string theme)
     {
         if (!Microsoft.UI.Windowing.AppWindowTitleBar.IsCustomizationSupported())
             return;
         var tb = AppWindow.TitleBar;
-        var dark = !ThemeCatalog.IsLight(App.Settings.Current.Theme);
+        var dark = !ThemeCatalog.IsLight(theme);
         var fg = dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
         tb.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
         tb.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
@@ -1510,7 +1511,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private async Task ShowSettingsAsync(GlobalSettingsTarget target)
     {
         var updated = await GlobalSettingsDialog.ShowAsync(
-            Root.XamlRoot, App.Settings.Current, ApplySettingsToApp, target);
+            Root.XamlRoot, App.Settings.Current, ApplyThemeToApp, ApplySettingsToApp, target);
         if (updated is null)
             return;
         App.Settings.Save(App.Settings.Current with
@@ -1532,38 +1533,66 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ApplySettingsToApp();
     }
 
-    /// <summary>Applies the persisted settings to the shell theme and every open terminal.</summary>
+    /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
     private void ApplySettingsToApp() => ApplySettingsToApp(App.Settings.Current);
 
-    /// <summary>Applies either saved settings or a reversible Settings-dialog preview.</summary>
     private void ApplySettingsToApp(AppSettings settings)
     {
-        Root.RequestedTheme = ThemeCatalog.IsLight(settings.Theme) ? ElementTheme.Light : ElementTheme.Dark;
-        var palette = ThemeVisualPalette.For(settings.Theme);
+        ApplyThemeToApp(settings.Theme);
+        foreach (var tab in ViewModel.AllTabs)
+        {
+            if (tab.View is TerminalTabView view)
+                view.ApplyNonThemeSettings(settings);
+            tab.NotifyAgentVisuals(); // the agent icon/badge is gated on a setting
+        }
+    }
+
+    /// <summary>Applies a reversible Settings-dialog theme preview without repeating
+    /// layout, scrollback, or highlight work in every open terminal.</summary>
+    private void ApplyThemeToApp(string theme)
+    {
+        var version = ++_themeApplyVersion;
+        var requestedTheme = ThemeCatalog.IsLight(theme) ? ElementTheme.Light : ElementTheme.Dark;
+        if (Root.RequestedTheme == requestedTheme)
+        {
+            ApplyThemePalette(theme);
+            return;
+        }
+
+        // Fluent controls resolve a light/dark RequestedTheme change during the next
+        // composition pass. Apply custom brushes in that pass too, before it is drawn,
+        // so the tree, tab chrome, terminals, and Fluent buttons change as one frame.
+        void ApplyPaletteBeforeRender(object? sender, object args)
+        {
+            Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= ApplyPaletteBeforeRender;
+            if (version == _themeApplyVersion)
+                ApplyThemePalette(theme);
+        }
+
+        Microsoft.UI.Xaml.Media.CompositionTarget.Rendering += ApplyPaletteBeforeRender;
+        Root.RequestedTheme = requestedTheme;
+    }
+
+    private void ApplyThemePalette(string theme)
+    {
+        var palette = ThemeVisualPalette.For(theme);
         _themePalette = palette;
-        Root.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Shell);
-        FilterBar.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Shell);
-        FilterFieldBorder.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Input);
-        FilterFieldBorder.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Divider);
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionShellBrush"]).Color = palette.Shell;
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionInputBrush"]).Color = palette.Input;
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionChromeFrameBrush"]).Color = palette.Frame;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Root.Resources["SessionTreeForegroundBrush"]).Color = palette.TreeForeground;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Root.Resources["SessionTreeMutedForegroundBrush"]).Color = palette.TreeMutedForeground;
         TreeNodeViewModel.ApplySelectionTheme(palette.TreeSelection);
-        QuickConnectBox.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Input);
-        ExpandAllButton.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Input);
-        CollapseAllButton.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Input);
-        TitleBarDivider.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Frame);
-        StatusBar.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(palette.Frame);
         foreach (var (splitter, line) in _splitterLines)
             line.Background = SplitterBrush(_activeSplitters.Contains(splitter));
         foreach (var groupView in _groupViews.Values)
             groupView.ApplyTheme(palette);
-        ApplyTitleBarButtonColors(); // caption buttons don't follow XAML theming
+        ApplyTitleBarButtonColors(theme); // caption buttons don't follow XAML theming
         foreach (var tab in ViewModel.AllTabs)
         {
             if (tab.View is TerminalTabView view)
-                view.ApplySettings(settings);
-            tab.ApplyAppTheme(settings.Theme);
-            tab.NotifyAgentVisuals(); // the agent icon/badge is gated on a setting
+                view.ApplyTheme(theme);
+            tab.ApplyAppTheme(theme);
         }
     }
 

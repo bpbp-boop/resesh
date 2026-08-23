@@ -783,11 +783,21 @@
           document.body.classList.toggle("light-ui", isLightTheme(msg.theme));
           ruler.setTheme(getRuler(msg.theme));
           try {
-            if (typeof msg.scrollback === "number") term.options.scrollback = msg.scrollback;
-            if (msg.fontSize) term.options.fontSize = msg.fontSize;
-            if (msg.fontFamily) term.options.fontFamily = msg.fontFamily;
-            fitPreservingTimestamps();
-            reportSize();
+            if (typeof msg.scrollback === "number" && msg.scrollback !== term.options.scrollback)
+              term.options.scrollback = msg.scrollback;
+            let layoutChanged = false;
+            if (msg.fontSize && msg.fontSize !== term.options.fontSize) {
+              term.options.fontSize = msg.fontSize;
+              layoutChanged = true;
+            }
+            if (msg.fontFamily && msg.fontFamily !== term.options.fontFamily) {
+              term.options.fontFamily = msg.fontFamily;
+              layoutChanged = true;
+            }
+            if (layoutChanged) {
+              fitPreservingTimestamps();
+              reportSize();
+            }
           } catch (err) {
             pageTrace("setOptions: " + (err && err.message));
           }

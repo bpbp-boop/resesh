@@ -836,17 +836,23 @@ public sealed class TerminalTabView : Grid, IDisposable
         return tcs.Task.GetAwaiter().GetResult();
     }
 
-    /// <summary>Pushes app settings into the xterm page (fonts, theme, clipboard behavior),
-    /// with this session's overrides layered on top.</summary>
-    public void ApplySettings(Core.Storage.AppSettings settings)
+    /// <summary>Applies the app chrome theme and this session's effective terminal theme
+    /// without changing terminal geometry or rescanning highlights.</summary>
+    public void ApplyTheme(string theme)
     {
-        _chromePalette = ThemeVisualPalette.For(settings.Theme);
+        _chromePalette = ThemeVisualPalette.For(theme);
         ApplyPaneSplitterTheme();
+        _terminal.ApplyOptions(theme: Session.Overrides?.Theme ?? theme);
+    }
+
+    /// <summary>Pushes layout and interaction settings into the xterm page, with this
+    /// session's overrides layered on top.</summary>
+    public void ApplyNonThemeSettings(Core.Storage.AppSettings settings)
+    {
         var effective = settings.WithOverrides(Session.Overrides);
         _terminal.ApplyOptions(
             fontSize: effective.FontSize,
             fontFamily: effective.FontFamily,
-            theme: effective.Theme,
             copyOnSelect: effective.CopyOnSelect,
             rightClickPaste: effective.RightClickPaste,
             scrollback: effective.Scrollback);

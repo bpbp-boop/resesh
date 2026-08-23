@@ -10,6 +10,7 @@ const sessionDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "
 const localDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "LocalProfileEditDialog.cs"), "utf8");
 const mainWindow = fs.readFileSync(path.join(__dirname, "..", "src", "App", "MainWindow.xaml.cs"), "utf8");
 const mainWindowXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "MainWindow.xaml"), "utf8");
+const appXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "App.xaml"), "utf8");
 const tabGroup = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"), "utf8");
 const terminalTab = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"), "utf8");
 const terminalControl = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "TerminalControl.cs"), "utf8");
@@ -39,10 +40,41 @@ test("global and per-session theme pickers use the shared catalog", () => {
   assert.match(localDialog, /Concat\(ThemeCatalog\.All\)/);
 });
 
-test("global theme selection previews immediately and cancel restores saved settings", () => {
-  assert.match(globalDialog, /theme\.SelectionChanged \+= \(_, _\) => applyPreview\(PreviewSettings\(\)\)/);
-  assert.match(globalDialog, /if \(await dialog\.ShowAsync\(\) != ContentDialogResult\.Primary\)[\s\S]*?applyPreview\(current\)/);
-  assert.match(mainWindow, /private void ApplySettingsToApp\(AppSettings settings\)/);
+test("global theme selection previews immediately and cancel restores saved theme", () => {
+  assert.match(globalDialog, /theme\.SelectionChanged \+= \(_, _\) => applyThemePreview\(PreviewTheme\(\)\)/);
+  assert.match(globalDialog, /if \(await dialog\.ShowAsync\(\) != ContentDialogResult\.Primary\)[\s\S]*?applyThemePreview\(current\.Theme\)/);
+  assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)/);
+});
+
+test("live theme previews avoid terminal layout and highlight work", () => {
+  assert.match(mainWindow, /GlobalSettingsDialog\.ShowAsync\([\s\S]*?ApplyThemeToApp, ApplySettingsToApp, target\)/);
+  assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)[\s\S]*?view\.ApplyTheme\(theme\)/);
+
+  const applyTheme = terminalTab.match(/public void ApplyTheme\(string theme\)\s*\{[\s\S]*?\n    \}/)?.[0];
+  assert.ok(applyTheme);
+  assert.match(applyTheme, /_terminal\.ApplyOptions\(theme:/);
+  assert.doesNotMatch(applyTheme, /ApplyHighlights|fontSize|fontFamily|scrollback/);
+
+  assert.match(terminal, /let layoutChanged = false;[\s\S]*?if \(layoutChanged\) \{[\s\S]*?fitPreservingTimestamps\(\)/);
+  assert.match(mainWindow, /private void ApplyThemePalette\(string theme\)[\s\S]*?view\.ApplyTheme\(theme\)/);
+});
+
+test("light-dark changes commit custom colors in the framework composition frame", () => {
+  assert.match(
+    mainWindow,
+    /CompositionTarget\.Rendering \+= ApplyPaletteBeforeRender;[\s\S]*?Root\.RequestedTheme = requestedTheme/,
+  );
+  assert.match(
+    mainWindow,
+    /CompositionTarget\.Rendering -= ApplyPaletteBeforeRender;[\s\S]*?version == _themeApplyVersion\)[\s\S]*?ApplyThemePalette\(theme\)/,
+  );
+  assert.match(
+    mainWindow,
+    /if \(Root\.RequestedTheme == requestedTheme\)[\s\S]*?ApplyThemePalette\(theme\);[\s\S]*?return;/,
+  );
+  const groupApplyTheme =
+    tabGroup.match(/internal void ApplyTheme\(ThemeVisualPalette palette\)\s*\{[\s\S]*?\n    \}/)?.[0] ?? "";
+  assert.doesNotMatch(groupApplyTheme, /QueueTabTemplateRefresh/);
 });
 
 test("unknown saved theme identifiers fall back safely", () => {
@@ -51,8 +83,12 @@ test("unknown saved theme identifiers fall back safely", () => {
 });
 
 test("custom themes recolor the app shell and tab strip", () => {
-  assert.match(mainWindow, /Root\.Background = .*palette\.Shell/);
-  assert.match(mainWindow, /FilterFieldBorder\.Background = .*palette\.Input/);
+  assert.match(mainWindow, /SessionShellBrush"\]\)\.Color = palette\.Shell/);
+  assert.match(mainWindow, /SessionInputBrush"\]\)\.Color = palette\.Input/);
+  assert.match(mainWindowXaml, /x:Name="ExpandAllButton"[\s\S]*?Background="\{StaticResource SessionInputBrush\}"/);
+  assert.match(appXaml, /x:Key="SessionShellBrush"/);
+  assert.match(appXaml, /x:Key="SessionInputBrush"/);
+  assert.match(appXaml, /x:Key="SessionChromeFrameBrush"/);
   assert.match(mainWindow, /groupView\.ApplyTheme\(palette\)/);
   assert.match(tabGroup, /Tabs\.Background = background/);
   assert.match(tabGroup, /TabStripActions\.Background = background/);
@@ -115,10 +151,11 @@ test("the terminal ruler edge uses a visible theme colour", () => {
 test("live theme changes repaint existing shell and pane dividers", () => {
   assert.match(mainWindowXaml, /x:Name="TitleBarDivider"/);
   assert.match(mainWindowXaml, /x:Name="StatusBar"/);
-  assert.match(mainWindow, /TitleBarDivider\.Background = .*palette\.Frame/);
-  assert.match(mainWindow, /StatusBar\.BorderBrush = .*palette\.Frame/);
+  assert.match(mainWindow, /SessionChromeFrameBrush"\]\)\.Color = palette\.Frame/);
+  assert.match(mainWindowXaml, /x:Name="TitleBarDivider"[\s\S]*?Background="\{StaticResource SessionChromeFrameBrush\}"/);
+  assert.match(mainWindowXaml, /x:Name="StatusBar"[\s\S]*?BorderBrush="\{StaticResource SessionChromeFrameBrush\}"/);
   assert.match(mainWindow, /foreach \(var \(splitter, line\) in _splitterLines\)[\s\S]*?line\.Background = SplitterBrush/);
-  assert.match(terminalTab, /_chromePalette = ThemeVisualPalette\.For\(settings\.Theme\);[\s\S]*?ApplyPaneSplitterTheme\(\)/);
+  assert.match(terminalTab, /_chromePalette = ThemeVisualPalette\.For\(theme\);[\s\S]*?ApplyPaneSplitterTheme\(\)/);
   assert.match(terminalTab, /new Microsoft\.UI\.Xaml\.Media\.SolidColorBrush\(_chromePalette\.Divider\)/);
 });
 
