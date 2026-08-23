@@ -1,9 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <title>Windows</title>
   <rect width="24" height="24" rx="5" fill="#0078D4"/>
-  <g fill="#FFFFFF">
-    <rect x="5" y="5" width="6.4" height="6.4"/>
-    <rect x="12.6" y="5" width="6.4" height="6.4"/>
-    <rect x="5" y="12.6" width="6.4" height="6.4"/>
-    <rect x="12.6" y="12.6" width="6.4" height="6.4"/>
-  </g>
+  <g transform="translate(3.6 3.6) scale(0.7)" fill="#FFFFFF"><path d="M0,0H11.377V11.372H0ZM12.623,0H24V11.372H12.623ZM0,12.623H11.377V24H0Zm12.623,0H24V24H12.623"/></g>
 </svg>

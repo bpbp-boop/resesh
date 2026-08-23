@@ -267,12 +267,11 @@ keyboard-interactive fallback.
   onto colored rounded squares, so every icon reads on both the dark (#181818) and light
   (#F3F3F3) tab strips. Direct2D's SvgImageSource handles Simple Icons' SVGO-compacted arc
   flags fine — verified live in the running app (cisco/debian render correctly in the tree).
-- Exceptions to Simple Icons: **juniper** — the set only has the full "Juniper NETWORKS"
-  logotype (illegible at 16 px) and juniper.net's favicon now serves HPE branding
-  post-acquisition, so it keeps a hand-drawn "J" badge; **arista/vyos/aruba** — not in
-  Simple Icons, their site favicons are composed onto white badges as PNGs (aruba's favicon
-  is HPE's mark, which is correct — the entry is "HPE / Aruba"); **windows** + the generic
-  router/switch/firewall/server glyphs are hand-drawn SVGs.
+- Exceptions to Simple Icons: **arista/vyos/aruba** are not in the set, so their official
+  site favicons are composed onto white badges as PNGs (Aruba's favicon is HPE's mark,
+  which is correct for the "HPE / Aruba" entry). The generic router/switch/firewall/server
+  glyphs are app symbols, not brand marks. Juniper uses the set's official full logotype,
+  and Windows uses its official Simple Icons mark.
 - Custom icons: files dropped in `%APPDATA%\Resesh\icons\` appear in the picker, key =
   filename. Built-in keys contain no dot, custom keys always do, so they can't collide.
   A session whose custom icon file was deleted round-trips its key through the editor
@@ -418,6 +417,11 @@ keyboard-interactive fallback.
   icon. Detection changes only the displayed icon and never changes `Session.Icon`;
   `Session.Agent` mirrors the icon field's semantics (null = detect, `none` = never show,
   a key = default until something is observed).
+- Branded agent assets use the official Simple Icons paths: Claude, Google Gemini, Pi,
+  and X for Grok from 16.28.0; OpenAI for Codex from 15.12.0 because the OpenAI mark is
+  absent from 16.28.0. They keep the existing agent accent colors so the monochrome marks
+  remain visible on light and dark tab strips. The generic agent glyph remains an app
+  symbol because it does not represent a brand.
 - All mapping lives in `AgentTracker` (Core, no UI): the page forwards raw evidence only —
   OSC payloads, titles, marked commands, bells — and every precedence rule is unit-tested.
   Order, strongest first: manual tab override, adapter events, live detection, session

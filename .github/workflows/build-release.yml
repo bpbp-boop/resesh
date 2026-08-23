@@ -207,6 +207,11 @@ jobs:
       contents: write
 
     steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - name: Download build assets
         uses: actions/download-artifact@v8
         with:
@@ -225,6 +230,42 @@ jobs:
 
           $lines | Set-Content release-assets/SHA256SUMS.txt -Encoding utf8NoBOM
 
+      - name: Prepare release notes
+        shell: pwsh
+        run: |
+          $notesPath = ".github/release-notes/$env:GITHUB_REF_NAME.md"
+
+          if (-not (Test-Path $notesPath)) {
+            $previousTag = git tag --sort=-version:refname |
+              Where-Object { $_ -ne $env:GITHUB_REF_NAME } |
+              Select-Object -First 1
+
+            $range = if ($previousTag) {
+              "$previousTag..$env:GITHUB_REF_NAME"
+            }
+            else {
+              $env:GITHUB_REF_NAME
+            }
+
+            $subjects = @(git log $range --no-merges --format="%s")
+            if ($LASTEXITCODE -ne 0 -or $subjects.Count -eq 0) {
+              throw "No commits found for release notes."
+            }
+
+            $notesPath = Join-Path $env:RUNNER_TEMP "release-notes.md"
+            $lines = @("## What's changed", "")
+            $lines += $subjects | ForEach-Object { "- $_" }
+
+            if ($previousTag) {
+              $compareUrl = "https://github.com/$env:GITHUB_REPOSITORY/compare/$previousTag...$env:GITHUB_REF_NAME"
+              $lines += @("", "## More", "", "- [View the full changelog]($compareUrl)")
+            }
+
+            $lines | Set-Content $notesPath -Encoding utf8NoBOM
+          }
+
+          "RELEASE_NOTES_PATH=$notesPath" >> $env:GITHUB_ENV
+
       - name: Publish release
         shell: pwsh
         env:
@@ -235,11 +276,14 @@ jobs:
           gh release view $env:GITHUB_REF_NAME *> $null
 
           if ($LASTEXITCODE -eq 0) {
+            gh release edit $env:GITHUB_REF_NAME `
+              --title "Resesh $env:GITHUB_REF_NAME" `
+              --notes-file $env:RELEASE_NOTES_PATH
             gh release upload $env:GITHUB_REF_NAME @assets --clobber
           }
           else {
             gh release create $env:GITHUB_REF_NAME @assets `
               --verify-tag `
-              --generate-notes `
+              --notes-file $env:RELEASE_NOTES_PATH `
               --title "Resesh $env:GITHUB_REF_NAME"
           }
