@@ -24,6 +24,17 @@ test("tabs use one browser-style width and shrink only when the strip is crowded
   assert.doesNotMatch(xaml, /TabWidthMode="SizeToContent"/);
 });
 
+test("custom tab chrome retains WinUI drag and reorder animations", () => {
+  const style = xaml.match(/<Style x:Key="CodeTabStyle"[\s\S]*?<\/Style>/)?.[0] ?? "";
+
+  assert.match(style, /VisualStateGroup x:Name="ReorderHintStates"/);
+  assert.equal(style.match(/<DragOverThemeAnimation/g)?.length, 4);
+  assert.match(style, /VisualStateGroup x:Name="DragStates"/);
+  assert.match(style, /<DragItemThemeAnimation TargetName="LayoutRoot"/);
+  assert.match(style, /<FadeOutThemeAnimation TargetName="LayoutRoot"/);
+  assert.match(style, /<DropTargetItemThemeAnimation TargetName="LayoutRoot"/);
+});
+
 test("tab text trims inside the shared width without moving the close action", () => {
   assert.match(xaml, /<ColumnDefinition Width="\*" \/>/);
   assert.match(xaml, /Grid\.Column="5"[\s\S]*?TextTrimming="CharacterEllipsis"/);
