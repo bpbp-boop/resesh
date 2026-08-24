@@ -43,7 +43,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private Storyboard? _sessionsPaneStoryboard;
     private FrameworkElement? _animatedSessionsPane;
     private int _sessionsPaneAnimationVersion;
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _sessionsPaneLayoutTimer;
 
     public MainWindow()
     {
@@ -635,7 +634,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 DefaultButton = ContentDialogButton.Close,
                 XamlRoot = Root.XamlRoot,
             };
-            if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            if (await ShowCloseConfirmationAsync(dialog))
             {
                 _closeConfirmed = true;
                 Close();
@@ -1055,13 +1054,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (tab.IsPinned)
         {
             // Pinned tabs need the extra deliberate step; one dialog covers both.
-            if (!await ConfirmAsync("Tab Is Pinned", $"\"{tab.Header}\" is pinned.{detail}", "Unpin and Close"))
+            if (!await ConfirmAsync("Tab Is Pinned", $"\"{tab.Header}\" is pinned.{detail}", "Unpin and Close", acceptY: true))
                 return;
             TogglePin(tab);
             CloseTabCore(tab);
             return;
         }
-        if (await ConfirmAsync("Close Tab", $"Close \"{tab.Header}\"?{detail}", "Close"))
+        if (await ConfirmAsync("Close Tab", $"Close \"{tab.Header}\"?{detail}", "Close", acceptY: true))
             CloseTabCore(tab);
     }
 
@@ -1097,7 +1096,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             XamlRoot = Root.XamlRoot,
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (!await ShowCloseConfirmationAsync(dialog))
             return;
         if (endTmuxCheckBox.IsChecked == true && !await view.TryEndRemoteSessionAsync())
         {
@@ -1118,7 +1117,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var message = connected > 0
             ? $"Close {tabs.Count} {description}? {connected} of them {(connected == 1 ? "is" : "are")} still connected."
             : $"Close {tabs.Count} {description}?";
-        if (!await ConfirmAsync("Close Tabs", message, "Close"))
+        if (!await ConfirmAsync("Close Tabs", message, "Close", acceptY: true))
             return;
         foreach (var tab in tabs)
             CloseTabCore(tab);
@@ -1791,9 +1790,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             EasingMode = opening ? EasingMode.EaseOut : EasingMode.EaseIn,
         };
 
-        if (animateChrome)
-            StartSessionsPaneLayoutAnimation(opening, duration);
-
+        // Keep the content column at an endpoint while the pane animates. Changing it every
+        // frame forces live terminals to reflow repeatedly and makes their ruler jump.
         transform.X = opening ? -travel : 0;
         pane.Opacity = opening ? 0.7 : 1;
         if (animateChrome)
@@ -1856,8 +1854,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 return;
             if (animateChrome)
             {
-                _sessionsPaneLayoutTimer?.Stop();
-                _sessionsPaneLayoutTimer = null;
                 TreeColumn.Width = new GridLength(opening ? _sessionsPaneWidth : 0);
                 TreeColumn.MinWidth = opening ? 180 : 0;
             }
@@ -1873,44 +1869,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         };
         _sessionsPaneStoryboard = storyboard;
         storyboard.Begin();
-    }
-
-    private void StartSessionsPaneLayoutAnimation(bool opening, TimeSpan duration)
-    {
-        _sessionsPaneLayoutTimer?.Stop();
-
-        var startWidth = Math.Clamp(TreeColumn.ActualWidth, 0, _sessionsPaneWidth);
-        var targetWidth = opening ? _sessionsPaneWidth : 0;
-        TreeColumn.MinWidth = 0;
-        TreeColumn.Width = new GridLength(startWidth);
-
-        var startedAt = System.Diagnostics.Stopwatch.GetTimestamp();
-        var timer = DispatcherQueue.CreateTimer();
-        timer.Interval = TimeSpan.FromMilliseconds(16);
-        timer.IsRepeating = true;
-        timer.Tick += (_, _) =>
-        {
-            var progress = Math.Clamp(
-                System.Diagnostics.Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds
-                    / duration.TotalMilliseconds,
-                0,
-                1);
-            var eased = opening
-                ? 1 - Math.Pow(1 - progress, 3)
-                : progress * progress * progress;
-            TreeColumn.Width = new GridLength(
-                startWidth + ((targetWidth - startWidth) * eased));
-
-            if (progress < 1)
-                return;
-            timer.Stop();
-            if (ReferenceEquals(_sessionsPaneLayoutTimer, timer))
-                _sessionsPaneLayoutTimer = null;
-            TreeColumn.Width = new GridLength(targetWidth);
-            TreeColumn.MinWidth = opening ? 180 : 0;
-        };
-        _sessionsPaneLayoutTimer = timer;
-        timer.Start();
     }
 
     private void PersistSessionsRailState() =>
@@ -2938,7 +2896,31 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         return await dialog.ShowAsync() == ContentDialogResult.Primary ? box.Text : null;
     }
 
-    private async Task<bool> ConfirmAsync(string title, string message, string primaryText = "Delete")
+    private static async Task<bool> ShowCloseConfirmationAsync(ContentDialog dialog)
+    {
+        var confirmedByKeyboard = false;
+        dialog.AddHandler(
+            UIElement.KeyDownEvent,
+            new KeyEventHandler((_, args) =>
+            {
+                if (args.Key != VirtualKey.Y)
+                    return;
+
+                args.Handled = true;
+                confirmedByKeyboard = true;
+                dialog.Hide();
+            }),
+            handledEventsToo: true);
+
+        var result = await dialog.ShowAsync();
+        return confirmedByKeyboard || result == ContentDialogResult.Primary;
+    }
+
+    private async Task<bool> ConfirmAsync(
+        string title,
+        string message,
+        string primaryText = "Delete",
+        bool acceptY = false)
     {
         var dialog = new ContentDialog
         {
@@ -2949,7 +2931,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = Root.XamlRoot,
         };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        return acceptY
+            ? await ShowCloseConfirmationAsync(dialog)
+            : await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 }
 
