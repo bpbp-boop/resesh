@@ -125,3 +125,72 @@ per-session fingerprint selection must not be described as destination constrain
 - [Keeper SSH Agent](https://docs.keeper.io/keeperpam/privileged-access-manager/ssh-agent)
 - [Proton Pass SSH Agent](https://proton.me/support/ssh-agent)
 - [FIDO Credential Exchange Format 1.0](https://fidoalliance.org/specs/cx/cxf-v1.0-ps-errata-20260309.html) — useful for future credential migration, not live agent session matching.
+
+---
+
+## 2. Native terminal surface via Microsoft Terminal
+
+**Goal:** determine whether Microsoft's native terminal control can replace
+WebView2 + xterm.js without replacing the WinUI shell, `ITerminalBackend`, SSH.NET,
+ConPTY, recording, or session model.
+
+Explore the Microsoft Terminal repository's `TerminalCore`, `AtlasEngine`, and
+`HwndTerminal` path before considering GPUI, QuickJS + `@xterm/headless`, or a
+new renderer. `HwndTerminal` already combines the native VT parser and text
+buffer with DirectWrite, Direct3D/Direct2D rendering, TSF/IME, selection, and UI
+Automation behind a small C ABI used by Microsoft's C# WPF wrapper.
+
+### Candidate integration
+
+- Keep local sessions on `LocalTerminalSession`/ConPTY and remote sessions on
+  `SshTerminalSession`/SSH.NET. The control consumes their common terminal byte
+  stream; it must not replace integrated SSH authentication, host-key trust,
+  SFTP, SSHFS, or tmux handling with `ssh.exe`.
+- Build a pinned, architecture-specific native DLL and host its child HWND from
+  WinUI 3. Do not depend on the repository's `Windows.UI.Xaml` `TermControl`,
+  which is not directly compatible with Resesh's `Microsoft.UI.Xaml` controls.
+- Put a narrow, versioned adapter around the native ABI. Do not expose Microsoft
+  Terminal internals throughout the C# application.
+- Preserve the current `TerminalControl` host contract so the native experiment
+  can be compared with WebView2 without rewriting tab and backend lifecycle code.
+
+### Questions to resolve
+
+- Whether a child HWND can coexist reliably with tab dragging, split groups,
+  lock/drop overlays, title-bar regions, focus restoration, DPI changes, and
+  XAML content drawn above the terminal.
+- How raw UTF-8 backend bytes are decoded and fed to TerminalCore without
+  changing invalid-sequence, chunk-boundary, or recording behavior.
+- Which extensions are required for OSC 7, OSC 3008, agent OSC events, title and
+  command reporting, prompt discovery, links, highlights, and command marks.
+- Whether complete terminal state can be captured and restored with the fidelity
+  required by rewind and asciicast playback; the existing xterm serialize path
+  has no equivalent in the published `HwndTerminal` ABI.
+- Whether search, the annotated ruler, commands panel, notices, and playback UI
+  can remain XAML surfaces without HWND airspace problems or renderer changes.
+- The native build, packaging, servicing, x64/ARM64, and long-term fork cost.
+  Microsoft Terminal's control is source-available under MIT but is not yet a
+  stable, supported consumer package.
+
+### Exploration acceptance
+
+- A disposable spike opens both a local ConPTY tab and an SSH.NET tab in the
+  existing WinUI application and exercises input, resize, scrollback, alternate
+  screen, mouse reporting, copy/paste, Unicode, IME, DPI, splits, and teardown.
+- The spike records measured startup, private memory, sustained-output
+  throughput, and input-to-paint latency against the current WebView2 surface.
+- A parity inventory identifies every current xterm/addon behavior as retained,
+  adapted, reimplemented, or blocked. No production migration proceeds with
+  silent feature loss.
+- Native adoption is considered only if it clearly improves a measured product
+  problem beyond lower-risk WebView2 work such as shared-buffer output and the
+  xterm WebGL renderer.
+
+### References
+
+- [Microsoft Terminal code organization](https://github.com/microsoft/terminal/blob/main/doc/ORGANIZATION.md)
+- [TerminalCore](https://github.com/microsoft/terminal/tree/main/src/cascadia/TerminalCore)
+- [AtlasEngine](https://github.com/microsoft/terminal/tree/main/src/renderer/atlas)
+- [`HwndTerminal` native ABI](https://github.com/microsoft/terminal/blob/main/src/cascadia/TerminalControl/HwndTerminal.hpp)
+- [C# WPF host](https://github.com/microsoft/terminal/tree/main/src/cascadia/WpfTerminalControl)
+- [Terminal control productization tracking](https://github.com/microsoft/terminal/issues/6999)
