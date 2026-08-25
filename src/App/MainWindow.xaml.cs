@@ -1805,9 +1805,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 continue;
 
             if (isColumns)
-                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(7) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1) });
             else
-                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(7) });
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1) });
 
             var splitterLine = new Border
             {
@@ -1832,9 +1832,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 // Keep this wider resize target transparent so it cannot cover that line.
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
             };
-            // Keep the splitter above the WebView2-backed terminal content. Its grid track
-            // is the full seven-pixel hit target so it does not overlap a terminal scrollbar;
-            // the separate centered border preserves the one-pixel visual divider.
+            // Keep the seven-pixel hit target above the WebView2 content while its
+            // one-pixel grid track lets both tab groups meet the visible divider.
             Canvas.SetZIndex(splitter, 1);
             if (isColumns)
             {
@@ -2540,10 +2539,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             else
                 _activeSplitters.Remove(splitter);
             line.Background = SplitterBrush(active);
-            if (splitter.ResizeDirection == CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns)
-                line.Width = active ? 3 : 1;
-            else
-                line.Height = active ? 3 : 1;
         }
     }
 

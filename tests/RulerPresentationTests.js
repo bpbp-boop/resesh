@@ -35,6 +35,7 @@ function paintPresentation(isSplit, isGroupFocused, isPointerOver = false) {
   };
   addon._strip = { clientHeight: 100, style: {}, dataset: {} };
   addon._canvas = { width: 0, height: 0, getContext: () => context };
+  addon._thumb = { style: {} };
   addon._cmdMarks = [
     { marker: { line: 10 }, exit: 0 },
     { marker: { line: 11 }, exit: 0 },
@@ -44,7 +45,11 @@ function paintPresentation(isSplit, isGroupFocused, isPointerOver = false) {
   addon.setPresentation(isSplit, isGroupFocused);
   addon._isPointerOver = isPointerOver;
   addon._paint();
-  return { operations, presentation: addon._strip.dataset.presentation };
+  return {
+    operations,
+    presentation: addon._strip.dataset.presentation,
+    thumbStyle: addon._thumb.style,
+  };
 }
 
 function operationsWithColor(result, color) {
@@ -90,6 +95,33 @@ test("hover keeps the full width and restores mark colors and opacity", () => {
   assert.equal(result.operations[0].x, 0);
   assert.equal(result.operations[0].width, 14);
   assert.equal(operationsWithColor(result, "#2ea043")[0].alpha, 1);
+});
+
+test("ruler thumb tracks the viewport independently from annotated marks", () => {
+  const result = paintPresentation(false, true);
+
+  assert.equal(result.thumbStyle.top, "50px");
+  assert.equal(result.thumbStyle.height, "20px");
+  assert.equal(operationsWithColor(result, "rgba(255,255,255,0.10)").length, 0);
+});
+
+test("ruler thumb uses VS Code reveal and fade timing", () => {
+  const addon = new RulerAddon();
+  addon._thumb = { style: {} };
+
+  addon._syncThumbVisibility();
+  assert.equal(addon._thumb.style.opacity, "0");
+  assert.equal(addon._thumb.style.transitionDuration, "800ms");
+
+  addon._isPointerOver = true;
+  addon._syncThumbVisibility();
+  assert.equal(addon._thumb.style.opacity, "1");
+  assert.equal(addon._thumb.style.transitionDuration, "100ms");
+
+  addon._isPointerOver = false;
+  addon._drag = { pointerId: 7 };
+  addon._syncThumbVisibility();
+  assert.equal(addon._thumb.style.opacity, "1");
 });
 
 function dragHarness() {

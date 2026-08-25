@@ -395,45 +395,62 @@
                 Height="44"
                 Background="{ThemeResource TabViewBackground}">
                 <Grid.Resources>
-                    <!-- Lightweight styling for the action buttons only: an active toggle
-                         (commands panel / file pane open) keeps its normal background and
-                         says so with an accent-colored glyph instead; pressing flashes the
-                         glyph the same way. Aliases live in ThemeDictionaries so they
-                         re-resolve with the theme and the user's Windows accent. -->
+                    <!-- Tab-bar actions stay flat at rest. Hover and press reveal a small
+                         surface; checked toggles use an accent glyph without a persistent
+                         box. Theme-local aliases keep those states consistent in both themes. -->
                     <ResourceDictionary>
                         <ResourceDictionary.ThemeDictionaries>
                             <ResourceDictionary x:Key="Default">
+                                <SolidColorBrush x:Key="TabActionButtonRestBrush" Color="Transparent" />
+                                <SolidColorBrush x:Key="TabActionButtonHoverBrush" Color="#1FFFFFFF" />
+                                <SolidColorBrush x:Key="TabActionButtonPressedBrush" Color="#2AFFFFFF" />
                                 <StaticResource x:Key="ToggleButtonForegroundChecked" ResourceKey="AccentTextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundCheckedPointerOver" ResourceKey="AccentTextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundCheckedPressed" ResourceKey="AccentTextFillColorSecondaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundPressed" ResourceKey="AccentTextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="AccentTextFillColorPrimaryBrush" />
-                                <StaticResource x:Key="ToggleButtonBackgroundChecked" ResourceKey="ToggleButtonBackground" />
-                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPointerOver" ResourceKey="ToggleButtonBackgroundPointerOver" />
-                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPressed" ResourceKey="ToggleButtonBackgroundPressed" />
-                                <StaticResource x:Key="ToggleButtonBorderBrushChecked" ResourceKey="ToggleButtonBorderBrush" />
-                                <StaticResource x:Key="ToggleButtonBorderBrushCheckedPointerOver" ResourceKey="ToggleButtonBorderBrushPointerOver" />
-                                <StaticResource x:Key="ToggleButtonBorderBrushCheckedPressed" ResourceKey="ToggleButtonBorderBrushPressed" />
+                                <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="TabActionButtonHoverBrush" />
+                                <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="TabActionButtonPressedBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundPointerOver" ResourceKey="TabActionButtonHoverBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundPressed" ResourceKey="TabActionButtonPressedBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundChecked" ResourceKey="TabActionButtonRestBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPointerOver" ResourceKey="TabActionButtonHoverBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPressed" ResourceKey="TabActionButtonPressedBrush" />
                             </ResourceDictionary>
                             <ResourceDictionary x:Key="Light">
+                                <SolidColorBrush x:Key="TabActionButtonRestBrush" Color="Transparent" />
+                                <SolidColorBrush x:Key="TabActionButtonHoverBrush" Color="#14000000" />
+                                <SolidColorBrush x:Key="TabActionButtonPressedBrush" Color="#22000000" />
                                 <StaticResource x:Key="ToggleButtonForegroundChecked" ResourceKey="AccentTextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundCheckedPointerOver" ResourceKey="AccentTextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundCheckedPressed" ResourceKey="AccentTextFillColorSecondaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundPressed" ResourceKey="AccentTextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="AccentTextFillColorPrimaryBrush" />
-                                <StaticResource x:Key="ToggleButtonBackgroundChecked" ResourceKey="ToggleButtonBackground" />
-                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPointerOver" ResourceKey="ToggleButtonBackgroundPointerOver" />
-                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPressed" ResourceKey="ToggleButtonBackgroundPressed" />
-                                <StaticResource x:Key="ToggleButtonBorderBrushChecked" ResourceKey="ToggleButtonBorderBrush" />
-                                <StaticResource x:Key="ToggleButtonBorderBrushCheckedPointerOver" ResourceKey="ToggleButtonBorderBrushPointerOver" />
-                                <StaticResource x:Key="ToggleButtonBorderBrushCheckedPressed" ResourceKey="ToggleButtonBorderBrushPressed" />
+                                <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="TabActionButtonHoverBrush" />
+                                <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="TabActionButtonPressedBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundPointerOver" ResourceKey="TabActionButtonHoverBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundPressed" ResourceKey="TabActionButtonPressedBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundChecked" ResourceKey="TabActionButtonRestBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPointerOver" ResourceKey="TabActionButtonHoverBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPressed" ResourceKey="TabActionButtonPressedBrush" />
                             </ResourceDictionary>
                         </ResourceDictionary.ThemeDictionaries>
+                        <Style TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                            <Setter Property="Background" Value="Transparent" />
+                            <Setter Property="BorderBrush" Value="Transparent" />
+                            <Setter Property="BorderThickness" Value="0" />
+                        </Style>
+                        <Style TargetType="ToggleButton" BasedOn="{StaticResource DefaultToggleButtonStyle}">
+                            <Setter Property="Background" Value="Transparent" />
+                            <Setter Property="BorderBrush" Value="Transparent" />
+                            <Setter Property="BorderThickness" Value="0" />
+                        </Style>
                     </ResourceDictionary>
                 </Grid.Resources>
                 <StackPanel
                     Orientation="Horizontal"
                     Spacing="6"
+                    Margin="0,0,6,0"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">
                     <ToggleButton
@@ -448,14 +465,14 @@
                                 x:Name="RecordStartIcon"
                                 Width="10"
                                 Height="10"
-                                Fill="#E74856" />
+                                Fill="{Binding Foreground, ElementName=RecordButton}" />
                             <Rectangle
                                 x:Name="RecordStopIcon"
                                 Width="10"
                                 Height="10"
                                 RadiusX="1"
                                 RadiusY="1"
-                                Fill="#E74856"
+                                Fill="{Binding Foreground, ElementName=RecordButton}"
                                 Visibility="Collapsed" />
                         </Grid>
                     </ToggleButton>

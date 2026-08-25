@@ -328,6 +328,7 @@ test("the alternate buffer hides the panel along with the strip", () => {
   addon._term = { rows: 20, buffer: { active: { type: "alternate", length: 100, viewportY: 0 } } };
   addon._strip = { clientHeight: 100, style: {}, dataset: {} };
   addon._canvas = { width: 0, height: 0, getContext: () => context };
+  addon._thumb = { style: {} };
   addon._cmdPanel = { style: {} };
   addon._cmdPanelOpen = true;
 
@@ -377,7 +378,7 @@ test("the native Show commands button reaches the page panel through the tab vie
   assert.match(groupCode, /ShowCommandsButton\.IsEnabled = tab is not null && !tab\.IsLocked/);
 });
 
-test("an active toggle shows an accent icon on a native background, tracked from the page", () => {
+test("an active toggle keeps flat chrome and shows an accent icon", () => {
   const control = fs.readFileSync(
     path.join(__dirname, "..", "src", "Terminal", "TerminalControl.cs"), "utf8");
   const tabView = fs.readFileSync(
@@ -393,13 +394,15 @@ test("an active toggle shows an accent icon on a native background, tracked from
   assert.match(groupCode, /CommandsPanelOpenChanged \+= ActionButtonView_StateChanged/);
   assert.match(groupCode, /ShowCommandsButton\.IsChecked = commandsOpen/);
 
-  // Checked state recolors the glyph with the theme-aware accent; backgrounds and
-  // borders alias back to the native rest/hover/pressed brushes.
+  // Resting buttons and checked toggles are flat. Hover and press reveal the
+  // theme-specific surface, while checked state recolors the glyph.
   const actions = groupXaml.match(/x:Name="TabStripActions"[\s\S]*?<\/Grid>\r?\n\r?\n        <Grid x:Name="TerminalHost"/)?.[0]
     ?? groupXaml.match(/x:Name="TabStripActions"[\s\S]*$/)?.[0] ?? "";
   assert.match(actions, /x:Key="ToggleButtonForegroundChecked" ResourceKey="AccentTextFillColorPrimaryBrush"/);
-  assert.match(actions, /x:Key="ToggleButtonBackgroundChecked" ResourceKey="ToggleButtonBackground"/);
-  assert.match(actions, /x:Key="ToggleButtonBorderBrushChecked" ResourceKey="ToggleButtonBorderBrush"/);
+  assert.match(actions, /x:Key="ToggleButtonBackgroundChecked" ResourceKey="TabActionButtonRestBrush"/);
+  assert.match(actions, /x:Key="ToggleButtonBackgroundCheckedPointerOver" ResourceKey="TabActionButtonHoverBrush"/);
+  assert.match(actions, /<Style TargetType="Button"[\s\S]*?BorderThickness" Value="0"/);
+  assert.match(actions, /<Style TargetType="ToggleButton"[\s\S]*?BorderThickness" Value="0"/);
   assert.match(actions, /x:Key="ButtonForegroundPressed" ResourceKey="AccentTextFillColorPrimaryBrush"/);
   // Both theme dictionaries carry the aliases so a runtime theme swap re-resolves them.
   assert.equal((actions.match(/x:Key="ToggleButtonForegroundChecked"/g) || []).length, 2);

@@ -331,7 +331,8 @@ public sealed partial class TabGroupView : UserControl
     {
         if (e.PropertyName == nameof(TabViewModel.View))
             ObserveFilePaneButtonTab();
-        else if (e.PropertyName is nameof(TabViewModel.Session) or nameof(TabViewModel.IsLocked) or nameof(TabViewModel.State))
+        else if (e.PropertyName is nameof(TabViewModel.Session) or nameof(TabViewModel.IsLocked)
+                 or nameof(TabViewModel.State) or nameof(TabViewModel.IsGroupFocused))
             UpdateTabActionButtons();
     }
 
@@ -341,6 +342,7 @@ public sealed partial class TabGroupView : UserControl
     {
         // An empty group has nothing the buttons could act on: hide the whole cluster.
         TabStripActions.Visibility = Group.Tabs.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        TabStripActions.Opacity = Group.SelectedTab?.IsGroupFocused == false ? 0.55 : 1.0;
 
         var tab = Group.SelectedTab;
         var isOpen = tab?.View is Terminal.TerminalTabView { IsFilePaneOpen: true };

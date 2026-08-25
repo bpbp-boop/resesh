@@ -6,6 +6,9 @@ const test = require("node:test");
 const source = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "MainWindow.xaml.cs"),
   "utf8");
+const terminalViewSource = fs.readFileSync(
+  path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"),
+  "utf8");
 const appResources = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "App.xaml"),
   "utf8");
@@ -20,9 +23,23 @@ test("session splitters keep a visible one-pixel divider under a transparent hit
   assert.match(layoutBuilder, /Background = new Microsoft\.UI\.Xaml\.Media\.SolidColorBrush\(_themePalette\.Divider\)/);
   assert.match(layoutBuilder, /Width = isColumns \? 1 : double\.NaN/);
   assert.match(layoutBuilder, /Height = isColumns \? double\.NaN : 1/);
+  assert.doesNotMatch(layoutBuilder, /GridLength\(7\)/);
+  assert.equal((layoutBuilder.match(/new GridLength\(1\) \}/g) ?? []).length, 2);
   assert.match(layoutBuilder,
     /Background = new Microsoft\.UI\.Xaml\.Media\.SolidColorBrush\(Microsoft\.UI\.Colors\.Transparent\)/);
   assert.doesNotMatch(layoutBuilder, /Background = .*Resources\["SessionSurfaceBrush"\]/);
+});
+
+test("pane divider stays one pixel wide while hover color changes", () => {
+  const groupActivation = source.match(
+    /private void SetSplitterActive[\s\S]*?\n    }\r?\n\r?\n    private Microsoft\.UI\.Xaml\.Media\.Brush SplitterBrush/)?.[0] ?? "";
+  const filePaneActivation = terminalViewSource.match(
+    /private void SetPaneSplitterActive[\s\S]*?\n    }\r?\n\r?\n    private void ApplyPaneSplitterTheme/)?.[0] ?? "";
+
+  assert.match(groupActivation, /line\.Background = SplitterBrush\(active\)/);
+  assert.doesNotMatch(groupActivation, /line\.(?:Width|Height)\s*=/);
+  assert.match(filePaneActivation, /ApplyPaneSplitterTheme\(\)/);
+  assert.doesNotMatch(filePaneActivation, /_paneSplitterLine\.Width\s*=/);
 });
 
 test("dark session divider is lighter than the scrollbar edge", () => {
