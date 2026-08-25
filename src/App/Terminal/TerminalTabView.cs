@@ -76,6 +76,9 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// <summary>Ctrl+Shift+P inside the terminal (open the app command palette).</summary>
     public event Action? CommandPaletteRequested;
 
+    /// <summary>Ctrl+Shift+K inside the terminal (focus the app quick-connect box).</summary>
+    public event Action? QuickConnectRequested;
+
     /// <summary>Raised (UI thread) when a connect to a session with no icon set identified
     /// the OS/vendor from the server banner. The window decides whether to persist it.</summary>
     public event Action<string>? IconSuggested;
@@ -189,6 +192,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.NewLocalTabRequested += () => DispatcherQueue.TryEnqueue(() => NewLocalTabRequested?.Invoke());
         _terminal.CommandPaletteRequested += () =>
             DispatcherQueue.TryEnqueue(() => CommandPaletteRequested?.Invoke());
+        _terminal.QuickConnectRequested += () =>
+            DispatcherQueue.TryEnqueue(() => QuickConnectRequested?.Invoke());
 
         _agent = new AgentTracker(Session.Agent);
         WireAgentSignals();

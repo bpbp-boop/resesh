@@ -180,9 +180,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             if (ViewModel.ActiveTab is { } tab)
                 ToggleFilePane(tab);
         };
-        // Ctrl+K: focus the quick connect box (only while a XAML control has focus;
-        // keystrokes inside the terminal's WebView2 never reach these accelerators).
-        var quickConnect = new KeyboardAccelerator { Key = VirtualKey.K, Modifiers = VirtualKeyModifiers.Control };
+        // Ctrl+Shift+K: focus the quick-connect box (also forwarded by the xterm page).
+        var quickConnect = new KeyboardAccelerator
+        {
+            Key = VirtualKey.K,
+            Modifiers = VirtualKeyModifiers.Control | VirtualKeyModifiers.Shift,
+        };
         quickConnect.Invoked += (_, e) =>
         {
             e.Handled = true;
@@ -325,7 +328,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         Add("Application", "Open Default Local Terminal", "new session shell tab",
             Sync(OpenDefaultLocalProfile), "Ctrl+Shift+T");
         Add("Application", "Quick Connect", "ssh search sessions connect",
-            Sync(() => QuickConnectBox.Focus(FocusState.Programmatic)), "Ctrl+K", keepActionFocus: true);
+            Sync(() => QuickConnectBox.Focus(FocusState.Programmatic)), "Ctrl+Shift+K", keepActionFocus: true);
         Add("View", "Filter Sessions", "search tree",
             Sync(() =>
             {
@@ -871,6 +874,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         view.CloseRequested += () => _ = RequestCloseTabAsync(tab);
         view.NewLocalTabRequested += OpenDefaultLocalProfile;
         view.CommandPaletteRequested += () => ShowCommandPalette(openedFromTerminal: true);
+        view.QuickConnectRequested += () => QuickConnectBox.Focus(FocusState.Programmatic);
         view.UnlockRequested += () => _ = HandleUnlockAsync(tab, view);
         view.IconSuggested += key =>
         {

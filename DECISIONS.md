@@ -310,9 +310,10 @@ keyboard-interactive fallback.
   counts as a target with the "ssh " prefix so single words keep meaning "search".
 - Verified live (screenshots + synthetic input): drag moves the window, passthrough clicks
   focus the quick connect box, saved + ad-hoc suggestions render, Enter connected
-  local-test end-to-end, pin toggles WS_EX_TOPMOST both ways, File menu opens. Not yet
-  human-verified: Ctrl+K (accelerator only reaches XAML focus, not the terminal WebView2),
-  MenuBar Alt-key navigation, light theme rendering.
+  local-test end-to-end, pin toggles WS_EX_TOPMOST both ways, File menu opens. At the time,
+  the original Ctrl+K accelerator only reached XAML focus, not the terminal WebView2; it was
+  later replaced by Ctrl+Shift+K with explicit terminal-page forwarding. MenuBar Alt-key
+  navigation and light theme rendering were not yet human-verified.
 - Post-ship fixes from first real use: (1) drag region died right after Split Right and
   came back "after a while" - the fallback caption region is disturbed transiently when the
   second group's WebView2 enters the tree. Fix: stop relying on the fallback; set an
