@@ -28,6 +28,9 @@ public sealed record AppSettings
     public string SessionsRailTab { get; init; } = "sessions";
 
 
+    /// <summary>Restore the clean-exit tab-group layout when the app next launches.</summary>
+    public bool ReopenLastLayoutAtStartup { get; init; }
+
     /// <summary>The local profile "+ Session" / Ctrl+Shift+T opens; null = highest-priority
     /// discovered shell (see LocalShellDiscovery.DefaultProfile).</summary>
     public Guid? DefaultLocalProfileId { get; init; }

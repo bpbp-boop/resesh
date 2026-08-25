@@ -64,6 +64,7 @@ dotnet test tests/Core.Tests
 | What | Where |
 | --- | --- |
 | Sessions + folders | `%APPDATA%\Resesh\sessions.json` (atomic writes, one `.bak` rotation) |
+| Workspaces + clean-exit layout | `%APPDATA%\Resesh\workspaces.json` (atomic writes, one `.bak` rotation) |
 | Secrets (passwords, key passphrases) | Windows Credential Manager, `Resesh:{session-guid}` |
 | Accepted host keys | `%APPDATA%\Resesh\known_hosts.json` |
 | Exported backups | User-selected `*.reseshbackup` file |

@@ -16,6 +16,7 @@ public sealed class SettingsStoreTests
                 WindowPlacement = new WindowPlacement(120, 80, 1440, 900, IsMaximized: true),
                 SessionsPaneOpen = false,
                 SessionsRailTab = "recordings",
+                ReopenLastLayoutAtStartup = true,
             });
 
             var loaded = new SettingsStore(path);
@@ -24,6 +25,7 @@ public sealed class SettingsStoreTests
             Assert.Equal(new WindowPlacement(120, 80, 1440, 900, IsMaximized: true), loaded.Current.WindowPlacement);
             Assert.False(loaded.Current.SessionsPaneOpen);
             Assert.Equal("recordings", loaded.Current.SessionsRailTab);
+            Assert.True(loaded.Current.ReopenLastLayoutAtStartup);
         }
         finally
         {

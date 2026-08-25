@@ -15,6 +15,7 @@ public enum GlobalSettingsTarget
     Scrollback,
     CopyOnSelect,
     RightClickPaste,
+    ReopenLastLayout,
     Recording,
     RecordingDirectory,
     AlwaysRecord,
@@ -79,6 +80,11 @@ public static class GlobalSettingsDialog
         };
         var copyOnSelect = new ToggleSwitch { Header = "Copy selected text", IsOn = current.CopyOnSelect };
         var rightClickPaste = new ToggleSwitch { Header = "Paste with right-click", IsOn = current.RightClickPaste };
+        var reopenLastLayout = new ToggleSwitch
+        {
+            Header = WrappingHeader("Reopen last layout at startup"),
+            IsOn = current.ReopenLastLayoutAtStartup,
+        };
 
         var recordingDirectory = new TextBox
         {
@@ -163,6 +169,10 @@ public static class GlobalSettingsDialog
             {
                 Description("These settings apply throughout Resesh. A saved session can override supported terminal and highlighting defaults."),
                 generalColumns,
+                SectionCard(
+                    "Startup",
+                    "The current ordered tab groups are saved on clean exit. Reopening adopts each saved session into its previous group.",
+                    reopenLastLayout),
             },
         };
 
@@ -270,6 +280,7 @@ public static class GlobalSettingsDialog
             GlobalSettingsTarget.Scrollback => scrollback,
             GlobalSettingsTarget.CopyOnSelect => copyOnSelect,
             GlobalSettingsTarget.RightClickPaste => rightClickPaste,
+            GlobalSettingsTarget.ReopenLastLayout => reopenLastLayout,
             GlobalSettingsTarget.RecordingDirectory => recordingDirectory,
             GlobalSettingsTarget.AlwaysRecord => alwaysRecord,
             GlobalSettingsTarget.RewindMinutes => rewindMinutes,
@@ -346,6 +357,7 @@ public static class GlobalSettingsDialog
             Scrollback = double.IsNaN(scrollback.Value) ? current.Scrollback : (int)scrollback.Value,
             CopyOnSelect = copyOnSelect.IsOn,
             RightClickPaste = rightClickPaste.IsOn,
+            ReopenLastLayoutAtStartup = reopenLastLayout.IsOn,
             AlwaysRecord = alwaysRecord.IsOn,
             RecordingDirectory = string.IsNullOrWhiteSpace(recordingDirectory.Text)
                 ? current.RecordingDirectory

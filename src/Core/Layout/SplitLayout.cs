@@ -35,7 +35,7 @@ public sealed class SplitLayoutBranch<T> : SplitLayoutNode<T> where T : notnull
 {
     private readonly List<SplitLayoutNode<T>> _children;
 
-    internal SplitLayoutBranch(SplitOrientation orientation, IEnumerable<SplitLayoutNode<T>> children)
+    public SplitLayoutBranch(SplitOrientation orientation, IEnumerable<SplitLayoutNode<T>> children)
     {
         Orientation = orientation;
         _children = [.. children];
@@ -55,9 +55,35 @@ public sealed class SplitLayout<T> where T : notnull
     private readonly Dictionary<T, SplitLayoutLeaf<T>> _leaves = [];
 
     public SplitLayout(T initialValue)
+        : this(new SplitLayoutLeaf<T>(initialValue))
     {
-        Root = new SplitLayoutLeaf<T>(initialValue);
-        _leaves.Add(initialValue, (SplitLayoutLeaf<T>)Root);
+    }
+
+    public SplitLayout(SplitLayoutNode<T> root)
+    {
+        Root = root ?? throw new ArgumentNullException(nameof(root));
+        Root.Parent = null;
+        IndexNode(Root);
+    }
+
+    private void IndexNode(SplitLayoutNode<T> node)
+    {
+        if (node is SplitLayoutLeaf<T> leaf)
+        {
+            if (!_leaves.TryAdd(leaf.Value, leaf))
+                throw new ArgumentException("The layout contains duplicate values.", nameof(node));
+            return;
+        }
+
+        if (node is not SplitLayoutBranch<T> branch
+            || !Enum.IsDefined(branch.Orientation)
+            || branch.Children.Count < 2)
+        {
+            throw new ArgumentException("The layout contains an invalid branch.", nameof(node));
+        }
+
+        foreach (var child in branch.Children)
+            IndexNode(child);
     }
 
     public SplitLayoutNode<T> Root { get; private set; }

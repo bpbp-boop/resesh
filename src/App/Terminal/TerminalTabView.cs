@@ -1054,7 +1054,6 @@ public sealed class TerminalTabView : Grid, IDisposable
             return;
         _paneSplitterActive = active;
         ApplyPaneSplitterTheme();
-        _paneSplitterLine.Width = active ? 3 : 1;
     }
 
     private void ApplyPaneSplitterTheme()

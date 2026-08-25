@@ -1,6 +1,7 @@
 using System.Text;
 using System.IO.Compression;
 using Resesh.Core.Backup;
+using Resesh.Core.Layout;
 using Resesh.Core.Credentials;
 using Resesh.Core.Models;
 using Resesh.Core.Ssh;
@@ -169,6 +170,181 @@ public sealed class SessionsBackupTests : IDisposable
         Assert.Equal("SHA256:key-fingerprint", importedKey.Fingerprint);
         Assert.Equal(importedKey.Id, Assert.Single(target.Sessions.Sessions).PrivateKeyId);
         Assert.Equal("key passphrase", target.Credentials.ReadKey(importedKey.Id));
+    }
+
+    [Fact]
+    public void Import_WorkspacesReplaceAndRemapEveryConflictOutcome()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "workspace-source"));
+        var replace = Ssh("Imported replacement", "replace.example", "");
+        var keep = Ssh("Imported kept", "keep.example", "") with { Username = "alice" };
+        var duplicate = Ssh("Imported duplicate", "duplicate.example", "") with { Username = "bob" };
+        var fresh = Ssh("Fresh layout tab", "fresh-layout.example", "");
+        foreach (var session in new[] { replace, keep, duplicate, fresh })
+            source.Sessions.Add(session);
+
+        var targetOnly = Ssh("Target only", "target-only.example", "");
+        var unresolvedId = Guid.NewGuid();
+        var importedWorkspaceStore = new WorkspaceStore(Path.Combine(source.Directory, "workspaces.json"));
+        importedWorkspaceStore.Load();
+        var importedWorkspace = importedWorkspaceStore.SaveAs("Imported workspace", new WorkspaceLayout
+        {
+            Groups =
+            [
+                new WorkspaceGroup
+                {
+                    Tabs =
+                    [
+                        new WorkspaceTabReference { SessionId = unresolvedId },
+                        new WorkspaceTabReference { SessionId = replace.Id, Pinned = true },
+                        new WorkspaceTabReference { SessionId = keep.Id },
+                        new WorkspaceTabReference { SessionId = duplicate.Id, Pinned = true },
+                        new WorkspaceTabReference { SessionId = targetOnly.Id },
+                    ],
+                    ActiveTabIndex = 3,
+                },
+                new WorkspaceGroup
+                {
+                    Tabs = [new WorkspaceTabReference { SessionId = fresh.Id }],
+                    ActiveTabIndex = 0,
+                },
+            ],
+            Layout = new WorkspaceLayoutNode
+            {
+                Orientation = SplitOrientation.Rows,
+                Children =
+                [
+                    new WorkspaceLayoutNode { GroupIndex = 0 },
+                    new WorkspaceLayoutNode { GroupIndex = 1 },
+                ],
+            },
+        });
+        importedWorkspaceStore.SaveLastLayout(new WorkspaceLayout
+        {
+            Groups =
+            [
+                new WorkspaceGroup
+                {
+                    Tabs = [new WorkspaceTabReference { SessionId = duplicate.Id }],
+                    ActiveTabIndex = 0,
+                },
+            ],
+        });
+
+        var backupPath = Path.Combine(_dir.FullName, "workspace-remap.reseshbackup");
+        SessionsBackup.Export(backupPath, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials, new BackupExportOptions());
+        var package = SessionsBackup.Read(backupPath);
+
+        var target = CreateStores(Path.Combine(_dir.FullName, "workspace-target"));
+        target.Sessions.Add(Ssh("Existing replaced", "old-replace.example", "") with { Id = replace.Id });
+        var keptTarget = Ssh("Existing kept", keep.Host, "") with { Username = keep.Username };
+        target.Sessions.Add(keptTarget);
+        var duplicateTarget = Ssh("Existing duplicate endpoint", duplicate.Host, "") with { Username = duplicate.Username };
+        target.Sessions.Add(duplicateTarget);
+        target.Sessions.Add(targetOnly);
+        var oldWorkspaceStore = new WorkspaceStore(Path.Combine(target.Directory, "workspaces.json"));
+        oldWorkspaceStore.Load();
+        oldWorkspaceStore.SaveAs("Must be replaced", new WorkspaceLayout { Groups = [new WorkspaceGroup()] });
+
+        SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>
+            {
+                [replace.Id] = BackupConflictResolution.Replace,
+                [keep.Id] = BackupConflictResolution.Keep,
+                [duplicate.Id] = BackupConflictResolution.Duplicate,
+            });
+
+        var duplicatedSession = Assert.Single(target.Sessions.Sessions, session => session.Name == duplicate.Name);
+        var loaded = new WorkspaceStore(Path.Combine(target.Directory, "workspaces.json"));
+        loaded.Load();
+        var workspace = Assert.Single(loaded.Workspaces);
+        Assert.Equal(importedWorkspace.Id, workspace.Id);
+        Assert.Equal("Imported workspace", workspace.Name);
+        Assert.Equal(
+            [replace.Id, keptTarget.Id, duplicatedSession.Id, targetOnly.Id],
+            workspace.Groups[0].Tabs.Select(tab => tab.SessionId));
+        Assert.Equal([true, false, true, false], workspace.Groups[0].Tabs.Select(tab => tab.Pinned));
+        Assert.Equal(2, workspace.Groups[0].ActiveTabIndex);
+        Assert.Equal(fresh.Id, Assert.Single(workspace.Groups[1].Tabs).SessionId);
+        Assert.Equal(SplitOrientation.Rows, workspace.Layout!.Orientation);
+        Assert.Equal(duplicatedSession.Id, Assert.Single(loaded.LastLayout!.Groups[0].Tabs).SessionId);
+        Assert.True(File.Exists(Path.Combine(target.Directory, "workspaces.json.bak")));
+    }
+
+    [Theory]
+    [InlineData("{ malformed")]
+    [InlineData("{\"workspaces\":[null]}")]
+    [InlineData("{\"workspaces\":[{\"id\":\"11111111-1111-1111-1111-111111111111\",\"name\":\"Bad\",\"groups\":[null]}]}")]
+    [InlineData("{\"workspaces\":[{\"id\":\"11111111-1111-1111-1111-111111111111\",\"name\":\"Bad\",\"groups\":[{\"tabs\":[null],\"activeTabIndex\":0}]}]}")]
+    public void Import_InvalidWorkspaceStructureFailsBeforeMutationAndDoesNotOverwrite(string payload)
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "malformed-workspace-source"));
+        var imported = Ssh("Would import", "would-import.example", "");
+        source.Sessions.Add(imported);
+        var package = new BackupPackage
+        {
+            Manifest = new BackupManifest { SchemaVersion = SessionsBackup.CurrentSchemaVersion },
+            Sessions = [imported],
+            Folders = [],
+            LocalFolders = [],
+            Settings = new AppSettings(),
+            KnownHosts = new Dictionary<string, KnownHostEntry>(),
+            Highlights = new HighlightBackupData(),
+            Icons = new Dictionary<string, byte[]>(),
+            Secrets = new Dictionary<Guid, string>(),
+            SshKeys = [],
+            KeySecrets = new Dictionary<Guid, string>(),
+            Workspaces = Encoding.UTF8.GetBytes(payload),
+        };
+        var target = CreateStores(Path.Combine(_dir.FullName, "malformed-workspace-target"));
+        var workspacePath = Path.Combine(target.Directory, "workspaces.json");
+        var workspaceStore = new WorkspaceStore(workspacePath);
+        workspaceStore.Load();
+        workspaceStore.SaveAs("Existing", new WorkspaceLayout { Groups = [new WorkspaceGroup()] });
+        var before = File.ReadAllBytes(workspacePath);
+
+        Assert.Throws<InvalidDataException>(() => SessionsBackup.Import(
+            package, target.Directory, target.Sessions, target.Settings, target.KnownHosts,
+            target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>()));
+
+        Assert.Empty(target.Sessions.Sessions);
+        Assert.Equal(before, File.ReadAllBytes(workspacePath));
+    }
+
+    [Fact]
+    public void Import_AbsentWorkspacePayloadPreservesExistingFile()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "no-workspace-source"));
+        var package = new BackupPackage
+        {
+            Manifest = new BackupManifest { SchemaVersion = SessionsBackup.CurrentSchemaVersion },
+            Sessions = [],
+            Folders = [],
+            LocalFolders = [],
+            Settings = new AppSettings(),
+            KnownHosts = new Dictionary<string, KnownHostEntry>(),
+            Highlights = new HighlightBackupData(),
+            Icons = new Dictionary<string, byte[]>(),
+            Secrets = new Dictionary<Guid, string>(),
+            SshKeys = [],
+            KeySecrets = new Dictionary<Guid, string>(),
+            Workspaces = null,
+        };
+        var target = CreateStores(Path.Combine(_dir.FullName, "no-workspace-target"));
+        var workspacePath = Path.Combine(target.Directory, "workspaces.json");
+        var workspaceStore = new WorkspaceStore(workspacePath);
+        workspaceStore.Load();
+        workspaceStore.SaveAs("Existing", new WorkspaceLayout { Groups = [new WorkspaceGroup()] });
+        var before = File.ReadAllBytes(workspacePath);
+
+        SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>());
+
+        Assert.Equal(before, File.ReadAllBytes(workspacePath));
     }
 
     public void Dispose() => _dir.Delete(recursive: true);

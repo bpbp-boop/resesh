@@ -32,6 +32,9 @@ and the git history.
 - **Recording & rewind** — bounded in-memory rewind with xterm state keyframes, paired
   asciicast v2 and timestamped plain logs rendered from terminal output, plus `.cast` playback with
   pause, speed, and seek controls.
+- **Workspaces & layout restore** — named ordered tab-group layouts with pinned and active
+  tab state, replace or additive opening that adopts live connections, clean-exit startup
+  restore, and conflict-aware workspace remapping through backup import.
 
 ---
 
@@ -81,35 +84,6 @@ New auth option `Agent`: talk to the Windows OpenSSH agent named pipe
 (`\\.\pipe\openssh-ssh-agent`, SSH agent protocol) and Pageant's shared-memory protocol.
 List agent keys in the session editor, try-all or pin a specific key. Removes the need to
 store key passphrases in Credential Manager.
-
----
-
-## Workspaces (saved layouts)
-
-The tmux-resurrect/tmuxinator idea, GUI-native: a **workspace** is a named arrangement of
-open sessions — which sessions, in which tab groups, in what order, which tabs are pinned,
-and which tab is active — reopened with one click ("morning: jump box, both app servers,
-the DB, side by side").
-
-**Model** (`workspaces.json` in `%APPDATA%\Resesh\`, same atomic-write/`.bak` treatment):
-- `Workspace`: id, name, ordered list of groups; each group is an ordered list of
-  `{ sessionId, pinned }` plus the active-tab index. References sessions by id — a
-  workspace is a *layout*, never a copy of session data. Deleted sessions are skipped on
-  open with a note, not an error.
-- Deliberately mirrors what `MainViewModel.Groups` / `TabViewModel` already hold, so
-  capture is a straight serialization of live state ("Save current layout as…").
-
-**UI:**
-- "Save current layout as workspace…" + a workspaces section in the tree (or a title-bar
-  dropdown) listing them; click to open, right-click to rename/update/delete.
-- **Open semantics:** default replaces the current layout (prompting if tabs are open);
-  modifier/context option to open *additively* into the current window. Sessions already
-  connected aren't reconnected — tabs are adopted into position.
-- **Restore on launch:** "Reopen last layout at startup" setting — the always-on companion
-  feature (continuum to resurrect). Persist the live layout on clean exit; pairs especially
-  well with tmux-persistent sessions, which reattach instantly.
-
-Include workspaces in the export archive (the schema already reserves them).
 
 ---
 
@@ -206,14 +180,11 @@ have `synchronize-panes` if they truly want it.
 | 1 | **GSSAPI spike** (parallel with anything) | S | **High — do early** |
 | 2 | Connectivity (tunnels → agent → jump hosts) | M–L | Medium |
 | 3 | Telnet & serial consoles (telnet → serial) | S–M | Low |
-| 4 | Workspaces (saved layouts) | M | Low |
-| 5 | GSSAPI productization (path chosen by spike) | M | Depends on spike |
-| 6 | Backlog picks | — | — |
+| 4 | GSSAPI productization (path chosen by spike) | M | Depends on spike |
+| 5 | Backlog picks | — | — |
 
 Within connectivity, tunnels come first (pure SSH.NET), then agent auth, then jump hosts
 (which build on the tunnel channel code). Telnet/serial rides directly behind connectivity:
 it reuses the backend contract as-is, telnet before serial (no new dependency vs. port
 enumeration + device-arrival plumbing), and together they close the console-cable objection
-cheaply. Workspaces sits late so the split model has settled, but it's independent enough
-to pull forward if it itches. GSSAPI ships last only because its spike must settle the
-approach first.
+cheaply. GSSAPI ships last only because its spike must settle the approach first.

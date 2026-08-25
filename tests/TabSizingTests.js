@@ -63,6 +63,7 @@ test("each tab bar reserves the measured width of every action button", () => {
   assert.match(strip, /Grid\.Column="1"[\s\S]*?x:Name="RecordButton"/);
   assert.match(strip, /x:Name="RecordButton"[\s\S]*?Width="30"[\s\S]*?Height="30"/);
   assert.match(strip, /x:Name="RewindButton"[\s\S]*?Width="30"[\s\S]*?Height="30"/);
+  assert.match(strip, /<StackPanel[\s\S]*?Margin="0,0,6,0"[\s\S]*?x:Name="RecordButton"/);
   assert.match(xaml, /x:Name="RecordStartIcon"[\s\S]*?x:Name="RecordStopIcon"/);
   assert.match(code, /RecordStartIcon\.Visibility = recording \? Visibility\.Collapsed : Visibility\.Visible/);
   assert.match(code, /RecordStopIcon\.Visibility = recording \? Visibility\.Visible : Visibility\.Collapsed/);
@@ -78,6 +79,20 @@ test("each tab bar reserves the measured width of every action button", () => {
   assert.match(strip, /x:Name="FilePaneToggle"[\s\S]*?Width="30"[\s\S]*?Height="30"[\s\S]*?Padding="0"/);
   assert.doesNotMatch(strip, /x:Name="FilePaneToggle"[\s\S]*?Background="Transparent"/);
   assert.match(strip, /Click="FilePaneToggle_Click"/);
+});
+
+test("record controls follow the button foreground instead of using warning red", () => {
+  const recordButton = xaml.match(/x:Name="RecordButton"[\s\S]*?<\/ToggleButton>/)?.[0] ?? "";
++
+  assert.equal(
+    recordButton.match(/Fill="\{Binding Foreground, ElementName=RecordButton\}"/g)?.length,
+    2);
+  assert.doesNotMatch(recordButton, /#E74856/);
+});
++
+test("action buttons dim with their inactive tab group", () => {
+  assert.match(code, /TabStripActions\.Opacity = Group\.SelectedTab\?\.IsGroupFocused == false \? 0\.55 : 1\.0/);
+  assert.match(code, /nameof\(TabViewModel\.IsGroupFocused\)[\s\S]{0,80}?UpdateTabActionButtons\(\)/);
 });
 
 test("the current-folder button is connected-only and uses the host action", () => {

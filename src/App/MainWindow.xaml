@@ -163,6 +163,7 @@
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Exit" Click="Exit_Click" />
                 </MenuBarItem>
+                <MenuBarItem x:Name="WorkspacesMenu" Title="Workspaces" />
                 <MenuBarItem Title="View">
                     <ToggleMenuFlyoutItem
                         x:Name="SessionsPaneMenuItem"
@@ -287,6 +288,19 @@
             </StackPanel>
         </Grid>
 
+        <InfoBar
+            x:Name="WorkspaceNotice"
+            Grid.Row="1"
+            Margin="12"
+            MaxWidth="620"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top"
+            Canvas.ZIndex="100"
+            IsClosable="True"
+            IsOpen="False"
+            Severity="Informational"
+            Title="Workspace note" />
+
         <!-- Main area: tree | splitter | tabs -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
@@ -346,6 +360,20 @@
                                 AutomationProperties.Name="Sessions">
                                 <NavigationViewItem.Icon>
                                     <FontIcon Glyph="&#xE8B7;" FontSize="16" />
+                                </NavigationViewItem.Icon>
+                            </NavigationViewItem>
+                            <NavigationViewItem
+                                x:Name="WorkspacesRailItem"
+                                Content="Workspaces"
+                                Tag="workspaces"
+                                ToolTipService.ToolTip="Workspaces"
+                                AutomationProperties.Name="Workspaces">
+                                <NavigationViewItem.Icon>
+                                    <ImageIcon>
+                                        <ImageIcon.Source>
+                                            <SvgImageSource UriSource="ms-appx:///Assets/workspaces.svg" />
+                                        </ImageIcon.Source>
+                                    </ImageIcon>
                                 </NavigationViewItem.Icon>
                             </NavigationViewItem>
                             <NavigationViewItem
@@ -568,6 +596,111 @@
                         TextAlignment="Center" />
                     <Button Content="Import from SecureCRT…" Click="Import_Click" HorizontalAlignment="Center" />
                 </StackPanel>
+            </Grid>
+
+            <Grid
+                x:Name="WorkspacesPane"
+                Grid.Column="1"
+                RowDefinitions="Auto,*"
+                Visibility="Collapsed">
+                <Grid
+                    Grid.Row="0"
+                    Height="44"
+                    ColumnDefinitions="*,Auto"
+                    Padding="12,7,6,7"
+                    Background="{StaticResource SessionShellBrush}">
+                    <TextBlock
+                        Text="Workspaces"
+                        FontWeight="SemiBold"
+                        VerticalAlignment="Center"
+                        Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                    <Button
+                        Grid.Column="1"
+                        Width="30"
+                        Height="30"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Click="SaveWorkspace_Click"
+                        ToolTipService.ToolTip="Save current layout as a workspace"
+                        AutomationProperties.Name="Save current layout as a workspace">
+                        <FontIcon Glyph="&#xE710;" FontSize="13" />
+                    </Button>
+                </Grid>
+                <ListView
+                    x:Name="WorkspaceList"
+                    Grid.Row="1"
+                    ItemsSource="{x:Bind Workspaces}"
+                    SelectionMode="None"
+                    IsItemClickEnabled="True"
+                    ItemClick="WorkspaceList_ItemClick">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <Grid ColumnDefinitions="20,*,Auto" ColumnSpacing="8" Padding="4,5">
+                                <controls:WorkspaceLayoutIcon
+                                    Layout="{Binding Layout}"
+                                    Stroke="{StaticResource SessionTreeForegroundBrush}"
+                                    VerticalAlignment="Center" />
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock
+                                        Text="{Binding Name}"
+                                        TextTrimming="CharacterEllipsis"
+                                        Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                                    <TextBlock
+                                        Text="{Binding LayoutSummary}"
+                                        FontSize="11"
+                                        Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                                </StackPanel>
+                                <Button
+                                    Grid.Column="2"
+                                    Width="30"
+                                    Height="30"
+                                    Padding="0"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    ToolTipService.ToolTip="Workspace actions"
+                                    AutomationProperties.Name="Workspace actions">
+                                    <FontIcon Glyph="&#xE712;" FontSize="13" />
+                                    <Button.Flyout>
+                                        <MenuFlyout>
+                                            <MenuFlyoutItem
+                                                Text="Open"
+                                                CommandParameter="{Binding}"
+                                                Click="OpenWorkspaceMenu_Click" />
+                                            <MenuFlyoutItem
+                                                Text="Open additively"
+                                                CommandParameter="{Binding}"
+                                                Click="OpenWorkspaceAdditivelyMenu_Click" />
+                                            <MenuFlyoutSeparator />
+                                            <MenuFlyoutItem
+                                                Text="Update from current layout…"
+                                                CommandParameter="{Binding}"
+                                                Click="UpdateWorkspaceMenu_Click" />
+                                            <MenuFlyoutItem
+                                                Text="Rename…"
+                                                CommandParameter="{Binding}"
+                                                Click="RenameWorkspaceMenu_Click" />
+                                            <MenuFlyoutItem
+                                                Text="Delete…"
+                                                CommandParameter="{Binding}"
+                                                Click="DeleteWorkspaceMenu_Click" />
+                                        </MenuFlyout>
+                                    </Button.Flyout>
+                                </Button>
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+                <TextBlock
+                    x:Name="NoWorkspacesState"
+                    Grid.Row="1"
+                    Margin="20"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Text="Save the current layout to add a workspace."
+                    TextWrapping="Wrap"
+                    TextAlignment="Center"
+                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
             </Grid>
 
             <Grid

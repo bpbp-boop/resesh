@@ -85,6 +85,9 @@
   var SNAP_PX = 8;          // click snaps to a mark within this many CSS px
   var DRAG_THRESHOLD = 3;   // pointer movement below this is a click, not a drag
   var FLASH_MS = 700;
+  // Match VS Code's scrollbar timing: quick reveal, slow fade after pointer exit.
+  var THUMB_SHOW_MS = 100;
+  var THUMB_HIDE_MS = 800;
 
   var HL_MAX_RULES = 32;    // bitmask width; overview rules beyond this are ignored
   var HL_SLICE = 2048;      // indexer lines per pass when no idle deadline is available
@@ -185,6 +188,7 @@
     this._strip = null;
     this._canvas = null;
     this._tooltip = null;
+    this._thumb = null;
     this._resizeObserver = null;
 
     this._colors = {
@@ -308,6 +312,11 @@
     var canvas = document.createElement("canvas");
     canvas.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;";
     strip.appendChild(canvas);
+    var thumb = document.createElement("div");
+    thumb.className = "scroll-ruler-thumb";
+    thumb.style.cssText = "position:absolute;left:0;width:100%;pointer-events:none;" +
+      "opacity:0;transition:opacity " + THUMB_HIDE_MS + "ms linear;";
+    strip.appendChild(thumb);
     // xterm's element is only as tall as its whole character rows, which can leave
     // unused pixels below it after fitting. Mount the ruler in the full-height host
     // so the scrollbar reaches the actual bottom edge of the content pane.
@@ -315,6 +324,7 @@
     host.appendChild(strip);
     this._strip = strip;
     this._canvas = canvas;
+    this._thumb = thumb;
 
     var tooltip = document.createElement("div");
     tooltip.className = "scroll-ruler-tooltip";
@@ -415,6 +425,7 @@
     strip.addEventListener("pointerenter", function () {
       self._isPointerOver = true;
       self._cancelTooltipHide();
+      self._syncThumbVisibility();
       self._queuePaint();
     });
     strip.addEventListener("pointerdown", function (e) { self._onPointerDown(e); });
@@ -429,6 +440,7 @@
       // Grace delay instead of an instant hide: the pointer crosses a 6px gap on
       // its way from the strip to an interactive tooltip's action buttons.
       self._scheduleTooltipHide();
+      self._syncThumbVisibility();
       self._queuePaint();
     });
     strip.addEventListener("wheel", function (e) {
@@ -447,6 +459,7 @@
     this._resizeObserver.observe(strip);
 
     this._queuePaint();
+    this._syncThumbVisibility();
   };
 
   RulerAddon.prototype.dispose = function () {
@@ -478,6 +491,7 @@
     if (this._strip && this._strip.parentElement) this._strip.parentElement.removeChild(this._strip);
     if (this._tooltip && this._tooltip.parentElement) this._tooltip.parentElement.removeChild(this._tooltip);
     if (this._cmdPanel && this._cmdPanel.parentElement) this._cmdPanel.parentElement.removeChild(this._cmdPanel);
+    this._thumb = null;
     this._cmdPanel = null;
     this._cmdPanelList = null;
     this._cmdPanelCount = null;
@@ -494,12 +508,12 @@
     this._queuePanelRefresh(); // open-panel row dots repaint in the new palette
   };
 
-  /** Feed the ruler palette to the CSS of the interactive chrome (toggle, panel,
-   * tooltip buttons) via custom properties on the host, so :hover rules can exist. */
+  /** Feed the ruler palette to its DOM chrome. */
   RulerAddon.prototype._applyChromeTheme = function () {
+    var c = this._colors;
+    if (this._thumb) this._thumb.style.backgroundColor = c.thumb;
     var hostEl = this._strip && this._strip.parentElement;
     if (!hostEl || !hostEl.style || !hostEl.style.setProperty) return;
-    var c = this._colors;
     hostEl.style.setProperty("--sr-bg", c.tooltipBg);
     hostEl.style.setProperty("--sr-fg", c.tooltipFg);
     hostEl.style.setProperty("--sr-muted", c.tooltipMuted);
@@ -1634,6 +1648,7 @@
     e.preventDefault(); // keep focus in the terminal
     this._hideTooltip();
     this._drag = { pointerId: e.pointerId, startY: e.offsetY, moved: false };
+    this._syncThumbVisibility();
     try { this._strip.setPointerCapture(e.pointerId); } catch (err) {}
   };
 
@@ -1672,6 +1687,7 @@
     if (typeof pointerId === "number" && pointerId !== this._drag.pointerId) return;
     var capturedPointerId = this._drag.pointerId;
     this._drag = null;
+    this._syncThumbVisibility();
     if (releaseCapture === false || !this._strip) return;
     try { this._strip.releasePointerCapture(capturedPointerId); } catch (err) {}
   };
@@ -1955,6 +1971,13 @@
 
   // ---- painting ----
 
+  RulerAddon.prototype._syncThumbVisibility = function () {
+    if (!this._thumb) return;
+    var visible = this._isPointerOver || this._drag !== null;
+    this._thumb.style.transitionDuration = (visible ? THUMB_SHOW_MS : THUMB_HIDE_MS) + "ms";
+    this._thumb.style.opacity = visible ? "1" : "0";
+  };
+
   RulerAddon.prototype._queuePaint = function () {
     var self = this;
     if (this._paintQueued) return;
@@ -2106,11 +2129,12 @@
     }
     ctx.globalAlpha = 1;
 
-    // Viewport window / thumb.
-    var thumbTop = (buf.viewportY / total) * devH;
-    var thumbH = Math.max((term.rows / total) * devH, Math.round(20 * dpr));
-    ctx.fillStyle = c.thumb;
-    ctx.fillRect(visualLeft, Math.round(Math.min(thumbTop, devH - thumbH)), visualWidth, Math.round(thumbH));
+    // Viewport window / thumb. It is separate from the canvas so its opacity can
+    // animate without hiding or continuously repainting the annotated marks below it.
+    var thumbTop = (buf.viewportY / total) * cssH;
+    var thumbH = Math.max((term.rows / total) * cssH, 20);
+    this._thumb.style.top = Math.round(Math.min(thumbTop, cssH - thumbH)) + "px";
+    this._thumb.style.height = Math.round(thumbH) + "px";
   };
 
   window.RulerAddon = { RulerAddon: RulerAddon };
