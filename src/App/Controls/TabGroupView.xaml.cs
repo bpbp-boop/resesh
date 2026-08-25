@@ -49,6 +49,8 @@ public sealed partial class TabGroupView : UserControl
     private TabViewModel? _middleClickTab;
     private SplitDirection _dropDirection = SplitDirection.Right;
     private bool _tabWidthRefreshQueued;
+    private bool _tabDividerRefreshQueued;
+    private bool _tabDividerLayoutRefreshPending;
     private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.Settings.Current.Theme);
     private readonly SolidColorBrush _tabBackgroundBrush;
     private readonly SolidColorBrush _tabDividerBrush;
@@ -77,8 +79,14 @@ public sealed partial class TabGroupView : UserControl
         {
             QueueTabWidthRefresh();
             UpdateTabActionButtons();
+            QueueTabDividerRefresh();
         };
-        Tabs.SizeChanged += (_, _) => QueueTabWidthRefresh();
+        Tabs.SizeChanged += (_, _) =>
+        {
+            QueueTabWidthRefresh();
+            QueueTabDividerRefresh();
+        };
+        TabStripHost.SizeChanged += (_, _) => QueueTabDividerRefresh();
 
         // Focus tracking: interacting anywhere in this group focuses it.
         AddHandler(PointerPressedEvent, new PointerEventHandler((_, _) => _host.FocusGroup(Group)), true);
@@ -97,6 +105,7 @@ public sealed partial class TabGroupView : UserControl
                 _host.ViewModel.NotifyActiveTabChanged();
                 ObserveFilePaneButtonTab();
                 FocusTerminal(Group.SelectedTab);
+                QueueTabDividerRefresh();
             }
         };
 
@@ -127,7 +136,6 @@ public sealed partial class TabGroupView : UserControl
     private void Tabs_Loaded(object sender, RoutedEventArgs e)
     {
         NormalizeTabStripTemplate();
-        ApplyTabStripDivider();
         QueueTabWidthRefresh();
     }
 
@@ -162,21 +170,19 @@ public sealed partial class TabGroupView : UserControl
     internal void ApplyTheme(ThemeVisualPalette palette)
     {
         _themePalette = palette;
-        // Keep these brush instances stable. WinUI's TabView template can retain the
-        // brush used by its small RightBottomBorderLine after a live theme change.
-        // Replacing the resource leaves a two-pixel fragment in the previous colour;
-        // updating the brush recolours both the old and rebuilt template elements.
+        // Keep these brush instances stable. WinUI can retain brushes from the existing
+        // TabView visual tree when a live theme change rebuilds its template.
         _tabBackgroundBrush.Color = palette.InactiveTab;
         _tabDividerBrush.Color = palette.Divider;
         var background = _tabBackgroundBrush;
         var divider = _tabDividerBrush;
         Tabs.Background = background;
         TabStripActions.Background = background;
-        TabStripActions.BorderBrush = divider;
+        LeftTabStripDivider.Fill = divider;
+        RightTabStripDivider.Fill = divider;
         Resources["TabViewBackground"] = background;
         Resources["TabViewBorderBrush"] = divider;
         Resources["CodeTabSeparatorBrush"] = divider;
-        ApplyTabStripDivider();
     }
 
     private void QueueTabTemplateRefresh()
@@ -186,23 +192,10 @@ public sealed partial class TabGroupView : UserControl
         DispatcherQueue.TryEnqueue(() => DispatcherQueue.TryEnqueue(() =>
         {
             NormalizeTabStripTemplate();
-            ApplyTabStripDivider();
             QueueTabWidthRefresh();
         }));
     }
 
-    private void ApplyTabStripDivider()
-    {
-        var divider = _tabDividerBrush;
-        if (FindDescendant(Tabs, "LeftBottomBorderLine") is Border left)
-            left.Background = divider;
-        if (FindDescendant(Tabs, "RightBottomBorderLine") is Border right)
-        {
-            right.Background = divider;
-            right.Margin = new Thickness(-1, 0, 0, 0);
-        }
-        TabStripActions.BorderBrush = divider;
-    }
 
     private void QueueTabWidthRefresh()
     {
@@ -214,7 +207,67 @@ public sealed partial class TabGroupView : UserControl
             _tabWidthRefreshQueued = false;
             FindDescendant(Tabs, "TabsItemsPresenter")?.InvalidateMeasure();
             Tabs.InvalidateMeasure();
+            QueueTabDividerRefreshAfterLayout();
         });
+    }
+
+    private void QueueTabDividerRefresh()
+    {
+        if (_tabDividerRefreshQueued)
+            return;
+
+        _tabDividerRefreshQueued = DispatcherQueue.TryEnqueue(() =>
+        {
+            _tabDividerRefreshQueued = false;
+            UpdateTabStripDivider();
+        });
+    }
+
+    private void QueueTabDividerRefreshAfterLayout()
+    {
+        if (_tabDividerLayoutRefreshPending)
+            return;
+
+        _tabDividerLayoutRefreshPending = true;
+        Tabs.LayoutUpdated += Tabs_DividerLayoutUpdated;
+    }
+
+    private void Tabs_DividerLayoutUpdated(object? sender, object e)
+    {
+        Tabs.LayoutUpdated -= Tabs_DividerLayoutUpdated;
+        _tabDividerLayoutRefreshPending = false;
+        UpdateTabStripDivider();
+    }
+
+    private void UpdateTabStripDivider()
+    {
+        var stripWidth = TabStripHost.ActualWidth;
+        if (Tabs.SelectedItem is null)
+        {
+            LeftTabStripDivider.Width = stripWidth;
+            RightTabStripDivider.Width = 0;
+            return;
+        }
+
+        if (Tabs.ContainerFromItem(Tabs.SelectedItem) is FrameworkElement activeTab &&
+            activeTab.ActualWidth > 0)
+        {
+            var origin = activeTab
+                .TransformToVisual(TabStripHost)
+                .TransformPoint(new Windows.Foundation.Point(0, 0));
+            var activeLeft = Math.Clamp(origin.X, 0, stripWidth);
+            var activeRight = Math.Clamp(origin.X + activeTab.ActualWidth, 0, stripWidth);
+            LeftTabStripDivider.Width = activeLeft;
+            RightTabStripDivider.Width = stripWidth - activeRight;
+            return;
+        }
+
+        // A newly opened and selected tab can precede realization of its container.
+        // Hide the divider until layout provides exact bounds rather than briefly
+        // drawing it beneath the new active tab.
+        LeftTabStripDivider.Width = 0;
+        RightTabStripDivider.Width = 0;
+        QueueTabDividerRefreshAfterLayout();
     }
 
     private static FrameworkElement? FindDescendant(DependencyObject root, string name)
@@ -365,6 +418,7 @@ public sealed partial class TabGroupView : UserControl
         _host.FocusGroup(Group);
         _host.ViewModel.NotifyActiveTabChanged();
         FocusTerminal(Group.SelectedTab);
+        QueueTabDividerRefresh();
     }
 
     private void FocusTerminal(TabViewModel? tab)

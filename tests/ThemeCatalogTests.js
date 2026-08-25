@@ -12,6 +12,7 @@ const mainWindow = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Mai
 const mainWindowXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "MainWindow.xaml"), "utf8");
 const appXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "App.xaml"), "utf8");
 const tabGroup = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"), "utf8");
+const tabGroupXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml"), "utf8");
 const terminalTab = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"), "utf8");
 const terminalControl = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "TerminalControl.cs"), "utf8");
 const visualPalette = fs.readFileSync(path.join(__dirname, "..", "src", "App", "ThemeVisualPalette.cs"), "utf8");
@@ -134,13 +135,12 @@ test("new split groups start with the live app palette", () => {
   assert.match(mainWindow, /private TabGroupView AttachGroupView[\s\S]*?view\.ApplyTheme\(_themePalette\)/);
 });
 
-test("terminal startup and the complete tab-row divider use the selected palette", () => {
+test("the tab-row divider spans both sides without crossing the active tab", () => {
   assert.match(terminalControl, /SetInitialOptions[\s\S]*?_webView\.DefaultBackgroundColor = ThemeBackground\(theme\)/);
   assert.match(terminalControl, /"solarized-light" => Windows\.UI\.Color\.FromArgb\(255, 0xFD, 0xF6, 0xE3\)/);
   assert.match(terminalControl, /"phthalo-green" => Windows\.UI\.Color\.FromArgb\(255, 0x12, 0x35, 0x24\)/);
-  assert.match(tabGroup, /FindDescendant\(Tabs, "RightBottomBorderLine"\)/);
-  assert.match(tabGroup, /right\.Margin = new Thickness\(-1, 0, 0, 0\)/);
-  assert.match(tabGroup, /TabStripActions\.BorderBrush = divider/);
+  assert.match(tabGroupXaml, /x:Name="LeftTabStripDivider"[\s\S]*?x:Name="RightTabStripDivider"/);
+  assert.match(tabGroup, /Tabs\.ContainerFromItem\(Tabs\.SelectedItem\)[\s\S]*?LeftTabStripDivider\.Width = activeLeft;[\s\S]*?RightTabStripDivider\.Width = stripWidth - activeRight;/);
 });
 
 test("the terminal ruler edge uses a visible theme colour", () => {
@@ -166,10 +166,11 @@ test("live theme changes remove WinUI tab insets again after template rebuild", 
   assert.match(tabGroup, /DispatcherQueue\.TryEnqueue\(\(\) => DispatcherQueue\.TryEnqueue/);
 });
 
-test("live theme changes recolor the retained right-edge divider brush", () => {
+test("live theme changes recolor both retained tab-row divider brushes", () => {
   assert.match(tabGroup, /_tabDividerBrush\.Color = palette\.Divider/);
   assert.match(tabGroup, /Resources\["TabViewBorderBrush"\] = divider/);
-  assert.match(tabGroup, /private void ApplyTabStripDivider\(\)[\s\S]*?var divider = _tabDividerBrush/);
+  assert.match(tabGroup, /LeftTabStripDivider\.Fill = divider/);
+  assert.match(tabGroup, /RightTabStripDivider\.Fill = divider/);
 });
 
 test("Resesh Dark keeps its original divider and bypasses stale Fluent strokes", () => {

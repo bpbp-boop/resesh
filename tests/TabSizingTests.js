@@ -43,9 +43,16 @@ test("tab text trims inside the shared width without moving the close action", (
 
 test("tabs remeasure after close, move, or newly available group space", () => {
   assert.match(code, /Group\.Tabs\.CollectionChanged \+= \(_, _\) =>[\s\S]{0,120}?QueueTabWidthRefresh\(\)/);
-  assert.match(code, /Tabs\.SizeChanged \+= \(_, _\) => QueueTabWidthRefresh\(\)/);
+  assert.match(code, /Tabs\.SizeChanged \+= \(_, _\) =>[\s\S]{0,100}?QueueTabWidthRefresh\(\)/);
   assert.match(code, /FindDescendant\(Tabs, "TabsItemsPresenter"\)\?\.InvalidateMeasure\(\)/);
   assert.match(code, /Tabs\.InvalidateMeasure\(\)/);
+});
+
+test("a newly selected tab waits for container layout before exposing the divider", () => {
+  assert.match(code, /Tabs\.LayoutUpdated \+= Tabs_DividerLayoutUpdated/);
+  assert.match(code, /Tabs_DividerLayoutUpdated[\s\S]*?UpdateTabStripDivider\(\)/);
+  assert.match(code, /activeTab\.ActualWidth > 0[\s\S]*?LeftTabStripDivider\.Width = activeLeft/);
+  assert.match(code, /LeftTabStripDivider\.Width = 0;[\s\S]*?RightTabStripDivider\.Width = 0;[\s\S]*?QueueTabDividerRefreshAfterLayout\(\)/);
 });
 
 test("each tab bar reserves the measured width of every action button", () => {

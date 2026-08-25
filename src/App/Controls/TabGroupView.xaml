@@ -393,7 +393,6 @@
                 x:Name="TabStripActions"
                 Grid.Column="1"
                 Height="40"
-                BorderThickness="0,0,0,1"
                 Background="{ThemeResource TabViewBackground}">
                 <Grid.Resources>
                     <!-- Lightweight styling for the action buttons only: an active toggle
@@ -518,6 +517,28 @@
                     </ToggleButton>
                 </StackPanel>
             </Grid>
+            <!-- Two overlay segments own the divider. Their widths follow the selected
+                 container, leaving only the active tab open to the terminal surface. -->
+            <Rectangle
+                x:Name="LeftTabStripDivider"
+                Grid.ColumnSpan="2"
+                Canvas.ZIndex="1"
+                Width="0"
+                Height="1"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Bottom"
+                Fill="{ThemeResource CodeTabSeparatorBrush}"
+                IsHitTestVisible="False" />
+            <Rectangle
+                x:Name="RightTabStripDivider"
+                Grid.ColumnSpan="2"
+                Canvas.ZIndex="1"
+                Width="0"
+                Height="1"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Bottom"
+                Fill="{ThemeResource CodeTabSeparatorBrush}"
+                IsHitTestVisible="False" />
         </Grid>
 
         <Grid x:Name="TerminalHost" Grid.Row="1" />
