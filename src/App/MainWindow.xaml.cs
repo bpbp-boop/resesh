@@ -87,10 +87,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ApplySettingsToApp();
         RegisterAccelerators();
         InitializeSessionsRail();
+        RefreshWorkspaceMenu();
         AppWindow.Closing += AppWindow_Closing;
         Closed += (_, _) =>
         {
             SaveTreePaneWidth();
+            App.Workspaces.SaveLastLayout(CaptureWorkspaceLayout());
             ViewModel.CloseAllTabs(); // tear down live SSH sessions without hanging
         };
     }
@@ -371,6 +373,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             () => ShowSettingsAsync(GlobalSettingsTarget.CopyOnSelect));
         Add("Global Settings", "Paste With Right-Click", "clipboard mouse",
             () => ShowSettingsAsync(GlobalSettingsTarget.RightClickPaste));
+        Add("Global Settings", "Reopen Last Layout at Startup", "workspace launch restore groups",
+            () => ShowSettingsAsync(GlobalSettingsTarget.ReopenLastLayout));
         Add("Global Settings", "Automatic Recording", "record sessions disk",
             () => ShowSettingsAsync(GlobalSettingsTarget.AlwaysRecord));
         Add("Global Settings", "Recording Directory", "record sessions path folder",
@@ -387,6 +391,16 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             () => ShowSettingsAsync(GlobalSettingsTarget.AgentAlertFlash));
         Add("Global Settings", "Agent Notification Sound", "alert audio",
             () => ShowSettingsAsync(GlobalSettingsTarget.AgentAlertSound));
+
+        Add("Workspaces", "Save Current Layout as Workspace", "tabs groups layout save as",
+            SaveCurrentWorkspaceAsAsync);
+        foreach (var workspace in App.Workspaces.Workspaces)
+        {
+            Add("Workspaces", $"Open {workspace.Name}", "tabs groups layout replace",
+                () => OpenWorkspaceAsync(workspace, additive: false));
+            Add("Workspaces", $"Open {workspace.Name} Additively", "tabs groups layout add",
+                () => OpenWorkspaceAsync(workspace, additive: true));
+        }
 
         if (ViewModel.ActiveTab is not { } tab)
             return commands;
@@ -1025,6 +1039,334 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     public Task ShowAgentAdaptersAsync() => ShowSettingsAsync(GlobalSettingsTarget.Agents);
 
+    // ---- Workspaces ----
+
+    private WorkspaceLayout CaptureWorkspaceLayout() => new()
+    {
+        Groups = ViewModel.Groups.Select(group =>
+        {
+            var originalActiveIndex = group.SelectedTab is null ? -1 : group.Tabs.IndexOf(group.SelectedTab);
+            var captured = group.Tabs
+                .Select((tab, originalIndex) => (Tab: tab, OriginalIndex: originalIndex))
+                .Where(item => !item.Tab.IsPlayback && App.Store.Find(item.Tab.Session.Id) is not null)
+                .ToList();
+            var activeIndex = captured.FindIndex(item => item.OriginalIndex == originalActiveIndex);
+            if (activeIndex < 0 && captured.Count > 0 && originalActiveIndex >= 0)
+            {
+                activeIndex = Math.Clamp(
+                    captured.Count(item => item.OriginalIndex < originalActiveIndex),
+                    0,
+                    captured.Count - 1);
+            }
+
+            return new WorkspaceGroup
+            {
+                Tabs = captured.Select(item => new WorkspaceTabReference
+                {
+                    SessionId = item.Tab.Session.Id,
+                    Pinned = item.Tab.IsPinned,
+                }).ToList(),
+                ActiveTabIndex = Math.Max(activeIndex, 0),
+            };
+        }).ToList(),
+    };
+
+    private void RefreshWorkspaceMenu()
+    {
+        WorkspacesMenu.Items.Clear();
+
+        var saveAs = new MenuFlyoutItem { Text = "Save current layout as workspace…" };
+        saveAs.Click += async (_, _) => await SaveCurrentWorkspaceAsAsync();
+        WorkspacesMenu.Items.Add(saveAs);
+        WorkspacesMenu.Items.Add(new MenuFlyoutSeparator());
+
+        if (App.Workspaces.Workspaces.Count == 0)
+        {
+            WorkspacesMenu.Items.Add(new MenuFlyoutItem
+            {
+                Text = "No saved workspaces",
+                IsEnabled = false,
+            });
+            return;
+        }
+
+        foreach (var workspace in App.Workspaces.Workspaces)
+        {
+            var workspaceMenu = new MenuFlyoutSubItem { Text = workspace.Name };
+            var open = new MenuFlyoutItem { Text = "Open" };
+            open.Click += async (_, _) => await OpenWorkspaceAsync(workspace, additive: false);
+            var additive = new MenuFlyoutItem { Text = "Open additively" };
+            additive.Click += async (_, _) => await OpenWorkspaceAsync(workspace, additive: true);
+            var update = new MenuFlyoutItem { Text = "Update from current layout…" };
+            update.Click += async (_, _) => await UpdateWorkspaceAsync(workspace);
+            var rename = new MenuFlyoutItem { Text = "Rename…" };
+            rename.Click += async (_, _) => await RenameWorkspaceAsync(workspace);
+            var delete = new MenuFlyoutItem { Text = "Delete…" };
+            delete.Click += async (_, _) => await DeleteWorkspaceAsync(workspace);
+
+            workspaceMenu.Items.Add(open);
+            workspaceMenu.Items.Add(additive);
+            workspaceMenu.Items.Add(new MenuFlyoutSeparator());
+            workspaceMenu.Items.Add(update);
+            workspaceMenu.Items.Add(rename);
+            workspaceMenu.Items.Add(delete);
+            WorkspacesMenu.Items.Add(workspaceMenu);
+        }
+    }
+
+    private async Task SaveCurrentWorkspaceAsAsync()
+    {
+        var name = (await PromptAsync("Save Workspace", "Workspace name", ""))?.Trim();
+        if (string.IsNullOrEmpty(name))
+            return;
+
+        try
+        {
+            App.Workspaces.SaveAs(name, CaptureWorkspaceLayout());
+            RefreshWorkspaceMenu();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException)
+        {
+            ShowWorkspaceNotice("Workspace was not saved", exception.Message);
+        }
+    }
+
+    private async Task RenameWorkspaceAsync(Workspace workspace)
+    {
+        var name = (await PromptAsync("Rename Workspace", "Workspace name", workspace.Name))?.Trim();
+        if (string.IsNullOrEmpty(name) || name == workspace.Name)
+            return;
+
+        try
+        {
+            App.Workspaces.Rename(workspace.Id, name);
+            RefreshWorkspaceMenu();
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException)
+        {
+            ShowWorkspaceNotice("Workspace was not renamed", exception.Message);
+        }
+    }
+
+    private async Task UpdateWorkspaceAsync(Workspace workspace)
+    {
+        if (!await ConfirmAsync(
+            "Update Workspace?",
+            $"Replace the saved layout in \"{workspace.Name}\" with the current tab groups?",
+            "Update"))
+        {
+            return;
+        }
+
+        App.Workspaces.Update(workspace.Id, CaptureWorkspaceLayout());
+        RefreshWorkspaceMenu();
+    }
+
+    private async Task DeleteWorkspaceAsync(Workspace workspace)
+    {
+        if (!await ConfirmAsync(
+            "Delete Workspace?",
+            $"Delete \"{workspace.Name}\"? Saved sessions are not deleted.",
+            "Delete"))
+        {
+            return;
+        }
+
+        App.Workspaces.Delete(workspace.Id);
+        RefreshWorkspaceMenu();
+    }
+
+    private async Task OpenWorkspaceAsync(Workspace workspace, bool additive)
+    {
+        if (!additive
+            && ViewModel.AllTabs.Any()
+            && !await ConfirmAsync(
+                "Replace Current Layout?",
+                $"Opening \"{workspace.Name}\" will close tabs that are not part of the workspace.",
+                "Replace"))
+        {
+            return;
+        }
+
+        ApplyWorkspaceLayout(new WorkspaceLayout { Groups = workspace.Groups }, additive);
+    }
+
+    /// <summary>Launch-time restoration. The setting guard keeps direct callers honest.</summary>
+    public void RestoreLastLayout()
+    {
+        if (!App.Settings.Current.ReopenLastLayoutAtStartup || App.Workspaces.LastLayout is not { } layout)
+            return;
+        ApplyWorkspaceLayout(layout, additive: false);
+    }
+
+    private void ApplyWorkspaceLayout(WorkspaceLayout layout, bool additive)
+    {
+        WorkspaceNotice.IsOpen = false;
+        var sourceGroups = layout.Groups.Count == 0
+            ? [new WorkspaceGroup()]
+            : layout.Groups.ToList();
+        var originalGroups = ViewModel.Groups.ToList();
+        var originalTabs = ViewModel.AllTabs.ToList();
+        var availableTabs = originalTabs
+            .Where(tab => !tab.IsPlayback)
+            .GroupBy(tab => tab.Session.Id)
+            .ToDictionary(group => group.Key, group => new Queue<TabViewModel>(group));
+        var usedTabs = new HashSet<TabViewModel>();
+        var targetGroups = new List<TabGroupViewModel>(sourceGroups.Count);
+
+        if (additive)
+        {
+            if (layout.Groups.Count == 0)
+                return;
+            var after = _groupLayout.Values[^1];
+            foreach (var _ in sourceGroups)
+            {
+                after = CreateWorkspaceGroupAfter(after);
+                targetGroups.Add(after);
+            }
+        }
+        else
+        {
+            var after = _groupLayout.Values[0];
+            targetGroups.Add(after);
+            for (var index = 1; index < sourceGroups.Count; index++)
+            {
+                after = CreateWorkspaceGroupAfter(after);
+                targetGroups.Add(after);
+            }
+        }
+
+        var missing = new List<Guid>();
+        for (var groupIndex = 0; groupIndex < sourceGroups.Count; groupIndex++)
+        {
+            var savedGroup = sourceGroups[groupIndex];
+            var targetGroup = targetGroups[groupIndex];
+            var placed = new List<(TabViewModel Tab, int OriginalIndex)>();
+
+            for (var tabIndex = 0; tabIndex < savedGroup.Tabs.Count; tabIndex++)
+            {
+                var savedTab = savedGroup.Tabs[tabIndex];
+                if (App.Store.Find(savedTab.SessionId) is not { } session)
+                {
+                    missing.Add(savedTab.SessionId);
+                    continue;
+                }
+
+                TabViewModel tab;
+                if (availableTabs.TryGetValue(savedTab.SessionId, out var candidates)
+                    && candidates.Count > 0)
+                {
+                    tab = candidates.Dequeue();
+                    PlaceWorkspaceTab(tab, targetGroup, placed.Count);
+                }
+                else
+                {
+                    tab = ConnectSession(session, targetGroup, trackRecent: false);
+                }
+
+                tab.IsPinned = savedTab.Pinned;
+                usedTabs.Add(tab);
+                placed.Add((tab, tabIndex));
+            }
+
+            if (placed.Count > 0)
+            {
+                // Preserve the saved active tab when it survived. If it was deleted, use
+                // its repaired position among survivors (the next tab, or the last at end).
+                var activeIndex = placed.FindIndex(item => item.OriginalIndex == savedGroup.ActiveTabIndex);
+                if (activeIndex < 0)
+                {
+                    activeIndex = Math.Clamp(
+                        placed.Count(item => item.OriginalIndex < savedGroup.ActiveTabIndex),
+                        0,
+                        placed.Count - 1);
+                }
+                targetGroup.SelectedTab = placed[activeIndex].Tab;
+            }
+            else
+            {
+                targetGroup.SelectedTab = null;
+            }
+        }
+
+        if (!additive)
+        {
+            foreach (var tab in originalTabs.Where(tab => !usedTabs.Contains(tab)))
+                RemoveWorkspaceTab(tab);
+            foreach (var group in originalGroups.Where(group => !targetGroups.Contains(group)))
+                RemoveWorkspaceGroup(group);
+        }
+        else
+        {
+            foreach (var group in originalGroups.Where(group => group.Tabs.Count == 0).ToList())
+                RemoveWorkspaceGroup(group);
+        }
+
+        SyncGroupOrder();
+        ViewModel.OnGroupsChanged();
+        RebuildGroupLayout();
+        FocusGroup(targetGroups.FirstOrDefault(group => group.Tabs.Count > 0) ?? targetGroups[0]);
+        ViewModel.SyncGroupFocus();
+        SavePinnedSessions();
+
+        if (missing.Count > 0)
+        {
+            var ids = string.Join(", ", missing.Distinct().Select(id => id.ToString()));
+            ShowWorkspaceNotice(
+                "Workspace opened with missing sessions",
+                $"{missing.Count} saved session reference(s) no longer exist and were skipped: {ids}");
+        }
+    }
+
+    private TabGroupViewModel CreateWorkspaceGroupAfter(TabGroupViewModel after)
+    {
+        var group = new TabGroupViewModel();
+        _groupLayout.Split(after, group, SplitDirection.Right);
+        ViewModel.Groups.Add(group);
+        AttachGroupView(group);
+        return group;
+    }
+
+    private void PlaceWorkspaceTab(TabViewModel tab, TabGroupViewModel target, int index)
+    {
+        var source = ViewModel.GroupOf(tab);
+        source.Tabs.Remove(tab);
+        if (source.SelectedTab == tab)
+            source.SelectedTab = source.Tabs.LastOrDefault();
+        target.Tabs.Insert(Math.Clamp(index, 0, target.Tabs.Count), tab);
+
+        if (source != target && tab.View is TerminalTabView view)
+        {
+            _groupViews[source].RemoveTerminal(view);
+            _groupViews[target].AddTerminal(view);
+        }
+    }
+
+    private void RemoveWorkspaceTab(TabViewModel tab)
+    {
+        var group = ViewModel.GroupOf(tab);
+        if (tab.View is TerminalTabView view)
+            _groupViews[group].RemoveTerminal(view);
+        ViewModel.CloseTab(tab);
+    }
+
+    private void RemoveWorkspaceGroup(TabGroupViewModel group)
+    {
+        if (group.Tabs.Count > 0 || !_groupLayout.Remove(group))
+            return;
+        if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(_groupViews[group]) is Panel parent)
+            parent.Children.Remove(_groupViews[group]);
+        _groupViews.Remove(group);
+        ViewModel.Groups.Remove(group);
+    }
+
+    private void ShowWorkspaceNotice(string title, string message)
+    {
+        WorkspaceNotice.Title = title;
+        WorkspaceNotice.Message = message;
+        WorkspaceNotice.IsOpen = true;
+    }
+
     // ---- ITabGroupHost ----
 
     public void FocusGroup(TabGroupViewModel group)
@@ -1584,6 +1926,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             Scrollback = updated.Scrollback,
             CopyOnSelect = updated.CopyOnSelect,
             RightClickPaste = updated.RightClickPaste,
+            ReopenLastLayoutAtStartup = updated.ReopenLastLayoutAtStartup,
             AlwaysRecord = updated.AlwaysRecord,
             RecordingDirectory = updated.RecordingDirectory,
             RewindMinutes = updated.RewindMinutes,
@@ -2375,6 +2718,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 resolutions));
 
             App.Icons.InvalidateCustomIcons();
+            App.Workspaces.Load();
+            RefreshWorkspaceMenu();
             ViewModel.RebuildTree();
             ApplySettingsToApp();
 

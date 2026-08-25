@@ -353,6 +353,11 @@ public static class SessionsBackup
         ICredentialService credentials,
         IReadOnlyDictionary<Guid, BackupConflictResolution> resolutions)
     {
+        // Validate opaque archive content before any import-side mutation. Presence means
+        // replacement; absence intentionally leaves the target workspace file untouched.
+        var importedWorkspaceData = package.Workspaces is null
+            ? null
+            : WorkspaceStore.ParsePayload(package.Workspaces);
         var keyIdMap = sshKeyStore.MergeImport(package.SshKeys);
         var mappedPackage = package with
         {
@@ -416,6 +421,9 @@ public static class SessionsBackup
         }
 
         var validSessionIds = sessionStore.Sessions.Select(s => s.Id).ToHashSet();
+        var remappedWorkspaceData = importedWorkspaceData is null
+            ? null
+            : WorkspaceStore.RemapReferences(importedWorkspaceData, idMap, validSessionIds);
         var importedSettings = package.Settings with
         {
             PinnedSessionIds = package.Settings.PinnedSessionIds
@@ -433,6 +441,12 @@ public static class SessionsBackup
         var knownHostsAdded = knownHostsStore.Merge(package.KnownHosts);
         highlightsStore.MergeBackup(package.Highlights);
         ImportFiles(dataDirectory, package);
+        if (remappedWorkspaceData is not null)
+        {
+            WorkspaceStore.WriteImported(
+                Path.Combine(dataDirectory, "workspaces.json"),
+                remappedWorkspaceData);
+        }
 
         return new BackupImportResult
         {
@@ -469,8 +483,6 @@ public static class SessionsBackup
             Directory.CreateDirectory(iconsDirectory);
             WriteAtomic(Path.Combine(iconsDirectory, name), content);
         }
-        if (package.Workspaces is not null)
-            WriteAtomic(Path.Combine(dataDirectory, "workspaces.json"), package.Workspaces);
     }
 
     private static void WriteAtomic(string path, byte[] content)

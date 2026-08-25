@@ -15,6 +15,7 @@ public partial class App : Application
     public static KnownHostsStore KnownHosts { get; } = new(StorePath("known_hosts.json", KnownHostsStore.DefaultPath));
     public static SettingsStore Settings { get; } = new(StorePath("settings.json", SettingsStore.DefaultPath));
     public static HighlightsStore Highlights { get; } = new(StorePath("highlights.json", HighlightsStore.DefaultPath));
+    public static WorkspaceStore Workspaces { get; } = new(StorePath("workspaces.json", WorkspaceStore.DefaultPath));
 
     /// <summary>`--data-dir <path>` keeps every JSON store in an alternate directory.
     /// `--demo` instead uses disposable JSON stores and in-memory secrets. Normal launches
@@ -97,6 +98,7 @@ public partial class App : Application
         SshKeys.Load();
         KnownHosts.Load();
         Highlights.Load();
+        Workspaces.Load();
         if (DemoMode.IsEnabled)
         {
             DemoMode.Seed(Store);
@@ -130,7 +132,10 @@ public partial class App : Application
         var window = new MainWindow();
         _window = window;
         window.Activate();
-        window.RestorePinnedSessions();
+        if (Settings.Current.ReopenLastLayoutAtStartup)
+            window.RestoreLastLayout();
+        else
+            window.RestorePinnedSessions();
 
         // `--open <session name>` (repeatable): open saved sessions at launch. Used by
         // the automated UI test rig; harmless for normal launches.
