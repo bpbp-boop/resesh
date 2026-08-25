@@ -247,9 +247,10 @@ public sealed class MainViewModel : ObservableObject
         RebuildTree();
     }
 
-    public void MoveSessionToFolder(Guid sessionId, string folderPath)
+    public void MoveSessionsToFolder(IEnumerable<Guid> sessionIds, string folderPath)
     {
-        _store.MoveToFolder(sessionId, folderPath);
+        foreach (var sessionId in sessionIds)
+            _store.MoveToFolder(sessionId, folderPath);
         RebuildTree();
     }
 
@@ -257,8 +258,17 @@ public sealed class MainViewModel : ObservableObject
 
     public void CreateFolder(string path, SessionKind kind = SessionKind.Ssh)
     {
+        path = FolderPaths.Normalize(path);
+        if (path.Length == 0 || _store.FoldersOf(kind).Contains(path, StringComparer.OrdinalIgnoreCase))
+            return;
+
         _store.CreateFolder(path, kind);
-        RebuildTree();
+
+        // Creating an empty folder does not invalidate any existing node. Preserve the
+        // realized containers (and their expansion state) instead of clearing the whole tree.
+        // A filtered tree only projects folders whose path matches the active query.
+        if (!IsSearching || path.Contains(_searchText.Trim(), StringComparison.OrdinalIgnoreCase))
+            InsertFolderPath(path, kind);
     }
 
     public void RenameFolder(string oldPath, string newPath, SessionKind kind = SessionKind.Ssh)
@@ -386,6 +396,65 @@ public sealed class MainViewModel : ObservableObject
     private bool ExpansionFor(string key) => IsSearching
         ? _filterExpansion.GetValueOrDefault(key, true)
         : _expansion.GetValueOrDefault(key, true);
+
+    private void InsertFolderPath(string path, SessionKind kind)
+    {
+        var isLocal = kind == SessionKind.Local;
+        ObservableCollection<TreeNodeViewModel> siblings;
+        if (isLocal)
+        {
+            var localRoot = RootNodes.FirstOrDefault(node => node.IsLocalRoot);
+            if (localRoot is null)
+            {
+                localRoot = TreeNodeViewModel.ForLocalRoot(
+                    ExpansionFor(ExpansionKeyFor("", SessionKind.Local)));
+                _currentNodes.Add(localRoot);
+                RootNodes.Insert(0, localRoot);
+            }
+            siblings = localRoot.Children;
+        }
+        else
+        {
+            siblings = RootNodes;
+        }
+
+        var currentPath = "";
+        foreach (var part in path.Split('/'))
+        {
+            currentPath = FolderPaths.Combine(currentPath, part);
+            var node = siblings.FirstOrDefault(candidate =>
+                candidate.IsFolder
+                && !candidate.IsLocalRoot
+                && candidate.IsLocalScope == isLocal
+                && candidate.FolderPath.Equals(currentPath, StringComparison.OrdinalIgnoreCase));
+            if (node is null)
+            {
+                node = TreeNodeViewModel.ForFolder(
+                    currentPath,
+                    ExpansionFor(ExpansionKeyFor(currentPath, kind)),
+                    isLocal);
+                _currentNodes.Add(node);
+                InsertFolderSorted(siblings, node);
+            }
+            siblings = node.Children;
+        }
+    }
+
+    private static void InsertFolderSorted(
+        ObservableCollection<TreeNodeViewModel> siblings,
+        TreeNodeViewModel folder)
+    {
+        var index = 0;
+        while (index < siblings.Count && siblings[index].IsLocalRoot)
+            index++;
+        while (index < siblings.Count
+            && siblings[index].IsFolder
+            && StringComparer.OrdinalIgnoreCase.Compare(siblings[index].Name, folder.Name) < 0)
+        {
+            index++;
+        }
+        siblings.Insert(index, folder);
+    }
 
     private IEnumerable<TreeNodeViewModel> BuildChildren(FolderNode folder, bool isLocalScope)
     {

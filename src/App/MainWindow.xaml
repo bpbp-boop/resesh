@@ -32,7 +32,10 @@
                             Glyph="&#xE8B7;"
                             FontSize="14"
                             Foreground="{StaticResource SessionTreeForegroundBrush}" />
-                        <TextBlock Text="{x:Bind Name}" Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                        <TextBlock
+                            Text="{x:Bind Name}"
+                            FontWeight="Normal"
+                            Foreground="{StaticResource SessionTreeForegroundBrush}" />
                     </StackPanel>
                 </TreeViewItem>
             </DataTemplate>
@@ -41,6 +44,7 @@
                 <TreeViewItem
                     ItemsSource="{x:Bind Children}"
                     Loaded="TreeViewItem_Loaded"
+                    AllowDrop="True"
                     Background="{x:Bind SelectionBackground, Mode=OneWay}"
                     Tapped="TreeNode_Tapped"
                     ContextRequested="TreeNode_ContextRequested"
@@ -504,7 +508,6 @@
                     AllowDrop="True"
                     DragItemsStarting="SessionTree_DragItemsStarting"
                     DragItemsCompleted="SessionTree_DragItemsCompleted"
-                    KeyDown="SessionTree_KeyDown"
                     Expanding="SessionTree_Expanding"
                     Collapsed="SessionTree_Collapsed">
                     <TreeView.Resources>

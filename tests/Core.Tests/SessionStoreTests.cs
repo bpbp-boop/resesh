@@ -96,13 +96,13 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     [Fact]
-    public void MoveToFolder_ChangesFolderPath()
+    public void MoveToFolder_PersistsAcrossReload()
     {
         var store = NewStore();
         var session = NewSession(folder: "A");
         store.Add(session);
         store.MoveToFolder(session.Id, "B/C");
-        Assert.Equal("B/C", store.Find(session.Id)!.FolderPath);
+        Assert.Equal("B/C", NewStore().Find(session.Id)!.FolderPath);
     }
 
     [Fact]

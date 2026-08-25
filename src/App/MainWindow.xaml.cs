@@ -50,6 +50,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ViewModel = new MainViewModel(App.Store, App.Credentials);
         _groupLayout = new SplitLayout<TabGroupViewModel>(ViewModel.Groups[0]);
         InitializeComponent();
+        // TreeViewItem consumes Enter before the TreeView's normal KeyDown event. Listen to
+        // handled events so the app's Explorer-style multi-selection can open every session.
+        SessionTree.AddHandler(
+            UIElement.KeyDownEvent,
+            new KeyEventHandler(SessionTree_KeyDown),
+            handledEventsToo: true);
         CommandPalette.CloseRequested += CloseCommandPalette;
         CommandPalette.CommandInvoked += command => _ = ExecuteCommandPaletteEntryAsync(command);
         RestoreWindowPlacement();
@@ -2575,6 +2581,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         if (NodeOf(sender) is not { } node || IsChevronHit(e.OriginalSource))
             return;
+        // SelectionMode=None leaves focus management to us too. Without this, the clicked
+        // row paints as selected but Enter is dispatched to whichever control held focus.
+        if (sender is TreeViewItem item)
+            item.Focus(FocusState.Pointer);
         e.Handled = true; // taps bubble to ancestor folder items; only the innermost row counts
         if (IsKeyDown(VirtualKey.Shift))
             SelectRangeTo(node);
@@ -2858,16 +2868,15 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void SessionTree_DragItemsStarting(TreeView sender, TreeViewDragItemsStartingEventArgs args)
     {
-        // v1: sessions move between folders; folders themselves are not draggable.
-        if (args.Items.Any(i => i is TreeNodeViewModel { IsFolder: true }))
+        // Sessions move between folders; folders themselves are not draggable.
+        if (args.Items.Any(item => item is TreeNodeViewModel { IsFolder: true }))
             args.Cancel = true;
     }
 
     private void SessionTree_DragItemsCompleted(TreeView sender, TreeViewDragItemsCompletedEventArgs args)
     {
         // Dropping onto a session targets that session's folder; onto nothing targets the
-        // SSH root. Local and SSH are separate scopes: cross-boundary drops are ignored
-        // (the rebuild below discards whatever the TreeView displayed).
+        // SSH root. Local and SSH are separate scopes: cross-boundary drops are discarded.
         var (targetFolder, targetIsLocal) = args.NewParentItem switch
         {
             TreeNodeViewModel { IsFolder: true } folder => (folder.FolderPath, folder.IsLocalScope),
@@ -2875,22 +2884,29 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             _ => ("", false),
         };
 
-        var moved = false;
-        foreach (var node in args.Items.OfType<TreeNodeViewModel>())
-        {
-            if (node.Session is { } session
+        var movedSessionIds = args.Items
+            .OfType<TreeNodeViewModel>()
+            .Where(node => node.Session is { } session
                 && session.IsLocal == targetIsLocal
-                && !FolderPaths.Normalize(session.FolderPath).Equals(FolderPaths.Normalize(targetFolder), StringComparison.OrdinalIgnoreCase))
-            {
-                ViewModel.MoveSessionToFolder(session.Id, targetFolder);
-                moved = true;
-            }
-        }
+                && !FolderPaths.Normalize(session.FolderPath).Equals(
+                    FolderPaths.Normalize(targetFolder),
+                    StringComparison.OrdinalIgnoreCase))
+            .Select(node => node.Session!.Id)
+            .ToList();
 
-        // Rebuild even on a no-op drop: the TreeView may have reordered the bound
-        // collections in ways the model doesn't track (order is always alphabetical).
-        if (!moved)
-            ViewModel.RebuildTree();
+        // WinUI has updated its transient hierarchy when it raises this event, but the
+        // underlying drag operation is still unwinding. Replacing RootNodes synchronously
+        // here lets that remaining work mutate the replacement tree. Persist after the event
+        // returns, then rebuild once from the store so the visual and saved trees agree.
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () =>
+            {
+                if (movedSessionIds.Count > 0)
+                    ViewModel.MoveSessionsToFolder(movedSessionIds, targetFolder);
+                else
+                    ViewModel.RebuildTree();
+            });
     }
 
     // ---- Dialog helpers ----
