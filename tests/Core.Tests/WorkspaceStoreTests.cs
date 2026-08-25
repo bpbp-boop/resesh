@@ -1,3 +1,4 @@
+using Resesh.Core.Layout;
 using Resesh.Core.Storage;
 
 namespace Resesh.Core.Tests;
@@ -53,6 +54,53 @@ public sealed class WorkspaceStoreTests : IDisposable
 
         Assert.True(loaded.Delete(saved.Id));
         Assert.Empty(loaded.Workspaces);
+    }
+
+    [Fact]
+    public void SaveLoad_PreservesNestedHorizontalSplitLayout()
+    {
+        var path = Path.Combine(_dir.FullName, "horizontal-workspace.json");
+        var store = new WorkspaceStore(path);
+        store.Load();
+        var layout = new WorkspaceLayout
+        {
+            Groups =
+            [
+                new WorkspaceGroup(),
+                new WorkspaceGroup(),
+                new WorkspaceGroup(),
+            ],
+            Layout = new WorkspaceLayoutNode
+            {
+                Orientation = SplitOrientation.Columns,
+                Children =
+                [
+                    new WorkspaceLayoutNode { GroupIndex = 0 },
+                    new WorkspaceLayoutNode
+                    {
+                        Orientation = SplitOrientation.Rows,
+                        Children =
+                        [
+                            new WorkspaceLayoutNode { GroupIndex = 1 },
+                            new WorkspaceLayoutNode { GroupIndex = 2 },
+                        ],
+                    },
+                ],
+            },
+        };
+
+        store.SaveAs("Horizontal split", layout);
+        store.SaveLastLayout(layout);
+
+        var loaded = new WorkspaceStore(path);
+        loaded.Load();
+
+        var workspaceLayout = Assert.Single(loaded.Workspaces).Layout!;
+        Assert.Equal(SplitOrientation.Columns, workspaceLayout.Orientation);
+        var horizontalSplit = workspaceLayout.Children[1];
+        Assert.Equal(SplitOrientation.Rows, horizontalSplit.Orientation);
+        Assert.Equal([1, 2], horizontalSplit.Children.Select(child => child.GroupIndex));
+        Assert.Equal(SplitOrientation.Rows, loaded.LastLayout!.Layout!.Children[1].Orientation);
     }
 
     [Fact]

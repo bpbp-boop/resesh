@@ -34,6 +34,29 @@ public class SplitLayoutTests
     }
 
     [Fact]
+    public void ConstructingFromTreePreservesNestedRowSplit()
+    {
+        var root = new SplitLayoutBranch<string>(
+            SplitOrientation.Columns,
+            [
+                new SplitLayoutLeaf<string>("left"),
+                new SplitLayoutBranch<string>(
+                    SplitOrientation.Rows,
+                    [
+                        new SplitLayoutLeaf<string>("top-right"),
+                        new SplitLayoutLeaf<string>("bottom-right"),
+                    ]),
+            ]);
+
+        var layout = new SplitLayout<string>(root);
+
+        var columns = Assert.IsType<SplitLayoutBranch<string>>(layout.Root);
+        var rows = Assert.IsType<SplitLayoutBranch<string>>(columns.Children[1]);
+        Assert.Equal(SplitOrientation.Rows, rows.Orientation);
+        Assert.Equal(["left", "top-right", "bottom-right"], layout.Values);
+    }
+
+    [Fact]
     public void RemovingALeafCollapsesAndFlattensRedundantBranches()
     {
         var layout = new SplitLayout<string>("a");

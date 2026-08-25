@@ -1,6 +1,7 @@
 using System.Text;
 using System.IO.Compression;
 using Resesh.Core.Backup;
+using Resesh.Core.Layout;
 using Resesh.Core.Credentials;
 using Resesh.Core.Models;
 using Resesh.Core.Ssh;
@@ -208,6 +209,15 @@ public sealed class SessionsBackupTests : IDisposable
                     ActiveTabIndex = 0,
                 },
             ],
+            Layout = new WorkspaceLayoutNode
+            {
+                Orientation = SplitOrientation.Rows,
+                Children =
+                [
+                    new WorkspaceLayoutNode { GroupIndex = 0 },
+                    new WorkspaceLayoutNode { GroupIndex = 1 },
+                ],
+            },
         });
         importedWorkspaceStore.SaveLastLayout(new WorkspaceLayout
         {
@@ -258,6 +268,7 @@ public sealed class SessionsBackupTests : IDisposable
         Assert.Equal([true, false, true, false], workspace.Groups[0].Tabs.Select(tab => tab.Pinned));
         Assert.Equal(2, workspace.Groups[0].ActiveTabIndex);
         Assert.Equal(fresh.Id, Assert.Single(workspace.Groups[1].Tabs).SessionId);
+        Assert.Equal(SplitOrientation.Rows, workspace.Layout!.Orientation);
         Assert.Equal(duplicatedSession.Id, Assert.Single(loaded.LastLayout!.Groups[0].Tabs).SessionId);
         Assert.True(File.Exists(Path.Combine(target.Directory, "workspaces.json.bak")));
     }

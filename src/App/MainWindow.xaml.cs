@@ -24,10 +24,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     public MainViewModel ViewModel { get; }
 
     public ObservableCollection<TreeNodeViewModel> RecentSessions { get; } = [];
+    public ObservableCollection<WorkspaceItemViewModel> Workspaces { get; } = [];
     public ObservableCollection<RecordingItemViewModel> Recordings { get; } = [];
 
     private readonly Dictionary<TabGroupViewModel, TabGroupView> _groupViews = [];
-    private readonly SplitLayout<TabGroupViewModel> _groupLayout;
+    private SplitLayout<TabGroupViewModel> _groupLayout;
     private bool _closeConfirmed;
     private bool _closePromptOpen;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
@@ -354,6 +355,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         Add("View", _sessionsPaneOpen ? "Hide Sessions Pane" : "Show Sessions Pane",
             "sidebar rail sessions recent recordings",
             Sync(() => SetSessionsPaneOpen(!_sessionsPaneOpen)));
+        Add("View", "Show Workspaces", "sidebar rail layouts",
+            Sync(() => SelectSessionsRailTab("workspaces")));
         Add("View", "Show Recent Sessions", "sidebar rail history",
             Sync(() => SelectSessionsRailTab("recent")));
         Add("View", "Show Recordings", "sidebar rail playback asciicast",
@@ -1041,78 +1044,156 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     // ---- Workspaces ----
 
-    private WorkspaceLayout CaptureWorkspaceLayout() => new()
+    private WorkspaceLayout CaptureWorkspaceLayout()
     {
-        Groups = ViewModel.Groups.Select(group =>
+        var groups = _groupLayout.Values.ToList();
+        var groupIndices = groups
+            .Select((group, index) => (group, index))
+            .ToDictionary(item => item.group, item => item.index);
+        return new WorkspaceLayout
         {
-            var originalActiveIndex = group.SelectedTab is null ? -1 : group.Tabs.IndexOf(group.SelectedTab);
-            var captured = group.Tabs
-                .Select((tab, originalIndex) => (Tab: tab, OriginalIndex: originalIndex))
-                .Where(item => !item.Tab.IsPlayback && App.Store.Find(item.Tab.Session.Id) is not null)
-                .ToList();
-            var activeIndex = captured.FindIndex(item => item.OriginalIndex == originalActiveIndex);
-            if (activeIndex < 0 && captured.Count > 0 && originalActiveIndex >= 0)
+            Groups = groups.Select(group =>
             {
-                activeIndex = Math.Clamp(
-                    captured.Count(item => item.OriginalIndex < originalActiveIndex),
-                    0,
-                    captured.Count - 1);
-            }
-
-            return new WorkspaceGroup
-            {
-                Tabs = captured.Select(item => new WorkspaceTabReference
+                var originalActiveIndex = group.SelectedTab is null ? -1 : group.Tabs.IndexOf(group.SelectedTab);
+                var captured = group.Tabs
+                    .Select((tab, originalIndex) => (Tab: tab, OriginalIndex: originalIndex))
+                    .Where(item => !item.Tab.IsPlayback && App.Store.Find(item.Tab.Session.Id) is not null)
+                    .ToList();
+                var activeIndex = captured.FindIndex(item => item.OriginalIndex == originalActiveIndex);
+                if (activeIndex < 0 && captured.Count > 0 && originalActiveIndex >= 0)
                 {
-                    SessionId = item.Tab.Session.Id,
-                    Pinned = item.Tab.IsPinned,
-                }).ToList(),
-                ActiveTabIndex = Math.Max(activeIndex, 0),
-            };
-        }).ToList(),
-    };
+                    activeIndex = Math.Clamp(
+                        captured.Count(item => item.OriginalIndex < originalActiveIndex),
+                        0,
+                        captured.Count - 1);
+                }
+
+                return new WorkspaceGroup
+                {
+                    Tabs = captured.Select(item => new WorkspaceTabReference
+                    {
+                        SessionId = item.Tab.Session.Id,
+                        Pinned = item.Tab.IsPinned,
+                    }).ToList(),
+                    ActiveTabIndex = Math.Max(activeIndex, 0),
+                };
+            }).ToList(),
+            Layout = CaptureWorkspaceLayoutNode(_groupLayout.Root, groupIndices),
+        };
+    }
+
+    private static WorkspaceLayoutNode CaptureWorkspaceLayoutNode(
+        SplitLayoutNode<TabGroupViewModel> node,
+        IReadOnlyDictionary<TabGroupViewModel, int> groupIndices) =>
+        node switch
+        {
+            SplitLayoutLeaf<TabGroupViewModel> leaf => new WorkspaceLayoutNode
+            {
+                GroupIndex = groupIndices[leaf.Value],
+            },
+            SplitLayoutBranch<TabGroupViewModel> branch => new WorkspaceLayoutNode
+            {
+                Orientation = branch.Orientation,
+                Children = branch.Children
+                    .Select(child => CaptureWorkspaceLayoutNode(child, groupIndices))
+                    .ToList(),
+            },
+            _ => throw new InvalidOperationException("Unknown split layout node."),
+        };
 
     private void RefreshWorkspaceMenu()
     {
-        WorkspacesMenu.Items.Clear();
+        Workspaces.Clear();
+        foreach (var workspace in App.Workspaces.Workspaces)
+            Workspaces.Add(WorkspaceItemViewModel.FromWorkspace(workspace));
+        NoWorkspacesState.Visibility = Workspaces.Count == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
+        var menuItems = new List<MenuFlyoutItemBase>();
         var saveAs = new MenuFlyoutItem { Text = "Save current layout as workspace…" };
         saveAs.Click += async (_, _) => await SaveCurrentWorkspaceAsAsync();
-        WorkspacesMenu.Items.Add(saveAs);
-        WorkspacesMenu.Items.Add(new MenuFlyoutSeparator());
+        menuItems.Add(saveAs);
+        menuItems.Add(new MenuFlyoutSeparator());
 
         if (App.Workspaces.Workspaces.Count == 0)
         {
-            WorkspacesMenu.Items.Add(new MenuFlyoutItem
+            menuItems.Add(new MenuFlyoutItem
             {
                 Text = "No saved workspaces",
                 IsEnabled = false,
             });
-            return;
         }
-
-        foreach (var workspace in App.Workspaces.Workspaces)
+        else
         {
-            var workspaceMenu = new MenuFlyoutSubItem { Text = workspace.Name };
-            var open = new MenuFlyoutItem { Text = "Open" };
-            open.Click += async (_, _) => await OpenWorkspaceAsync(workspace, additive: false);
-            var additive = new MenuFlyoutItem { Text = "Open additively" };
-            additive.Click += async (_, _) => await OpenWorkspaceAsync(workspace, additive: true);
-            var update = new MenuFlyoutItem { Text = "Update from current layout…" };
-            update.Click += async (_, _) => await UpdateWorkspaceAsync(workspace);
-            var rename = new MenuFlyoutItem { Text = "Rename…" };
-            rename.Click += async (_, _) => await RenameWorkspaceAsync(workspace);
-            var delete = new MenuFlyoutItem { Text = "Delete…" };
-            delete.Click += async (_, _) => await DeleteWorkspaceAsync(workspace);
+            foreach (var workspace in App.Workspaces.Workspaces)
+            {
+                var workspaceMenu = new MenuFlyoutSubItem { Text = workspace.Name };
+                var open = new MenuFlyoutItem { Text = "Open" };
+                open.Click += async (_, _) => await OpenWorkspaceAsync(workspace, additive: false);
+                var additive = new MenuFlyoutItem { Text = "Open additively" };
+                additive.Click += async (_, _) => await OpenWorkspaceAsync(workspace, additive: true);
+                var update = new MenuFlyoutItem { Text = "Update from current layout…" };
+                update.Click += async (_, _) => await UpdateWorkspaceAsync(workspace);
+                var rename = new MenuFlyoutItem { Text = "Rename…" };
+                rename.Click += async (_, _) => await RenameWorkspaceAsync(workspace);
+                var delete = new MenuFlyoutItem { Text = "Delete…" };
+                delete.Click += async (_, _) => await DeleteWorkspaceAsync(workspace);
 
-            workspaceMenu.Items.Add(open);
-            workspaceMenu.Items.Add(additive);
-            workspaceMenu.Items.Add(new MenuFlyoutSeparator());
-            workspaceMenu.Items.Add(update);
-            workspaceMenu.Items.Add(rename);
-            workspaceMenu.Items.Add(delete);
-            WorkspacesMenu.Items.Add(workspaceMenu);
+                workspaceMenu.Items.Add(open);
+                workspaceMenu.Items.Add(additive);
+                workspaceMenu.Items.Add(new MenuFlyoutSeparator());
+                workspaceMenu.Items.Add(update);
+                workspaceMenu.Items.Add(rename);
+                workspaceMenu.Items.Add(delete);
+                menuItems.Add(workspaceMenu);
+            }
         }
+
+        while (WorkspacesMenu.Items.Count > 0)
+            WorkspacesMenu.Items.RemoveAt(WorkspacesMenu.Items.Count - 1);
+        foreach (var menuItem in menuItems)
+            WorkspacesMenu.Items.Add(menuItem);
     }
+    private async void SaveWorkspace_Click(object sender, RoutedEventArgs e) =>
+        await SaveCurrentWorkspaceAsAsync();
+
+    private async void WorkspaceList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is WorkspaceItemViewModel item)
+            await OpenWorkspaceAsync(item.Workspace, additive: false);
+    }
+
+    private async void OpenWorkspaceMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
+            await OpenWorkspaceAsync(item.Workspace, additive: false);
+    }
+
+    private async void OpenWorkspaceAdditivelyMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
+            await OpenWorkspaceAsync(item.Workspace, additive: true);
+    }
+
+    private async void UpdateWorkspaceMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
+            await UpdateWorkspaceAsync(item.Workspace);
+    }
+
+    private async void RenameWorkspaceMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
+            await RenameWorkspaceAsync(item.Workspace);
+    }
+
+    private async void DeleteWorkspaceMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
+            await DeleteWorkspaceAsync(item.Workspace);
+    }
+
 
     private async Task SaveCurrentWorkspaceAsAsync()
     {
@@ -1188,7 +1269,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             return;
         }
 
-        ApplyWorkspaceLayout(new WorkspaceLayout { Groups = workspace.Groups }, additive);
+        ApplyWorkspaceLayout(new WorkspaceLayout
+        {
+            Groups = workspace.Groups,
+            Layout = workspace.Layout,
+        }, additive);
     }
 
     /// <summary>Launch-time restoration. The setting guard keeps direct callers honest.</summary>
@@ -1302,6 +1387,31 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 RemoveWorkspaceGroup(group);
         }
 
+        var savedLayout = layout.Layout ?? CreateColumnWorkspaceLayout(sourceGroups.Count);
+        if (additive)
+        {
+            var targetSet = targetGroups.ToHashSet();
+            var existingGroups = _groupLayout.Values.Where(group => !targetSet.Contains(group)).ToList();
+            var existingIndices = existingGroups
+                .Select((group, index) => (group, index))
+                .ToDictionary(item => item.group, item => item.index);
+            var existingLayout = CaptureWorkspaceLayoutSubset(_groupLayout.Root, existingIndices);
+            var combinedGroups = existingGroups.Concat(targetGroups).ToList();
+            var addedLayout = OffsetWorkspaceLayout(savedLayout, existingGroups.Count);
+            var combinedLayout = existingLayout is null
+                ? addedLayout
+                : new WorkspaceLayoutNode
+                {
+                    Orientation = SplitOrientation.Columns,
+                    Children = [existingLayout, addedLayout],
+                };
+            RebuildWorkspaceSplitLayout(combinedGroups, combinedLayout);
+        }
+        else
+        {
+            RebuildWorkspaceSplitLayout(targetGroups, savedLayout);
+        }
+
         SyncGroupOrder();
         ViewModel.OnGroupsChanged();
         RebuildGroupLayout();
@@ -1326,6 +1436,72 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         AttachGroupView(group);
         return group;
     }
+    private static WorkspaceLayoutNode CreateColumnWorkspaceLayout(int groupCount) =>
+        groupCount == 1
+            ? new WorkspaceLayoutNode { GroupIndex = 0 }
+            : new WorkspaceLayoutNode
+            {
+                Orientation = SplitOrientation.Columns,
+                Children = Enumerable.Range(0, groupCount)
+                    .Select(index => new WorkspaceLayoutNode { GroupIndex = index })
+                    .ToList(),
+            };
+
+    private static WorkspaceLayoutNode? CaptureWorkspaceLayoutSubset(
+        SplitLayoutNode<TabGroupViewModel> node,
+        IReadOnlyDictionary<TabGroupViewModel, int> groupIndices)
+    {
+        if (node is SplitLayoutLeaf<TabGroupViewModel> leaf)
+        {
+            return groupIndices.TryGetValue(leaf.Value, out var index)
+                ? new WorkspaceLayoutNode { GroupIndex = index }
+                : null;
+        }
+
+        if (node is not SplitLayoutBranch<TabGroupViewModel> branch)
+            throw new InvalidOperationException("Unknown split layout node.");
+
+        var children = branch.Children
+            .Select(child => CaptureWorkspaceLayoutSubset(child, groupIndices))
+            .OfType<WorkspaceLayoutNode>()
+            .ToList();
+        return children.Count switch
+        {
+            0 => null,
+            1 => children[0],
+            _ => new WorkspaceLayoutNode
+            {
+                Orientation = branch.Orientation,
+                Children = children,
+            },
+        };
+    }
+
+    private static WorkspaceLayoutNode OffsetWorkspaceLayout(WorkspaceLayoutNode node, int offset) =>
+        node.Orientation is null
+            ? node with { GroupIndex = node.GroupIndex + offset }
+            : node with
+            {
+                Children = node.Children
+                    .Select(child => OffsetWorkspaceLayout(child, offset))
+                    .ToList(),
+            };
+
+    private void RebuildWorkspaceSplitLayout(
+        IReadOnlyList<TabGroupViewModel> groups,
+        WorkspaceLayoutNode layout) =>
+        _groupLayout = new SplitLayout<TabGroupViewModel>(
+            BuildWorkspaceSplitNode(layout, groups));
+
+    private static SplitLayoutNode<TabGroupViewModel> BuildWorkspaceSplitNode(
+        WorkspaceLayoutNode node,
+        IReadOnlyList<TabGroupViewModel> groups) =>
+        node.Orientation is { } orientation
+            ? new SplitLayoutBranch<TabGroupViewModel>(
+                orientation,
+                node.Children.Select(child => BuildWorkspaceSplitNode(child, groups)))
+            : new SplitLayoutLeaf<TabGroupViewModel>(groups[node.GroupIndex]);
+
 
     private void PlaceWorkspaceTab(TabViewModel tab, TabGroupViewModel target, int index)
     {
@@ -2027,6 +2203,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private static string NormalizeRailTab(string? tab) => tab switch
     {
+        "workspaces" => "workspaces",
         "recent" => "recent",
         "recordings" => "recordings",
         _ => "sessions",
@@ -2036,6 +2213,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         var visible = _sessionsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
         SessionsPane.Visibility = _selectedRailTab == "sessions" ? visible : Visibility.Collapsed;
+        WorkspacesPane.Visibility = _selectedRailTab == "workspaces" ? visible : Visibility.Collapsed;
         RecentPane.Visibility = _selectedRailTab == "recent" ? visible : Visibility.Collapsed;
         RecordingsPane.Visibility = _selectedRailTab == "recordings" ? visible : Visibility.Collapsed;
 
@@ -2047,6 +2225,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
         SessionsRail.SelectedItem = _selectedRailTab switch
         {
+            "workspaces" => WorkspacesRailItem,
             "recent" => RecentRailItem,
             "recordings" => RecordingsRailItem,
             _ => SessionsRailItem,
@@ -2107,6 +2286,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private FrameworkElement SelectedSessionsPane() => _selectedRailTab switch
     {
+        "workspaces" => WorkspacesPane,
         "recent" => RecentPane,
         "recordings" => RecordingsPane,
         _ => SessionsPane,

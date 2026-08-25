@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Resesh.Core.Layout;
 
 namespace Resesh.Core.Storage;
 
@@ -20,6 +21,15 @@ public sealed record WorkspaceGroup
 public sealed record WorkspaceLayout
 {
     public IReadOnlyList<WorkspaceGroup> Groups { get; init; } = [];
+    public WorkspaceLayoutNode? Layout { get; init; }
+}
+
+/// <summary>A leaf group or recursive equal-size split in a saved workspace.</summary>
+public sealed record WorkspaceLayoutNode
+{
+    public int GroupIndex { get; init; } = -1;
+    public SplitOrientation? Orientation { get; init; }
+    public IReadOnlyList<WorkspaceLayoutNode> Children { get; init; } = [];
 }
 
 /// <summary>A named, stable saved layout.</summary>
@@ -28,6 +38,7 @@ public sealed record Workspace
     public Guid Id { get; init; }
     public string Name { get; init; } = "";
     public IReadOnlyList<WorkspaceGroup> Groups { get; init; } = [];
+    public WorkspaceLayoutNode? Layout { get; init; }
 }
 
 /// <summary>
@@ -93,6 +104,7 @@ public sealed class WorkspaceStore
                 Id = Guid.NewGuid(),
                 Name = name,
                 Groups = normalized.Groups,
+                Layout = normalized.Layout,
             };
             _workspaces.Add(workspace);
             Save();
@@ -122,7 +134,12 @@ public sealed class WorkspaceStore
         lock (_gate)
         {
             var index = FindIndex(id);
-            _workspaces[index] = _workspaces[index] with { Groups = NormalizeLayout(layout).Groups };
+            var normalized = NormalizeLayout(layout);
+            _workspaces[index] = _workspaces[index] with
+            {
+                Groups = normalized.Groups,
+                Layout = normalized.Layout,
+            };
             Save();
         }
     }
@@ -206,6 +223,7 @@ public sealed class WorkspaceStore
     {
         WorkspaceLayout RemapLayout(WorkspaceLayout layout) => new()
         {
+            Layout = layout.Layout,
             Groups = layout.Groups.Select(group =>
             {
                 var surviving = group.Tabs
@@ -232,9 +250,18 @@ public sealed class WorkspaceStore
 
         return new WorkspaceStoreData
         {
-            Workspaces = source.Workspaces!.Select(workspace => workspace with
+            Workspaces = source.Workspaces!.Select(workspace =>
             {
-                Groups = RemapLayout(new WorkspaceLayout { Groups = workspace.Groups }).Groups,
+                var remapped = RemapLayout(new WorkspaceLayout
+                {
+                    Groups = workspace.Groups,
+                    Layout = workspace.Layout,
+                });
+                return workspace with
+                {
+                    Groups = remapped.Groups,
+                    Layout = remapped.Layout,
+                };
             }).ToList(),
             LastLayout = source.LastLayout is null ? null : RemapLayout(source.LastLayout),
         };
@@ -258,8 +285,12 @@ public sealed class WorkspaceStore
                 throw new InvalidDataException("The workspace payload contains an empty or duplicate workspace id.");
             if (string.IsNullOrWhiteSpace(workspace.Name))
                 throw new InvalidDataException("The workspace payload contains an unnamed workspace.");
-            var layout = NormalizeLayout(new WorkspaceLayout { Groups = workspace.Groups });
-            workspaces.Add(workspace with { Groups = layout.Groups });
+            var layout = NormalizeLayout(new WorkspaceLayout
+            {
+                Groups = workspace.Groups,
+                Layout = workspace.Layout,
+            });
+            workspaces.Add(workspace with { Groups = layout.Groups, Layout = layout.Layout });
         }
 
         return new WorkspaceStoreData
@@ -274,34 +305,104 @@ public sealed class WorkspaceStore
         if (layout.Groups is null)
             throw new InvalidDataException("A workspace has no groups collection.");
 
+        var groups = layout.Groups.Select(group =>
+        {
+            if (group is null)
+                throw new InvalidDataException("A workspace contains a null group.");
+            if (group.Tabs is null)
+                throw new InvalidDataException("A workspace group has no tabs collection.");
+
+            var tabs = new List<WorkspaceTabReference>(group.Tabs.Count);
+            foreach (var tab in group.Tabs)
+            {
+                if (tab is null)
+                    throw new InvalidDataException("A workspace group contains a null tab.");
+                if (tab.SessionId == Guid.Empty)
+                    throw new InvalidDataException("A workspace contains an empty session id.");
+                tabs.Add(tab);
+            }
+
+            if ((tabs.Count == 0 && group.ActiveTabIndex != 0)
+                || (tabs.Count > 0
+                    && (group.ActiveTabIndex < 0 || group.ActiveTabIndex >= tabs.Count)))
+            {
+                throw new InvalidDataException("A workspace active-tab index is outside its group.");
+            }
+
+            return group with { Tabs = tabs };
+        }).ToList();
+
+        var normalizedLayout = layout.Layout ?? CreateLegacyLayout(groups.Count);
+        if (normalizedLayout is not null)
+        {
+            var groupIndices = new List<int>();
+            normalizedLayout = NormalizeLayoutNode(normalizedLayout, groups.Count, groupIndices);
+            if (!groupIndices.SequenceEqual(Enumerable.Range(0, groups.Count)))
+                throw new InvalidDataException("A workspace split layout does not contain every group in order.");
+        }
+        else if (groups.Count != 0)
+        {
+            throw new InvalidDataException("A workspace split layout is missing.");
+        }
+
         return new WorkspaceLayout
         {
-            Groups = layout.Groups.Select(group =>
+            Groups = groups,
+            Layout = normalizedLayout,
+        };
+    }
+
+    private static WorkspaceLayoutNode? CreateLegacyLayout(int groupCount)
+    {
+        if (groupCount == 0)
+            return null;
+        if (groupCount == 1)
+            return new WorkspaceLayoutNode { GroupIndex = 0 };
+        return new WorkspaceLayoutNode
+        {
+            Orientation = SplitOrientation.Columns,
+            Children = Enumerable.Range(0, groupCount)
+                .Select(index => new WorkspaceLayoutNode { GroupIndex = index })
+                .ToList(),
+        };
+    }
+
+    private static WorkspaceLayoutNode NormalizeLayoutNode(
+        WorkspaceLayoutNode node,
+        int groupCount,
+        List<int> groupIndices)
+    {
+        if (node.Children is null)
+            throw new InvalidDataException("A workspace split node has no children collection.");
+
+        if (node.Orientation is null)
+        {
+            if (node.Children.Count != 0
+                || node.GroupIndex < 0
+                || node.GroupIndex >= groupCount
+                || groupIndices.Contains(node.GroupIndex))
             {
-                if (group is null)
-                    throw new InvalidDataException("A workspace contains a null group.");
-                if (group.Tabs is null)
-                    throw new InvalidDataException("A workspace group has no tabs collection.");
+                throw new InvalidDataException("A workspace split layout contains an invalid group leaf.");
+            }
+            groupIndices.Add(node.GroupIndex);
+            return new WorkspaceLayoutNode { GroupIndex = node.GroupIndex };
+        }
 
-                var tabs = new List<WorkspaceTabReference>(group.Tabs.Count);
-                foreach (var tab in group.Tabs)
-                {
-                    if (tab is null)
-                        throw new InvalidDataException("A workspace group contains a null tab.");
-                    if (tab.SessionId == Guid.Empty)
-                        throw new InvalidDataException("A workspace contains an empty session id.");
-                    tabs.Add(tab);
-                }
+        if (node.GroupIndex != -1
+            || !Enum.IsDefined(node.Orientation.Value)
+            || node.Children.Count < 2)
+        {
+            throw new InvalidDataException("A workspace split layout contains an invalid branch.");
+        }
 
-                if ((tabs.Count == 0 && group.ActiveTabIndex != 0)
-                    || (tabs.Count > 0
-                        && (group.ActiveTabIndex < 0 || group.ActiveTabIndex >= tabs.Count)))
-                {
-                    throw new InvalidDataException("A workspace active-tab index is outside its group.");
-                }
-
-                return group with { Tabs = tabs };
-            }).ToList(),
+        return new WorkspaceLayoutNode
+        {
+            Orientation = node.Orientation,
+            Children = node.Children
+                .Select(child => child is null
+                    ? throw new InvalidDataException("A workspace split layout contains a null node.")
+                    : NormalizeLayoutNode(child, groupCount, groupIndices))
+                .ToList(),
         };
     }
 
