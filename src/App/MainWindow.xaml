@@ -22,7 +22,7 @@
                 <TreeViewItem
                     ItemsSource="{x:Bind Children}"
                     IsExpanded="{x:Bind IsExpanded, Mode=OneWay}"
-                    Loaded="FolderTreeViewItem_Loaded"
+                    Loaded="TreeViewItem_Loaded"
                     AllowDrop="True"
                     Background="{x:Bind SelectionBackground, Mode=OneWay}"
                     Tapped="TreeNode_Tapped"
@@ -40,6 +40,7 @@
             <DataTemplate x:Key="SessionTemplate" x:DataType="vm:TreeNodeViewModel">
                 <TreeViewItem
                     ItemsSource="{x:Bind Children}"
+                    Loaded="TreeViewItem_Loaded"
                     Background="{x:Bind SelectionBackground, Mode=OneWay}"
                     Tapped="TreeNode_Tapped"
                     ContextRequested="TreeNode_ContextRequested"
@@ -79,7 +80,7 @@
                 <TreeViewItem
                     ItemsSource="{x:Bind Children}"
                     IsExpanded="{x:Bind IsExpanded, Mode=OneWay}"
-                    Loaded="FolderTreeViewItem_Loaded"
+                    Loaded="TreeViewItem_Loaded"
                     AllowDrop="True"
                     Background="{x:Bind SelectionBackground, Mode=OneWay}"
                     Tapped="TreeNode_Tapped"

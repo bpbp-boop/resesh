@@ -36,6 +36,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private int _themeApplyVersion;
     private DependencyObject? _palettePreviousFocus;
     private bool _paletteOpenedFromTerminal;
+    private const double TreeIndentationScale = 0.5;
     private string _selectedRailTab = "sessions";
     private bool _sessionsPaneOpen;
     private double _sessionsPaneWidth = 280;
@@ -2075,15 +2076,27 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     }
 
     /// <summary>
-    /// TreeView virtualizes rows outside the viewport. Those rows can be realized long
-    /// after the bounded rebuild sync has finished, and WinUI does not reliably apply an
-    /// IsExpanded binding before the item's children exist. Re-apply the VM state whenever
-    /// a folder row enters the visual tree so scrolling cannot reveal a stale collapse.
+    /// Applies expansion state and replaces WinUI's generous per-level indentation with a
+    /// compact equivalent. Binding the scaled padding keeps it correct when drag-and-drop
+    /// changes a realized node's depth.
     /// </summary>
-    private void FolderTreeViewItem_Loaded(object sender, RoutedEventArgs e)
+    private void TreeViewItem_Loaded(object sender, RoutedEventArgs e)
     {
-        if (sender is TreeViewItem item
-            && item.DataContext is TreeNodeViewModel { IsFolder: true } node
+        if (sender is not TreeViewItem item)
+            return;
+
+        if (FindTemplateElement(item, "MultiSelectGrid") is Grid row)
+        {
+            row.SetBinding(Grid.PaddingProperty, new Microsoft.UI.Xaml.Data.Binding
+            {
+                Source = item,
+                Path = new PropertyPath("TreeViewItemTemplateSettings.Indentation"),
+                Converter = CompactTreeIndentationConverter.Instance,
+                Mode = Microsoft.UI.Xaml.Data.BindingMode.OneWay,
+            });
+        }
+
+        if (item.DataContext is TreeNodeViewModel { IsFolder: true } node
             && item.IsExpanded != node.IsExpanded)
         {
             Trace($"realized: '{node.FolderPath}' container={item.IsExpanded} vm={node.IsExpanded} -> pushing");
@@ -2138,7 +2151,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         // The stock TextBox template shows its own clear button while focused.
         // This field has a persistent clear button, so remove the template button
         // to avoid two slightly offset X glyphs occupying the same space.
-        if (FindFilterBoxTemplateElement(FilterBox, "DeleteButton") is Button deleteButton)
+        if (FindTemplateElement(FilterBox, "DeleteButton") is Button deleteButton)
         {
             deleteButton.Opacity = 0;
             deleteButton.IsHitTestVisible = false;
@@ -2147,19 +2160,36 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
     }
 
-    private static FrameworkElement? FindFilterBoxTemplateElement(DependencyObject root, string name)
+    private static FrameworkElement? FindTemplateElement(DependencyObject root, string name)
     {
-        for (var index = 0; index < Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root); index++)
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
         {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, index);
+            var child = VisualTreeHelper.GetChild(root, index);
             if (child is FrameworkElement { Name: var childName } element && childName == name)
                 return element;
 
-            if (FindFilterBoxTemplateElement(child, name) is { } descendant)
+            if (FindTemplateElement(child, name) is { } descendant)
                 return descendant;
         }
 
         return null;
+    }
+
+    private sealed class CompactTreeIndentationConverter : Microsoft.UI.Xaml.Data.IValueConverter
+    {
+        public static CompactTreeIndentationConverter Instance { get; } = new();
+
+        public object Convert(object value, Type targetType, object parameter, string language) =>
+            value is Thickness indentation
+                ? new Thickness(
+                    indentation.Left * TreeIndentationScale,
+                    indentation.Top,
+                    indentation.Right,
+                    indentation.Bottom)
+                : value;
+
+        public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+            throw new NotSupportedException();
     }
 
     private void ClearFilterButton_Click(object sender, RoutedEventArgs e) => ClearFilter();
