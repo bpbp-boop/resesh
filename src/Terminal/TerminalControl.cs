@@ -20,19 +20,71 @@ public sealed record TerminalTimedReplayEvent(double Time, string Type, string D
 /// </summary>
 public sealed class TerminalControl : Grid, IDisposable
 {
-    private const string VirtualHost = "app.local";
     private const int FlushThresholdBytes = 32 * 1024;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
+    private static readonly Lazy<Task<CoreWebView2Environment>> SharedEnvironment =
+        new(CreateEnvironmentAsync);
+    private static readonly Lazy<string> TerminalPage = new(LoadTerminalPage);
+
+    private static string LoadTerminalPage()
+    {
+        var wwwroot = Path.Combine(AppContext.BaseDirectory, "Resesh.Terminal", "wwwroot");
+        if (!Directory.Exists(wwwroot))
+            wwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
+
+        var html = File.ReadAllText(Path.Combine(wwwroot, "terminal.html"));
+        var assets = new (string Marker, string FileName, string OpenTag, string CloseTag)[]
+        {
+            ("<link rel=\"stylesheet\" href=\"xterm.css\">", "xterm.css", "<style>", "</style>"),
+            ("<script src=\"xterm.js\"></script>", "xterm.js", "<script>", "</script>"),
+            ("<script src=\"addon-fit.js\"></script>", "addon-fit.js", "<script>", "</script>"),
+            ("<script src=\"addon-web-links.js\"></script>", "addon-web-links.js", "<script>", "</script>"),
+            ("<script src=\"addon-search.js\"></script>", "addon-search.js", "<script>", "</script>"),
+            ("<script src=\"addon-highlight.js\"></script>", "addon-highlight.js", "<script>", "</script>"),
+            ("<script src=\"addon-serialize.js\"></script>", "addon-serialize.js", "<script>", "</script>"),
+            ("<script src=\"addon-ruler.js\"></script>", "addon-ruler.js", "<script>", "</script>"),
+        };
+
+        var page = new StringBuilder(html.Length + 800 * 1024);
+        var cursor = 0;
+        foreach (var (marker, fileName, openTag, closeTag) in assets)
+        {
+            var markerIndex = html.IndexOf(marker, cursor, StringComparison.Ordinal);
+            if (markerIndex < 0)
+                throw new InvalidDataException($"Terminal page does not reference {fileName}.");
+
+            var asset = File.ReadAllText(Path.Combine(wwwroot, fileName));
+            if (asset.Contains(closeTag, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"{fileName} cannot be safely inlined.");
+
+            page.Append(html, cursor, markerIndex - cursor);
+            page.Append(openTag).Append(asset).Append(closeTag);
+            cursor = markerIndex + marker.Length;
+        }
+        page.Append(html, cursor, html.Length - cursor);
+        return page.ToString();
+    }
+
+    private static async Task<CoreWebView2Environment> CreateEnvironmentAsync()
+    {
+        var userDataFolder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Resesh", "WebView2");
+        return await CoreWebView2Environment.CreateWithOptionsAsync(
+            null, userDataFolder, new CoreWebView2EnvironmentOptions());
+    }
 
     private readonly WebView2 _webView = new();
     private object? _initialOptions;
     private readonly object _outputGate = new();
     private readonly MemoryStream _pendingOutput = new(FlushThresholdBytes);
     private List<OutputIngest> _pendingIngest = [];
+    // Messages produced while WebView2 is still loading. Every entry is already serialized,
+    // so flushing preserves the exact order seen by the terminal page.
+    private readonly Queue<string> _pendingMessages = new();
     private DispatcherQueueTimer? _flushTimer;
     private bool _flushDispatchPending;
     private bool _flushTimerPending;
@@ -123,10 +175,7 @@ public sealed class TerminalControl : Grid, IDisposable
 
     public async Task InitializeAsync()
     {
-        var userDataFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Resesh", "WebView2");
-        var environment = await CoreWebView2Environment.CreateWithOptionsAsync(
-            null, userDataFolder, new CoreWebView2EnvironmentOptions());
+        var environment = await SharedEnvironment.Value;
         await _webView.EnsureCoreWebView2Async(environment);
 
         var core = _webView.CoreWebView2;
@@ -139,17 +188,11 @@ public sealed class TerminalControl : Grid, IDisposable
         core.Settings.AreDevToolsEnabled = false;
 #endif
 
-        // WinUI library content lands under "<ProjectName>\wwwroot" in the app output.
-        var wwwroot = Path.Combine(AppContext.BaseDirectory, "Resesh.Terminal", "wwwroot");
-        if (!Directory.Exists(wwwroot))
-            wwwroot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
-        core.SetVirtualHostNameToFolderMapping(VirtualHost, wwwroot, CoreWebView2HostResourceAccessKind.Allow);
         core.WebMessageReceived += OnWebMessageReceived;
-        // Chromium heuristic-caches virtual-host files (no Cache-Control headers), which can
-        // serve a stale terminal.html/addon after an app update; the assets are local, so a
-        // fresh read costs nothing.
-        await core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache);
-        core.Navigate($"https://{VirtualHost}/terminal.html");
+        // One in-memory document avoids the virtual-host request waterfall for the bundled
+        // stylesheet and scripts. The lazy value is rebuilt from disk once per app process,
+        // so rebuilt or updated assets cannot come from Chromium's stale disk cache.
+        core.NavigateToString(TerminalPage.Value);
     }
 
     private void OnWebMessageReceived(CoreWebView2 sender, CoreWebView2WebMessageReceivedEventArgs args)
@@ -182,6 +225,7 @@ public sealed class TerminalControl : Grid, IDisposable
                     Columns = root.GetProperty("cols").GetInt32();
                     Rows = root.GetProperty("rows").GetInt32();
                     _pageReady = true;
+                    FlushPendingMessages();
                     PostRulerPresentation();
                     PostPromptPlatform();
                     Ready?.Invoke(Columns, Rows);
@@ -594,13 +638,25 @@ public sealed class TerminalControl : Grid, IDisposable
 
     private void Post(object message)
     {
-        if (_disposed || !_pageReady || _webView.CoreWebView2 is null)
+        if (_disposed)
+            return;
+
+        var json = JsonSerializer.Serialize(message, JsonOptions);
+        if (!_pageReady || _webView.CoreWebView2 is null)
         {
-            TraceHook?.Invoke(
-                $"Post DROPPED: disposed={_disposed} pageReady={_pageReady} core={(_webView.CoreWebView2 is null ? "null" : "ok")}");
+            _pendingMessages.Enqueue(json);
             return;
         }
-        _webView.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(message, JsonOptions));
+        _webView.CoreWebView2.PostWebMessageAsJson(json);
+    }
+
+    private void FlushPendingMessages()
+    {
+        var core = _webView.CoreWebView2;
+        if (!_pageReady || core is null)
+            return;
+        while (_pendingMessages.TryDequeue(out var json))
+            core.PostWebMessageAsJson(json);
     }
 
     public void Dispose()
@@ -609,6 +665,7 @@ public sealed class TerminalControl : Grid, IDisposable
             return;
         _disposed = true;
         _flushTimer?.Stop();
+        _pendingMessages.Clear();
         _webView.Close();
     }
 }

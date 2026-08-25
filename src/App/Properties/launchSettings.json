@@ -2,6 +2,10 @@
   "profiles": {
     "Resesh.App (Unpackaged)": {
       "commandName": "Project"
+    },
+    "Resesh.App Demo (Unpackaged)": {
+      "commandName": "Project",
+      "commandLineArgs": "--demo"
     }
   }
 }

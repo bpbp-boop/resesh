@@ -11,16 +11,19 @@ public partial class App : Application
 
     public static SessionStore Store { get; } = new(StorePath("sessions.json", SessionStore.DefaultPath));
     public static SshKeyStore SshKeys { get; } = new(StorePath("ssh-keys.json", SshKeyStore.DefaultPath));
-    public static ICredentialService Credentials { get; } = new WindowsCredentialService();
+    public static ICredentialService Credentials { get; } = DemoMode.CreateCredentialService();
     public static KnownHostsStore KnownHosts { get; } = new(StorePath("known_hosts.json", KnownHostsStore.DefaultPath));
     public static SettingsStore Settings { get; } = new(StorePath("settings.json", SettingsStore.DefaultPath));
     public static HighlightsStore Highlights { get; } = new(StorePath("highlights.json", HighlightsStore.DefaultPath));
 
-    /// <summary>`--data-dir <path>`: keep every JSON store in an alternate directory.
-    /// Used by the automated UI test rig; normal launches use the %APPDATA% defaults.
-    /// Secrets stay in Windows Credential Manager either way.</summary>
+    /// <summary>`--data-dir <path>` keeps every JSON store in an alternate directory.
+    /// `--demo` instead uses disposable JSON stores and in-memory secrets. Normal launches
+    /// use the %APPDATA% defaults and Windows Credential Manager.</summary>
     private static string StorePath(string fileName, string defaultPath)
     {
+        if (DemoMode.IsEnabled)
+            return DemoMode.StorePath(fileName);
+
         var args = Environment.GetCommandLineArgs();
         for (var i = 1; i < args.Length - 1; i++)
         {
@@ -37,7 +40,8 @@ public partial class App : Application
 
     public App()
     {
-        MigrateLegacyDataDir();
+        if (!DemoMode.IsEnabled)
+            MigrateLegacyDataDir();
 
         // Application-level theme must be set before any UI exists; it also themes
         // popups/dialogs, which don't inherit element-level RequestedTheme.
@@ -93,23 +97,30 @@ public partial class App : Application
         SshKeys.Load();
         KnownHosts.Load();
         Highlights.Load();
-        try
+        if (DemoMode.IsEnabled)
         {
-            SshKeys.MigrateLegacySessions(Store, Credentials);
+            DemoMode.Seed(Store);
         }
-        catch (Exception ex)
+        else
         {
-            LogCrash(ex); // keep legacy session data usable if key-registry migration fails
-        }
-        try
-        {
-            // Adds newly discovered shells as built-in local profiles (stable ids) and
-            // reports which built-ins are available; unavailable ones are hidden.
-            AvailableLocalShells = Resesh.Core.Local.LocalShellDiscovery.SyncBuiltIns(Store);
-        }
-        catch (Exception ex)
-        {
-            LogCrash(ex); // discovery must never block launch; local profiles just stay hidden
+            try
+            {
+                SshKeys.MigrateLegacySessions(Store, Credentials);
+            }
+            catch (Exception ex)
+            {
+                LogCrash(ex); // keep legacy session data usable if key-registry migration fails
+            }
+            try
+            {
+                // Adds newly discovered shells as built-in local profiles (stable ids) and
+                // reports which built-ins are available; unavailable ones are hidden.
+                AvailableLocalShells = Resesh.Core.Local.LocalShellDiscovery.SyncBuiltIns(Store);
+            }
+            catch (Exception ex)
+            {
+                LogCrash(ex); // discovery must never block launch; local profiles just stay hidden
+            }
         }
 #if DEBUG
         Resesh.Core.Ssh.SshTerminalSession.TraceHook = message => MainWindow.Trace(message);

@@ -116,9 +116,17 @@ keyboard-interactive fallback.
   dialog -> typed confirm -> key replaced -> clean reconnect.
 - WebView2 gotcha (REAL, cost hours): Chromium heuristic-caches virtual-host-mapped files
   (they carry Last-Modified but no Cache-Control), so a rebuilt terminal.html can be served
-  STALE - the new find bar silently missing while the exe is current. Fix:
-  `Profile.ClearBrowsingDataAsync(DiskCache)` before Navigate (assets are local; re-read is
-  free). Also killed lingering msedgewebview2 processes lock %LOCALAPPDATA%\Resesh\WebView2.
+  stale while the executable is current. The first fix cleared the complete disk cache before
+  every navigation, which added about four seconds to every local and remote terminal launch.
+  `TerminalControl` now shares one WebView2 environment and builds one in-memory document
+  from the bundled HTML, CSS, and scripts per app process. `NavigateToString` removes the
+  virtual-host request waterfall and Chromium disk caching. Measured page readiness fell
+  from about 1.34 seconds to 0.31 seconds for a warm new tab.
+- Terminal startup overlaps transport work with WebView2 initialization. `TerminalControl`
+  serializes page messages produced before the ready handshake and flushes them in order;
+  `TerminalTabView` creates rewind/recording capture first, then starts the local process or
+  SSH connection beside page initialization. The backend begins at 80x24 and receives one
+  deduplicated resize when the measured page size becomes available.
 - Debug diagnostics: TerminalControl.TraceHook mirrors SshTerminalSession's (wired to
   trace.log); the page reports JS errors via `pageError` messages and keeps a rolling
   `window.__msgLog` of option pushes.

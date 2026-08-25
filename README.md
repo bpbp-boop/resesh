@@ -25,6 +25,18 @@ src/App/bin/x64/Debug/net8.0-windows10.0.19041.0/Resesh.App.exe
 
 On ARM64, substitute `-p:Platform=ARM64`.
 
+### Screenshot demo
+
+Launch an isolated demo with a populated session tree:
+
+```powershell
+.\demo.ps1
+```
+
+The script builds the app for the current processor architecture and starts it with
+disposable demo data. It does not read or change the normal Resesh sessions, settings, or
+credentials. Use `.\demo.ps1 -Platform ARM64` to override the detected architecture.
+
 ## Releases
 
 GitHub Actions builds and tests each push and pull request. Each build produces, for x64 and Arm64:

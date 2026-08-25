@@ -37,6 +37,11 @@ public sealed class TerminalTabView : Grid, IDisposable
     private SshTerminalSession? _ssh; // set when _backend is the SSH implementation
     private bool _connecting;
     private bool _disposed;
+    private bool _initialLaunchStarted;
+    private int _captureColumns;
+    private int _captureRows;
+    private int _backendColumns;
+    private int _backendRows;
     private TerminalCapture? _capture;
     private TerminalPlayerView? _rewindPlayer;
     private bool _rewindAvailable;
@@ -135,8 +140,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         };
         _terminal.Resized += (cols, rows) =>
         {
-            _backend?.Resize(cols, rows);
-            _capture?.CaptureResize(cols, rows, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            ResizeBackend(cols, rows);
+            CaptureResize(cols, rows);
         };
         _terminal.OutputObserved += (data, unixMs) => _capture?.CaptureOutput(data, unixMs);
         _terminal.KeyframeCaptured += (state, cols, rows, unixMs) =>
@@ -153,10 +158,8 @@ public sealed class TerminalTabView : Grid, IDisposable
 
         _terminal.Ready += (cols, rows) => DispatcherQueue.TryEnqueue(() =>
         {
-            EnsureCapture(cols, rows);
-            if (initial.AlwaysRecord)
-                TryStartAutomaticRecording();
-            _ = ConnectAsync(isReconnect: false);
+            ResizeBackend(cols, rows);
+            CaptureResize(cols, rows);
         });
         _terminal.TitleChanged += title => DispatcherQueue.TryEnqueue(() => _tab.ApplyTerminalTitle(title));
         _terminal.CommandChanged += text => DispatcherQueue.TryEnqueue(() => _tab.ApplyRunningCommand(text));
@@ -200,8 +203,19 @@ public sealed class TerminalTabView : Grid, IDisposable
 
         Loaded += async (_, _) =>
         {
-            if (_backend is null && !_connecting)
-                await _terminal.InitializeAsync(); // Ready fires when the page is up
+            if (_initialLaunchStarted || _disposed)
+                return;
+            _initialLaunchStarted = true;
+
+            // Capture must exist before the backend can emit. The page reports its measured
+            // size later; until then both transports start at TerminalControl's 80x24 default.
+            EnsureCapture(_terminal.Columns, _terminal.Rows);
+            if (initial.AlwaysRecord)
+                TryStartAutomaticRecording();
+
+            await Task.WhenAll(
+                _terminal.InitializeAsync(),
+                ConnectAsync(isReconnect: false));
         };
     }
 
@@ -215,10 +229,30 @@ public sealed class TerminalTabView : Grid, IDisposable
             rows,
             maximumAge: TimeSpan.FromMinutes(Math.Clamp(settings.RewindMinutes, 1, 24 * 60)),
             maximumBytes: Math.Clamp(settings.RewindMegabytes, 1, 1024) * 1024L * 1024L);
+        _captureColumns = columns;
+        _captureRows = rows;
         _capture.Changed += OnCaptureChanged;
         _capture.RecordingChanged += (_, _) =>
             DispatcherQueue.TryEnqueue(SyncCaptureState);
         SyncCaptureState();
+    }
+
+    private void CaptureResize(int columns, int rows)
+    {
+        if (_capture is null || (_captureColumns == columns && _captureRows == rows))
+            return;
+        _capture.CaptureResize(columns, rows, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        _captureColumns = columns;
+        _captureRows = rows;
+    }
+
+    private void ResizeBackend(int columns, int rows)
+    {
+        if (_backend is null || (_backendColumns == columns && _backendRows == rows))
+            return;
+        _backend.Resize(columns, rows);
+        _backendColumns = columns;
+        _backendRows = rows;
     }
 
     private void OnCaptureChanged()
@@ -522,9 +556,12 @@ public sealed class TerminalTabView : Grid, IDisposable
 
             var cols = _terminal.Columns;
             var rows = _terminal.Rows;
+            _backendColumns = cols;
+            _backendRows = rows;
             await Task.Run(() => local.Start(Session, cols, rows));
 
             _backend = local;
+            ResizeBackend(_terminal.Columns, _terminal.Rows);
             _tab.ExitCode = null;
             _tab.State = TabConnectionState.Connected;
             _tab.ConnectionSummary = $"pid {local.ProcessId}";
@@ -593,6 +630,8 @@ public sealed class TerminalTabView : Grid, IDisposable
 
             var cols = _terminal.Columns;
             var rows = _terminal.Rows;
+            _backendColumns = cols;
+            _backendRows = rows;
             Func<SshTerminalSession, string?>? bootstrapFactory = Session.Persistent
                 ? connected => SelectTmuxBootstrapBlocking(connected, isReconnect)
                 : null;
@@ -603,6 +642,7 @@ public sealed class TerminalTabView : Grid, IDisposable
 
             _backend = session;
             _ssh = session;
+            ResizeBackend(_terminal.Columns, _terminal.Rows);
             _tab.State = TabConnectionState.Connected;
             _tab.ConnectionSummary = string.Join(" • ",
                 new[] { session.Encryption, session.HostKeyFingerprint }.Where(s => !string.IsNullOrEmpty(s)));
