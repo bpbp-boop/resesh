@@ -249,8 +249,7 @@ public sealed class MainViewModel : ObservableObject
 
     public void MoveSessionsToFolder(IEnumerable<Guid> sessionIds, string folderPath)
     {
-        foreach (var sessionId in sessionIds)
-            _store.MoveToFolder(sessionId, folderPath);
+        _store.MoveToFolder(sessionIds, folderPath);
         RebuildTree();
     }
 

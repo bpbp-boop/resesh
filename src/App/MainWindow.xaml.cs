@@ -2488,65 +2488,24 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     // ---- Tree selection (Explorer-style: click, Ctrl+click toggle, Shift+click range) ----
 
-    private readonly List<TreeNodeViewModel> _selection = [];
-    private TreeNodeViewModel? _selectionAnchor;
+    private readonly OrderedSelection<TreeNodeViewModel> _treeSelection =
+        new((node, selected) => node.IsSelected = selected);
+    private IReadOnlyList<TreeNodeViewModel> _selection => _treeSelection.Items;
+    private IReadOnlyList<Session> _dragSessions = [];
 
     private static bool IsKeyDown(VirtualKey key) =>
         Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(key)
             .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
 
-    private void ClearSelection()
-    {
-        foreach (var node in _selection)
-            node.IsSelected = false;
-        _selection.Clear();
-        _selectionAnchor = null;
-    }
+    private void ClearSelection() => _treeSelection.Clear();
 
-    private void SelectOnly(TreeNodeViewModel node)
-    {
-        ClearSelection();
-        node.IsSelected = true;
-        _selection.Add(node);
-        _selectionAnchor = node;
-    }
+    private void SelectOnly(TreeNodeViewModel node) => _treeSelection.SelectOnly(node);
 
-    private void ToggleSelection(TreeNodeViewModel node)
-    {
-        if (node.IsSelected)
-        {
-            node.IsSelected = false;
-            _selection.Remove(node);
-        }
-        else
-        {
-            node.IsSelected = true;
-            _selection.Add(node);
-        }
-        _selectionAnchor = node;
-    }
+    private void ToggleSelection(TreeNodeViewModel node) => _treeSelection.Toggle(node);
 
     /// <summary>Range select over the flattened visible tree, from the anchor to the clicked node.</summary>
-    private void SelectRangeTo(TreeNodeViewModel node)
-    {
-        var anchor = _selectionAnchor;
-        var visible = VisibleNodes().ToList();
-        var from = anchor is null ? -1 : visible.IndexOf(anchor);
-        var to = visible.IndexOf(node);
-        if (from < 0 || to < 0)
-        {
-            SelectOnly(node);
-            return;
-        }
-        ClearSelection();
-        _selectionAnchor = anchor; // the anchor survives repeated Shift+clicks, as in Explorer
-        var (lo, hi) = from <= to ? (from, to) : (to, from);
-        for (var i = lo; i <= hi; i++)
-        {
-            visible[i].IsSelected = true;
-            _selection.Add(visible[i]);
-        }
-    }
+    private void SelectRangeTo(TreeNodeViewModel node) =>
+        _treeSelection.SelectRangeTo(node, VisibleNodes().ToList());
 
     /// <summary>Nodes in display order, skipping children of collapsed folders.</summary>
     private IEnumerable<TreeNodeViewModel> VisibleNodes()
@@ -2575,6 +2534,23 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             current = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(current);
         }
         return false;
+    }
+
+    private void TreeNode_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is not TreeViewItem { FocusState: FocusState.Keyboard } item
+            || !ReferenceEquals(item, FocusManager.GetFocusedElement(Root.XamlRoot))
+            || NodeOf(item) is not { } node)
+        {
+            return;
+        }
+
+        var extendRange = IsKeyDown(VirtualKey.Shift);
+        _treeSelection.SelectForKeyboardFocus(
+            node,
+            VisibleNodes().ToList(),
+            extendRange,
+            preserveSelection: IsKeyDown(VirtualKey.Control) && !extendRange);
     }
 
     private void TreeNode_Tapped(object sender, TappedRoutedEventArgs e)
@@ -2868,31 +2844,52 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void SessionTree_DragItemsStarting(TreeView sender, TreeViewDragItemsStartingEventArgs args)
     {
-        // Sessions move between folders; folders themselves are not draggable.
-        if (args.Items.Any(item => item is TreeNodeViewModel { IsFolder: true }))
+        _dragSessions = [];
+        if (args.Items.OfType<TreeNodeViewModel>().FirstOrDefault() is not { } draggedNode)
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        var draggedSelection = _treeSelection.BeginDrag(draggedNode);
+        // Folders are deliberately immovable. A mixed custom selection is one drag unit,
+        // so do not silently move only its session leaves.
+        if (draggedSelection.Any(node => node.IsFolder))
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        _dragSessions = draggedSelection
+            .Select(node => node.Session)
+            .OfType<Session>()
+            .ToList();
+        if (_dragSessions.Count == 0)
             args.Cancel = true;
     }
 
     private void SessionTree_DragItemsCompleted(TreeView sender, TreeViewDragItemsCompletedEventArgs args)
     {
+        var draggedSessions = _dragSessions;
+        _dragSessions = [];
+
         // Dropping onto a session targets that session's folder; onto nothing targets the
         // SSH root. Local and SSH are separate scopes: cross-boundary drops are discarded.
-        var (targetFolder, targetIsLocal) = args.NewParentItem switch
+        var (targetFolder, targetKind) = args.NewParentItem switch
         {
-            TreeNodeViewModel { IsFolder: true } folder => (folder.FolderPath, folder.IsLocalScope),
-            TreeNodeViewModel sessionNode => (sessionNode.FolderPath, sessionNode.IsLocalScope),
-            _ => ("", false),
+            TreeNodeViewModel { IsFolder: true } folder =>
+                (folder.FolderPath, folder.IsLocalScope ? SessionKind.Local : SessionKind.Ssh),
+            TreeNodeViewModel sessionNode =>
+                (sessionNode.FolderPath, sessionNode.IsLocalScope ? SessionKind.Local : SessionKind.Ssh),
+            _ => ("", SessionKind.Ssh),
         };
-
-        var movedSessionIds = args.Items
-            .OfType<TreeNodeViewModel>()
-            .Where(node => node.Session is { } session
-                && session.IsLocal == targetIsLocal
-                && !FolderPaths.Normalize(session.FolderPath).Equals(
-                    FolderPaths.Normalize(targetFolder),
-                    StringComparison.OrdinalIgnoreCase))
-            .Select(node => node.Session!.Id)
-            .ToList();
+        var plan = SessionDropPlanner.Plan(
+            args.DropResult == Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move,
+            draggedSessions,
+            targetFolder,
+            targetKind);
+        if (!plan.Accepted)
+            return;
 
         // WinUI has updated its transient hierarchy when it raises this event, but the
         // underlying drag operation is still unwinding. Replacing RootNodes synchronously
@@ -2902,8 +2899,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
             () =>
             {
-                if (movedSessionIds.Count > 0)
-                    ViewModel.MoveSessionsToFolder(movedSessionIds, targetFolder);
+                if (plan.SessionIds.Count > 0)
+                    ViewModel.MoveSessionsToFolder(plan.SessionIds, targetFolder);
                 else
                     ViewModel.RebuildTree();
             });

@@ -106,6 +106,22 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     [Fact]
+    public void MoveToFolder_BatchPersistsEverySession()
+    {
+        var store = NewStore();
+        var first = NewSession("first", "A");
+        var second = NewSession("second", "B");
+        store.Add(first);
+        store.Add(second);
+
+        store.MoveToFolder([first.Id, second.Id], "C");
+
+        var reloaded = NewStore();
+        Assert.Equal("C", reloaded.Find(first.Id)!.FolderPath);
+        Assert.Equal("C", reloaded.Find(second.Id)!.FolderPath);
+    }
+
+    [Fact]
     public void Folders_IncludeExplicitAndDerivedAncestors()
     {
         var store = NewStore();

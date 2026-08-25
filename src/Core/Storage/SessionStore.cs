@@ -118,15 +118,34 @@ public sealed class SessionStore
         }
     }
 
-    public void MoveToFolder(Guid id, string folderPath)
+    public void MoveToFolder(Guid id, string folderPath) =>
+        MoveToFolder([id], folderPath);
+
+    public void MoveToFolder(IEnumerable<Guid> ids, string folderPath)
     {
         lock (_gate)
         {
-            var index = _sessions.FindIndex(s => s.Id == id);
-            if (index < 0)
+            var remaining = ids.ToHashSet();
+            if (remaining.Count == 0)
                 return;
-            _sessions[index] = _sessions[index] with { FolderPath = FolderPaths.Normalize(folderPath) };
-            Save();
+
+            folderPath = FolderPaths.Normalize(folderPath);
+            var changed = false;
+            for (var index = 0; index < _sessions.Count && remaining.Count > 0; index++)
+            {
+                var session = _sessions[index];
+                if (!remaining.Remove(session.Id)
+                    || session.FolderPath.Equals(folderPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                _sessions[index] = session with { FolderPath = folderPath };
+                changed = true;
+            }
+
+            if (changed)
+                Save();
         }
     }
 

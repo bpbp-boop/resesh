@@ -23,6 +23,7 @@
                     ItemsSource="{x:Bind Children}"
                     IsExpanded="{x:Bind IsExpanded, Mode=OneWay}"
                     Loaded="TreeViewItem_Loaded"
+                    GotFocus="TreeNode_GotFocus"
                     AllowDrop="True"
                     Background="{x:Bind SelectionBackground, Mode=OneWay}"
                     Tapped="TreeNode_Tapped"
@@ -44,6 +45,7 @@
                 <TreeViewItem
                     ItemsSource="{x:Bind Children}"
                     Loaded="TreeViewItem_Loaded"
+                    GotFocus="TreeNode_GotFocus"
                     AllowDrop="True"
                     Background="{x:Bind SelectionBackground, Mode=OneWay}"
                     Tapped="TreeNode_Tapped"
@@ -85,6 +87,7 @@
                     ItemsSource="{x:Bind Children}"
                     IsExpanded="{x:Bind IsExpanded, Mode=OneWay}"
                     Loaded="TreeViewItem_Loaded"
+                    GotFocus="TreeNode_GotFocus"
                     AllowDrop="True"
                     Background="{x:Bind SelectionBackground, Mode=OneWay}"
                     Tapped="TreeNode_Tapped"
