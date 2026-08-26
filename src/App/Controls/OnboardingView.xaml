@@ -83,16 +83,16 @@
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
 
-                <!-- Section 1: Terminal Theme & Previews -->
+                <!-- Section 1: Application Theme & Previews -->
                 <StackPanel Spacing="18">
                     <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
                         <StackPanel Spacing="3" VerticalAlignment="Center">
                             <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                                 <FontIcon Glyph="&#xE790;" FontSize="17" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                                <TextBlock Text="Terminal Theme" Style="{ThemeResource SubtitleTextBlockStyle}" FontWeight="SemiBold" />
+                                <TextBlock Text="Application Theme" Style="{ThemeResource SubtitleTextBlockStyle}" FontWeight="SemiBold" />
                             </StackPanel>
                             <TextBlock
-                                Text="Previews display real prompt colors, folder greens, SSH command blues, and output styling."
+                                Text="This setting changes the entire app: menus, session tree, tabs, and terminal colors. A theme override for one session changes only that terminal."
                                 TextWrapping="Wrap"
                                 Style="{ThemeResource CaptionTextBlockStyle}"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -140,6 +140,25 @@
                                 </ToggleButton>
                             </StackPanel>
                         </Border>
+                    </Grid>
+
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" VerticalAlignment="Center">
+                        <StackPanel Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="Featured themes" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock
+                                Text="Select a preview card, or open the full theme list."
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+                        <DropDownButton
+                            x:Name="BrowseAllThemesButton"
+                            Grid.Column="1"
+                            Content="Browse all themes..."
+                            AutomationProperties.Name="Browse all themes">
+                            <DropDownButton.Flyout>
+                                <MenuFlyout x:Name="AllThemesFlyout" />
+                            </DropDownButton.Flyout>
+                        </DropDownButton>
                     </Grid>
 
                     <!-- Theme Preview Cards Grid: Tokyo Night and Phthalo Green -->
@@ -653,12 +672,6 @@
                     <VisualState.StateTriggers>
                         <AdaptiveTrigger MinWindowWidth="760" />
                     </VisualState.StateTriggers>
-                    <VisualState.Setters>
-                        <Setter Target="ImportThirdColumn.Width" Value="0" />
-                        <Setter Target="SecureCrtCard.(Grid.Row)" Value="1" />
-                        <Setter Target="SecureCrtCard.(Grid.Column)" Value="0" />
-                        <Setter Target="SecureCrtCard.(Grid.ColumnSpan)" Value="2" />
-                    </VisualState.Setters>
                 </VisualState>
                 <VisualState x:Name="Narrow">
                     <VisualState.StateTriggers>
@@ -668,15 +681,6 @@
                         <Setter Target="ThemeSecondColumn.Width" Value="0" />
                         <Setter Target="PhthaloGreenThemeCard.(Grid.Row)" Value="1" />
                         <Setter Target="PhthaloGreenThemeCard.(Grid.Column)" Value="0" />
-
-                        <Setter Target="ImportSecondColumn.Width" Value="0" />
-                        <Setter Target="ImportThirdColumn.Width" Value="0" />
-
-                        <Setter Target="OpenSshCard.(Grid.Row)" Value="1" />
-                        <Setter Target="OpenSshCard.(Grid.Column)" Value="0" />
-
-                        <Setter Target="SecureCrtCard.(Grid.Row)" Value="2" />
-                        <Setter Target="SecureCrtCard.(Grid.Column)" Value="0" />
                     </VisualState.Setters>
                 </VisualState>
             </VisualStateGroup>

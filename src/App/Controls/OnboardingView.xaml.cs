@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Resesh.App.Dialogs;
 using Resesh.Core.Import;
 using Resesh.Core.Storage;
 
@@ -36,6 +37,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         CopyOnSelectToggle.IsOn = settings.CopyOnSelect;
         RightClickPasteToggle.IsOn = settings.RightClickPaste;
         CrashReportsToggle.IsOn = settings.WriteCrashReports;
+        PopulateThemeFlyout();
         UpdateThemeSelection();
         Loaded += OnLoaded;
     }
@@ -120,28 +122,43 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         label.Text = text;
     }
 
-    private void PuttyImport_Click(object sender, RoutedEventArgs e)
+    private async void PuttyImport_Click(object sender, RoutedEventArgs e)
     {
         if (_puttyScan is null)
             return;
-        CommitImport(_puttyScan, PuttyImportButton, PuttyImportLabel, PuttyBadge, "PuTTY");
+        await PreviewAndCommitImportAsync(
+            _puttyScan,
+            PuttyImportButton,
+            PuttyImportLabel,
+            PuttyBadge,
+            "PuTTY");
     }
 
-    private void OpenSshImport_Click(object sender, RoutedEventArgs e)
+    private async void OpenSshImport_Click(object sender, RoutedEventArgs e)
     {
         if (_openSshScan is null)
             return;
-        CommitImport(_openSshScan, OpenSshImportButton, OpenSshImportLabel, OpenSshBadge, "OpenSSH");
+        await PreviewAndCommitImportAsync(
+            _openSshScan,
+            OpenSshImportButton,
+            OpenSshImportLabel,
+            OpenSshBadge,
+            "OpenSSH");
     }
 
-    private void SecureCrtImport_Click(object sender, RoutedEventArgs e)
+    private async void SecureCrtImport_Click(object sender, RoutedEventArgs e)
     {
         if (_secureCrtScan is null)
             return;
-        CommitImport(_secureCrtScan, SecureCrtImportButton, SecureCrtImportLabel, SecureCrtBadge, "SecureCRT");
+        await PreviewAndCommitImportAsync(
+            _secureCrtScan,
+            SecureCrtImportButton,
+            SecureCrtImportLabel,
+            SecureCrtBadge,
+            "SecureCRT");
     }
 
-    private void CommitImport(
+    private async Task PreviewAndCommitImportAsync(
         ImportScanResult scan,
         Button button,
         TextBlock label,
@@ -150,7 +167,15 @@ public sealed partial class OnboardingView : UserControl, IDisposable
     {
         try
         {
-            var (imported, duplicates) = SecureCrtImporter.Commit(App.Store, scan.Importable);
+            var preview = new ImportPreviewDialog(scan, source)
+            {
+                XamlRoot = XamlRoot,
+            };
+            await preview.ShowAsync();
+            if (preview.Confirmed is not { Count: > 0 } confirmed)
+                return;
+
+            var (imported, duplicates) = SecureCrtImporter.Commit(App.Store, confirmed);
             _sessionsChanged();
             button.IsEnabled = false;
             label.Text = "Imported";
@@ -181,6 +206,26 @@ public sealed partial class OnboardingView : UserControl, IDisposable
 
     private void PhthaloGreenTheme_Click(object sender, RoutedEventArgs e) => SelectTheme("phthalo-green");
 
+    private void PopulateThemeFlyout()
+    {
+        foreach (var theme in ThemeCatalog.All)
+        {
+            var item = new ToggleMenuFlyoutItem
+            {
+                Text = theme.Name,
+                Tag = theme.Id,
+            };
+            item.Click += ThemeFlyoutItem_Click;
+            AllThemesFlyout.Items.Add(item);
+        }
+    }
+
+    private void ThemeFlyoutItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is ToggleMenuFlyoutItem { Tag: string theme })
+            SelectTheme(theme);
+    }
+
     private void SelectTheme(string theme)
     {
         _selectedTheme = theme;
@@ -202,6 +247,17 @@ public sealed partial class OnboardingView : UserControl, IDisposable
 
         PhthaloGreenThemeCard.IsChecked = isPhthalo;
         PhthaloGreenCheck.Visibility = isPhthalo ? Visibility.Visible : Visibility.Collapsed;
+
+        foreach (var item in AllThemesFlyout.Items)
+        {
+            if (item is ToggleMenuFlyoutItem { Tag: string themeItem } themeMenuItem)
+            {
+                themeMenuItem.IsChecked = string.Equals(
+                    themeItem,
+                    _selectedTheme,
+                    StringComparison.OrdinalIgnoreCase);
+            }
+        }
 
         var resolved = App.ResolveTheme(_selectedTheme);
         if (_selectedTheme == "system")
