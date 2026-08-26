@@ -158,7 +158,7 @@
                     <MenuFlyoutItem Text="New Folder…" Click="NewFolder_Click" />
                     <MenuFlyoutItem Text="Open Recording…" Click="OpenRecording_Click" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem Text="Import from SecureCRT…" Click="Import_Click" />
+                    <MenuFlyoutItem Text="Import sessions…" Click="Import_Click" />
                     <MenuFlyoutItem Text="SSH Keys…" Click="SshKeys_Click" />
                     <MenuFlyoutItem Text="Export backup…" Click="ExportBackup_Click" />
                     <MenuFlyoutItem Text="Import backup…" Click="ImportBackup_Click" />
@@ -594,12 +594,12 @@
                         Foreground="{StaticResource SessionTreeForegroundBrush}"
                         HorizontalAlignment="Center" />
                     <TextBlock
-                        Text="Create a session with the + button, or bring your existing sessions across with Import — it reads your SecureCRT configuration directly."
+                        Text="Create a session with the + button, or import existing sessions from PuTTY, OpenSSH, or SecureCRT."
                         TextWrapping="Wrap"
                         Opacity="0.7"
                         Foreground="{StaticResource SessionTreeMutedForegroundBrush}"
                         TextAlignment="Center" />
-                    <Button Content="Import from SecureCRT…" Click="Import_Click" HorizontalAlignment="Center" />
+                    <Button Content="Import sessions…" Click="Import_Click" HorizontalAlignment="Center" />
                 </StackPanel>
             </Grid>
 

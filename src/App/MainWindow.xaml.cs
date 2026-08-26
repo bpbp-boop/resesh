@@ -3103,41 +3103,60 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }.ShowAsync();
     }
 
-    // ---- SecureCRT import ----
+    // ---- Session import ----
 
     private async void Import_Click(object sender, RoutedEventArgs e)
     {
         try
         {
-            var dir = Core.Import.SecureCrtImporter.DefaultConfigSessionsPath;
-            if (!Directory.Exists(dir))
-            {
-                var picker = new Windows.Storage.Pickers.FolderPicker();
-                picker.FileTypeFilter.Add("*");
-                WinRT.Interop.InitializeWithWindow.Initialize(
-                    picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-                var folder = await picker.PickSingleFolderAsync();
-                if (folder is null)
-                    return;
-                dir = folder.Path;
-            }
+            var puttyTask = Task.Run(() => Core.Import.PuttyRegistryImporter.Scan());
+            var openSshTask = Task.Run(() =>
+                Core.Import.OpenSshConfigImporter.Scan(Core.Import.OpenSshConfigImporter.DefaultConfigPath));
+            var secureCrtTask = Task.Run(() =>
+                Directory.Exists(Core.Import.SecureCrtImporter.DefaultConfigSessionsPath)
+                    ? Core.Import.SecureCrtImporter.Scan(Core.Import.SecureCrtImporter.DefaultConfigSessionsPath)
+                    : EmptyImportScan());
 
-            var scan = Core.Import.SecureCrtImporter.Scan(dir);
+            await Task.WhenAll(puttyTask, openSshTask, secureCrtTask);
+            var puttyScan = await puttyTask;
+            var openSshScan = await openSshTask;
+            var secureCrtScan = await secureCrtTask;
+
+            var sourceDialog = new ImportSessionsDialog(puttyScan, openSshScan, secureCrtScan)
+            {
+                XamlRoot = Root.XamlRoot,
+            };
+            await sourceDialog.ShowAsync();
+            if (sourceDialog.SelectedSource is not { } source)
+                return;
+
+            var scan = await GetSelectedImportScanAsync(source, puttyScan, openSshScan, secureCrtScan);
+            if (scan is null)
+                return;
+
+            var sourceName = source switch
+            {
+                SessionImportSource.Putty => "PuTTY",
+                SessionImportSource.OpenSsh => "OpenSSH",
+                SessionImportSource.SecureCrt => "SecureCRT",
+                _ => throw new ArgumentOutOfRangeException(nameof(source)),
+            };
+
             if (scan.Importable.Count == 0 && scan.Skipped.Count == 0)
             {
                 await new ContentDialog
                 {
-                    Title = "Import from SecureCRT",
-                    Content = $"No SecureCRT session files (.ini) found under:\n{dir}",
+                    Title = $"Import from {sourceName}",
+                    Content = "No importable SSH sessions were found.",
                     CloseButtonText = "OK",
                     XamlRoot = Root.XamlRoot,
                 }.ShowAsync();
                 return;
             }
 
-            var dialog = new ImportPreviewDialog(scan) { XamlRoot = Root.XamlRoot };
-            await dialog.ShowAsync();
-            if (dialog.Confirmed is not { Count: > 0 } confirmed)
+            var preview = new ImportPreviewDialog(scan, sourceName) { XamlRoot = Root.XamlRoot };
+            await preview.ShowAsync();
+            if (preview.Confirmed is not { Count: > 0 } confirmed)
                 return;
 
             var (imported, duplicates) = Core.Import.SecureCrtImporter.Commit(App.Store, confirmed);
@@ -3163,6 +3182,49 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             }.ShowAsync();
         }
     }
+
+    private async Task<Core.Import.ImportScanResult?> GetSelectedImportScanAsync(
+        SessionImportSource source,
+        Core.Import.ImportScanResult puttyScan,
+        Core.Import.ImportScanResult openSshScan,
+        Core.Import.ImportScanResult secureCrtScan)
+    {
+        if (source == SessionImportSource.Putty)
+            return puttyScan;
+
+        if (source == SessionImportSource.OpenSsh)
+        {
+            if (openSshScan.Importable.Count > 0)
+                return openSshScan;
+
+            var picker = new Windows.Storage.Pickers.FileOpenPicker();
+            picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(
+                picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            var file = await picker.PickSingleFileAsync();
+            return file is null
+                ? null
+                : await Task.Run(() => Core.Import.OpenSshConfigImporter.Scan(file.Path));
+        }
+
+        if (secureCrtScan.Importable.Count > 0)
+            return secureCrtScan;
+
+        var folderPicker = new Windows.Storage.Pickers.FolderPicker();
+        folderPicker.FileTypeFilter.Add("*");
+        WinRT.Interop.InitializeWithWindow.Initialize(
+            folderPicker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        var folder = await folderPicker.PickSingleFolderAsync();
+        return folder is null
+            ? null
+            : await Task.Run(() => Core.Import.SecureCrtImporter.Scan(folder.Path));
+    }
+
+    private static Core.Import.ImportScanResult EmptyImportScan() => new()
+    {
+        Importable = [],
+        Skipped = [],
+    };
 
     // ---- Tree selection (Explorer-style: click, Ctrl+click toggle, Shift+click range) ----
 

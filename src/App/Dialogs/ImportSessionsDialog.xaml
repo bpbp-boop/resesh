@@ -1,0 +1,50 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.ImportSessionsDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Import sessions"
+    PrimaryButtonText="Continue"
+    CloseButtonText="Cancel"
+    DefaultButton="Primary">
+
+    <StackPanel MinWidth="440" Spacing="14">
+        <TextBlock
+            Text="Choose where to import SSH sessions from."
+            TextWrapping="Wrap" />
+
+        <RadioButtons x:Name="SourceOptions">
+            <RadioButton x:Name="PuttyOption">
+                <StackPanel Margin="0,4" Spacing="2">
+                    <TextBlock Text="PuTTY" FontWeight="SemiBold" />
+                    <TextBlock
+                        x:Name="PuttyDetail"
+                        FontSize="12"
+                        Opacity="0.65"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </RadioButton>
+
+            <RadioButton x:Name="OpenSshOption">
+                <StackPanel Margin="0,4" Spacing="2">
+                    <TextBlock Text="OpenSSH config" FontWeight="SemiBold" />
+                    <TextBlock
+                        x:Name="OpenSshDetail"
+                        FontSize="12"
+                        Opacity="0.65"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </RadioButton>
+
+            <RadioButton x:Name="SecureCrtOption">
+                <StackPanel Margin="0,4" Spacing="2">
+                    <TextBlock Text="SecureCRT" FontWeight="SemiBold" />
+                    <TextBlock
+                        x:Name="SecureCrtDetail"
+                        FontSize="12"
+                        Opacity="0.65"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </RadioButton>
+        </RadioButtons>
+    </StackPanel>
+</ContentDialog>

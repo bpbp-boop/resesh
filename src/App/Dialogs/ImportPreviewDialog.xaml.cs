@@ -38,10 +38,11 @@ public sealed partial class ImportPreviewDialog : ContentDialog
     /// <summary>Set when the user confirms; the candidates to import.</summary>
     public IReadOnlyList<ImportCandidate>? Confirmed { get; private set; }
 
-    public ImportPreviewDialog(ImportScanResult scan)
+    public ImportPreviewDialog(ImportScanResult scan, string sourceName)
     {
         Candidates = scan.Importable.Select(c => new ImportCandidateVm { Candidate = c }).ToList();
         InitializeComponent();
+        Title = $"Import from {sourceName}";
 
         SummaryText.Text = $"Found {scan.Importable.Count} SSH session(s)"
             + (scan.Skipped.Count > 0 ? $" ({scan.Skipped.Count} non-SSH skipped)." : ".")

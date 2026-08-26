@@ -3,7 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:Resesh.App.Dialogs"
-    Title="Import from SecureCRT"
+    Title="Import sessions"
     PrimaryButtonText="Import"
     CloseButtonText="Cancel"
     DefaultButton="Primary">
@@ -43,7 +43,7 @@
         </Expander>
 
         <TextBlock
-            Text="Passwords are not imported — SecureCRT stores them encrypted. Imported sessions will prompt on first connect and can save to Windows Credential Manager."
+            Text="Passwords are not imported. Imported sessions will prompt on first connect and can save passwords in Windows Credential Manager."
             TextWrapping="Wrap"
             Opacity="0.7"
             FontSize="12" />
