@@ -57,17 +57,19 @@
                                 <SolidColorBrush Color="{x:Bind TagColor, Mode=OneWay}" />
                             </Rectangle.Fill>
                         </Rectangle>
-                        <Image
-                            Source="{x:Bind IconSource, Mode=OneWay}"
+                        <BitmapIcon
+                            UriSource="{x:Bind IconUri, Mode=OneWay}"
                             Width="16"
                             Height="16"
                             VerticalAlignment="Center"
-                            Visibility="{x:Bind IconVisibility, Mode=OneWay}" />
+                            Foreground="{StaticResource SessionTreeForegroundBrush}"
+                            ShowAsMonochrome="True"
+                            Visibility="{x:Bind TreeIconVisibility, Mode=OneWay}" />
                         <FontIcon
                             Glyph="&#xEDA2;"
                             FontSize="14"
                             Foreground="{StaticResource SessionTreeForegroundBrush}"
-                            Visibility="{x:Bind DefaultIconVisibility, Mode=OneWay}" />
+                            Visibility="{x:Bind DefaultTreeIconVisibility, Mode=OneWay}" />
                         <TextBlock
                             local:MatchHighlighter.Text="{x:Bind Name}"
                             local:MatchHighlighter.Query="{x:Bind HighlightQuery}"

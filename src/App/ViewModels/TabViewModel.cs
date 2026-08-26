@@ -299,8 +299,8 @@ public sealed class TabViewModel : ObservableObject
 
     /// <summary>
     /// Whether this tab's group is the focused one. In split view each group has a
-    /// selected tab, but only the focused group's shows the accent + bright text
-    /// (VS Code style) — otherwise two tabs look equally "active".
+    /// selected tab. The unfocused group's selected tab keeps the active surface so it
+    /// still reads as the open tab in that pane, with an underline distinguishing it.
     /// </summary>
     public bool IsGroupFocused
     {
@@ -326,6 +326,7 @@ public sealed class TabViewModel : ObservableObject
     private void NotifyTabVisuals()
     {
         OnPropertyChanged(nameof(AccentVisibility));
+        OnPropertyChanged(nameof(InactivePaneUnderlineVisibility));
         OnPropertyChanged(nameof(HeaderBackground));
         OnPropertyChanged(nameof(HeaderBorderBrush));
         OnPropertyChanged(nameof(HeaderForeground));
@@ -334,6 +335,8 @@ public sealed class TabViewModel : ObservableObject
     }
 
     public Visibility AccentVisibility => IsActive && IsGroupFocused ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility InactivePaneUnderlineVisibility =>
+        IsActive && !IsGroupFocused ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>The × shows on the active tab and on hover; hidden (but space kept) otherwise. Never on pinned tabs.</summary>
     public double CloseOpacity => !IsPinned && (IsActive || IsPointerOver) ? 1.0 : 0.0;
@@ -353,12 +356,11 @@ public sealed class TabViewModel : ObservableObject
     {
         get
         {
-            // In split view, only the focused group's selected tab matches the terminal.
-            // A selected tab in another group stays on the inactive strip surface so the
-            // focused group remains clear; pointer hover still gets a subtle tint.
+            // Every pane's selected tab matches its open terminal. In an unfocused pane,
+            // an underline rather than a different surface distinguishes the selected tab.
             Windows.UI.Color color;
             var palette = ThemeVisualPalette.For(_appTheme);
-            if (IsActive && IsGroupFocused)
+            if (IsActive)
                 color = palette.ActiveTab;
             else if (IsPointerOver)
                 color = palette.HoverTab;

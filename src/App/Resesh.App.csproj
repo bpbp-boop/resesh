@@ -23,6 +23,7 @@
     <Content Include="Assets\workspaces.svg" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\SessionIcons\*.svg" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\SessionIcons\*.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\SessionTreeIcons\*.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\AgentIcons\*.svg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

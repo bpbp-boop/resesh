@@ -73,10 +73,18 @@ public sealed class TreeNodeViewModel : ObservableObject
     /// <summary>Per-session color tag as a renderable color; transparent when unset.</summary>
     public Windows.UI.Color TagColor => ParseColor(Session?.ColorTag);
 
-    /// <summary>Session icon image; null shows the default terminal glyph instead.
-    /// Tree nodes are recreated on every rebuild, so no change notification is needed.</summary>
+    /// <summary>Monochrome session icon used by the tree; null shows the default glyph.</summary>
+    public Uri? IconUri => App.Icons.GetTreeUri(Session?.Icon);
+
+    /// <summary>Full-color session icon used by non-tree surfaces such as Recents.</summary>
     public Microsoft.UI.Xaml.Media.ImageSource? IconSource =>
         App.Icons.GetImage(Session?.Icon, Icons.SessionIconCatalog.ListIconSize);
+
+    public Microsoft.UI.Xaml.Visibility TreeIconVisibility =>
+        IconUri is null ? Microsoft.UI.Xaml.Visibility.Collapsed : Microsoft.UI.Xaml.Visibility.Visible;
+
+    public Microsoft.UI.Xaml.Visibility DefaultTreeIconVisibility =>
+        IconUri is null ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
 
     public Microsoft.UI.Xaml.Visibility IconVisibility =>
         IconSource is null ? Microsoft.UI.Xaml.Visibility.Collapsed : Microsoft.UI.Xaml.Visibility.Visible;
@@ -124,7 +132,10 @@ public sealed class TreeNodeViewModel : ObservableObject
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(HostSummary));
         OnPropertyChanged(nameof(TagColor));
+        OnPropertyChanged(nameof(IconUri));
         OnPropertyChanged(nameof(IconSource));
+        OnPropertyChanged(nameof(TreeIconVisibility));
+        OnPropertyChanged(nameof(DefaultTreeIconVisibility));
         OnPropertyChanged(nameof(IconVisibility));
         OnPropertyChanged(nameof(DefaultIconVisibility));
     }

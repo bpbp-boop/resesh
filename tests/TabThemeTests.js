@@ -22,9 +22,13 @@ test("session theme overrides stay inside the terminal and do not recolor tabs",
   assert.match(tabVisuals, /ThemeVisualPalette\.For\(_appTheme\)/);
 });
 
-test("a selected tab in an unfocused split uses the inactive tab surface", () => {
-  assert.match(viewModel, /if \(IsActive && IsGroupFocused\)[\s\S]*?color = palette\.ActiveTab/);
-  assert.match(viewModel, /else[\s\S]*?color = palette\.InactiveTab/);
+test("a selected tab in an unfocused split keeps the active surface and gains an underline", () => {
+  assert.match(viewModel, /if \(IsActive\)[\s\S]*?color = palette\.ActiveTab/);
+  assert.match(viewModel, /InactivePaneUnderlineVisibility[\s\S]*?IsActive && !IsGroupFocused/);
+  const xaml = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml"),
+    "utf8");
+  assert.match(xaml, /Fill="\{x:Bind HeaderBorderBrush, Mode=OneWay\}"[\s\S]*?VerticalAlignment="Bottom"[\s\S]*?InactivePaneUnderlineVisibility/);
 });
 
 test("saved and previewed theme changes refresh every open tab palette", () => {

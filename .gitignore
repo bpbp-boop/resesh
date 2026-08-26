@@ -8,3 +8,4 @@ installer/prereqs/
 Properties/PublishProfiles/
 .env
 .wrangler/
+.artifacts/

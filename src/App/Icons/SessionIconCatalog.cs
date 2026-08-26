@@ -22,6 +22,37 @@ public sealed class SessionIconCatalog
     public const double PickerTileSize = 24;
 
     private static readonly string[] CustomExtensions = [".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".bmp"];
+    private static readonly IReadOnlyDictionary<string, string> TreeIconFiles =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["linux"] = "linux.png",
+            ["proxmox"] = "proxmox.png",
+            ["debian"] = "debian.png",
+            ["ubuntu"] = "ubuntu.png",
+            ["rhel"] = "redhat.png",
+            ["centos"] = "centos.png",
+            ["fedora"] = "fedora.png",
+            ["suse"] = "suse.png",
+            ["arch"] = "archlinux.png",
+            ["alpine"] = "alpinelinux.png",
+            ["freebsd"] = "freebsd.png",
+            ["openbsd"] = "openbsd.png",
+            ["windows"] = "panels-top-left.png",
+            ["macos"] = "apple.png",
+            ["cisco"] = "cisco.png",
+            ["juniper"] = "junipernetworks.png",
+            ["arista"] = "network.png",
+            ["nokia"] = "nokia.png",
+            ["paloalto"] = "paloaltonetworks.png",
+            ["fortinet"] = "fortinet.png",
+            ["mikrotik"] = "mikrotik.png",
+            ["vyos"] = "router.png",
+            ["aruba"] = "wifi.png",
+            ["router"] = "router.png",
+            ["switch"] = "network.png",
+            ["firewall"] = "shield.png",
+            ["server"] = "server.png",
+        };
 
     // Cached per (key, physical pixel size): each display surface gets a bitmap rendered at
     // its exact on-screen size, so the GPU never resamples (its bilinear-only minification
@@ -45,6 +76,7 @@ public sealed class SessionIconCatalog
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "icons");
 
     private static string BuiltInDirectory => Path.Combine(AppContext.BaseDirectory, "Assets", "SessionIcons");
+    private static string TreeIconDirectory => Path.Combine(AppContext.BaseDirectory, "Assets", "SessionTreeIcons");
 
     /// <summary>The image for an icon key rendered for a display size in logical pixels
     /// (16 in the tree/tab strip, 24 in the picker), or null for no/unknown icon (callers
@@ -60,6 +92,29 @@ public sealed class SessionIconCatalog
         if (source is not null)
             _cache[cacheKey] = source;
         return source;
+    }
+
+    /// <summary>The monochrome tree icon URI for an icon key, or null for the default glyph.
+    /// Built-ins use transparent one-color assets; custom images use a generic terminal
+    /// glyph so arbitrary image colors and backgrounds never leak into the session tree.</summary>
+    public Uri? GetTreeUri(string? key)
+    {
+        if (string.IsNullOrEmpty(key) || key == SessionIcons.None)
+            return null;
+        try
+        {
+            var filename = TreeIconFiles.TryGetValue(key, out var builtIn)
+                ? builtIn
+                : ResolvePath(key) is not null ? "terminal.png" : null;
+            if (filename is null)
+                return null;
+            var path = Path.Combine(TreeIconDirectory, filename);
+            return File.Exists(path) ? new Uri(path) : null;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or UriFormatException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -94,26 +149,32 @@ public sealed class SessionIconCatalog
     {
         try
         {
-            if (SessionIcons.IsBuiltIn(key))
-            {
-                foreach (var ext in (string[])[".svg", ".png"])
-                {
-                    var path = Path.Combine(BuiltInDirectory, key + ext);
-                    if (File.Exists(path))
-                        return LoadFile(path, pixels);
-                }
-                return null;
-            }
-
-            // Custom keys are bare filenames; GetFileName guards against path segments.
-            var file = Path.Combine(CustomIconsDirectory, Path.GetFileName(key));
-            if (File.Exists(file) && CustomExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase))
-                return LoadFile(file, pixels);
+            return ResolvePath(key) is { } path ? LoadFile(path, pixels) : null;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or UriFormatException)
         {
+            return null;
         }
-        return null;
+    }
+
+    private static string? ResolvePath(string key)
+    {
+        if (SessionIcons.IsBuiltIn(key))
+        {
+            foreach (var ext in (string[])[".svg", ".png"])
+            {
+                var path = Path.Combine(BuiltInDirectory, key + ext);
+                if (File.Exists(path))
+                    return path;
+            }
+            return null;
+        }
+
+        // Custom keys are bare filenames; GetFileName guards against path segments.
+        var file = Path.Combine(CustomIconsDirectory, Path.GetFileName(key));
+        return File.Exists(file) && CustomExtensions.Contains(Path.GetExtension(file), StringComparer.OrdinalIgnoreCase)
+            ? file
+            : null;
     }
 
     private static ImageSource LoadFile(string path, int pixels) =>

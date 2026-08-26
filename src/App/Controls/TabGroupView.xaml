@@ -6,8 +6,8 @@
 
     <UserControl.Resources>
         <ResourceDictionary>
-            <!-- VS Code-style tab strip: square flush tabs, active tab blends into the
-                 terminal, inactive tabs dimmed. Scoped here so only this TabView changes. -->
+            <!-- VS Code-style tab strip: square flush tabs, selected tabs blend into their
+                 terminals, and the selected tab in an unfocused pane gains an underline. -->
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Default">
                     <SolidColorBrush x:Key="TabViewBackground" Color="#181818" />
@@ -217,9 +217,9 @@
                         IsClosable="False"
                         Height="44">
                         <TabViewItem.Header>
-                            <!-- The tab is painted entirely here: background, VS Code-style top
-                                 accent on the active tab, and a custom close button. -->
-                            <!-- The right border is the VS Code-style 1px divider between tabs. -->
+                            <!-- The tab is painted entirely here: background, focus indicators,
+                                 and a custom close button. The right border is the VS Code-style
+                                 1px divider between tabs. -->
                             <Grid
                                 Height="44"
                                 Margin="0"
@@ -234,6 +234,12 @@
                                     VerticalAlignment="Top"
                                     HorizontalAlignment="Stretch"
                                     Visibility="{x:Bind AccentVisibility, Mode=OneWay}" />
+                                <Rectangle
+                                    Height="1"
+                                    Fill="{x:Bind HeaderBorderBrush, Mode=OneWay}"
+                                    VerticalAlignment="Bottom"
+                                    HorizontalAlignment="Stretch"
+                                    Visibility="{x:Bind InactivePaneUnderlineVisibility, Mode=OneWay}" />
                                 <Grid
                                     Margin="10,0,6,0"
                                     VerticalAlignment="Center">
