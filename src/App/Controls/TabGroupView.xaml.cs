@@ -20,6 +20,12 @@ public interface ITabGroupHost
     void SplitDown(TabViewModel tab);
     void SplitTab(TabViewModel tab, TabGroupViewModel targetGroup, SplitDirection direction);
     void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex);
+    void TransferTabToGroup(
+        TabViewModel tab,
+        ITabGroupHost sourceHost,
+        TabGroupViewModel targetGroup,
+        int targetIndex);
+    void DetachTabForTransfer(TabViewModel tab);
     void SetTabContentDropTargetsVisible(bool visible);
     void CloneSession(TabViewModel tab);
     void TogglePin(TabViewModel tab);
@@ -855,8 +861,13 @@ public sealed partial class TabGroupView : UserControl
             }
         }
 
-        // Never land in front of the target group's pinned tabs.
-        _host.MoveTabBetweenGroups(tab, Group, Math.Max(index, Group.Tabs.Count(t => t.IsPinned)));
+        // The target host owns the transfer because each window has its own view model
+        // and terminal visual tree.
+        _host.TransferTabToGroup(
+            tab,
+            _dragSource!._host,
+            Group,
+            Math.Max(index, Group.Tabs.Count(t => t.IsPinned)));
     }
 
     private void ContentDropSurface_DragOver(object sender, DragEventArgs e)
@@ -920,6 +931,9 @@ public sealed partial class TabGroupView : UserControl
             return;
 
         var direction = _dropDirection;
+        var sourceHost = _dragSource._host;
+        if (!ReferenceEquals(sourceHost, _host))
+            _host.TransferTabToGroup(tab, sourceHost, Group, Group.Tabs.Count);
         EndTabDrag();
         _host.SplitTab(tab, Group, direction);
     }

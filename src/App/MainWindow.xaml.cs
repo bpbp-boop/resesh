@@ -1733,7 +1733,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         RebuildGroupLayout();
     }
 
-    public void SetTabContentDropTargetsVisible(bool visible)
+    public void SetTabContentDropTargetsVisible(bool visible) =>
+        App.SetTabContentDropTargetsVisible(visible);
+
+    internal void SetTabContentDropTargetsVisibleCore(bool visible)
     {
         foreach (var groupView in _groupViews.Values)
             groupView.SetContentDropTargetVisible(visible);
@@ -1763,6 +1766,36 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         // needs its group-focus flag refreshed.
         ViewModel.SyncGroupFocus();
         CollapseGroupIfEmpty(source);
+    }
+
+    public void TransferTabToGroup(
+        TabViewModel tab,
+        ITabGroupHost sourceHost,
+        TabGroupViewModel targetGroup,
+        int targetIndex)
+    {
+        if (ReferenceEquals(sourceHost, this))
+        {
+            MoveTabBetweenGroups(tab, targetGroup, targetIndex);
+            return;
+        }
+
+        sourceHost.DetachTabForTransfer(tab);
+        ViewModel.AttachTab(tab, targetGroup, targetIndex);
+        if (tab.View is TerminalTabView view)
+            _groupViews[targetGroup].AddTerminal(view);
+
+        FocusGroup(targetGroup);
+        ViewModel.SyncGroupFocus();
+    }
+
+    public void DetachTabForTransfer(TabViewModel tab)
+    {
+        var sourceGroup = ViewModel.GroupOf(tab);
+        if (tab.View is TerminalTabView view)
+            _groupViews[sourceGroup].RemoveTerminal(view);
+        ViewModel.DetachTab(tab);
+        CollapseGroupIfEmpty(sourceGroup);
     }
 
     private void CollapseGroupIfEmpty(TabGroupViewModel group)

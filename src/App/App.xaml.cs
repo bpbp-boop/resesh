@@ -213,6 +213,14 @@ public partial class App : Application
             window.RefreshWorkspaceMenu();
     }
 
+    internal static void SetTabContentDropTargetsVisible(bool visible)
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.SetTabContentDropTargetsVisibleCore(visible);
+    }
+
     private MainWindow CreateWindowCore()
     {
         var window = new MainWindow();

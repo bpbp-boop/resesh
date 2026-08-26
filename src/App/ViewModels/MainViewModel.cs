@@ -151,30 +151,46 @@ public sealed class MainViewModel : ObservableObject
             while (used.Contains(tab.TmuxSlot))
                 tab.TmuxSlot++;
         }
-        tab.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName is nameof(TabViewModel.State) or nameof(TabViewModel.ConnectionSummary)
-                or nameof(TabViewModel.Header))
-            {
-                OnPropertyChanged(nameof(StatusText));
-            }
-        };
-        group.Tabs.Add(tab);
+        AttachTab(tab, group, group.Tabs.Count);
+        return tab;
+    }
+
+    /// <summary>Attaches a live tab that was detached from another window.</summary>
+    public void AttachTab(TabViewModel tab, TabGroupViewModel group, int index)
+    {
+        tab.PropertyChanged += Tab_PropertyChanged;
+        group.Tabs.Insert(Math.Clamp(index, 0, group.Tabs.Count), tab);
         group.SelectedTab = tab;
         tab.IsGroupFocused = group == _focusedGroup;
         OnPropertyChanged(nameof(StatusText));
-        return tab;
+    }
+
+    /// <summary>Detaches a live tab without disposing its terminal session.</summary>
+    public TabGroupViewModel DetachTab(TabViewModel tab)
+    {
+        var group = GroupOf(tab);
+        tab.PropertyChanged -= Tab_PropertyChanged;
+        group.Tabs.Remove(tab);
+        if (group.SelectedTab == tab)
+            group.SelectedTab = group.Tabs.LastOrDefault();
+        OnPropertyChanged(nameof(StatusText));
+        return group;
+    }
+
+    private void Tab_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(TabViewModel.State) or nameof(TabViewModel.ConnectionSummary)
+            or nameof(TabViewModel.Header))
+        {
+            OnPropertyChanged(nameof(StatusText));
+        }
     }
 
     /// <summary>Removes and disposes the tab. Collapsing empty groups is the window's job.</summary>
     public void CloseTab(TabViewModel tab)
     {
-        var group = GroupOf(tab);
-        group.Tabs.Remove(tab);
+        DetachTab(tab);
         (tab.View as IDisposable)?.Dispose();
-        if (group.SelectedTab == tab)
-            group.SelectedTab = group.Tabs.LastOrDefault();
-        OnPropertyChanged(nameof(StatusText));
     }
 
     public void CloseAllTabs()
@@ -182,7 +198,10 @@ public sealed class MainViewModel : ObservableObject
         foreach (var group in Groups)
         {
             foreach (var tab in group.Tabs.ToList())
+            {
+                tab.PropertyChanged -= Tab_PropertyChanged;
                 (tab.View as IDisposable)?.Dispose();
+            }
             group.Tabs.Clear();
             group.SelectedTab = null;
         }
