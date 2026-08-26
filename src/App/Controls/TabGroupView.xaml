@@ -231,10 +231,13 @@
                                 PointerExited="TabHeader_PointerExited">
                                 <Rectangle
                                     Height="1"
-                                    Fill="#0078D4"
                                     VerticalAlignment="Top"
                                     HorizontalAlignment="Stretch"
-                                    Visibility="{x:Bind AccentVisibility, Mode=OneWay}" />
+                                    Visibility="{x:Bind AccentVisibility, Mode=OneWay}">
+                                    <Rectangle.Fill>
+                                        <SolidColorBrush Color="{x:Bind FocusedBorderColor, Mode=OneWay}" />
+                                    </Rectangle.Fill>
+                                </Rectangle>
                                 <Rectangle
                                     Height="1"
                                     Fill="{x:Bind HeaderBorderBrush, Mode=OneWay}"

@@ -31,6 +31,14 @@ test("a selected tab in an unfocused split keeps the active surface and gains an
   assert.match(xaml, /Fill="\{x:Bind HeaderBorderBrush, Mode=OneWay\}"[\s\S]*?VerticalAlignment="Bottom"[\s\S]*?InactivePaneUnderlineVisibility/);
 });
 
+test("a focused selected tab border follows its session color", () => {
+  const xaml = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml"),
+    "utf8");
+  assert.match(viewModel, /FocusedBorderColor => TagColor\.A > 0[\s\S]*?TagColor[\s\S]*?0x00, 0x78, 0xD4/);
+  assert.match(xaml, /Visibility="\{x:Bind AccentVisibility, Mode=OneWay\}"[\s\S]*?SolidColorBrush Color="\{x:Bind FocusedBorderColor, Mode=OneWay\}"/);
+});
+
 test("inactive tabs in an unfocused split use a dimmer foreground", () => {
   const foreground = viewModel.match(/public Microsoft\.UI\.Xaml\.Media\.Brush HeaderForeground[\s\S]*?\);/)?.[0] ?? "";
   assert.match(foreground, /: IsGroupFocused/);

@@ -112,6 +112,7 @@ public sealed class TabViewModel : ObservableObject
                 OnPropertyChanged(nameof(Subtitle));
                 OnPropertyChanged(nameof(IconSource));
                 OnPropertyChanged(nameof(IconVisibility));
+                OnPropertyChanged(nameof(FocusedBorderColor));
             }
         }
     }
@@ -639,6 +640,12 @@ public sealed class TabViewModel : ObservableObject
             return Windows.UI.Color.FromArgb(0, 0, 0, 0);
         }
     }
+
+    /// <summary>The focused-tab border follows its session color, with the standard
+    /// accent retained for tabs that do not have a color tag.</summary>
+    public Windows.UI.Color FocusedBorderColor => TagColor.A > 0
+        ? TagColor
+        : Windows.UI.Color.FromArgb(255, 0x00, 0x78, 0xD4);
 
     /// <summary>Set while locked-out after repeated failed unlock attempts.</summary>
     public DateTimeOffset LockoutUntil { get; private set; } = DateTimeOffset.MinValue;
