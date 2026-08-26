@@ -9,18 +9,18 @@ version-specific findings and design decisions.
 
 ## Stack
 
-- WinUI 3 (Windows App SDK 2.4.0), C#, .NET 8
+- WinUI 3 (Windows App SDK 2.4.0), C#, .NET 10
 - SSH.NET for transport
 - WebView2 + xterm.js (bundled) as the terminal surface
 - Unpackaged deployment; release builds are self-contained
 
 ## Build & run
 
-Requires the .NET SDK (8+) on Windows 10 21H2 or later.
+Requires the .NET 10 SDK on Windows 10 21H2 or later.
 
 ```
 dotnet build src/App/Resesh.App.csproj -p:Platform=x64
-src/App/bin/x64/Debug/net8.0-windows10.0.19041.0/Resesh.App.exe
+src/App/bin/x64/Debug/net10.0-windows10.0.19041.0/Resesh.App.exe
 ```
 
 On ARM64, substitute `-p:Platform=ARM64`.
@@ -41,7 +41,7 @@ credentials. Use `.\demo.ps1 -Platform ARM64` to override the detected architect
 
 GitHub Actions builds and tests each push and pull request. Each build produces, for x64 and Arm64:
 
-- a `-setup.exe` bundle — the recommended download. The app is self-contained (.NET 8 and the
+- a `-setup.exe` bundle — the recommended download. The app is self-contained (.NET 10 and the
   Windows App Runtime ship inside it), and the bundle installs the two remaining prerequisites,
   the Visual C++ Runtime and the WebView2 Runtime, only when the computer lacks them.
 - a bare `.msi` for scripted deployments. It assumes the Visual C++ and WebView2 runtimes are
