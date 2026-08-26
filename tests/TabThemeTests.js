@@ -31,6 +31,12 @@ test("a selected tab in an unfocused split keeps the active surface and gains an
   assert.match(xaml, /Fill="\{x:Bind HeaderBorderBrush, Mode=OneWay\}"[\s\S]*?VerticalAlignment="Bottom"[\s\S]*?InactivePaneUnderlineVisibility/);
 });
 
+test("inactive tabs in an unfocused split use a dimmer foreground", () => {
+  const foreground = viewModel.match(/public Microsoft\.UI\.Xaml\.Media\.Brush HeaderForeground[\s\S]*?\);/)?.[0] ?? "";
+  assert.match(foreground, /: IsGroupFocused/);
+  assert.match(foreground, /0x9D[\s\S]*?0x61[\s\S]*?0x72[\s\S]*?0x8A/);
+});
+
 test("saved and previewed theme changes refresh every open tab palette", () => {
   assert.match(viewModel, /public void ApplyAppTheme\(string theme\)[\s\S]*?_appTheme = theme;[\s\S]*?NotifyTabVisuals\(\)/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)[\s\S]*?foreach \(var tab in ViewModel\.AllTabs\)[\s\S]*?tab\.ApplyAppTheme\(theme\)/);

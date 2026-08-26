@@ -378,7 +378,9 @@ public sealed class TabViewModel : ObservableObject
             ? IsGroupFocused
                 ? (IsDark ? Windows.UI.Color.FromArgb(255, 0xFF, 0xFF, 0xFF) : Windows.UI.Color.FromArgb(255, 0x33, 0x33, 0x33))
                 : (IsDark ? Windows.UI.Color.FromArgb(255, 0xC0, 0xC0, 0xC0) : Windows.UI.Color.FromArgb(255, 0x55, 0x55, 0x55))
-            : (IsDark ? Windows.UI.Color.FromArgb(255, 0x9D, 0x9D, 0x9D) : Windows.UI.Color.FromArgb(255, 0x61, 0x61, 0x61)));
+            : IsGroupFocused
+                ? (IsDark ? Windows.UI.Color.FromArgb(255, 0x9D, 0x9D, 0x9D) : Windows.UI.Color.FromArgb(255, 0x61, 0x61, 0x61))
+                : (IsDark ? Windows.UI.Color.FromArgb(255, 0x72, 0x72, 0x72) : Windows.UI.Color.FromArgb(255, 0x8A, 0x8A, 0x8A)));
 
     /// <summary>Tab-strip status dot: green connected/running, red disconnected/failed,
     /// amber connecting, neutral gray for a clean local exit; accent blue when connected
