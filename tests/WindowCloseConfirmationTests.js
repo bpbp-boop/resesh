@@ -35,7 +35,7 @@ test("Y confirms session-close dialogs without becoming a global destructive sho
   const yHelper = source.match(
     /private static async Task<bool> ShowCloseConfirmationAsync[\s\S]*?\n    }\r?\n\r?\n    private async Task<bool> ConfirmAsync/)?.[0] ?? "";
 
-  assert.match(yHelper, /dialog\.AddHandler\([\s\S]*?KeyDownEvent[\s\S]*?new KeyEventHandler[\s\S]*?handledEventsToo: true\)/);
+  assert.match(yHelper, /dialog\.AddHandler\([\s\S]*?PreviewKeyDownEvent[\s\S]*?new KeyEventHandler[\s\S]*?handledEventsToo: true\)/);
   assert.match(yHelper, /args\.Key != VirtualKey\.Y/);
   assert.match(yHelper, /confirmedByKeyboard = true/);
   assert.match(yHelper, /dialog\.Hide\(\)/);

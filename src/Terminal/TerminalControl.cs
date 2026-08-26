@@ -5,6 +5,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Web.WebView2.Core;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace Resesh.Terminal;
 
@@ -234,6 +235,26 @@ public sealed class TerminalControl : Grid, IDisposable
                     if (root.TryGetProperty("data", out var data) && data.GetString() is { } b64)
                         InputReceived?.Invoke(Convert.FromBase64String(b64));
                     break;
+                case "copy":
+                    if (root.TryGetProperty("text", out var clipboardText) &&
+                        clipboardText.GetString() is { Length: > 0 } text)
+                    {
+                        try
+                        {
+                            var package = new DataPackage();
+                            package.SetText(text);
+                            Clipboard.SetContent(package);
+                            Clipboard.Flush();
+                        }
+                        catch (Exception exception)
+                        {
+                            TraceHook?.Invoke($"clipboard copy failed: {exception.Message}");
+                        }
+                    }
+                    break;
+                case "paste":
+                    PasteFromClipboard();
+                    break;
                 case "resize":
                     Columns = root.GetProperty("cols").GetInt32();
                     Rows = root.GetProperty("rows").GetInt32();
@@ -353,6 +374,24 @@ public sealed class TerminalControl : Grid, IDisposable
                         TraceHook?.Invoke($"pageError: {err.GetString()}");
                     break;
             }
+        }
+    }
+
+    private async void PasteFromClipboard()
+    {
+        try
+        {
+            var content = Clipboard.GetContent();
+            if (!content.Contains(StandardDataFormats.Text))
+                return;
+
+            var text = await content.GetTextAsync();
+            if (!string.IsNullOrEmpty(text))
+                Post(new { type = "paste", text });
+        }
+        catch (Exception exception)
+        {
+            TraceHook?.Invoke($"clipboard paste failed: {exception.Message}");
         }
     }
 

@@ -169,6 +169,29 @@ public sealed class WorkspaceStoreTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(path));
     }
 
+    [Fact]
+    public void Reorder_PersistsExactOrderAndRejectsIncompleteOrder()
+    {
+        var path = Path.Combine(_dir.FullName, "reordered-workspaces.json");
+        var store = new WorkspaceStore(path);
+        store.Load();
+        var first = store.SaveAs("First", EmptyLayout());
+        var second = store.SaveAs("Second", EmptyLayout());
+        var third = store.SaveAs("Third", EmptyLayout());
+
+        store.Reorder([third.Id, first.Id, second.Id]);
+
+        var loaded = new WorkspaceStore(path);
+        loaded.Load();
+        Assert.Equal(
+            ["Third", "First", "Second"],
+            loaded.Workspaces.Select(workspace => workspace.Name));
+
+        var before = File.ReadAllBytes(path);
+        Assert.Throws<ArgumentException>(() => store.Reorder([first.Id, second.Id]));
+        Assert.Equal(before, File.ReadAllBytes(path));
+    }
+
     public void Dispose() => _dir.Delete(recursive: true);
 
     private static WorkspaceLayout EmptyLayout() => new()

@@ -155,6 +155,25 @@ public sealed class WorkspaceStore
         }
     }
 
+    public void Reorder(IReadOnlyList<Guid> orderedIds)
+    {
+        ArgumentNullException.ThrowIfNull(orderedIds);
+        lock (_gate)
+        {
+            if (orderedIds.Count != _workspaces.Count || orderedIds.Distinct().Count() != orderedIds.Count)
+                throw new ArgumentException("Workspace order must contain every workspace exactly once.", nameof(orderedIds));
+
+            var byId = _workspaces.ToDictionary(workspace => workspace.Id);
+            if (orderedIds.Any(id => !byId.ContainsKey(id)))
+                throw new ArgumentException("Workspace order contains an unknown workspace.", nameof(orderedIds));
+            if (_workspaces.Select(workspace => workspace.Id).SequenceEqual(orderedIds))
+                return;
+
+            _workspaces = orderedIds.Select(id => byId[id]).ToList();
+            Save();
+        }
+    }
+
     public void SaveLastLayout(WorkspaceLayout layout)
     {
         lock (_gate)

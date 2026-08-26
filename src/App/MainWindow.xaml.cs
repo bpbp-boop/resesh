@@ -1173,6 +1173,20 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             await OpenWorkspaceAsync(item.Workspace, additive: false);
     }
 
+    private void WorkspaceList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
+    {
+        try
+        {
+            App.Workspaces.Reorder(Workspaces.Select(item => item.Workspace.Id).ToList());
+            App.RefreshWorkspaceMenus();
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException)
+        {
+            App.RefreshWorkspaceMenus();
+            ShowWorkspaceNotice("Workspace order was not saved", exception.Message);
+        }
+    }
+
     private async void OpenWorkspaceMenu_Click(object sender, RoutedEventArgs e)
     {
         if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
@@ -3493,7 +3507,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         var confirmedByKeyboard = false;
         dialog.AddHandler(
-            UIElement.KeyDownEvent,
+            UIElement.PreviewKeyDownEvent,
             new KeyEventHandler((_, args) =>
             {
                 if (args.Key != VirtualKey.Y)

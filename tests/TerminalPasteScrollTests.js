@@ -16,7 +16,6 @@ const pasteHelper = page.match(/function pasteText\(text\)\s*{([\s\S]*?)\n    }/
 assert.ok(pasteHelper, "pasteText helper should exist");
 assert.match(pasteHelper[1], /returnToLiveInput\(\)/);
 
-const helperUses = page.match(/pasteText\(text\);/g) || [];
-assert.strictEqual(helperUses.length, 2, "right-click and Ctrl+Shift+V should share paste behavior");
+assert.match(page, /case "paste":\s*pasteText\(/, "the native clipboard response should use pasteText");
 
 console.log("Terminal paste scroll tests passed.");

@@ -635,7 +635,11 @@
                     ItemsSource="{x:Bind Workspaces}"
                     SelectionMode="None"
                     IsItemClickEnabled="True"
-                    ItemClick="WorkspaceList_ItemClick">
+                    CanDragItems="True"
+                    CanReorderItems="True"
+                    AllowDrop="True"
+                    ItemClick="WorkspaceList_ItemClick"
+                    DragItemsCompleted="WorkspaceList_DragItemsCompleted">
                     <ListView.ItemTemplate>
                         <DataTemplate>
                             <Grid ColumnDefinitions="20,*,Auto" ColumnSpacing="8" Padding="4,5">

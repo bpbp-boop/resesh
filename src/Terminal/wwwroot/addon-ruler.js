@@ -227,6 +227,7 @@
     this.onContext = null; // page hook: bounded raw OSC 3008 payload for native validation
     this.onPromptContext = null; // page hook: (label, platform?) when a known prompt is idle
     this.onCommandsPanelChanged = null; // page hook: (open) — the host's button mirrors it
+    this.onCopyText = null; // page hook: (text) — native host owns the system clipboard
     this._lastPromptSignature = null;
     this._promptPlatform = null; // strong prompt evidence persists across later mode changes
 
@@ -1349,9 +1350,14 @@
 
   RulerAddon.prototype._copyCommandOutput = function (line, button, doneLabel, emptyLabel) {
     var output = this.getCommandOutput(line);
-    // Never clobber the clipboard with nothing; say so on the button instead.
-    if (output && typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(output).catch(function () {});
+    // Clipboard access from an embedded WebView is not reliable. Prefer the page hook
+    // so the native host performs the same clipboard operation as terminal selection.
+    if (output) {
+      if (typeof this.onCopyText === "function") {
+        try { this.onCopyText(output); } catch (err) {}
+      } else if (typeof navigator !== "undefined" && navigator.clipboard) {
+        navigator.clipboard.writeText(output).catch(function () {});
+      }
     }
     if (!button) return;
     var restore = button.textContent;

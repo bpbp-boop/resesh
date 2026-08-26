@@ -383,11 +383,14 @@
     ruler.onCommandsPanelChanged = function (open) {
       host.postMessage({ type: "commandsPanel", open: open === true });
     };
+    ruler.onCopyText = function (text) {
+      host.postMessage({ type: "copy", text: text });
+    };
 
     term.onSelectionChange(function () {
       // Find selects each match it lands on; don't let copy-on-select clobber the clipboard.
       if (copyOnSelect && term.hasSelection() && findbar.style.display !== "flex") {
-        navigator.clipboard.writeText(term.getSelection()).catch(function () {});
+        host.postMessage({ type: "copy", text: term.getSelection() });
       }
     });
 
@@ -411,9 +414,7 @@
     container.addEventListener("contextmenu", function (e) {
       e.preventDefault();
       if (rightClickPaste) {
-        navigator.clipboard.readText().then(function (text) {
-          pasteText(text);
-        }).catch(function () {});
+        host.postMessage({ type: "paste" });
       }
     });
 
@@ -559,13 +560,11 @@
       }
       if (e.type === "keydown" && e.ctrlKey && e.shiftKey) {
         if (e.code === "KeyC" && term.hasSelection()) {
-          navigator.clipboard.writeText(term.getSelection()).catch(function () {});
+          host.postMessage({ type: "copy", text: term.getSelection() });
           return false;
         }
         if (e.code === "KeyV") {
-          navigator.clipboard.readText().then(function (text) {
-            pasteText(text);
-          }).catch(function () {});
+          host.postMessage({ type: "paste" });
           return false;
         }
       }
@@ -749,6 +748,9 @@
           break;
         case "connected":
           connected = true;
+          break;
+        case "paste":
+          pasteText(typeof msg.text === "string" ? msg.text : "");
           break;
         case "showReplay":
           showReplay(msg);

@@ -222,6 +222,7 @@ test("the command popover offers Jump to and Copy output on the nearest mark", (
 
   addon._showTooltip(12);
   copied.length = 0;
+  addon.onCopyText = text => copied.push(text);
   const copyButton = addon._tooltip.children[addon._tooltip.children.length - 1].children[1];
   copyButton.handlers.click(click);
   assert.equal(copied.length, 1);
@@ -353,6 +354,7 @@ test("the page wires Ctrl+Shift+O, the host toggle message, and the find bar dod
   assert.match(pageSource, /e\.code === "KeyO"/);
   assert.match(pageSource, /case "toggleCommands":[\s\S]*?ruler\.toggleCommandsPanel\(\)/);
   assert.match(pageSource, /onCommandsPanelChanged[\s\S]*?type: "commandsPanel"/);
+  assert.match(pageSource, /onCopyText[\s\S]*?type: "copy"/);
   assert.match(pageSource, /body\.find-open \.scroll-ruler-panel \{ top: 38px; \}/);
   assert.match(pageSource, /classList\.add\("find-open"\)/);
   assert.match(pageSource, /classList\.remove\("find-open"\)/);
