@@ -455,6 +455,7 @@
                     </ResourceDictionary>
                 </Grid.Resources>
                 <StackPanel
+                    x:Name="ExpandedTabActions"
                     Orientation="Horizontal"
                     Spacing="6"
                     Margin="0,0,6,0"
@@ -540,6 +541,44 @@
                         <FontIcon Glyph="&#xE8B7;" FontSize="14" />
                     </ToggleButton>
                 </StackPanel>
+                <Button
+                    x:Name="TabActionsOverflowButton"
+                    Width="30"
+                    Height="30"
+                    Margin="0,0,6,0"
+                    Padding="0"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Visibility="Collapsed"
+                    ToolTipService.ToolTip="More tab actions"
+                    AutomationProperties.Name="More tab actions">
+                    <FontIcon Glyph="&#xE712;" FontSize="14" />
+                    <Button.Flyout>
+                        <MenuFlyout>
+                            <ToggleMenuFlyoutItem
+                                x:Name="RecordOverflowItem"
+                                Text="Start recording"
+                                Click="RecordButton_Click" />
+                            <ToggleMenuFlyoutItem
+                                x:Name="RewindOverflowItem"
+                                Text="Instant rewind"
+                                Click="RewindButton_Click" />
+                            <ToggleMenuFlyoutItem
+                                x:Name="ShowCommandsOverflowItem"
+                                Text="Show commands"
+                                Click="ShowCommandsButton_Click" />
+                            <MenuFlyoutSeparator />
+                            <MenuFlyoutItem
+                                x:Name="CurrentFolderOverflowItem"
+                                Text="Open file pane at terminal folder"
+                                Click="CurrentFolderButton_Click" />
+                            <ToggleMenuFlyoutItem
+                                x:Name="FilePaneOverflowItem"
+                                Text="Show file pane"
+                                Click="FilePaneToggle_Click" />
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
             </Grid>
             <!-- Two overlay segments own the divider. Their widths follow the selected
                  container, leaving only the active tab open to the terminal surface. -->

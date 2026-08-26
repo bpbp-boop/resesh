@@ -45,6 +45,9 @@ public interface ITabGroupHost
 
 public sealed partial class TabGroupView : UserControl
 {
+    private const double MinimumTabWidth = 100;
+    private const double ExpandedTabActionsFallbackWidth = 180;
+
     // In-process handoff for cross-group tab drags.
     private static TabViewModel? _draggedTab;
     private static TabGroupView? _dragSource;
@@ -63,6 +66,7 @@ public sealed partial class TabGroupView : UserControl
     private readonly SolidColorBrush _tabDividerBrush;
     private TabViewModel? _filePaneButtonTab;
     private Terminal.TerminalTabView? _filePaneButtonView;
+    private double _expandedTabActionsWidth = ExpandedTabActionsFallbackWidth;
 
     public TabGroupViewModel Group { get; }
 
@@ -96,7 +100,11 @@ public sealed partial class TabGroupView : UserControl
             QueueTabWidthRefresh();
             QueueTabDividerRefresh();
         };
-        TabStripHost.SizeChanged += (_, _) => QueueTabDividerRefresh();
+        TabStripHost.SizeChanged += (_, _) =>
+        {
+            UpdateTabActionLayout();
+            QueueTabDividerRefresh();
+        };
 
         // Focus tracking: interacting anywhere in this group focuses it.
         AddHandler(PointerPressedEvent, new PointerEventHandler((_, _) => _host.FocusGroup(Group)), true);
@@ -372,6 +380,7 @@ public sealed partial class TabGroupView : UserControl
             ? Visibility.Visible
             : Visibility.Collapsed;
         TabStripActions.Opacity = Group.SelectedTab?.IsGroupFocused == false ? 0.55 : 1.0;
+        UpdateTabActionLayout();
 
         var tab = Group.SelectedTab;
         var isOpen = tab?.View is Terminal.TerminalTabView { IsFilePaneOpen: true };
@@ -386,12 +395,21 @@ public sealed partial class TabGroupView : UserControl
             tab.State == TabConnectionState.Connected && !tab.IsLocked;
         RecordButton.IsEnabled = tab?.View is Terminal.TerminalTabView { CanRecord: true } && !tab.IsLocked;
         RewindButton.IsEnabled = tab?.View is Terminal.TerminalTabView { CanRewind: true } && !tab.IsLocked;
+        RecordOverflowItem.IsEnabled = RecordButton.IsEnabled;
+        RewindOverflowItem.IsEnabled = RewindButton.IsEnabled;
+        ShowCommandsOverflowItem.IsEnabled = ShowCommandsButton.IsEnabled;
+        CurrentFolderOverflowItem.IsEnabled = CurrentFolderButton.IsEnabled;
+        FilePaneOverflowItem.IsEnabled = FilePaneToggle.IsEnabled;
         FilePaneToggle.IsChecked = isOpen;
         ShowCommandsButton.IsChecked = commandsOpen;
         RecordButton.IsChecked = recording;
         RecordStartIcon.Visibility = recording ? Visibility.Collapsed : Visibility.Visible;
         RecordStopIcon.Visibility = recording ? Visibility.Visible : Visibility.Collapsed;
         RewindButton.IsChecked = rewinding;
+        FilePaneOverflowItem.IsChecked = isOpen;
+        ShowCommandsOverflowItem.IsChecked = commandsOpen;
+        RecordOverflowItem.IsChecked = recording;
+        RewindOverflowItem.IsChecked = rewinding;
 
         var label = isOpen ? "Hide file pane" : "Show file pane";
         ToolTipService.SetToolTip(FilePaneToggle, $"{label} (Ctrl+Shift+E)");
@@ -405,6 +423,27 @@ public sealed partial class TabGroupView : UserControl
         AutomationProperties.SetName(RecordButton, recordingLabel);
         ToolTipService.SetToolTip(RewindButton, rewinding ? "Return to live terminal" : "Instant rewind");
         AutomationProperties.SetName(RewindButton, rewinding ? "Return to live terminal" : "Instant rewind");
+        FilePaneOverflowItem.Text = label;
+        ShowCommandsOverflowItem.Text = commandsLabel;
+        RecordOverflowItem.Text = recordingLabel;
+        RewindOverflowItem.Text = rewinding ? "Return to live terminal" : "Instant rewind";
+    }
+
+    private void UpdateTabActionLayout()
+    {
+        if (ExpandedTabActions.Visibility == Visibility.Visible && ExpandedTabActions.ActualWidth > 0)
+            _expandedTabActionsWidth = ExpandedTabActions.ActualWidth;
+
+        var useOverflow = TabStripHost.ActualWidth > 0
+            && Group.Tabs.Count > 0
+            && TabStripHost.ActualWidth < Group.Tabs.Count * MinimumTabWidth + _expandedTabActionsWidth;
+        var expandedVisibility = useOverflow ? Visibility.Collapsed : Visibility.Visible;
+        if (ExpandedTabActions.Visibility == expandedVisibility)
+            return;
+
+        ExpandedTabActions.Visibility = expandedVisibility;
+        TabActionsOverflowButton.Visibility = useOverflow ? Visibility.Visible : Visibility.Collapsed;
+        QueueTabWidthRefresh();
     }
 
     private async void RecordButton_Click(object sender, RoutedEventArgs e)

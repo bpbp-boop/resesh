@@ -83,6 +83,20 @@ test("each tab bar reserves the measured width of every action button", () => {
   assert.match(strip, /Click="FilePaneToggle_Click"/);
 });
 
+test("tab actions collapse into an overflow menu before minimum-width tabs scroll", () => {
+  assert.match(xaml, /x:Name="ExpandedTabActions"/);
+  assert.match(xaml, /x:Name="TabActionsOverflowButton"[\s\S]*?Visibility="Collapsed"[\s\S]*?<MenuFlyout>/);
+  assert.match(xaml, /x:Name="RecordOverflowItem"[\s\S]*?Click="RecordButton_Click"/);
+  assert.match(xaml, /x:Name="RewindOverflowItem"[\s\S]*?Click="RewindButton_Click"/);
+  assert.match(xaml, /x:Name="ShowCommandsOverflowItem"[\s\S]*?Click="ShowCommandsButton_Click"/);
+  assert.match(xaml, /x:Name="CurrentFolderOverflowItem"[\s\S]*?Click="CurrentFolderButton_Click"/);
+  assert.match(xaml, /x:Name="FilePaneOverflowItem"[\s\S]*?Click="FilePaneToggle_Click"/);
+  assert.match(code, /TabStripHost\.ActualWidth < Group\.Tabs\.Count \* MinimumTabWidth \+ _expandedTabActionsWidth/);
+  assert.match(code, /ExpandedTabActions\.Visibility = expandedVisibility;[\s\S]{0,120}?TabActionsOverflowButton\.Visibility/);
+  assert.match(code, /FilePaneOverflowItem\.IsChecked = isOpen/);
+  assert.match(code, /RecordOverflowItem\.IsEnabled = RecordButton\.IsEnabled/);
+});
+
 test("record controls follow the button foreground instead of using warning red", () => {
   const recordButton = xaml.match(/x:Name="RecordButton"[\s\S]*?<\/ToggleButton>/)?.[0] ?? "";
   assert.equal(
