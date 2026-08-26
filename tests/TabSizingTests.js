@@ -41,9 +41,11 @@ test("tab text trims inside the shared width without moving the close action", (
   assert.match(xaml, /Grid\.Column="6"[\s\S]*?Click="TabCloseGlyph_Click"/);
 });
 
-test("tabs remeasure after close, move, or newly available group space", () => {
-  assert.match(code, /Group\.Tabs\.CollectionChanged \+= \(_, _\) =>[\s\S]{0,120}?QueueTabWidthRefresh\(\)/);
+test("tabs recalculate their full equal width after a close", () => {
+  assert.match(code, /Group\.Tabs\.CollectionChanged \+= \(_, _\)/);
+  assert.match(code, /Tabs\.TabItemsChanged \+= \(_, e\) =>[\s\S]{0,160}?CollectionChange\.ItemRemoved[\s\S]{0,80}?QueueFullTabWidthRefresh\(\)/);
   assert.match(code, /Tabs\.SizeChanged \+= \(_, _\) =>[\s\S]{0,100}?QueueTabWidthRefresh\(\)/);
+  assert.match(code, /QueueFullTabWidthRefresh\(\)[\s\S]*?TabWidthMode = TabViewWidthMode\.SizeToContent;[\s\S]{0,100}?TabWidthMode = TabViewWidthMode\.Equal/);
   assert.match(code, /FindDescendant\(Tabs, "TabsItemsPresenter"\)\?\.InvalidateMeasure\(\)/);
   assert.match(code, /Tabs\.InvalidateMeasure\(\)/);
 });
@@ -83,13 +85,11 @@ test("each tab bar reserves the measured width of every action button", () => {
 
 test("record controls follow the button foreground instead of using warning red", () => {
   const recordButton = xaml.match(/x:Name="RecordButton"[\s\S]*?<\/ToggleButton>/)?.[0] ?? "";
-+
   assert.equal(
     recordButton.match(/Fill="\{Binding Foreground, ElementName=RecordButton\}"/g)?.length,
     2);
   assert.doesNotMatch(recordButton, /#E74856/);
 });
-+
 test("action buttons dim with their inactive tab group", () => {
   assert.match(code, /TabStripActions\.Opacity = Group\.SelectedTab\?\.IsGroupFocused == false \? 0\.55 : 1\.0/);
   assert.match(code, /nameof\(TabViewModel\.IsGroupFocused\)[\s\S]{0,80}?UpdateTabActionButtons\(\)/);

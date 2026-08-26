@@ -55,6 +55,7 @@ public sealed partial class TabGroupView : UserControl
     private TabViewModel? _middleClickTab;
     private SplitDirection _dropDirection = SplitDirection.Right;
     private bool _tabWidthRefreshQueued;
+    private bool _fullTabWidthRefreshQueued;
     private bool _tabDividerRefreshQueued;
     private bool _tabDividerLayoutRefreshPending;
     private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.ResolveTheme(App.Settings.Current.Theme));
@@ -75,17 +76,20 @@ public sealed partial class TabGroupView : UserControl
         _tabMenu = BuildTabMenu();
         ObserveFilePaneButtonTab();
 
-        // Equal-width tabs must recalculate in both directions. Queue the refresh after
-        // TabView has handled the collection change, so closing or moving a tab lets all
-        // remaining tabs grow back toward the 240px browser width. Size changes cover a
-        // group that gains space when a neighboring split is removed or resized.
-        // The action-button cluster also follows the count: hidden at zero tabs, and
-        // SelectedTab does not change when the first tab arrives in an empty group.
+        // Source changes refresh the layout and action buttons. WinUI's native tab-items
+        // event runs when it has received the new collection state; use that event to
+        // recover full equal widths after a removal. Size changes cover a group that gains
+        // space when a neighboring split is removed or resized.
         Group.Tabs.CollectionChanged += (_, _) =>
         {
             QueueTabWidthRefresh();
             UpdateTabActionButtons();
             QueueTabDividerRefresh();
+        };
+        Tabs.TabItemsChanged += (_, e) =>
+        {
+            if (e.CollectionChange == Windows.Foundation.Collections.CollectionChange.ItemRemoved)
+                QueueFullTabWidthRefresh();
         };
         Tabs.SizeChanged += (_, _) =>
         {
@@ -211,6 +215,23 @@ public sealed partial class TabGroupView : UserControl
         _tabWidthRefreshQueued = DispatcherQueue.TryEnqueue(() =>
         {
             _tabWidthRefreshQueued = false;
+            FindDescendant(Tabs, "TabsItemsPresenter")?.InvalidateMeasure();
+            Tabs.InvalidateMeasure();
+            QueueTabDividerRefreshAfterLayout();
+        });
+    }
+
+    private void QueueFullTabWidthRefresh()
+    {
+        if (_fullTabWidthRefreshQueued)
+            return;
+
+        _fullTabWidthRefreshQueued = DispatcherQueue.TryEnqueue(() =>
+        {
+            _fullTabWidthRefreshQueued = false;
+            // WinUI otherwise defers this full-width path until a pointer event.
+            Tabs.TabWidthMode = TabViewWidthMode.SizeToContent;
+            Tabs.TabWidthMode = TabViewWidthMode.Equal;
             FindDescendant(Tabs, "TabsItemsPresenter")?.InvalidateMeasure();
             Tabs.InvalidateMeasure();
             QueueTabDividerRefreshAfterLayout();
