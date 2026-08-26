@@ -30,10 +30,10 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
-      - name: Select .NET 8 SDK
-        run: dotnet new globaljson --sdk-version 8.0.100 --roll-forward latestFeature --force
+      - name: Select .NET 10 SDK
+        run: dotnet new globaljson --sdk-version 10.0.100 --roll-forward latestFeature --force
 
       - name: Run .NET tests
         run: >-
@@ -69,10 +69,10 @@ jobs:
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
 
-      - name: Select .NET 8 SDK
-        run: dotnet new globaljson --sdk-version 8.0.100 --roll-forward latestFeature --force
+      - name: Select .NET 10 SDK
+        run: dotnet new globaljson --sdk-version 10.0.100 --roll-forward latestFeature --force
 
       - name: Set build version
         shell: pwsh
