@@ -149,6 +149,8 @@
 
             <MenuBar x:Name="TitleBarMenus" Grid.Column="2" VerticalAlignment="Center">
                 <MenuBarItem Title="File">
+                    <MenuFlyoutItem Text="New Window" Click="NewWindow_Click" />
+                    <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="New SSH Session…" Click="NewSession_Click" />
                     <MenuFlyoutItem Text="New Local Profile…" Click="NewLocalProfile_Click" />
                     <MenuFlyoutItem Text="New Folder…" Click="NewFolder_Click" />
@@ -667,6 +669,10 @@
                                                 Text="Open"
                                                 CommandParameter="{Binding}"
                                                 Click="OpenWorkspaceMenu_Click" />
+                                            <MenuFlyoutItem
+                                                Text="Open in new window"
+                                                CommandParameter="{Binding}"
+                                                Click="OpenWorkspaceInNewWindowMenu_Click" />
                                             <MenuFlyoutItem
                                                 Text="Open additively"
                                                 CommandParameter="{Binding}"

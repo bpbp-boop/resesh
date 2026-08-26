@@ -328,6 +328,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             return Task.CompletedTask;
         };
 
+        Add("Application", "New Window", "open separate window",
+            Sync(() => App.OpenNewWindow()));
         Add("Application", "Open Default Local Terminal", "new session shell tab",
             Sync(OpenDefaultLocalProfile), "Ctrl+Shift+T");
         Add("Application", "Quick Connect", "ssh search sessions connect",
@@ -401,6 +403,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         {
             Add("Workspaces", $"Open {workspace.Name}", "tabs groups layout replace",
                 () => OpenWorkspaceAsync(workspace, additive: false));
+            Add("Workspaces", $"Open {workspace.Name} in New Window", "tabs groups layout separate",
+                Sync(() => OpenWorkspaceInNewWindow(workspace)));
             Add("Workspaces", $"Open {workspace.Name} Additively", "tabs groups layout add",
                 () => OpenWorkspaceAsync(workspace, additive: true));
         }
@@ -613,6 +617,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 (int)Math.Round(AppTitleBar.ActualHeight * scale))]);
         source.SetRegionRects(Microsoft.UI.Input.NonClientRegionKind.Passthrough, [.. rects]);
     }
+
+    private void NewWindow_Click(object sender, RoutedEventArgs e) => App.OpenNewWindow();
 
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
 
@@ -1101,7 +1107,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             _ => throw new InvalidOperationException("Unknown split layout node."),
         };
 
-    private void RefreshWorkspaceMenu()
+    internal void RefreshWorkspaceMenu()
     {
         Workspaces.Clear();
         foreach (var workspace in App.Workspaces.Workspaces)
@@ -1131,6 +1137,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 var workspaceMenu = new MenuFlyoutSubItem { Text = workspace.Name };
                 var open = new MenuFlyoutItem { Text = "Open" };
                 open.Click += async (_, _) => await OpenWorkspaceAsync(workspace, additive: false);
+                var newWindow = new MenuFlyoutItem { Text = "Open in new window" };
+                newWindow.Click += (_, _) => OpenWorkspaceInNewWindow(workspace);
                 var additive = new MenuFlyoutItem { Text = "Open additively" };
                 additive.Click += async (_, _) => await OpenWorkspaceAsync(workspace, additive: true);
                 var update = new MenuFlyoutItem { Text = "Update from current layout…" };
@@ -1141,6 +1149,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 delete.Click += async (_, _) => await DeleteWorkspaceAsync(workspace);
 
                 workspaceMenu.Items.Add(open);
+                workspaceMenu.Items.Add(newWindow);
                 workspaceMenu.Items.Add(additive);
                 workspaceMenu.Items.Add(new MenuFlyoutSeparator());
                 workspaceMenu.Items.Add(update);
@@ -1168,6 +1177,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
             await OpenWorkspaceAsync(item.Workspace, additive: false);
+    }
+
+    private void OpenWorkspaceInNewWindowMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
+            OpenWorkspaceInNewWindow(item.Workspace);
     }
 
     private async void OpenWorkspaceAdditivelyMenu_Click(object sender, RoutedEventArgs e)
@@ -1204,7 +1219,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         try
         {
             App.Workspaces.SaveAs(name, CaptureWorkspaceLayout());
-            RefreshWorkspaceMenu();
+            App.RefreshWorkspaceMenus();
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException)
         {
@@ -1221,7 +1236,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         try
         {
             App.Workspaces.Rename(workspace.Id, name);
-            RefreshWorkspaceMenu();
+            App.RefreshWorkspaceMenus();
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException)
         {
@@ -1240,7 +1255,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
 
         App.Workspaces.Update(workspace.Id, CaptureWorkspaceLayout());
-        RefreshWorkspaceMenu();
+        App.RefreshWorkspaceMenus();
     }
 
     private async Task DeleteWorkspaceAsync(Workspace workspace)
@@ -1254,7 +1269,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
 
         App.Workspaces.Delete(workspace.Id);
-        RefreshWorkspaceMenu();
+        App.RefreshWorkspaceMenus();
     }
 
     private async Task OpenWorkspaceAsync(Workspace workspace, bool additive)
@@ -1274,6 +1289,16 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             Groups = workspace.Groups,
             Layout = workspace.Layout,
         }, additive);
+    }
+
+    private static void OpenWorkspaceInNewWindow(Workspace workspace)
+    {
+        var window = App.OpenNewWindow();
+        window.ApplyWorkspaceLayout(new WorkspaceLayout
+        {
+            Groups = workspace.Groups,
+            Layout = workspace.Layout,
+        }, additive: false);
     }
 
     /// <summary>Launch-time restoration. The setting guard keeps direct callers honest.</summary>
@@ -2894,7 +2919,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
             App.Icons.InvalidateCustomIcons();
             App.Workspaces.Load();
-            RefreshWorkspaceMenu();
+            App.RefreshWorkspaceMenus();
             ViewModel.RebuildTree();
             ApplySettingsToApp();
 
@@ -3144,6 +3169,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (_selection is [{ Session: { IsLocal: true } localProfile }])
         {
             AddItem(menu, "Open", () => ConnectSession(localProfile));
+            AddItem(menu, "Open in new window", () => ConnectInNewWindow([localProfile]));
             menu.Items.Add(new MenuFlyoutSeparator());
             AddItem(menu, "Edit…", async () => await OpenLocalProfileEditorAsync(localProfile, localProfile.FolderPath));
             if (App.Settings.Current.DefaultLocalProfileId != localProfile.Id)
@@ -3157,6 +3183,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (_selection is [{ Session: { } single }])
         {
             AddItem(menu, "Connect", () => ConnectSession(single));
+            AddItem(menu, "Connect in new window", () => ConnectInNewWindow([single]));
             menu.Items.Add(new MenuFlyoutSeparator());
             AddItem(menu, "Edit…", async () => await OpenSessionEditorAsync(single, single.FolderPath));
             AddItem(menu, "Delete", async () => await DeleteSessionAsync(single));
@@ -3180,7 +3207,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             foreach (var session in SessionsOf(selection))
                 ConnectSession(session);
         });
-        AddItem(menu, "Connect in Tabs in New Window", () => ConnectInNewWindow(SessionsOf(selection).ToList()));
+        AddItem(menu, "Open in new window", () => ConnectInNewWindow(SessionsOf(selection).ToList()));
         menu.Items.Add(new MenuFlyoutSeparator());
 
         // Single folder keeps its create/rename items; mixed selections get the shared subset.
@@ -3249,8 +3276,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         if (sessions.Count == 0)
             return;
-        var window = new MainWindow();
-        window.Activate();
+        var window = App.OpenNewWindow();
         foreach (var session in sessions)
             window.ConnectSession(session);
     }

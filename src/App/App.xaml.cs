@@ -1,3 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.UI.Dispatching;
+using Microsoft.Windows.AppLifecycle;
 using Microsoft.UI.Xaml;
 using Resesh.Core.Credentials;
 using Resesh.Core.Ssh;
@@ -7,7 +11,9 @@ namespace Resesh.App;
 
 public partial class App : Application
 {
-    private Window? _window;
+    private readonly List<MainWindow> _windows = [];
+    private AppInstance? _appInstance;
+    private DispatcherQueue? _dispatcherQueue;
 
     public static SessionStore Store { get; } = new(StorePath("sessions.json", SessionStore.DefaultPath));
     public static SshKeyStore SshKeys { get; } = new(StorePath("ssh-keys.json", SshKeyStore.DefaultPath));
@@ -32,6 +38,22 @@ public partial class App : Application
                 return Path.Combine(Path.GetFullPath(args[i + 1]), fileName);
         }
         return defaultPath;
+    }
+
+    /// <summary>Different data directories are independent app instances. Normal launches
+    /// sharing a data directory redirect into one process so every window shares the same
+    /// in-memory stores and cannot race JSON writes.</summary>
+    private static string? ActivationKey()
+    {
+        if (DemoMode.IsEnabled)
+            return null;
+
+        var dataDirectory = Path.GetDirectoryName(StorePath("sessions.json", SessionStore.DefaultPath))!;
+        var normalized = Path.GetFullPath(dataDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .ToUpperInvariant();
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return $"Resesh-{Convert.ToHexString(hash)}";
     }
     public static Resesh.App.Icons.SessionIconCatalog Icons { get; } = new();
 
@@ -94,6 +116,13 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        if (RedirectToPrimaryInstance())
+            return;
+
+        _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+        _appInstance = AppInstance.GetCurrent();
+        _appInstance.Activated += AppInstance_Activated;
+
         Store.Load();
         SshKeys.Load();
         KnownHosts.Load();
@@ -129,30 +158,87 @@ public partial class App : Application
         Resesh.Core.Local.LocalTerminalSession.TraceHook = message => MainWindow.Trace(message);
         Resesh.Terminal.TerminalControl.TraceHook = message => MainWindow.Trace(message);
 #endif
-        var window = new MainWindow();
-        _window = window;
-        window.Activate();
+        var window = CreateWindowCore();
         if (Settings.Current.ReopenLastLayoutAtStartup)
             window.RestoreLastLayout();
         else
             window.RestorePinnedSessions();
 
+        ApplyLaunchArguments(window, Environment.GetCommandLineArgs());
+    }
+
+    private bool RedirectToPrimaryInstance()
+    {
+        if (ActivationKey() is not { } key)
+            return false;
+
+        var registered = AppInstance.FindOrRegisterForKey(key);
+        if (registered.IsCurrent)
+            return false;
+
+        RedirectAndExitAsync(registered);
+        return true;
+    }
+
+    private async void RedirectAndExitAsync(AppInstance registered)
+    {
+        try
+        {
+            await registered.RedirectActivationToAsync(AppInstance.GetCurrent().GetActivatedEventArgs());
+        }
+        catch (Exception ex)
+        {
+            LogCrash(ex);
+        }
+        finally
+        {
+            Exit();
+        }
+    }
+
+    private void AppInstance_Activated(object? sender, AppActivationArguments args)
+    {
+        _dispatcherQueue?.TryEnqueue(() => CreateWindowCore());
+    }
+
+    /// <summary>Creates a blank, app-owned window. Keeping every window rooted here is
+    /// required because WinUI does not expose an application window collection.</summary>
+    public static MainWindow OpenNewWindow() => ((App)Current).CreateWindowCore();
+
+    internal static void RefreshWorkspaceMenus()
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.RefreshWorkspaceMenu();
+    }
+
+    private MainWindow CreateWindowCore()
+    {
+        var window = new MainWindow();
+        _windows.Add(window);
+        window.Closed += (_, _) => _windows.Remove(window);
+        window.Activate();
+        return window;
+    }
+
+    private static void ApplyLaunchArguments(MainWindow window, IReadOnlyList<string> args)
+    {
         // `--open <session name>` (repeatable): open saved sessions at launch. Used by
         // the automated UI test rig; harmless for normal launches.
-        var args2 = Environment.GetCommandLineArgs();
-        for (var i = 1; i < args2.Length - 1; i++)
+        for (var i = 1; i < args.Count - 1; i++)
         {
-            if (args2[i] == "--open"
+            if (args[i] == "--open"
                 && Store.Sessions.FirstOrDefault(s =>
-                    s.Name.Equals(args2[i + 1], StringComparison.OrdinalIgnoreCase)) is { } session)
+                    s.Name.Equals(args[i + 1], StringComparison.OrdinalIgnoreCase)) is { } session)
             {
                 window.OpenSessionFromLaunch(session);
             }
-            else if (args2[i] == "--open-recording")
+            else if (args[i] == "--open-recording")
             {
                 try
                 {
-                    window.OpenRecordingFromLaunch(args2[i + 1]);
+                    window.OpenRecordingFromLaunch(args[i + 1]);
                 }
                 catch (Exception ex)
                 {
