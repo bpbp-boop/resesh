@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml;
 using Resesh.Core.Credentials;
 using Resesh.Core.Ssh;
 using Resesh.Core.Storage;
+using Windows.UI.ViewManagement;
 
 namespace Resesh.App;
 
@@ -61,6 +62,17 @@ public partial class App : Application
     /// launch by discovery). Built-ins outside this set are hidden, not deleted.</summary>
     public static IReadOnlySet<Guid> AvailableLocalShells { get; private set; } = new HashSet<Guid>();
 
+    /// <summary>Resolves the System choice to the Windows color mode used right now.</summary>
+    public static string ResolveTheme(string? theme)
+    {
+        if (!string.Equals(theme, "system", StringComparison.OrdinalIgnoreCase))
+            return ThemeCatalog.Find(theme).Id;
+
+        var background = new UISettings().GetColorValue(UIColorType.Background);
+        var luminance = (0.2126 * background.R) + (0.7152 * background.G) + (0.0722 * background.B);
+        return luminance >= 128 ? "light" : "dark";
+    }
+
     public App()
     {
         if (!DemoMode.IsEnabled)
@@ -69,7 +81,9 @@ public partial class App : Application
         // Application-level theme must be set before any UI exists; it also themes
         // popups/dialogs, which don't inherit element-level RequestedTheme.
         Settings.Load();
-        RequestedTheme = ThemeCatalog.IsLight(Settings.Current.Theme) ? ApplicationTheme.Light : ApplicationTheme.Dark;
+        RequestedTheme = ThemeCatalog.IsLight(ResolveTheme(Settings.Current.Theme))
+            ? ApplicationTheme.Light
+            : ApplicationTheme.Dark;
 
         InitializeComponent();
         UnhandledException += (_, e) =>
@@ -102,6 +116,9 @@ public partial class App : Application
 
     private static void LogCrash(Exception? ex)
     {
+        if (!Settings.Current.WriteCrashReports)
+            return;
+
         try
         {
             var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Resesh");
@@ -163,6 +180,7 @@ public partial class App : Application
             window.RestoreLastLayout();
         else
             window.RestorePinnedSessions();
+        window.OpenWelcomeIfNeeded();
 
         ApplyLaunchArguments(window, Environment.GetCommandLineArgs());
     }

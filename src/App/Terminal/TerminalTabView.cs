@@ -58,7 +58,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     private FilePaneView? _filePane;
     private CommunityToolkit.WinUI.Controls.GridSplitter? _paneSplitter;
     private Border? _paneSplitterLine;
-    private ThemeVisualPalette _chromePalette = ThemeVisualPalette.For(App.Settings.Current.Theme);
+    private ThemeVisualPalette _chromePalette = ThemeVisualPalette.For(App.ResolveTheme(App.Settings.Current.Theme));
     private bool _paneSplitterActive;
     private string? _secret;
     private Session? _resolvedSshSession;
@@ -150,8 +150,9 @@ public sealed class TerminalTabView : Grid, IDisposable
         // The page's terminal is constructed with these (init handshake), so it opens
         // with the right theme/fonts instead of restyling just after first paint.
         var initial = App.Settings.Current.WithOverrides(Session.Overrides);
+        var initialTheme = App.ResolveTheme(initial.Theme);
         _terminal.SetInitialOptions(
-            initial.FontSize, initial.FontFamily, initial.Theme,
+            initial.FontSize, initial.FontFamily, initialTheme,
             initial.CopyOnSelect, initial.RightClickPaste, initial.Scrollback,
             BuildHighlightPayload());
         _terminal.SetPromptPlatform(Session.Icon);
@@ -885,9 +886,10 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// without changing terminal geometry or rescanning highlights.</summary>
     public void ApplyTheme(string theme)
     {
+        theme = App.ResolveTheme(theme);
         _chromePalette = ThemeVisualPalette.For(theme);
         ApplyPaneSplitterTheme();
-        _terminal.ApplyOptions(theme: Session.Overrides?.Theme ?? theme);
+        _terminal.ApplyOptions(theme: App.ResolveTheme(Session.Overrides?.Theme ?? theme));
     }
 
     /// <summary>Pushes layout and interaction settings into the xterm page, with this

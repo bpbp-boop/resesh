@@ -12,6 +12,7 @@ public static class ThemeCatalog
     [
         new("dark", "Resesh Dark"),
         new("light", "Resesh Light", true),
+        new("system", "System"),
         new("solarized-dark", "Solarized Dark"),
         new("solarized-light", "Solarized Light", true),
         new("dracula", "Dracula"),

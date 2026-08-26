@@ -179,6 +179,7 @@
                         Text="Command Palette…"
                         Click="CommandPaletteMenu_Click"
                         KeyboardAcceleratorTextOverride="Ctrl+Shift+P" />
+                    <MenuFlyoutItem Text="Welcome" Click="WelcomeMenu_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Expand All" Click="ExpandAll_Click" />
                     <MenuFlyoutItem Text="Collapse All" Click="CollapseAll_Click" />

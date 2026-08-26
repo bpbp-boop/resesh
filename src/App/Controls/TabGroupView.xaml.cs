@@ -57,7 +57,7 @@ public sealed partial class TabGroupView : UserControl
     private bool _tabWidthRefreshQueued;
     private bool _tabDividerRefreshQueued;
     private bool _tabDividerLayoutRefreshPending;
-    private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.Settings.Current.Theme);
+    private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.ResolveTheme(App.Settings.Current.Theme));
     private readonly SolidColorBrush _tabBackgroundBrush;
     private readonly SolidColorBrush _tabDividerBrush;
     private TabViewModel? _filePaneButtonTab;
@@ -347,7 +347,9 @@ public sealed partial class TabGroupView : UserControl
     private void UpdateTabActionButtons()
     {
         // An empty group has nothing the buttons could act on: hide the whole cluster.
-        TabStripActions.Visibility = Group.Tabs.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        TabStripActions.Visibility = Group.Tabs.Count > 0 && Group.SelectedTab is { IsOnboarding: false }
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         TabStripActions.Opacity = Group.SelectedTab?.IsGroupFocused == false ? 0.55 : 1.0;
 
         var tab = Group.SelectedTab;
@@ -355,8 +357,10 @@ public sealed partial class TabGroupView : UserControl
         var commandsOpen = tab?.View is Terminal.TerminalTabView { IsCommandsPanelOpen: true };
         var recording = tab?.View is Terminal.TerminalTabView { IsRecording: true };
         var rewinding = tab?.View is Terminal.TerminalTabView { IsRewinding: true };
-        ShowCommandsButton.IsEnabled = tab is not null && !tab.IsLocked;
-        FilePaneToggle.IsEnabled = tab?.Capabilities.FilePane == true && !tab.IsLocked;
+        ShowCommandsButton.IsEnabled = tab is not null && !tab.IsLocked && tab.View is Terminal.TerminalTabView;
+        FilePaneToggle.IsEnabled = tab?.Capabilities.FilePane == true
+            && !tab.IsLocked
+            && tab.View is Terminal.TerminalTabView;
         CurrentFolderButton.IsEnabled = tab?.Capabilities.FilePane == true &&
             tab.State == TabConnectionState.Connected && !tab.IsLocked;
         RecordButton.IsEnabled = tab?.View is Terminal.TerminalTabView { CanRecord: true } && !tab.IsLocked;
@@ -625,12 +629,14 @@ public sealed partial class TabGroupView : UserControl
     private void ConfigureMenuFor(TabViewModel tab)
     {
         var caps = tab.Capabilities;
-        _resetName.IsEnabled = tab.TitleOverride is not null;
+        var isOnboarding = tab.IsOnboarding;
+        _rename.IsEnabled = !isOnboarding;
+        _resetName.IsEnabled = !isOnboarding && tab.TitleOverride is not null;
         // Local tabs use process verbs (Stop/Restart); remote-only actions disappear entirely.
         _reconnect.Text = caps.StartAgainVerb;
-        _reconnect.IsEnabled = IsStopped(tab);
+        _reconnect.IsEnabled = !isOnboarding && IsStopped(tab);
         _disconnect.Text = caps.StopVerb;
-        _disconnect.IsEnabled = tab.State == TabConnectionState.Connected;
+        _disconnect.IsEnabled = !isOnboarding && tab.State == TabConnectionState.Connected;
         // Only persistent sessions have a remote session to end; close/disconnect only detach them.
         var endRemote = caps.RemoteSession && tab.Session.Persistent;
         _endRemote.Visibility = endRemote ? Visibility.Visible : Visibility.Collapsed;
@@ -640,12 +646,12 @@ public sealed partial class TabGroupView : UserControl
         _closeOthers.IsEnabled = Group.Tabs.Any(t => t != tab && !t.IsPinned);
         _closeRight.IsEnabled = Group.Tabs.Skip(Group.Tabs.IndexOf(tab) + 1).Any(t => !t.IsPinned);
         _pin.Text = tab.IsPinned ? "Unpin Tab" : "Pin Tab";
-        _clone.IsEnabled = !tab.IsPlayback;
-        _pin.IsEnabled = !tab.IsPlayback;
-        _lock.IsEnabled = !tab.IsPlayback && !tab.IsLocked;
+        _clone.IsEnabled = !isOnboarding && !tab.IsPlayback;
+        _pin.IsEnabled = !isOnboarding && !tab.IsPlayback;
+        _lock.IsEnabled = !isOnboarding && !tab.IsPlayback && !tab.IsLocked;
         // Splitting a lone tab would leave an empty group that immediately collapses — pointless.
-        _split.IsEnabled = Group.Tabs.Count > 1;
-        _splitDown.IsEnabled = Group.Tabs.Count > 1;
+        _split.IsEnabled = !isOnboarding && Group.Tabs.Count > 1;
+        _splitDown.IsEnabled = !isOnboarding && Group.Tabs.Count > 1;
         _filePane.Visibility = caps.FilePane ? Visibility.Visible : Visibility.Collapsed;
         _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
         var filePaneCwd = caps.FilePane;
@@ -656,7 +662,7 @@ public sealed partial class TabGroupView : UserControl
             : Visibility.Collapsed;
         // Session Options is disabled when the saved session was deleted while connected.
         var sessionExists = _host.ViewModel.RankedMatches("").Any(s => s.Id == tab.Session.Id);
-        _options.IsEnabled = sessionExists;
+        _options.IsEnabled = !isOnboarding && sessionExists;
         ConfigureHighlightMenu(tab, sessionExists);
         ConfigureAgentMenu(tab, sessionExists);
     }

@@ -31,6 +31,16 @@ public sealed record AppSettings
     /// <summary>Restore the clean-exit tab-group layout when the app next launches.</summary>
     public bool ReopenLastLayoutAtStartup { get; init; }
 
+    /// <summary>False for a new installation until the welcome tab is finished. Null marks
+    /// settings created before onboarding existed, so upgrades do not reopen it automatically.</summary>
+    public bool? OnboardingCompleted { get; init; }
+
+    /// <summary>Ask before closing a running, unpinned terminal session.</summary>
+    public bool ConfirmCloseActiveSessions { get; init; } = true;
+
+    /// <summary>Write unhandled exception details to the local crash log. Nothing is uploaded.</summary>
+    public bool WriteCrashReports { get; init; } = true;
+
     /// <summary>The local profile "+ Session" / Ctrl+Shift+T opens; null = highest-priority
     /// discovered shell (see LocalShellDiscovery.DefaultProfile).</summary>
     public Guid? DefaultLocalProfileId { get; init; }
@@ -107,7 +117,13 @@ public sealed class SettingsStore
             try
             {
                 if (File.Exists(_path))
+                {
                     Current = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_path), JsonOptions) ?? new AppSettings();
+                }
+                else
+                {
+                    Current = new AppSettings { OnboardingCompleted = false };
+                }
             }
             catch (Exception e) when (e is JsonException or IOException)
             {

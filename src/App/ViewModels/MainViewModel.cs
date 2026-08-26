@@ -113,6 +113,8 @@ public sealed class MainViewModel : ObservableObject
             var tab = ActiveTab;
             if (tab is null)
                 return baseText;
+            if (tab.IsOnboarding)
+                return $"{baseText}  •  Welcome — setup";
             var status = $"{baseText}  •  {tab.Header} — {tab.Endpoint} • {tab.StateText}";
             return tab.ConnectionSummary.Length > 0 ? $"{status} • {tab.ConnectionSummary}" : status;
         }

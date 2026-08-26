@@ -58,4 +58,41 @@ public sealed class SettingsStoreTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Load_NewSettingsFileMarksOnboardingIncomplete()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"resesh-new-settings-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new SettingsStore(path);
+
+            store.Load();
+
+            Assert.False(store.Current.OnboardingCompleted);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Load_LegacySettingsDoesNotForceOnboarding()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"resesh-legacy-settings-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(path, "{\"theme\":\"dark\"}");
+            var store = new SettingsStore(path);
+
+            store.Load();
+
+            Assert.Null(store.Current.OnboardingCompleted);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

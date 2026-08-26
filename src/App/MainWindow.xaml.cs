@@ -16,6 +16,7 @@ using Resesh.Core.Storage;
 using Microsoft.UI.Windowing;
 using Windows.Graphics;
 using Windows.System;
+using Windows.UI.ViewManagement;
 
 namespace Resesh.App;
 
@@ -33,7 +34,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private bool _closePromptOpen;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
     private RectInt32? _normalWindowBounds;
-    private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.Settings.Current.Theme);
+    private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.ResolveTheme(App.Settings.Current.Theme));
     private int _themeApplyVersion;
     private DependencyObject? _palettePreviousFocus;
     private bool _paletteOpenedFromTerminal;
@@ -45,6 +46,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private Storyboard? _sessionsPaneStoryboard;
     private FrameworkElement? _animatedSessionsPane;
     private int _sessionsPaneAnimationVersion;
+    private readonly UISettings _uiSettings = new();
 
     public MainWindow()
     {
@@ -89,13 +91,22 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         RegisterAccelerators();
         InitializeSessionsRail();
         RefreshWorkspaceMenu();
+        _uiSettings.ColorValuesChanged += SystemColorsChanged;
         AppWindow.Closing += AppWindow_Closing;
         Closed += (_, _) =>
         {
+            _uiSettings.ColorValuesChanged -= SystemColorsChanged;
             SaveTreePaneWidth();
             App.Workspaces.SaveLastLayout(CaptureWorkspaceLayout());
             ViewModel.CloseAllTabs(); // tear down live SSH sessions without hanging
         };
+    }
+
+    private void SystemColorsChanged(UISettings sender, object args)
+    {
+        if (!string.Equals(App.Settings.Current.Theme, "system", StringComparison.OrdinalIgnoreCase))
+            return;
+        DispatcherQueue.TryEnqueue(() => ApplyThemeToApp("system"));
     }
 
     private void RestoreWindowPlacement()
@@ -363,6 +374,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             Sync(() => SelectSessionsRailTab("recent")));
         Add("View", "Show Recordings", "sidebar rail playback asciicast",
             Sync(() => SelectSessionsRailTab("recordings")));
+        Add("View", "Open Welcome", "onboarding setup getting started import theme",
+            Sync(OpenWelcome), keepActionFocus: true);
 
         Add("Global Settings", "Open Settings", "preferences options",
             () => ShowSettingsAsync(GlobalSettingsTarget.General));
@@ -411,6 +424,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
         if (ViewModel.ActiveTab is not { } tab)
             return commands;
+
+        if (tab.IsOnboarding)
+        {
+            Add("Tab", "Close Welcome", "current active tab", () => RequestCloseTabAsync(tab), "Ctrl+F4");
+            return commands;
+        }
 
         if (!tab.IsPlayback && App.Store.Find(tab.Session.Id) is not null)
         {
@@ -568,6 +587,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     /// <summary>Caption buttons live outside XAML theming; keep them in sync with the app theme.</summary>
     private void ApplyTitleBarButtonColors(string theme)
     {
+        theme = App.ResolveTheme(theme);
         if (!Microsoft.UI.Windowing.AppWindowTitleBar.IsCustomizationSupported())
             return;
         var tb = AppWindow.TitleBar;
@@ -635,6 +655,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         // open sessions, but let an empty window close immediately.
         if (_closeConfirmed || !ViewModel.AllTabs.Any())
             return;
+        if (!App.Settings.Current.ConfirmCloseActiveSessions
+            || !ViewModel.AllTabs.Any(tab => !tab.IsOnboarding))
+            return;
 
         args.Cancel = true;
         if (_closePromptOpen)
@@ -648,7 +671,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         try
         {
-            var count = ViewModel.AllTabs.Count();
+            var count = ViewModel.AllTabs.Count(tab => !tab.IsOnboarding);
             if (count == 0)
             {
                 _closeConfirmed = true;
@@ -697,6 +720,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     }
 
     private void CommandPaletteMenu_Click(object sender, RoutedEventArgs e) => ShowCommandPalette();
+
+    private void WelcomeMenu_Click(object sender, RoutedEventArgs e) => OpenWelcome();
 
     // Menu items act on the focused group's selected tab; they no-op when idle.
     private void SplitRightMenu_Click(object sender, RoutedEventArgs e)
@@ -879,6 +904,44 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     /// <summary>Launch-time entry for App's --open argument (the automated test rig).</summary>
     public void OpenSessionFromLaunch(Session session) => ConnectSession(session);
+
+    public void OpenWelcomeIfNeeded()
+    {
+        if (App.Settings.Current.OnboardingCompleted == false)
+            OpenWelcome();
+    }
+
+    private void OpenWelcome()
+    {
+        if (ViewModel.AllTabs.FirstOrDefault(tab => tab.IsOnboarding) is { } existing)
+        {
+            var existingGroup = ViewModel.GroupOf(existing);
+            existingGroup.SelectedTab = existing;
+            FocusGroup(existingGroup);
+            return;
+        }
+
+        var group = ViewModel.FocusedGroup;
+        var tab = TabViewModel.CreateOnboarding();
+        ViewModel.AttachTab(tab, group, group.Tabs.Count);
+        var view = new OnboardingView(
+            App.Settings.Current,
+            ApplyThemeToApp,
+            ViewModel.RebuildTree);
+        view.FinishRequested += () => FinishOnboarding(tab, view);
+        tab.View = view;
+        _groupViews[group].AddTerminal(view);
+    }
+
+    private void FinishOnboarding(TabViewModel tab, OnboardingView view)
+    {
+        if (!ViewModel.AllTabs.Contains(tab))
+            return;
+
+        App.Settings.Save(view.Complete());
+        ApplySettingsToApp();
+        CloseTabCore(tab);
+    }
 
     /// <summary>Opens a tab for the session and starts its terminal + shell lifecycle
     /// (SSH connect or local ConPTY launch, per the session's kind).</summary>
@@ -1550,7 +1613,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             source.SelectedTab = source.Tabs.LastOrDefault();
         target.Tabs.Insert(Math.Clamp(index, 0, target.Tabs.Count), tab);
 
-        if (source != target && tab.View is TerminalTabView view)
+        if (source != target && tab.View is UIElement view)
         {
             _groupViews[source].RemoveTerminal(view);
             _groupViews[target].AddTerminal(view);
@@ -1560,7 +1623,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private void RemoveWorkspaceTab(TabViewModel tab)
     {
         var group = ViewModel.GroupOf(tab);
-        if (tab.View is TerminalTabView view)
+        if (tab.View is OnboardingView onboarding)
+            onboarding.CancelPreview();
+        if (tab.View is UIElement view)
             _groupViews[group].RemoveTerminal(view);
         ViewModel.CloseTab(tab);
     }
@@ -1603,6 +1668,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     /// <summary>THE close pathway: X button, Ctrl+F4, context menu, and middle-click all land here.</summary>
     public async Task RequestCloseTabAsync(TabViewModel tab)
     {
+        if (tab.IsOnboarding
+            || (!tab.IsPinned && !App.Settings.Current.ConfirmCloseActiveSessions))
+        {
+            CloseTabCore(tab);
+            return;
+        }
+
         if (tab.Capabilities.RemoteSession
             && tab.Session.Persistent
             && tab.State == TabConnectionState.Connected
@@ -1681,6 +1753,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         tabs = tabs.Where(t => !t.IsPinned).ToList(); // bulk closes never touch pinned tabs
         if (tabs.Count == 0)
             return;
+        if (!App.Settings.Current.ConfirmCloseActiveSessions)
+        {
+            foreach (var tab in tabs)
+                CloseTabCore(tab);
+            return;
+        }
+
         var connected = tabs.Count(t => t.State == TabConnectionState.Connected);
         var message = connected > 0
             ? $"Close {tabs.Count} {description}? {connected} of them {(connected == 1 ? "is" : "are")} still connected."
@@ -1695,7 +1774,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         Trace($"CloseTabCore: closing '{tab.Header}' selected={ReferenceEquals(ViewModel.GroupOf(tab).SelectedTab, tab)}");
         var group = ViewModel.GroupOf(tab);
-        if (tab.View is TerminalTabView view)
+        if (tab.View is OnboardingView onboarding)
+            onboarding.CancelPreview();
+        if (tab.View is UIElement view)
             _groupViews[group].RemoveTerminal(view);
         ViewModel.CloseTab(tab);
         Trace($"CloseTabCore: done; selected now '{group.SelectedTab?.Header ?? "(null)"}'");
@@ -1755,7 +1836,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         targetGroup.Tabs.Insert(Math.Clamp(targetIndex, 0, targetGroup.Tabs.Count), tab);
         targetGroup.SelectedTab = tab;
 
-        if (tab.View is TerminalTabView view)
+        if (tab.View is UIElement view)
         {
             _groupViews[source].RemoveTerminal(view);
             _groupViews[targetGroup].AddTerminal(view);
@@ -1782,7 +1863,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
         sourceHost.DetachTabForTransfer(tab);
         ViewModel.AttachTab(tab, targetGroup, targetIndex);
-        if (tab.View is TerminalTabView view)
+        if (tab.View is UIElement view)
             _groupViews[targetGroup].AddTerminal(view);
 
         FocusGroup(targetGroup);
@@ -1792,7 +1873,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     public void DetachTabForTransfer(TabViewModel tab)
     {
         var sourceGroup = ViewModel.GroupOf(tab);
-        if (tab.View is TerminalTabView view)
+        if (tab.View is UIElement view)
             _groupViews[sourceGroup].RemoveTerminal(view);
         ViewModel.DetachTab(tab);
         CollapseGroupIfEmpty(sourceGroup);
@@ -2205,6 +2286,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     /// layout, scrollback, or highlight work in every open terminal.</summary>
     private void ApplyThemeToApp(string theme)
     {
+        theme = App.ResolveTheme(theme);
         var version = ++_themeApplyVersion;
         var requestedTheme = ThemeCatalog.IsLight(theme) ? ElementTheme.Light : ElementTheme.Dark;
         if (Root.RequestedTheme == requestedTheme)

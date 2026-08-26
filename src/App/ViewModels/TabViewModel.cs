@@ -36,10 +36,35 @@ public sealed class TabViewModel : ObservableObject
     private string _appTheme;
 
     public TabViewModel(Session session)
+        : this(session, isOnboarding: false)
+    {
+    }
+
+    private TabViewModel(Session session, bool isOnboarding)
     {
         _session = session;
         _appTheme = App.Settings.Current.Theme;
+        _appTheme = App.ResolveTheme(_appTheme);
+        IsOnboarding = isOnboarding;
     }
+
+    public static TabViewModel CreateOnboarding() => new(
+        new Session
+        {
+            Id = Guid.Empty,
+            Name = "Welcome",
+            Kind = SessionKind.Local,
+            Local = new LocalTarget(),
+        },
+        isOnboarding: true)
+    {
+        State = TabConnectionState.Playback,
+    };
+
+    /// <summary>A native app page hosted in the tab strip instead of a terminal session.</summary>
+    public bool IsOnboarding { get; }
+
+    public bool CanDrag => !IsOnboarding;
 
     /// <summary>What this tab's target kind supports; drives menu naming and visibility.</summary>
     public SessionCapabilities Capabilities => SessionCapabilities.For(Session);
@@ -349,6 +374,7 @@ public sealed class TabViewModel : ObservableObject
     public void ApplyAppTheme(string theme)
     {
         _appTheme = theme;
+        _appTheme = App.ResolveTheme(_appTheme);
         NotifyTabVisuals();
     }
 
@@ -404,7 +430,7 @@ public sealed class TabViewModel : ObservableObject
         set => SetProperty(ref _connectionSummary, value);
     }
 
-    public string Header => TitleOverride ?? Session.Name;
+    public string Header => IsOnboarding ? "Welcome" : TitleOverride ?? Session.Name;
 
     // ---- second tab line (tells tabs of the same session apart) ----
 
@@ -506,6 +532,8 @@ public sealed class TabViewModel : ObservableObject
     {
         get
         {
+            if (IsOnboarding)
+                return "Setup Resesh";
             if (TerminalTitle is not { } title)
                 return RunningCommand ?? PromptContext ?? FallbackSubtitle;
             var match = PromptTitle.Match(title);
@@ -541,19 +569,23 @@ public sealed class TabViewModel : ObservableObject
 
     public Visibility IconVisibility => IconSource is null ? Visibility.Collapsed : Visibility.Visible;
 
-    public string Endpoint => IsLocal
-        ? Session.Local?.Executable ?? ""
-        : $"{Session.Username}@{Session.Host}:{Session.Port}";
+    public string Endpoint => IsOnboarding
+        ? ""
+        : IsLocal
+            ? Session.Local?.Executable ?? ""
+            : $"{Session.Username}@{Session.Host}:{Session.Port}";
 
-    public string StateText => State switch
-    {
-        TabConnectionState.Connecting => IsLocal ? "starting…" : "connecting…",
-        TabConnectionState.Connected when IsLocal => HasUnseenOutput ? "running — new output" : "running",
-        TabConnectionState.Connected => HasUnseenOutput ? "connected — new output" : "connected",
-        TabConnectionState.Playback => "recording playback",
-        TabConnectionState.Exited => ExitCode is { } code ? $"exited (code {code})" : "exited",
-        _ => IsLocal ? "failed" : "disconnected",
-    };
+    public string StateText => IsOnboarding
+        ? "setup"
+        : State switch
+        {
+            TabConnectionState.Connecting => IsLocal ? "starting…" : "connecting…",
+            TabConnectionState.Connected when IsLocal => HasUnseenOutput ? "running — new output" : "running",
+            TabConnectionState.Connected => HasUnseenOutput ? "connected — new output" : "connected",
+            TabConnectionState.Playback => "recording playback",
+            TabConnectionState.Exited => ExitCode is { } code ? $"exited (code {code})" : "exited",
+            _ => IsLocal ? "failed" : "disconnected",
+        };
 
     // ---- Pin state (browser-style: pinned tabs can't be closed without unpinning) ----
 

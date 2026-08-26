@@ -215,6 +215,7 @@
                     <TabViewItem
                         Style="{StaticResource CodeTabStyle}"
                         IsClosable="False"
+                        CanDrag="{x:Bind CanDrag}"
                         Height="44">
                         <TabViewItem.Header>
                             <!-- The tab is painted entirely here: background, focus indicators,

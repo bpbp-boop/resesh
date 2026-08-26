@@ -53,10 +53,11 @@ public sealed class TerminalPlayerView : Grid, IDisposable
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var settings = App.Settings.Current;
+        var theme = App.ResolveTheme(settings.Theme);
         _terminal.SetInitialOptions(
             settings.FontSize,
             settings.FontFamily,
-            settings.Theme,
+            theme,
             copyOnSelect: true,
             rightClickPaste: false,
             scrollback: settings.Scrollback,
@@ -72,7 +73,7 @@ public sealed class TerminalPlayerView : Grid, IDisposable
         {
             Padding = new Thickness(10, 7, 10, 7),
             ColumnSpacing = 10,
-            Background = new SolidColorBrush(ThemeVisualPalette.For(settings.Theme).InactiveTab),
+            Background = new SolidColorBrush(ThemeVisualPalette.For(theme).InactiveTab),
         };
         controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
