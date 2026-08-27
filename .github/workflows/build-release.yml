@@ -128,6 +128,10 @@ jobs:
             }
           }
 
+          if (-not (Test-Path (Join-Path $appExe.Directory.FullName "LICENSE"))) {
+            throw "Build output is missing the GPLv2 LICENSE file."
+          }
+
           $unexpectedFiles = @(
             "DirectML.dll",
             "onnxruntime.dll",

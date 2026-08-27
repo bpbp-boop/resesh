@@ -1,5 +1,6 @@
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Resesh.Core.Storage;
@@ -37,10 +38,14 @@ public enum GlobalSettingsTarget
 /// </summary>
 public static class GlobalSettingsDialog
 {
-    private const double DialogWidth = 760;
+    private const double PreferredDialogWidth = 760;
     // Tall enough that the Highlighting tab's rule form (the tallest view) fits without
     // scrolling; the host ScrollViewer only kicks in when the window itself is too short.
-    private const double TabContentHeight = 660;
+    private const double PreferredTabContentHeight = 660;
+    private const double DialogHorizontalChrome = 72;
+    private const double DialogVerticalChrome = 180;
+    private const double StackedCardThreshold = 620;
+    private const double StackedFieldThreshold = 460;
 
     public static async Task<AppSettings?> ShowAsync(
         XamlRoot xamlRoot,
@@ -49,6 +54,10 @@ public static class GlobalSettingsDialog
         Action applyHighlightChanges,
         GlobalSettingsTarget initialTarget = GlobalSettingsTarget.General)
     {
+        var (dialogWidth, tabContentHeight) = GetDialogContentSize(xamlRoot);
+        var stackCards = dialogWidth < StackedCardThreshold;
+        var stackFields = dialogWidth < StackedFieldThreshold;
+
         var theme = new ComboBox
         {
             Header = "Theme",
@@ -132,6 +141,21 @@ public static class GlobalSettingsDialog
             IsOn = current.AgentAlertSound,
         };
 
+        SetAutomationId(theme, "SettingsTheme");
+        SetAutomationId(fontFamily, "SettingsFontFamily");
+        SetAutomationId(fontSize, "SettingsFontSize");
+        SetAutomationId(scrollback, "SettingsScrollback");
+        SetAutomationId(copyOnSelect, "SettingsCopyOnSelect");
+        SetAutomationId(rightClickPaste, "SettingsRightClickPaste");
+        SetAutomationId(reopenLastLayout, "SettingsReopenLastLayout");
+        SetAutomationId(recordingDirectory, "SettingsRecordingDirectory");
+        SetAutomationId(alwaysRecord, "SettingsAlwaysRecord");
+        SetAutomationId(rewindMinutes, "SettingsRewindMinutes");
+        SetAutomationId(rewindMegabytes, "SettingsRewindMegabytes");
+        SetAutomationId(agentIcons, "SettingsShowAgentIcons");
+        SetAutomationId(agentFlash, "SettingsAgentAlertFlash");
+        SetAutomationId(agentSound, "SettingsAgentAlertSound");
+
         void SyncAgentAlertControls()
         {
             agentFlash.IsEnabled = agentIcons.IsOn;
@@ -143,24 +167,14 @@ public static class GlobalSettingsDialog
         // ---- General ----
 
         var numberGrid = new Grid { ColumnSpacing = 12 };
-        numberGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        numberGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        Grid.SetColumn(fontSize, 0);
-        Grid.SetColumn(scrollback, 1);
-        numberGrid.Children.Add(fontSize);
-        numberGrid.Children.Add(scrollback);
+        ConfigureResponsiveColumns(numberGrid, stackFields, fontSize, scrollback);
 
         var generalColumns = new Grid { ColumnSpacing = 16 };
-        generalColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        generalColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         var appearanceCard = SectionCard("Appearance", "Set the default look for every terminal.", theme, fontFamily, numberGrid);
         var interactionCard = SectionCard("Terminal interaction", null, copyOnSelect, rightClickPaste);
         appearanceCard.VerticalAlignment = VerticalAlignment.Top;
         interactionCard.VerticalAlignment = VerticalAlignment.Top;
-        Grid.SetColumn(appearanceCard, 0);
-        Grid.SetColumn(interactionCard, 1);
-        generalColumns.Children.Add(appearanceCard);
-        generalColumns.Children.Add(interactionCard);
+        ConfigureResponsiveColumns(generalColumns, stackCards, appearanceCard, interactionCard);
 
         var generalTab = new StackPanel
         {
@@ -179,12 +193,7 @@ public static class GlobalSettingsDialog
         // ---- Recording ----
 
         var rewindGrid = new Grid { ColumnSpacing = 12 };
-        rewindGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        rewindGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        Grid.SetColumn(rewindMinutes, 0);
-        Grid.SetColumn(rewindMegabytes, 1);
-        rewindGrid.Children.Add(rewindMinutes);
-        rewindGrid.Children.Add(rewindMegabytes);
+        ConfigureResponsiveColumns(rewindGrid, stackFields, rewindMinutes, rewindMegabytes);
 
         var recordingTab = new StackPanel
         {
@@ -208,7 +217,7 @@ public static class GlobalSettingsDialog
 
         // Fixed-height grid (not a stack): the editor's rules list takes the star row so it
         // expands to fill the tab, keeping the preview section pinned above the caption.
-        var highlightingTab = new Grid { Height = TabContentHeight, RowSpacing = 12 };
+        var highlightingTab = new Grid { Height = PreferredTabContentHeight, RowSpacing = 12 };
         highlightingTab.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         highlightingTab.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         highlightingTab.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -225,8 +234,6 @@ public static class GlobalSettingsDialog
         // ---- Agents ----
 
         var agentColumns = new Grid { ColumnSpacing = 16 };
-        agentColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        agentColumns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         var tabStatusCard = SectionCard(
             "Tab display",
@@ -239,10 +246,7 @@ public static class GlobalSettingsDialog
             agentSound);
         tabStatusCard.VerticalAlignment = VerticalAlignment.Stretch;
         alertCard.VerticalAlignment = VerticalAlignment.Stretch;
-        Grid.SetColumn(tabStatusCard, 0);
-        Grid.SetColumn(alertCard, 1);
-        agentColumns.Children.Add(tabStatusCard);
-        agentColumns.Children.Add(alertCard);
+        ConfigureResponsiveColumns(agentColumns, stackCards, tabStatusCard, alertCard);
 
         var agentsTab = new StackPanel
         {
@@ -294,8 +298,8 @@ public static class GlobalSettingsDialog
         var tabPanels = new UIElement[] { generalTab, recordingTab, highlightingTab, agentsTab };
         var host = new ScrollViewer
         {
-            Width = DialogWidth,
-            Height = TabContentHeight,
+            Width = dialogWidth,
+            Height = tabContentHeight,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
@@ -308,6 +312,11 @@ public static class GlobalSettingsDialog
             new SelectorBarItem { Text = "Highlighting" },
             new SelectorBarItem { Text = "Agents" },
         };
+        SetAutomationId(bar, "SettingsSectionSelector");
+        SetAutomationId(barItems[0], "SettingsGeneralTab");
+        SetAutomationId(barItems[1], "SettingsRecordingTab");
+        SetAutomationId(barItems[2], "SettingsHighlightingTab");
+        SetAutomationId(barItems[3], "SettingsAgentsTab");
         foreach (var item in barItems)
             bar.Items.Add(item);
 
@@ -337,13 +346,55 @@ public static class GlobalSettingsDialog
             PrimaryButtonText = "Save",
             CloseButtonText = "Cancel",
             XamlRoot = xamlRoot,
+            Background = (Brush)Application.Current.Resources["SessionShellBrush"],
+            BorderBrush = (Brush)Application.Current.Resources["SettingsCardBorderBrush"],
+            Foreground = (Brush)Application.Current.Resources["SessionTreeForegroundBrush"],
         };
+        SetAutomationId(dialog, "GlobalSettingsDialog");
         dialog.Opened += (_, _) =>
             initialFocus?.DispatcherQueue.TryEnqueue(() => initialFocus.Focus(FocusState.Programmatic));
-        dialog.Resources["ContentDialogMaxWidth"] = DialogWidth + 48;
-        dialog.Resources["ContentDialogMaxHeight"] = 960d;
+        void UpdateDialogLayout()
+        {
+            (dialogWidth, tabContentHeight) = GetDialogContentSize(xamlRoot);
+            var shouldStackCards = dialogWidth < StackedCardThreshold;
+            var shouldStackFields = dialogWidth < StackedFieldThreshold;
+            if (shouldStackCards != stackCards)
+            {
+                stackCards = shouldStackCards;
+                ConfigureResponsiveColumns(generalColumns, stackCards, appearanceCard, interactionCard);
+                ConfigureResponsiveColumns(agentColumns, stackCards, tabStatusCard, alertCard);
+            }
+            if (shouldStackFields != stackFields)
+            {
+                stackFields = shouldStackFields;
+                ConfigureResponsiveColumns(numberGrid, stackFields, fontSize, scrollback);
+                ConfigureResponsiveColumns(rewindGrid, stackFields, rewindMinutes, rewindMegabytes);
+            }
+            host.Width = dialogWidth;
+            host.Height = tabContentHeight;
+            dialog.Resources["ContentDialogMaxWidth"] = Math.Min(
+                PreferredDialogWidth + 48,
+                Math.Max(280, xamlRoot.Size.Width - 24));
+            dialog.Resources["ContentDialogMaxHeight"] = Math.Min(
+                960d,
+                Math.Max(280, xamlRoot.Size.Height - 24));
+        }
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        void XamlRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => UpdateDialogLayout();
+        UpdateDialogLayout();
+        xamlRoot.Changed += XamlRootChanged;
+
+        ContentDialogResult result;
+        try
+        {
+            result = await dialog.ShowAsync();
+        }
+        finally
+        {
+            xamlRoot.Changed -= XamlRootChanged;
+        }
+
+        if (result != ContentDialogResult.Primary)
         {
             applyThemePreview(current.Theme);
             return null;
@@ -392,6 +443,46 @@ public static class GlobalSettingsDialog
         MaxWidth = 300,
     };
 
+    private static void SetAutomationId(DependencyObject element, string automationId) =>
+        AutomationProperties.SetAutomationId(element, automationId);
+
+    private static (double Width, double Height) GetDialogContentSize(XamlRoot xamlRoot) =>
+        (Math.Min(PreferredDialogWidth, Math.Max(240, xamlRoot.Size.Width - DialogHorizontalChrome)),
+         Math.Min(PreferredTabContentHeight, Math.Max(180, xamlRoot.Size.Height - DialogVerticalChrome)));
+
+    private static void ConfigureResponsiveColumns(Grid grid, bool stacked, params FrameworkElement[] children)
+    {
+        var spacing = Math.Max(grid.ColumnSpacing, grid.RowSpacing);
+        grid.ColumnDefinitions.Clear();
+        grid.RowDefinitions.Clear();
+        grid.Children.Clear();
+
+        if (stacked)
+        {
+            grid.ColumnSpacing = 0;
+            grid.RowSpacing = spacing;
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            for (var index = 0; index < children.Length; index++)
+            {
+                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                Grid.SetRow(children[index], index);
+                Grid.SetColumn(children[index], 0);
+                grid.Children.Add(children[index]);
+            }
+            return;
+        }
+
+        grid.ColumnSpacing = spacing;
+        grid.RowSpacing = 0;
+        for (var index = 0; index < children.Length; index++)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            Grid.SetRow(children[index], 0);
+            Grid.SetColumn(children[index], index);
+            grid.Children.Add(children[index]);
+        }
+    }
+
     private static Border SectionCard(string title, string? description, params UIElement[] controls)
     {
         var panel = new StackPanel { Spacing = 12 };
@@ -418,8 +509,8 @@ public static class GlobalSettingsDialog
             Padding = new Thickness(16),
             CornerRadius = new CornerRadius(8),
             BorderThickness = new Thickness(1),
-            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(48, 128, 128, 128)),
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(18, 128, 128, 128)),
+            BorderBrush = (Brush)Application.Current.Resources["SettingsCardBorderBrush"],
+            Background = (Brush)Application.Current.Resources["SettingsCardBackgroundBrush"],
             Child = panel,
         };
     }

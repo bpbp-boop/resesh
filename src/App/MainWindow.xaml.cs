@@ -47,6 +47,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private FrameworkElement? _animatedSessionsPane;
     private int _sessionsPaneAnimationVersion;
     private readonly UISettings _uiSettings = new();
+    private bool _isHighContrast = App.IsHighContrast;
 
     public MainWindow()
     {
@@ -104,9 +105,15 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void SystemColorsChanged(UISettings sender, object args)
     {
-        if (!string.Equals(App.Settings.Current.Theme, "system", StringComparison.OrdinalIgnoreCase))
-            return;
-        DispatcherQueue.TryEnqueue(() => ApplyThemeToApp("system"));
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            var theme = App.Settings.Current.Theme;
+            var isHighContrast = App.IsHighContrast;
+            var highContrastChanged = isHighContrast != _isHighContrast;
+            _isHighContrast = isHighContrast;
+            if (highContrastChanged || string.Equals(theme, "system", StringComparison.OrdinalIgnoreCase))
+                ApplyThemeToApp(theme);
+        });
     }
 
     private void RestoreWindowPlacement()
@@ -591,6 +598,19 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (!Microsoft.UI.Windowing.AppWindowTitleBar.IsCustomizationSupported())
             return;
         var tb = AppWindow.TitleBar;
+        var palette = ThemeVisualPalette.For(theme);
+        if (palette.IsHighContrast)
+        {
+            tb.ButtonBackgroundColor = palette.Shell;
+            tb.ButtonInactiveBackgroundColor = palette.Shell;
+            tb.ButtonForegroundColor = palette.TreeForeground;
+            tb.ButtonInactiveForegroundColor = palette.TreeForeground;
+            tb.ButtonHoverBackgroundColor = palette.TreeSelection;
+            tb.ButtonHoverForegroundColor = palette.TreeSelectionForeground;
+            tb.ButtonPressedBackgroundColor = palette.TreeSelection;
+            tb.ButtonPressedForegroundColor = palette.TreeSelectionForeground;
+            return;
+        }
         var dark = !ThemeCatalog.IsLight(theme);
         var fg = dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
         tb.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
@@ -2316,9 +2336,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionShellBrush"]).Color = palette.Shell;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionInputBrush"]).Color = palette.Input;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionChromeFrameBrush"]).Color = palette.Frame;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Root.Resources["SessionTreeForegroundBrush"]).Color = palette.TreeForeground;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Root.Resources["SessionTreeMutedForegroundBrush"]).Color = palette.TreeMutedForeground;
-        TreeNodeViewModel.ApplySelectionTheme(palette.TreeSelection);
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeForegroundBrush"]).Color = palette.TreeForeground;
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeMutedForegroundBrush"]).Color = palette.TreeMutedForeground;
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeSelectionBrush"]).Color = palette.TreeSelection;
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeSelectionForegroundBrush"]).Color = palette.TreeSelectionForeground;
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SettingsCardBorderBrush"]).Color = palette.Frame;
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SettingsCardBackgroundBrush"]).Color = palette.Input;
         foreach (var (splitter, line) in _splitterLines)
             line.Background = SplitterBrush(_activeSplitters.Contains(splitter));
         foreach (var groupView in _groupViews.Values)

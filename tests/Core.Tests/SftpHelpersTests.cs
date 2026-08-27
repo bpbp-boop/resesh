@@ -67,6 +67,48 @@ public sealed class RemotePathTests
     }
 }
 
+public sealed class WindowsDownloadPathTests
+{
+    [Fact]
+    public void Combine_accepts_a_normal_remote_leaf_name()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "resesh-download-test");
+
+        var result = WindowsDownloadPath.Combine(root, root, "report.txt");
+
+        Assert.Equal(Path.GetFullPath(Path.Combine(root, "report.txt")), result);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(".")]
+    [InlineData("..")]
+    [InlineData("..\\outside.txt")]
+    [InlineData("folder\\file.txt")]
+    [InlineData("C:\\outside.txt")]
+    [InlineData("\\\\server\\share.txt")]
+    [InlineData("bad:name.txt")]
+    [InlineData("CON")]
+    [InlineData("con.log")]
+    [InlineData("CON .txt")]
+    [InlineData("COM1.log")]
+    [InlineData("LPT9")]
+    [InlineData("file.")]
+    [InlineData("file ")]
+    public void ValidateName_rejects_names_that_are_unsafe_on_Windows(string name) =>
+        Assert.Throws<InvalidDataException>(() => WindowsDownloadPath.ValidateName(name));
+
+    [Fact]
+    public void Combine_rejects_a_parent_outside_the_download_root()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "resesh-download-test", "root");
+        var outside = Path.Combine(root, "..", "outside");
+
+        Assert.Throws<InvalidDataException>(() =>
+            WindowsDownloadPath.Combine(root, outside, "report.txt"));
+    }
+}
+
 public sealed class UnixPermissionsTests
 {
     [Theory]

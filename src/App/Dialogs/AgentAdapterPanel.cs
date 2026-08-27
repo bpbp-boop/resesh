@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Resesh.Core.Agents;
@@ -32,8 +33,9 @@ public static class AgentAdapterPanel
             Margin = new Thickness(0, 4, 0, 0),
         });
 
+        var index = 0;
         foreach (var snippet in AgentAdapters.All)
-            panel.Children.Add(SnippetExpander(snippet));
+            panel.Children.Add(SnippetExpander(snippet, index++));
 
         panel.Children.Add(ProtocolReference());
         return panel;
@@ -42,7 +44,7 @@ public static class AgentAdapterPanel
     /// <summary>One adapter as a compact card. Its destination stays visible, while the
     /// explanation and code stay behind the chevron. Copy remains available without
     /// expanding the card.</summary>
-    private static UIElement SnippetExpander(AgentAdapterSnippet snippet)
+    private static UIElement SnippetExpander(AgentAdapterSnippet snippet, int index)
     {
         var header = new StackPanel
         {
@@ -96,6 +98,8 @@ public static class AgentAdapterPanel
             VerticalAlignment = VerticalAlignment.Top,
             Margin = new Thickness(0, 10, 42, 0),
         };
+        AutomationProperties.SetAutomationId(expander, $"SettingsAgentAdapter_{index}");
+        AutomationProperties.SetAutomationId(copy, $"SettingsAgentAdapterCopy_{index}");
         copy.Click += (_, _) =>
         {
             var package = new Windows.ApplicationModel.DataTransfer.DataPackage();
@@ -134,6 +138,7 @@ public static class AgentAdapterPanel
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Content = CodeBlock(AgentAdapters.SequenceReference, wrap: true),
         };
+        AutomationProperties.SetAutomationId(expander, "SettingsAgentProtocolReference");
         return RowCard(expander);
     }
 

@@ -19,6 +19,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Content Include="..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\workspaces.svg" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\SessionIcons\*.svg" CopyToOutputDirectory="PreserveNewest" />

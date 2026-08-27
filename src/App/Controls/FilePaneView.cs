@@ -733,12 +733,17 @@ public sealed class FilePaneView : UserControl, IDisposable
             {
                 foreach (var entry in entries)
                 {
+                    var safeName = WindowsDownloadPath.ValidateName(entry.Name);
                     var localName = RemotePath.UniqueName(
-                        entry.Name,
-                        name => File.Exists(Path.Combine(targetDir, name)) || Directory.Exists(Path.Combine(targetDir, name)));
-                    var localPath = Path.Combine(targetDir, localName);
+                        safeName,
+                        name =>
+                        {
+                            var candidate = WindowsDownloadPath.Combine(targetDir, targetDir, name);
+                            return File.Exists(candidate) || Directory.Exists(candidate);
+                        });
+                    var localPath = WindowsDownloadPath.Combine(targetDir, targetDir, localName);
                     if (entry.IsDirectory && !entry.IsSymlink)
-                        PlanRemoteDirectory(sftp, entry.FullPath, localPath, files, token);
+                        PlanRemoteDirectory(sftp, entry.FullPath, localPath, targetDir, files, token);
                     else
                         files.Add((entry, localPath));
                     if (openAfter)
@@ -766,17 +771,18 @@ public sealed class FilePaneView : UserControl, IDisposable
     }
 
     private static void PlanRemoteDirectory(
-        SftpSession sftp, string remoteDir, string localDir,
+        SftpSession sftp, string remoteDir, string localDir, string targetRoot,
         List<(RemoteFileEntry, string)> files, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
         Directory.CreateDirectory(localDir);
         foreach (var child in sftp.ListDirectory(remoteDir))
         {
+            var childLocalPath = WindowsDownloadPath.Combine(targetRoot, localDir, child.Name);
             if (child.IsDirectory && !child.IsSymlink)
-                PlanRemoteDirectory(sftp, child.FullPath, Path.Combine(localDir, child.Name), files, token);
+                PlanRemoteDirectory(sftp, child.FullPath, childLocalPath, targetRoot, files, token);
             else
-                files.Add((child, Path.Combine(localDir, child.Name)));
+                files.Add((child, childLocalPath));
         }
     }
 

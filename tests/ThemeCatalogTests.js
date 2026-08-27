@@ -43,7 +43,7 @@ test("global and per-session theme pickers use the shared catalog", () => {
 
 test("global theme selection previews immediately and cancel restores saved theme", () => {
   assert.match(globalDialog, /theme\.SelectionChanged \+= \(_, _\) => applyThemePreview\(PreviewTheme\(\)\)/);
-  assert.match(globalDialog, /if \(await dialog\.ShowAsync\(\) != ContentDialogResult\.Primary\)[\s\S]*?applyThemePreview\(current\.Theme\)/);
+  assert.match(globalDialog, /result = await dialog\.ShowAsync\(\);[\s\S]*?if \(result != ContentDialogResult\.Primary\)[\s\S]*?applyThemePreview\(current\.Theme\)/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)/);
 });
 
@@ -122,13 +122,29 @@ test("each theme gives the session tree its terminal foreground and selection co
 });
 
 test("live theme changes recolor session-tree labels, details, icons, and selection", () => {
-  assert.match(mainWindowXaml, /x:Key="SessionTreeForegroundBrush"/);
-  assert.match(mainWindowXaml, /x:Key="SessionTreeMutedForegroundBrush"/);
+  // App scope, so the Welcome tab shares the same mutable brush instances.
+  assert.match(appXaml, /x:Key="SessionTreeForegroundBrush"/);
+  assert.match(appXaml, /x:Key="SessionTreeMutedForegroundBrush"/);
   assert.match(mainWindowXaml, /x:Name="SessionTree"[\s\S]*?Foreground="\{StaticResource SessionTreeForegroundBrush\}"/);
-  assert.match(mainWindowXaml, /Text="\{x:Bind HostSummary, Mode=OneWay\}"[\s\S]*?Foreground="\{StaticResource SessionTreeMutedForegroundBrush\}"/);
+  assert.match(mainWindowXaml, /Text="\{x:Bind HostSummary, Mode=OneWay\}"[\s\S]*?PresentationValues\.TreeMutedForeground\(IsSelected\)/);
   assert.match(mainWindow, /SessionTreeForegroundBrush"\]\)\.Color = palette\.TreeForeground/);
   assert.match(mainWindow, /SessionTreeMutedForegroundBrush"\]\)\.Color = palette\.TreeMutedForeground/);
-  assert.match(mainWindow, /TreeNodeViewModel\.ApplySelectionTheme\(palette\.TreeSelection\)/);
+  assert.match(mainWindow, /SessionTreeSelectionBrush"\]\)\.Color = palette\.TreeSelection/);
+  assert.match(mainWindow, /SessionTreeSelectionForegroundBrush"\]\)\.Color = palette\.TreeSelectionForeground/);
+});
+
+test("High Contrast uses Windows system colors across custom chrome", () => {
+  assert.match(appXaml, /x:Key="HighContrast"/);
+  assert.match(appXaml, /SystemColorWindowColor/);
+  assert.match(appXaml, /SystemColorWindowTextColor/);
+  assert.match(appXaml, /SystemColorHighlightColor/);
+  assert.match(tabGroupXaml, /x:Key="HighContrast"[\s\S]*?SystemColorHighlightTextColor/);
+  assert.match(visualPalette, /if \(App\.IsHighContrast\)/);
+  assert.match(visualPalette, /SystemColorHighlightTextColor/);
+  assert.doesNotMatch(mainWindow, /HighContrastChanged \+=/);
+  assert.match(mainWindow, /var highContrastChanged = isHighContrast != _isHighContrast/);
+  assert.match(mainWindow, /highContrastChanged \|\| string\.Equals\(theme, "system"/);
+  assert.match(mainWindow, /ButtonHoverForegroundColor = palette\.TreeSelectionForeground/);
 });
 
 test("new split groups start with the live app palette", () => {

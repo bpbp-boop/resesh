@@ -3,333 +3,303 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Resesh — Rethinking the session and connection manager</title>
+<title>resesh — three hundred hosts, one window.</title>
 <link rel="canonical" href="https://resesh.net/">
-<meta name="description" content="Resesh is a fast SSH and local terminal client for Windows with tabs, split views, session recording, instant rewind, and asciicast playback.">
+<meta name="description" content="resesh is a session and connection manager for windows. every server in one tree, open in tabs, split, saved workspaces, and a recording of what you typed.">
 <link rel="icon" href="assets/favicon.ico">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<script>
+  /* Applied before first paint so a stored light choice never flashes dark. */
+  (function () {
+    try {
+      var t = localStorage.getItem("resesh-theme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
+<script src="theme.js" defer></script>
+<script src="downloads.js" defer></script>
 </head>
 <body>
 
-<nav>
-  <div class="nav-inner">
-    <a class="brand" href="#home"><img src="assets/favicon-32.png" alt="">Resesh</a>
-    <div class="nav-links">
-      <a href="#home">Home</a>
-      <a href="#features">Features</a>
-      <a href="#faq">FAQ</a>
-      <a href="#downloads">Downloads</a>
+<div class="grid-bg"></div>
+
+<header class="site-header">
+  <a class="logo" href="#top">
+    <span class="logo__tile">./</span>
+    <span class="logo__word">resesh</span>
+  </a>
+  <nav class="nav">
+    <a class="nav__link" href="features.html">features</a>
+    <a class="nav__link" href="#faq">faq</a>
+    <a class="nav__link" href="https://github.com/bpbp-boop/resesh">github</a>
+    <button class="theme-toggle" type="button" data-theme-toggle>light</button>
+    <a class="btn-fill btn-fill--sm" href="#downloads">download</a>
+  </nav>
+</header>
+
+<section class="hero" id="top">
+  <div class="hero__copy">
+    <div class="pill">
+      <span class="dot"></span>
+      <span><span data-release-version>v0.7.0</span> beta &nbsp;·&nbsp; windows 10 21h2+ &nbsp;·&nbsp; x64 + arm64</span>
+    </div>
+
+    <h1 class="hero__title">three hundred hosts,<br>one window.</h1>
+
+    <p class="hero__lede">a session and connection manager for windows. every server in one tree, open in tabs, split, saved workspaces, however you need — and a recording of what you typed when someone asks tomorrow.</p>
+
+    <div class="btn-row">
+      <a class="btn-fill" href="#downloads"><span class="btn-prompt">$</span> ./resesh --install</a>
+      <a class="btn-outline" href="#features">see the features →</a>
+    </div>
+
+    <div class="trust-row">
+      <span>free &amp; open source</span>
+      <span>no cloud, no account</span>
+      <span>imports sessions from securecrt, putty and openssh</span>
     </div>
   </div>
-</nav>
 
-<!-- ================= HOME ================= -->
-<section id="home">
-  <div class="wrap">
-    <h1>Resesh</h1>
-    <p class="lead">Rethinking the session and connection manager</p>
-    <p class="sub">Keep all your servers in one tree. Open them in tabs. Do your work in one window.</p>
-    <div class="cta">
-      <a class="btn btn-primary" href="#downloads">Download</a>
-      <a class="btn btn-ghost" href="#features">See the features</a>
+  <div class="hero__media">
+    <div class="frame frame--shadow">
+      <div class="frame__bar">
+        <span class="frame__lights">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+        <span>resesh — splits · 2 groups, 4 tabs</span>
+      </div>
+      <div class="placeholder">
+        <div class="placeholder__inner">
+          <span class="placeholder__tag">[ IMAGE ]</span>
+          <span class="placeholder__desc">hero.png — main window: session tree left, two live terminals side by side</span>
+          <span class="placeholder__hint">drop the real screenshot here · 2560×1440</span>
+        </div>
+      </div>
     </div>
-    <button class="shot-btn" popovertarget="lb-1"><img class="shot" fetchpriority="high" src="assets/hero.png" alt="The Resesh main window. The session tree is on the left. Two terminals are open side by side."></button>
-<div id="lb-1" class="lightbox" popover><button popovertarget="lb-1" popovertargetaction="hide"><img loading="lazy" src="assets/hero.png" alt="The Resesh main window. The session tree is on the left. Two terminals are open side by side."></button></div>
-    <p class="shot-caption">Split view with two live connections. The tree, quick connect, and tabs stay in one window.</p>
+    <div class="frame__caption">split view, two live connections</div>
   </div>
 </section>
 
-<!-- ================= FEATURES ================= -->
-<section id="features" class="section-pad">
-  <div class="wrap">
-    <p class="kicker">Features</p>
-    <h2>Made for daily work on many hosts</h2>
-
-    <div class="feature">
-      <div class="feature-text">
-        <h3>One tree for all your servers</h3>
-        <p>Put your sessions in folders. Give each one an icon and a color.</p>
-        <p>Type in the filter box to find a session. Press <kbd>Enter</kbd> to connect.</p>
-        <p>Quick connect is always at the top. Press <kbd>Ctrl+Shift+K</kbd> and type a name, or <span style="font-family:'Cascadia Mono',Consolas,monospace">user@host</span>.</p>
+<section class="section section--alt" id="features">
+  <div class="container container--gutter">
+    <div class="summary">
+      <div class="summary__cell">
+        <span class="summary__index">01</span>
+        <h3 class="summary__title">one tree, every host</h3>
+        <p class="summary__body">folders, icons, colors. type in the filter box, press <span class="key">enter</span>, you're on the box.</p>
       </div>
-      <div class="feature-media">
-        <button class="shot-btn" popovertarget="lb-2"><img class="shot" loading="lazy" src="assets/search.png" alt="The session tree, filtered by the text db. Three sessions match." style="max-width:340px"></button>
-<div id="lb-2" class="lightbox" popover><button popovertarget="lb-2" popovertargetaction="hide"><img loading="lazy" src="assets/search.png" alt="The session tree, filtered by the text db. Three sessions match."></button></div>
+      <div class="summary__cell">
+        <span class="summary__index">02</span>
+        <h3 class="summary__title">tabs, splits, and state</h3>
+        <p class="summary__body">green dot connected, blue dot output you haven't read. as many panes as the change window needs.</p>
+      </div>
+      <div class="summary__cell">
+        <span class="summary__index">03</span>
+        <h3 class="summary__title">record, rewind, replay</h3>
+        <p class="summary__body">rewind a live terminal on the spot. every recording writes an asciicast plus a timestamped log.</p>
+      </div>
+    </div>
+    <div class="scrollcue">
+      <span class="scrollcue__prompt">$</span>
+      <span>scroll for the full feature tour</span>
+      <span class="cursor"></span>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="tour">
+  <div class="container tour">
+
+    <div class="beat">
+      <div class="beat__copy">
+        <span class="eyebrow">01 / sessions</span>
+        <h2 class="beat__title">every host catalogued</h2>
+        <p class="beat__body">nest folders as deep as your estate goes. tag a group red and every tab from it carries the color, so you know which window is prod before you paste. duplicate a session, change one field, done.</p>
+        <ul class="bullets">
+          <li><span class="bullets__mark">·</span> ssh, telnet, serial, rdp and local shells in one list</li>
+          <li><span class="bullets__mark">·</span> credentials stored per host or inherited from the folder</li>
+          <li><span class="bullets__mark">·</span> jump hosts and port forwards saved with the session</li>
+        </ul>
+      </div>
+      <div class="frame">
+        <div class="frame__bar">sessions.png — session tree with folder colors</div>
+        <div class="placeholder placeholder--4x3">
+          <div class="placeholder__inner">
+            <span class="placeholder__tag">[ IMAGE ]</span>
+            <span class="placeholder__desc">drop screenshot here</span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="feature flip">
-      <div class="feature-text">
-        <h3>Tabs and split view</h3>
-        <p>Open many sessions in tabs. Each tab shows its state — a green dot for connected, a blue dot for output you have not seen yet.</p>
-        <p>Split tabs side-by-side or vertically. Add three, four, or as many splits as you need.</p>
-        <p>Five controls stay with every tab group: record, instant rewind, command history, the terminal's current folder, and the file pane.</p>
+    <div class="beat">
+      <div class="frame">
+        <div class="frame__bar">workspace.png — four panes, mixed protocols</div>
+        <div class="placeholder placeholder--4x3">
+          <div class="placeholder__inner">
+            <span class="placeholder__tag">[ IMAGE ]</span>
+            <span class="placeholder__desc">drop screenshot here</span>
+          </div>
+        </div>
       </div>
-      <div class="feature-media">
-        <button class="shot-btn" popovertarget="lb-3"><img class="shot" loading="lazy" src="assets/tabs.png" alt="The Resesh window in split view. Three tabs on the left show two web servers and a switch. The right pane shows a database server."></button>
-<div id="lb-3" class="lightbox" popover><button popovertarget="lb-3" popovertargetaction="hide"><img loading="lazy" src="assets/tabs.png" alt="The Resesh window in split view. Three tabs on the left show two web servers and a switch. The right pane shows a database server."></button></div>
-      </div>
-    </div>
-
-    <div class="feature">
-      <div class="feature-text">
-        <h3>Every action from the keyboard</h3>
-        <p>Press <kbd>Ctrl+Shift+P</kbd> to open the command palette. Search app actions, tab actions, global settings, and settings for the current saved session.</p>
-        <p>Type a few words, then use <kbd>Up</kbd>, <kbd>Down</kbd>, and <kbd>Enter</kbd>. The palette opens each setting at the correct control.</p>
-      </div>
-      <div class="feature-media">
-        <button class="shot-btn" popovertarget="lb-13"><img class="shot" loading="lazy" src="assets/command-palette.png" alt="The Resesh command palette open above a terminal. The sample session tree remains visible on the left."></button>
-<div id="lb-13" class="lightbox" popover><button popovertarget="lb-13" popovertargetaction="hide"><img loading="lazy" src="assets/command-palette.png" alt="The Resesh command palette open above a terminal. The sample session tree remains visible on the left."></button></div>
+      <div class="beat__copy">
+        <span class="eyebrow">02 / workspaces</span>
+        <h2 class="beat__title">save your workspaces</h2>
+        <p class="beat__body">save a layout — the tabs, the split ratios, which pane sits where — and reopen it tomorrow morning exactly as you left it. one workspace per maintenance window, per customer, per rack.</p>
+        <div class="keycaps">
+          <span class="keycap">ctrl</span>
+          <span class="keycap">shift</span>
+          <span class="keycap">w</span>
+          <span class="keycaps__note">reopen last workspace</span>
+        </div>
       </div>
     </div>
 
-    <div class="feature flip">
-      <div class="feature-text">
-        <h3>Keyword highlighting</h3>
-        <p>Interface names, IP addresses, and up or down states get their own colors.</p>
-        <p>The built-in rules know network output. You can add your own rules with a regular expression.</p>
+    <div class="beat">
+      <div class="beat__copy">
+        <span class="eyebrow">03 / recordings</span>
+        <h2 class="beat__title">every session, on the record</h2>
+        <p class="beat__body">recording is on by default. scrub backwards through a live terminal without disconnecting, export an asciicast for the change ticket, or grep the plain-text log six months later when the post-mortem asks who ran what.</p>
+        <div class="termblock">
+          <span><span class="termblock__prompt">$</span> ls ~/resesh/recordings/</span>
+          <span class="termblock__out">core-sw-01_2026-08-27_0914.cast&nbsp;&nbsp;&nbsp;core-sw-01_2026-08-27_0914.log</span>
+          <span class="termblock__out">edge-fw-04_2026-08-26_2231.cast&nbsp;&nbsp;&nbsp;edge-fw-04_2026-08-26_2231.log</span>
+        </div>
       </div>
-      <div class="feature-media">
-        <button class="shot-btn" popovertarget="lb-4"><img class="shot" loading="lazy" src="assets/highlight.png" alt="A terminal with Cisco switch output. Interface names, IP addresses, and states show in different colors."></button>
-<div id="lb-4" class="lightbox" popover><button popovertarget="lb-4" popovertargetaction="hide"><img loading="lazy" src="assets/highlight.png" alt="A terminal with Cisco switch output. Interface names, IP addresses, and states show in different colors."></button></div>
-      </div>
-    </div>
-
-    <div class="feature">
-      <div class="feature-text">
-        <h3>A scrollbar that knows your output</h3>
-        <p>The scrollbar shows a mark for each command, error, and search match. Click a mark to go to that line.</p>
-        <p>A red mark shows a command that failed. Press <kbd>Ctrl+Shift+F</kbd> to search the output.</p>
-      </div>
-      <div class="feature-media">
-        <button class="shot-btn" popovertarget="lb-5"><img class="shot" loading="lazy" src="assets/ruler.png" alt="The find bar with the search text down, and the scrollbar with colored marks."></button>
-<div id="lb-5" class="lightbox" popover><button popovertarget="lb-5" popovertargetaction="hide"><img loading="lazy" src="assets/ruler.png" alt="The find bar with the search text down, and the scrollbar with colored marks."></button></div>
+      <div class="frame">
+        <div class="frame__bar">rewind.png — scrubber over a live terminal</div>
+        <div class="placeholder placeholder--4x3">
+          <div class="placeholder__inner">
+            <span class="placeholder__tag">[ IMAGE ]</span>
+            <span class="placeholder__desc">drop screenshot here</span>
+          </div>
+        </div>
       </div>
     </div>
 
-    <div class="feature flip">
-      <div class="feature-text">
-        <h3>Every command in one list</h3>
-        <p>The commands panel lists each command from the session, with a green dot for success and a red dot for a failure.</p>
-        <p>Click a command to jump to its output. Copy the full output of any command with one click — also from the scrollbar tooltip.</p>
-        <p>Works with shell integration on the host, or without it: press <kbd>Enter</kbd> and Resesh finds the command itself.</p>
-      </div>
-      <div class="feature-media">
-        <button class="shot-btn" popovertarget="lb-6"><img class="shot" loading="lazy" src="assets/commands.png" alt="A session on a database server. The commands panel on the right lists nine commands. Two have a red dot."></button>
-<div id="lb-6" class="lightbox" popover><button popovertarget="lb-6" popovertargetaction="hide"><img loading="lazy" src="assets/commands.png" alt="A session on a database server. The commands panel on the right lists nine commands. Two have a red dot."></button></div>
-      </div>
+    <div class="tour__more">
+      <a href="features.html"><span class="btn-prompt">$</span> see all features →</a>
     </div>
+  </div>
+</section>
 
-    <div class="feature">
-      <div class="feature-text">
-        <h3>Agent-aware tabs</h3>
-        <p>Run Codex, Claude Code or another AI agent in a tab. The tab shows the agent and its state.</p>
-        <p>A badge tells you when the agent waits for you.</p>
-      </div>
-      <div class="feature-media">
-        <button class="shot-btn" popovertarget="lb-7"><img class="shot" loading="lazy" src="assets/agents.png" alt="The tab strip. Two tabs show the Claude icon with a state badge."></button>
-<div id="lb-7" class="lightbox" popover><button popovertarget="lb-7" popovertargetaction="hide"><img loading="lazy" src="assets/agents.png" alt="The tab strip. Two tabs show the Claude icon with a state badge."></button></div>
-      </div>
+<section class="section section--alt" id="switch">
+  <div class="container stack">
+    <div class="head-block">
+      <span class="eyebrow">04 / migration</span>
+      <h2 class="h2-md">bring your sessions with you</h2>
+      <p class="lede">point resesh at your existing config and it reads the hosts, folders and options it recognises. nothing is uploaded anywhere.</p>
     </div>
-
-    <div class="feature flip">
-      <div class="feature-text">
-        <h3>Remote files next to the terminal</h3>
-        <p>The file pane shows the files on the host over SFTP. Upload and download with drag and drop, or with the toolbar.</p>
-        <p>One click opens the pane at the folder your terminal is in.</p>
-        <p>With <a href="https://github.com/winfsp/sshfs-win">SSHFS-Win</a> installed, one more click mounts the same folder in Explorer.</p>
-      </div>
-      <div class="feature-media">
-        <button class="shot-btn" popovertarget="lb-8"><img class="shot" loading="lazy" src="assets/file-pane.png" alt="A session on a web server. The file pane on the right lists the folders and files in /srv/app."></button>
-<div id="lb-8" class="lightbox" popover><button popovertarget="lb-8" popovertargetaction="hide"><img loading="lazy" src="assets/file-pane.png" alt="A session on a web server. The file pane on the right lists the folders and files in /srv/app."></button></div>
-      </div>
-    </div>
-
-    <div class="feature">
-      <div class="feature-text">
-        <h3>Your rules, your colors</h3>
-        <p>Turn each highlight rule on or off. Change a built-in rule, or add a new one.</p>
-        <p>The preview shows the result immediately.</p>
-      </div>
-      <div class="feature-media">
-        <button class="shot-btn" popovertarget="lb-9"><img class="shot" loading="lazy" src="assets/settings.png" alt="The settings window with the list of highlight rules and a colored preview line."></button>
-<div id="lb-9" class="lightbox" popover><button popovertarget="lb-9" popovertargetaction="hide"><img loading="lazy" src="assets/settings.png" alt="The settings window with the list of highlight rules and a colored preview line."></button></div>
-      </div>
-    </div>
-
-    <div class="feature flip">
-      <div class="feature-text">
-        <h3>Twelve themes</h3>
-        <p>Pick a theme, including Phthalo Green, Tokyo Night, and two light themes. The tree, tabs, and terminal follow it.</p>
-        <p>Each session can also keep its own theme, font, and highlight rules.</p>
-      </div>
-      <div class="feature-media theme-pair">
-        <button class="shot-btn" popovertarget="lb-10"><img class="shot" loading="lazy" src="assets/theme-tokyo.png" alt="The app in the Tokyo Night theme."></button>
-<div id="lb-10" class="lightbox" popover><button popovertarget="lb-10" popovertargetaction="hide"><img loading="lazy" src="assets/theme-tokyo.png" alt="The app in the Tokyo Night theme."></button></div>
-        <button class="shot-btn" popovertarget="lb-11"><img class="shot" loading="lazy" src="assets/theme-light.png" alt="The app in the Solarized Light theme."></button>
-<div id="lb-11" class="lightbox" popover><button popovertarget="lb-11" popovertargetaction="hide"><img loading="lazy" src="assets/theme-light.png" alt="The app in the Solarized Light theme."></button></div>
-      </div>
-    </div>
-
-    <div class="feature">
-      <div class="feature-text">
-        <h3>Local shells in the same window</h3>
-        <p>PowerShell, Command Prompt, WSL, and Git Bash — Resesh finds the shells on your PC and puts them under <em>Local</em>.</p>
-        <p>A local tab works like any other tab. Split it, search it, give it a theme. <kbd>Ctrl+Shift+T</kbd> opens your default shell.</p>
-      </div>
-      <div class="feature-media">
-        <button class="shot-btn" popovertarget="lb-12"><img class="shot" loading="lazy" src="assets/local-shells.png" alt="Three local tabs: PowerShell, Command Prompt, and Git Bash. The PowerShell tab shows command output."></button>
-<div id="lb-12" class="lightbox" popover><button popovertarget="lb-12" popovertargetaction="hide"><img loading="lazy" src="assets/local-shells.png" alt="Three local tabs: PowerShell, Command Prompt, and Git Bash. The PowerShell tab shows command output."></button></div>
-      </div>
-    </div>
-
     <div class="cards">
       <div class="card">
-        <h3>Record, rewind, and replay</h3>
-        <p>Use the tab controls to record any SSH or local tab, or rewind a live terminal instantly. Open a cast later with pause, speed, and seek controls. Each recording creates paired asciicast and timestamped plain-text files.</p>
+        <span class="card__name">securecrt</span>
+        <span class="card__note">sessions folder, per-host protocol and colors</span>
       </div>
       <div class="card">
-        <h3>Persistent sessions</h3>
-        <p>A lost connection does not stop your work. Resesh attaches again and shows the output you missed. tmux on the host makes it possible.</p>
+        <span class="card__name">putty</span>
+        <span class="card__note">registry saved sessions and tunnels</span>
       </div>
       <div class="card">
-        <h3>Import from SecureCRT</h3>
-        <p>Import your saved SecureCRT sessions in one step.</p>
+        <span class="card__name">openssh</span>
+        <span class="card__note">~/.ssh/config hosts, jump hosts, identities</span>
       </div>
       <div class="card">
-        <h3>Secrets stay safe</h3>
-        <p>Passwords and key passphrases go into Windows Credential Manager only. They never go into files on disk.</p>
-      </div>
-      <div class="card">
-        <h3>One safe list for your SSH keys</h3>
-        <p>Register a private key one time and use it in many sessions. Resesh keeps the file in place, pins its fingerprint, and keeps its passphrase in Windows Credential Manager.</p>
-      </div>
-      <div class="card">
-        <h3>Backups</h3>
-        <p>Export one file with your sessions, settings, and known hosts. Import it on a new PC. Backups with secrets are encrypted.</p>
+        <span class="card__name">csv</span>
+        <span class="card__note">whatever your inventory tool exports</span>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ================= FAQ ================= -->
-<section id="faq" class="section-pad">
-  <div class="wrap">
-    <p class="kicker">FAQ</p>
-    <h2>Questions and answers</h2>
+<section class="section" id="downloads">
+  <div class="container downloads">
+    <div class="downloads__copy">
+      <span class="eyebrow">./resesh</span>
+      <h2 class="h2-xl">download the beta</h2>
+      <p class="lede">free while in beta, and free after. no account, no telemetry, no license server to phone home to.</p>
+      <div class="specs">
+        <span>windows 10 21h2 or newer</span>
+        <span>signed installer · sha256 published per release</span>
+      </div>
+    </div>
+    <div class="downloads__list">
+      <a class="dl dl--primary" href="https://github.com/bpbp-boop/resesh/releases/download/v0.7.0/Resesh-0.7.0-windows-x64-setup.exe" data-dl="x64-setup">
+        <span class="dl__text">
+          <span class="dl__title">installer · x64</span>
+          <span class="dl__sub" data-dl-sub>Resesh-0.7.0-windows-x64-setup.exe · 80 mb</span>
+        </span>
+        <span class="dl__arrow">↓</span>
+      </a>
+      <a class="dl" href="https://github.com/bpbp-boop/resesh/releases/download/v0.7.0/Resesh-0.7.0-windows-arm64-setup.exe" data-dl="arm64-setup">
+        <span class="dl__text">
+          <span class="dl__title">installer · arm64</span>
+          <span class="dl__sub" data-dl-sub>Resesh-0.7.0-windows-arm64-setup.exe · 64 mb</span>
+        </span>
+        <span class="dl__arrow">↓</span>
+      </a>
+      <a class="dl" href="https://github.com/bpbp-boop/resesh/releases/download/v0.7.0/Resesh-0.7.0-windows-x64-portable.zip" data-dl="x64-portable">
+        <span class="dl__text">
+          <span class="dl__title">portable zip</span>
+          <span class="dl__sub" data-dl-sub>no install, runs from a usb stick · 70 mb</span>
+        </span>
+        <span class="dl__arrow">↓</span>
+      </a>
+    </div>
+  </div>
+</section>
 
-    <div class="faq-list">
-      <div class="faq-item">
-        <h3>Which Windows versions can run Resesh?</h3>
-        <p>Windows 10 21H2 or later, and Windows 11. Resesh runs on x64 and Arm64.</p>
+<section class="section section--alt" id="faq">
+  <div class="container faq">
+    <div class="head-block faq__intro">
+      <h2 class="h2-md">questions</h2>
+      <p class="lede">anything missing, open an issue on github.</p>
+    </div>
+    <div class="faq__list">
+      <div class="faq__item">
+        <span class="faq__q">is it actually free?</span>
+        <span class="faq__a">yes. free during the beta and free after it. the source is on github.</span>
       </div>
-      <div class="faq-item">
-        <h3>Is Resesh free?</h3>
-        <p>Yes. Resesh is free and open source.</p>
+      <div class="faq__item">
+        <span class="faq__q">does anything leave my machine?</span>
+        <span class="faq__a">no. sessions, credentials and recordings stay in your local profile. there is no account and no telemetry.</span>
       </div>
-      <div class="faq-item">
-        <h3>Where does Resesh keep my passwords?</h3>
-        <p>In Windows Credential Manager. Passwords never go into files on disk.</p>
+      <div class="faq__item">
+        <span class="faq__q">where are credentials kept?</span>
+        <span class="faq__a">in the windows credential store, encrypted per user. resesh never writes a password to its own config files.</span>
       </div>
-      <div class="faq-item">
-        <h3>Can I use SSH keys?</h3>
-        <p>Yes. Register a private key one time and use it in many sessions. Resesh points to the key file and never moves it.</p>
+      <div class="faq__item">
+        <span class="faq__q">which protocols are supported?</span>
+        <span class="faq__a">ssh, telnet, serial and local shells today. rdp is in progress for a later beta.</span>
       </div>
-      <div class="faq-item">
-        <h3>What do persistent sessions need?</h3>
-        <p>The host needs tmux. Turn on <em>Persistent</em> in the session options. Resesh does the rest.</p>
+      <div class="faq__item">
+        <span class="faq__q">mac or linux?</span>
+        <span class="faq__a">not yet. windows is the focus while the beta stabilises.</span>
       </div>
-      <div class="faq-item">
-        <h3>Can I move my data to a new PC?</h3>
-        <p>Yes. Export a backup file on the old PC. Import it on the new PC.</p>
-      </div>
-      <div class="faq-item">
-        <h3>What does session recording save?</h3>
-        <p>Each recording creates an asciicast <code>.cast</code> file for exact playback and a timestamped plain-text <code>.log</code>. Output printed by the terminal can include secrets, so Resesh always shows when recording is active.</p>
-      </div>
-      <div class="faq-item">
-        <h3>Does Resesh send my data anywhere?</h3>
-        <p>No. Resesh has no cloud part. Your data stays on your PC.</p>
-      </div>
-      <div class="faq-item">
-        <h3>How do I report a problem?</h3>
-        <p>Open an issue on <a href="https://github.com/bpbp-boop/resesh/issues">GitHub</a>.</p>
-      </div>
-      <div class="faq-item">
-        <h3>Is it available for Mac or Linux?</h3>
-        <p>Not yet. Maybe one day.</p>
+      <div class="faq__item">
+        <span class="faq__q">can i script it?</span>
+        <span class="faq__a">sessions and workspaces are plain files, so they diff and version-control cleanly. a cli for launching a workspace is planned.</span>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ================= DOWNLOADS ================= -->
-<section id="downloads" class="section-pad">
-  <div class="wrap">
-    <p class="kicker">Downloads</p>
-    <h2>Get Resesh</h2>
-    <p class="lead">Resesh is in beta. New builds come to GitHub first.</p>
-    <p id="release-version" class="sub">Latest release: v0.1.0</p>
-
-    <div class="downloads">
-      <div class="download-card">
-        <h3>Installer</h3>
-        <span class="arch">Windows x64</span>
-        <a class="btn btn-primary" data-asset-suffix="-x64-setup.exe" href="https://github.com/bpbp-boop/resesh/releases/download/v0.1.0/Resesh-0.1.0-windows-x64-setup.exe">Download</a>
-      </div>
-      <div class="download-card">
-        <h3>Installer</h3>
-        <span class="arch">Windows Arm64</span>
-        <a class="btn btn-primary" data-asset-suffix="-arm64-setup.exe" href="https://github.com/bpbp-boop/resesh/releases/download/v0.1.0/Resesh-0.1.0-windows-arm64-setup.exe">Download</a>
-      </div>
-      <div class="download-card">
-        <h3>Portable ZIP</h3>
-        <span class="arch">Windows x64 · no install</span>
-        <a class="btn btn-primary" data-asset-suffix="-x64-portable.zip" href="https://github.com/bpbp-boop/resesh/releases/download/v0.1.0/Resesh-0.1.0-windows-x64-portable.zip">Download</a>
-      </div>
-    </div>
-
-    <div class="requirements">
-      <h3>You need</h3>
-      <ul>
-        <li>Windows 10 21H2 or later, or Windows 11</li>
-        <li>An x64 or Arm64 PC</li>
-        <li>300 MB of free space</li>
-      </ul>
-    </div>
-
-    <p style="margin-top:28px;color:var(--muted)">All builds, Arm64 portable ZIPs, and SHA-256 checksums are on the
-      <a href="https://github.com/bpbp-boop/resesh/releases/latest">releases page</a>.
-      You can also build Resesh from the <a href="https://github.com/bpbp-boop/resesh">source code</a>.</p>
+<footer class="site-footer">
+  <div class="site-footer__brand">
+    <span class="logo__tile logo__tile--sm">./</span>
+    <span>resesh · beta · made for people with too many tabs</span>
   </div>
-</section>
-
-<footer>
-  <div class="footer-inner">
-    <span>Resesh — an SSH client for Windows</span>
-    <span>The screenshots show demo data. · <a href="https://github.com/bpbp-boop/resesh">GitHub</a></span>
+  <div class="site-footer__links">
+    <a href="https://github.com/bpbp-boop/resesh">github</a>
+    <a href="https://github.com/bpbp-boop/resesh/issues">issues</a>
+    <a href="https://github.com/bpbp-boop/resesh/releases">changelog</a>
   </div>
 </footer>
-
-<script>
-(function () {
-  // Point the download buttons at the newest release; the static v0.1.0
-  // links remain the fallback if the API is unreachable.
-  fetch("https://api.github.com/repos/bpbp-boop/resesh/releases/latest")
-    .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-    .then(function (release) {
-      document.querySelectorAll("[data-asset-suffix]").forEach(function (link) {
-        var suffix = link.getAttribute("data-asset-suffix");
-        var asset = (release.assets || []).find(function (a) { return a.name.endsWith(suffix); });
-        if (asset) { link.href = asset.browser_download_url; }
-      });
-      var note = document.getElementById("release-version");
-      if (note && release.tag_name) { note.textContent = "Latest release: " + release.tag_name; }
-    })
-    .catch(function () {});
-})();
-
-</script>
 
 </body>
 </html>

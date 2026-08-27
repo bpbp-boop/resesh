@@ -2,6 +2,7 @@
     x:Class="Resesh.App.Controls.TabGroupView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Resesh.App"
     xmlns:vm="using:Resesh.App.ViewModels">
 
     <UserControl.Resources>
@@ -9,7 +10,7 @@
             <!-- VS Code-style tab strip: square flush tabs, selected tabs blend into their
                  terminals, and the selected tab in an unfocused pane gains an underline. -->
             <ResourceDictionary.ThemeDictionaries>
-                <ResourceDictionary x:Key="Default">
+                <ResourceDictionary x:Key="Dark">
                     <SolidColorBrush x:Key="TabViewBackground" Color="#181818" />
                     <SolidColorBrush x:Key="TabViewBorderBrush" Color="#181818" />
                     <!-- The header DataTemplate paints the whole tab; kill the built-in chrome. -->
@@ -42,6 +43,21 @@
                     <x:Double x:Key="TabViewItemHeaderMinHeight">44</x:Double>
                     <SolidColorBrush x:Key="CodeTabSeparatorBrush" Color="#D8D8D8" />
                     <SolidColorBrush x:Key="TabDropOverlayBrush" Color="#332677CB" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="TabViewBackground" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="TabViewBorderBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="Transparent" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPointerOver" Color="Transparent" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPressed" Color="Transparent" />
+                    <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="Transparent" />
+                    <SolidColorBrush x:Key="TabViewSelectedItemBorderBrush" Color="Transparent" />
+                    <Thickness x:Key="TabViewHeaderPadding">0,0,0,0</Thickness>
+                    <Thickness x:Key="TabViewItemHeaderPadding">0,0,0,0</Thickness>
+                    <x:Double x:Key="TabViewItemMinHeight">44</x:Double>
+                    <x:Double x:Key="TabViewItemHeaderMinHeight">44</x:Double>
+                    <SolidColorBrush x:Key="CodeTabSeparatorBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="TabDropOverlayBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
@@ -198,7 +214,7 @@
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Top"
                 Loaded="Tabs_Loaded"
-                TabItemsSource="{x:Bind Group.Tabs}"
+                TabItemsSource="{x:Bind Group.Tabs, Mode=OneWay}"
                 SelectedItem="{x:Bind Group.SelectedTab, Mode=TwoWay}"
                 SelectionChanged="Tabs_SelectionChanged"
                 IsAddTabButtonVisible="False"
@@ -224,26 +240,33 @@
                             <Grid
                                 Height="44"
                                 Margin="0"
-                                Background="{x:Bind HeaderBackground, Mode=OneWay}"
                                 BorderThickness="0,0,1,0"
-                                BorderBrush="{x:Bind HeaderBorderBrush, Mode=OneWay}"
                                 PointerEntered="TabHeader_PointerEntered"
                                 PointerExited="TabHeader_PointerExited">
+                                <Grid.Background>
+                                    <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBackgroundColor(AppTheme, IsActive, IsPointerOver), Mode=OneWay}" />
+                                </Grid.Background>
+                                <Grid.BorderBrush>
+                                    <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBorderColor(AppTheme), Mode=OneWay}" />
+                                </Grid.BorderBrush>
                                 <Rectangle
                                     Height="1"
                                     VerticalAlignment="Top"
                                     HorizontalAlignment="Stretch"
-                                    Visibility="{x:Bind AccentVisibility, Mode=OneWay}">
+                                    Visibility="{x:Bind local:PresentationValues.FocusedAccentVisibility(IsActive, IsGroupFocused), Mode=OneWay}">
                                     <Rectangle.Fill>
-                                        <SolidColorBrush Color="{x:Bind FocusedBorderColor, Mode=OneWay}" />
+                                        <SolidColorBrush Color="{x:Bind local:PresentationValues.FocusedTabBorderColor(AppTheme, ColorTag), Mode=OneWay}" />
                                     </Rectangle.Fill>
                                 </Rectangle>
                                 <Rectangle
                                     Height="1"
-                                    Fill="{x:Bind HeaderBorderBrush, Mode=OneWay}"
                                     VerticalAlignment="Bottom"
                                     HorizontalAlignment="Stretch"
-                                    Visibility="{x:Bind InactivePaneUnderlineVisibility, Mode=OneWay}" />
+                                    Visibility="{x:Bind local:PresentationValues.InactiveUnderlineVisibility(IsActive, IsGroupFocused), Mode=OneWay}">
+                                    <Rectangle.Fill>
+                                        <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBorderColor(AppTheme), Mode=OneWay}" />
+                                    </Rectangle.Fill>
+                                </Rectangle>
                                 <Grid
                                     Margin="10,0,6,0"
                                     VerticalAlignment="Center">
@@ -265,7 +288,7 @@
                                         RadiusY="1.5"
                                         VerticalAlignment="Center">
                                         <Rectangle.Fill>
-                                            <SolidColorBrush Color="{x:Bind TagColor}" />
+                                            <SolidColorBrush Color="{x:Bind local:PresentationValues.ColorTag(ColorTag), Mode=OneWay}" />
                                         </Rectangle.Fill>
                                     </Rectangle>
                                     <StackPanel
@@ -280,7 +303,7 @@
                                             VerticalAlignment="Center"
                                             ToolTipService.ToolTip="{x:Bind StateText, Mode=OneWay}">
                                             <Ellipse.Fill>
-                                                <SolidColorBrush Color="{x:Bind StateColor, Mode=OneWay}" />
+                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.StateColor(State, HasUnseenOutput), Mode=OneWay}" />
                                             </Ellipse.Fill>
                                         </Ellipse>
                                         <Ellipse
@@ -288,7 +311,7 @@
                                             Height="7"
                                             Fill="#E74856"
                                             VerticalAlignment="Center"
-                                            Visibility="{x:Bind RecordingIndicatorVisibility, Mode=OneWay}"
+                                            Visibility="{x:Bind local:PresentationValues.Visible(IsRecording), Mode=OneWay}"
                                             ToolTipService.ToolTip="{x:Bind RecordingTooltip, Mode=OneWay}" />
                                     </StackPanel>
                                     <!-- Tabs stay icon-free unless an agent is active. The
@@ -300,9 +323,9 @@
                                         Margin="0,0,6,0"
                                         VerticalAlignment="Center"
                                         ToolTipService.ToolTip="{x:Bind AgentTooltip, Mode=OneWay}"
-                                        Visibility="{x:Bind IconVisibility, Mode=OneWay}">
+                                        Visibility="{x:Bind local:PresentationValues.AgentIconVisibility(AgentIconKey), Mode=OneWay}">
                                         <Image
-                                            Source="{x:Bind IconSource, Mode=OneWay}"
+                                            Source="{x:Bind local:PresentationValues.AgentIcon(AgentIconKey), Mode=OneWay}"
                                             Width="16"
                                             Height="16" />
                                         <Border
@@ -313,10 +336,12 @@
                                             VerticalAlignment="Bottom"
                                             CornerRadius="6"
                                             BorderThickness="1"
-                                            BorderBrush="{x:Bind HeaderBackground, Mode=OneWay}"
-                                            Visibility="{x:Bind AgentBadgeVisibility, Mode=OneWay}">
+                                            Visibility="{x:Bind local:PresentationValues.AgentBadgeVisibility(AgentIconKey, Agent.Attention), Mode=OneWay}">
+                                            <Border.BorderBrush>
+                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBackgroundColor(AppTheme, IsActive, IsPointerOver), Mode=OneWay}" />
+                                            </Border.BorderBrush>
                                             <Border.Background>
-                                                <SolidColorBrush Color="{x:Bind AgentBadgeColor, Mode=OneWay}" />
+                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.AgentBadgeColor(Agent.Attention), Mode=OneWay}" />
                                             </Border.Background>
                                             <TextBlock
                                                 Text="{x:Bind AgentBadgeGlyph, Mode=OneWay}"
@@ -335,16 +360,22 @@
                                         Margin="0,0,6,0"
                                         VerticalAlignment="Center"
                                         ToolTipService.ToolTip="Pinned"
-                                        Foreground="{x:Bind HeaderForeground, Mode=OneWay}"
-                                        Visibility="{x:Bind PinIconVisibility, Mode=OneWay}" />
+                                        Visibility="{x:Bind local:PresentationValues.Visible(IsPinned), Mode=OneWay}">
+                                        <FontIcon.Foreground>
+                                            <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
+                                        </FontIcon.Foreground>
+                                    </FontIcon>
                                     <FontIcon
                                         Grid.Column="4"
                                         Glyph="&#xE72E;"
                                         FontSize="11"
                                         Margin="0,0,6,0"
                                         VerticalAlignment="Center"
-                                        Foreground="{x:Bind HeaderForeground, Mode=OneWay}"
-                                        Visibility="{x:Bind LockIconVisibility, Mode=OneWay}" />
+                                        Visibility="{x:Bind local:PresentationValues.Visible(IsLocked), Mode=OneWay}">
+                                        <FontIcon.Foreground>
+                                            <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
+                                        </FontIcon.Foreground>
+                                    </FontIcon>
                                     <!-- Two lines: the session name, and whatever best identifies
                                          this particular tab (running program, cwd, or endpoint) —
                                          so several tabs of one host aren't interchangeable. -->
@@ -361,10 +392,13 @@
                                             FontSize="13"
                                             LineHeight="17"
                                             LineStackingStrategy="BlockLineHeight"
-                                            FontWeight="{x:Bind HeaderFontWeight, Mode=OneWay}"
+                                            FontWeight="{x:Bind local:PresentationValues.TabHeaderFontWeight(HasUnseenOutput), Mode=OneWay}"
                                             TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind Header, Mode=OneWay}"
-                                            Foreground="{x:Bind HeaderForeground, Mode=OneWay}" />
+                                            ToolTipService.ToolTip="{x:Bind Header, Mode=OneWay}">
+                                            <TextBlock.Foreground>
+                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
+                                            </TextBlock.Foreground>
+                                        </TextBlock>
                                         <TextBlock
                                             x:Name="TabSubtitleText"
                                             Text="{x:Bind Subtitle, Mode=OneWay}"
@@ -373,8 +407,11 @@
                                             LineStackingStrategy="BlockLineHeight"
                                             TextTrimming="CharacterEllipsis"
                                             Opacity="0.7"
-                                            ToolTipService.ToolTip="{x:Bind Subtitle, Mode=OneWay}"
-                                            Foreground="{x:Bind HeaderForeground, Mode=OneWay}" />
+                                            ToolTipService.ToolTip="{x:Bind Subtitle, Mode=OneWay}">
+                                            <TextBlock.Foreground>
+                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
+                                            </TextBlock.Foreground>
+                                        </TextBlock>
                                     </StackPanel>
                                     <Button
                                         Grid.Column="6"
@@ -386,11 +423,18 @@
                                         CornerRadius="3"
                                         VerticalAlignment="Center"
                                         Opacity="{x:Bind CloseOpacity, Mode=OneWay}"
-                                        IsHitTestVisible="{x:Bind CloseInteractive, Mode=OneWay}">
+                                        IsHitTestVisible="{x:Bind CloseInteractive, Mode=OneWay}"
+                                        IsEnabled="{x:Bind CloseInteractive, Mode=OneWay}"
+                                        IsTabStop="{x:Bind CloseInteractive, Mode=OneWay}"
+                                        AutomationProperties.Name="{x:Bind CloseAutomationName, Mode=OneWay}"
+                                        AutomationProperties.AutomationId="{x:Bind CloseAutomationId, Mode=OneWay}">
                                         <FontIcon
                                             Glyph="&#xE711;"
-                                            FontSize="10"
-                                            Foreground="{x:Bind HeaderForeground, Mode=OneWay}" />
+                                            FontSize="10">
+                                            <FontIcon.Foreground>
+                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
+                                            </FontIcon.Foreground>
+                                        </FontIcon>
                                     </Button>
                                 </Grid>
                             </Grid>
@@ -410,7 +454,7 @@
                          box. Theme-local aliases keep those states consistent in both themes. -->
                     <ResourceDictionary>
                         <ResourceDictionary.ThemeDictionaries>
-                            <ResourceDictionary x:Key="Default">
+                            <ResourceDictionary x:Key="Dark">
                                 <SolidColorBrush x:Key="TabActionButtonRestBrush" Color="Transparent" />
                                 <SolidColorBrush x:Key="TabActionButtonHoverBrush" Color="#1FFFFFFF" />
                                 <SolidColorBrush x:Key="TabActionButtonPressedBrush" Color="#2AFFFFFF" />
@@ -436,6 +480,24 @@
                                 <StaticResource x:Key="ToggleButtonForegroundCheckedPressed" ResourceKey="AccentTextFillColorSecondaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundPressed" ResourceKey="AccentTextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="AccentTextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="TabActionButtonHoverBrush" />
+                                <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="TabActionButtonPressedBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundPointerOver" ResourceKey="TabActionButtonHoverBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundPressed" ResourceKey="TabActionButtonPressedBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundChecked" ResourceKey="TabActionButtonRestBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPointerOver" ResourceKey="TabActionButtonHoverBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundCheckedPressed" ResourceKey="TabActionButtonPressedBrush" />
+                            </ResourceDictionary>
+                            <ResourceDictionary x:Key="HighContrast">
+                                <SolidColorBrush x:Key="TabActionButtonRestBrush" Color="Transparent" />
+                                <SolidColorBrush x:Key="TabActionButtonHoverBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                                <SolidColorBrush x:Key="TabActionButtonPressedBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                                <SolidColorBrush x:Key="TabActionButtonForegroundBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                                <StaticResource x:Key="ToggleButtonForegroundChecked" ResourceKey="TabActionButtonForegroundBrush" />
+                                <StaticResource x:Key="ToggleButtonForegroundCheckedPointerOver" ResourceKey="TabActionButtonForegroundBrush" />
+                                <StaticResource x:Key="ToggleButtonForegroundCheckedPressed" ResourceKey="TabActionButtonForegroundBrush" />
+                                <StaticResource x:Key="ToggleButtonForegroundPressed" ResourceKey="TabActionButtonForegroundBrush" />
+                                <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="TabActionButtonForegroundBrush" />
                                 <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="TabActionButtonHoverBrush" />
                                 <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="TabActionButtonPressedBrush" />
                                 <StaticResource x:Key="ToggleButtonBackgroundPointerOver" ResourceKey="TabActionButtonHoverBrush" />

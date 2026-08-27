@@ -7,9 +7,6 @@ namespace Resesh.App.ViewModels;
 /// <summary>A node in the session tree: either a folder or a session leaf.</summary>
 public sealed class TreeNodeViewModel : ObservableObject
 {
-    private static readonly Microsoft.UI.Xaml.Media.SolidColorBrush SelectedBrush =
-        new(Windows.UI.Color.FromArgb(255, 0x26, 0x4F, 0x78));
-
     private bool _isExpanded;
     private bool _isSelected;
 
@@ -23,17 +20,8 @@ public sealed class TreeNodeViewModel : ObservableObject
     public bool IsSelected
     {
         get => _isSelected;
-        set
-        {
-            if (SetProperty(ref _isSelected, value))
-                OnPropertyChanged(nameof(SelectionBackground));
-        }
+        set => SetProperty(ref _isSelected, value);
     }
-
-    public Microsoft.UI.Xaml.Media.Brush? SelectionBackground => _isSelected ? SelectedBrush : null;
-
-    /// <summary>Keeps the shared selected-row surface aligned with the active terminal theme.</summary>
-    internal static void ApplySelectionTheme(Windows.UI.Color color) => SelectedBrush.Color = color;
 
     /// <summary>Null for folders. Session leaves can replace their immutable model in place
     /// when an edit does not change tree structure or ordering.</summary>
@@ -70,39 +58,9 @@ public sealed class TreeNodeViewModel : ObservableObject
     /// <summary>The active tree filter, used only to highlight matching session names.</summary>
     public string HighlightQuery { get; set; } = "";
 
-    /// <summary>Per-session color tag as a renderable color; transparent when unset.</summary>
-    public Windows.UI.Color TagColor => ParseColor(Session?.ColorTag);
+    public string? ColorTag => Session?.ColorTag;
 
-    /// <summary>Monochrome session icon used by the tree; null shows the default glyph.</summary>
-    public Uri? IconUri => App.Icons.GetTreeUri(Session?.Icon);
-
-    /// <summary>Full-color session icon used by non-tree surfaces such as Recents.</summary>
-    public Microsoft.UI.Xaml.Media.ImageSource? IconSource =>
-        App.Icons.GetImage(Session?.Icon, Icons.SessionIconCatalog.ListIconSize);
-
-    public Microsoft.UI.Xaml.Visibility TreeIconVisibility =>
-        IconUri is null ? Microsoft.UI.Xaml.Visibility.Collapsed : Microsoft.UI.Xaml.Visibility.Visible;
-
-    public Microsoft.UI.Xaml.Visibility DefaultTreeIconVisibility =>
-        IconUri is null ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
-
-    public Microsoft.UI.Xaml.Visibility IconVisibility =>
-        IconSource is null ? Microsoft.UI.Xaml.Visibility.Collapsed : Microsoft.UI.Xaml.Visibility.Visible;
-
-    public Microsoft.UI.Xaml.Visibility DefaultIconVisibility =>
-        IconSource is null ? Microsoft.UI.Xaml.Visibility.Visible : Microsoft.UI.Xaml.Visibility.Collapsed;
-
-    private static Windows.UI.Color ParseColor(string? hex)
-    {
-        if (hex is not null && hex.Length == 7 && hex[0] == '#'
-            && byte.TryParse(hex.AsSpan(1, 2), System.Globalization.NumberStyles.HexNumber, null, out var r)
-            && byte.TryParse(hex.AsSpan(3, 2), System.Globalization.NumberStyles.HexNumber, null, out var g)
-            && byte.TryParse(hex.AsSpan(5, 2), System.Globalization.NumberStyles.HexNumber, null, out var b))
-        {
-            return Windows.UI.Color.FromArgb(255, r, g, b);
-        }
-        return Windows.UI.Color.FromArgb(0, 0, 0, 0);
-    }
+    public string? IconKey => Session?.Icon;
 
     private TreeNodeViewModel(Session? session, string folderPath, bool isLocalScope, bool isLocalRoot = false)
     {
@@ -131,12 +89,7 @@ public sealed class TreeNodeViewModel : ObservableObject
         OnPropertyChanged(nameof(Session));
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(HostSummary));
-        OnPropertyChanged(nameof(TagColor));
-        OnPropertyChanged(nameof(IconUri));
-        OnPropertyChanged(nameof(IconSource));
-        OnPropertyChanged(nameof(TreeIconVisibility));
-        OnPropertyChanged(nameof(DefaultTreeIconVisibility));
-        OnPropertyChanged(nameof(IconVisibility));
-        OnPropertyChanged(nameof(DefaultIconVisibility));
+        OnPropertyChanged(nameof(ColorTag));
+        OnPropertyChanged(nameof(IconKey));
     }
 }

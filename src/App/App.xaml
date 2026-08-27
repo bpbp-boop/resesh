@@ -12,8 +12,14 @@
             <SolidColorBrush x:Key="SessionShellBrush" Color="#181818" />
             <SolidColorBrush x:Key="SessionInputBrush" Color="#121212" />
             <SolidColorBrush x:Key="SessionChromeFrameBrush" Color="#2B2B2B" />
+            <SolidColorBrush x:Key="SessionTreeForegroundBrush" Color="#CCCCCC" />
+            <SolidColorBrush x:Key="SessionTreeMutedForegroundBrush" Color="#959595" />
+            <SolidColorBrush x:Key="SessionTreeSelectionBrush" Color="#264F78" />
+            <SolidColorBrush x:Key="SessionTreeSelectionForegroundBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="SettingsCardBorderBrush" Color="#2B2B2B" />
+            <SolidColorBrush x:Key="SettingsCardBackgroundBrush" Color="#121212" />
             <ResourceDictionary.ThemeDictionaries>
-                <ResourceDictionary x:Key="Default">
+                <ResourceDictionary x:Key="Dark">
                     <SolidColorBrush x:Key="SessionSurfaceBrush" Color="#181818" />
                     <SolidColorBrush x:Key="SessionFrameBrush" Color="#3C3C3C" />
                     <SolidColorBrush x:Key="SessionDividerBrush" Color="#424242" />
@@ -24,6 +30,12 @@
                     <SolidColorBrush x:Key="SessionFrameBrush" Color="#C8C8C8" />
                     <SolidColorBrush x:Key="SessionDividerBrush" Color="#E6E6E6" />
                     <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="#0078D4" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="SessionSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="SessionFrameBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="SessionDividerBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>

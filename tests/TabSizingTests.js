@@ -15,6 +15,9 @@ const terminalView = fs.readFileSync(
 const filePaneView = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "Controls", "FilePaneView.cs"),
   "utf8");
+const tabViewModel = fs.readFileSync(
+  path.join(__dirname, "..", "src", "App", "ViewModels", "TabViewModel.cs"),
+  "utf8");
 
 
 test("tabs use one browser-style width and shrink only when the strip is crowded", () => {
@@ -83,6 +86,17 @@ test("each tab bar reserves the measured width of every action button", () => {
   assert.match(strip, /Click="FilePaneToggle_Click"/);
 });
 
+test("a hidden tab close action is not focusable and has stable automation metadata", () => {
+  const closeButton = xaml.match(/<Button[\s\S]*?Click="TabCloseGlyph_Click"[\s\S]*?<\/Button>/)?.[0] ?? "";
+
+  assert.match(closeButton, /IsEnabled="\{x:Bind CloseInteractive, Mode=OneWay\}"/);
+  assert.match(closeButton, /IsTabStop="\{x:Bind CloseInteractive, Mode=OneWay\}"/);
+  assert.match(closeButton, /AutomationProperties\.Name="\{x:Bind CloseAutomationName, Mode=OneWay\}"/);
+  assert.match(closeButton, /AutomationProperties\.AutomationId="\{x:Bind CloseAutomationId, Mode=OneWay\}"/);
+  assert.match(tabViewModel, /CloseAutomationName => \$"Close \{Header\}"/);
+  assert.match(tabViewModel, /CloseAutomationId => \$"TabClose_/);
+});
+
 test("tab actions collapse into an overflow menu before minimum-width tabs scroll", () => {
   assert.match(xaml, /x:Name="ExpandedTabActions"/);
   assert.match(xaml, /x:Name="TabActionsOverflowButton"[\s\S]*?Visibility="Collapsed"[\s\S]*?<MenuFlyout>/);
@@ -118,6 +132,13 @@ test("local sessions use the direct filesystem pane and Explorer path", () => {
   assert.match(terminalView, /Session\.IsLocal[\s\S]*?new FilePaneView\(\(\) => Session, OpenInExplorerAsync\)/);
   assert.match(terminalView, /OpenInExplorerAsync\(string path\)[\s\S]*?Session\.IsLocal[\s\S]*?OpenLocalDirectoryInExplorer\(path\)[\s\S]*?SshfsIntegration/);
   assert.match(filePaneView, /_localFiles is not null \\|\\| SshfsIntegration\.IsInstalled/);
+});
+
+test("SFTP downloads validate each remote name and keep recursive paths below the selected folder", () => {
+  assert.match(filePaneView, /WindowsDownloadPath\.ValidateName\(entry\.Name\)/);
+  assert.match(filePaneView, /PlanRemoteDirectory\(sftp, entry\.FullPath, localPath, targetDir, files, token\)/);
+  assert.match(filePaneView, /WindowsDownloadPath\.Combine\(targetRoot, localDir, child\.Name\)/);
+  assert.doesNotMatch(filePaneView, /Path\.Combine\(localDir, child\.Name\)/);
 });
 
 test("the tab-bar toggle follows selection and all file-pane open and close routes", () => {

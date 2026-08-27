@@ -1,6 +1,5 @@
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
-using Microsoft.UI.Xaml;
 using Resesh.Core.Agents;
 using Resesh.Core.Backend;
 using Resesh.Core.Models;
@@ -28,6 +27,7 @@ public enum TabConnectionState
 /// <summary>One open tab: a session plus its terminal view and connection state.</summary>
 public sealed class TabViewModel : ObservableObject
 {
+    private readonly Guid _tabInstanceId = Guid.NewGuid();
     private Session _session;
     private string? _titleOverride;
     private TabConnectionState _state = TabConnectionState.Connecting;
@@ -108,11 +108,10 @@ public sealed class TabViewModel : ObservableObject
             if (SetProperty(ref _session, value))
             {
                 OnPropertyChanged(nameof(Header));
+                OnPropertyChanged(nameof(CloseAutomationName));
                 OnPropertyChanged(nameof(Endpoint));
                 OnPropertyChanged(nameof(Subtitle));
-                OnPropertyChanged(nameof(IconSource));
-                OnPropertyChanged(nameof(IconVisibility));
-                OnPropertyChanged(nameof(FocusedBorderColor));
+                OnPropertyChanged(nameof(ColorTag));
             }
         }
     }
@@ -131,7 +130,10 @@ public sealed class TabViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _titleOverride, value))
+            {
                 OnPropertyChanged(nameof(Header));
+                OnPropertyChanged(nameof(CloseAutomationName));
+            }
         }
     }
 
@@ -151,7 +153,6 @@ public sealed class TabViewModel : ObservableObject
                     PromptContext = null;
                 }
                 OnPropertyChanged(nameof(StateText));
-                OnPropertyChanged(nameof(StateColor));
             }
         }
     }
@@ -166,7 +167,6 @@ public sealed class TabViewModel : ObservableObject
         {
             if (SetProperty(ref _isRecording, value))
             {
-                OnPropertyChanged(nameof(RecordingIndicatorVisibility));
                 OnPropertyChanged(nameof(RecordingTooltip));
             }
         }
@@ -178,7 +178,6 @@ public sealed class TabViewModel : ObservableObject
         set => SetProperty(ref _hasRewind, value);
     }
 
-    public Visibility RecordingIndicatorVisibility => IsRecording ? Visibility.Visible : Visibility.Collapsed;
     public string RecordingTooltip => IsRecording ? "Recording terminal output" : "";
 
     // ---- VS Code-style tab visuals (the header content paints the whole tab) ----
@@ -215,15 +214,10 @@ public sealed class TabViewModel : ObservableObject
         {
             if (SetProperty(ref _hasUnseenOutput, value))
             {
-                OnPropertyChanged(nameof(StateColor));
                 OnPropertyChanged(nameof(StateText));
-                OnPropertyChanged(nameof(HeaderFontWeight));
             }
         }
     }
-
-    public Windows.UI.Text.FontWeight HeaderFontWeight =>
-        HasUnseenOutput ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
 
     /// <summary>Called (UI thread) when session output arrives; marks the tab unless it's visible.
     /// A tab selected in an unfocused split group is still on screen, so IsActive is the gate.</summary>
@@ -253,10 +247,7 @@ public sealed class TabViewModel : ObservableObject
     /// setting changes, since the displayed icon and badge are derived from it.</summary>
     public void NotifyAgentVisuals()
     {
-        OnPropertyChanged(nameof(IconSource));
-        OnPropertyChanged(nameof(IconVisibility));
-        OnPropertyChanged(nameof(AgentBadgeVisibility));
-        OnPropertyChanged(nameof(AgentBadgeColor));
+        OnPropertyChanged(nameof(AgentIconKey));
         OnPropertyChanged(nameof(AgentBadgeGlyph));
         OnPropertyChanged(nameof(AgentBadgeSize));
         OnPropertyChanged(nameof(AgentTooltip));
@@ -264,27 +255,7 @@ public sealed class TabViewModel : ObservableObject
 
     private static bool AgentIconsEnabled => App.Settings.Current.ShowAgentIcons;
 
-    private Microsoft.UI.Xaml.Media.ImageSource? AgentIconSource =>
-        AgentIconsEnabled ? App.Icons.GetAgentImage(Agent.Key, Icons.SessionIconCatalog.ListIconSize) : null;
-
-    /// <summary>The attention badge rides on the agent icon, so it needs one to sit on.</summary>
-    public Visibility AgentBadgeVisibility =>
-        AgentIconSource is not null && Agent.Attention is not (AgentAttention.None
-            or AgentAttention.Idle)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
-    /// <summary>Amber only for states that genuinely mean "the agent is waiting for you";
-    /// a bare bell (Signal) gets neutral gray so it can't be mistaken for one.</summary>
-    public Windows.UI.Color AgentBadgeColor => Agent.Attention switch
-    {
-        AgentAttention.Working => Windows.UI.Color.FromArgb(255, 0x00, 0x78, 0xD4),
-        AgentAttention.NeedsApproval => Windows.UI.Color.FromArgb(255, 0xFF, 0xB9, 0x00),
-        AgentAttention.NeedsAnswer => Windows.UI.Color.FromArgb(255, 0xFF, 0xB9, 0x00),
-        AgentAttention.Complete => Windows.UI.Color.FromArgb(255, 0x16, 0xC6, 0x0C),
-        AgentAttention.Failed => Windows.UI.Color.FromArgb(255, 0xE7, 0x48, 0x56),
-        _ => Windows.UI.Color.FromArgb(255, 0x9E, 0x9E, 0x9E),
-    };
+    public string? AgentIconKey => AgentIconsEnabled && Agent.IsAgent ? Agent.Key : null;
 
     /// <summary>Meaningful states get a symbol as well as a colour, so the badge remains
     /// readable for users who cannot distinguish the colours.</summary>
@@ -351,78 +322,28 @@ public sealed class TabViewModel : ObservableObject
 
     private void NotifyTabVisuals()
     {
-        OnPropertyChanged(nameof(AccentVisibility));
-        OnPropertyChanged(nameof(InactivePaneUnderlineVisibility));
-        OnPropertyChanged(nameof(HeaderBackground));
-        OnPropertyChanged(nameof(HeaderBorderBrush));
-        OnPropertyChanged(nameof(HeaderForeground));
         OnPropertyChanged(nameof(CloseOpacity));
         OnPropertyChanged(nameof(CloseInteractive));
     }
-
-    public Visibility AccentVisibility => IsActive && IsGroupFocused ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility InactivePaneUnderlineVisibility =>
-        IsActive && !IsGroupFocused ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>The × shows on the active tab and on hover; hidden (but space kept) otherwise. Never on pinned tabs.</summary>
     public double CloseOpacity => !IsPinned && (IsActive || IsPointerOver) ? 1.0 : 0.0;
 
     public bool CloseInteractive => !IsPinned && (IsActive || IsPointerOver);
 
-    private bool IsDark => !Resesh.Core.Storage.ThemeCatalog.IsLight(_appTheme);
+    public string CloseAutomationName => $"Close {Header}";
+
+    public string CloseAutomationId => $"TabClose_{_tabInstanceId:N}";
+
+    public string AppTheme => _appTheme;
 
     /// <summary>Applies a saved or previewed app theme to this tab's chrome.</summary>
     public void ApplyAppTheme(string theme)
     {
         _appTheme = theme;
         _appTheme = App.ResolveTheme(_appTheme);
-        NotifyTabVisuals();
+        OnPropertyChanged(nameof(AppTheme));
     }
-
-    public Microsoft.UI.Xaml.Media.Brush HeaderBackground
-    {
-        get
-        {
-            // Every pane's selected tab matches its open terminal. In an unfocused pane,
-            // an underline rather than a different surface distinguishes the selected tab.
-            Windows.UI.Color color;
-            var palette = ThemeVisualPalette.For(_appTheme);
-            if (IsActive)
-                color = palette.ActiveTab;
-            else if (IsPointerOver)
-                color = palette.HoverTab;
-            else
-                color = palette.InactiveTab;
-            return new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
-        }
-    }
-
-    public Microsoft.UI.Xaml.Media.Brush HeaderBorderBrush =>
-        new Microsoft.UI.Xaml.Media.SolidColorBrush(ThemeVisualPalette.For(_appTheme).Divider);
-
-    public Microsoft.UI.Xaml.Media.Brush HeaderForeground => new Microsoft.UI.Xaml.Media.SolidColorBrush(
-        IsActive
-            ? IsGroupFocused
-                ? (IsDark ? Windows.UI.Color.FromArgb(255, 0xFF, 0xFF, 0xFF) : Windows.UI.Color.FromArgb(255, 0x33, 0x33, 0x33))
-                : (IsDark ? Windows.UI.Color.FromArgb(255, 0xC0, 0xC0, 0xC0) : Windows.UI.Color.FromArgb(255, 0x55, 0x55, 0x55))
-            : IsGroupFocused
-                ? (IsDark ? Windows.UI.Color.FromArgb(255, 0x9D, 0x9D, 0x9D) : Windows.UI.Color.FromArgb(255, 0x61, 0x61, 0x61))
-                : (IsDark ? Windows.UI.Color.FromArgb(255, 0x72, 0x72, 0x72) : Windows.UI.Color.FromArgb(255, 0x8A, 0x8A, 0x8A)));
-
-    /// <summary>Tab-strip status dot: green connected/running, red disconnected/failed,
-    /// amber connecting, neutral gray for a clean local exit; accent blue when connected
-    /// with unseen output (problems keep their color).</summary>
-    public Windows.UI.Color StateColor =>
-        State == TabConnectionState.Connected && HasUnseenOutput
-            ? Windows.UI.Color.FromArgb(255, 0x00, 0x78, 0xD4)
-            : State switch
-            {
-                TabConnectionState.Connected => Windows.UI.Color.FromArgb(255, 0x16, 0xC6, 0x0C),
-                TabConnectionState.Connecting => Windows.UI.Color.FromArgb(255, 0xFF, 0xB9, 0x00),
-                TabConnectionState.Exited => Windows.UI.Color.FromArgb(255, 0x8A, 0x8A, 0x8A),
-                TabConnectionState.Playback => Windows.UI.Color.FromArgb(255, 0x00, 0x78, 0xD4),
-                _ => Windows.UI.Color.FromArgb(255, 0xE7, 0x48, 0x56),
-            };
 
     /// <summary>e.g. "aes256-gcm@openssh.com • SHA256:…" once connected.</summary>
     public string ConnectionSummary
@@ -565,11 +486,6 @@ public sealed class TabViewModel : ObservableObject
         }
     }
 
-    /// <summary>The active agent icon. Ordinary tabs deliberately have no icon.</summary>
-    public Microsoft.UI.Xaml.Media.ImageSource? IconSource => AgentIconSource;
-
-    public Visibility IconVisibility => IconSource is null ? Visibility.Collapsed : Visibility.Visible;
-
     public string Endpoint => IsOnboarding
         ? ""
         : IsLocal
@@ -599,13 +515,10 @@ public sealed class TabViewModel : ObservableObject
         {
             if (SetProperty(ref _isPinned, value))
             {
-                OnPropertyChanged(nameof(PinIconVisibility));
                 NotifyTabVisuals(); // the × hides while pinned
             }
         }
     }
-
-    public Visibility PinIconVisibility => IsPinned ? Visibility.Visible : Visibility.Collapsed;
 
     // ---- Lock state (per plan: password held in memory only; never persisted) ----
 
@@ -616,36 +529,10 @@ public sealed class TabViewModel : ObservableObject
     {
         get => _isLocked;
         private set
-        {
-            if (SetProperty(ref _isLocked, value))
-                OnPropertyChanged(nameof(LockIconVisibility));
-        }
+            => SetProperty(ref _isLocked, value);
     }
 
-    public Visibility LockIconVisibility => IsLocked ? Visibility.Visible : Visibility.Collapsed;
-
-    /// <summary>Session color tag for the tab strip; transparent when unset.</summary>
-    public Windows.UI.Color TagColor
-    {
-        get
-        {
-            var hex = Session.ColorTag;
-            if (hex is { Length: 7 } && hex[0] == '#'
-                && byte.TryParse(hex.AsSpan(1, 2), System.Globalization.NumberStyles.HexNumber, null, out var r)
-                && byte.TryParse(hex.AsSpan(3, 2), System.Globalization.NumberStyles.HexNumber, null, out var g)
-                && byte.TryParse(hex.AsSpan(5, 2), System.Globalization.NumberStyles.HexNumber, null, out var b))
-            {
-                return Windows.UI.Color.FromArgb(255, r, g, b);
-            }
-            return Windows.UI.Color.FromArgb(0, 0, 0, 0);
-        }
-    }
-
-    /// <summary>The focused-tab border follows its session color, with the standard
-    /// accent retained for tabs that do not have a color tag.</summary>
-    public Windows.UI.Color FocusedBorderColor => TagColor.A > 0
-        ? TagColor
-        : Windows.UI.Color.FromArgb(255, 0x00, 0x78, 0xD4);
+    public string? ColorTag => Session.ColorTag;
 
     /// <summary>Set while locked-out after repeated failed unlock attempts.</summary>
     public DateTimeOffset LockoutUntil { get; private set; } = DateTimeOffset.MinValue;

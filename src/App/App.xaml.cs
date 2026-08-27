@@ -23,6 +23,8 @@ public partial class App : Application
     public static SettingsStore Settings { get; } = new(StorePath("settings.json", SettingsStore.DefaultPath));
     public static HighlightsStore Highlights { get; } = new(StorePath("highlights.json", HighlightsStore.DefaultPath));
     public static WorkspaceStore Workspaces { get; } = new(StorePath("workspaces.json", WorkspaceStore.DefaultPath));
+    private static AccessibilitySettings Accessibility { get; } = new();
+    public static bool IsHighContrast => Accessibility.HighContrast;
 
     /// <summary>`--data-dir <path>` keeps every JSON store in an alternate directory.
     /// `--demo` instead uses disposable JSON stores and in-memory secrets. Normal launches

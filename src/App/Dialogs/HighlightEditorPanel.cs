@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.UI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
@@ -117,6 +118,23 @@ public static class HighlightEditorPanel
         var saveButton = new Button { Content = "Save rule", Style = (Style)Application.Current.Resources["AccentButtonStyle"] };
         var cancelButton = new Button { Content = "Cancel" };
         var resetButton = new Button { Content = "Reset to default", Margin = new Thickness(16, 0, 0, 0) };
+
+        SetAutomationId(list, "SettingsHighlightRules");
+        SetAutomationId(addButton, "SettingsHighlightAdd");
+        SetAutomationId(editButton, "SettingsHighlightEdit");
+        SetAutomationId(deleteButton, "SettingsHighlightDelete");
+        SetAutomationId(listSample, "SettingsHighlightListSample");
+        SetAutomationId(nameBox, "SettingsHighlightName");
+        SetAutomationId(patternBox, "SettingsHighlightPattern");
+        SetAutomationId(colorBox, "SettingsHighlightColor");
+        SetAutomationId(boldCheck, "SettingsHighlightBold");
+        SetAutomationId(underlineCheck, "SettingsHighlightUnderline");
+        SetAutomationId(matchCaseCheck, "SettingsHighlightMatchCase");
+        SetAutomationId(overviewCheck, "SettingsHighlightOverview");
+        SetAutomationId(sampleBox, "SettingsHighlightFormSample");
+        SetAutomationId(saveButton, "SettingsHighlightSave");
+        SetAutomationId(cancelButton, "SettingsHighlightCancel");
+        SetAutomationId(resetButton, "SettingsHighlightReset");
         var formButtons = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -205,6 +223,7 @@ public static class HighlightEditorPanel
                     VerticalAlignment = VerticalAlignment.Center,
                 };
                 var id = rule.Id;
+                SetAutomationId(check, $"SettingsHighlightRuleEnabled_{rule.Id}");
                 check.Checked += (_, _) => { App.Highlights.SetEnabled(id, true); Changed(); };
                 check.Unchecked += (_, _) => { App.Highlights.SetEnabled(id, false); Changed(); };
 
@@ -447,4 +466,7 @@ public static class HighlightEditorPanel
             Convert.ToByte(text.Substring(3, 2), 16),
             Convert.ToByte(text.Substring(5, 2), 16));
     }
+
+    private static void SetAutomationId(DependencyObject element, string automationId) =>
+        AutomationProperties.SetAutomationId(element, automationId);
 }

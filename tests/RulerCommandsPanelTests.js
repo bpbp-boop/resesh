@@ -406,6 +406,8 @@ test("an active toggle keeps flat chrome and shows an accent icon", () => {
   assert.match(actions, /<Style TargetType="Button"[\s\S]*?BorderThickness" Value="0"/);
   assert.match(actions, /<Style TargetType="ToggleButton"[\s\S]*?BorderThickness" Value="0"/);
   assert.match(actions, /x:Key="ButtonForegroundPressed" ResourceKey="AccentTextFillColorPrimaryBrush"/);
-  // Both theme dictionaries carry the aliases so a runtime theme swap re-resolves them.
-  assert.equal((actions.match(/x:Key="ToggleButtonForegroundChecked"/g) || []).length, 2);
+  // Dark, Light, and High Contrast dictionaries carry the aliases so a runtime
+  // theme swap re-resolves them.
+  assert.equal((actions.match(/x:Key="ToggleButtonForegroundChecked"/g) || []).length, 3);
+  assert.match(actions, /x:Key="HighContrast"[\s\S]*?SystemColorHighlightTextColor/);
 });
