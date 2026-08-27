@@ -23,6 +23,7 @@ public static class ThemeCatalog
         new("tokyo-night", "Tokyo Night"),
         new("catppuccin-mocha", "Catppuccin Mocha"),
         new("phthalo-green", "Phthalo Green"),
+        new("vaporwave", "Vaporwave"),
     ];
 
     public static ThemeChoice Find(string? id) =>

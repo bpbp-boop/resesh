@@ -6,6 +6,7 @@ namespace Resesh.App;
 
 internal sealed record ThemeVisualPalette(
     Windows.UI.Color Shell,
+    Windows.UI.Color Chrome,
     Windows.UI.Color Input,
     Windows.UI.Color Frame,
     Windows.UI.Color Divider,
@@ -16,6 +17,10 @@ internal sealed record ThemeVisualPalette(
     Windows.UI.Color TreeMutedForeground,
     Windows.UI.Color TreeSelection,
     Windows.UI.Color TreeSelectionForeground,
+    Windows.UI.Color Accent,
+    double AccentBarThickness,
+    Windows.UI.Color PaneBorder,
+    Windows.UI.Color PaneFocusBorder,
     bool IsHighContrast)
 {
     private static Windows.UI.Color Hex(uint rgb) => Windows.UI.Color.FromArgb(
@@ -38,16 +43,33 @@ internal sealed record ThemeVisualPalette(
         "tokyo-night" => New(0x1A1B26, 0x16161E, 0x414868, 0xC0CAF5, 0x33467C),
         "catppuccin-mocha" => New(0x1E1E2E, 0x181825, 0x45475A, 0xCDD6F4, 0x45475A),
         "phthalo-green" => New(0x123524, 0x0B2118, 0x2D5A48, 0xD7EEE5, 0x245A46),
+        // Surfaces stay near-neutral with only a violet cast, and step widely apart, so
+        // elevation reads at a glance. The saturated pink is spent on the accent alone.
+        "vaporwave" => New(0x2E2940, 0x1A1724, 0x332C47, 0xE8E4F0, 0x2E2940) with
+        {
+            Shell = Hex(0x231F31),
+            Chrome = Hex(0x1A1724),
+            Input = Hex(0x12101A),
+            HoverTab = Hex(0x231F31),
+            Accent = Hex(0xFF2D95),
+            AccentBarThickness = 2,
+            PaneBorder = Hex(0x231F31),
+            PaneFocusBorder = Hex(0x4B2E83),
+        },
         "light" => New(0xFFFFFF, 0xF3F3F3, 0xD8D8D8, 0x383A42, 0xBFCEFF),
             _ => New(0x0C0C0C, 0x181818, 0x2B2B2B, 0xCCCCCC, 0x264F78),
         };
     }
 
+    /// <summary>Derives the surface ramp from a theme's five defining colors. Secondary
+    /// chrome (the status bar) lifts just off the shell, and the accent stays the stock
+    /// Windows blue on a hairline bar unless the theme overrides both.</summary>
     private static ThemeVisualPalette New(
         uint active, uint inactive, uint divider, uint foreground, uint selection) =>
-        new(Hex(inactive), Blend(active, inactive), Hex(divider), Hex(divider),
+        new(Hex(inactive), Blend(inactive, divider), Blend(active, inactive), Hex(divider), Hex(divider),
             Hex(active), Blend(active, divider), Hex(inactive),
-            Hex(foreground), Blend(foreground, inactive), Hex(selection), Hex(foreground), false);
+            Hex(foreground), Blend(foreground, inactive), Hex(selection), Hex(foreground),
+            Hex(0x0078D4), 1, Hex(divider), Hex(selection), false);
 
     private static ThemeVisualPalette HighContrast()
     {
@@ -56,8 +78,8 @@ internal sealed record ThemeVisualPalette(
         var text = SystemColor("SystemColorWindowTextColor", ui.GetColorValue(UIColorType.Foreground));
         var highlight = SystemColor("SystemColorHighlightColor", ui.GetColorValue(UIColorType.Accent));
         var highlightText = SystemColor("SystemColorHighlightTextColor", Contrast(highlight));
-        return new(window, window, text, text, window, highlight, window,
-            text, text, highlight, highlightText, true);
+        return new(window, window, window, text, text, window, highlight, window,
+            text, text, highlight, highlightText, highlight, 2, text, highlight, true);
     }
 
     private static Windows.UI.Color SystemColor(string key, Windows.UI.Color fallback)

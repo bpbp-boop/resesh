@@ -15,6 +15,10 @@ const tabGroup = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Contr
 const tabGroupXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml"), "utf8");
 const terminalTab = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"), "utf8");
 const terminalControl = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "TerminalControl.cs"), "utf8");
+const dialogTheme = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "DialogTheme.cs"), "utf8");
+const sessionEditXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "SessionEditDialog.xaml"), "utf8");
+const commandPalette = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "CommandPaletteView.xaml"), "utf8");
+const presentation = fs.readFileSync(path.join(__dirname, "..", "src", "App", "PresentationValues.cs"), "utf8");
 const visualPalette = fs.readFileSync(path.join(__dirname, "..", "src", "App", "ThemeVisualPalette.cs"), "utf8");
 
 const ids = [...catalog.matchAll(/new\("([a-z-]+)",/g)].map(match => match[1]);
@@ -33,6 +37,102 @@ test("Phthalo Green uses its green shell and terminal palette", () => {
     /"phthalo-green": \{\s*background: "#123524", foreground: "#d7eee5", cursor: "#72e0ad", selectionBackground: "#245a46"/,
   );
   assert.match(visualPalette, /"phthalo-green" => New\(0x123524, 0x0B2118, 0x2D5A48, 0xD7EEE5, 0x245A46\)/);
+});
+
+test("Vaporwave keeps its purple under the surfaces, not on them", () => {
+  // Four clearly separated near-neutral steps, deepest pane first.
+  assert.match(
+    terminal,
+    /"vaporwave": \{\s*background: "#12101a", foreground: "#e8e4f0", cursor: "#ff2d95", selectionBackground: "#4b2e83"/,
+  );
+  assert.match(terminalControl, /"vaporwave" => Windows\.UI\.Color\.FromArgb\(255, 0x12, 0x10, 0x1A\)/);
+  const vaporwave = visualPalette.match(/"vaporwave" => New\([\s\S]*?\n        \},/)?.[0] ?? "";
+  assert.match(vaporwave, /New\(0x2E2940, 0x1A1724, 0x332C47, 0xE8E4F0, 0x2E2940\)/);
+  assert.match(vaporwave, /Chrome = Hex\(0x1A1724\)/);
+  assert.match(vaporwave, /Shell = Hex\(0x231F31\)/);
+  assert.match(vaporwave, /Input = Hex\(0x12101A\)/);
+  // Pink is a marker, not a surface or a body foreground.
+  assert.match(vaporwave, /Accent = Hex\(0xFF2D95\)/);
+  assert.match(vaporwave, /AccentBarThickness = 2/);
+  assert.doesNotMatch(vaporwave, /(?:Shell|Chrome|Input|HoverTab|TreeForeground) = Hex\(0xFF2D95\)/);
+  assert.match(vaporwave, /PaneFocusBorder = Hex\(0x4B2E83\)/);
+});
+
+test("the active tab and the focused pane are a full step, not a nudge", () => {
+  // Active tab: its own background step plus the theme accent bar above it.
+  assert.match(presentation, /FocusedTabBorderColor[\s\S]*?parsed\.A > 0 \? parsed : palette\.Accent/);
+  assert.match(presentation, /FocusedTabAccentThickness[\s\S]*?For\(appTheme\)\.AccentBarThickness/);
+  assert.match(
+    tabGroupXaml,
+    /Height="\{x:Bind local:PresentationValues\.FocusedTabAccentThickness\(AppTheme\), Mode=OneWay\}"/,
+  );
+  // Focused pane: the gutter the two panes already share IS the border, so the seam
+  // between panes stays exactly one pixel instead of stacking a border on each side.
+  assert.doesNotMatch(tabGroupXaml, /PaneFocusEdge/);
+  assert.match(
+    mainWindow,
+    /groups\.Contains\(ViewModel\.FocusedGroup\) \? _themePalette\.PaneFocusBorder : _themePalette\.PaneBorder/,
+  );
+  assert.match(mainWindow, /Width = isColumns \? 1 : double\.NaN/);
+  assert.match(
+    mainWindow,
+    /_paneBoundaries\[splitterLine\] =\s*\[\.\. branch\.Children\[index\]\.Values, \.\. branch\.Children\[index \+ 1\]\.Values\]/,
+  );
+  // A boundary the focused pane does not touch stays neutral, and so does the tree splitter.
+  assert.match(mainWindow, /_paneBoundaries\.TryGetValue\(line, out var groups\)[\s\S]*?_themePalette\.Divider/);
+  assert.match(mainWindow, /_paneBoundaries\.Clear\(\)/);
+});
+
+test("the command palette is built from theme surfaces, not Fluent defaults", () => {
+  assert.doesNotMatch(commandPalette, /ThemeResource (?:SolidBackgroundFillColorBaseBrush|SurfaceStrokeColorDefaultBrush)/);
+  // Card on the shell surface, search field recessed to the input surface.
+  assert.match(commandPalette, /x:Name="PaletteCard"[\s\S]*?Background="\{StaticResource SessionShellBrush\}"[\s\S]*?BorderBrush="\{StaticResource SessionChromeFrameBrush\}"/);
+  const searchBox = commandPalette.match(/<TextBox\s+x:Name="SearchBox"[\s\S]*?<\/TextBox>/)?.[0] ?? "";
+  assert.match(searchBox, /x:Key="TextControlBackground" ResourceKey="SessionInputBrush"/);
+  assert.match(searchBox, /x:Key="TextControlPlaceholderForeground" ResourceKey="SessionTreeMutedForegroundBrush"/);
+  // Focus is the one place the palette spends the theme accent.
+  assert.match(searchBox, /x:Key="TextControlBorderBrushFocused" ResourceKey="SessionAccentBrush"/);
+  // Rows select with the session tree's selection color.
+  assert.match(commandPalette, /x:Key="ListViewItemBackgroundSelected" ResourceKey="SessionTreeSelectionBrush"/);
+  assert.match(commandPalette, /x:Key="ListViewItemForegroundSelected" ResourceKey="SessionTreeSelectionForegroundBrush"/);
+  assert.match(appXaml, /x:Key="SessionAccentBrush"/);
+  assert.match(mainWindow, /SessionAccentBrush"\]\)\.Color = palette\.Accent/);
+});
+
+test("session options dialogs follow the session palette", () => {
+  // Dialogs open in their own popup root, so the palette has to be pushed onto them.
+  assert.match(sessionDialog, /InitializeComponent\(\);\s*DialogTheme\.Apply\(this\)/);
+  assert.match(localDialog, /DialogTheme\.Apply\(this\)/);
+  // Surfaces, fields, and selection reuse the same brushes as the main window.
+  assert.match(dialogTheme, /Set\(dialog, shell,[\s\S]*?"ContentDialogBackground"/);
+  assert.match(dialogTheme, /Set\(dialog, input,[\s\S]*?"TextControlBackground"[\s\S]*?"ComboBoxBackground"/);
+  assert.match(dialogTheme, /Set\(dialog, selection,[\s\S]*?"ComboBoxItemBackgroundSelected"/);
+  assert.match(dialogTheme, /Set\(dialog, accent,[\s\S]*?"TextControlBorderBrushFocused"[\s\S]*?"AccentFillColorDefaultBrush"/);
+  // Mutable app brushes, so a live theme change reaches an open dialog.
+  assert.match(dialogTheme, /private static Brush Brush\(string key\) =>\s*\(Brush\)Application\.Current\.Resources\[key\]/);
+});
+
+test("the session options form has room for its columns and scrolls every section", () => {
+  // 500 of content inside the stock 548 cap left nothing for the dialog's own padding.
+  assert.match(sessionEditXaml, /<x:Double x:Key="ContentDialogMaxWidth">660<\/x:Double>/);
+  assert.match(sessionEditXaml, /<StackPanel Spacing="12" MinWidth="580" MaxWidth="600">/);
+  // Both form sections scroll, and the scrollbar has its own gutter rather than
+  // sitting on the fields.
+  const connection = sessionEditXaml.match(/x:Name="ConnectionPanel"[\s\S]*?>/)?.[0] ?? "";
+  const terminal = sessionEditXaml.match(/x:Name="TerminalPanel"[\s\S]*?>/)?.[0] ?? "";
+  for (const section of [connection, terminal]) {
+    assert.match(section, /VerticalScrollBarVisibility="Auto"/);
+    assert.match(section, /Padding="0,0,12,0"/);
+  }
+  assert.match(localDialog, /MaxHeight = 560,\s*Padding = new Thickness\(0, 0, 12, 0\)/);
+  // No negative margins faking the gap between a heading and its caption.
+  assert.doesNotMatch(sessionEditXaml, /Margin="0,-\d/);
+});
+
+test("the status bar takes a themed chrome surface, not a translucent Fluent layer", () => {
+  assert.match(appXaml, /x:Key="SessionChromeBrush"/);
+  assert.match(mainWindowXaml, /x:Name="StatusBar"[\s\S]*?Background="\{StaticResource SessionChromeBrush\}"/);
+  assert.match(mainWindow, /SessionChromeBrush"\]\)\.Color = palette\.Chrome/);
 });
 
 test("global and per-session theme pickers use the shared catalog", () => {

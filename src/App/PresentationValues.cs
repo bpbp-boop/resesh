@@ -119,8 +119,13 @@ public static class PresentationValues
             return palette.TreeSelection;
 
         var parsed = ParseColor(colorTag);
-        return parsed.A > 0 ? parsed : Rgb(0x0078D4);
+        return parsed.A > 0 ? parsed : palette.Accent;
     }
+
+    /// <summary>Height of the active tab's accent bar. Themes whose accent is the only
+    /// saturated color on screen ask for a thicker bar so it reads as a marker.</summary>
+    public static double FocusedTabAccentThickness(string appTheme) =>
+        ThemeVisualPalette.For(appTheme).AccentBarThickness;
 
     private static Brush ResourceBrush(string key) =>
         (Brush)Application.Current.Resources[key];

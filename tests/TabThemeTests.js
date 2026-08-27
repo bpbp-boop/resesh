@@ -15,6 +15,9 @@ const presentation = fs.readFileSync(
 const xaml = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml"),
   "utf8");
+const visualPalette = fs.readFileSync(
+  path.join(__dirname, "..", "src", "App", "ThemeVisualPalette.cs"),
+  "utf8");
 
 test("tab colors use the live saved theme instead of the launch-only application theme", () => {
   assert.match(viewModel, /_appTheme = App\.Settings\.Current\.Theme/);
@@ -35,7 +38,9 @@ test("a selected tab in an unfocused split keeps the active surface and gains an
 });
 
 test("a focused selected tab border follows its session color", () => {
-  assert.match(presentation, /FocusedTabBorderColor\(string appTheme, string\? colorTag\)[\s\S]*?parsed\.A > 0 \? parsed : Rgb\(0x0078D4\)/);
+  // Session color wins; otherwise the theme's accent, which defaults to the stock blue.
+  assert.match(presentation, /FocusedTabBorderColor\(string appTheme, string\? colorTag\)[\s\S]*?parsed\.A > 0 \? parsed : palette\.Accent/);
+  assert.match(visualPalette, /Hex\(0x0078D4\), 1, Hex\(divider\), Hex\(selection\), false\)/);
   assert.match(xaml, /FocusedAccentVisibility\(IsActive, IsGroupFocused\)[\s\S]*?FocusedTabBorderColor\(AppTheme, ColorTag\)/);
 });
 

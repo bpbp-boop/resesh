@@ -48,6 +48,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         SessionSettingsTarget initialTarget = SessionSettingsTarget.General)
     {
         InitializeComponent();
+        DialogTheme.Apply(this);
         OverrideThemeBox.ItemsSource = new[] { new ThemeChoice("", "Use app setting") }
             .Concat(ThemeCatalog.All).ToList();
         _existing = existing;

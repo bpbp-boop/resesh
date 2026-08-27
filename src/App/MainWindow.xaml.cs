@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -1683,6 +1683,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             if (tab.View is TerminalTabView view)
                 view.SetRulerPresentation(ViewModel.IsSplit, tab.IsGroupFocused);
         }
+
+        RepaintSplitterLines();
+    }
+
+    private void RepaintSplitterLines()
+    {
+        foreach (var (splitter, line) in _splitterLines)
+            line.Background = SplitterBrush(line, _activeSplitters.Contains(splitter));
     }
 
     /// <summary>THE close pathway: X button, Ctrl+F4, context menu, and middle-click all land here.</summary>
@@ -1942,6 +1950,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         GroupArea.Children.Clear();
         foreach (var splitter in _splitterLines.Keys.Where(splitter => splitter != TreeSplitter).ToList())
             _splitterLines.Remove(splitter);
+        _paneBoundaries.Clear();
         GroupArea.Children.Add(BuildGroupLayoutElement(_groupLayout.Root));
         UpdateRulerPresentations();
         // Re-assert after WebView2 controls settle into their new rows and columns.
@@ -2018,6 +2027,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 Grid.SetRow(splitterLine, gridIndex + 1);
                 Grid.SetRow(splitter, gridIndex + 1);
             }
+            _paneBoundaries[splitterLine] =
+                [.. branch.Children[index].Values, .. branch.Children[index + 1].Values];
             grid.Children.Add(splitterLine);
             grid.Children.Add(splitter);
             ConfigureSplitter(splitter, splitterLine);
@@ -2334,6 +2345,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var palette = ThemeVisualPalette.For(theme);
         _themePalette = palette;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionShellBrush"]).Color = palette.Shell;
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionChromeBrush"]).Color = palette.Chrome;
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionAccentBrush"]).Color = palette.Accent;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionInputBrush"]).Color = palette.Input;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionChromeFrameBrush"]).Color = palette.Frame;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeForegroundBrush"]).Color = palette.TreeForeground;
@@ -2342,8 +2355,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeSelectionForegroundBrush"]).Color = palette.TreeSelectionForeground;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SettingsCardBorderBrush"]).Color = palette.Frame;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SettingsCardBackgroundBrush"]).Color = palette.Input;
-        foreach (var (splitter, line) in _splitterLines)
-            line.Background = SplitterBrush(_activeSplitters.Contains(splitter));
+        RepaintSplitterLines();
         foreach (var groupView in _groupViews.Values)
             groupView.ApplyTheme(palette);
         ApplyTitleBarButtonColors(theme); // caption buttons don't follow XAML theming
@@ -2689,6 +2701,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     // ---- tree pane persistence ----
 
     private readonly Dictionary<CommunityToolkit.WinUI.Controls.GridSplitter, Border> _splitterLines = [];
+    private readonly Dictionary<Border, HashSet<TabGroupViewModel>> _paneBoundaries = [];
     private readonly HashSet<CommunityToolkit.WinUI.Controls.GridSplitter> _activeSplitters = [];
 
     private void ConfigureSplitter(CommunityToolkit.WinUI.Controls.GridSplitter splitter, Border line)
@@ -2715,13 +2728,26 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 _activeSplitters.Add(splitter);
             else
                 _activeSplitters.Remove(splitter);
-            line.Background = SplitterBrush(active);
+            line.Background = SplitterBrush(line, active);
         }
     }
 
-    private Microsoft.UI.Xaml.Media.Brush SplitterBrush(bool active) => active
-        ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSplitterHoverBrush"]
-        : new Microsoft.UI.Xaml.Media.SolidColorBrush(_themePalette.Divider);
+    /// <summary>Pane focus is carried by the one-pixel gutter the two panes already share.
+    /// A border drawn inside each pane would stack with it, so the seam is the border:
+    /// gutters touching the focused pane take the theme's focus color, the rest stay
+    /// neutral. Same-orientation branches are always flattened, so every leaf under a
+    /// boundary's two subtrees really does touch that boundary.</summary>
+    private Microsoft.UI.Xaml.Media.Brush SplitterBrush(Border line, bool active)
+    {
+        if (active)
+            return (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSplitterHoverBrush"];
+
+        if (!_paneBoundaries.TryGetValue(line, out var groups))
+            return new Microsoft.UI.Xaml.Media.SolidColorBrush(_themePalette.Divider); // the tree splitter
+
+        return new Microsoft.UI.Xaml.Media.SolidColorBrush(
+            groups.Contains(ViewModel.FocusedGroup) ? _themePalette.PaneFocusBorder : _themePalette.PaneBorder);
+    }
 
     private void SaveTreePaneWidth()
     {

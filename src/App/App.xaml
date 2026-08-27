@@ -10,6 +10,8 @@
             <!-- Stable instances avoid WinUI's implicit brush transitions during a live
                  light/dark change. MainWindow mutates their colors before the frame draws. -->
             <SolidColorBrush x:Key="SessionShellBrush" Color="#181818" />
+            <SolidColorBrush x:Key="SessionChromeBrush" Color="#1E1E1E" />
+            <SolidColorBrush x:Key="SessionAccentBrush" Color="#0078D4" />
             <SolidColorBrush x:Key="SessionInputBrush" Color="#121212" />
             <SolidColorBrush x:Key="SessionChromeFrameBrush" Color="#2B2B2B" />
             <SolidColorBrush x:Key="SessionTreeForegroundBrush" Color="#CCCCCC" />

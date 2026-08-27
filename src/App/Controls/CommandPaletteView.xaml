@@ -23,20 +23,43 @@
             Margin="24,72,24,24"
             HorizontalAlignment="Stretch"
             VerticalAlignment="Top"
-            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+            Background="{StaticResource SessionShellBrush}"
+            BorderBrush="{StaticResource SessionChromeFrameBrush}"
             BorderThickness="1"
             CornerRadius="8">
             <Border.Shadow>
                 <ThemeShadow />
             </Border.Shadow>
             <Grid RowDefinitions="Auto,*">
+                <!-- The palette is made of the same material as the session tree: the card
+                     is a shell surface, the search field is recessed to the input surface, and
+                     rows select with the tree's selection color. Only the focus underline
+                     spends the theme accent. -->
                 <TextBox
                     x:Name="SearchBox"
                     Margin="12"
                     PlaceholderText="Search commands and settings"
+                    Foreground="{StaticResource SessionTreeForegroundBrush}"
+                    PlaceholderForeground="{StaticResource SessionTreeMutedForegroundBrush}"
+                    SelectionHighlightColor="{StaticResource SessionAccentBrush}"
                     TextChanged="SearchBox_TextChanged"
-                    AutomationProperties.Name="Search commands and settings" />
+                    AutomationProperties.Name="Search commands and settings">
+                    <TextBox.Resources>
+                        <StaticResource x:Key="TextControlBackground" ResourceKey="SessionInputBrush" />
+                        <StaticResource x:Key="TextControlBackgroundPointerOver" ResourceKey="SessionInputBrush" />
+                        <StaticResource x:Key="TextControlBackgroundFocused" ResourceKey="SessionInputBrush" />
+                        <StaticResource x:Key="TextControlBackgroundDisabled" ResourceKey="SessionInputBrush" />
+                        <StaticResource x:Key="TextControlBorderBrush" ResourceKey="SessionChromeFrameBrush" />
+                        <StaticResource x:Key="TextControlBorderBrushPointerOver" ResourceKey="SessionChromeFrameBrush" />
+                        <StaticResource x:Key="TextControlBorderBrushFocused" ResourceKey="SessionAccentBrush" />
+                        <StaticResource x:Key="TextControlForeground" ResourceKey="SessionTreeForegroundBrush" />
+                        <StaticResource x:Key="TextControlForegroundPointerOver" ResourceKey="SessionTreeForegroundBrush" />
+                        <StaticResource x:Key="TextControlForegroundFocused" ResourceKey="SessionTreeForegroundBrush" />
+                        <StaticResource x:Key="TextControlPlaceholderForeground" ResourceKey="SessionTreeMutedForegroundBrush" />
+                        <StaticResource x:Key="TextControlPlaceholderForegroundPointerOver" ResourceKey="SessionTreeMutedForegroundBrush" />
+                        <StaticResource x:Key="TextControlPlaceholderForegroundFocused" ResourceKey="SessionTreeMutedForegroundBrush" />
+                    </TextBox.Resources>
+                </TextBox>
 
                 <Grid Grid.Row="1">
                     <ListView
@@ -46,7 +69,18 @@
                         SelectionMode="Single"
                         IsItemClickEnabled="True"
                         ItemClick="CommandList_ItemClick"
+                        Foreground="{StaticResource SessionTreeForegroundBrush}"
                         AutomationProperties.Name="Command results">
+                        <ListView.Resources>
+                            <!-- Pointer-over keeps WinUI's translucent overlay: it reads on any
+                                 theme surface. Selection takes the tree's own selection color. -->
+                            <StaticResource x:Key="ListViewItemBackgroundSelected" ResourceKey="SessionTreeSelectionBrush" />
+                            <StaticResource x:Key="ListViewItemBackgroundSelectedPointerOver" ResourceKey="SessionTreeSelectionBrush" />
+                            <StaticResource x:Key="ListViewItemBackgroundSelectedPressed" ResourceKey="SessionTreeSelectionBrush" />
+                            <StaticResource x:Key="ListViewItemForeground" ResourceKey="SessionTreeForegroundBrush" />
+                            <StaticResource x:Key="ListViewItemForegroundPointerOver" ResourceKey="SessionTreeForegroundBrush" />
+                            <StaticResource x:Key="ListViewItemForegroundSelected" ResourceKey="SessionTreeSelectionForegroundBrush" />
+                        </ListView.Resources>
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -80,7 +114,7 @@
                         x:Name="NoResultsText"
                         Margin="20,12,20,24"
                         Text="No matching commands"
-                        Opacity="0.65"
+                        Foreground="{StaticResource SessionTreeMutedForegroundBrush}"
                         HorizontalAlignment="Center"
                         AutomationProperties.LiveSetting="Polite"
                         Visibility="Collapsed" />

@@ -250,7 +250,7 @@
                                     <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBorderColor(AppTheme), Mode=OneWay}" />
                                 </Grid.BorderBrush>
                                 <Rectangle
-                                    Height="1"
+                                    Height="{x:Bind local:PresentationValues.FocusedTabAccentThickness(AppTheme), Mode=OneWay}"
                                     VerticalAlignment="Top"
                                     HorizontalAlignment="Stretch"
                                     Visibility="{x:Bind local:PresentationValues.FocusedAccentVisibility(IsActive, IsGroupFocused), Mode=OneWay}">

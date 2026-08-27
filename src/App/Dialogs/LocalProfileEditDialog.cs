@@ -97,6 +97,7 @@ public sealed class LocalProfileEditDialog : ContentDialog
     public LocalProfileEditDialog(IEnumerable<string> localFolderPaths, Session? existing, string defaultFolder,
         bool isCurrentDefault, SessionSettingsTarget initialTarget = SessionSettingsTarget.General)
     {
+        DialogTheme.Apply(this);
         _existing = existing;
         Title = existing is null ? "New Local Profile" : "Edit Local Profile";
         PrimaryButtonText = "Save";
@@ -150,7 +151,9 @@ public sealed class LocalProfileEditDialog : ContentDialog
             }
         }
 
-        var panel = new StackPanel { Spacing = 12, MinWidth = 420 };
+        // Wide enough for the longest field headers ("Environment overrides (NAME=value
+        // per line; empty value removes)"), which the template clips rather than wraps.
+        var panel = new StackPanel { Spacing = 12, MinWidth = 460 };
         panel.Children.Add(_validation);
         panel.Children.Add(_name);
         panel.Children.Add(_folder);
@@ -184,7 +187,15 @@ public sealed class LocalProfileEditDialog : ContentDialog
             panel.Children.Add(reset);
         }
 
-        Content = new ScrollViewer { MaxHeight = 560, Content = panel };
+        // The scrollbar gets its own gutter: without it, it sits on top of the fields
+        // it overlaps as soon as the form is long enough to scroll (which it always is).
+        Content = new ScrollViewer
+        {
+            MaxHeight = 560,
+            Padding = new Thickness(0, 0, 12, 0),
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = panel,
+        };
         Opened += (_, _) => DispatcherQueue.TryEnqueue(() =>
             InitialFocus(initialTarget)?.Focus(FocusState.Programmatic));
     }

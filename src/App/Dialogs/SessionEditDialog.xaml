@@ -8,7 +8,14 @@
     DefaultButton="Primary"
     PrimaryButtonClick="OnPrimaryButtonClick">
 
-    <StackPanel Spacing="12" MinWidth="500">
+    <ContentDialog.Resources>
+        <!-- The stock cap is 548, which the 500-wide content plus the dialog's own
+             horizontal padding already exceeded: the columns had nothing to spare and
+             the widest captions ran into the edge. -->
+        <x:Double x:Key="ContentDialogMaxWidth">660</x:Double>
+    </ContentDialog.Resources>
+
+    <StackPanel Spacing="12" MinWidth="580" MaxWidth="600">
         <TextBlock
             x:Name="ValidationText"
             Foreground="{ThemeResource SystemFillColorCriticalBrush}"
@@ -23,102 +30,111 @@
             <SelectorBarItem x:Name="NotesSection" Text="Notes" />
         </SelectorBar>
 
+        <!-- A fixed height keeps the dialog from resizing as sections change. Each
+             section scrolls inside it, so a tall one is reachable instead of clipped. -->
         <Grid Height="480">
-            <StackPanel x:Name="ConnectionPanel" Spacing="12">
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="NameBox" Grid.Column="0" Header="Name" PlaceholderText="prod-web-01" />
-                    <ComboBox
-                        x:Name="FolderBox"
-                        Grid.Column="1"
-                        Header="Folder"
-                        IsEditable="True"
-                        PlaceholderText="(root)"
-                        HorizontalAlignment="Stretch" />
-                </Grid>
+            <ScrollViewer
+                x:Name="ConnectionPanel"
+                VerticalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Disabled"
+                Padding="0,0,12,0">
+                <StackPanel Spacing="12">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="NameBox" Grid.Column="0" Header="Name" PlaceholderText="prod-web-01" />
+                        <ComboBox
+                            x:Name="FolderBox"
+                            Grid.Column="1"
+                            Header="Folder"
+                            IsEditable="True"
+                            PlaceholderText="(root)"
+                            HorizontalAlignment="Stretch" />
+                    </Grid>
 
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="120" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="HostBox" Grid.Column="0" Header="Host" PlaceholderText="10.0.0.1 or host.example.com" />
-                    <NumberBox
-                        x:Name="PortBox"
-                        Grid.Column="1"
-                        Header="Port"
-                        Minimum="1"
-                        Maximum="65535"
-                        SpinButtonPlacementMode="Compact"
-                        Value="22" />
-                </Grid>
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="120" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="HostBox" Grid.Column="0" Header="Host" PlaceholderText="10.0.0.1 or host.example.com" />
+                        <NumberBox
+                            x:Name="PortBox"
+                            Grid.Column="1"
+                            Header="Port"
+                            Minimum="1"
+                            Maximum="65535"
+                            SpinButtonPlacementMode="Compact"
+                            Value="22" />
+                    </Grid>
 
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="UsernameBox" Grid.Column="0" Header="Username" PlaceholderText="admin" />
-                    <ComboBox
-                        x:Name="AuthBox"
-                        Grid.Column="1"
-                        Header="Authentication"
-                        SelectedIndex="0"
-                        SelectionChanged="AuthBox_SelectionChanged"
-                        HorizontalAlignment="Stretch">
-                        <ComboBoxItem Content="Password" />
-                        <ComboBoxItem Content="Private key" />
-                        <ComboBoxItem Content="None" />
-                    </ComboBox>
-                </Grid>
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="UsernameBox" Grid.Column="0" Header="Username" PlaceholderText="admin" />
+                        <ComboBox
+                            x:Name="AuthBox"
+                            Grid.Column="1"
+                            Header="Authentication"
+                            SelectedIndex="0"
+                            SelectionChanged="AuthBox_SelectionChanged"
+                            HorizontalAlignment="Stretch">
+                            <ComboBoxItem Content="Password" />
+                            <ComboBoxItem Content="Private key" />
+                            <ComboBoxItem Content="None" />
+                        </ComboBox>
+                    </Grid>
 
-                <Grid x:Name="KeyPathPanel" ColumnSpacing="12" Visibility="Collapsed">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <ComboBox
-                        x:Name="KeyBox"
-                        Grid.Column="0"
-                        Header="SSH key"
-                        DisplayMemberPath="Label"
-                        PlaceholderText="Select a registered key"
-                        HorizontalAlignment="Stretch" />
-                    <Button
-                        Grid.Column="1"
-                        Content="Add…"
-                        VerticalAlignment="Bottom"
-                        Click="AddKey_Click" />
-                </Grid>
+                    <Grid x:Name="KeyPathPanel" ColumnSpacing="12" Visibility="Collapsed">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox
+                            x:Name="KeyBox"
+                            Grid.Column="0"
+                            Header="SSH key"
+                            DisplayMemberPath="Label"
+                            PlaceholderText="Select a registered key"
+                            HorizontalAlignment="Stretch" />
+                        <Button
+                            Grid.Column="1"
+                            Content="Add…"
+                            VerticalAlignment="Bottom"
+                            Click="AddKey_Click" />
+                    </Grid>
 
-                <StackPanel x:Name="PasswordPanel" Spacing="4">
-                    <PasswordBox x:Name="PasswordBox" Header="Password" />
+                    <StackPanel x:Name="PasswordPanel" Spacing="4">
+                        <PasswordBox x:Name="PasswordBox" Header="Password" />
+                        <TextBlock
+                            x:Name="PasswordHint"
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Stored in Windows Credential Manager"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
                     <TextBlock
-                        x:Name="PasswordHint"
+                        x:Name="KeyHint"
                         Style="{ThemeResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Stored in Windows Credential Manager"
-                        TextWrapping="Wrap" />
+                        Text="Resesh keeps a reference to the key in its current location. Manage registered keys from the File menu."
+                        TextWrapping="Wrap"
+                        Visibility="Collapsed" />
                 </StackPanel>
-
-                <TextBlock
-                    x:Name="KeyHint"
-                    Style="{ThemeResource CaptionTextBlockStyle}"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="Resesh keeps a reference to the key in its current location. Manage registered keys from the File menu."
-                    TextWrapping="Wrap"
-                    Visibility="Collapsed" />
-            </StackPanel>
+            </ScrollViewer>
 
             <ScrollViewer
                 x:Name="TerminalPanel"
                 VerticalScrollBarVisibility="Auto"
                 HorizontalScrollBarVisibility="Disabled"
+                Padding="0,0,12,0"
                 Visibility="Collapsed">
-                <StackPanel Spacing="12" Padding="0,0,12,0">
+                <StackPanel Spacing="12">
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -192,16 +208,16 @@
                         TextWrapping="Wrap" />
                 </StackPanel>
 
-                <TextBlock
-                    Style="{ThemeResource BodyStrongTextBlockStyle}"
-                    Text="Appearance overrides"
-                    Margin="0,4,0,0" />
-                <TextBlock
-                    Style="{ThemeResource CaptionTextBlockStyle}"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="Blank fields use the app-wide setting."
-                    Margin="0,-8,0,0"
-                    TextWrapping="Wrap" />
+                <StackPanel Spacing="2" Margin="0,4,0,0">
+                    <TextBlock
+                        Style="{ThemeResource BodyStrongTextBlockStyle}"
+                        Text="Appearance overrides" />
+                    <TextBlock
+                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Blank fields use the app-wide setting."
+                        TextWrapping="Wrap" />
+                </StackPanel>
 
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>

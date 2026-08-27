@@ -898,7 +898,7 @@
             x:Name="StatusBar"
             Grid.Row="2"
             Padding="12,6"
-            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            Background="{StaticResource SessionChromeBrush}"
             BorderBrush="{StaticResource SessionChromeFrameBrush}"
             BorderThickness="0,1,0,0">
             <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" FontSize="12" Opacity="0.8" />
