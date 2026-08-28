@@ -463,11 +463,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download build assets
+      - name: Download x64 release assets
         uses: actions/download-artifact@v8
         with:
+          name: resesh-x64
           path: release-assets
-          merge-multiple: true
+
+      - name: Download ARM64 release assets
+        uses: actions/download-artifact@v8
+        with:
+          name: resesh-arm64
+          path: release-assets
 
       - name: Create checksums
         shell: pwsh
