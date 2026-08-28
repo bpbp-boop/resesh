@@ -148,6 +148,7 @@ jobs:
           "APP_OUTPUT_DIR=$($appExe.Directory.FullName)" >> $env:GITHUB_ENV
 
       - name: Create MSI, setup bundle, and portable ZIP
+        if: github.ref_type != 'tag'
         shell: pwsh
         run: |
           $outputDir = Join-Path $env:GITHUB_WORKSPACE "release-assets"
@@ -192,6 +193,252 @@ jobs:
           }
 
       - name: Upload build assets
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: resesh-${{ matrix.asset_architecture }}
+          path: |
+            release-assets/*.msi
+            release-assets/*-setup.exe
+            release-assets/*-portable.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload application output for signing
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: resesh-app-${{ matrix.asset_architecture }}
+          path: ${{ env.APP_OUTPUT_DIR }}
+          if-no-files-found: error
+          retention-days: 1
+
+  sign:
+    name: Sign ${{ matrix.asset_architecture }}
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: windows-2022
+    environment: code-signing
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - platform: x64
+            asset_architecture: x64
+            installer_platform: x64
+          - platform: ARM64
+            asset_architecture: arm64
+            installer_platform: arm64
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Select .NET 10 SDK
+        run: dotnet new globaljson --sdk-version 10.0.100 --roll-forward latestFeature --force
+
+      - name: Set build version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+            $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          }
+          else {
+            $version = "0.0.$env:GITHUB_RUN_NUMBER"
+          }
+
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Release tags must use the form v1.2.3. MSI versions must be numeric."
+          }
+
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Download application output
+        uses: actions/download-artifact@v8
+        with:
+          name: resesh-app-${{ matrix.asset_architecture }}
+          path: app-output
+
+      - name: Cache SimplySign Desktop
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}\SimplySignDesktop.msi
+          key: simplysign-desktop-windows-9.4.3.90
+
+      - name: Install SimplySign Desktop
+        shell: pwsh
+        run: |
+          $installerUrl = "https://files.certum.eu/software/SimplySignDesktop/Windows/9.4.3.90/SimplySignDesktop-9.4.3.90-64-bit-en.msi"
+          $installerPath = Join-Path $env:RUNNER_TEMP "SimplySignDesktop.msi"
+
+          if (-not (Test-Path $installerPath -PathType Leaf)) {
+            & curl.exe --fail --location --retry 3 --output $installerPath $installerUrl
+            if ($LASTEXITCODE -ne 0) {
+              throw "SimplySign Desktop download failed with exit code $LASTEXITCODE."
+            }
+          }
+          $installerSignature = Get-AuthenticodeSignature $installerPath
+          if ($installerSignature.Status -ne "Valid") {
+            throw "SimplySign Desktop installer has invalid Authenticode status '$($installerSignature.Status)'."
+          }
+          if ($installerSignature.SignerCertificate.Subject -notmatch "(Asseco Data Systems|Certum)") {
+            throw "SimplySign Desktop installer has unexpected signer '$($installerSignature.SignerCertificate.Subject)'."
+          }
+
+          $arguments = @(
+            "/i",
+            $installerPath,
+            "/quiet",
+            "/norestart",
+            "ALLUSERS=1",
+            "REBOOT=ReallySuppress"
+          )
+          $process = Start-Process msiexec.exe -ArgumentList $arguments -Wait -PassThru
+          if ($process.ExitCode -notin @(0, 3010)) {
+            throw "SimplySign Desktop installation failed with exit code $($process.ExitCode)."
+          }
+
+          $executable = "$env:ProgramFiles\Certum\SimplySign Desktop\SimplySignDesktop.exe"
+          if (-not (Test-Path $executable -PathType Leaf)) {
+            throw "SimplySign Desktop installation did not produce '$executable'."
+          }
+
+      - name: Connect to Certum SimplySign
+        shell: pwsh
+        env:
+          CERTUM_USERNAME: ${{ secrets.CERTUM_USERNAME }}
+          CERTUM_OTP_URI: ${{ secrets.CERTUM_OTP_URI }}
+        run: |
+          ./.github/scripts/Connect-SimplySign.ps1 `
+            -Username $env:CERTUM_USERNAME `
+            -OtpUri $env:CERTUM_OTP_URI
+
+      - name: Sign application binaries
+        shell: pwsh
+        run: |
+          $signTool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" `
+            -Recurse `
+            -Filter signtool.exe `
+            -File |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+
+          if ($null -eq $signTool) {
+            throw "SignTool was not found."
+          }
+
+          $appOutputDir = Join-Path $env:GITHUB_WORKSPACE "app-output"
+          $files = @(
+            "Resesh.App.exe",
+            "Resesh.App.dll",
+            "Resesh.Core.dll",
+            "Resesh.Terminal.dll"
+          ) | ForEach-Object { Join-Path $appOutputDir $_ }
+
+          foreach ($file in $files) {
+            if (-not (Test-Path $file -PathType Leaf)) {
+              throw "Application build is missing '$file'."
+            }
+
+            & $signTool.FullName sign `
+              /sha1 $env:CERTUM_CERT_THUMBPRINT `
+              /fd sha256 `
+              /tr http://time.certum.pl `
+              /td sha256 `
+              $file
+            if ($LASTEXITCODE -ne 0) {
+              throw "SignTool failed to sign '$file'."
+            }
+
+            & $signTool.FullName verify /pa /all $file
+            if ($LASTEXITCODE -ne 0) {
+              throw "SignTool could not verify '$file'."
+            }
+          }
+
+          "APP_OUTPUT_DIR=$appOutputDir" >> $env:GITHUB_ENV
+          "SIGNTOOL_PATH=$($signTool.FullName)" >> $env:GITHUB_ENV
+
+      - name: Create and sign release assets
+        shell: pwsh
+        run: |
+          $outputDir = Join-Path $env:GITHUB_WORKSPACE "release-assets"
+          $assetPrefix = "resesh-$env:VERSION-windows-${{ matrix.asset_architecture }}"
+          $zipPath = Join-Path $outputDir "$assetPrefix-portable.zip"
+
+          New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+          Compress-Archive -Path "$env:APP_OUTPUT_DIR\*" -DestinationPath $zipPath -CompressionLevel Optimal
+
+          dotnet build installer/Resesh.Installer.wixproj `
+            --configuration Release `
+            -p:InstallerPlatform="${{ matrix.installer_platform }}" `
+            -p:PayloadDir="$env:APP_OUTPUT_DIR" `
+            -p:ProductVersion="$env:VERSION" `
+            -p:OutputPath="$outputDir"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "MSI build failed with exit code $LASTEXITCODE."
+          }
+
+          $msiPath = Join-Path $outputDir "$assetPrefix.msi"
+          if (-not (Test-Path $msiPath -PathType Leaf)) {
+            throw "MSI build did not produce '$msiPath'."
+          }
+
+          & $env:SIGNTOOL_PATH sign `
+            /sha1 $env:CERTUM_CERT_THUMBPRINT `
+            /fd sha256 `
+            /tr http://time.certum.pl `
+            /td sha256 `
+            $msiPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "SignTool failed to sign '$msiPath'."
+          }
+          & $env:SIGNTOOL_PATH verify /pa /all $msiPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "SignTool could not verify '$msiPath'."
+          }
+
+          ./installer/download-prereqs.ps1 -Arch "${{ matrix.asset_architecture }}"
+
+          dotnet build installer/Resesh.Bundle.wixproj `
+            --configuration Release `
+            -p:InstallerPlatform="${{ matrix.installer_platform }}" `
+            -p:ProductVersion="$env:VERSION" `
+            -p:MsiPath="$msiPath" `
+            -p:OutputPath="$outputDir"
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Bundle build failed with exit code $LASTEXITCODE."
+          }
+
+          $setupPath = Join-Path $outputDir "$assetPrefix-setup.exe"
+          if (-not (Test-Path $setupPath -PathType Leaf)) {
+            throw "Bundle build did not produce '$setupPath'."
+          }
+
+          & $env:SIGNTOOL_PATH sign `
+            /sha1 $env:CERTUM_CERT_THUMBPRINT `
+            /fd sha256 `
+            /tr http://time.certum.pl `
+            /td sha256 `
+            $setupPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "SignTool failed to sign '$setupPath'."
+          }
+          & $env:SIGNTOOL_PATH verify /pa /all $setupPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "SignTool could not verify '$setupPath'."
+          }
+
+      - name: Upload signed build assets
         uses: actions/upload-artifact@v7
         with:
           name: resesh-${{ matrix.asset_architecture }}
@@ -205,7 +452,7 @@ jobs:
   release:
     name: Create GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: sign
     runs-on: windows-2022
     permissions:
       contents: write
