@@ -107,7 +107,7 @@ public static class TmuxPersistence
             + "if type history >/dev/null 2>&1; then "
             + "case \"$(history 1)\" in *resesh-tmux-bootstrap*) "
             + "history -d \"$(history 1 | awk '{print $1;exit}')\" >/dev/null 2>&1;; esac; fi; "
-            + "printf '\\n[Resesh] tmux not found on this host - continuing without persistence.\\n\\n'; "
+            + "printf '\\n[resesh] tmux not found on this host - continuing without persistence.\\n\\n'; "
             + "fi # resesh-tmux-bootstrap";
     }
 

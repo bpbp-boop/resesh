@@ -444,7 +444,7 @@ keyboard-interactive fallback.
 - ConEmu's `OSC 9;4` progress form is explicitly NOT a notification: PowerShell 7 emits it
   for ordinary progress bars, which would otherwise light up every long-running tab.
 - Structured events use `OSC 7377 ; agent ; id=… ; state=… ; label=…` ("SESS" on a phone
-  keypad), namespaced after the code so 7377 can carry other Resesh subprotocols. Chosen
+  keypad), namespaced after the code so 7377 can carry other resesh subprotocols. Chosen
   clear of 0/1/2, 7, 8, 9, 52, 133, 633, 777 and 1337. Labels are percent-decoded, then
   stripped of control/format characters and truncated to 80 chars — terminal output is
   untrusted, and a label never leaves the app (taskbar flash and beep carry no content).
@@ -482,7 +482,7 @@ keyboard-interactive fallback.
   the prompt raised the icon and `ls -la` retired it.
 
 ## 2026-08-18 - First-class SSH key registry (5.0)
-- A private key stays in the user-selected location. Resesh registers its external path and
+- A private key stays in the user-selected location. resesh registers its external path and
   public metadata in `ssh-keys.json`; it never copies, moves, or deletes the private-key file.
   This avoids a second source of truth for OpenSSH, Git, agents, scripts, and key rotation.
 - SSH sessions reference one stable key id. A registered key may serve many sessions, and its
@@ -531,7 +531,7 @@ keyboard-interactive fallback.
 - Setting commands open the existing editor at the correct section and focus the target
   control. The palette does not duplicate validation, preview, Save, or Cancel behavior.
 - Per-session terminal values are labeled Session Settings. They persist on the saved
-  profile and affect its open and future tabs; Resesh still has no transient tab-only
+  profile and affect its open and future tabs; resesh still has no transient tab-only
   appearance layer.
 - WebView2 does not forward window accelerators. The terminal page captures Ctrl+Shift+P
   at the window boundary and uses the existing page-to-host message path, including when

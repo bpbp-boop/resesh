@@ -1,4 +1,4 @@
-# Downloads the redistributables the Resesh setup bundle embeds. Both URLs are
+# Downloads the redistributables the resesh setup bundle embeds. Both URLs are
 # Microsoft's evergreen "latest" permalinks.
 param(
     [ValidateSet("x64", "arm64")]

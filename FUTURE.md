@@ -1,4 +1,4 @@
-# Resesh Future
+# resesh Future
 
 Ideas that are worth preserving but are not committed roadmap work. When an item is
 scheduled, move it to [ROADMAP.md](ROADMAP.md) and keep implementation decisions in
@@ -8,9 +8,9 @@ scheduled, move it to [ROADMAP.md](ROADMAP.md) and keep implementation decisions
 
 ## 1. Password-manager-backed SSH keys
 
-**Goal:** let a Resesh session authenticate with an SSH key held by 1Password,
+**Goal:** let a resesh session authenticate with an SSH key held by 1Password,
 Bitwarden, KeePass/KeePassXC, Keeper, Proton Pass, or another compatible agent. The
-private key and its passphrase must never enter Resesh storage.
+private key and its passphrase must never enter resesh storage.
 
 This extends the `AuthMethod.Agent` work already listed under **Connectivity** in the
 roadmap. It is an SSH-agent integration, not a separate SDK integration for each
@@ -33,7 +33,7 @@ Expected provider paths:
   Ed25519 and RSA keys, but currently has no per-host agent key selection or `ssh-add`
   constraints.
 - **Keeper** — its desktop agent uses the system-wide OpenSSH pipe. KeeperPAM can add
-  managed tunnels and key rotation, but Resesh only needs the agent boundary.
+  managed tunnels and key rotation, but resesh only needs the agent boundary.
 - **KeePassXC** — it loads database-backed keys into Windows OpenSSH agent or Pageant;
   KeePassXC does not provide a separate agent endpoint.
 - **KeePass with KeeAgent** — use its OpenSSH-compatible or Pageant interface. Do not
@@ -46,7 +46,7 @@ wire behavior. Unknown RFC-compatible agents must work without a provider adapte
 
 ### Session and key identity
 
-Resesh already owns the destination identity: session id, display name, username,
+resesh already owns the destination identity: session id, display name, username,
 host, and port. Keep that separate from the client key:
 
 - Identify an agent key by its public-key algorithm and SHA-256 public-key fingerprint.
@@ -75,7 +75,7 @@ or try to import their saved hosts.
    rejection as different errors.
 
 The base agent signing request contains the public key, data to sign, and flags. It does
-not contain a friendly hostname. Resesh can show the destination in its own UI, but must
+not contain a friendly hostname. resesh can show the destination in its own UI, but must
 not claim that the password manager's approval is bound to that host.
 
 OpenSSH defines `session-bind@openssh.com` and
@@ -148,7 +148,7 @@ Automation behind a small C ABI used by Microsoft's C# WPF wrapper.
   SFTP, SSHFS, or tmux handling with `ssh.exe`.
 - Build a pinned, architecture-specific native DLL and host its child HWND from
   WinUI 3. Do not depend on the repository's `Windows.UI.Xaml` `TermControl`,
-  which is not directly compatible with Resesh's `Microsoft.UI.Xaml` controls.
+  which is not directly compatible with resesh's `Microsoft.UI.Xaml` controls.
 - Put a narrow, versioned adapter around the native ABI. Do not expose Microsoft
   Terminal internals throughout the C# application.
 - Preserve the current `TerminalControl` host contract so the native experiment

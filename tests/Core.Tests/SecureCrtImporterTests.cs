@@ -8,6 +8,90 @@ public sealed class SecureCrtImporterTests
     private static string FixtureDir =>
         Path.Combine(AppContext.BaseDirectory, "Fixtures", "SecureCRT");
 
+    private sealed class MockSecureCrtConfigSource(
+        string? configPath,
+        bool storePersonalDataSeparately = false,
+        string? personalDataPath = null) : ISecureCrtConfigSource
+    {
+        public SecureCrtConfigSettings GetSettings() =>
+            new(configPath, storePersonalDataSeparately, personalDataPath);
+    }
+
+    [Fact]
+    public void ScanDefault_UsesConfiguredRegistryRoot()
+    {
+        var configDir = Directory.CreateTempSubdirectory("securecrt-config-test");
+        try
+        {
+            var sessionsDir = Directory.CreateDirectory(Path.Combine(configDir.FullName, "Sessions"));
+            File.WriteAllText(
+                Path.Combine(sessionsDir.FullName, "configured-session.ini"),
+                "S:\"Hostname\"=registry.example\n"
+                + "S:\"Username\"=admin\n"
+                + "S:\"Protocol Name\"=SSH2\n"
+                + "D:\"[SSH2] Port\"=00000016");
+            var source = new MockSecureCrtConfigSource(configDir.FullName);
+
+            var paths = SecureCrtImporter.GetSessionPaths(source);
+            Assert.Equal(sessionsDir.FullName, paths.ConfigSessionsPath);
+            Assert.Null(paths.PersonalSessionsPath);
+            var candidate = Assert.Single(SecureCrtImporter.ScanDefault(source).Importable);
+            Assert.Equal("configured-session", candidate.Name);
+            Assert.Equal("registry.example", candidate.Host);
+        }
+        finally
+        {
+            configDir.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ScanDefault_OverlaysUsernameOnlyWhenPersonalDataIsEnabled()
+    {
+        var root = Directory.CreateTempSubdirectory("securecrt-personal-test");
+        try
+        {
+            var configPath = Directory.CreateDirectory(Path.Combine(root.FullName, "Config"));
+            var configSessions = Directory.CreateDirectory(Path.Combine(configPath.FullName, "Sessions", "Team"));
+            File.WriteAllText(
+                Path.Combine(configSessions.FullName, "router.ini"),
+                "S:\"Hostname\"=router.example\n"
+                + "S:\"Username\"=shared-user\n"
+                + "S:\"Protocol Name\"=SSH2");
+
+            var personalPath = Directory.CreateDirectory(Path.Combine(root.FullName, "ConfigPersonal"));
+            var personalSessions = Directory.CreateDirectory(
+                Path.Combine(personalPath.FullName, "Sessions", "Team"));
+            File.WriteAllText(
+                Path.Combine(personalSessions.FullName, "router.ini"),
+                "S:\"Username\"=personal-user\n"
+                + "S:\"Password V2\"=encrypted-value");
+
+            var enabledSource = new MockSecureCrtConfigSource(
+                configPath.FullName,
+                storePersonalDataSeparately: true,
+                personalDataPath: personalPath.FullName);
+            var paths = SecureCrtImporter.GetSessionPaths(enabledSource);
+            Assert.Equal(Path.Combine(personalPath.FullName, "Sessions"), paths.PersonalSessionsPath);
+
+            var candidate = Assert.Single(SecureCrtImporter.ScanDefault(enabledSource).Importable);
+            Assert.Equal("router.example", candidate.Host);
+            Assert.Equal("personal-user", candidate.Username);
+
+            var disabledSource = new MockSecureCrtConfigSource(
+                configPath.FullName,
+                storePersonalDataSeparately: false,
+                personalDataPath: personalPath.FullName);
+            var candidateWithoutOverlay = Assert.Single(
+                SecureCrtImporter.ScanDefault(disabledSource).Importable);
+            Assert.Equal("shared-user", candidateWithoutOverlay.Username);
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
     [Fact]
     public void Scan_FindsSshSessionsAndMirrorsFolders()
     {

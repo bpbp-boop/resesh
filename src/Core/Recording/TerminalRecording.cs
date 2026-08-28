@@ -395,7 +395,7 @@ internal sealed class TerminalDiskRecorder : IDisposable
             env = new Dictionary<string, string>
             {
                 ["TERM"] = string.IsNullOrWhiteSpace(terminalType) ? "xterm-256color" : terminalType,
-                ["SHELL"] = "Resesh",
+                ["SHELL"] = "resesh",
             },
         };
         _castWriter.WriteLine(JsonSerializer.Serialize(header, JsonOptions));

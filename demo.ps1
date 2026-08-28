@@ -17,7 +17,7 @@ $process = Start-Process -FilePath $exe -ArgumentList "--demo" -PassThru
 while (-not $process.HasExited) {
     $process.Refresh()
     if ($process.MainWindowHandle -ne 0) {
-        Write-Host "Resesh demo is ready (PID $($process.Id))."
+        Write-Host "resesh demo is ready (PID $($process.Id))."
         break
     }
     Start-Sleep -Milliseconds 100

@@ -181,7 +181,7 @@ public static class GlobalSettingsDialog
             Spacing = 16,
             Children =
             {
-                Description("These settings apply throughout Resesh. A saved session can override supported terminal and highlighting defaults."),
+                Description("These settings apply throughout resesh. A saved session can override supported terminal and highlighting defaults."),
                 generalColumns,
                 SectionCard(
                     "Startup",
@@ -237,7 +237,7 @@ public static class GlobalSettingsDialog
 
         var tabStatusCard = SectionCard(
             "Tab display",
-            "Replace a session icon while Resesh recognizes a supported agent in that tab.",
+            "Replace a session icon while resesh recognizes a supported agent in that tab.",
             agentIcons);
         var alertCard = SectionCard(
             "Background alerts",
@@ -253,11 +253,11 @@ public static class GlobalSettingsDialog
             Spacing = 16,
             Children =
             {
-                Description("Track supported coding agents in each terminal tab. Resesh can notify you when an agent needs a response."),
+                Description("Track supported coding agents in each terminal tab. resesh can notify you when an agent needs a response."),
                 agentColumns,
                 SectionCard(
                     "Agent adapters",
-                    "Resesh identifies supported agents automatically. Add an adapter only for exact working, waiting, and finished states.",
+                    "resesh identifies supported agents automatically. Add an adapter only for exact working, waiting, and finished states.",
                     AgentAdapterPanel.Create()),
             },
         };

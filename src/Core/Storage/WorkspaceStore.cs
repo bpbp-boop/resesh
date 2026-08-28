@@ -30,6 +30,8 @@ public sealed record WorkspaceLayoutNode
     public int GroupIndex { get; init; } = -1;
     public SplitOrientation? Orientation { get; init; }
     public IReadOnlyList<WorkspaceLayoutNode> Children { get; init; } = [];
+    /// <summary>Arranged width or height of each child pane, in DIPs.</summary>
+    public IReadOnlyList<double> Sizes { get; init; } = [];
 }
 
 /// <summary>A named, stable saved layout.</summary>
@@ -393,6 +395,8 @@ public sealed class WorkspaceStore
     {
         if (node.Children is null)
             throw new InvalidDataException("A workspace split node has no children collection.");
+        if (node.Sizes is null)
+            throw new InvalidDataException("A workspace split node has no pane sizes collection.");
 
         if (node.Orientation is null)
         {
@@ -404,12 +408,16 @@ public sealed class WorkspaceStore
                 throw new InvalidDataException("A workspace split layout contains an invalid group leaf.");
             }
             groupIndices.Add(node.GroupIndex);
+            if (node.Sizes.Count != 0)
+                throw new InvalidDataException("A workspace leaf cannot contain pane sizes.");
             return new WorkspaceLayoutNode { GroupIndex = node.GroupIndex };
         }
 
         if (node.GroupIndex != -1
             || !Enum.IsDefined(node.Orientation.Value)
-            || node.Children.Count < 2)
+            || node.Children.Count < 2
+            || (node.Sizes.Count != 0 && node.Sizes.Count != node.Children.Count)
+            || node.Sizes.Any(size => !double.IsFinite(size) || size <= 0))
         {
             throw new InvalidDataException("A workspace split layout contains an invalid branch.");
         }
@@ -422,6 +430,7 @@ public sealed class WorkspaceStore
                     ? throw new InvalidDataException("A workspace split layout contains a null node.")
                     : NormalizeLayoutNode(child, groupCount, groupIndices))
                 .ToList(),
+            Sizes = node.Sizes.ToList(),
         };
     }
 

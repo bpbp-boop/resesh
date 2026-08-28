@@ -1,7 +1,7 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
-    Name="Resesh"
-    Manufacturer="Resesh"
+    Name="resesh"
+    Manufacturer="resesh"
     Version="$(ProductVersion)"
     UpgradeCode="E284A090-DB9E-4E77-8E76-607841ED669E"
     Scope="perMachine"
@@ -31,7 +31,7 @@
         <Shortcut
           Id="ReseshStartMenuShortcut"
           Directory="ProgramMenuFolder"
-          Name="Resesh"
+          Name="resesh"
           WorkingDirectory="INSTALLFOLDER"
           Advertise="yes" />
       </File>

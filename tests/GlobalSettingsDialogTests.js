@@ -32,7 +32,7 @@ test("the general tab groups related settings and stacks cards on narrow windows
   assert.match(dialog, /SectionCard\("Terminal interaction"/);
   assert.match(dialog, /ConfigureResponsiveColumns\(generalColumns, stackCards/);
   assert.match(dialog, /StackedCardThreshold/);
-  assert.match(dialog, /These settings apply throughout Resesh/);
+  assert.match(dialog, /These settings apply throughout resesh/);
 });
 
 test("settings tracks window size and reflows fields without horizontal scrolling", () => {

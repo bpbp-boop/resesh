@@ -95,7 +95,7 @@
                         <FontIcon Glyph="&#xE756;" FontSize="17" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <StackPanel Spacing="1" VerticalAlignment="Center">
-                        <TextBlock Text="Welcome to Resesh" Style="{ThemeResource BodyStrongTextBlockStyle}" FontSize="15" />
+                        <TextBlock Text="Welcome to resesh" Style="{ThemeResource BodyStrongTextBlockStyle}" FontSize="15" />
                         <TextBlock
                             Text="Quick setup and configuration"
                             Style="{ThemeResource CaptionTextBlockStyle}"
@@ -136,7 +136,7 @@
 
                 <!-- Hero Section Header -->
                 <StackPanel Spacing="8">
-                    <TextBlock Text="Make Resesh yours" Style="{ThemeResource TitleTextBlockStyle}" FontWeight="Bold" FontSize="26" />
+                    <TextBlock Text="Make resesh yours" Style="{ThemeResource TitleTextBlockStyle}" FontWeight="Bold" FontSize="26" />
                     <TextBlock
                         MaxWidth="840"
                         HorizontalAlignment="Left"
@@ -472,7 +472,7 @@
                             <TextBlock Text="Import Sessions" Style="{ThemeResource SubtitleTextBlockStyle}" FontWeight="SemiBold" />
                         </StackPanel>
                         <TextBlock
-                            Text="Automatically scanned from your environment. Click import to bring in your hosts with passwords safely stored in Windows Credential Manager."
+                            Text="Automatically scanned from your environment. Import brings in hosts and folders. Passwords are not imported; you will be prompted on first connect and can save them in Windows Credential Manager."
                             TextWrapping="Wrap"
                             Style="{ThemeResource CaptionTextBlockStyle}"
                             Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />

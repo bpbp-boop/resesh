@@ -728,7 +728,7 @@ public sealed partial class TabGroupView : UserControl
     }
 
     /// <summary>
-    /// Rebuilds the Agent submenu: what Resesh thinks is running here, an explicit
+    /// Rebuilds the Agent submenu: what resesh thinks is running here, an explicit
     /// override (or "auto"), and the adapter snippets. A manual choice is exactly that —
     /// detection never overwrites it, and it never touches the session icon.
     /// </summary>

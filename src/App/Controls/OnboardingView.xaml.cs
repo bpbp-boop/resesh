@@ -72,10 +72,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
 
         var puttyTask = Task.Run(() => PuttyRegistryImporter.Scan());
         var openSshTask = Task.Run(() => OpenSshConfigImporter.Scan(OpenSshConfigImporter.DefaultConfigPath));
-        var secureCrtTask = Task.Run(() =>
-            Directory.Exists(SecureCrtImporter.DefaultConfigSessionsPath)
-                ? SecureCrtImporter.Scan(SecureCrtImporter.DefaultConfigSessionsPath)
-                : new ImportScanResult { Importable = [], Skipped = [] });
+        var secureCrtTask = Task.Run(SecureCrtImporter.ScanDefault);
 
         try
         {

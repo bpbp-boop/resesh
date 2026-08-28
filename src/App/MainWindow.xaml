@@ -6,7 +6,7 @@
     xmlns:controls="using:Resesh.App.Controls"
     xmlns:vm="using:Resesh.App.ViewModels"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
-    Title="Resesh">
+    Title="resesh">
 
     <Grid
         x:Name="Root"
@@ -888,8 +888,8 @@
                 ResizeDirection="Columns"
                 ManipulationCompleted="TreeSplitter_ManipulationCompleted" />
 
-            <!-- Recursive tab-group layout. Code builds equal row/column siblings and
-                 inserts a GridSplitter between each pair. -->
+            <!-- Recursive tab-group layout. Code builds row/column siblings and inserts
+                 a GridSplitter between each pair. -->
             <Grid x:Name="GroupArea" Grid.Column="3" />
         </Grid>
 

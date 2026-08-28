@@ -179,7 +179,7 @@ public static class SshKeyManagerDialog
                 {
                     new TextBlock
                     {
-                        Text = "Resesh records where each key is stored. It does not copy or move private-key files.",
+                        Text = "resesh records where each key is stored. It does not copy or move private-key files.",
                         TextWrapping = TextWrapping.Wrap,
                     },
                     status,

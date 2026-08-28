@@ -2,7 +2,7 @@
   <PropertyGroup>
     <InstallerPlatform Condition="'$(InstallerPlatform)' == ''">x64</InstallerPlatform>
     <IntermediateOutputPath>obj\bundle\$(InstallerPlatform)\$(Configuration)\</IntermediateOutputPath>
-    <OutputName>Resesh-$(ProductVersion)-windows-$(InstallerPlatform)-setup</OutputName>
+    <OutputName>resesh-$(ProductVersion)-windows-$(InstallerPlatform)-setup</OutputName>
     <OutputType>Bundle</OutputType>
     <ProductVersion Condition="'$(ProductVersion)' == ''">0.0.0</ProductVersion>
     <DefineConstants>$(DefineConstants);ProductVersion=$(ProductVersion);Arch=$(InstallerPlatform);MsiPath=$(MsiPath)</DefineConstants>

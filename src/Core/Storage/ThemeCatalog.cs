@@ -10,8 +10,8 @@ public static class ThemeCatalog
 {
     public static IReadOnlyList<ThemeChoice> All { get; } =
     [
-        new("dark", "Resesh Dark"),
-        new("light", "Resesh Light", true),
+        new("dark", "resesh Dark"),
+        new("light", "resesh Light", true),
         new("system", "System"),
         new("solarized-dark", "Solarized Dark"),
         new("solarized-light", "Solarized Light", true),

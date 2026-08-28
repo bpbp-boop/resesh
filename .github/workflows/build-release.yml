@@ -151,7 +151,7 @@ jobs:
         shell: pwsh
         run: |
           $outputDir = Join-Path $env:GITHUB_WORKSPACE "release-assets"
-          $assetPrefix = "Resesh-$env:VERSION-windows-${{ matrix.asset_architecture }}"
+          $assetPrefix = "resesh-$env:VERSION-windows-${{ matrix.asset_architecture }}"
           $zipPath = Join-Path $outputDir "$assetPrefix-portable.zip"
 
           New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
@@ -281,7 +281,7 @@ jobs:
 
           if ($LASTEXITCODE -eq 0) {
             gh release edit $env:GITHUB_REF_NAME `
-              --title "Resesh $env:GITHUB_REF_NAME" `
+              --title "resesh $env:GITHUB_REF_NAME" `
               --notes-file $env:RELEASE_NOTES_PATH
             gh release upload $env:GITHUB_REF_NAME @assets --clobber
           }
@@ -289,5 +289,5 @@ jobs:
             gh release create $env:GITHUB_REF_NAME @assets `
               --verify-tag `
               --notes-file $env:RELEASE_NOTES_PATH `
-              --title "Resesh $env:GITHUB_REF_NAME"
+              --title "resesh $env:GITHUB_REF_NAME"
           }

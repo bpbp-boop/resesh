@@ -455,7 +455,7 @@ public sealed class TabViewModel : ObservableObject
         get
         {
             if (IsOnboarding)
-                return "Setup Resesh";
+                return "Setup resesh";
             if (TerminalTitle is not { } title)
                 return RunningCommand ?? PromptContext ?? FallbackSubtitle;
             var match = PromptTitle.Match(title);

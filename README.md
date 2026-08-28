@@ -1,4 +1,4 @@
-# Resesh
+# resesh
 
 A tabbed SSH and local-terminal client for Windows, built to replace SecureCRT for daily use:
 a folder tree of saved sessions, fast search, tabbed xterm.js terminals, paired asciicast
@@ -34,7 +34,7 @@ Launch an isolated demo with a populated session tree:
 ```
 
 The script builds the app for the current processor architecture and starts it with
-disposable demo data. It does not read or change the normal Resesh sessions, settings, or
+disposable demo data. It does not read or change the normal resesh sessions, settings, or
 credentials. Use `.\demo.ps1 -Platform ARM64` to override the detected architecture.
 
 ## Releases

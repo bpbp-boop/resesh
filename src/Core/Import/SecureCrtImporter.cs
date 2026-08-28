@@ -27,19 +27,83 @@ public sealed record ImportScanResult
     public required IReadOnlyList<ImportCandidate> Skipped { get; init; }
 }
 
+internal readonly record struct SecureCrtConfigSettings(
+    string? ConfigPath,
+    bool StorePersonalDataSeparately,
+    string? PersonalDataPath);
+
+internal interface ISecureCrtConfigSource
+{
+    SecureCrtConfigSettings GetSettings();
+}
+
+internal sealed class WindowsSecureCrtConfigSource : ISecureCrtConfigSource
+{
+    private const string SecureCrtKeyPath = @"Software\VanDyke\SecureCRT";
+    private const string ConfigPathValueName = "Config Path";
+    private const string StorePersonalDataSeparatelyValueName = "Store Personal Data Separately";
+    private const string PersonalDataPathValueName = "Personal Data Path";
+
+    public SecureCrtConfigSettings GetSettings()
+    {
+        if (!OperatingSystem.IsWindows())
+            return default;
+
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(SecureCrtKeyPath);
+            return new SecureCrtConfigSettings(
+                key?.GetValue(ConfigPathValueName) as string,
+                key?.GetValue(StorePersonalDataSeparatelyValueName) is int and not 0,
+                key?.GetValue(PersonalDataPathValueName) as string);
+        }
+        catch (Exception)
+        {
+            return default;
+        }
+    }
+}
+
 /// <summary>
-/// Reads SecureCRT's Config\Sessions directory. Each session is an .ini file; the directory
-/// structure is the folder tree. Passwords are intentionally not imported (SecureCRT encrypts
-/// them; imported sessions are marked "credential needed" instead).
+/// Reads SecureCRT's Config\Sessions directory and overlays usernames from the matching
+/// personal-data session files when separate personal storage is enabled. The directory
+/// structure is the folder tree. Passwords stay encrypted and are intentionally not imported;
+/// imported sessions are marked "credential needed" instead.
 /// </summary>
 public static class SecureCrtImporter
 {
     private static readonly string[] SkippedFileNames = ["__FolderData__.ini", "Default.ini"];
 
-    public static string DefaultConfigSessionsPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VanDyke", "Config", "Sessions");
+    public static ImportScanResult ScanDefault() => ScanDefault(new WindowsSecureCrtConfigSource());
 
-    public static ImportScanResult Scan(string sessionsDir)
+    internal static ImportScanResult ScanDefault(ISecureCrtConfigSource source)
+    {
+        var (configSessionsPath, personalSessionsPath) = GetSessionPaths(source);
+        return Directory.Exists(configSessionsPath)
+            ? Scan(configSessionsPath, personalSessionsPath)
+            : new ImportScanResult { Importable = [], Skipped = [] };
+    }
+
+    internal static (string ConfigSessionsPath, string? PersonalSessionsPath) GetSessionPaths(
+        ISecureCrtConfigSource source)
+    {
+        var settings = source.GetSettings();
+        var configPath = string.IsNullOrWhiteSpace(settings.ConfigPath)
+            ? Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "VanDyke",
+                "Config")
+            : settings.ConfigPath.Trim();
+        var personalSessionsPath =
+            settings.StorePersonalDataSeparately && !string.IsNullOrWhiteSpace(settings.PersonalDataPath)
+                ? Path.Combine(settings.PersonalDataPath.Trim(), "Sessions")
+                : null;
+        return (Path.Combine(configPath, "Sessions"), personalSessionsPath);
+    }
+
+    public static ImportScanResult Scan(string sessionsDir) => Scan(sessionsDir, personalSessionsDir: null);
+
+    private static ImportScanResult Scan(string sessionsDir, string? personalSessionsDir)
     {
         var importable = new List<ImportCandidate>();
         var skipped = new List<ImportCandidate>();
@@ -53,6 +117,15 @@ public static class SecureCrtImporter
             var relative = Path.GetRelativePath(sessionsDir, file);
             var folder = FolderPaths.Normalize(Path.GetDirectoryName(relative) ?? "");
             var candidate = Parse(File.ReadAllText(file), Path.GetFileNameWithoutExtension(fileName), folder, relative);
+            if (personalSessionsDir is not null)
+            {
+                var personalFile = Path.Combine(personalSessionsDir, relative);
+                if (File.Exists(personalFile)
+                    && GetStringValue(File.ReadAllText(personalFile), "Username") is { } personalUsername)
+                {
+                    candidate = candidate with { Username = personalUsername.Trim() };
+                }
+            }
             (candidate.IsSupported ? importable : skipped).Add(candidate);
         }
 
@@ -107,6 +180,22 @@ public static class SecureCrtImporter
             Username = username.Trim(),
             Protocol = protocol,
         };
+    }
+
+    private static string? GetStringValue(string iniContent, string expectedKey)
+    {
+        string? result = null;
+        foreach (var rawLine in iniContent.Split('\n'))
+        {
+            var line = rawLine.TrimEnd('\r').Trim();
+            if (TryParseLine(line, out var kind, out var key, out var value)
+                && kind == 'S'
+                && key == expectedKey)
+            {
+                result = value;
+            }
+        }
+        return result;
     }
 
     /// <summary>Matches lines of the shape X:"Key"=Value; anything else is ignored.</summary>

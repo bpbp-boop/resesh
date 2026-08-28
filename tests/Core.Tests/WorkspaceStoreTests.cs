@@ -104,6 +104,40 @@ public sealed class WorkspaceStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveLoad_PreservesArrangedPaneSizes()
+    {
+        var path = Path.Combine(_dir.FullName, "sized-workspace.json");
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+        var layout = new WorkspaceLayout
+        {
+            Groups =
+            [
+                new WorkspaceGroup { Tabs = [new WorkspaceTabReference { SessionId = first }] },
+                new WorkspaceGroup { Tabs = [new WorkspaceTabReference { SessionId = second }] },
+            ],
+            Layout = new WorkspaceLayoutNode
+            {
+                Orientation = SplitOrientation.Columns,
+                Sizes = [417.25, 803.5],
+                Children =
+                [
+                    new WorkspaceLayoutNode { GroupIndex = 0 },
+                    new WorkspaceLayoutNode { GroupIndex = 1 },
+                ],
+            },
+        };
+
+        var store = new WorkspaceStore(path);
+        store.Load();
+        store.SaveAs("Sized", layout);
+
+        var loaded = new WorkspaceStore(path);
+        loaded.Load();
+        Assert.Equal([417.25, 803.5], Assert.Single(loaded.Workspaces).Layout!.Sizes);
+    }
+
+    [Fact]
     public void Load_CorruptPrimaryFallsBackToBakFromPreviousAtomicWrite()
     {
         var path = Path.Combine(_dir.FullName, "workspaces.json");

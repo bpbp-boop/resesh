@@ -30,6 +30,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private readonly Dictionary<TabGroupViewModel, TabGroupView> _groupViews = [];
     private SplitLayout<TabGroupViewModel> _groupLayout;
+    private Guid? _workspaceId;
     private bool _closeConfirmed;
     private bool _closePromptOpen;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
@@ -84,7 +85,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ViewModel.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(MainViewModel.StatusText))
+            {
                 SyncSessionMenu();
+                App.RefreshWindowTitles();
+            }
         };
         ScheduleExpansionSync();
         SyncEmptyState();
@@ -101,6 +105,26 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             App.Workspaces.SaveLastLayout(CaptureWorkspaceLayout());
             ViewModel.CloseAllTabs(); // tear down live SSH sessions without hanging
         };
+    }
+
+    internal void RefreshWindowTitle(bool showContext)
+    {
+        if (!showContext)
+        {
+            Title = "resesh";
+            return;
+        }
+
+        var workspaceName = _workspaceId is { } workspaceId
+            ? App.Workspaces.Workspaces.FirstOrDefault(workspace => workspace.Id == workspaceId)?.Name
+            : null;
+        Title = workspaceName ?? ViewModel.ActiveTab?.Session.Name ?? "resesh";
+    }
+
+    private void SetWorkspaceContext(Guid? workspaceId)
+    {
+        _workspaceId = workspaceId;
+        App.RefreshWindowTitles();
     }
 
     private void SystemColorsChanged(UISettings sender, object args)
@@ -703,7 +727,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             var pronoun = count == 1 ? "it" : "them";
             var dialog = new ContentDialog
             {
-                Title = "Exit Resesh?",
+                Title = "Exit resesh?",
                 Content = $"Are you sure you want to exit? You have {count} open {sessionText}. Exiting will close {pronoun}.",
                 PrimaryButtonText = "Exit",
                 CloseButtonText = "Cancel",
@@ -1167,28 +1191,55 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                     ActiveTabIndex = Math.Max(activeIndex, 0),
                 };
             }).ToList(),
-            Layout = CaptureWorkspaceLayoutNode(_groupLayout.Root, groupIndices),
+            Layout = CaptureWorkspaceLayoutNode(
+                _groupLayout.Root,
+                groupIndices,
+                GroupArea.Children.FirstOrDefault() as FrameworkElement),
         };
     }
 
-    private static WorkspaceLayoutNode CaptureWorkspaceLayoutNode(
+    private WorkspaceLayoutNode CaptureWorkspaceLayoutNode(
         SplitLayoutNode<TabGroupViewModel> node,
-        IReadOnlyDictionary<TabGroupViewModel, int> groupIndices) =>
+        IReadOnlyDictionary<TabGroupViewModel, int> groupIndices,
+        FrameworkElement? element) =>
         node switch
         {
             SplitLayoutLeaf<TabGroupViewModel> leaf => new WorkspaceLayoutNode
             {
                 GroupIndex = groupIndices[leaf.Value],
             },
-            SplitLayoutBranch<TabGroupViewModel> branch => new WorkspaceLayoutNode
-            {
-                Orientation = branch.Orientation,
-                Children = branch.Children
-                    .Select(child => CaptureWorkspaceLayoutNode(child, groupIndices))
-                    .ToList(),
-            },
+            SplitLayoutBranch<TabGroupViewModel> branch => CaptureWorkspaceLayoutBranch(
+                branch, groupIndices, element),
             _ => throw new InvalidOperationException("Unknown split layout node."),
         };
+
+    private WorkspaceLayoutNode CaptureWorkspaceLayoutBranch(
+        SplitLayoutBranch<TabGroupViewModel> branch,
+        IReadOnlyDictionary<TabGroupViewModel, int> groupIndices,
+        FrameworkElement? element)
+    {
+        var grid = element as Grid;
+        var isColumns = branch.Orientation == SplitOrientation.Columns;
+        IReadOnlyList<double> sizes = grid is null
+            ? []
+            : branch.Children.Select((_, index) => isColumns
+                ? grid.ColumnDefinitions[index * 2].ActualWidth
+                : grid.RowDefinitions[index * 2].ActualHeight).ToList();
+        if (sizes.Count != branch.Children.Count || sizes.Any(size => !double.IsFinite(size) || size <= 0))
+            sizes = [];
+
+        return new WorkspaceLayoutNode
+        {
+            Orientation = branch.Orientation,
+            Sizes = sizes,
+            Children = branch.Children
+                .Select((child, index) => CaptureWorkspaceLayoutNode(
+                    child,
+                    groupIndices,
+                    grid is null ? null : (FrameworkElement)grid.Children[index * 3]))
+                .ToList(),
+        };
+    }
 
     internal void RefreshWorkspaceMenu()
     {
@@ -1386,6 +1437,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             Groups = workspace.Groups,
             Layout = workspace.Layout,
         }, additive);
+        SetWorkspaceContext(additive ? null : workspace.Id);
     }
 
     private static void OpenWorkspaceInNewWindow(Workspace workspace)
@@ -1396,6 +1448,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             Groups = workspace.Groups,
             Layout = workspace.Layout,
         }, additive: false);
+        window.SetWorkspaceContext(workspace.Id);
     }
 
     /// <summary>Launch-time restoration. The setting guard keeps direct callers honest.</summary>
@@ -1611,18 +1664,27 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void RebuildWorkspaceSplitLayout(
         IReadOnlyList<TabGroupViewModel> groups,
-        WorkspaceLayoutNode layout) =>
+        WorkspaceLayoutNode layout)
+    {
+        _savedPaneSizes.Clear();
         _groupLayout = new SplitLayout<TabGroupViewModel>(
             BuildWorkspaceSplitNode(layout, groups));
+    }
 
-    private static SplitLayoutNode<TabGroupViewModel> BuildWorkspaceSplitNode(
+    private SplitLayoutNode<TabGroupViewModel> BuildWorkspaceSplitNode(
         WorkspaceLayoutNode node,
-        IReadOnlyList<TabGroupViewModel> groups) =>
-        node.Orientation is { } orientation
-            ? new SplitLayoutBranch<TabGroupViewModel>(
-                orientation,
-                node.Children.Select(child => BuildWorkspaceSplitNode(child, groups)))
-            : new SplitLayoutLeaf<TabGroupViewModel>(groups[node.GroupIndex]);
+        IReadOnlyList<TabGroupViewModel> groups)
+    {
+        if (node.Orientation is not { } orientation)
+            return new SplitLayoutLeaf<TabGroupViewModel>(groups[node.GroupIndex]);
+
+        var branch = new SplitLayoutBranch<TabGroupViewModel>(
+            orientation,
+            node.Children.Select(child => BuildWorkspaceSplitNode(child, groups)));
+        if (node.Sizes.Count == node.Children.Count)
+            _savedPaneSizes[branch] = node.Sizes.ToList();
+        return branch;
+    }
 
 
     private void PlaceWorkspaceTab(TabViewModel tab, TabGroupViewModel target, int index)
@@ -1965,14 +2027,25 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var branch = (SplitLayoutBranch<TabGroupViewModel>)node;
         var grid = new Grid();
         var isColumns = branch.Orientation == SplitOrientation.Columns;
+        var hasSavedSizes = _savedPaneSizes.TryGetValue(branch, out var savedSizes);
 
         for (var index = 0; index < branch.Children.Count; index++)
         {
             var gridIndex = index * 2;
             if (isColumns)
-                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                grid.ColumnDefinitions.Add(new ColumnDefinition
+                {
+                    Width = hasSavedSizes
+                        ? new GridLength(savedSizes![index])
+                        : new GridLength(1, GridUnitType.Star),
+                });
             else
-                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+                grid.RowDefinitions.Add(new RowDefinition
+                {
+                    Height = hasSavedSizes
+                        ? new GridLength(savedSizes![index])
+                        : new GridLength(1, GridUnitType.Star),
+                });
 
             var child = BuildGroupLayoutElement(branch.Children[index]);
             Grid.SetColumn(child, 0);
@@ -2703,6 +2776,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private readonly Dictionary<CommunityToolkit.WinUI.Controls.GridSplitter, Border> _splitterLines = [];
     private readonly Dictionary<Border, HashSet<TabGroupViewModel>> _paneBoundaries = [];
     private readonly HashSet<CommunityToolkit.WinUI.Controls.GridSplitter> _activeSplitters = [];
+    private readonly Dictionary<SplitLayoutBranch<TabGroupViewModel>, IReadOnlyList<double>> _savedPaneSizes = [];
 
     private void ConfigureSplitter(CommunityToolkit.WinUI.Controls.GridSplitter splitter, Border line)
     {
@@ -3016,9 +3090,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             var picker = new Windows.Storage.Pickers.FileSavePicker
             {
                 SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
-                SuggestedFileName = $"Resesh backup {DateTime.Now:yyyy-MM-dd}",
+                SuggestedFileName = $"resesh backup {DateTime.Now:yyyy-MM-dd}",
             };
-            picker.FileTypeChoices.Add("Resesh backup", [".reseshbackup"]);
+            picker.FileTypeChoices.Add("resesh backup", [".reseshbackup"]);
             WinRT.Interop.InitializeWithWindow.Initialize(
                 picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
             var file = await picker.PickSaveFileAsync();
@@ -3161,10 +3235,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             var puttyTask = Task.Run(() => Core.Import.PuttyRegistryImporter.Scan());
             var openSshTask = Task.Run(() =>
                 Core.Import.OpenSshConfigImporter.Scan(Core.Import.OpenSshConfigImporter.DefaultConfigPath));
-            var secureCrtTask = Task.Run(() =>
-                Directory.Exists(Core.Import.SecureCrtImporter.DefaultConfigSessionsPath)
-                    ? Core.Import.SecureCrtImporter.Scan(Core.Import.SecureCrtImporter.DefaultConfigSessionsPath)
-                    : EmptyImportScan());
+            var secureCrtTask = Task.Run(Core.Import.SecureCrtImporter.ScanDefault);
 
             await Task.WhenAll(puttyTask, openSshTask, secureCrtTask);
             var puttyScan = await puttyTask;
@@ -3269,11 +3340,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             : await Task.Run(() => Core.Import.SecureCrtImporter.Scan(folder.Path));
     }
 
-    private static Core.Import.ImportScanResult EmptyImportScan() => new()
-    {
-        Importable = [],
-        Skipped = [],
-    };
 
     // ---- Tree selection (Explorer-style: click, Ctrl+click toggle, Shift+click range) ----
 

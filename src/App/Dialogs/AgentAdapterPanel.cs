@@ -8,7 +8,7 @@ namespace Resesh.App.Dialogs;
 
 /// <summary>
 /// The opt-in adapter snippets (Phase 6.2), hosted inline in the Settings dialog's Agents
-/// tab. Resesh deliberately installs nothing: the exact text is shown here, the user
+/// tab. resesh deliberately installs nothing: the exact text is shown here, the user
 /// copies it to a target they choose, and removing it is deleting the lines again. An
 /// adapter's only power is to emit one escape sequence describing what the agent is doing —
 /// it can never send input or approve anything.
@@ -24,7 +24,7 @@ public static class AgentAdapterPanel
             IsClosable = false,
             Severity = InfoBarSeverity.Informational,
             Title = "Manual setup",
-            Message = "Resesh does not install adapters or change any host. An adapter only reports status to its terminal; it cannot approve requests or send input.",
+            Message = "resesh does not install adapters or change any host. An adapter only reports status to its terminal; it cannot approve requests or send input.",
         });
         panel.Children.Add(new TextBlock
         {

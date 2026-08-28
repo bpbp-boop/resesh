@@ -8,7 +8,7 @@ namespace Resesh.Core.Agents;
 public sealed record AgentAdapterSnippet(string Title, string Target, string Description, string Text);
 
 /// <summary>
-/// Text for the opt-in adapters. Resesh never installs these itself: the tab menu shows
+/// Text for the opt-in adapters. resesh never installs these itself: the tab menu shows
 /// the exact text, the user copies it to the target they choose, and removing it is
 /// deleting the lines again. Nothing here can send input to a session — an adapter's only
 /// power is to emit one escape sequence describing what the agent is doing.
@@ -76,7 +76,7 @@ public static class AgentAdapters
         return JsonSerializer.Serialize(
             new
             {
-                description = "Resesh tab status for Codex. Reports state only; never approves or sends input.",
+                description = "resesh tab status for Codex. Reports state only; never approves or sends input.",
                 hooks,
             },
             // Relaxed escaping so the quotes inside the commands stay readable (\" instead
@@ -136,7 +136,7 @@ public static class AgentAdapters
         "~/.bashrc or ~/.zshrc · Any command-line agent",
         "Reports working, finished, and failed states for an agent command that you wrap.",
         """
-        # Resesh agent status: resesh_agent <id> <state> [label]
+        # resesh agent status: resesh_agent <id> <state> [label]
         resesh_agent() { printf '\033]7377;agent;id=%s;state=%s;label=%s\007' "$1" "$2" "${3:-}" > /dev/tty; }
 
         # Example wrapper — `agentrun claude` reports the run's lifecycle to the tab.

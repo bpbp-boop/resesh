@@ -2,8 +2,8 @@
      xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Bundle
-    Name="Resesh"
-    Manufacturer="Resesh"
+    Name="resesh"
+    Manufacturer="resesh"
     Version="$(ProductVersion)"
     UpgradeCode="7B7F9C7D-2F0A-4E1B-9D25-9C4B7A1E63F2"
     IconSourceFile="..\src\App\Assets\app.ico"

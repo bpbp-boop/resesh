@@ -1,4 +1,4 @@
-# Resesh Roadmap
+# resesh Roadmap
 
 What's planned next, roughly in order of value and dependency. Design details and
 version-specific findings for work already shipped live in [DECISIONS.md](DECISIONS.md)
@@ -145,7 +145,7 @@ export archive.
 
 ## Backlog — unordered candidates
 
-**Non-goal — scripting/automation API:** Resesh is the interactive layer; fleet
+**Non-goal — scripting/automation API:** resesh is the interactive layer; fleet
 automation belongs in Ansible/Netmiko-class tooling run from a trusted host, where it's
 versioned and reviewed. No embedded scripting language, ever. Command snippets stay in
 scope — interactive-shaped, not automation-shaped. **Broadcast input is cut too**: it's
@@ -162,7 +162,7 @@ have `synchronize-panes` if they truly want it.
 - **Per-session color schemes** — extend the settings-override layer + the palettes in
   `terminal.html`; `Session.ColorTag` already exists as the tab accent.
 - **Manual shell-integration snippet** — optionally show and copy OSC 133/OSC 7 setup
-  for users who choose to install it. Resesh must never send setup code automatically.
+  for users who choose to install it. resesh must never send setup code automatically.
 - **Foreground-process title side channel** — tmux-grade `pane_current_command` on plain
   sessions with zero shell cooperation: each tab owns its SSH connection, so an exec
   channel can locate the shell channel's process ($PPID → our sshd child → its child

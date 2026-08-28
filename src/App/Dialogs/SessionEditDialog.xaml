@@ -122,7 +122,7 @@
                         x:Name="KeyHint"
                         Style="{ThemeResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Resesh keeps a reference to the key in its current location. Manage registered keys from the File menu."
+                        Text="resesh keeps a reference to the key in its current location. Manage registered keys from the File menu."
                         TextWrapping="Wrap"
                         Visibility="Collapsed" />
                 </StackPanel>

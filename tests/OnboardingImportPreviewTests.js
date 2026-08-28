@@ -34,11 +34,12 @@ test("Welcome commits only the candidates confirmed in the preview", () => {
     /SecureCrtImporter\.Commit\(App\.Store, scan\.Importable\)/);
 });
 
-test("the preview lists aliases and connection targets with explicit confirmation", () => {
+test("the preview lists aliases, targets, and destination folders with explicit confirmation", () => {
   assert.match(previewXaml, /PrimaryButtonText="Import"/);
   assert.match(previewXaml, /CloseButtonText="Cancel"/);
   assert.match(previewXaml, /Text="\{x:Bind Name\}"/);
   assert.match(previewXaml, /Text="\{x:Bind Detail\}"/);
+  assert.match(previewXaml, /Text="\{x:Bind FolderDetail\}"/);
   assert.match(previewCode, /public string Name => Candidate\.Name/);
-  assert.match(previewCode, /return \$"\{user\}\{target\}\{folder\}"/);
+  assert.match(previewCode, /Candidate\.FolderPath\.Length > 0 \? \$"Folder: \{Candidate\.FolderPath\}" : "Folder: \(root\)"/);
 });

@@ -25,10 +25,14 @@ public sealed class ImportCandidateVm : ObservableObject
         {
             var target = Candidate.Port == 22 ? Candidate.Host : $"{Candidate.Host}:{Candidate.Port}";
             var user = Candidate.Username.Length > 0 ? $"{Candidate.Username}@" : "";
-            var folder = Candidate.FolderPath.Length > 0 ? $"  →  {Candidate.FolderPath}" : "";
-            return $"{user}{target}{folder}";
+            return $"{user}{target}";
         }
     }
+
+    public string FolderDetail =>
+        Candidate.FolderPath.Length > 0 ? $"Folder: {Candidate.FolderPath}" : "Folder: (root)";
+
+    public string AccessibleName => $"{Name}, {Detail}, {FolderDetail}";
 }
 
 public sealed partial class ImportPreviewDialog : ContentDialog

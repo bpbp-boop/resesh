@@ -225,12 +225,22 @@ public partial class App : Application
     /// required because WinUI does not expose an application window collection.</summary>
     public static MainWindow OpenNewWindow() => ((App)Current).CreateWindowCore();
 
+    internal static void RefreshWindowTitles()
+    {
+        if (Current is not App app)
+            return;
+        var showContext = app._windows.Count > 1;
+        foreach (var window in app._windows.ToList())
+            window.RefreshWindowTitle(showContext);
+    }
+
     internal static void RefreshWorkspaceMenus()
     {
         if (Current is not App app)
             return;
         foreach (var window in app._windows.ToList())
             window.RefreshWorkspaceMenu();
+        RefreshWindowTitles();
     }
 
     internal static void SetTabContentDropTargetsVisible(bool visible)
@@ -245,8 +255,13 @@ public partial class App : Application
     {
         var window = new MainWindow();
         _windows.Add(window);
-        window.Closed += (_, _) => _windows.Remove(window);
+        window.Closed += (_, _) =>
+        {
+            _windows.Remove(window);
+            RefreshWindowTitles();
+        };
         window.Activate();
+        RefreshWindowTitles();
         return window;
     }
 

@@ -9,3 +9,4 @@ Properties/PublishProfiles/
 .env
 .wrangler/
 .artifacts/
+.tmp/
