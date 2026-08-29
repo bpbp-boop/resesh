@@ -30,9 +30,14 @@ function makeAddon(active, normal) {
   let markers = 0;
   addon._term = {
     buffer: { active, normal: normal || active },
-    registerMarker() {
+    registerMarker(offset) {
       markers++;
-      return { line: 0, isDisposed: false, dispose() { this.isDisposed = true; }, onDispose() {} };
+      return {
+        line: active.baseY + active.cursorY + (offset || 0),
+        isDisposed: false,
+        dispose() { this.isDisposed = true; },
+        onDispose() {}
+      };
     },
   };
   addon.markerCount = () => markers;
@@ -135,6 +140,24 @@ test("discovery still titles a full-screen app that took the alternate screen, w
   runPendingTimers(); // retry: still alternate, probe gives up
   assert.deepEqual(addon.calls, [["vim notes.txt", 7]]);
   assert.equal(addon.markerCount(), 1); // the probe only — no mark on the alternate screen
+});
+
+test("a full-screen command replaces an earlier command before the buffer switches", () => {
+  const normal = buffer([
+    line("u@h:~$ ls"),
+    line("u@h:~$ nano notes.txt"),
+  ]);
+  const addon = makeAddon(normal);
+
+  addon.notifyEnter(4);
+  normal.cursorY = 1;
+  addon.notifyEnter(4);
+  addon._term.buffer.active = buffer([line("editing notes.txt")], "alternate");
+  addon.notifyEnter(4); // Enter inside nano must not revive or replace the prior command.
+  runPendingTimers();
+  runPendingTimers();
+
+  assert.deepEqual(addon.calls, [["ls", 4], ["nano notes.txt", 4]]);
 });
 
 test("discovery stays quiet on a line without a prompt shape", () => {

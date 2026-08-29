@@ -55,3 +55,14 @@ test("saved and previewed theme changes refresh every open tab palette", () => {
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)[\s\S]*?foreach \(var tab in ViewModel\.AllTabs\)[\s\S]*?tab\.ApplyAppTheme\(theme\)/);
   assert.match(xaml, /TabHeaderBorderColor\(AppTheme\), Mode=OneWay/);
 });
+
+test("persistent tabs prefer a newer detected command over a delayed tmux title", () => {
+  const subtitle = viewModel.match(
+    /public string Subtitle[\s\S]*?private string FallbackSubtitle/)?.[0] ?? "";
+  assert.ok(
+    subtitle.indexOf("Session.Persistent && RunningCommand") < subtitle.indexOf("TerminalTitle is not"),
+    "the detected command must win before the stale tmux title is considered");
+  assert.match(
+    viewModel,
+    /Session\.Persistent && AgentDetection\.IsShellTitle\(TerminalTitle\)[\s\S]*?RunningCommand = null/);
+});

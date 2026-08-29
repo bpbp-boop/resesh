@@ -389,11 +389,14 @@ public sealed class TabViewModel : ObservableObject
             TerminalTitle = null;
         else
             TerminalTitle = trimmed;
-        // A prompt-shaped title means the shell is drawing a prompt again: whatever
-        // command was running is over. This is the only end signal hosts without
-        // OSC 133 ever send.
-        if (TerminalTitle is { } t && PromptTitle.IsMatch(t))
+        // A prompt-shaped title means the shell is drawing a prompt again. Persistent
+        // sessions report the foreground shell name instead because tmux owns OSC titles.
+        // Both are definite end signals for the last detected command.
+        if ((TerminalTitle is { } t && PromptTitle.IsMatch(t))
+            || (Session.Persistent && AgentDetection.IsShellTitle(TerminalTitle)))
+        {
             RunningCommand = null;
+        }
     }
 
     private string? _runningCommand;
@@ -447,8 +450,9 @@ public sealed class TabViewModel : ObservableObject
     /// <summary>
     /// The tab's second line, best available: what a program set as the title, else the
     /// running command the page saw start, else the cwd from a prompt-shaped title, else
-    /// the endpoint. The endpoint is always known, so this never returns empty — a blank
-    /// second line would leave a visible gap in the strip.
+    /// the endpoint. A persistent session gives a newer Enter-gated command priority over
+    /// tmux's window title because tmux can publish the previous foreground process late.
+    /// The endpoint is always known, so this never returns empty.
     /// </summary>
     public string Subtitle
     {
@@ -456,6 +460,8 @@ public sealed class TabViewModel : ObservableObject
         {
             if (IsOnboarding)
                 return "Setup resesh";
+            if (Session.Persistent && RunningCommand is { } persistentCommand)
+                return persistentCommand;
             if (TerminalTitle is not { } title)
                 return RunningCommand ?? PromptContext ?? FallbackSubtitle;
             var match = PromptTitle.Match(title);

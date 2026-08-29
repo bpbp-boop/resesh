@@ -1080,13 +1080,13 @@
   };
 
   /** Discovered marks: called by the page when the user's input contains Enter.
-   * The cursor row is anchored with a probe marker and its text evaluated only after
-   * the echo round trip settles — typed characters are echoed by the REMOTE side, so
-   * a fast paste (or a laggy link) can put Enter ahead of its own command's echo.
-   * The probe walks back across soft wraps to the row the prompt started on; a line
-   * that never grows a prompt+command shape just disposes quietly. The page's title
-   * epoch rides along so it can drop a discovered command whose prompt title already
-   * moved on (a fast command finished before the probe fired). */
+   * The cursor row is anchored with a probe marker. If the command is already echoed,
+   * report it before returning to xterm; this prevents an older probe from winning when
+   * the new command immediately switches to the alternate buffer. The delayed evaluation
+   * still handles a fast paste (or a laggy link) whose remote echo arrives after Enter,
+   * and owns mark creation after that echo settles. Wrapped commands walk back to the row
+   * where the prompt started. The page's title epoch rides along so it can drop a delayed
+   * command whose prompt title already moved on. */
   RulerAddon.prototype.notifyEnter = function (epoch) {
     if (this._cmdOscSeen || this._term.buffer.active.type === "alternate") return;
     this._lastPromptSignature = null;
@@ -1096,6 +1096,34 @@
     this._cmdEnterProbes.push(marker);
     var attempts = 0;
     var reported = false;
+
+    function readCommand() {
+      var norm = self._term.buffer.normal;
+      var row = marker.line;
+      var bufLine = norm.getLine(row);
+      while (bufLine && bufLine.isWrapped && row > 0) {
+        row--;
+        bufLine = norm.getLine(row);
+      }
+      var lineText = bufLine ? bufLine.translateToString(true) : "";
+      // Gate on CMD_PROMPT_RE (prompt plus a real command); CMD_SPLIT_RE then says
+      // where the command starts, so the title slices at the column the mark used.
+      var match = CMD_PROMPT_RE.test(lineText) ? CMD_SPLIT_RE.exec(lineText) : null;
+      if (!match) return null;
+      return {
+        row: row,
+        text: self._cmdText(norm, row, lineText.length - match[2].length)
+      };
+    }
+
+    // Most interactive input was echoed before Enter. Capture it now because a program
+    // such as nano can switch buffers before the settle timer gets a chance to run.
+    var visibleCommand = readCommand();
+    if (visibleCommand) {
+      reported = true;
+      self._fireCommand(visibleCommand.text, epoch);
+    }
+
     function evaluate() {
       if (marker.isDisposed) { self._finishCommandProbe(marker); return; }
       if (self._cmdOscSeen || !self._term) {
@@ -1108,25 +1136,14 @@
       // have taken the alternate screen before the probe fired — that app IS the
       // running command, so the title must still come out. The mark stays gated on
       // the normal screen being active (_cmdCommit's math is cursor-relative).
-      var norm = self._term.buffer.normal;
-      var row = marker.line;
-      var bufLine = norm.getLine(row);
-      while (bufLine && bufLine.isWrapped && row > 0) {
-        row--;
-        bufLine = norm.getLine(row);
-      }
-      var lineText = bufLine ? bufLine.translateToString(true) : "";
-      // Gate on CMD_PROMPT_RE (prompt plus a real command); CMD_SPLIT_RE then says
-      // where the command starts, so the title slices at the column the mark used.
-      var m = CMD_PROMPT_RE.test(lineText) ? CMD_SPLIT_RE.exec(lineText) : null;
-      if (m) {
-        var commandText = self._cmdText(norm, row, lineText.length - m[2].length);
+      var command = readCommand();
+      if (command) {
         if (!reported) {
           reported = true;
-          self._fireCommand(commandText, epoch);
+          self._fireCommand(command.text, epoch);
         }
         if (self._term.buffer.active.type !== "alternate") {
-          self._cmdCommit(row, null, "guess", marker._osc3008Id, commandText);
+          self._cmdCommit(command.row, null, "guess", marker._osc3008Id, command.text);
           marker.dispose();
           self._finishCommandProbe(marker);
           return;

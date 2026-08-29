@@ -16,7 +16,7 @@ test("OSC 3008 crosses the terminal boundary as bounded raw data", () => {
 });
 
 test("OSC 3008 command results enrich Enter-gated marks without replacing discovery", () => {
-  assert.match(ruler, /_cmdCommit\(row, null, "guess", marker\._osc3008Id, commandText\)/);
+  assert.match(ruler, /_cmdCommit\(command\.row, null, "guess", marker\._osc3008Id, command\.text\)/);
   assert.match(ruler, /current\.exit = parsed\.status[\s\S]*?current\.entry\.exit/);
   assert.doesNotMatch(ruler, /_onOsc3008[\s\S]{0,500}_cmdOscSeen = true/);
 });
