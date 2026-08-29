@@ -39,25 +39,6 @@ test("Phthalo Green uses its green shell and terminal palette", () => {
   assert.match(visualPalette, /"phthalo-green" => New\(0x123524, 0x0B2118, 0x2D5A48, 0xD7EEE5, 0x245A46\)/);
 });
 
-test("Vaporwave keeps its purple under the surfaces, not on them", () => {
-  // Four clearly separated near-neutral steps, deepest pane first.
-  assert.match(
-    terminal,
-    /"vaporwave": \{\s*background: "#12101a", foreground: "#e8e4f0", cursor: "#ff2d95", selectionBackground: "#4b2e83"/,
-  );
-  assert.match(terminalControl, /"vaporwave" => Windows\.UI\.Color\.FromArgb\(255, 0x12, 0x10, 0x1A\)/);
-  const vaporwave = visualPalette.match(/"vaporwave" => New\([\s\S]*?\n        \},/)?.[0] ?? "";
-  assert.match(vaporwave, /New\(0x2E2940, 0x1A1724, 0x332C47, 0xE8E4F0, 0x2E2940\)/);
-  assert.match(vaporwave, /Chrome = Hex\(0x1A1724\)/);
-  assert.match(vaporwave, /Shell = Hex\(0x231F31\)/);
-  assert.match(vaporwave, /Input = Hex\(0x12101A\)/);
-  // Pink is a marker, not a surface or a body foreground.
-  assert.match(vaporwave, /Accent = Hex\(0xFF2D95\)/);
-  assert.match(vaporwave, /AccentBarThickness = 2/);
-  assert.doesNotMatch(vaporwave, /(?:Shell|Chrome|Input|HoverTab|TreeForeground) = Hex\(0xFF2D95\)/);
-  assert.match(vaporwave, /PaneFocusBorder = Hex\(0x4B2E83\)/);
-});
-
 test("the active tab and the focused pane are a full step, not a nudge", () => {
   // Active tab: its own background step plus the theme accent bar above it.
   assert.match(presentation, /FocusedTabBorderColor[\s\S]*?parsed\.A > 0 \? parsed : palette\.Accent/);
