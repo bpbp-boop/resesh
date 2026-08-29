@@ -8,6 +8,7 @@ const dialog = read("src", "App", "Dialogs", "GlobalSettingsDialog.cs");
 const highlightPanel = read("src", "App", "Dialogs", "HighlightEditorPanel.cs");
 const agentPanel = read("src", "App", "Dialogs", "AgentAdapterPanel.cs");
 const windowCode = read("src", "App", "MainWindow.xaml.cs");
+const windowXaml = read("src", "App", "MainWindow.xaml");
 
 test("settings is one targeted dialog with General / Recording / Highlighting / Agents tabs", () => {
   assert.match(dialog, /new SelectorBar\(\)/);
@@ -30,16 +31,18 @@ test("the tab host keeps one responsive height so switching tabs doesn't resize 
 test("the general tab groups related settings and stacks cards on narrow windows", () => {
   assert.match(dialog, /SectionCard\("Appearance"/);
   assert.match(dialog, /SectionCard\("Terminal interaction"/);
+  assert.match(dialog, /SectionCard\(\s*"Interface"[\s\S]*?showStatusBar/);
   assert.match(dialog, /ConfigureResponsiveColumns\(generalColumns, stackCards/);
   assert.match(dialog, /StackedCardThreshold/);
   assert.match(dialog, /These settings apply throughout resesh/);
 });
 
-test("settings tracks window size and reflows fields without horizontal scrolling", () => {
+test("settings tracks window size and keeps cards clear of the scrollbar", () => {
   assert.match(dialog, /xamlRoot\.Changed \+= XamlRootChanged/);
   assert.match(dialog, /xamlRoot\.Changed -= XamlRootChanged/);
   assert.match(dialog, /ConfigureResponsiveColumns\(numberGrid, stackFields/);
   assert.match(dialog, /ConfigureResponsiveColumns\(rewindGrid, stackFields/);
+  assert.match(dialog, /Padding = new Thickness\(0, 0, 20, 0\)/);
   assert.match(dialog, /HorizontalScrollBarVisibility = ScrollBarVisibility\.Disabled/);
 });
 
@@ -58,6 +61,7 @@ test("settings fields and section tabs have stable automation IDs", () => {
     ["scrollback", "SettingsScrollback"],
     ["copyOnSelect", "SettingsCopyOnSelect"],
     ["rightClickPaste", "SettingsRightClickPaste"],
+    ["showStatusBar", "SettingsShowStatusBar"],
     ["reopenLastLayout", "SettingsReopenLastLayout"],
     ["recordingDirectory", "SettingsRecordingDirectory"],
     ["alwaysRecord", "SettingsAlwaysRecord"],
@@ -165,6 +169,16 @@ test("background alert choices are unavailable when agent icons are off", () => 
   assert.match(dialog, /agentFlash\.IsEnabled = agentIcons\.IsOn/);
   assert.match(dialog, /agentSound\.IsEnabled = agentIcons\.IsOn/);
   assert.match(dialog, /agentIcons\.Toggled \+= \(_, _\) => SyncAgentAlertControls\(\)/);
+});
+
+test("the status bar is visible by default and follows the saved setting", () => {
+  assert.match(dialog, /IsOn = current\.ShowStatusBar/);
+  assert.match(dialog, /Header = WrappingHeader\("Show status bar"\)/);
+  assert.match(windowXaml, /x:Name="StatusBar"[\s\S]*?AutomationProperties\.AutomationId="StatusBar"/);
+  assert.match(windowXaml, /x:Name="StatusBar"[\s\S]*?Grid\.Row="2"/);
+  assert.match(windowCode, /ApplyStatusBarVisibility\(settings\.ShowStatusBar\)/);
+  assert.match(windowCode, /StatusBarMenuItem\.IsChecked = visible/);
+  assert.match(windowCode, /ShowStatusBar = updated\.ShowStatusBar/);
 });
 
 test("saving rebases only the dialog's fields onto the live settings", () => {

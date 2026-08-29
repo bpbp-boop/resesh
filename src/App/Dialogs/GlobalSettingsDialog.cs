@@ -16,6 +16,7 @@ public enum GlobalSettingsTarget
     Scrollback,
     CopyOnSelect,
     RightClickPaste,
+    ShowStatusBar,
     ReopenLastLayout,
     Recording,
     RecordingDirectory,
@@ -38,7 +39,7 @@ public enum GlobalSettingsTarget
 /// </summary>
 public static class GlobalSettingsDialog
 {
-    private const double PreferredDialogWidth = 760;
+    private const double PreferredDialogWidth = 920;
     // Tall enough that the Highlighting tab's rule form (the tallest view) fits without
     // scrolling; the host ScrollViewer only kicks in when the window itself is too short.
     private const double PreferredTabContentHeight = 660;
@@ -89,6 +90,11 @@ public static class GlobalSettingsDialog
         };
         var copyOnSelect = new ToggleSwitch { Header = "Copy selected text", IsOn = current.CopyOnSelect };
         var rightClickPaste = new ToggleSwitch { Header = "Paste with right-click", IsOn = current.RightClickPaste };
+        var showStatusBar = new ToggleSwitch
+        {
+            Header = WrappingHeader("Show status bar"),
+            IsOn = current.ShowStatusBar,
+        };
         var reopenLastLayout = new ToggleSwitch
         {
             Header = WrappingHeader("Reopen last layout at startup"),
@@ -143,6 +149,7 @@ public static class GlobalSettingsDialog
 
         SetAutomationId(theme, "SettingsTheme");
         SetAutomationId(fontFamily, "SettingsFontFamily");
+        SetAutomationId(showStatusBar, "SettingsShowStatusBar");
         SetAutomationId(fontSize, "SettingsFontSize");
         SetAutomationId(scrollback, "SettingsScrollback");
         SetAutomationId(copyOnSelect, "SettingsCopyOnSelect");
@@ -183,6 +190,10 @@ public static class GlobalSettingsDialog
             {
                 Description("These settings apply throughout resesh. A saved session can override supported terminal and highlighting defaults."),
                 generalColumns,
+                SectionCard(
+                    "Interface",
+                    "Choose which optional shell elements remain visible.",
+                    showStatusBar),
                 SectionCard(
                     "Startup",
                     "The current ordered tab groups are saved on clean exit. Reopening adopts each saved session into its previous group.",
@@ -280,6 +291,7 @@ public static class GlobalSettingsDialog
         {
             GlobalSettingsTarget.Theme => theme,
             GlobalSettingsTarget.FontFamily => fontFamily,
+            GlobalSettingsTarget.ShowStatusBar => showStatusBar,
             GlobalSettingsTarget.FontSize => fontSize,
             GlobalSettingsTarget.Scrollback => scrollback,
             GlobalSettingsTarget.CopyOnSelect => copyOnSelect,
@@ -300,6 +312,9 @@ public static class GlobalSettingsDialog
         {
             Width = dialogWidth,
             Height = tabContentHeight,
+            // Keep tab content clear of the vertical scrollbar. Without this gutter,
+            // full-width cards can render underneath the scrollbar and lose their right border.
+            Padding = new Thickness(0, 0, 20, 0),
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
@@ -408,6 +423,7 @@ public static class GlobalSettingsDialog
             Scrollback = double.IsNaN(scrollback.Value) ? current.Scrollback : (int)scrollback.Value,
             CopyOnSelect = copyOnSelect.IsOn,
             RightClickPaste = rightClickPaste.IsOn,
+            ShowStatusBar = showStatusBar.IsOn,
             ReopenLastLayoutAtStartup = reopenLastLayout.IsOn,
             AlwaysRecord = alwaysRecord.IsOn,
             RecordingDirectory = string.IsNullOrWhiteSpace(recordingDirectory.Text)

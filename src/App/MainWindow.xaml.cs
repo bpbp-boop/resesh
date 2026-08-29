@@ -399,6 +399,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         Add("View", _sessionsPaneOpen ? "Hide Sessions Pane" : "Show Sessions Pane",
             "sidebar rail sessions recent recordings",
             Sync(() => SetSessionsPaneOpen(!_sessionsPaneOpen)));
+        Add("View", App.Settings.Current.ShowStatusBar ? "Hide Status Bar" : "Show Status Bar",
+            "bottom bar interface chrome",
+            Sync(() => SetStatusBarVisible(!App.Settings.Current.ShowStatusBar)));
         Add("View", "Show Workspaces", "sidebar rail layouts",
             Sync(() => SelectSessionsRailTab("workspaces")));
         Add("View", "Show Recent Sessions", "sidebar rail history",
@@ -414,6 +417,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             () => ShowSettingsAsync(GlobalSettingsTarget.Theme));
         Add("Global Settings", "Terminal Font Family", "appearance typeface",
             () => ShowSettingsAsync(GlobalSettingsTarget.FontFamily));
+        Add("Global Settings", "Status Bar", "appearance interface bottom chrome",
+            () => ShowSettingsAsync(GlobalSettingsTarget.ShowStatusBar));
         Add("Global Settings", "Font Size", "appearance terminal text",
             () => ShowSettingsAsync(GlobalSettingsTarget.FontSize));
         Add("Global Settings", "Scrollback Lines", "terminal history buffer",
@@ -762,6 +767,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             ? Visibility.Visible
             : Visibility.Collapsed;
     }
+
+    private void StatusBarMenu_Click(object sender, RoutedEventArgs e) =>
+        SetStatusBarVisible(StatusBarMenuItem.IsChecked);
+
 
     private void CommandPaletteMenu_Click(object sender, RoutedEventArgs e) => ShowCommandPalette();
 
@@ -2354,6 +2363,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         {
             Theme = updated.Theme,
             FontFamily = updated.FontFamily,
+            ShowStatusBar = updated.ShowStatusBar,
             FontSize = updated.FontSize,
             Scrollback = updated.Scrollback,
             CopyOnSelect = updated.CopyOnSelect,
@@ -2374,10 +2384,22 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
     private void ApplySettingsToApp() => ApplySettingsToApp(App.Settings.Current);
+    private void ApplyStatusBarVisibility(bool visible)
+    {
+        StatusBar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        StatusBarMenuItem.IsChecked = visible;
+    }
+
+    private void SetStatusBarVisible(bool visible)
+    {
+        App.Settings.Save(App.Settings.Current with { ShowStatusBar = visible });
+        ApplyStatusBarVisibility(visible);
+    }
 
     private void ApplySettingsToApp(AppSettings settings)
     {
         ApplyThemeToApp(settings.Theme);
+        ApplyStatusBarVisibility(settings.ShowStatusBar);
         foreach (var tab in ViewModel.AllTabs)
         {
             if (tab.View is TerminalTabView view)

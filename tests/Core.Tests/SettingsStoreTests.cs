@@ -5,7 +5,7 @@ namespace Resesh.Core.Tests;
 public sealed class SettingsStoreTests
 {
     [Fact]
-    public void WindowAndSessionsPaneState_RoundTripsThroughSettingsFile()
+    public void WindowSessionsPaneAndStatusBarState_RoundTripsThroughSettingsFile()
     {
         var path = Path.Combine(Path.GetTempPath(), $"sessions-settings-{Guid.NewGuid():N}.json");
         try
@@ -15,6 +15,7 @@ public sealed class SettingsStoreTests
             {
                 WindowPlacement = new WindowPlacement(120, 80, 1440, 900, IsMaximized: true),
                 SessionsPaneOpen = false,
+                ShowStatusBar = false,
                 SessionsRailTab = "recordings",
                 ReopenLastLayoutAtStartup = true,
             });
@@ -24,6 +25,7 @@ public sealed class SettingsStoreTests
 
             Assert.Equal(new WindowPlacement(120, 80, 1440, 900, IsMaximized: true), loaded.Current.WindowPlacement);
             Assert.False(loaded.Current.SessionsPaneOpen);
+            Assert.False(loaded.Current.ShowStatusBar);
             Assert.Equal("recordings", loaded.Current.SessionsRailTab);
             Assert.True(loaded.Current.ReopenLastLayoutAtStartup);
         }
@@ -31,6 +33,12 @@ public sealed class SettingsStoreTests
         {
             File.Delete(path);
         }
+    }
+
+    [Fact]
+    public void NewSettingsDefaultToShowingStatusBar()
+    {
+        Assert.True(new AppSettings().ShowStatusBar);
     }
 
     [Fact]

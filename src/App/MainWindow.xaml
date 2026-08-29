@@ -169,6 +169,11 @@
                         Text="Sessions pane"
                         IsChecked="True"
                         Click="SessionsPaneMenu_Click" />
+                    <ToggleMenuFlyoutItem
+                        x:Name="StatusBarMenuItem"
+                        Text="Status bar"
+                        IsChecked="True"
+                        Click="StatusBarMenu_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem
                         Text="Command Palette…"
@@ -896,6 +901,7 @@
         <!-- Status bar -->
         <Border
             x:Name="StatusBar"
+            AutomationProperties.AutomationId="StatusBar"
             Grid.Row="2"
             Padding="12,6"
             Background="{StaticResource SessionChromeBrush}"

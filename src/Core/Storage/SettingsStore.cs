@@ -21,6 +21,9 @@ public sealed record AppSettings
     /// <summary>Saved sessions opened most recently, newest first.</summary>
     public IReadOnlyList<Guid> RecentSessionIds { get; init; } = [];
 
+    /// <summary>Whether the bottom status bar is visible.</summary>
+    public bool ShowStatusBar { get; init; } = true;
+
     /// <summary>Whether the content pane beside the compact sessions rail is open.</summary>
     public bool SessionsPaneOpen { get; init; } = true;
 
