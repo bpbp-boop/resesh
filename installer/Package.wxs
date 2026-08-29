@@ -33,7 +33,9 @@
           Directory="ProgramMenuFolder"
           Name="resesh"
           WorkingDirectory="INSTALLFOLDER"
-          Advertise="yes" />
+          Advertise="yes">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="Resesh.Terminal" />
+        </Shortcut>
       </File>
     </Component>
   </Package>

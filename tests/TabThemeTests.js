@@ -44,6 +44,19 @@ test("a focused selected tab border follows its session color", () => {
   assert.match(xaml, /FocusedAccentVisibility\(IsActive, IsGroupFocused\)[\s\S]*?FocusedTabBorderColor\(AppTheme, ColorTag\)/);
 });
 
+test("an empty tab group does not draw a tab-strip divider", () => {
+  const emptySelection = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"),
+    "utf8").match(/if \(Tabs\.SelectedItem is null\)[\s\S]*?return;/)?.[0] ?? "";
+  assert.match(emptySelection, /LeftTabStripDivider\.Width = 0/);
+  assert.match(emptySelection, /RightTabStripDivider\.Width = 0/);
+});
+
+test("normal themes use a one-pixel focused tab accent", () => {
+  assert.match(visualPalette, /"vaporwave"[\s\S]*?AccentBarThickness = 1/);
+  assert.match(visualPalette, /Hex\(0x0078D4\), 1, Hex\(divider\)/);
+});
+
 test("inactive tabs in an unfocused split use a dimmer foreground", () => {
   const foreground = presentation.match(/TabHeaderForegroundColor[\s\S]*?TabHeaderFontWeight/)?.[0] ?? "";
   assert.match(foreground, /\? isGroupFocused/);

@@ -279,7 +279,7 @@ public sealed partial class TabGroupView : UserControl
         var stripWidth = TabStripHost.ActualWidth;
         if (Tabs.SelectedItem is null)
         {
-            LeftTabStripDivider.Width = stripWidth;
+            LeftTabStripDivider.Width = 0;
             RightTabStripDivider.Width = 0;
             return;
         }

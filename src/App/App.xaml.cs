@@ -1,8 +1,6 @@
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.UI.Dispatching;
-using Microsoft.Windows.AppLifecycle;
 using Microsoft.UI.Xaml;
+using Resesh.App.Interop;
 using Resesh.Core.Credentials;
 using Resesh.Core.Ssh;
 using Resesh.Core.Storage;
@@ -13,7 +11,6 @@ namespace Resesh.App;
 public partial class App : Application
 {
     private readonly List<MainWindow> _windows = [];
-    private AppInstance? _appInstance;
     private DispatcherQueue? _dispatcherQueue;
 
     public static SessionStore Store { get; } = new(StorePath("sessions.json", SessionStore.DefaultPath));
@@ -26,38 +23,10 @@ public partial class App : Application
     private static AccessibilitySettings Accessibility { get; } = new();
     public static bool IsHighContrast => Accessibility.HighContrast;
 
-    /// <summary>`--data-dir <path>` keeps every JSON store in an alternate directory.
-    /// `--demo` instead uses disposable JSON stores and in-memory secrets. Normal launches
-    /// use the %APPDATA% defaults and Windows Credential Manager.</summary>
-    private static string StorePath(string fileName, string defaultPath)
-    {
-        if (DemoMode.IsEnabled)
-            return DemoMode.StorePath(fileName);
 
-        var args = Environment.GetCommandLineArgs();
-        for (var i = 1; i < args.Length - 1; i++)
-        {
-            if (args[i] == "--data-dir")
-                return Path.Combine(Path.GetFullPath(args[i + 1]), fileName);
-        }
-        return defaultPath;
-    }
-
-    /// <summary>Different data directories are independent app instances. Normal launches
-    /// sharing a data directory redirect into one process so every window shares the same
-    /// in-memory stores and cannot race JSON writes.</summary>
-    private static string? ActivationKey()
-    {
-        if (DemoMode.IsEnabled)
-            return null;
-
-        var dataDirectory = Path.GetDirectoryName(StorePath("sessions.json", SessionStore.DefaultPath))!;
-        var normalized = Path.GetFullPath(dataDirectory)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            .ToUpperInvariant();
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
-        return $"Resesh-{Convert.ToHexString(hash)}";
-    }
+    /// <summary>Resolves the shared data location used for stores and app instancing.</summary>
+    private static string StorePath(string fileName, string defaultPath) =>
+        Program.StorePath(fileName, defaultPath);
     public static Resesh.App.Icons.SessionIconCatalog Icons { get; } = new();
 
     /// <summary>Built-in local profiles whose shell is installed right now (set once at
@@ -135,12 +104,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        if (RedirectToPrimaryInstance())
-            return;
-
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
-        _appInstance = AppInstance.GetCurrent();
-        _appInstance.Activated += AppInstance_Activated;
 
         Store.Load();
         SshKeys.Load();
@@ -185,38 +149,12 @@ public partial class App : Application
         window.OpenWelcomeIfNeeded();
 
         ApplyLaunchArguments(window, Environment.GetCommandLineArgs());
+
+        Program.SetActivationTarget(this);
     }
 
-    private bool RedirectToPrimaryInstance()
-    {
-        if (ActivationKey() is not { } key)
-            return false;
 
-        var registered = AppInstance.FindOrRegisterForKey(key);
-        if (registered.IsCurrent)
-            return false;
-
-        RedirectAndExitAsync(registered);
-        return true;
-    }
-
-    private async void RedirectAndExitAsync(AppInstance registered)
-    {
-        try
-        {
-            await registered.RedirectActivationToAsync(AppInstance.GetCurrent().GetActivatedEventArgs());
-        }
-        catch (Exception ex)
-        {
-            LogCrash(ex);
-        }
-        finally
-        {
-            Exit();
-        }
-    }
-
-    private void AppInstance_Activated(object? sender, AppActivationArguments args)
+    internal void HandleRedirectedActivation()
     {
         _dispatcherQueue?.TryEnqueue(() => CreateWindowCore());
     }
@@ -254,6 +192,10 @@ public partial class App : Application
     private MainWindow CreateWindowCore()
     {
         var window = new MainWindow();
+        TaskbarIntegration.ConfigureWindow(
+            WinRT.Interop.WindowNative.GetWindowHandle(window),
+            Program.RelaunchCommand(),
+            Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
         _windows.Add(window);
         window.Closed += (_, _) =>
         {

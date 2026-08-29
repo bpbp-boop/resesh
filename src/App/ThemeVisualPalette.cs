@@ -52,7 +52,7 @@ internal sealed record ThemeVisualPalette(
             Input = Hex(0x12101A),
             HoverTab = Hex(0x231F31),
             Accent = Hex(0xFF2D95),
-            AccentBarThickness = 2,
+            AccentBarThickness = 1,
             PaneBorder = Hex(0x231F31),
             PaneFocusBorder = Hex(0x4B2E83),
         },
