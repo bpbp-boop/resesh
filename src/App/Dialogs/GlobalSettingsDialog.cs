@@ -67,7 +67,6 @@ public static class GlobalSettingsDialog
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         string PreviewTheme() => (theme.SelectedItem as ThemeChoice)?.Id ?? current.Theme;
-        theme.SelectionChanged += (_, _) => applyThemePreview(PreviewTheme());
         var fontFamily = new TextBox { Header = "Terminal font family", Text = current.FontFamily };
         var fontSize = new NumberBox
         {
@@ -366,6 +365,13 @@ public static class GlobalSettingsDialog
             Foreground = (Brush)Application.Current.Resources["SessionTreeForegroundBrush"],
         };
         SetAutomationId(dialog, "GlobalSettingsDialog");
+        DialogTheme.Apply(dialog, PreviewTheme());
+        theme.SelectionChanged += (_, _) =>
+        {
+            var previewTheme = PreviewTheme();
+            applyThemePreview(previewTheme);
+            DialogTheme.SetRequestedTheme(dialog, previewTheme);
+        };
         dialog.Opened += (_, _) =>
             initialFocus?.DispatcherQueue.TryEnqueue(() => initialFocus.Focus(FocusState.Programmatic));
         void UpdateDialogLayout()

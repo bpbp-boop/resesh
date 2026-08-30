@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Resesh.Core.Storage;
 
 namespace Resesh.App.Dialogs;
 
@@ -12,8 +13,9 @@ namespace Resesh.App.Dialogs;
 /// </summary>
 internal static class DialogTheme
 {
-    public static void Apply(ContentDialog dialog)
+    public static void Apply(ContentDialog dialog, string? theme = null)
     {
+        SetRequestedTheme(dialog, theme ?? App.Settings.Current.Theme);
         var shell = Brush("SessionShellBrush");
         var input = Brush("SessionInputBrush");
         var frame = Brush("SessionChromeFrameBrush");
@@ -110,6 +112,13 @@ internal static class DialogTheme
             "AccentFillColorDefaultBrush",
             "AccentFillColorSecondaryBrush",
             "AccentFillColorTertiaryBrush");
+    }
+
+    public static void SetRequestedTheme(ContentDialog dialog, string theme)
+    {
+        dialog.RequestedTheme = ThemeCatalog.IsLight(App.ResolveTheme(theme))
+            ? ElementTheme.Light
+            : ElementTheme.Dark;
     }
 
     private static void Set(ContentDialog dialog, Brush brush, params string[] keys)

@@ -80,15 +80,25 @@ test("the command palette is built from theme surfaces, not Fluent defaults", ()
   assert.match(mainWindow, /SessionAccentBrush"\]\)\.Color = palette\.Accent/);
 });
 
-test("session options dialogs follow the session palette", () => {
-  // Dialogs open in their own popup root, so the palette has to be pushed onto them.
+test("dialogs follow the live session palette and light-dark mode", () => {
+  // Dialogs open in their own popup root, so the palette and RequestedTheme have to be
+  // pushed onto them instead of relying on the window's element theme.
   assert.match(sessionDialog, /InitializeComponent\(\);\s*DialogTheme\.Apply\(this\)/);
   assert.match(localDialog, /DialogTheme\.Apply\(this\)/);
+  assert.match(globalDialog, /DialogTheme\.Apply\(dialog, PreviewTheme\(\)\)/);
+  assert.match(
+    globalDialog,
+    /theme\.SelectionChanged[\s\S]*?applyThemePreview\(previewTheme\);[\s\S]*?DialogTheme\.SetRequestedTheme\(dialog, previewTheme\)/,
+  );
   // Surfaces, fields, and selection reuse the same brushes as the main window.
   assert.match(dialogTheme, /Set\(dialog, shell,[\s\S]*?"ContentDialogBackground"/);
   assert.match(dialogTheme, /Set\(dialog, input,[\s\S]*?"TextControlBackground"[\s\S]*?"ComboBoxBackground"/);
   assert.match(dialogTheme, /Set\(dialog, selection,[\s\S]*?"ComboBoxItemBackgroundSelected"/);
   assert.match(dialogTheme, /Set\(dialog, accent,[\s\S]*?"TextControlBorderBrushFocused"[\s\S]*?"AccentFillColorDefaultBrush"/);
+  assert.match(
+    dialogTheme,
+    /dialog\.RequestedTheme = ThemeCatalog\.IsLight\(App\.ResolveTheme\(theme\)\)[\s\S]*?\? ElementTheme\.Light[\s\S]*?: ElementTheme\.Dark/,
+  );
   // Mutable app brushes, so a live theme change reaches an open dialog.
   assert.match(dialogTheme, /private static Brush Brush\(string key\) =>\s*\(Brush\)Application\.Current\.Resources\[key\]/);
 });
@@ -123,7 +133,7 @@ test("global and per-session theme pickers use the shared catalog", () => {
 });
 
 test("global theme selection previews immediately and cancel restores saved theme", () => {
-  assert.match(globalDialog, /theme\.SelectionChanged \+= \(_, _\) => applyThemePreview\(PreviewTheme\(\)\)/);
+  assert.match(globalDialog, /theme\.SelectionChanged[\s\S]*?applyThemePreview\(previewTheme\)/);
   assert.match(globalDialog, /result = await dialog\.ShowAsync\(\);[\s\S]*?if \(result != ContentDialogResult\.Primary\)[\s\S]*?applyThemePreview\(current\.Theme\)/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)/);
 });
