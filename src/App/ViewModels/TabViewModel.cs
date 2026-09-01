@@ -255,7 +255,11 @@ public sealed class TabViewModel : ObservableObject
 
     private static bool AgentIconsEnabled => App.Settings.Current.ShowAgentIcons;
 
-    public string? AgentIconKey => AgentIconsEnabled && Agent.IsAgent ? Agent.Key : null;
+    /// <summary>The key passed to compiled function bindings in the tab template. This must
+    /// stay non-null: generated x:Bind code skips function updates when a nullable string
+    /// becomes null, which would leave the previous agent image visible after exit.</summary>
+    public string AgentIconKey =>
+        AgentIconsEnabled && Agent.IsAgent ? Agent.Key! : AgentIdentities.None;
 
     /// <summary>Meaningful states get a symbol as well as a colour, so the badge remains
     /// readable for users who cannot distinguish the colours.</summary>

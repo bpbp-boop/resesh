@@ -44,10 +44,10 @@ test("tab text trims inside the shared width without moving the close action", (
   assert.match(xaml, /Grid\.Column="6"[\s\S]*?Click="TabCloseGlyph_Click"/);
 });
 
-test("tabs recalculate their full equal width after a close", () => {
+test("tabs recalculate their equal width after a close or strip resize", () => {
   assert.match(code, /Group\.Tabs\.CollectionChanged \+= \(_, _\)/);
   assert.match(code, /Tabs\.TabItemsChanged \+= \(_, e\) =>[\s\S]{0,160}?CollectionChange\.ItemRemoved[\s\S]{0,80}?QueueFullTabWidthRefresh\(\)/);
-  assert.match(code, /Tabs\.SizeChanged \+= \(_, _\) =>[\s\S]{0,100}?QueueTabWidthRefresh\(\)/);
+  assert.match(code, /Tabs\.SizeChanged \+= \(_, _\) =>[\s\S]{0,300}?QueueFullTabWidthRefresh\(\)/);
   assert.match(code, /QueueFullTabWidthRefresh\(\)[\s\S]*?TabWidthMode = TabViewWidthMode\.SizeToContent;[\s\S]{0,100}?TabWidthMode = TabViewWidthMode\.Equal/);
   assert.match(code, /FindDescendant\(Tabs, "TabsItemsPresenter"\)\?\.InvalidateMeasure\(\)/);
   assert.match(code, /Tabs\.InvalidateMeasure\(\)/);

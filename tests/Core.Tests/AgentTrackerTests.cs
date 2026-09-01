@@ -50,6 +50,19 @@ public class AgentTrackerTests
     }
 
     [Fact]
+    public void CommandEndRetiresAnAgentThatNeverSaidGoodbye()
+    {
+        var tracker = new AgentTracker();
+        tracker.ObserveEvent(Structured("agent;id=codex;state=working"));
+        Assert.True(tracker.Current.IsAgent);
+
+        // CommandEnded ("") arriving from OSC 133;D / prompt context
+        tracker.ObserveCommand("");
+        Assert.False(tracker.Current.IsAgent);
+        Assert.Equal(AgentAttention.None, tracker.Current.Attention);
+    }
+
+    [Fact]
     public void TitleNamingAnAgentIsAccepted_ButSilenceIsNotEvidenceOfExit()
     {
         var tracker = new AgentTracker();

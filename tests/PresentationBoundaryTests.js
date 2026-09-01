@@ -20,10 +20,16 @@ test("tab and tree view models expose data instead of WinUI presentation objects
   }
 
   assert.match(tabViewModel, /public string AppTheme => _appTheme/);
-  assert.match(tabViewModel, /public string\? AgentIconKey/);
+  assert.match(tabViewModel, /public string AgentIconKey/);
   assert.match(tabViewModel, /public string\? ColorTag => Session\.ColorTag/);
   assert.match(treeViewModel, /public string\? IconKey => Session\?\.Icon/);
   assert.match(treeViewModel, /public string\? ColorTag => Session\?\.ColorTag/);
+});
+
+test("agent icon binding uses a non-null sentinel so x:Bind clears stale images", () => {
+  const property = tabViewModel.match(/public string AgentIconKey[\s\S]*?;/)?.[0] ?? "";
+  assert.match(property, /AgentIdentities\.None/);
+  assert.doesNotMatch(property, /\?\s*AgentIconKey|null/);
 });
 
 test("the view layer owns colors, brushes, images, font weights, and visibility", () => {

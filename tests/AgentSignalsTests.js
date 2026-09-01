@@ -101,3 +101,27 @@ test("the page maps no attention state of its own", () => {
   // Every mapping decision belongs to the native tracker, where it is tested.
   assert.doesNotMatch(pageSource, /needs-approval|needs-answer/);
 });
+
+test("TerminalTabView wires running command changes and prompt context to retire stale agents", () => {
+  const terminalTabView = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"),
+    "utf8");
+
+  // CommandChanged (runningCommand: text on start, "" on 133;D end) feeds agent tracking
+  assert.match(
+    terminalTabView,
+    /_terminal\.CommandChanged \+= command => ApplyAgent\(tracker => tracker\.ObserveCommand\(command\)\);/);
+
+  // PromptContextChanged (reaching an idle prompt) feeds agent tracking as command end
+  assert.match(
+    terminalTabView,
+    /_terminal\.PromptContextChanged \+= \(_, _\) => ApplyAgent\(tracker => tracker\.ObserveCommand\(""\)\);/);
+
+  // TitleChanged and CommandObserved remain wired
+  assert.match(
+    terminalTabView,
+    /_terminal\.TitleChanged \+= title => ApplyAgent\(tracker => tracker\.ObserveTitle\(title\)\);/);
+  assert.match(
+    terminalTabView,
+    /_terminal\.CommandObserved \+= command => ApplyAgent\(tracker => tracker\.ObserveCommand\(command\)\);/);
+});

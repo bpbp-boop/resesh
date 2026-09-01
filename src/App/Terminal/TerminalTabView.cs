@@ -396,7 +396,9 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.BellReceived += () =>
             ApplyAgent(tracker => tracker.ObserveEvent(AgentOsc.Bell()));
         _terminal.TitleChanged += title => ApplyAgent(tracker => tracker.ObserveTitle(title));
+        _terminal.CommandChanged += command => ApplyAgent(tracker => tracker.ObserveCommand(command));
         _terminal.CommandObserved += command => ApplyAgent(tracker => tracker.ObserveCommand(command));
+        _terminal.PromptContextChanged += (_, _) => ApplyAgent(tracker => tracker.ObserveCommand(""));
 
         _tab.PropertyChanged += (_, e) =>
         {

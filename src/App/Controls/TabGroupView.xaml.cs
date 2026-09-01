@@ -97,7 +97,10 @@ public sealed partial class TabGroupView : UserControl
         };
         Tabs.SizeChanged += (_, _) =>
         {
-            QueueTabWidthRefresh();
+            // TabView caches equal item widths. Invalidating measure alone leaves the old
+            // width in place when the strip narrows, so the ScrollViewer shifts tabs left.
+            // Reset the mode to force WinUI to recalculate the shared width for this extent.
+            QueueFullTabWidthRefresh();
             QueueTabDividerRefresh();
         };
         TabStripHost.SizeChanged += (_, _) =>
