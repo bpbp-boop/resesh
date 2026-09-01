@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "fixture": "tests/Fixtures/Terminal/vt-parity.json",
+  "statusValues": ["pass", "partial", "missing", "not-applicable"],
+  "evidence": "Phase 0 source inspection and deterministic smoke fixtures",
+  "capabilities": [
+    { "capability": "normal buffer rendering", "webView": "pass", "native": "pass" },
+    { "capability": "alternate buffer rendering", "webView": "pass", "native": "pass" },
+    { "capability": "Unicode, wide, combining, and emoji glyphs", "webView": "pass", "native": "pass" },
+    { "capability": "ANSI colors and line rendition", "webView": "pass", "native": "pass" },
+    { "capability": "OSC 8 link rendering", "webView": "pass", "native": "partial", "note": "TerminalCore detects links; the HWND ABI does not expose activation to resesh." },
+    { "capability": "OSC 7 working-directory event", "webView": "pass", "native": "missing" },
+    { "capability": "OSC 133 shell marks", "webView": "pass", "native": "missing" },
+    { "capability": "OSC 3008 context event", "webView": "pass", "native": "missing" },
+    { "capability": "OSC 7377, 9, and 777 agent evidence", "webView": "pass", "native": "missing" },
+    { "capability": "search", "webView": "pass", "native": "missing" },
+    { "capability": "persistent highlights", "webView": "pass", "native": "missing" },
+    { "capability": "command marks", "webView": "pass", "native": "missing" },
+    { "capability": "overview ruler", "webView": "pass", "native": "missing" },
+    { "capability": "bookmarks", "webView": "pass", "native": "missing" },
+    { "capability": "commands panel", "webView": "pass", "native": "missing" },
+    { "capability": "copy-on-select setting", "webView": "pass", "native": "missing" },
+    { "capability": "right-click paste setting", "webView": "pass", "native": "missing" },
+    { "capability": "bounded instant rewind", "webView": "pass", "native": "not-applicable", "note": "Phase 0 disables native in-memory rewind until native keyframes exist; disk recording remains available." },
+    { "capability": "local ConPTY transport", "webView": "pass", "native": "pass" },
+    { "capability": "SSH.NET transport", "webView": "pass", "native": "pass" },
+    { "capability": "input, focus, resize, DPI, split visibility, and teardown", "webView": "pass", "native": "pass" }
+  ]
+}

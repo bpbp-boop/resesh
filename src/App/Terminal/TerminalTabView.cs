@@ -231,7 +231,8 @@ public sealed class TerminalTabView : Grid, IDisposable
             columns,
             rows,
             maximumAge: TimeSpan.FromMinutes(Math.Clamp(settings.RewindMinutes, 1, 24 * 60)),
-            maximumBytes: Math.Clamp(settings.RewindMegabytes, 1, 1024) * 1024L * 1024L);
+            maximumBytes: Math.Clamp(settings.RewindMegabytes, 1, 1024) * 1024L * 1024L,
+            retainForRewind: _terminal.SupportsRewindCapture);
         _captureColumns = columns;
         _captureRows = rows;
         _capture.Changed += OnCaptureChanged;
@@ -260,12 +261,13 @@ public sealed class TerminalTabView : Grid, IDisposable
 
     private void OnCaptureChanged()
     {
-        if (_rewindAvailable || _capture is null)
+        if (_capture is null)
             return;
         var snapshot = _capture.Snapshot();
-        if (snapshot.Keyframe is null && snapshot.Events.Count == 0)
+        var available = snapshot.Keyframe is not null || snapshot.Events.Count > 0;
+        if (_rewindAvailable == available)
             return;
-        _rewindAvailable = true;
+        _rewindAvailable = available;
         DispatcherQueue.TryEnqueue(SyncCaptureState);
     }
 

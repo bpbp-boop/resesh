@@ -163,6 +163,8 @@ public sealed class TerminalControl : TerminalSurface
     /// toggle button can mirror the true state.</summary>
     public override event Action<bool>? CommandsPanelOpenChanged;
 
+    public override bool SupportsRewindCapture => true;
+
     public override int Columns { get; protected set; } = 80;
     public override int Rows { get; protected set; } = 24;
 

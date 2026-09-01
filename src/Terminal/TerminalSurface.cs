@@ -30,6 +30,8 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract event Action<string>? CommandObserved;
     public abstract event Action<bool>? CommandsPanelOpenChanged;
 
+    public abstract bool SupportsRewindCapture { get; }
+
     public abstract int Columns { get; protected set; }
     public abstract int Rows { get; protected set; }
 

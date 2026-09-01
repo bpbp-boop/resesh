@@ -1,88 +1,172 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text.Json;
 
 namespace Resesh.Terminal;
 
-/// <summary>
-/// Narrow adapter for the unsupported HwndTerminal C ABI exported by
-/// Microsoft.Terminal.Control.dll. Keep all Microsoft Terminal interop in this file.
-/// </summary>
+/// <summary>Versioned adapter for the resesh ABI exported by Microsoft.Terminal.Control.dll.</summary>
 internal sealed class NativeTerminalApi
 {
-    internal const int AdapterAbiVersion = 1;
+    internal const ushort AbiMajor = 1;
+    internal const ushort AbiMinor = 0;
     internal const string DllEnvironmentVariable = "RESESH_NATIVE_TERMINAL_DLL";
 
-    internal static NativeTerminalApi Instance => Shared.Value;
+    private const uint ThemeOption = 0x00000001;
+    private const uint LoadLibrarySearchDllLoadDir = 0x00000100;
+    private const uint LoadLibrarySearchSystem32 = 0x00000800;
+
     private static readonly Lazy<NativeTerminalApi> Shared = new(Create);
+    internal static NativeTerminalApi Instance => Shared.Value;
 
     private readonly IntPtr _module;
+    private readonly CreateDelegate _create;
+    private readonly DestroyDelegate _destroy;
+    private readonly RegisterEventCallbackDelegate _registerEventCallback;
+    private readonly SendOutputDelegate _sendOutput;
+    private readonly SendKeyEventDelegate _sendKeyEvent;
+    private readonly SendCharEventDelegate _sendCharEvent;
+    private readonly SetFocusedDelegate _setFocused;
+    private readonly ResizePixelsDelegate _resizePixels;
+    private readonly SetOptionsDelegate _setOptions;
 
-    private NativeTerminalApi(IntPtr module)
+    private NativeTerminalApi(IntPtr module, string libraryPath)
     {
         _module = module;
-        CreateTerminal = Load<CreateTerminalDelegate>("CreateTerminal");
-        DestroyTerminal = Load<DestroyTerminalDelegate>("DestroyTerminal");
-        SendOutput = Load<SendOutputDelegate>("TerminalSendOutput");
-        TriggerResize = Load<TriggerResizeDelegate>("TerminalTriggerResize");
-        DpiChanged = Load<DpiChangedDelegate>("TerminalDpiChanged");
-        RegisterWriteCallback = Load<RegisterWriteCallbackDelegate>("TerminalRegisterWriteCallback");
-        SendKeyEvent = Load<SendKeyEventDelegate>("TerminalSendKeyEvent");
-        SendCharEvent = Load<SendCharEventDelegate>("TerminalSendCharEvent");
-        if (TryLoad<SetFocusedDelegate>("TerminalSetFocused") is { } setFocused)
+        LibraryPath = libraryPath;
+
+        var getAbiVersion = Load<GetAbiVersionDelegate>("ReseshTerminalGetAbiVersion");
+        var packedVersion = getAbiVersion();
+        var major = checked((ushort)(packedVersion >> 16));
+        var minor = checked((ushort)(packedVersion & 0xffff));
+        if (major != AbiMajor)
         {
-            SetFocused = setFocused.Invoke;
+            throw new InvalidOperationException(
+                $"The native terminal ABI is {major}.{minor}; resesh requires {AbiMajor}.{AbiMinor}.");
         }
-        else
-        {
-            var setFocus = Load<FocusDelegate>("TerminalSetFocus");
-            var killFocus = Load<FocusDelegate>("TerminalKillFocus");
-            SetFocused = (terminal, focused) =>
-            {
-                if (focused)
-                    setFocus(terminal);
-                else
-                    killFocus(terminal);
-            };
-        }
-        SetTheme = Load<SetThemeDelegate>("TerminalSetTheme");
+        AbiVersion = new Version(major, minor);
+
+        BuildId = ReadBuildId(Load<GetBuildIdDelegate>("ReseshTerminalGetBuildId"));
+        _create = Load<CreateDelegate>("ReseshTerminalCreate");
+        _destroy = Load<DestroyDelegate>("ReseshTerminalDestroy");
+        _registerEventCallback = Load<RegisterEventCallbackDelegate>("ReseshTerminalRegisterEventCallback");
+        _sendOutput = Load<SendOutputDelegate>("ReseshTerminalSendOutput");
+        _sendKeyEvent = Load<SendKeyEventDelegate>("ReseshTerminalSendKeyEvent");
+        _sendCharEvent = Load<SendCharEventDelegate>("ReseshTerminalSendCharEvent");
+        _setFocused = Load<SetFocusedDelegate>("ReseshTerminalSetFocused");
+        _resizePixels = Load<ResizePixelsDelegate>("ReseshTerminalResizePixels");
+        _setOptions = Load<SetOptionsDelegate>("ReseshTerminalSetOptions");
     }
 
-    internal CreateTerminalDelegate CreateTerminal { get; }
-    internal DestroyTerminalDelegate DestroyTerminal { get; }
-    internal SendOutputDelegate SendOutput { get; }
-    internal TriggerResizeDelegate TriggerResize { get; }
-    internal DpiChangedDelegate DpiChanged { get; }
-    internal RegisterWriteCallbackDelegate RegisterWriteCallback { get; }
-    internal SendKeyEventDelegate SendKeyEvent { get; }
-    internal SendCharEventDelegate SendCharEvent { get; }
-    internal Action<IntPtr, bool> SetFocused { get; }
-    internal SetThemeDelegate SetTheme { get; }
+    internal string LibraryPath { get; }
+    internal Version AbiVersion { get; }
+    internal string BuildId { get; }
+
+    internal IntPtr CreateTerminal(IntPtr parentHwnd, out IntPtr childHwnd)
+    {
+        var options = new CreateOptions
+        {
+            StructSize = checked((uint)Marshal.SizeOf<CreateOptions>()),
+            AbiMajor = AbiMajor,
+            AbiMinor = AbiMinor,
+            ParentHwnd = parentHwnd,
+        };
+        ThrowIfFailed(_create(in options, out childHwnd, out var terminal));
+        return terminal;
+    }
+
+    internal void DestroyTerminal(IntPtr terminal)
+    {
+        if (terminal != IntPtr.Zero)
+            ThrowIfFailed(_destroy(terminal));
+    }
+
+    internal void RegisterEventCallback(IntPtr terminal, EventCallback callback) =>
+        ThrowIfFailed(_registerEventCallback(terminal, callback, IntPtr.Zero));
+
+    internal void SendOutput(IntPtr terminal, string text) =>
+        ThrowIfFailed(_sendOutput(terminal, text, checked((uint)text.Length)));
+
+    internal void SendKeyEvent(IntPtr terminal, ushort virtualKey, ushort scanCode, ushort flags, bool keyDown) =>
+        ThrowIfFailed(_sendKeyEvent(terminal, virtualKey, scanCode, flags, keyDown ? (byte)1 : (byte)0));
+
+    internal void SendCharEvent(IntPtr terminal, char character, ushort scanCode, ushort flags) =>
+        ThrowIfFailed(_sendCharEvent(terminal, character, scanCode, flags));
+
+    internal void SetFocused(IntPtr terminal, bool focused) =>
+        ThrowIfFailed(_setFocused(terminal, focused ? (byte)1 : (byte)0));
+
+    internal TilSize ResizePixels(IntPtr terminal, int width, int height)
+    {
+        ThrowIfFailed(_resizePixels(terminal, width, height, out var columns, out var rows));
+        return new TilSize { X = columns, Y = rows };
+    }
+
+    internal void SetTheme(IntPtr terminal, TerminalTheme theme, string fontFamily, short fontSize, int dpi)
+    {
+        var options = new TerminalOptions
+        {
+            StructSize = checked((uint)Marshal.SizeOf<TerminalOptions>()),
+            AbiMajor = AbiMajor,
+            AbiMinor = AbiMinor,
+            Flags = ThemeOption,
+            DefaultBackground = theme.DefaultBackground,
+            DefaultForeground = theme.DefaultForeground,
+            DefaultSelectionBackground = theme.DefaultSelectionBackground,
+            CursorStyle = theme.CursorStyle,
+            ColorTable = theme.ColorTable,
+            FontFamily = fontFamily,
+            FontFamilyLength = checked((uint)fontFamily.Length),
+            FontSize = fontSize,
+            Dpi = dpi,
+        };
+        ThrowIfFailed(_setOptions(terminal, in options));
+    }
 
     private static NativeTerminalApi Create()
     {
-        const uint loadLibrarySearchDllLoadDir = 0x00000100;
-        const uint loadLibrarySearchUserDirs = 0x00000400;
-        const uint loadLibrarySearchDefaultDirs = 0x00001000;
-
         var path = ResolveLibraryPath();
+        VerifyArchitecture(path);
+        VerifyAppLocalHash(path);
+
         var directory = Path.GetDirectoryName(path)
             ?? throw new InvalidOperationException("The native terminal DLL path has no parent directory.");
-        if (AddDllDirectory(directory) == IntPtr.Zero)
+        var directoryCookie = AddDllDirectory(directory);
+        if (directoryCookie == IntPtr.Zero)
         {
             throw new InvalidOperationException(
                 $"Could not add the native terminal DLL directory '{directory}' (Win32 error {Marshal.GetLastPInvokeError()}).");
         }
 
-        var module = LoadLibraryEx(
-            path,
-            IntPtr.Zero,
-            loadLibrarySearchDllLoadDir | loadLibrarySearchUserDirs | loadLibrarySearchDefaultDirs);
+        IntPtr module;
+        int loadError = 0;
+        try
+        {
+            module = LoadLibraryEx(
+                path,
+                IntPtr.Zero,
+                LoadLibrarySearchDllLoadDir | LoadLibrarySearchSystem32);
+            if (module == IntPtr.Zero)
+                loadError = Marshal.GetLastPInvokeError();
+        }
+        finally
+        {
+            _ = RemoveDllDirectory(directoryCookie);
+        }
+
         if (module == IntPtr.Zero)
         {
             throw new InvalidOperationException(
-                $"Could not load the native terminal DLL '{path}' for the " +
-                $"{RuntimeInformation.ProcessArchitecture} process (Win32 error {Marshal.GetLastPInvokeError()}).");
+                $"Could not load the native terminal DLL '{path}' (Win32 error {loadError}).");
         }
-        return new NativeTerminalApi(module);
+        try
+        {
+            return new NativeTerminalApi(module, path);
+        }
+        catch
+        {
+            _ = FreeLibrary(module);
+            throw;
+        }
     }
 
     private static string ResolveLibraryPath()
@@ -97,24 +181,106 @@ internal sealed class NativeTerminalApi
                 $"{DllEnvironmentVariable} points to a file that does not exist.", fullPath);
         }
 
-        var architecture = RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.X64 => "x64",
-            Architecture.Arm64 => "arm64",
-            var value => value.ToString().ToLowerInvariant(),
-        };
         var appLocalPath = Path.Combine(
             AppContext.BaseDirectory,
             "NativeTerminal",
-            architecture,
+            ArchitectureName(),
             "Microsoft.Terminal.Control.dll");
         if (File.Exists(appLocalPath))
             return appLocalPath;
 
         throw new FileNotFoundException(
-            "The native terminal surface is selected, but Microsoft.Terminal.Control.dll is not configured. " +
-            $"Set {DllEnvironmentVariable}, or put the pinned DLL at '{appLocalPath}'.",
+            "The native terminal surface is selected, but its pinned DLL is missing. " +
+            $"Set {DllEnvironmentVariable}, or build the artifact at '{appLocalPath}'.",
             appLocalPath);
+    }
+
+    private static void VerifyArchitecture(string path)
+    {
+        using var stream = File.OpenRead(path);
+        using var reader = new BinaryReader(stream);
+        if (reader.ReadUInt16() != 0x5a4d)
+            throw new BadImageFormatException("The native terminal DLL has no DOS header.", path);
+        stream.Position = 0x3c;
+        var peOffset = reader.ReadUInt32();
+        if (peOffset > stream.Length - 6)
+            throw new BadImageFormatException("The native terminal DLL has an invalid PE header offset.", path);
+        stream.Position = peOffset;
+        if (reader.ReadUInt32() != 0x00004550)
+            throw new BadImageFormatException("The native terminal DLL has no PE signature.", path);
+
+        var machine = reader.ReadUInt16();
+        var expected = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => (ushort)0x8664,
+            Architecture.Arm64 => (ushort)0xaa64,
+            var architecture => throw new PlatformNotSupportedException(
+                $"The native terminal does not support {architecture} processes."),
+        };
+        if (machine != expected)
+        {
+            throw new BadImageFormatException(
+                $"The native terminal DLL machine 0x{machine:x4} does not match " +
+                $"the {RuntimeInformation.ProcessArchitecture} process (0x{expected:x4}).",
+                path);
+        }
+    }
+
+    private static void VerifyAppLocalHash(string libraryPath)
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(DllEnvironmentVariable)))
+            return;
+
+        var manifestPath = Path.Combine(AppContext.BaseDirectory, "NativeTerminal", "native-terminal.json");
+        if (!File.Exists(manifestPath))
+            throw new FileNotFoundException("The native terminal artifact manifest is missing.", manifestPath);
+
+        using var document = JsonDocument.Parse(File.ReadAllBytes(manifestPath));
+        var architecture = ArchitectureName();
+        var expected = document.RootElement
+            .GetProperty("artifacts")
+            .GetProperty(architecture)
+            .GetProperty("Microsoft.Terminal.Control.dll")
+            .GetString();
+        if (string.IsNullOrWhiteSpace(expected))
+            throw new InvalidDataException($"The native terminal manifest has no DLL hash for {architecture}.");
+
+        using var library = File.OpenRead(libraryPath);
+        var actual = Convert.ToHexString(SHA256.HashData(library)).ToLowerInvariant();
+        if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                $"The native terminal DLL hash is {actual}, but the manifest requires {expected}.");
+        }
+    }
+
+    private static string ArchitectureName() => RuntimeInformation.ProcessArchitecture switch
+    {
+        Architecture.X64 => "x64",
+        Architecture.Arm64 => "arm64",
+        var architecture => throw new PlatformNotSupportedException(
+            $"The native terminal does not support {architecture} processes."),
+    };
+
+    private static string ReadBuildId(GetBuildIdDelegate getBuildId)
+    {
+        _ = getBuildId(IntPtr.Zero, 0, out var required);
+        if (required is 0 or > 4096)
+            throw new InvalidDataException("The native terminal returned an invalid build ID length.");
+
+        var buffer = Marshal.AllocHGlobal(checked((int)required * sizeof(char)));
+        try
+        {
+            ThrowIfFailed(getBuildId(buffer, required, out var written));
+            if (written != required)
+                throw new InvalidDataException("The native terminal changed its build ID length.");
+            return Marshal.PtrToStringUni(buffer, checked((int)required - 1))
+                ?? throw new InvalidDataException("The native terminal returned an empty build ID.");
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
     }
 
     private T Load<T>(string exportName) where T : Delegate
@@ -122,22 +288,53 @@ internal sealed class NativeTerminalApi
         if (!NativeLibrary.TryGetExport(_module, exportName, out var address))
         {
             throw new EntryPointNotFoundException(
-                $"The native terminal ABI v{AdapterAbiVersion} requires export '{exportName}'.");
+                $"The native terminal ABI {AbiMajor}.{AbiMinor} requires export '{exportName}'.");
         }
         return Marshal.GetDelegateForFunctionPointer<T>(address);
     }
 
-    private T? TryLoad<T>(string exportName) where T : Delegate =>
-        NativeLibrary.TryGetExport(_module, exportName, out var address)
-            ? Marshal.GetDelegateForFunctionPointer<T>(address)
-            : null;
+    private static void ThrowIfFailed(int result)
+    {
+        if (result < 0)
+            Marshal.ThrowExceptionForHR(result);
+    }
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr AddDllDirectory(string newDirectory);
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RemoveDllDirectory(IntPtr cookie);
+
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool FreeLibrary(IntPtr module);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr LoadLibraryEx(string fileName, IntPtr reserved, uint flags);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CreateOptions
+    {
+        internal uint StructSize;
+        internal ushort AbiMajor;
+        internal ushort AbiMinor;
+        internal IntPtr ParentHwnd;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct NativeEvent
+    {
+        internal uint StructSize;
+        internal ushort AbiMajor;
+        internal ushort AbiMinor;
+        internal uint Type;
+        internal uint Reserved;
+        internal ulong Sequence;
+        internal IntPtr Text;
+        internal uint TextLength;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct TilSize
     {
@@ -157,49 +354,82 @@ internal sealed class NativeTerminalApi
         internal uint[] ColorTable;
     }
 
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    internal delegate int CreateTerminalDelegate(IntPtr parentHwnd, out IntPtr childHwnd, out IntPtr terminal);
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct TerminalOptions
+    {
+        internal uint StructSize;
+        internal ushort AbiMajor;
+        internal ushort AbiMinor;
+        internal uint Flags;
+        internal uint DefaultBackground;
+        internal uint DefaultForeground;
+        internal uint DefaultSelectionBackground;
+        internal uint CursorStyle;
+
+        [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U4, SizeConst = 16)]
+        internal uint[] ColorTable;
+
+        [MarshalAs(UnmanagedType.LPWStr)]
+        internal string FontFamily;
+        internal uint FontFamilyLength;
+        internal short FontSize;
+        internal ushort Reserved;
+        internal int Dpi;
+    }
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    internal delegate void DestroyTerminalDelegate(IntPtr terminal);
+    private delegate uint GetAbiVersionDelegate();
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetBuildIdDelegate(IntPtr buffer, uint capacity, out uint requiredCapacity);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int CreateDelegate(in CreateOptions options, out IntPtr childHwnd, out IntPtr terminal);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int DestroyDelegate(IntPtr terminal);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    internal delegate void EventCallback(IntPtr context, in NativeEvent eventData);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int RegisterEventCallbackDelegate(
+        IntPtr terminal,
+        EventCallback callback,
+        IntPtr context);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
-    internal delegate void SendOutputDelegate(IntPtr terminal, [MarshalAs(UnmanagedType.LPWStr)] string data);
+    private delegate int SendOutputDelegate(
+        IntPtr terminal,
+        [MarshalAs(UnmanagedType.LPWStr)] string text,
+        uint textLength);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    internal delegate int TriggerResizeDelegate(IntPtr terminal, int width, int height, out TilSize dimensions);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    internal delegate void DpiChangedDelegate(IntPtr terminal, int newDpi);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
-    internal delegate void WriteCallback([MarshalAs(UnmanagedType.LPWStr)] string data);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    internal delegate void RegisterWriteCallbackDelegate(IntPtr terminal, WriteCallback callback);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    internal delegate void SendKeyEventDelegate(
+    private delegate int SendKeyEventDelegate(
         IntPtr terminal,
         ushort virtualKey,
         ushort scanCode,
         ushort flags,
-        [MarshalAs(UnmanagedType.I1)] bool keyDown);
+        byte keyDown);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    internal delegate void SendCharEventDelegate(IntPtr terminal, char character, ushort scanCode, ushort flags);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    internal delegate void SetFocusedDelegate(IntPtr terminal, [MarshalAs(UnmanagedType.I1)] bool focused);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    internal delegate void FocusDelegate(IntPtr terminal);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
-    internal delegate void SetThemeDelegate(
+    private delegate int SendCharEventDelegate(
         IntPtr terminal,
-        TerminalTheme theme,
-        [MarshalAs(UnmanagedType.LPWStr)] string fontFamily,
-        short fontSize,
-        int dpi);
+        char character,
+        ushort scanCode,
+        ushort flags);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int SetFocusedDelegate(IntPtr terminal, byte focused);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ResizePixelsDelegate(
+        IntPtr terminal,
+        int width,
+        int height,
+        out int columns,
+        out int rows);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int SetOptionsDelegate(IntPtr terminal, in TerminalOptions options);
 }

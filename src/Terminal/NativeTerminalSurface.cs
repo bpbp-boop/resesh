@@ -33,7 +33,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private readonly object _outputGate = new();
     private readonly MemoryStream _pendingOutput = new();
     private readonly Decoder _outputDecoder = new UTF8Encoding(false, false).GetDecoder();
-    private readonly NativeTerminalApi.WriteCallback _writeCallback;
+    private readonly NativeTerminalApi.EventCallback _eventCallback;
     private readonly WindowProc _windowProc;
 
     private NativeTerminalApi? _api;
@@ -120,12 +120,14 @@ public sealed class NativeTerminalSurface : TerminalSurface
         remove { }
     }
 
+    public override bool SupportsRewindCapture => false;
+
     public override int Columns { get; protected set; } = 80;
     public override int Rows { get; protected set; } = 24;
 
     public NativeTerminalSurface()
     {
-        _writeCallback = OnNativeInput;
+        _eventCallback = OnNativeEvent;
         _windowProc = ChildWindowProc;
         AutomationProperties.SetAutomationId(this, "NativeTerminalSurface");
         AutomationProperties.SetName(this, "Terminal");
@@ -150,8 +152,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 throw new InvalidOperationException("The application window handle is not available.");
 
             _api = NativeTerminalApi.Instance;
-            var result = _api.CreateTerminal(_parentHwnd, out _childHwnd, out _terminal);
-            Marshal.ThrowExceptionForHR(result);
+            _terminal = _api.CreateTerminal(_parentHwnd, out _childHwnd);
             if (_childHwnd == IntPtr.Zero || _terminal == IntPtr.Zero)
                 throw new InvalidOperationException("Microsoft Terminal returned an empty terminal handle.");
 
@@ -164,7 +165,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
             if (_originalWindowProc == IntPtr.Zero && windowProcError != 0)
                 throw new InvalidOperationException($"Could not subclass the terminal window (Win32 error {windowProcError}).");
 
-            _api.RegisterWriteCallback(_terminal, _writeCallback);
+            _api.RegisterEventCallback(_terminal, _eventCallback);
             _dpi = checked((int)GetDpiForWindow(_parentHwnd));
             ApplyNativeTheme();
             _initialized = true;
@@ -403,7 +404,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         if (newDpi != _dpi)
         {
             _dpi = newDpi;
-            _api!.DpiChanged(_terminal, _dpi);
+            ApplyNativeTheme();
             force = true;
         }
 
@@ -418,9 +419,9 @@ public sealed class NativeTerminalSurface : TerminalSurface
             $"NativeTerminal bounds dip=({bounds.X:F1},{bounds.Y:F1},{bounds.Width:F1},{bounds.Height:F1}) " +
             $"root=({rootContent.ActualWidth:F1},{rootContent.ActualHeight:F1}) scale={scale:F2} " +
             $"px=({x},{y},{width},{height}) hwnd=0x{_parentHwnd.ToInt64():X}");
-        // HwndTerminal's resize export always moves its child window to (0, 0).
+        // The native resize operation always moves its child window to (0, 0).
         // Position it after that call so the HWND follows the XAML element.
-        var result = _api!.TriggerResize(_terminal, width, height, out var dimensions);
+        var dimensions = _api!.ResizePixels(_terminal, width, height);
         SetWindowPos(
             _childHwnd,
             IntPtr.Zero,
@@ -429,7 +430,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
             width,
             height,
             SwpNoActivate | SwpNoZOrder | SwpShowWindow);
-        if (result >= 0 && dimensions.X > 0 && dimensions.Y > 0
+        if (dimensions.X > 0 && dimensions.Y > 0
             && (Columns != dimensions.X || Rows != dimensions.Y))
         {
             Columns = dimensions.X;
@@ -502,6 +503,35 @@ public sealed class NativeTerminalSurface : TerminalSurface
             _api.SendOutput(_terminal, text);
     }
 
+    private void OnNativeEvent(IntPtr context, in NativeTerminalApi.NativeEvent eventData)
+    {
+        try
+        {
+            const uint inputEvent = 1;
+            if (_disposed
+                || eventData.StructSize < Marshal.SizeOf<NativeTerminalApi.NativeEvent>()
+                || eventData.AbiMajor != NativeTerminalApi.AbiMajor
+                || eventData.Type != inputEvent
+                || eventData.TextLength > 512 * 1024
+                || (eventData.TextLength > 0 && eventData.Text == IntPtr.Zero))
+            {
+                return;
+            }
+
+            var data = eventData.TextLength == 0
+                ? string.Empty
+                : Marshal.PtrToStringUni(eventData.Text, checked((int)eventData.TextLength));
+            if (data is not null)
+                OnNativeInput(data);
+        }
+        catch (Exception exception)
+        {
+            // Managed exceptions must never cross the native callback boundary.
+            try { TraceHook?.Invoke($"native input callback failed: {exception.Message}"); }
+            catch { }
+        }
+    }
+
     private void OnNativeInput(string data)
     {
         if (_disposed || !_inputEnabled || string.IsNullOrEmpty(data))
@@ -516,6 +546,23 @@ public sealed class NativeTerminalSurface : TerminalSurface
     }
 
     private IntPtr ChildWindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
+    {
+        try
+        {
+            return ChildWindowProcCore(hwnd, message, wParam, lParam);
+        }
+        catch (Exception exception)
+        {
+            // Managed exceptions must never cross the Win32 window procedure boundary.
+            try { TraceHook?.Invoke($"native window procedure failed: {exception.Message}"); }
+            catch { }
+            return _originalWindowProc == IntPtr.Zero
+                ? DefWindowProc(hwnd, message, wParam, lParam)
+                : CallWindowProc(_originalWindowProc, hwnd, message, wParam, lParam);
+        }
+    }
+
+    private IntPtr ChildWindowProcCore(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
     {
         if (_api is not null && _terminal != IntPtr.Zero)
         {

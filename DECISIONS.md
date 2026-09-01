@@ -538,3 +538,23 @@ keyboard-interactive fallback.
   the terminal find field has focus.
 - Escape or a backdrop click closes the palette. A terminal-opened palette restores xterm
   focus so the next keystroke returns to terminal input.
+
+## 2026-09-01 - Native terminal parity phases 0 and 1
+- Keep `TerminalControl` and WebView2 as the default live surface. The native surface is
+  selected only when `RESESH_TERMINAL_SURFACE=native`; this is not a product cutover.
+- Own the Microsoft Terminal changes in the separate
+  `https://github.com/bpbp-boop/terminal` fork. Pin the upstream release, fork commit,
+  vcpkg dependency baseline, vcpkg tool commit, architecture, artifact hashes, symbols,
+  and license in `eng/native-terminal.json`.
+- Use a versioned C ABI with opaque handles. Every input structure carries its size and
+  ABI version. Native callbacks use copied, bounded payloads, run outside the TerminalCore
+  lock, reject callback reentry, and finish before destruction returns.
+- Load only the selected app-local DLL directory and System32. Validate the PE machine,
+  app-local SHA-256, ABI major version, build ID export, and all required exports before
+  terminal creation.
+- Native rewind stays unavailable until native snapshots exist. Recording to disk remains
+  available, but native live capture does not retain an unbounded raw-event history.
+  Capture without keyframes also stops and clears retained events at its byte limit.
+- `tests/Fixtures/Terminal/vt-parity.json` is the Phase 0 behavior baseline.
+  `eng/native-terminal-performance.json` records the approved regression budgets and the
+  measured WebView2 and native-foundation startup and private-memory baselines.

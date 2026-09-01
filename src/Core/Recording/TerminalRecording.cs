@@ -45,6 +45,7 @@ public sealed class TerminalCapture : IDisposable
     private readonly List<TerminalKeyframe> _keyframes = [];
     private readonly TimeSpan _maximumAge;
     private readonly long _maximumBytes;
+    private readonly bool _retainForRewind;
     private long _eventBytes;
     private long _keyframeBytes;
     private double _latestTime;
@@ -53,13 +54,15 @@ public sealed class TerminalCapture : IDisposable
     private TerminalKeyframe? _anchor;
     private TerminalDiskRecorder? _recorder;
     private bool _disposed;
+    private bool _rewindDisabled;
 
     public TerminalCapture(
         int initialColumns,
         int initialRows,
         DateTimeOffset? startedAt = null,
         TimeSpan? maximumAge = null,
-        long maximumBytes = 32L * 1024 * 1024)
+        long maximumBytes = 32L * 1024 * 1024,
+        bool retainForRewind = true)
     {
         if (initialColumns <= 0)
             throw new ArgumentOutOfRangeException(nameof(initialColumns));
@@ -75,6 +78,7 @@ public sealed class TerminalCapture : IDisposable
         StartedAt = startedAt ?? DateTimeOffset.UtcNow;
         _maximumAge = maximumAge ?? TimeSpan.FromMinutes(30);
         _maximumBytes = maximumBytes;
+        _retainForRewind = retainForRewind;
     }
 
     public DateTimeOffset StartedAt { get; }
@@ -115,12 +119,15 @@ public sealed class TerminalCapture : IDisposable
             lock (_gate)
             {
                 ThrowIfDisposed();
+                if (!_retainForRewind && _recorder is null)
+                    return;
+
                 var count = _decoder.GetChars(data, rented.AsSpan(), flush: false);
                 if (count > 0)
                 {
                     var text = new string(rented, 0, count);
-                    AppendLocked(new TerminalRecordingEvent(ToElapsedLocked(unixTimeMilliseconds), "o", text));
-                    appended = true;
+                    appended = AppendLocked(new TerminalRecordingEvent(
+                        ToElapsedLocked(unixTimeMilliseconds), "o", text));
                 }
             }
         }
@@ -137,16 +144,18 @@ public sealed class TerminalCapture : IDisposable
         if (columns <= 0 || rows <= 0)
             return;
 
+        var changed = false;
         lock (_gate)
         {
             ThrowIfDisposed();
             _currentColumns = columns;
             _currentRows = rows;
-            AppendLocked(new TerminalRecordingEvent(
+            changed = AppendLocked(new TerminalRecordingEvent(
                 ToElapsedLocked(unixTimeMilliseconds), "r",
                 string.Create(CultureInfo.InvariantCulture, $"{columns}x{rows}")));
         }
-        Changed?.Invoke();
+        if (changed)
+            Changed?.Invoke();
     }
 
     public void CaptureKeyframe(string state, int columns, int rows, long unixTimeMilliseconds)
@@ -156,17 +165,23 @@ public sealed class TerminalCapture : IDisposable
         if (columns <= 0 || rows <= 0)
             return;
 
+        var changed = false;
         lock (_gate)
         {
             ThrowIfDisposed();
             _currentColumns = columns;
             _currentRows = rows;
-            var frame = new TerminalKeyframe(ToElapsedLocked(unixTimeMilliseconds), columns, rows, state);
-            _keyframes.Add(frame);
-            _keyframeBytes += FrameBytes(frame);
-            TrimLocked();
+            if (_retainForRewind && !_rewindDisabled)
+            {
+                var frame = new TerminalKeyframe(ToElapsedLocked(unixTimeMilliseconds), columns, rows, state);
+                _keyframes.Add(frame);
+                _keyframeBytes += FrameBytes(frame);
+                changed = true;
+                TrimLocked();
+            }
         }
-        Changed?.Invoke();
+        if (changed)
+            Changed?.Invoke();
     }
 
     public TerminalRewindSlice Snapshot(double? atTime = null)
@@ -230,13 +245,17 @@ public sealed class TerminalCapture : IDisposable
         return path;
     }
 
-    private void AppendLocked(TerminalRecordingEvent item)
+    private bool AppendLocked(TerminalRecordingEvent item)
     {
-        _events.AddLast(item);
-        _eventBytes += EventBytes(item);
         _latestTime = Math.Max(_latestTime, item.Time);
         _recorder?.Write(item);
+        if (!_retainForRewind || _rewindDisabled)
+            return false;
+
+        _events.AddLast(item);
+        _eventBytes += EventBytes(item);
         TrimLocked();
+        return true;
     }
 
     private double ToElapsedLocked(long unixTimeMilliseconds)
@@ -262,12 +281,30 @@ public sealed class TerminalCapture : IDisposable
         if (ageFrame is not null)
             PromoteAnchorLocked(ageFrame);
 
-        while (_eventBytes + _keyframeBytes + (_anchor is null ? 0 : FrameBytes(_anchor)) > _maximumBytes)
+        while (RetainedBytesLocked() > _maximumBytes)
         {
-            if (_keyframes.Count == 0)
-                break;
-            PromoteAnchorLocked(_keyframes[0]);
+            if (_keyframes.Count > 0)
+            {
+                PromoteAnchorLocked(_keyframes[0]);
+                continue;
+            }
+
+            DisableRewindLocked();
+            break;
         }
+    }
+
+    private long RetainedBytesLocked() =>
+        _eventBytes + _keyframeBytes + (_anchor is null ? 0 : FrameBytes(_anchor));
+
+    private void DisableRewindLocked()
+    {
+        _events.Clear();
+        _keyframes.Clear();
+        _eventBytes = 0;
+        _keyframeBytes = 0;
+        _anchor = null;
+        _rewindDisabled = true;
     }
 
     private void PromoteAnchorLocked(TerminalKeyframe frame)

@@ -19,6 +19,13 @@
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <NativeTerminalArchitecture Condition="'$(Platform)'=='x64'">x64</NativeTerminalArchitecture>
+    <NativeTerminalArchitecture Condition="'$(Platform)'=='ARM64'">arm64</NativeTerminalArchitecture>
+    <NativeTerminalArchitecture Condition="'$(NativeTerminalArchitecture)'=='' and '$(RuntimeIdentifier)'=='win-x64'">x64</NativeTerminalArchitecture>
+    <NativeTerminalArchitecture Condition="'$(NativeTerminalArchitecture)'=='' and '$(RuntimeIdentifier)'=='win-arm64'">arm64</NativeTerminalArchitecture>
+  </PropertyGroup>
+
   <ItemGroup>
     <Content Include="..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
@@ -27,6 +34,18 @@
     <Content Include="Assets\SessionIcons\*.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\SessionTreeIcons\*.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\AgentIcons\*.svg" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\eng\native-terminal.json"
+          Link="NativeTerminal\native-terminal.json"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+    <None Include="..\..\.artifacts\native-terminal\$(NativeTerminalArchitecture)\Microsoft.Terminal.Control.dll;..\..\.artifacts\native-terminal\$(NativeTerminalArchitecture)\LICENSE"
+          Condition="'$(NativeTerminalArchitecture)'!='' and Exists('..\..\.artifacts\native-terminal\$(NativeTerminalArchitecture)\Microsoft.Terminal.Control.dll') and Exists('..\..\.artifacts\native-terminal\$(NativeTerminalArchitecture)\LICENSE')"
+          Link="NativeTerminal\$(NativeTerminalArchitecture)\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

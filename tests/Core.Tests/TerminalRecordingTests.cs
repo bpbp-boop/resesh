@@ -110,6 +110,46 @@ public sealed class TerminalRecordingTests : IDisposable
         Assert.Contains("ordered", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void DisabledRewindRetainsNoEventsButStillRecordsToDisk()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(
+            80, 24, startedAt: started, maximumBytes: 128, retainForRewind: false);
+        var path = capture.StartRecording(_directory, "native");
+
+        capture.CaptureOutput(
+            Encoding.UTF8.GetBytes(new string('x', 4096)),
+            started.AddSeconds(1).ToUnixTimeMilliseconds());
+        capture.CaptureResize(100, 30, started.AddSeconds(2).ToUnixTimeMilliseconds());
+        capture.StopRecording();
+
+        Assert.Empty(capture.Snapshot().Events);
+        var recording = AsciicastReader.Read(path);
+        Assert.Equal(2, recording.Events.Count);
+        Assert.Equal(4096, recording.Events[0].Data.Length);
+        Assert.Equal("100x30", recording.Events[1].Data);
+    }
+
+    [Fact]
+    public void RewindWithoutAKeyframeDisablesBeforeItExceedsTheByteLimit()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(
+            80, 24, startedAt: started, maximumBytes: 128);
+
+        capture.CaptureOutput(
+            Encoding.UTF8.GetBytes(new string('x', 256)),
+            started.AddSeconds(1).ToUnixTimeMilliseconds());
+        capture.CaptureOutput(
+            Encoding.UTF8.GetBytes("later"),
+            started.AddSeconds(2).ToUnixTimeMilliseconds());
+
+        var snapshot = capture.Snapshot();
+        Assert.Null(snapshot.Keyframe);
+        Assert.Empty(snapshot.Events);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))
