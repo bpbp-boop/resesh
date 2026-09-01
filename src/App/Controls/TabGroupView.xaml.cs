@@ -334,7 +334,12 @@ public sealed partial class TabGroupView : UserControl
         var selected = Group.SelectedTab?.View;
         MainWindow.Trace($"SyncTerminalVisibility: selected='{Group.SelectedTab?.Header}' children={TerminalHost.Children.Count}");
         foreach (var child in TerminalHost.Children)
-            child.Visibility = ReferenceEquals(child, selected) ? Visibility.Visible : Visibility.Collapsed;
+        {
+            var visible = ReferenceEquals(child, selected);
+            child.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+            if (child is Terminal.TerminalTabView terminal)
+                terminal.SetHostVisible(visible);
+        }
     }
 
     // ---- tab-bar action buttons (show commands, current folder, file pane) ----

@@ -30,7 +30,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     private readonly KnownHostsStore _knownHosts;
     private readonly SshKeyStore _sshKeys;
     private readonly IReadOnlySet<int> _tmuxSlotsAlreadyOpen;
-    private readonly TerminalControl _terminal = new();
+    private readonly TerminalSurface _terminal = TerminalSurfaceFactory.CreateLive();
     private readonly ProgressRing _spinner = new() { IsActive = false, Width = 48, Height = 48 };
 
     private ITerminalBackend? _backend;
@@ -112,6 +112,8 @@ public sealed class TerminalTabView : Grid, IDisposable
     public bool IsRewinding => _rewindPlayer is not null;
     public bool CanRewind => _rewindAvailable;
     public string? RecordingPath => _capture?.RecordingPath;
+
+    internal void SetHostVisible(bool visible) => _terminal.SetHostVisible(visible);
 
     public TerminalTabView(TabViewModel tab, ICredentialService credentials, KnownHostsStore knownHosts,
         SshKeyStore sshKeys,
@@ -510,6 +512,9 @@ public sealed class TerminalTabView : Grid, IDisposable
         _connecting = true;
         _spinner.IsActive = true;
         _tab.State = TabConnectionState.Connecting;
+        // Native HWND terminals cannot sit behind XAML progress and credential dialogs.
+        // WebView2 keeps rendering; it only stops accepting input.
+        _terminal.SetInputEnabled(false);
         _workingDirectory.Reset();
 
         // Tear down the previous (dead) backend so its blocked reader thread is released.
@@ -529,6 +534,12 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             _connecting = false;
             _spinner.IsActive = false;
+            if (!_tab.IsLocked && _rewindPlayer is null)
+            {
+                _terminal.SetInputEnabled(true);
+                if (_tab.State == TabConnectionState.Connected)
+                    _terminal.FocusTerminal();
+            }
         }
     }
 
