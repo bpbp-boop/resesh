@@ -8,10 +8,24 @@ namespace Resesh.Terminal;
 internal sealed class NativeTerminalApi
 {
     internal const ushort AbiMajor = 1;
-    internal const ushort AbiMinor = 0;
+    internal const ushort AbiMinor = 1;
     internal const string DllEnvironmentVariable = "RESESH_NATIVE_TERMINAL_DLL";
 
     private const uint ThemeOption = 0x00000001;
+    private const uint InteractionOption = 0x00000002;
+    private const uint EnableBuiltinGlyphs = 0x00000001;
+    private const uint EnableColorGlyphs = 0x00000002;
+    private const uint DetectUrls = 0x00000004;
+    private const uint CopyOnSelect = 0x00000008;
+    private const uint RightClickPaste = 0x00000010;
+    private const uint SnapOnInput = 0x00000020;
+    private const uint AllowOscClipboard = 0x00000040;
+    private const uint AllowOscNotifications = 0x00000080;
+    private const uint ReadOnly = 0x00000100;
+    private const uint CopyHtml = 0x00000001;
+    private const uint CopyRtf = 0x00000002;
+    private const uint FilterCrLf = 0x00000001;
+    private const uint FilterControlCodes = 0x00000002;
     private const uint LoadLibrarySearchDllLoadDir = 0x00000100;
     private const uint LoadLibrarySearchSystem32 = 0x00000800;
 
@@ -28,6 +42,8 @@ internal sealed class NativeTerminalApi
     private readonly SetFocusedDelegate _setFocused;
     private readonly ResizePixelsDelegate _resizePixels;
     private readonly SetOptionsDelegate _setOptions;
+    private readonly CopySelectionDelegate _copySelection;
+    private readonly PasteTextDelegate _pasteText;
 
     private NativeTerminalApi(IntPtr module, string libraryPath)
     {
@@ -38,7 +54,7 @@ internal sealed class NativeTerminalApi
         var packedVersion = getAbiVersion();
         var major = checked((ushort)(packedVersion >> 16));
         var minor = checked((ushort)(packedVersion & 0xffff));
-        if (major != AbiMajor)
+        if (major != AbiMajor || minor < AbiMinor)
         {
             throw new InvalidOperationException(
                 $"The native terminal ABI is {major}.{minor}; resesh requires {AbiMajor}.{AbiMinor}.");
@@ -55,20 +71,57 @@ internal sealed class NativeTerminalApi
         _setFocused = Load<SetFocusedDelegate>("ReseshTerminalSetFocused");
         _resizePixels = Load<ResizePixelsDelegate>("ReseshTerminalResizePixels");
         _setOptions = Load<SetOptionsDelegate>("ReseshTerminalSetOptions");
+        _copySelection = Load<CopySelectionDelegate>("ReseshTerminalCopySelection");
+        _pasteText = Load<PasteTextDelegate>("ReseshTerminalPasteText");
     }
 
     internal string LibraryPath { get; }
     internal Version AbiVersion { get; }
     internal string BuildId { get; }
 
-    internal IntPtr CreateTerminal(IntPtr parentHwnd, out IntPtr childHwnd)
+    internal IntPtr CreateTerminal(
+        IntPtr parentHwnd,
+        NativeTerminalCreationSettings settings,
+        out IntPtr childHwnd)
     {
+        var theme = settings.Theme;
+        var flags = EnableBuiltinGlyphs | EnableColorGlyphs | DetectUrls | SnapOnInput;
+        if (settings.CopyOnSelect)
+            flags |= CopyOnSelect;
+        if (settings.RightClickPaste)
+            flags |= RightClickPaste;
+        if (settings.AllowOscClipboard)
+            flags |= AllowOscClipboard;
+        if (settings.AllowOscNotifications)
+            flags |= AllowOscNotifications;
+        if (settings.ReadOnly)
+            flags |= ReadOnly;
+
+        const string wordDelimiters = " ./\\()\"'-:,.;<>~!@#$%^&*|+=[]{}~?\u2502";
         var options = new CreateOptions
         {
             StructSize = checked((uint)Marshal.SizeOf<CreateOptions>()),
             AbiMajor = AbiMajor,
             AbiMinor = AbiMinor,
             ParentHwnd = parentHwnd,
+            InitialColumns = settings.InitialColumns,
+            InitialRows = settings.InitialRows,
+            HistorySize = settings.HistorySize,
+            Flags = flags,
+            FontFamily = settings.FontFamily,
+            FontFamilyLength = checked((uint)settings.FontFamily.Length),
+            FontSize = checked((short)settings.FontSize),
+            FontWeight = 400,
+            DefaultBackground = theme.DefaultBackground,
+            DefaultForeground = theme.DefaultForeground,
+            SelectionBackground = theme.DefaultSelectionBackground,
+            CursorColor = theme.CursorColor,
+            CursorStyle = theme.CursorStyle,
+            ColorTable = theme.ColorTable,
+            CopyFormatting = CopyHtml | CopyRtf,
+            PasteFiltering = FilterCrLf | FilterControlCodes,
+            WordDelimiters = wordDelimiters,
+            WordDelimitersLength = checked((uint)wordDelimiters.Length),
         };
         ThrowIfFailed(_create(in options, out childHwnd, out var terminal));
         return terminal;
@@ -95,6 +148,16 @@ internal sealed class NativeTerminalApi
     internal void SetFocused(IntPtr terminal, bool focused) =>
         ThrowIfFailed(_setFocused(terminal, focused ? (byte)1 : (byte)0));
 
+    internal bool CopySelection(IntPtr terminal, bool clearSelection)
+    {
+        var result = _copySelection(terminal, clearSelection ? (byte)1 : (byte)0);
+        ThrowIfFailed(result);
+        return result == 0;
+    }
+
+    internal void PasteText(IntPtr terminal, string text) =>
+        ThrowIfFailed(_pasteText(terminal, text, checked((uint)text.Length)));
+
     internal TilSize ResizePixels(IntPtr terminal, int width, int height)
     {
         ThrowIfFailed(_resizePixels(terminal, width, height, out var columns, out var rows));
@@ -112,12 +175,39 @@ internal sealed class NativeTerminalApi
             DefaultBackground = theme.DefaultBackground,
             DefaultForeground = theme.DefaultForeground,
             DefaultSelectionBackground = theme.DefaultSelectionBackground,
+            CursorColor = theme.CursorColor,
             CursorStyle = theme.CursorStyle,
             ColorTable = theme.ColorTable,
             FontFamily = fontFamily,
             FontFamilyLength = checked((uint)fontFamily.Length),
             FontSize = fontSize,
             Dpi = dpi,
+        };
+        ThrowIfFailed(_setOptions(terminal, in options));
+    }
+
+    internal void SetInteraction(
+        IntPtr terminal,
+        bool copyOnSelect,
+        bool rightClickPaste,
+        bool readOnly)
+    {
+        var interactionFlags = readOnly ? ReadOnly : 0;
+        if (copyOnSelect)
+            interactionFlags |= CopyOnSelect;
+        if (rightClickPaste)
+            interactionFlags |= RightClickPaste;
+        var options = new TerminalOptions
+        {
+            StructSize = checked((uint)Marshal.SizeOf<TerminalOptions>()),
+            AbiMajor = AbiMajor,
+            AbiMinor = AbiMinor,
+            Flags = InteractionOption,
+            ColorTable = new uint[16],
+            FontFamily = string.Empty,
+            InteractionFlags = interactionFlags,
+            CopyFormatting = CopyHtml | CopyRtf,
+            PasteFiltering = FilterCrLf | FilterControlCodes,
         };
         ThrowIfFailed(_setOptions(terminal, in options));
     }
@@ -313,13 +403,38 @@ internal sealed class NativeTerminalApi
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr LoadLibraryEx(string fileName, IntPtr reserved, uint flags);
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct CreateOptions
     {
         internal uint StructSize;
         internal ushort AbiMajor;
         internal ushort AbiMinor;
         internal IntPtr ParentHwnd;
+        internal int InitialColumns;
+        internal int InitialRows;
+        internal int HistorySize;
+        internal uint Flags;
+
+        [MarshalAs(UnmanagedType.LPWStr)]
+        internal string FontFamily;
+        internal uint FontFamilyLength;
+        internal short FontSize;
+        internal ushort FontWeight;
+        internal uint DefaultBackground;
+        internal uint DefaultForeground;
+        internal uint SelectionBackground;
+        internal uint CursorColor;
+        internal uint CursorStyle;
+
+        [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U4, SizeConst = 16)]
+        internal uint[] ColorTable;
+
+        internal uint CopyFormatting;
+        internal uint PasteFiltering;
+
+        [MarshalAs(UnmanagedType.LPWStr)]
+        internal string WordDelimiters;
+        internal uint WordDelimitersLength;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -329,10 +444,14 @@ internal sealed class NativeTerminalApi
         internal ushort AbiMajor;
         internal ushort AbiMinor;
         internal uint Type;
-        internal uint Reserved;
+        internal uint Flags;
         internal ulong Sequence;
         internal IntPtr Text;
         internal uint TextLength;
+        internal IntPtr Html;
+        internal uint HtmlLength;
+        internal IntPtr Rtf;
+        internal uint RtfLength;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -348,6 +467,7 @@ internal sealed class NativeTerminalApi
         internal uint DefaultBackground;
         internal uint DefaultForeground;
         internal uint DefaultSelectionBackground;
+        internal uint CursorColor;
         internal uint CursorStyle;
 
         [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U4, SizeConst = 16)]
@@ -364,6 +484,7 @@ internal sealed class NativeTerminalApi
         internal uint DefaultBackground;
         internal uint DefaultForeground;
         internal uint DefaultSelectionBackground;
+        internal uint CursorColor;
         internal uint CursorStyle;
 
         [MarshalAs(UnmanagedType.ByValArray, ArraySubType = UnmanagedType.U4, SizeConst = 16)]
@@ -375,7 +496,23 @@ internal sealed class NativeTerminalApi
         internal short FontSize;
         internal ushort Reserved;
         internal int Dpi;
+        internal uint InteractionFlags;
+        internal uint CopyFormatting;
+        internal uint PasteFiltering;
     }
+
+    internal readonly record struct NativeTerminalCreationSettings(
+        int InitialColumns,
+        int InitialRows,
+        int HistorySize,
+        string FontFamily,
+        int FontSize,
+        TerminalTheme Theme,
+        bool CopyOnSelect,
+        bool RightClickPaste,
+        bool AllowOscClipboard,
+        bool AllowOscNotifications,
+        bool ReadOnly);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate uint GetAbiVersionDelegate();
@@ -432,4 +569,13 @@ internal sealed class NativeTerminalApi
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int SetOptionsDelegate(IntPtr terminal, in TerminalOptions options);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int CopySelectionDelegate(IntPtr terminal, byte clearSelection);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
+    private delegate int PasteTextDelegate(
+        IntPtr terminal,
+        [MarshalAs(UnmanagedType.LPWStr)] string text,
+        uint textLength);
 }

@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace Resesh.Terminal;
 
@@ -47,6 +48,9 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private bool _initializationFailed;
     private bool _inputEnabled = true;
     private bool _hostVisible = true;
+    private bool _copyOnSelect = true;
+    private bool _rightClickPaste = true;
+    private bool _readOnly;
     private bool _reconnectOnEnter;
     private bool _suppressNextCharacter;
     private bool _disposed;
@@ -56,6 +60,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private int _lastWidth = -1;
     private int _lastHeight = -1;
     private int _fontSize = 14;
+    private int _scrollback = 10000;
     private string _fontFamily = "Cascadia Mono";
     private string _theme = "dark";
     private XamlRoot? _subscribedRoot;
@@ -152,7 +157,19 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 throw new InvalidOperationException("The application window handle is not available.");
 
             _api = NativeTerminalApi.Instance;
-            _terminal = _api.CreateTerminal(_parentHwnd, out _childHwnd);
+            var creationSettings = new NativeTerminalApi.NativeTerminalCreationSettings(
+                Columns,
+                Rows,
+                _scrollback,
+                _fontFamily,
+                _fontSize,
+                BuildTheme(_theme),
+                _copyOnSelect,
+                _rightClickPaste,
+                AllowOscClipboard: false,
+                AllowOscNotifications: false,
+                _readOnly);
+            _terminal = _api.CreateTerminal(_parentHwnd, creationSettings, out _childHwnd);
             if (_childHwnd == IntPtr.Zero || _terminal == IntPtr.Zero)
                 throw new InvalidOperationException("Microsoft Terminal returned an empty terminal handle.");
 
@@ -284,7 +301,10 @@ public sealed class NativeTerminalSurface : TerminalSurface
         _fontSize = fontSize;
         _fontFamily = FirstFontFamily(fontFamily);
         _theme = theme;
-        _inputEnabled = !readOnly;
+        _copyOnSelect = copyOnSelect;
+        _rightClickPaste = rightClickPaste;
+        _scrollback = scrollback;
+        _readOnly = readOnly;
     }
 
     public override void ApplyOptions(
@@ -301,7 +321,15 @@ public sealed class NativeTerminalSurface : TerminalSurface
             _fontFamily = FirstFontFamily(fontFamily);
         if (theme is not null)
             _theme = theme;
+        if (copyOnSelect is not null)
+            _copyOnSelect = copyOnSelect.Value;
+        if (rightClickPaste is not null)
+            _rightClickPaste = rightClickPaste.Value;
+        if (scrollback is not null)
+            _scrollback = scrollback.Value;
         ApplyNativeTheme();
+        if (_terminal != IntPtr.Zero && _api is not null)
+            _api.SetInteraction(_terminal, _copyOnSelect, _rightClickPaste, _readOnly);
         UpdateBounds(force: true);
     }
 
@@ -508,33 +536,103 @@ public sealed class NativeTerminalSurface : TerminalSurface
         try
         {
             const uint inputEvent = 1;
+            const uint clipboardCopyEvent = 2;
+            const uint clipboardPasteRequestEvent = 3;
             if (_disposed
                 || eventData.StructSize < Marshal.SizeOf<NativeTerminalApi.NativeEvent>()
                 || eventData.AbiMajor != NativeTerminalApi.AbiMajor
-                || eventData.Type != inputEvent
-                || eventData.TextLength > 512 * 1024
-                || (eventData.TextLength > 0 && eventData.Text == IntPtr.Zero))
+                || eventData.TextLength > 16 * 1024 * 1024
+                || eventData.HtmlLength > 16 * 1024 * 1024
+                || eventData.RtfLength > 16 * 1024 * 1024
+                || (eventData.TextLength > 0 && eventData.Text == IntPtr.Zero)
+                || (eventData.HtmlLength > 0 && eventData.Html == IntPtr.Zero)
+                || (eventData.RtfLength > 0 && eventData.Rtf == IntPtr.Zero))
             {
                 return;
             }
 
-            var data = eventData.TextLength == 0
-                ? string.Empty
-                : Marshal.PtrToStringUni(eventData.Text, checked((int)eventData.TextLength));
-            if (data is not null)
-                OnNativeInput(data);
+            switch (eventData.Type)
+            {
+                case inputEvent:
+                {
+                    var data = eventData.TextLength == 0
+                        ? string.Empty
+                        : Marshal.PtrToStringUni(eventData.Text, checked((int)eventData.TextLength));
+                    if (data is not null)
+                        OnNativeInput(data);
+                    break;
+                }
+                case clipboardCopyEvent:
+                {
+                    var text = eventData.TextLength == 0
+                        ? string.Empty
+                        : Marshal.PtrToStringUni(eventData.Text, checked((int)eventData.TextLength)) ?? string.Empty;
+                    var html = eventData.HtmlLength == 0
+                        ? null
+                        : Marshal.PtrToStringUTF8(eventData.Html, checked((int)eventData.HtmlLength));
+                    var rtf = eventData.RtfLength == 0
+                        ? null
+                        : Marshal.PtrToStringUTF8(eventData.Rtf, checked((int)eventData.RtfLength));
+                    DispatcherQueue.TryEnqueue(() => CopyToClipboard(text, html, rtf));
+                    break;
+                }
+                case clipboardPasteRequestEvent:
+                    DispatcherQueue.TryEnqueue(() => _ = PasteFromClipboardAsync());
+                    break;
+            }
         }
         catch (Exception exception)
         {
             // Managed exceptions must never cross the native callback boundary.
-            try { TraceHook?.Invoke($"native input callback failed: {exception.Message}"); }
+            try { TraceHook?.Invoke($"native event callback failed: {exception.Message}"); }
             catch { }
+        }
+    }
+
+    private static void CopyToClipboard(string text, string? html, string? rtf)
+    {
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        try
+        {
+            var package = new DataPackage();
+            package.SetText(text);
+            if (!string.IsNullOrEmpty(html))
+                package.SetHtmlFormat(html);
+            if (!string.IsNullOrEmpty(rtf))
+                package.SetRtf(rtf);
+            Clipboard.SetContent(package);
+            Clipboard.Flush();
+        }
+        catch (Exception exception)
+        {
+            TraceHook?.Invoke($"native clipboard copy failed: {exception.Message}");
+        }
+    }
+
+    private async Task PasteFromClipboardAsync()
+    {
+        try
+        {
+            if (_disposed || _readOnly || _terminal == IntPtr.Zero || _api is null)
+                return;
+            var content = Clipboard.GetContent();
+            if (!content.Contains(StandardDataFormats.Text))
+                return;
+            var text = await content.GetTextAsync();
+            if (!_disposed && !string.IsNullOrEmpty(text) && _terminal != IntPtr.Zero)
+                _api.PasteText(_terminal, text);
+        }
+        catch (Exception exception)
+        {
+            TraceHook?.Invoke($"native clipboard paste failed: {exception.Message}");
         }
     }
 
     private void OnNativeInput(string data)
     {
-        if (_disposed || !_inputEnabled || string.IsNullOrEmpty(data))
+        if (_disposed || !_inputEnabled || _readOnly || string.IsNullOrEmpty(data))
             return;
         if (_reconnectOnEnter && data.IndexOfAny(['\r', '\n']) >= 0)
         {
@@ -613,6 +711,18 @@ public sealed class NativeTerminalSurface : TerminalSurface
         var shift = (GetKeyState(0x10) & 0x8000) != 0;
         if (!control)
             return false;
+        if (shift && virtualKey == 0x43
+            && _api?.CopySelection(_terminal, clearSelection: false) == true)
+        {
+            _suppressNextCharacter = true;
+            return true;
+        }
+        if (shift && virtualKey == 0x56)
+        {
+            _suppressNextCharacter = true;
+            _ = PasteFromClipboardAsync();
+            return true;
+        }
 
         Action? action = virtualKey switch
         {
@@ -668,6 +778,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
             DefaultBackground = light ? ColorRef(255, 255, 255) : ColorRef(12, 12, 12),
             DefaultForeground = light ? ColorRef(12, 12, 12) : ColorRef(204, 204, 204),
             DefaultSelectionBackground = ColorRef(38, 79, 120),
+            CursorColor = light ? ColorRef(12, 12, 12) : ColorRef(242, 242, 242),
             CursorStyle = 5,
             ColorTable = colors,
         };
