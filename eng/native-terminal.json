@@ -8,12 +8,12 @@
   "fork": {
     "repository": "https://github.com/bpbp-boop/terminal.git",
     "branch": "resesh-abi-v1",
-    "commit": "547a4f94188972888e22314d0822970c75125bd6"
+    "commit": "251399ead0ecc37817acb6b1ee8a8df934a43f00"
   },
   "abi": {
     "major": 1,
-    "minor": 2,
-    "buildId": "terminal-v1.24.11911.0-resesh-abi1.2"
+    "minor": 3,
+    "buildId": "terminal-v1.24.11911.0-resesh-abi1.3"
   },
   "supportedArchitectures": ["x64", "arm64"],
   "configuration": "Release",
@@ -29,12 +29,12 @@
   },
   "artifacts": {
     "x64": {
-      "Microsoft.Terminal.Control.dll": "3c1338fbecb5ab218498b405d7f316e13334b59897e69368589684cf4d41e688",
-      "Microsoft.Terminal.Control.pdb": "e8872ead62ee262375d76e3624b2c7e28382ed68465e6b3267cada244f0f57a7"
+      "Microsoft.Terminal.Control.dll": "b470ec7b524f98977f9b8c6b1d3fcb3a68af136c16af314f464d5300898576bc",
+      "Microsoft.Terminal.Control.pdb": "5eabb542952fc464d07fc3e5279533a528eedb456becaf15fc742b48144d67c8"
     },
     "arm64": {
-      "Microsoft.Terminal.Control.dll": "c824427a3c1de1350ede96e4316f5aa55a071e6a1cca86c73d55a9bbacaeb1e3",
-      "Microsoft.Terminal.Control.pdb": "ca1e5cfce04abbed6a3247185845a80816cda92d2c05fdb661fc2461aa337818"
+      "Microsoft.Terminal.Control.dll": "6af43e3097c3ba4593ca8f9a4349abcaa7bfc18ca05f443f8cc09acf97847c8b",
+      "Microsoft.Terminal.Control.pdb": "540ffe50a9d045bb467f8d499ca703dce0b898365016e92d71533dca353e2338"
     }
   }
 }

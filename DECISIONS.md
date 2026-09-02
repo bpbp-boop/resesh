@@ -569,3 +569,16 @@ keyboard-interactive fallback.
   SFTP path selection, and agent attention mapping.
 - Native callbacks only copy data and enqueue application work. They do not call back into
   the terminal handle.
+
+## 2026-09-02 - Native terminal search and links
+- ABI 1.3 searches inside TerminalCore and returns exact match counts, the current
+  zero-based match, invalidation state, and invalid-regex state. C# does not scan the
+  terminal buffer.
+- The native find row uses WinUI controls above the child HWND. Opening it reduces the
+  HWND height. Search navigation keeps focus in the field, and closing restores terminal
+  focus.
+- HwndTerminal updates the upstream URL pattern tree after output and resize. It hit-tests
+  OSC 8 links and detected URLs in child-window cell coordinates, renders upstream hover
+  state, and reports the URI and source through the ordered event queue.
+- URI launch policy stays in resesh. Only absolute HTTP and HTTPS links can reach the
+  Windows default browser; the native DLL never calls `ShellExecute`.

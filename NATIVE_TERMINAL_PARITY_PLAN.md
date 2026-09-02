@@ -1,6 +1,6 @@
 # Native Microsoft Terminal Parity Plan
 
-Status: implementation in progress — Phases 0–3 complete
+Status: implementation in progress — Phases 0–4 complete
 
 Related work:
 

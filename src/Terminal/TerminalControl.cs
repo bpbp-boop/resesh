@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.UI.Dispatching;
@@ -303,19 +302,8 @@ public sealed class TerminalControl : TerminalSurface
                     QuickConnectRequested?.Invoke();
                     break;
                 case "openLink":
-                    if (root.TryGetProperty("uri", out var uriProperty) &&
-                        Uri.TryCreate(uriProperty.GetString(), UriKind.Absolute, out var uri) &&
-                        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
-                    {
-                        try
-                        {
-                            Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
-                        }
-                        catch (Exception exception)
-                        {
-                            TraceHook?.Invoke($"openLink failed: {exception.Message}");
-                        }
-                    }
+                    if (root.TryGetProperty("uri", out var uriProperty))
+                        TerminalLinkPolicy.Open(uriProperty.GetString(), TraceHook);
                     break;
                 case "agentOsc":
                     if (root.TryGetProperty("code", out var oscCode))

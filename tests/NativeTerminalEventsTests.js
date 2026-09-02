@@ -17,7 +17,7 @@ const capabilities = JSON.parse(fs.readFileSync(
   "utf8"
 ));
 
-assert.match(api, /AbiMinor\s*=\s*2/);
+assert.match(api, /AbiMinor\s*=\s*3/);
 for (const eventName of [
   "TitleChanged",
   "WorkingDirectoryChanged",
@@ -27,6 +27,7 @@ for (const eventName of [
   "ShellIntegrationMarkChanged",
   "TerminalModeChanged",
   "OscObserved",
+  "OpenLink",
 ]) {
   assert.match(api, new RegExp(`${eventName}\\s*=\\s*\\d+`), `${eventName} must have a typed ABI value`);
 }
@@ -50,16 +51,25 @@ assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) => TitleChanged\?\.Invo
   "native callbacks must queue application state changes");
 assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) => WorkingDirectoryReported\?\.Invoke/);
 assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) => AgentOscReceived\?\.Invoke/);
+assert.match(api, /ReseshTerminalSearch/);
+assert.match(api, /ReseshTerminalClearSearch/);
+assert.match(api, /ReseshTerminalGetSearchState/);
+assert.match(surface, /NativeTerminalFindInput/);
+assert.match(surface, /case NativeTerminalApi\.NativeEventType\.OpenLink:[\s\S]*?TerminalLinkPolicy\.Open/);
+assert.match(surface, /new Windows\.Foundation\.Rect\(0, findHeight, ActualWidth/,
+  "the find row must reduce the child HWND bounds");
 
 for (const name of [
   "OSC 7 working-directory event",
   "OSC 133 shell marks",
   "OSC 3008 context event",
   "OSC 7377, 9, and 777 agent evidence",
+  "OSC 8 link rendering",
+  "search",
 ]) {
   const item = capabilities.capabilities.find((capability) => capability.capability === name);
   assert.ok(item, `missing capability row: ${name}`);
-  assert.strictEqual(item.native, "pass", `${name} must pass after Phase 3`);
+  assert.strictEqual(item.native, "pass", `${name} must pass after Phase 4`);
 }
 
 console.log("Native terminal event tests passed.");

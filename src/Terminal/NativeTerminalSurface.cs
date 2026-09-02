@@ -3,8 +3,13 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.System;
 
 namespace Resesh.Terminal;
 
@@ -40,6 +45,11 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private readonly NativeTerminalApi.EventCallback _eventCallback;
     private readonly WindowProc _windowProc;
 
+    private readonly Border _findBar = new();
+    private readonly TextBox _findInput = new();
+    private readonly TextBlock _findCount = new();
+    private readonly ToggleButton _findCase = new();
+    private readonly ToggleButton _findRegex = new();
     private NativeTerminalApi? _api;
     private IntPtr _parentHwnd;
     private IntPtr _childHwnd;
@@ -71,6 +81,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private char? _pendingShellMarkAction;
     private bool _alternateBufferActive;
     private bool _bracketedPasteModeEnabled;
+    private bool _searchRefreshPending;
 
     public static Action<string>? TraceHook { get; set; }
 
@@ -121,6 +132,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         _windowProc = ChildWindowProc;
         AutomationProperties.SetAutomationId(this, "NativeTerminalSurface");
         AutomationProperties.SetName(this, "Terminal");
+        ConfigureFindBar();
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -386,11 +398,12 @@ public sealed class NativeTerminalSurface : TerminalSurface
             return;
         }
 
+        var findHeight = _findBar.Visibility == Visibility.Visible ? _findBar.Height : 0;
         Windows.Foundation.Rect bounds;
         try
         {
             bounds = TransformToVisual(rootContent).TransformBounds(
-                new Windows.Foundation.Rect(0, 0, ActualWidth, ActualHeight));
+                new Windows.Foundation.Rect(0, findHeight, ActualWidth, Math.Max(0, ActualHeight - findHeight)));
         }
         catch (InvalidOperationException)
         {
@@ -575,6 +588,20 @@ public sealed class NativeTerminalSurface : TerminalSurface
                     DispatcherQueue.TryEnqueue(() => BellReceived?.Invoke());
                     break;
                 case NativeTerminalApi.NativeEventType.BufferOrViewportChanged:
+                    if (_findBar.Visibility == Visibility.Visible
+                        && _findInput.Text.Length > 0
+                        && !_searchRefreshPending)
+                    {
+                        _searchRefreshPending = true;
+                        if (!DispatcherQueue.TryEnqueue(() =>
+                        {
+                            _searchRefreshPending = false;
+                            RunFind(forward: true, execute: false);
+                        }))
+                        {
+                            _searchRefreshPending = false;
+                        }
+                    }
                     break;
                 case NativeTerminalApi.NativeEventType.AlternateBufferChanged:
                     _alternateBufferActive = (eventData.Flags & 1) != 0;
@@ -606,6 +633,12 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 case NativeTerminalApi.NativeEventType.OscObserved:
                     ObserveOsc(eventData.Value0, ReadEventText(in eventData));
                     break;
+                case NativeTerminalApi.NativeEventType.OpenLink:
+                {
+                    var uri = ReadEventText(in eventData);
+                    DispatcherQueue.TryEnqueue(() => TerminalLinkPolicy.Open(uri, TraceHook));
+                    break;
+                }
             }
         }
         catch (Exception exception)
@@ -790,6 +823,12 @@ public sealed class NativeTerminalSurface : TerminalSurface
         var shift = (GetKeyState(0x10) & 0x8000) != 0;
         if (!control)
             return false;
+        if (shift && virtualKey == 0x46)
+        {
+            _suppressNextCharacter = true;
+            DispatcherQueue.TryEnqueue(OpenFind);
+            return true;
+        }
         if (shift && virtualKey == 0x43
             && _api?.CopySelection(_terminal, clearSelection: false) == true)
         {
@@ -832,6 +871,173 @@ public sealed class NativeTerminalSurface : TerminalSurface
         scanCode = (ushort)(scanCodeAndFlags & 0x00FF);
         flags = (ushort)(scanCodeAndFlags & 0xFF00);
         virtualKey = checked((ushort)wParam.ToInt64());
+    }
+
+    private void ConfigureFindBar()
+    {
+        _findBar.Height = 40;
+        _findBar.Padding = new Thickness(8, 4, 8, 4);
+        _findBar.VerticalAlignment = VerticalAlignment.Top;
+        _findBar.HorizontalAlignment = HorizontalAlignment.Stretch;
+        _findBar.BorderThickness = new Thickness(0, 0, 0, 1);
+        _findBar.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(64, 128, 128, 128));
+        _findBar.Visibility = Visibility.Collapsed;
+        _findBar.SetValue(Canvas.ZIndexProperty, 1);
+
+        _findBar.KeyDown += OnFindRowKeyDown;
+        _findInput.Width = 240;
+        _findInput.PlaceholderText = "Find";
+        _findInput.Margin = new Thickness(0, 0, 8, 0);
+        AutomationProperties.SetAutomationId(_findInput, "NativeTerminalFindInput");
+        AutomationProperties.SetName(_findInput, "Find");
+        _findInput.TextChanged += (_, _) => RunFind(forward: true, execute: false);
+        _findInput.KeyDown += OnFindInputKeyDown;
+
+        _findCount.Width = 88;
+        _findCount.VerticalAlignment = VerticalAlignment.Center;
+        _findCount.TextAlignment = TextAlignment.Center;
+        AutomationProperties.SetAutomationId(_findCount, "NativeTerminalFindCount");
+        AutomationProperties.SetAccessibilityView(_findCount, AccessibilityView.Content);
+
+        ConfigureFindToggle(_findCase, "Aa", "Match case", "NativeTerminalFindCase");
+        ConfigureFindToggle(_findRegex, ".*", "Use regular expression", "NativeTerminalFindRegex");
+        _findCase.Click += (_, _) => RunFind(forward: true, execute: false);
+        _findRegex.Click += (_, _) => RunFind(forward: true, execute: false);
+
+        var previous = CreateFindButton("\uE72B", "Previous match", "NativeTerminalFindPrevious");
+        previous.Click += (_, _) => RunFind(forward: false, execute: true);
+        var next = CreateFindButton("\uE72A", "Next match", "NativeTerminalFindNext");
+        next.Click += (_, _) => RunFind(forward: true, execute: true);
+        var close = CreateFindButton("\uE711", "Close find", "NativeTerminalFindClose");
+        close.Click += (_, _) => CloseFind();
+
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        row.Children.Add(_findInput);
+        row.Children.Add(_findCount);
+        row.Children.Add(_findCase);
+        row.Children.Add(_findRegex);
+        row.Children.Add(previous);
+        row.Children.Add(next);
+        row.Children.Add(close);
+        _findBar.Child = row;
+        Children.Add(_findBar);
+    }
+
+    private static void ConfigureFindToggle(ToggleButton button, string content, string name, string automationId)
+    {
+        button.Content = content;
+        button.MinWidth = 32;
+        button.Height = 30;
+        button.Margin = new Thickness(2, 0, 0, 0);
+        ToolTipService.SetToolTip(button, name);
+        AutomationProperties.SetName(button, name);
+        AutomationProperties.SetAutomationId(button, automationId);
+    }
+
+    private static Button CreateFindButton(string glyph, string name, string automationId)
+    {
+        var button = new Button
+        {
+            Content = new FontIcon { Glyph = glyph, FontSize = 12 },
+            MinWidth = 32,
+            Height = 30,
+            Margin = new Thickness(2, 0, 0, 0),
+        };
+        ToolTipService.SetToolTip(button, name);
+        AutomationProperties.SetName(button, name);
+        AutomationProperties.SetAutomationId(button, automationId);
+        return button;
+    }
+
+    private void OpenFind()
+    {
+        if (_disposed)
+            return;
+        _findBar.Visibility = Visibility.Visible;
+        UpdateBounds(force: true);
+        _findInput.Focus(FocusState.Programmatic);
+        _findInput.SelectAll();
+        if (_findInput.Text.Length > 0)
+            RunFind(forward: true, execute: false);
+    }
+
+    private void CloseFind()
+    {
+        if (_findBar.Visibility != Visibility.Visible)
+            return;
+        if (_terminal != IntPtr.Zero && _api is not null)
+            _api.ClearSearch(_terminal);
+        _findCount.Text = "";
+        _findBar.Visibility = Visibility.Collapsed;
+        UpdateBounds(force: true);
+        FocusTerminal();
+    }
+
+    private void OnFindInputKeyDown(object sender, KeyRoutedEventArgs args)
+    {
+        if (args.Key == VirtualKey.Enter)
+        {
+            var shift = (GetKeyState(0x10) & 0x8000) != 0;
+            RunFind(forward: !shift, execute: true);
+            args.Handled = true;
+        }
+        else if (args.Key == VirtualKey.Escape)
+        {
+            CloseFind();
+            args.Handled = true;
+        }
+    }
+
+    private void OnFindRowKeyDown(object sender, KeyRoutedEventArgs args)
+    {
+        if (args.Key == VirtualKey.Escape)
+        {
+            CloseFind();
+            args.Handled = true;
+            return;
+        }
+        var control = (GetKeyState(0x11) & 0x8000) != 0;
+        var shift = (GetKeyState(0x10) & 0x8000) != 0;
+        if (control && shift && args.Key == VirtualKey.F)
+        {
+            _findInput.Focus(FocusState.Programmatic);
+            _findInput.SelectAll();
+            args.Handled = true;
+        }
+    }
+
+
+    private void RunFind(bool forward, bool execute)
+    {
+        if (_terminal == IntPtr.Zero || _api is null || _findBar.Visibility != Visibility.Visible)
+            return;
+        var query = _findInput.Text;
+        if (query.Length == 0)
+        {
+            _api.ClearSearch(_terminal);
+            _findCount.Text = "";
+            return;
+        }
+
+        var state = _api.Search(
+            _terminal,
+            query,
+            forward,
+            _findCase.IsChecked == true,
+            _findRegex.IsChecked == true,
+            execute,
+            scrollIntoView: true);
+        _findCount.Text = state.InvalidRegex
+            ? "Bad regex"
+            : state.TotalMatches == 0
+                ? "No results"
+                : $"{Math.Max(0, state.CurrentMatch) + 1} of {(state.TotalMatches > 999 ? "999+" : state.TotalMatches)}";
+        _findInput.Focus(FocusState.Programmatic);
     }
 
     private void ApplyNativeTheme()

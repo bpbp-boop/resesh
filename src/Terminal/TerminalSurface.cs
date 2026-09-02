@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.UI.Xaml.Controls;
 
 namespace Resesh.Terminal;
@@ -71,6 +72,27 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract void ApplyHighlights(IReadOnlyList<object> rules);
     public abstract Task<(string Context, string? Platform)?> RequestPromptContextAsync();
     public abstract void Dispose();
+}
+
+internal static class TerminalLinkPolicy
+{
+    internal static void Open(string? value, Action<string>? trace = null)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+        }
+        catch (Exception exception)
+        {
+            trace?.Invoke($"openLink failed: {exception.Message}");
+        }
+    }
 }
 
 public static class TerminalSurfaceFactory

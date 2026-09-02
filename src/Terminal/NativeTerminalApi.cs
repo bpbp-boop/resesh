@@ -8,7 +8,7 @@ namespace Resesh.Terminal;
 internal sealed class NativeTerminalApi
 {
     internal const ushort AbiMajor = 1;
-    internal const ushort AbiMinor = 2;
+    internal const ushort AbiMinor = 3;
     internal const string DllEnvironmentVariable = "RESESH_NATIVE_TERMINAL_DLL";
 
     private const uint ThemeOption = 0x00000001;
@@ -44,6 +44,9 @@ internal sealed class NativeTerminalApi
     private readonly SetOptionsDelegate _setOptions;
     private readonly CopySelectionDelegate _copySelection;
     private readonly PasteTextDelegate _pasteText;
+    private readonly SearchDelegate _search;
+    private readonly ClearSearchDelegate _clearSearch;
+    private readonly GetSearchStateDelegate _getSearchState;
 
     private NativeTerminalApi(IntPtr module, string libraryPath)
     {
@@ -73,6 +76,9 @@ internal sealed class NativeTerminalApi
         _setOptions = Load<SetOptionsDelegate>("ReseshTerminalSetOptions");
         _copySelection = Load<CopySelectionDelegate>("ReseshTerminalCopySelection");
         _pasteText = Load<PasteTextDelegate>("ReseshTerminalPasteText");
+        _search = Load<SearchDelegate>("ReseshTerminalSearch");
+        _clearSearch = Load<ClearSearchDelegate>("ReseshTerminalClearSearch");
+        _getSearchState = Load<GetSearchStateDelegate>("ReseshTerminalGetSearchState");
     }
 
     internal string LibraryPath { get; }
@@ -157,6 +163,54 @@ internal sealed class NativeTerminalApi
 
     internal void PasteText(IntPtr terminal, string text) =>
         ThrowIfFailed(_pasteText(terminal, text, checked((uint)text.Length)));
+
+    internal SearchState Search(
+        IntPtr terminal,
+        string query,
+        bool forward,
+        bool caseSensitive,
+        bool regularExpression,
+        bool executeSearch,
+        bool scrollIntoView)
+    {
+        uint flags = 0;
+        if (forward)
+            flags |= 0x01;
+        if (caseSensitive)
+            flags |= 0x02;
+        if (regularExpression)
+            flags |= 0x04;
+        if (executeSearch)
+            flags |= 0x08;
+        if (scrollIntoView)
+            flags |= 0x10;
+        var request = new SearchRequest
+        {
+            StructSize = checked((uint)Marshal.SizeOf<SearchRequest>()),
+            AbiMajor = AbiMajor,
+            AbiMinor = AbiMinor,
+            Query = query,
+            QueryLength = checked((uint)query.Length),
+            Flags = flags,
+        };
+        ThrowIfFailed(_search(terminal, in request, out var state));
+        return ToSearchState(state);
+    }
+
+    internal void ClearSearch(IntPtr terminal) => ThrowIfFailed(_clearSearch(terminal));
+
+    internal SearchState GetSearchState(IntPtr terminal)
+    {
+        ThrowIfFailed(_getSearchState(terminal, out var state));
+        return ToSearchState(state);
+    }
+
+    private static SearchState ToSearchState(NativeSearchState state) =>
+        new(
+            state.TotalMatches,
+            state.CurrentMatch,
+            (state.Flags & 0x01) != 0,
+            (state.Flags & 0x02) != 0);
 
     internal TilSize ResizePixels(IntPtr terminal, int width, int height)
     {
@@ -470,6 +524,7 @@ internal sealed class NativeTerminalApi
         ShellIntegrationMarkChanged = 9,
         TerminalModeChanged = 10,
         OscObserved = 11,
+        OpenLink = 12,
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -519,6 +574,32 @@ internal sealed class NativeTerminalApi
         internal uint PasteFiltering;
     }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct SearchRequest
+    {
+        internal uint StructSize;
+        internal ushort AbiMajor;
+        internal ushort AbiMinor;
+
+        [MarshalAs(UnmanagedType.LPWStr)]
+        internal string Query;
+
+        internal uint QueryLength;
+        internal uint Flags;
+        internal int ScrollOffset;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeSearchState
+    {
+        internal uint StructSize;
+        internal ushort AbiMajor;
+        internal ushort AbiMinor;
+        internal int TotalMatches;
+        internal int CurrentMatch;
+        internal uint Flags;
+    }
+
     internal readonly record struct NativeTerminalCreationSettings(
         int InitialColumns,
         int InitialRows,
@@ -531,6 +612,12 @@ internal sealed class NativeTerminalApi
         bool AllowOscClipboard,
         bool AllowOscNotifications,
         bool ReadOnly);
+
+    internal readonly record struct SearchState(
+        int TotalMatches,
+        int CurrentMatch,
+        bool Invalidated,
+        bool InvalidRegex);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate uint GetAbiVersionDelegate();
@@ -596,4 +683,16 @@ internal sealed class NativeTerminalApi
         IntPtr terminal,
         [MarshalAs(UnmanagedType.LPWStr)] string text,
         uint textLength);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int SearchDelegate(
+        IntPtr terminal,
+        in SearchRequest request,
+        out NativeSearchState state);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ClearSearchDelegate(IntPtr terminal);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetSearchStateDelegate(IntPtr terminal, out NativeSearchState state);
 }
