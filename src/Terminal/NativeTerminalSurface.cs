@@ -162,7 +162,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 Rows,
                 _scrollback,
                 _fontFamily,
-                _fontSize,
+                ToNativePointSize(_fontSize),
                 NativeTerminalThemeCatalog.Find(_theme),
                 _copyOnSelect,
                 _rightClickPaste,
@@ -759,9 +759,17 @@ public sealed class NativeTerminalSurface : TerminalSurface
     {
         if (_terminal == IntPtr.Zero || _api is null)
             return;
-        _api.SetTheme(_terminal, NativeTerminalThemeCatalog.Find(_theme), _fontFamily, checked((short)_fontSize), _dpi);
+        _api.SetTheme(
+            _terminal,
+            NativeTerminalThemeCatalog.Find(_theme),
+            _fontFamily,
+            ToNativePointSize(_fontSize),
+            _dpi);
     }
 
+    // xterm.js sizes fonts in CSS pixels. Microsoft Terminal sizes fonts in points.
+    private static short ToNativePointSize(int cssPixels) =>
+        checked((short)Math.Max(1, (cssPixels * 3 + 2) / 4));
 
     private static string FirstFontFamily(string families)
     {

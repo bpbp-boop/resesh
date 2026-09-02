@@ -284,7 +284,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         _palettePreviousFocus = openedFromTerminal
             ? null
             : FocusManager.GetFocusedElement(Root.XamlRoot) as DependencyObject;
-        CommandPalette.Open(BuildCommandPalette());
+        var commands = BuildCommandPalette();
+        SetTerminalHostsVisible(false);
+        CommandPalette.Open(commands);
     }
 
     private void CloseCommandPalette()
@@ -293,6 +295,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             return;
 
         CommandPalette.Close();
+        SetTerminalHostsVisible(true);
         RestorePaletteFocus();
     }
 
@@ -315,6 +318,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
         finally
         {
+            SetTerminalHostsVisible(true);
             if (!command.KeepActionFocus)
                 FocusActiveTerminal();
             _palettePreviousFocus = null;

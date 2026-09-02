@@ -6,6 +6,7 @@ const test = require("node:test");
 const catalog = fs.readFileSync(path.join(__dirname, "..", "src", "Core", "Storage", "ThemeCatalog.cs"), "utf8");
 const terminal = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "wwwroot", "terminal.html"), "utf8");
 const nativeThemes = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "NativeTerminalThemeCatalog.cs"), "utf8");
+const nativeSurface = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "NativeTerminalSurface.cs"), "utf8");
 const globalDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "GlobalSettingsDialog.cs"), "utf8");
 const sessionDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "SessionEditDialog.xaml.cs"), "utf8");
 const localDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "LocalProfileEditDialog.cs"), "utf8");
@@ -75,6 +76,14 @@ test("native palettes exactly match the WebView palettes", () => {
   }
 });
 
+test("native font size preserves the WebView CSS-pixel scale", () => {
+  assert.equal([...nativeSurface.matchAll(/ToNativePointSize\(_fontSize\)/g)].length, 2);
+  assert.match(
+    nativeSurface,
+    /ToNativePointSize\(int cssPixels\)[\s\S]*?\(cssPixels \* 3 \+ 2\) \/ 4/,
+  );
+});
+
 test("Phthalo Green uses its green shell and terminal palette", () => {
   assert.match(catalog, /new\("phthalo-green", "Phthalo Green"\)/);
   assert.match(
@@ -123,6 +132,21 @@ test("the command palette is built from theme surfaces, not Fluent defaults", ()
   assert.match(commandPalette, /x:Key="ListViewItemForegroundSelected" ResourceKey="SessionTreeSelectionForegroundBrush"/);
   assert.match(appXaml, /x:Key="SessionAccentBrush"/);
   assert.match(mainWindow, /SessionAccentBrush"\]\)\.Color = palette\.Accent/);
+});
+
+test("the command palette hides child terminal windows until it closes", () => {
+  assert.match(
+    mainWindow,
+    /ShowCommandPalette\(bool openedFromTerminal = false\)[\s\S]*?SetTerminalHostsVisible\(false\);[\s\S]*?CommandPalette\.Open\(commands\)/,
+  );
+  assert.match(
+    mainWindow,
+    /CloseCommandPalette\(\)[\s\S]*?CommandPalette\.Close\(\);[\s\S]*?SetTerminalHostsVisible\(true\);[\s\S]*?RestorePaletteFocus\(\)/,
+  );
+  assert.match(
+    mainWindow,
+    /ExecuteCommandPaletteEntryAsync[\s\S]*?finally[\s\S]*?SetTerminalHostsVisible\(true\)/,
+  );
 });
 
 test("dialogs follow the live session palette and light-dark mode", () => {
