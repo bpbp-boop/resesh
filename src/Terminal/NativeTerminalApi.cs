@@ -8,7 +8,7 @@ namespace Resesh.Terminal;
 internal sealed class NativeTerminalApi
 {
     internal const ushort AbiMajor = 1;
-    internal const ushort AbiMinor = 1;
+    internal const ushort AbiMinor = 2;
     internal const string DllEnvironmentVariable = "RESESH_NATIVE_TERMINAL_DLL";
 
     private const uint ThemeOption = 0x00000001;
@@ -452,6 +452,24 @@ internal sealed class NativeTerminalApi
         internal uint HtmlLength;
         internal IntPtr Rtf;
         internal uint RtfLength;
+        internal long Value0;
+        internal long Value1;
+        internal long Value2;
+    }
+
+    internal enum NativeEventType : uint
+    {
+        Input = 1,
+        ClipboardCopy = 2,
+        ClipboardPasteRequest = 3,
+        TitleChanged = 4,
+        WorkingDirectoryChanged = 5,
+        Bell = 6,
+        BufferOrViewportChanged = 7,
+        AlternateBufferChanged = 8,
+        ShellIntegrationMarkChanged = 9,
+        TerminalModeChanged = 10,
+        OscObserved = 11,
     }
 
     [StructLayout(LayoutKind.Sequential)]

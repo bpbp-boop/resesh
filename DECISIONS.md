@@ -558,3 +558,14 @@ keyboard-interactive fallback.
 - `tests/Fixtures/Terminal/vt-parity.json` is the Phase 0 behavior baseline.
   `eng/native-terminal-performance.json` records the approved regression budgets and the
   measured WebView2 and native-foundation startup and private-memory baselines.
+
+## 2026-09-02 - Native terminal typed events
+- ABI 1.2 reports title, working-directory, bell, buffer or viewport, alternate-buffer,
+  shell-mark, terminal-mode, and generic OSC events through the existing ordered queue.
+- `OutputStateMachineEngine` observes every complete OSC before normal dispatch. Observation
+  never consumes the sequence, so OSC 9 and all other upstream actions still run.
+- OSC payloads cross the ABI with their exact UTF-16 length. C# keeps the resesh policy:
+  bounded payload validation, OSC 7 and OSC 3008 parsing, title and command precedence,
+  SFTP path selection, and agent attention mapping.
+- Native callbacks only copy data and enqueue application work. They do not call back into
+  the terminal handle.

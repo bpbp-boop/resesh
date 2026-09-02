@@ -67,6 +67,10 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private string _fontFamily = "Cascadia Mono";
     private string _theme = "dark";
     private XamlRoot? _subscribedRoot;
+    private ulong _lastNativeEventSequence;
+    private char? _pendingShellMarkAction;
+    private bool _alternateBufferActive;
+    private bool _bracketedPasteModeEnabled;
 
     public static Action<string>? TraceHook { get; set; }
 
@@ -86,42 +90,18 @@ public sealed class NativeTerminalSurface : TerminalSurface
     public override event Action? CommandPaletteRequested;
     public override event Action? QuickConnectRequested;
     public override event Action<int, int>? Ready;
-    public override event Action<string>? TitleChanged
-    {
-        add { }
-        remove { }
-    }
-    public override event Action<string>? CommandChanged
-    {
-        add { }
-        remove { }
-    }
+    public override event Action<string>? TitleChanged;
+    public override event Action<string>? CommandChanged;
     public override event Action<string, string?>? PromptContextChanged
     {
         add { }
         remove { }
     }
-    public override event Action<string>? WorkingDirectoryReported
-    {
-        add { }
-        remove { }
-    }
-    public override event Action<string>? ContextReported
-    {
-        add { }
-        remove { }
-    }
-    public override event Action<int, string>? AgentOscReceived
-    {
-        add { }
-        remove { }
-    }
+    public override event Action<string>? WorkingDirectoryReported;
+    public override event Action<string>? ContextReported;
+    public override event Action<int, string>? AgentOscReceived;
     public override event Action? BellReceived;
-    public override event Action<string>? CommandObserved
-    {
-        add { }
-        remove { }
-    }
+    public override event Action<string>? CommandObserved;
     public override event Action<bool>? CommandsPanelOpenChanged
     {
         add { }
@@ -129,6 +109,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
     }
 
     public override bool SupportsRewindCapture => false;
+    internal bool IsAlternateBufferActive => _alternateBufferActive;
+    internal bool IsBracketedPasteModeEnabled => _bracketedPasteModeEnabled;
 
     public override int Columns { get; protected set; } = 80;
     public override int Rows { get; protected set; } = 24;
@@ -228,8 +210,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
         if (_initializationFailed)
             return;
 
-        if (data.IndexOf((byte)0x07) >= 0)
-            DispatcherQueue.TryEnqueue(() => BellReceived?.Invoke());
+        // Bell events come from TerminalCore. Scanning bytes here would treat a BEL
+        // that terminates an OSC sequence as an audible bell.
 
         lock (_outputGate)
         {
@@ -278,7 +260,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
     public override void ToggleCommandsPanel()
     {
-        // HwndTerminal has no command-mark or commands-panel ABI.
+        // HwndTerminal reports shell marks but has no commands-panel ABI.
     }
 
     public override void SetRulerPresentation(bool isSplit, bool isGroupFocused)
@@ -288,7 +270,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
     public override void SetPromptPlatform(string? platform)
     {
-        // Prompt discovery stays unsupported in the native MVP.
+        // HwndTerminal has no prompt-platform discovery ABI.
     }
 
     public override void SetInitialOptions(
@@ -538,12 +520,11 @@ public sealed class NativeTerminalSurface : TerminalSurface
     {
         try
         {
-            const uint inputEvent = 1;
-            const uint clipboardCopyEvent = 2;
-            const uint clipboardPasteRequestEvent = 3;
             if (_disposed
                 || eventData.StructSize < Marshal.SizeOf<NativeTerminalApi.NativeEvent>()
                 || eventData.AbiMajor != NativeTerminalApi.AbiMajor
+                || eventData.Sequence == 0
+                || eventData.Sequence <= _lastNativeEventSequence
                 || eventData.TextLength > 16 * 1024 * 1024
                 || eventData.HtmlLength > 16 * 1024 * 1024
                 || eventData.RtfLength > 16 * 1024 * 1024
@@ -554,22 +535,16 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 return;
             }
 
-            switch (eventData.Type)
+            _lastNativeEventSequence = eventData.Sequence;
+            var eventType = (NativeTerminalApi.NativeEventType)eventData.Type;
+            switch (eventType)
             {
-                case inputEvent:
-                {
-                    var data = eventData.TextLength == 0
-                        ? string.Empty
-                        : Marshal.PtrToStringUni(eventData.Text, checked((int)eventData.TextLength));
-                    if (data is not null)
-                        OnNativeInput(data);
+                case NativeTerminalApi.NativeEventType.Input:
+                    OnNativeInput(ReadEventText(in eventData));
                     break;
-                }
-                case clipboardCopyEvent:
+                case NativeTerminalApi.NativeEventType.ClipboardCopy:
                 {
-                    var text = eventData.TextLength == 0
-                        ? string.Empty
-                        : Marshal.PtrToStringUni(eventData.Text, checked((int)eventData.TextLength)) ?? string.Empty;
+                    var text = ReadEventText(in eventData);
                     var html = eventData.HtmlLength == 0
                         ? null
                         : Marshal.PtrToStringUTF8(eventData.Html, checked((int)eventData.HtmlLength));
@@ -579,8 +554,57 @@ public sealed class NativeTerminalSurface : TerminalSurface
                     DispatcherQueue.TryEnqueue(() => CopyToClipboard(text, html, rtf));
                     break;
                 }
-                case clipboardPasteRequestEvent:
+                case NativeTerminalApi.NativeEventType.ClipboardPasteRequest:
                     DispatcherQueue.TryEnqueue(() => _ = PasteFromClipboardAsync());
+                    break;
+                case NativeTerminalApi.NativeEventType.TitleChanged:
+                {
+                    var title = ReadEventText(in eventData);
+                    if (title.Length > 512)
+                        title = title[..512];
+                    DispatcherQueue.TryEnqueue(() => TitleChanged?.Invoke(title));
+                    break;
+                }
+                case NativeTerminalApi.NativeEventType.WorkingDirectoryChanged:
+                {
+                    var workingDirectory = ReadEventText(in eventData);
+                    DispatcherQueue.TryEnqueue(() => WorkingDirectoryReported?.Invoke(workingDirectory));
+                    break;
+                }
+                case NativeTerminalApi.NativeEventType.Bell:
+                    DispatcherQueue.TryEnqueue(() => BellReceived?.Invoke());
+                    break;
+                case NativeTerminalApi.NativeEventType.BufferOrViewportChanged:
+                    break;
+                case NativeTerminalApi.NativeEventType.AlternateBufferChanged:
+                    _alternateBufferActive = (eventData.Flags & 1) != 0;
+                    break;
+                case NativeTerminalApi.NativeEventType.ShellIntegrationMarkChanged:
+                {
+                    var action = _pendingShellMarkAction;
+                    _pendingShellMarkAction = null;
+                    if (action == 'C')
+                    {
+                        var command = ReadEventText(in eventData);
+                        if (command.Length > 512)
+                            command = command[..512];
+                        if (!string.IsNullOrWhiteSpace(command))
+                        {
+                            DispatcherQueue.TryEnqueue(() =>
+                            {
+                                CommandObserved?.Invoke(command);
+                                CommandChanged?.Invoke(command);
+                            });
+                        }
+                    }
+                    break;
+                }
+                case NativeTerminalApi.NativeEventType.TerminalModeChanged:
+                    if (eventData.Value0 == 2)
+                        _bracketedPasteModeEnabled = (eventData.Flags & 1) != 0;
+                    break;
+                case NativeTerminalApi.NativeEventType.OscObserved:
+                    ObserveOsc(eventData.Value0, ReadEventText(in eventData));
                     break;
             }
         }
@@ -590,6 +614,52 @@ public sealed class NativeTerminalSurface : TerminalSurface
             try { TraceHook?.Invoke($"native event callback failed: {exception.Message}"); }
             catch { }
         }
+    }
+
+    private static string ReadEventText(in NativeTerminalApi.NativeEvent eventData) =>
+        eventData.TextLength == 0
+            ? string.Empty
+            : Marshal.PtrToStringUni(eventData.Text, checked((int)eventData.TextLength)) ?? string.Empty;
+
+    private void ObserveOsc(long codeValue, string payload)
+    {
+        if (codeValue is < 0 or > int.MaxValue)
+            return;
+
+        var code = (int)codeValue;
+        switch (code)
+        {
+            case 7 when IsValidOscPayload(payload, 2048):
+                DispatcherQueue.TryEnqueue(() => WorkingDirectoryReported?.Invoke(payload));
+                break;
+            case 133 when IsValidOscPayload(payload, 4096):
+            {
+                var separator = payload.IndexOf(';');
+                var action = separator < 0 ? payload : payload[..separator];
+                _pendingShellMarkAction = action is "A" or "B" or "C" or "D" ? action[0] : null;
+                if (_pendingShellMarkAction == 'D')
+                    DispatcherQueue.TryEnqueue(() => CommandChanged?.Invoke(string.Empty));
+                break;
+            }
+            case 3008 when IsValidOscPayload(payload, 4096):
+                DispatcherQueue.TryEnqueue(() => ContextReported?.Invoke(payload));
+                break;
+            case 7377 or 9 or 777 when IsValidOscPayload(payload, 2048):
+                DispatcherQueue.TryEnqueue(() => AgentOscReceived?.Invoke(code, payload));
+                break;
+        }
+    }
+
+    private static bool IsValidOscPayload(string payload, int maximumLength)
+    {
+        if (payload.Length > maximumLength)
+            return false;
+        foreach (var character in payload)
+        {
+            if (character < ' ' || character == '\u007f')
+                return false;
+        }
+        return true;
     }
 
     private static void CopyToClipboard(string text, string? html, string? rtf)
