@@ -163,7 +163,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 _scrollback,
                 _fontFamily,
                 _fontSize,
-                BuildTheme(_theme),
+                NativeTerminalThemeCatalog.Find(_theme),
                 _copyOnSelect,
                 _rightClickPaste,
                 AllowOscClipboard: false,
@@ -759,33 +759,9 @@ public sealed class NativeTerminalSurface : TerminalSurface
     {
         if (_terminal == IntPtr.Zero || _api is null)
             return;
-        _api.SetTheme(_terminal, BuildTheme(_theme), _fontFamily, checked((short)_fontSize), _dpi);
+        _api.SetTheme(_terminal, NativeTerminalThemeCatalog.Find(_theme), _fontFamily, checked((short)_fontSize), _dpi);
     }
 
-    private static NativeTerminalApi.TerminalTheme BuildTheme(string theme)
-    {
-        var light = theme.Equals("light", StringComparison.OrdinalIgnoreCase)
-            || theme.EndsWith("-light", StringComparison.OrdinalIgnoreCase);
-        var colors = new[]
-        {
-            ColorRef(12, 12, 12), ColorRef(197, 15, 31), ColorRef(19, 161, 14), ColorRef(193, 156, 0),
-            ColorRef(0, 55, 218), ColorRef(136, 23, 152), ColorRef(58, 150, 221), ColorRef(204, 204, 204),
-            ColorRef(118, 118, 118), ColorRef(231, 72, 86), ColorRef(22, 198, 12), ColorRef(249, 241, 165),
-            ColorRef(59, 120, 255), ColorRef(180, 0, 158), ColorRef(97, 214, 214), ColorRef(242, 242, 242),
-        };
-        return new NativeTerminalApi.TerminalTheme
-        {
-            DefaultBackground = light ? ColorRef(255, 255, 255) : ColorRef(12, 12, 12),
-            DefaultForeground = light ? ColorRef(12, 12, 12) : ColorRef(204, 204, 204),
-            DefaultSelectionBackground = ColorRef(38, 79, 120),
-            CursorColor = light ? ColorRef(12, 12, 12) : ColorRef(242, 242, 242),
-            CursorStyle = 5,
-            ColorTable = colors,
-        };
-    }
-
-    private static uint ColorRef(byte red, byte green, byte blue) =>
-        red | ((uint)green << 8) | ((uint)blue << 16);
 
     private static string FirstFontFamily(string families)
     {

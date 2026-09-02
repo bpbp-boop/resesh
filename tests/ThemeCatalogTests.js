@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const catalog = fs.readFileSync(path.join(__dirname, "..", "src", "Core", "Storage", "ThemeCatalog.cs"), "utf8");
 const terminal = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "wwwroot", "terminal.html"), "utf8");
+const nativeThemes = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "NativeTerminalThemeCatalog.cs"), "utf8");
 const globalDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "GlobalSettingsDialog.cs"), "utf8");
 const sessionDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "SessionEditDialog.xaml.cs"), "utf8");
 const localDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "LocalProfileEditDialog.cs"), "utf8");
@@ -22,11 +23,55 @@ const presentation = fs.readFileSync(path.join(__dirname, "..", "src", "App", "P
 const visualPalette = fs.readFileSync(path.join(__dirname, "..", "src", "App", "ThemeVisualPalette.cs"), "utf8");
 
 const ids = [...catalog.matchAll(/new\("([a-z-]+)",/g)].map(match => match[1]);
+const paletteProperties = [
+  "background", "foreground", "cursor", "selectionBackground",
+  "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
+  "brightBlack", "brightRed", "brightGreen", "brightYellow",
+  "brightBlue", "brightMagenta", "brightCyan", "brightWhite",
+];
+
+function webPalette(id) {
+  let body;
+  if (id === "dark" || id === "system") {
+    body = terminal.match(/const DARK_THEME = \{([\s\S]*?)\n  \};/)?.[1];
+  } else if (id === "light") {
+    body = terminal.match(/const LIGHT_THEME = \{([\s\S]*?)\n  \};/)?.[1];
+  } else {
+    const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    body = terminal.match(new RegExp(`(?:"${escapedId}"|${escapedId})\\s*:\\s*\\{([\\s\\S]*?)\\n\\s*\\}`))?.[1];
+  }
+  assert.ok(body, `web palette ${id}`);
+
+  return paletteProperties.map(property => {
+    const color = body.match(new RegExp(`${property}:\\s*"#([0-9a-f]{6})"`, "i"))?.[1];
+    if (id === "dark" || id === "system") {
+      if (property === "selectionBackground") return "264F78";
+    }
+    assert.ok(color, `${id}.${property}`);
+    return color.toUpperCase();
+  });
+}
+
+function nativePalette(id) {
+  const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const body = nativeThemes.match(new RegExp(`\\["${escapedId}"\\]\\s*=\\s*New\\(([\\s\\S]*?)\\),`))?.[1];
+  assert.ok(body, `native palette ${id}`);
+  const colors = [...body.matchAll(/0x([0-9A-F]{6})/g)].map(match => match[1]);
+  assert.equal(colors.length, paletteProperties.length, `${id} native color count`);
+  return colors;
+}
+
 
 test("each catalog theme has a terminal palette", () => {
   for (const id of ids) {
     if (id === "dark" || id === "light") continue;
     assert.match(terminal, new RegExp(`(?:"${id}"|${id})\\s*:`), id);
+  }
+});
+
+test("native palettes exactly match the WebView palettes", () => {
+  for (const id of ids) {
+    assert.deepEqual(nativePalette(id), webPalette(id), id);
   }
 });
 

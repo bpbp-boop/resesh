@@ -2380,31 +2380,39 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     /// widths, pinned tabs, window placement) survives.</summary>
     private async Task ShowSettingsAsync(GlobalSettingsTarget target)
     {
-        var updated = await GlobalSettingsDialog.ShowAsync(
-            Root.XamlRoot, App.Settings.Current, ApplyThemeToApp, ApplySettingsToApp, target);
-        if (updated is null)
-            return;
-        App.Settings.Save(App.Settings.Current with
+        SetTerminalHostsVisible(false);
+        try
         {
-            Theme = updated.Theme,
-            FontFamily = updated.FontFamily,
-            ShowStatusBar = updated.ShowStatusBar,
-            FontSize = updated.FontSize,
-            Scrollback = updated.Scrollback,
-            CopyOnSelect = updated.CopyOnSelect,
-            RightClickPaste = updated.RightClickPaste,
-            ReopenLastLayoutAtStartup = updated.ReopenLastLayoutAtStartup,
-            AlwaysRecord = updated.AlwaysRecord,
-            RecordingDirectory = updated.RecordingDirectory,
-            RewindMinutes = updated.RewindMinutes,
-            RewindMegabytes = updated.RewindMegabytes,
-            ShowAgentIcons = updated.ShowAgentIcons,
-            AgentAlertFlash = updated.AgentAlertFlash,
-            AgentAlertSound = updated.AgentAlertSound,
-        });
-        ApplySettingsToApp();
-        if (_sessionsPaneOpen && _selectedRailTab == "recordings")
-            _ = RefreshRecordingsAsync();
+            var updated = await GlobalSettingsDialog.ShowAsync(
+                Root.XamlRoot, App.Settings.Current, ApplyThemeToApp, ApplySettingsToApp, target);
+            if (updated is null)
+                return;
+            App.Settings.Save(App.Settings.Current with
+            {
+                Theme = updated.Theme,
+                FontFamily = updated.FontFamily,
+                ShowStatusBar = updated.ShowStatusBar,
+                FontSize = updated.FontSize,
+                Scrollback = updated.Scrollback,
+                CopyOnSelect = updated.CopyOnSelect,
+                RightClickPaste = updated.RightClickPaste,
+                ReopenLastLayoutAtStartup = updated.ReopenLastLayoutAtStartup,
+                AlwaysRecord = updated.AlwaysRecord,
+                RecordingDirectory = updated.RecordingDirectory,
+                RewindMinutes = updated.RewindMinutes,
+                RewindMegabytes = updated.RewindMegabytes,
+                ShowAgentIcons = updated.ShowAgentIcons,
+                AgentAlertFlash = updated.AgentAlertFlash,
+                AgentAlertSound = updated.AgentAlertSound,
+            });
+            ApplySettingsToApp();
+            if (_sessionsPaneOpen && _selectedRailTab == "recordings")
+                _ = RefreshRecordingsAsync();
+        }
+        finally
+        {
+            SetTerminalHostsVisible(true);
+        }
     }
 
     /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>

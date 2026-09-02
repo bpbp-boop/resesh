@@ -53,6 +53,13 @@ test("the complete dialog follows the live application palette", () => {
   assert.match(dialog, /Background = \(Brush\)Application\.Current\.Resources\["SettingsCardBackgroundBrush"\]/);
 });
 
+test("settings keeps child terminal windows below the modal dialog", () => {
+  assert.match(
+    windowCode,
+    /ShowSettingsAsync\(GlobalSettingsTarget target\)[\s\S]*?SetTerminalHostsVisible\(false\);[\s\S]*?GlobalSettingsDialog\.ShowAsync[\s\S]*?finally[\s\S]*?SetTerminalHostsVisible\(true\);/,
+  );
+});
+
 test("settings fields and section tabs have stable automation IDs", () => {
   for (const [control, automationId] of [
     ["theme", "SettingsTheme"],
