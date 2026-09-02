@@ -203,7 +203,7 @@ test("global and per-session theme pickers use the shared catalog", () => {
 
 test("global theme selection previews immediately and cancel restores saved theme", () => {
   assert.match(globalDialog, /theme\.SelectionChanged[\s\S]*?applyThemePreview\(previewTheme\)/);
-  assert.match(globalDialog, /result = await dialog\.ShowAsync\(\);[\s\S]*?if \(result != ContentDialogResult\.Primary\)[\s\S]*?applyThemePreview\(current\.Theme\)/);
+  assert.match(globalDialog, /result = await dialog\.ShowModalAsync\(\);[\s\S]*?if \(result != ContentDialogResult\.Primary\)[\s\S]*?applyThemePreview\(current\.Theme\)/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)/);
 });
 

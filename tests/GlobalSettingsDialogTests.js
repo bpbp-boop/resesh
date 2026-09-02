@@ -53,10 +53,11 @@ test("the complete dialog follows the live application palette", () => {
   assert.match(dialog, /Background = \(Brush\)Application\.Current\.Resources\["SettingsCardBackgroundBrush"\]/);
 });
 
-test("settings keeps child terminal windows below the modal dialog", () => {
-  assert.match(
+test("settings uses the shared modal presenter for native child-window airspace", () => {
+  assert.match(dialog, /result = await dialog\.ShowModalAsync\(\)/);
+  assert.doesNotMatch(
     windowCode,
-    /ShowSettingsAsync\(GlobalSettingsTarget target\)[\s\S]*?SetTerminalHostsVisible\(false\);[\s\S]*?GlobalSettingsDialog\.ShowAsync[\s\S]*?finally[\s\S]*?SetTerminalHostsVisible\(true\);/,
+    /ShowSettingsAsync\(GlobalSettingsTarget target\)[\s\S]*?SetTerminalHostsVisible\(/,
   );
 });
 

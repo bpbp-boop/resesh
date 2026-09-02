@@ -858,7 +858,7 @@ public sealed partial class TabGroupView : UserControl
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = XamlRoot,
         };
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(box.Text))
+        if (await dialog.ShowModalAsync() == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(box.Text))
             tab.TitleOverride = box.Text.Trim();
     }
 

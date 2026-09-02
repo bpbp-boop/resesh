@@ -168,7 +168,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
             {
                 XamlRoot = XamlRoot,
             };
-            await preview.ShowAsync();
+            await preview.ShowModalAsync();
             if (preview.Confirmed is not { Count: > 0 } confirmed)
                 return;
 

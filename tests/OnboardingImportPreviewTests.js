@@ -22,7 +22,7 @@ test("Welcome import buttons open a preview before importing", () => {
   assert.match(
     onboarding,
     /var preview = new ImportPreviewDialog\(scan, source\)[\s\S]*?XamlRoot = XamlRoot/);
-  assert.match(onboarding, /await preview\.ShowAsync\(\)/);
+  assert.match(onboarding, /await preview\.ShowModalAsync\(\)/);
 });
 
 test("Welcome commits only the candidates confirmed in the preview", () => {

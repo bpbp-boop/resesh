@@ -199,7 +199,7 @@ public static class SshKeyManagerDialog
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = xamlRoot,
         };
-        await dialog.ShowAsync();
+        await dialog.ShowModalAsync();
     }
 
     private static string? PickKeyFile(XamlRoot xamlRoot, string title)

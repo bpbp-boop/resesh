@@ -317,7 +317,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = XamlRoot,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await dialog.ShowModalAsync() != ContentDialogResult.Primary)
             return;
         try
         {
@@ -331,7 +331,7 @@ public sealed class TerminalTabView : Grid, IDisposable
                 Content = exception.Message,
                 CloseButtonText = "OK",
                 XamlRoot = XamlRoot,
-            }.ShowAsync();
+            }.ShowModalAsync();
         }
     }
 

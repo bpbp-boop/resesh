@@ -408,7 +408,7 @@ public static class GlobalSettingsDialog
         ContentDialogResult result;
         try
         {
-            result = await dialog.ShowAsync();
+            result = await dialog.ShowModalAsync();
         }
         finally
         {

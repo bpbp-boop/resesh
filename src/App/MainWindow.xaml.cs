@@ -63,6 +63,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             handledEventsToo: true);
         CommandPalette.CloseRequested += CloseCommandPalette;
         CommandPalette.CommandInvoked += command => _ = ExecuteCommandPaletteEntryAsync(command);
+        ModalDialogPresenter.OpenStateChanged += ModalDialogPresenter_OpenStateChanged;
         RestoreWindowPlacement();
         AppWindow.Changed += AppWindow_Changed;
         ConfigureSplitter(TreeSplitter, TreeSplitterLine);
@@ -100,6 +101,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         AppWindow.Closing += AppWindow_Closing;
         Closed += (_, _) =>
         {
+            ModalDialogPresenter.OpenStateChanged -= ModalDialogPresenter_OpenStateChanged;
             _uiSettings.ColorValuesChanged -= SystemColorsChanged;
             SaveTreePaneWidth();
             App.Workspaces.SaveLastLayout(CaptureWorkspaceLayout());
@@ -314,7 +316,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 Content = exception.Message,
                 CloseButtonText = "OK",
                 XamlRoot = Root.XamlRoot,
-            }.ShowAsync();
+            }.ShowModalAsync();
         }
         finally
         {
@@ -578,7 +580,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         {
             XamlRoot = Root.XamlRoot,
         };
-        await dialog.ShowAsync();
+        await dialog.ShowModalAsync();
         if (dialog.Result is not { } result)
             return;
 
@@ -722,7 +724,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private async Task ConfirmWindowCloseAsync()
     {
-        SetTerminalHostsVisible(false);
         try
         {
             var count = ViewModel.AllTabs.Count(tab => !tab.IsOnboarding);
@@ -752,8 +753,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
         finally
         {
-            if (!_closeConfirmed)
-                SetTerminalHostsVisible(true);
             _closePromptOpen = false;
         }
     }
@@ -772,6 +771,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             if (tab.View is TerminalTabView terminal)
                 terminal.SetHostVisible(false);
         }
+    }
+
+    private void ModalDialogPresenter_OpenStateChanged(XamlRoot xamlRoot, bool isOpen)
+    {
+        if (ReferenceEquals(xamlRoot, Root.XamlRoot))
+            SetTerminalHostsVisible(!isOpen);
     }
 
     private void PinButton_Click(object sender, RoutedEventArgs e)
@@ -1088,7 +1093,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 Content = exception.Message,
                 CloseButtonText = "OK",
                 XamlRoot = Root.XamlRoot,
-            }.ShowAsync();
+            }.ShowModalAsync();
         }
     }
 
@@ -1108,7 +1113,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 Content = exception.Message,
                 CloseButtonText = "OK",
                 XamlRoot = Root.XamlRoot,
-            }.ShowAsync();
+            }.ShowModalAsync();
         }
     }
 
@@ -2217,7 +2222,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         {
             XamlRoot = Root.XamlRoot,
         };
-        await dialog.ShowAsync();
+        await dialog.ShowModalAsync();
         if (dialog.Result is { } result)
             ViewModel.UpdateSession(result, dialog.Password);
     }
@@ -2234,7 +2239,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = Root.XamlRoot,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary || box.Password.Length == 0)
+        if (await dialog.ShowModalAsync() != ContentDialogResult.Primary || box.Password.Length == 0)
             return;
         tab.Lock(box.Password);
         (tab.View as TerminalTabView)?.ShowLockOverlay();
@@ -2251,7 +2256,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 Content = $"Too many failed attempts. Try again in {Math.Ceiling(wait.TotalSeconds)} seconds.",
                 CloseButtonText = "OK",
                 XamlRoot = Root.XamlRoot,
-            }.ShowAsync();
+            }.ShowModalAsync();
             return;
         }
 
@@ -2265,7 +2270,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = Root.XamlRoot,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await dialog.ShowModalAsync() != ContentDialogResult.Primary)
             return;
 
         if (tab.TryUnlock(box.Password))
@@ -2283,7 +2288,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                     : "Wrong password.",
                 CloseButtonText = "OK",
                 XamlRoot = Root.XamlRoot,
-            }.ShowAsync();
+            }.ShowModalAsync();
         }
     }
 
@@ -2322,7 +2327,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 + "Check the connection and try again.",
             CloseButtonText = "OK",
             XamlRoot = Root.XamlRoot,
-        }.ShowAsync();
+        }.ShowModalAsync();
     }
 
     public void ToggleFilePane(TabViewModel tab)
@@ -2366,7 +2371,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 Content = exception.Message,
                 CloseButtonText = "OK",
                 XamlRoot = Root.XamlRoot,
-            }.ShowAsync();
+            }.ShowModalAsync();
         }
     }
 
@@ -2384,39 +2389,31 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     /// widths, pinned tabs, window placement) survives.</summary>
     private async Task ShowSettingsAsync(GlobalSettingsTarget target)
     {
-        SetTerminalHostsVisible(false);
-        try
+        var updated = await GlobalSettingsDialog.ShowAsync(
+            Root.XamlRoot, App.Settings.Current, ApplyThemeToApp, ApplySettingsToApp, target);
+        if (updated is null)
+            return;
+        App.Settings.Save(App.Settings.Current with
         {
-            var updated = await GlobalSettingsDialog.ShowAsync(
-                Root.XamlRoot, App.Settings.Current, ApplyThemeToApp, ApplySettingsToApp, target);
-            if (updated is null)
-                return;
-            App.Settings.Save(App.Settings.Current with
-            {
-                Theme = updated.Theme,
-                FontFamily = updated.FontFamily,
-                ShowStatusBar = updated.ShowStatusBar,
-                FontSize = updated.FontSize,
-                Scrollback = updated.Scrollback,
-                CopyOnSelect = updated.CopyOnSelect,
-                RightClickPaste = updated.RightClickPaste,
-                ReopenLastLayoutAtStartup = updated.ReopenLastLayoutAtStartup,
-                AlwaysRecord = updated.AlwaysRecord,
-                RecordingDirectory = updated.RecordingDirectory,
-                RewindMinutes = updated.RewindMinutes,
-                RewindMegabytes = updated.RewindMegabytes,
-                ShowAgentIcons = updated.ShowAgentIcons,
-                AgentAlertFlash = updated.AgentAlertFlash,
-                AgentAlertSound = updated.AgentAlertSound,
-            });
-            ApplySettingsToApp();
-            if (_sessionsPaneOpen && _selectedRailTab == "recordings")
-                _ = RefreshRecordingsAsync();
-        }
-        finally
-        {
-            SetTerminalHostsVisible(true);
-        }
+            Theme = updated.Theme,
+            FontFamily = updated.FontFamily,
+            ShowStatusBar = updated.ShowStatusBar,
+            FontSize = updated.FontSize,
+            Scrollback = updated.Scrollback,
+            CopyOnSelect = updated.CopyOnSelect,
+            RightClickPaste = updated.RightClickPaste,
+            ReopenLastLayoutAtStartup = updated.ReopenLastLayoutAtStartup,
+            AlwaysRecord = updated.AlwaysRecord,
+            RecordingDirectory = updated.RecordingDirectory,
+            RewindMinutes = updated.RewindMinutes,
+            RewindMegabytes = updated.RewindMegabytes,
+            ShowAgentIcons = updated.ShowAgentIcons,
+            AgentAlertFlash = updated.AgentAlertFlash,
+            AgentAlertSound = updated.AgentAlertSound,
+        });
+        ApplySettingsToApp();
+        if (_sessionsPaneOpen && _selectedRailTab == "recordings")
+            _ = RefreshRecordingsAsync();
     }
 
     /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
@@ -3142,7 +3139,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             {
                 XamlRoot = Root.XamlRoot,
             };
-            await optionsDialog.ShowAsync();
+            await optionsDialog.ShowModalAsync();
             if (optionsDialog.Options is not { } options)
                 return;
 
@@ -3177,7 +3174,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                     : "The backup was saved. It does not contain passwords or key passphrases.",
                 CloseButtonText = "OK",
                 XamlRoot = Root.XamlRoot,
-            }.ShowAsync();
+            }.ShowModalAsync();
         }
         catch (Exception ex)
         {
@@ -3213,7 +3210,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             var package = await Task.Run(() => SessionsBackup.Read(file.Path, passphrase));
             var conflicts = SessionsBackup.FindConflicts(App.Store, package);
             var preview = new ImportBackupDialog(package, conflicts) { XamlRoot = Root.XamlRoot };
-            await preview.ShowAsync();
+            await preview.ShowModalAsync();
             if (preview.Resolutions is not { } resolutions)
                 return;
 
@@ -3244,7 +3241,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                         : ""),
                 CloseButtonText = "OK",
                 XamlRoot = Root.XamlRoot,
-            }.ShowAsync();
+            }.ShowModalAsync();
         }
         catch (Exception ex)
         {
@@ -3269,7 +3266,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = Root.XamlRoot,
         };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary && box.Password.Length > 0
+        return await dialog.ShowModalAsync() == ContentDialogResult.Primary && box.Password.Length > 0
             ? box.Password
             : null;
     }
@@ -3282,7 +3279,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             Content = exception.Message,
             CloseButtonText = "OK",
             XamlRoot = Root.XamlRoot,
-        }.ShowAsync();
+        }.ShowModalAsync();
     }
 
     // ---- Session import ----
@@ -3305,7 +3302,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             {
                 XamlRoot = Root.XamlRoot,
             };
-            await sourceDialog.ShowAsync();
+            await sourceDialog.ShowModalAsync();
             if (sourceDialog.SelectedSource is not { } source)
                 return;
 
@@ -3329,12 +3326,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                     Content = "No importable SSH sessions were found.",
                     CloseButtonText = "OK",
                     XamlRoot = Root.XamlRoot,
-                }.ShowAsync();
+                }.ShowModalAsync();
                 return;
             }
 
             var preview = new ImportPreviewDialog(scan, sourceName) { XamlRoot = Root.XamlRoot };
-            await preview.ShowAsync();
+            await preview.ShowModalAsync();
             if (preview.Confirmed is not { Count: > 0 } confirmed)
                 return;
 
@@ -3348,7 +3345,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                     : $"Imported {imported} session(s); skipped {duplicates} duplicate(s).",
                 CloseButtonText = "OK",
                 XamlRoot = Root.XamlRoot,
-            }.ShowAsync();
+            }.ShowModalAsync();
         }
         catch (Exception ex)
         {
@@ -3358,7 +3355,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 Content = ex.Message,
                 CloseButtonText = "OK",
                 XamlRoot = Root.XamlRoot,
-            }.ShowAsync();
+            }.ShowModalAsync();
         }
     }
 
@@ -3829,7 +3826,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         {
             XamlRoot = Root.XamlRoot,
         };
-        await dialog.ShowAsync();
+        await dialog.ShowModalAsync();
         if (dialog.Result is not { } result)
             return;
 
@@ -3851,7 +3848,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = Root.XamlRoot,
         };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary ? box.Text : null;
+        return await dialog.ShowModalAsync() == ContentDialogResult.Primary ? box.Text : null;
     }
 
     private static async Task<bool> ShowCloseConfirmationAsync(ContentDialog dialog)
@@ -3870,7 +3867,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             }),
             handledEventsToo: true);
 
-        var result = await dialog.ShowAsync();
+        var result = await dialog.ShowModalAsync();
         return confirmedByKeyboard || result == ContentDialogResult.Primary;
     }
 
@@ -3891,7 +3888,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         };
         return acceptY
             ? await ShowCloseConfirmationAsync(dialog)
-            : await dialog.ShowAsync() == ContentDialogResult.Primary;
+            : await dialog.ShowModalAsync() == ContentDialogResult.Primary;
     }
 }
 
