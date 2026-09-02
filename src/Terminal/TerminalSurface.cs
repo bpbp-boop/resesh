@@ -30,6 +30,11 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract event Action<string>? CommandObserved;
     public abstract event Action<bool>? CommandsPanelOpenChanged;
 
+    /// <summary>Requests host-level pane focus when a native child window receives pointer input.</summary>
+    public event Action? HostFocusRequested;
+
+    protected void RequestHostFocus() => HostFocusRequested?.Invoke();
+
     public abstract bool SupportsRewindCapture { get; }
 
     public abstract int Columns { get; protected set; }

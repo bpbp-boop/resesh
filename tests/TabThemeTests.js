@@ -18,6 +18,15 @@ const xaml = fs.readFileSync(
 const visualPalette = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "ThemeVisualPalette.cs"),
   "utf8");
+const terminalSurface = fs.readFileSync(
+  path.join(__dirname, "..", "src", "Terminal", "TerminalSurface.cs"),
+  "utf8");
+const nativeSurface = fs.readFileSync(
+  path.join(__dirname, "..", "src", "Terminal", "NativeTerminalSurface.cs"),
+  "utf8");
+const terminalTab = fs.readFileSync(
+  path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"),
+  "utf8");
 
 test("tab colors use the live saved theme instead of the launch-only application theme", () => {
   assert.match(viewModel, /_appTheme = App\.Settings\.Current\.Theme/);
@@ -42,6 +51,19 @@ test("a focused selected tab border follows its session color", () => {
   assert.match(presentation, /FocusedTabBorderColor\(string appTheme, string\? colorTag\)[\s\S]*?parsed\.A > 0 \? parsed : palette\.Accent/);
   assert.match(visualPalette, /Hex\(0x0078D4\), 1, Hex\(divider\), Hex\(selection\), false\)/);
   assert.match(xaml, /FocusedAccentVisibility\(IsActive, IsGroupFocused\)[\s\S]*?FocusedTabBorderColor\(AppTheme, ColorTag\)/);
+});
+
+test("native terminal pointer input focuses its current tab group", () => {
+  assert.match(terminalSurface, /event Action\? HostFocusRequested/);
+  assert.match(
+    nativeSurface,
+    /case WmLeftButtonDown:[\s\S]*?RequestHostFocus\(\);[\s\S]*?SetFocus\(hwnd\)/);
+  assert.match(
+    terminalTab,
+    /_terminal\.HostFocusRequested \+= [\s\S]*?FocusRequested\?\.Invoke\(\)/);
+  assert.match(
+    mainWindow,
+    /view\.FocusRequested \+= \(\) => FocusGroup\(ViewModel\.GroupOf\(tab\)\)/);
 });
 
 test("an empty tab group does not draw a tab-strip divider", () => {

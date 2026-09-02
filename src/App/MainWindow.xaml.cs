@@ -1042,6 +1042,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         view.NewLocalTabRequested += OpenDefaultLocalProfile;
         view.CommandPaletteRequested += () => ShowCommandPalette(openedFromTerminal: true);
         view.QuickConnectRequested += () => QuickConnectBox.Focus(FocusState.Programmatic);
+        view.FocusRequested += () => FocusGroup(ViewModel.GroupOf(tab));
         view.UnlockRequested += () => _ = HandleUnlockAsync(tab, view);
         view.IconSuggested += key =>
         {

@@ -30,6 +30,9 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private const uint WmSysKeyDown = 0x0104;
     private const uint WmSysKeyUp = 0x0105;
     private const uint WmLeftButtonDown = 0x0201;
+    private const uint WmRightButtonDown = 0x0204;
+    private const uint WmMiddleButtonDown = 0x0207;
+    private const uint WmXButtonDown = 0x020B;
 
     private readonly object _outputGate = new();
     private readonly MemoryStream _pendingOutput = new();
@@ -673,7 +676,13 @@ public sealed class NativeTerminalSurface : TerminalSurface
                     _api.SetFocused(_terminal, false);
                     break;
                 case WmMouseActivate:
+                    SetFocus(hwnd);
+                    break;
                 case WmLeftButtonDown:
+                case WmRightButtonDown:
+                case WmMiddleButtonDown:
+                case WmXButtonDown:
+                    RequestHostFocus();
                     SetFocus(hwnd);
                     break;
                 case WmKeyDown:

@@ -107,6 +107,9 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// <summary>Raised when recording or rewind availability changes.</summary>
     public event Action? CaptureStateChanged;
 
+    /// <summary>Raised when native terminal pointer input must focus this tab's pane.</summary>
+    public event Action? FocusRequested;
+
     public bool IsRecording => _capture?.IsRecording == true;
     public bool CanRecord => _capture is not null && !_disposed;
     public bool IsRewinding => _rewindPlayer is not null;
@@ -134,6 +137,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         Children.Add(_terminal);
         Children.Add(_spinner);
 
+        _terminal.HostFocusRequested += () =>
+            DispatcherQueue.TryEnqueue(() => FocusRequested?.Invoke());
         _terminal.InputReceived += data =>
         {
             _backend?.Write(data);
