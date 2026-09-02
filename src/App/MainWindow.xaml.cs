@@ -718,6 +718,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private async Task ConfirmWindowCloseAsync()
     {
+        SetTerminalHostsVisible(false);
         try
         {
             var count = ViewModel.AllTabs.Count(tab => !tab.IsOnboarding);
@@ -747,7 +748,25 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
         finally
         {
+            if (!_closeConfirmed)
+                SetTerminalHostsVisible(true);
             _closePromptOpen = false;
+        }
+    }
+
+    private void SetTerminalHostsVisible(bool visible)
+    {
+        if (visible)
+        {
+            foreach (var groupView in _groupViews.Values)
+                groupView.SyncTerminalVisibility();
+            return;
+        }
+
+        foreach (var tab in ViewModel.AllTabs)
+        {
+            if (tab.View is TerminalTabView terminal)
+                terminal.SetHostVisible(false);
         }
     }
 
