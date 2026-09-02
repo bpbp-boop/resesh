@@ -38,6 +38,16 @@ public class AgentDetectionTests
     public void RecognizesAgentTitles(string title, string expected) =>
         Assert.Equal(expected, AgentDetection.FromTitle(title));
 
+    [Fact]
+    public void RecognizesCodexDefaultAnimatedTitles()
+    {
+        foreach (var frame in "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
+            Assert.Equal("codex", AgentDetection.FromTitle($"{frame} resesh"));
+
+        Assert.Null(AgentDetection.FromTitle("build ⠋ resesh"));
+        Assert.Null(AgentDetection.FromTitle("⠋resesh"));
+    }
+
     [Theory]
     [InlineData("bpg@host: ~/src/claude")]           // a directory, not a running agent
     [InlineData("C:\\tools\\gemini")]

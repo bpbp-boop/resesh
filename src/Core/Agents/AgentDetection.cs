@@ -51,6 +51,11 @@ public static class AgentDetection
         "sh", "bash", "zsh", "fish", "dash", "ash", "ksh", "mksh", "csh", "tcsh", "nu",
     };
 
+    // Codex's default OSC 2 title is an animated spinner followed by the project name.
+    // It does not contain the word "codex", which makes this the only title evidence
+    // available when Codex runs on a remote host without the structured adapter.
+    private const string CodexTitleSpinnerFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+
     /// <summary>
     /// The agent started by a command line, or null when it starts no agent we know.
     /// Null is a real answer for the caller ("this is a plain shell command"), which is
@@ -89,6 +94,13 @@ public static class AgentDetection
     {
         if (string.IsNullOrWhiteSpace(title))
             return null;
+        var titleSpan = title.AsSpan().TrimStart();
+        if (CodexTitleSpinnerFrames.Contains(titleSpan[0])
+            && (titleSpan.Length == 1 || char.IsWhiteSpace(titleSpan[1])))
+        {
+            return "codex";
+        }
+
         foreach (var raw in title.Split((char[])[' ', '\t', ':', ',', '|', '(', ')', '[', ']'],
                      StringSplitOptions.RemoveEmptyEntries))
         {
