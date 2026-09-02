@@ -8,6 +8,7 @@ using FxSsh.Services;
 //   big   -> streams ~10 MB of numbered lines (throughput/batching test)
 //   slow  -> ten ticks over ~6 s, first after 1.5 s (background-tab activity test)
 //   codex -> emits Codex's default animated OSC 2 title (SSH agent-icon test)
+//   shell -> emits a stock shell prompt OSC 2 title (agent-exit test)
 //   bye   -> closes the channel from the server side
 // Window-change requests are acknowledged in-band so resize plumbing is observable.
 
@@ -51,7 +52,7 @@ server.ConnectionAccepted += (_, session) =>
                     void Send(string s) => channel.SendData(Encoding.UTF8.GetBytes(s));
 
                     Send("Welcome to the Sessions test server!\r\n");
-                    Send("Commands: big (10 MB dump), slow (delayed ticks), codex (agent-title test), bye (server-side close). Anything else echoes.\r\n$ ");
+                    Send("Commands: big (10 MB dump), slow (delayed ticks), codex and shell (agent-title tests), bye (server-side close). Anything else echoes.\r\n$ ");
 
                     channel.WindowChange += (_, wc) =>
                         Send($"\r\n[window-change: {wc.WidthColumns}x{wc.HeightRows}]\r\n$ ");
@@ -103,6 +104,9 @@ server.ConnectionAccepted += (_, session) =>
                                         break;
                                     case "codex":
                                         Send("\x1b]2;⠋ remote-project\x07");
+                                        break;
+                                    case "shell":
+                                        Send("\x1b]2;root@rct-keep:/srv/rct-keep\x07");
                                         break;
                                     case "slow":
                                         // Delayed trickle: output that arrives well after the user

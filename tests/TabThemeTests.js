@@ -99,5 +99,5 @@ test("persistent tabs prefer a newer detected command over a delayed tmux title"
     "the detected command must win before the stale tmux title is considered");
   assert.match(
     viewModel,
-    /Session\.Persistent && AgentDetection\.IsShellTitle\(TerminalTitle\)[\s\S]*?RunningCommand = null/);
+    /AgentDetection\.IsShellTitle\(TerminalTitle\)[\s\S]*?RunningCommand = null/);
 });

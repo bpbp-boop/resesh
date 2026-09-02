@@ -34,7 +34,7 @@ public class AgentDetectionTests
     [InlineData("Claude Code", "claude")]
     [InlineData("✳ claude — building", "claude")]
     [InlineData("codex", "codex")]
-    [InlineData("bpg@host: gemini", "gemini")]
+    [InlineData("bpg@host | gemini", "gemini")]
     public void RecognizesAgentTitles(string title, string expected) =>
         Assert.Equal(expected, AgentDetection.FromTitle(title));
 
@@ -61,8 +61,19 @@ public class AgentDetectionTests
     [InlineData("bash")]
     [InlineData("-zsh")]
     [InlineData("fish")]
-    public void ExactShellTitlesAreExitSignals(string title) =>
+    [InlineData("root@rct-keep:/srv/rct-keep")]
+    [InlineData("bpg@host: ~/src")]
+    public void ShellTitlesAreExitSignals(string title) =>
         Assert.True(AgentDetection.IsShellTitle(title));
+
+    [Theory]
+    [InlineData("root@rct-keep:/srv/rct-keep", "/srv/rct-keep")]
+    [InlineData("bpg@host: ~/src", "~/src")]
+    public void ExtractsDirectoryFromShellPromptTitle(string title, string expected)
+    {
+        Assert.True(AgentDetection.TryGetShellPromptDirectory(title, out var directory));
+        Assert.Equal(expected, directory);
+    }
 
     [Theory]
     [InlineData("bash — server")]
