@@ -1937,8 +1937,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     internal void SetTabContentDropTargetsVisibleCore(bool visible)
     {
+        if (visible)
+            SetTerminalHostsVisible(false);
+
         foreach (var groupView in _groupViews.Values)
             groupView.SetContentDropTargetVisible(visible);
+
+        if (!visible)
+            SetTerminalHostsVisible(true);
     }
 
     public void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex)
