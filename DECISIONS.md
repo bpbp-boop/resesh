@@ -582,3 +582,23 @@ keyboard-interactive fallback.
   state, and reports the URI and source through the ordered event queue.
 - URI launch policy stays in resesh. Only absolute HTTP and HTTPS links can reach the
   Windows default browser; the native DLL never calls `ShellExecute`.
+
+## 2026-09-02 - Native terminal command navigation
+- ABI 1.4 keeps command marks, search rows, prompt probes, and bookmarks in
+  TerminalCore-owned row metadata. Command and bookmark identities can coexist on one
+  row and survive normal buffer movement, reflow, and scrollback trimming.
+- Every variable-size ABI result uses caller-owned storage with a required-length query.
+  `GetMarkText(markId, includeOutput)` is the single command and transcript text contract.
+- Exact OSC 133 shell marks are authoritative. Local prompt discovery starts before Enter,
+  waits for echoed input, rejects title-epoch changes, and stops when exact marks appear.
+  Prompt parsing is bounded to 4,096 characters and stored commands to 512 characters.
+- The native overview uses WinUI `AnnotatedScrollBar` through `IScrollController`.
+  A non-hit-test drawing layer buckets command, bookmark, and search ticks and draws a
+  separate proportional viewport. Native viewport events complete matching scroll requests.
+- The docked commands panel uses a virtualized `ListView` data template. Command text and
+  status brushes are created only for realized rows. Jump and copy-output actions stay out
+  of the narrow ruler.
+- Native artifacts are pinned to fork commit
+  `95e25194f73f0d721481a5f59ae6f59a27f90b64`, build ID
+  `terminal-v1.24.11911.0-resesh-abi1.4`, with x64 and ARM64 hashes in
+  `eng/native-terminal.json`.

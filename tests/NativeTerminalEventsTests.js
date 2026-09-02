@@ -17,7 +17,7 @@ const capabilities = JSON.parse(fs.readFileSync(
   "utf8"
 ));
 
-assert.match(api, /AbiMinor\s*=\s*3/);
+assert.match(api, /AbiMinor\s*=\s*4/);
 for (const eventName of [
   "TitleChanged",
   "WorkingDirectoryChanged",
@@ -47,7 +47,7 @@ assert.match(surface, /case 7377 or 9 or 777 when IsValidOscPayload\(payload, 20
 assert.match(surface, /new UTF8Encoding\(false, false\)\.GetDecoder\(\)/,
   "one persistent decoder must preserve UTF-8 split across backend reads");
 assert.match(surface, /_outputDecoder\.GetChars\([\s\S]*?flush:\s*false\)/);
-assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) => TitleChanged\?\.Invoke/,
+assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) =>[\s\S]*?_titleEpoch\+\+;[\s\S]*?TitleChanged\?\.Invoke/,
   "native callbacks must queue application state changes");
 assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) => WorkingDirectoryReported\?\.Invoke/);
 assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) => AgentOscReceived\?\.Invoke/);
@@ -56,8 +56,8 @@ assert.match(api, /ReseshTerminalClearSearch/);
 assert.match(api, /ReseshTerminalGetSearchState/);
 assert.match(surface, /NativeTerminalFindInput/);
 assert.match(surface, /case NativeTerminalApi\.NativeEventType\.OpenLink:[\s\S]*?TerminalLinkPolicy\.Open/);
-assert.match(surface, /new Windows\.Foundation\.Rect\(0, findHeight, ActualWidth/,
-  "the find row must reduce the child HWND bounds");
+assert.match(surface, /new Windows\.Foundation\.Rect\([\s\S]*?findHeight,[\s\S]*?ActualWidth - chromeWidth/,
+  "the find row and Phase 5 side chrome must reduce the child HWND bounds");
 
 for (const name of [
   "OSC 7 working-directory event",

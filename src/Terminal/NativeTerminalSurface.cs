@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
@@ -25,6 +26,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private const uint SwpShowWindow = 0x0040;
     private const int SwHide = 0;
     private const int SwShow = 5;
+    private const int PromptParseWindow = 4096;
+    private const int MaximumCommandLength = 512;
 
     private const uint WmSetFocus = 0x0007;
     private const uint WmKillFocus = 0x0008;
@@ -50,6 +53,33 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private readonly TextBlock _findCount = new();
     private readonly ToggleButton _findCase = new();
     private readonly ToggleButton _findRegex = new();
+    private readonly NativeTerminalRuler _ruler = new();
+    private readonly NativeTerminalCommandsPanel _commandsPanel = new();
+    private readonly Dictionary<ulong, CancellationTokenSource> _promptProbes = [];
+    private readonly Dictionary<ulong, string> _probeCommands = [];
+    private readonly Dictionary<ulong, int?> _probeExitCodes = [];
+    private readonly Dictionary<string, ulong> _osc3008Probes = new(StringComparer.Ordinal);
+    private static readonly Regex PromptCommandPattern = new(
+        @"^(?<prompt>(?:PS [^\n]{0,200}>|[^@\s$#%>]{1,100}@[^@\s$#%>]{1,100}\s+[^\r\n$#%>]{1,160}?\s*[$#%>]|(?:\[[^\]]{1,100}\]|[^\s$#%>]{0,100})[$#%>]))\s?(?<command>\S.*)$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex WindowsPromptContextPattern = new(
+        @"^(?:PS )?(?<context>(?:[A-Za-z]:[\\/]|\\\\)[^\r\n>]*)>$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex UnixBracketedPromptContextPattern = new(
+        @"^\[[^@\]\s]{1,100}@[^\]\s]{1,100}\s+(?<context>[^\]\r\n]{1,160})\]\s*[$#%>]$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex UnixSpacedPromptContextPattern = new(
+        @"^[^@\s$#%>]{1,100}@[^\s$#%>]{1,100}\s+(?<context>[^\r\n$#%>]{1,160}?)\s*[$#%>]$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex CiscoPromptContextPattern = new(
+        @"^(?:RP/\d+/(?:RP|RSP)\d+/CPU\d+:)?[A-Za-z0-9][A-Za-z0-9._-]{0,100}(?:\((?<mode>[^()\r\n]{1,100})\))?(?<terminator>[#>])$",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex JuniperPromptContextPattern = new(
+        @"^[^@\s]+@[^\s#>]+(?<terminator>[#>])$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+    private static readonly Regex NokiaPromptContextPattern = new(
+        @"^[A-Z]:[^@\s]+@[^\s#]+#$",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private NativeTerminalApi? _api;
     private IntPtr _parentHwnd;
     private IntPtr _childHwnd;
@@ -82,6 +112,18 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private bool _alternateBufferActive;
     private bool _bracketedPasteModeEnabled;
     private bool _searchRefreshPending;
+    private IReadOnlyList<NativeTerminalApi.MarkRecord> _marks = [];
+    private int _viewTop;
+    private int _bufferHeight = 24;
+    private long _titleEpoch;
+    private bool _commandsPanelOpen;
+    private bool _exactShellMarksSeen;
+    private string? _promptPlatform;
+    private string _promptContext = string.Empty;
+    private string? _promptContextPlatform;
+    private bool _annotationRefreshPending;
+    private ulong _commandsFingerprint = ulong.MaxValue;
+    private ulong _lastPromptProbeId;
 
     public static Action<string>? TraceHook { get; set; }
 
@@ -103,21 +145,13 @@ public sealed class NativeTerminalSurface : TerminalSurface
     public override event Action<int, int>? Ready;
     public override event Action<string>? TitleChanged;
     public override event Action<string>? CommandChanged;
-    public override event Action<string, string?>? PromptContextChanged
-    {
-        add { }
-        remove { }
-    }
+    public override event Action<string, string?>? PromptContextChanged;
     public override event Action<string>? WorkingDirectoryReported;
     public override event Action<string>? ContextReported;
     public override event Action<int, string>? AgentOscReceived;
     public override event Action? BellReceived;
     public override event Action<string>? CommandObserved;
-    public override event Action<bool>? CommandsPanelOpenChanged
-    {
-        add { }
-        remove { }
-    }
+    public override event Action<bool>? CommandsPanelOpenChanged;
 
     public override bool SupportsRewindCapture => false;
     internal bool IsAlternateBufferActive => _alternateBufferActive;
@@ -133,6 +167,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
         AutomationProperties.SetAutomationId(this, "NativeTerminalSurface");
         AutomationProperties.SetName(this, "Terminal");
         ConfigureFindBar();
+        ConfigureRuler();
+        ConfigureCommandsPanel();
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -183,6 +219,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
             _dpi = checked((int)GetDpiForWindow(_parentHwnd));
             ApplyNativeTheme();
             _initialized = true;
+            _ruler.UpdateViewport(0, Rows, Rows, alternateBuffer: false);
+            RefreshAnnotations();
             UpdateBounds();
             QueueOutputFlush();
             Ready?.Invoke(Columns, Rows);
@@ -269,21 +307,13 @@ public sealed class NativeTerminalSurface : TerminalSurface
         _hostVisible = visible;
         UpdateBounds(force: visible);
     }
+    public override void ToggleCommandsPanel() => SetCommandsPanelOpen(!_commandsPanelOpen);
 
-    public override void ToggleCommandsPanel()
-    {
-        // HwndTerminal reports shell marks but has no commands-panel ABI.
-    }
+    public override void SetRulerPresentation(bool isSplit, bool isGroupFocused) =>
+        _ruler.SetPresentation(isSplit, isGroupFocused);
 
-    public override void SetRulerPresentation(bool isSplit, bool isGroupFocused)
-    {
-        // HwndTerminal has no annotated-ruler ABI.
-    }
-
-    public override void SetPromptPlatform(string? platform)
-    {
-        // HwndTerminal has no prompt-platform discovery ABI.
-    }
+    public override void SetPromptPlatform(string? platform) =>
+        _promptPlatform = platform;
 
     public override void SetInitialOptions(
         int fontSize,
@@ -335,8 +365,31 @@ public sealed class NativeTerminalSurface : TerminalSurface
         // HwndTerminal has no highlight-rule ABI.
     }
 
-    public override Task<(string Context, string? Platform)?> RequestPromptContextAsync() =>
-        Task.FromResult<(string Context, string? Platform)?>(null);
+    public override Task<(string Context, string? Platform)?> RequestPromptContextAsync()
+    {
+        if (_terminal != IntPtr.Zero && _api is not null && !_alternateBufferActive)
+        {
+            try
+            {
+                var probe = _api.BeginPromptProbe(_terminal);
+                var parsed = ParsePromptContextLine(probe.Text);
+                if (probe.Id != 0 && !_promptProbes.ContainsKey(probe.Id))
+                    _api.DiscardPromptProbe(_terminal, probe.Id);
+                if (parsed is { } current)
+                {
+                    _promptContext = current.Context;
+                    _promptContextPlatform = current.Platform;
+                    return Task.FromResult<(string Context, string? Platform)?>(current);
+                }
+            }
+            catch (Exception exception)
+            {
+                TraceHook?.Invoke($"native prompt context request failed: {exception.Message}");
+            }
+        }
+        return Task.FromResult<(string Context, string? Platform)?>(
+            string.IsNullOrEmpty(_promptContext) ? null : (_promptContext, _promptContextPlatform));
+    }
 
     private void OnLoaded(object sender, RoutedEventArgs args)
     {
@@ -399,11 +452,25 @@ public sealed class NativeTerminalSurface : TerminalSurface
         }
 
         var findHeight = _findBar.Visibility == Visibility.Visible ? _findBar.Height : 0;
+        var rulerWidth = _alternateBufferActive ? 0 : _ruler.Width;
+        var commandsWidth = _commandsPanelOpen && !_alternateBufferActive
+            ? Math.Min(NativeTerminalCommandsPanel.PreferredWidth, ActualWidth * 0.7)
+            : 0;
+        if (commandsWidth > 0)
+            _commandsPanel.Width = commandsWidth;
+        var chromeWidth = rulerWidth + commandsWidth;
+        _ruler.Margin = new Thickness(0, findHeight, 0, 0);
+        _commandsPanel.Margin = new Thickness(0, findHeight, rulerWidth, 0);
+        _findBar.Margin = new Thickness(0, 0, chromeWidth, 0);
         Windows.Foundation.Rect bounds;
         try
         {
             bounds = TransformToVisual(rootContent).TransformBounds(
-                new Windows.Foundation.Rect(0, findHeight, ActualWidth, Math.Max(0, ActualHeight - findHeight)));
+                new Windows.Foundation.Rect(
+                    0,
+                    findHeight,
+                    Math.Max(0, ActualWidth - chromeWidth),
+                    Math.Max(0, ActualHeight - findHeight)));
         }
         catch (InvalidOperationException)
         {
@@ -575,7 +642,11 @@ public sealed class NativeTerminalSurface : TerminalSurface
                     var title = ReadEventText(in eventData);
                     if (title.Length > 512)
                         title = title[..512];
-                    DispatcherQueue.TryEnqueue(() => TitleChanged?.Invoke(title));
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        _titleEpoch++;
+                        TitleChanged?.Invoke(title);
+                    });
                     break;
                 }
                 case NativeTerminalApi.NativeEventType.WorkingDirectoryChanged:
@@ -588,42 +659,63 @@ public sealed class NativeTerminalSurface : TerminalSurface
                     DispatcherQueue.TryEnqueue(() => BellReceived?.Invoke());
                     break;
                 case NativeTerminalApi.NativeEventType.BufferOrViewportChanged:
-                    if (_findBar.Visibility == Visibility.Visible
-                        && _findInput.Text.Length > 0
-                        && !_searchRefreshPending)
+                {
+                    var viewTop = checked((int)eventData.Value0);
+                    var viewportHeight = checked((int)eventData.Value1);
+                    var bufferHeight = checked((int)eventData.Value2);
+                    DispatcherQueue.TryEnqueue(() =>
                     {
-                        _searchRefreshPending = true;
-                        if (!DispatcherQueue.TryEnqueue(() =>
+                        _viewTop = viewTop;
+                        _bufferHeight = bufferHeight;
+                        _ruler.UpdateViewport(viewTop, viewportHeight, bufferHeight, _alternateBufferActive);
+                        QueueAnnotationRefresh();
+                        if (_findBar.Visibility == Visibility.Visible
+                            && _findInput.Text.Length > 0
+                            && !_searchRefreshPending)
                         {
-                            _searchRefreshPending = false;
-                            RunFind(forward: true, execute: false);
-                        }))
-                        {
-                            _searchRefreshPending = false;
+                            _searchRefreshPending = true;
+                            DispatcherQueue.TryEnqueue(() =>
+                            {
+                                _searchRefreshPending = false;
+                                RunFind(forward: true, execute: false);
+                            });
                         }
-                    }
+                    });
                     break;
+                }
                 case NativeTerminalApi.NativeEventType.AlternateBufferChanged:
-                    _alternateBufferActive = (eventData.Flags & 1) != 0;
+                {
+                    var active = (eventData.Flags & 1) != 0;
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        _alternateBufferActive = active;
+                        _ruler.UpdateViewport(_viewTop, Rows, _bufferHeight, active);
+                        _commandsPanel.Visibility = _commandsPanelOpen && !active
+                            ? Visibility.Visible
+                            : Visibility.Collapsed;
+                        UpdateBounds(force: true);
+                        if (!active)
+                            QueueAnnotationRefresh();
+                    });
                     break;
+                }
                 case NativeTerminalApi.NativeEventType.ShellIntegrationMarkChanged:
                 {
                     var action = _pendingShellMarkAction;
                     _pendingShellMarkAction = null;
-                    if (action == 'C')
+                    var command = ReadEventText(in eventData);
+                    if (command.Length > MaximumCommandLength)
+                        command = command[..MaximumCommandLength];
+                    DispatcherQueue.TryEnqueue(() =>
                     {
-                        var command = ReadEventText(in eventData);
-                        if (command.Length > 512)
-                            command = command[..512];
-                        if (!string.IsNullOrWhiteSpace(command))
+                        CancelPromptProbes();
+                        if (action == 'C' && !string.IsNullOrWhiteSpace(command))
                         {
-                            DispatcherQueue.TryEnqueue(() =>
-                            {
-                                CommandObserved?.Invoke(command);
-                                CommandChanged?.Invoke(command);
-                            });
+                            CommandObserved?.Invoke(command);
+                            CommandChanged?.Invoke(command);
                         }
-                    }
+                        RefreshAnnotations();
+                    });
                     break;
                 }
                 case NativeTerminalApi.NativeEventType.TerminalModeChanged:
@@ -670,12 +762,17 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 var separator = payload.IndexOf(';');
                 var action = separator < 0 ? payload : payload[..separator];
                 _pendingShellMarkAction = action is "A" or "B" or "C" or "D" ? action[0] : null;
+                _exactShellMarksSeen = _pendingShellMarkAction is not null;
                 if (_pendingShellMarkAction == 'D')
                     DispatcherQueue.TryEnqueue(() => CommandChanged?.Invoke(string.Empty));
                 break;
             }
             case 3008 when IsValidOscPayload(payload, 4096):
-                DispatcherQueue.TryEnqueue(() => ContextReported?.Invoke(payload));
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    ObserveOsc3008(payload);
+                    ContextReported?.Invoke(payload);
+                });
                 break;
             case 7377 or 9 or 777 when IsValidOscPayload(payload, 2048):
                 DispatcherQueue.TryEnqueue(() => AgentOscReceived?.Invoke(code, payload));
@@ -793,6 +890,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
                     if (TryHandleAppShortcut(checked((ushort)wParam.ToInt64())))
                         return IntPtr.Zero;
                     UnpackKeyMessage(wParam, lParam, out var downKey, out var downScan, out var downFlags);
+                    if (downKey == 0x0D)
+                        BeginPromptDiscovery();
                     _api.SendKeyEvent(_terminal, downKey, downScan, downFlags, true);
                     return IntPtr.Zero;
                 case WmKeyUp:
@@ -841,6 +940,23 @@ public sealed class NativeTerminalSurface : TerminalSurface
             _ = PasteFromClipboardAsync();
             return true;
         }
+        if (shift && virtualKey == 0x4F)
+        {
+            _suppressNextCharacter = true;
+            DispatcherQueue.TryEnqueue(ToggleCommandsPanel);
+            return true;
+        }
+        if (shift && virtualKey == 0x4D)
+        {
+            _suppressNextCharacter = true;
+            DispatcherQueue.TryEnqueue(ToggleBookmark);
+            return true;
+        }
+        if (shift && virtualKey is 0x26 or 0x28)
+        {
+            DispatcherQueue.TryEnqueue(() => _ruler.JumpCommand(previous: virtualKey == 0x26));
+            return true;
+        }
 
         Action? action = virtualKey switch
         {
@@ -873,6 +989,407 @@ public sealed class NativeTerminalSurface : TerminalSurface
         virtualKey = checked((ushort)wParam.ToInt64());
     }
 
+    private void ConfigureRuler()
+    {
+        _ruler.ScrollRequested += viewTop =>
+        {
+            if (_terminal == IntPtr.Zero || _api is null)
+                return;
+            try
+            {
+                _api.UserScroll(_terminal, viewTop);
+            }
+            catch (Exception exception)
+            {
+                TraceHook?.Invoke($"native ruler scroll failed: {exception.Message}");
+            }
+        };
+        _ruler.MarkRequested += ScrollToMark;
+        Children.Add(_ruler);
+    }
+
+    private void ConfigureCommandsPanel()
+    {
+        _commandsPanel.CloseRequested += () => SetCommandsPanelOpen(false);
+        _commandsPanel.JumpRequested += ScrollToMark;
+        _commandsPanel.CopyRequested += CopyMarkOutput;
+        Children.Add(_commandsPanel);
+    }
+
+    private void SetCommandsPanelOpen(bool open)
+    {
+        if (_disposed || _commandsPanelOpen == open)
+            return;
+        _commandsPanelOpen = open;
+        _commandsPanel.Visibility = open && !_alternateBufferActive
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (open)
+            _commandsFingerprint = ulong.MaxValue;
+        if (open)
+            RefreshAnnotations();
+        UpdateBounds(force: true);
+        CommandsPanelOpenChanged?.Invoke(open);
+        if (!open)
+            FocusTerminal();
+    }
+
+    private void RefreshAnnotations()
+    {
+        if (_terminal == IntPtr.Zero || _api is null)
+            return;
+        try
+        {
+            _marks = _api.GetMarks(_terminal);
+            var searchRows = _api.GetSearchRows(_terminal);
+            _ruler.UpdateAnnotations(_marks, searchRows, MarkLabel);
+            var fingerprint = CommandFingerprint(_marks);
+            if (_commandsPanelOpen && fingerprint != _commandsFingerprint)
+            {
+                _commandsFingerprint = fingerprint;
+                _commandsPanel.SetCommands(_marks, MarkLabel);
+            }
+        }
+        catch (Exception exception)
+        {
+            TraceHook?.Invoke($"native annotation refresh failed: {exception.Message}");
+        }
+    }
+
+    private void QueueAnnotationRefresh()
+    {
+        if (_annotationRefreshPending || _alternateBufferActive)
+            return;
+        _annotationRefreshPending = true;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            _annotationRefreshPending = false;
+            RefreshAnnotations();
+        });
+    }
+
+    private void ScrollToMark(ulong markId)
+    {
+        if (_terminal == IntPtr.Zero || _api is null)
+            return;
+        try
+        {
+            _api.ScrollToMark(_terminal, markId);
+            FocusTerminal();
+        }
+        catch (Exception exception)
+        {
+            TraceHook?.Invoke($"native mark jump failed: {exception.Message}");
+            RefreshAnnotations();
+        }
+    }
+
+    private static ulong CommandFingerprint(IReadOnlyList<NativeTerminalApi.MarkRecord> marks)
+    {
+        var fingerprint = 1469598103934665603UL;
+        foreach (var mark in marks)
+        {
+            if (mark.Kind is not (NativeTerminalApi.MarkKind.ExactCommand or NativeTerminalApi.MarkKind.ApplicationCommand))
+                continue;
+            fingerprint = unchecked((fingerprint ^ mark.Id) * 1099511628211UL);
+            fingerprint = unchecked((fingerprint ^ mark.Generation) * 1099511628211UL);
+            fingerprint = unchecked((fingerprint ^ unchecked((ulong)mark.Row)) * 1099511628211UL);
+            fingerprint = unchecked((fingerprint ^ unchecked((ulong)(mark.ExitCode ?? int.MinValue))) * 1099511628211UL);
+        }
+        return fingerprint;
+    }
+
+    private string MarkLabel(ulong markId)
+    {
+        if (_terminal == IntPtr.Zero || _api is null)
+            return string.Empty;
+        try
+        {
+            return _api.GetMarkText(_terminal, markId, includeOutput: false);
+        }
+        catch (Exception exception)
+        {
+            TraceHook?.Invoke($"native mark text failed: {exception.Message}");
+            return string.Empty;
+        }
+    }
+
+    private void CopyMarkOutput(ulong markId)
+    {
+        if (_terminal == IntPtr.Zero || _api is null)
+            return;
+        try
+        {
+            var text = _api.GetMarkText(_terminal, markId, includeOutput: true);
+            CopyToClipboard(text, null, null);
+        }
+        catch (Exception exception)
+        {
+            TraceHook?.Invoke($"native command output failed: {exception.Message}");
+        }
+    }
+
+    private void ToggleBookmark()
+    {
+        if (_terminal == IntPtr.Zero || _api is null || _alternateBufferActive)
+            return;
+        try
+        {
+            var existing = _marks
+                .Where(mark => mark.Kind == NativeTerminalApi.MarkKind.Bookmark)
+                .Select(mark => mark.Id)
+                .ToHashSet();
+            var color = NativeTerminalThemeCatalog.Find(_theme).ColorTable[6];
+            var bookmarkId = _api.AddBookmark(_terminal, -1, color);
+            if (existing.Contains(bookmarkId))
+                _api.RemoveBookmark(_terminal, bookmarkId);
+            RefreshAnnotations();
+        }
+        catch (Exception exception)
+        {
+            TraceHook?.Invoke($"native bookmark failed: {exception.Message}");
+        }
+    }
+
+    private void BeginPromptDiscovery()
+    {
+        if (_terminal == IntPtr.Zero || _api is null || _exactShellMarksSeen || _alternateBufferActive)
+            return;
+        try
+        {
+            var probe = _api.BeginPromptProbe(_terminal);
+            if (probe.Id == 0)
+                return;
+            var cancellation = new CancellationTokenSource();
+            _promptProbes[probe.Id] = cancellation;
+            _probeCommands.Clear();
+            _probeExitCodes.Clear();
+            _osc3008Probes.Clear();
+            _lastPromptProbeId = probe.Id;
+            var epoch = _titleEpoch;
+            var immediate = ParseCommand(probe.Text);
+            if (immediate is not null)
+            {
+                ReportPromptContext(probe.Text);
+                _probeCommands[probe.Id] = immediate;
+                CommandObserved?.Invoke(immediate);
+                CommandChanged?.Invoke(immediate);
+            }
+            _ = SettlePromptProbeAsync(probe.Id, epoch, cancellation.Token);
+        }
+        catch (Exception exception)
+        {
+            TraceHook?.Invoke($"native prompt probe failed: {exception.Message}");
+        }
+    }
+
+    private async Task SettlePromptProbeAsync(ulong probeId, long epoch, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                await Task.Delay(attempt == 0 ? 300 : 900, cancellationToken);
+                if (_disposed || _terminal == IntPtr.Zero || _api is null || _exactShellMarksSeen)
+                    return;
+                if (epoch != _titleEpoch)
+                    break;
+                var line = _api.GetMarkText(_terminal, probeId, includeOutput: false);
+                var command = ParseCommand(line);
+                if (command is null)
+                    continue;
+                ReportPromptContext(line);
+                if (!_probeCommands.ContainsKey(probeId))
+                {
+                    _probeCommands[probeId] = command;
+                    CommandObserved?.Invoke(command);
+                    CommandChanged?.Invoke(command);
+                }
+                _probeCommands[probeId] = command;
+                _probeExitCodes.TryGetValue(probeId, out var exitCode);
+                _api.CreateApplicationMark(_terminal, probeId, command, exitCode);
+                if (_promptProbes.Remove(probeId, out var completedProbe))
+                    completedProbe.Dispose();
+                RefreshAnnotations();
+                return;
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                TraceHook?.Invoke($"native prompt discovery failed: {exception.Message}");
+                break;
+            }
+        }
+
+        try
+        {
+            if (_terminal != IntPtr.Zero && _api is not null)
+                _api.DiscardPromptProbe(_terminal, probeId);
+        }
+        catch (Exception exception)
+        {
+            TraceHook?.Invoke($"native prompt probe cleanup failed: {exception.Message}");
+        }
+        finally
+        {
+            if (_promptProbes.Remove(probeId, out var abandonedProbe))
+                abandonedProbe.Dispose();
+            if (_lastPromptProbeId == probeId)
+                _lastPromptProbeId = 0;
+        }
+    }
+
+    private static string? ParseCommand(string line)
+    {
+        var match = PromptCommandPattern.Match(line, 0, Math.Min(line.Length, PromptParseWindow));
+        if (!match.Success)
+            return null;
+        var command = match.Groups["command"].Value.TrimEnd();
+        return command.Length > MaximumCommandLength ? command[..MaximumCommandLength] : command;
+    }
+
+    private void ReportPromptContext(string line)
+    {
+        var parsed = ParsePromptContextLine(line);
+        if (parsed is not { } context
+            || (string.Equals(context.Context, _promptContext, StringComparison.Ordinal)
+                && string.Equals(context.Platform, _promptContextPlatform, StringComparison.Ordinal)))
+        {
+            return;
+        }
+        _promptContext = context.Context;
+        _promptContextPlatform = context.Platform;
+        PromptContextChanged?.Invoke(context.Context, context.Platform);
+    }
+
+    private (string Context, string? Platform)? ParsePromptContextLine(string line)
+    {
+        var matchLength = Math.Min(line.Length, PromptParseWindow);
+        var commandMatch = PromptCommandPattern.Match(line, 0, matchLength);
+        var prompt = commandMatch.Success ? commandMatch.Groups["prompt"].Value : line[..matchLength].Trim();
+        return ParsePromptContext(prompt);
+    }
+
+    private (string Context, string? Platform)? ParsePromptContext(string prompt)
+    {
+        var match = WindowsPromptContextPattern.Match(prompt);
+        if (!match.Success)
+            match = UnixBracketedPromptContextPattern.Match(prompt);
+        if (!match.Success)
+            match = UnixSpacedPromptContextPattern.Match(prompt);
+        if (match.Success)
+            return (match.Groups["context"].Value.Trim(), null);
+        if (_promptPlatform == "cisco")
+        {
+            var vendorMatch = CiscoPromptContextPattern.Match(prompt);
+            if (vendorMatch.Success)
+            {
+                var mode = vendorMatch.Groups["mode"].Value;
+                var context = string.IsNullOrEmpty(mode)
+                    ? vendorMatch.Groups["terminator"].Value == ">" ? "user EXEC" : "privileged EXEC"
+                    : mode == "config" ? "configure" : mode.Replace('-', ' ');
+                return (context, "cisco");
+            }
+        }
+        if (_promptPlatform == "juniper" && JuniperPromptContextPattern.IsMatch(prompt))
+            return ("operational", "juniper");
+        if (_promptPlatform == "nokia" && NokiaPromptContextPattern.IsMatch(prompt))
+            return ("MD-CLI", "nokia");
+        return null;
+    }
+
+    private void CancelPromptProbes()
+    {
+        foreach (var cancellation in _promptProbes.Values)
+            cancellation.Cancel();
+        if (_terminal != IntPtr.Zero && _api is not null)
+        {
+            foreach (var probeId in _promptProbes.Keys)
+            {
+                try { _api.DiscardPromptProbe(_terminal, probeId); }
+                catch { }
+            }
+        }
+        foreach (var cancellation in _promptProbes.Values)
+            cancellation.Dispose();
+        _promptProbes.Clear();
+        _probeCommands.Clear();
+        _probeExitCodes.Clear();
+        _osc3008Probes.Clear();
+        _lastPromptProbeId = 0;
+    }
+
+    private void ObserveOsc3008(string payload)
+    {
+        var fields = payload.Split(';');
+        if (fields.Length == 0)
+            return;
+        var separator = fields[0].IndexOf('=');
+        if (separator <= 0)
+            return;
+        var action = fields[0][..separator];
+        var id = UnescapeOsc3008(fields[0][(separator + 1)..]);
+        if (id is null)
+            return;
+
+        if (action == "start")
+        {
+            var probeId = _lastPromptProbeId;
+            if (probeId != 0 && (_promptProbes.ContainsKey(probeId) || _probeCommands.ContainsKey(probeId)))
+                _osc3008Probes[id] = probeId;
+            return;
+        }
+        if (action != "end" || !_osc3008Probes.Remove(id, out var associatedProbe))
+            return;
+
+        int? exitCode = null;
+        foreach (var field in fields.Skip(1))
+        {
+            var split = field.IndexOf('=');
+            if (split <= 0)
+                continue;
+            var key = field[..split];
+            var value = field[(split + 1)..];
+            if (key == "status" && int.TryParse(value, out var status))
+                exitCode = status;
+            else if (key == "exit" && value == "success")
+                exitCode = 0;
+        }
+        _probeExitCodes[associatedProbe] = exitCode;
+        if (_terminal != IntPtr.Zero
+            && _api is not null
+            && _probeCommands.TryGetValue(associatedProbe, out var command)
+            && !_promptProbes.ContainsKey(associatedProbe))
+        {
+            try
+            {
+                _api.CreateApplicationMark(_terminal, associatedProbe, command, exitCode);
+                RefreshAnnotations();
+                _probeCommands.Remove(associatedProbe);
+                _probeExitCodes.Remove(associatedProbe);
+                if (_lastPromptProbeId == associatedProbe)
+                    _lastPromptProbeId = 0;
+            }
+            catch (Exception exception)
+            {
+                TraceHook?.Invoke($"native OSC 3008 association failed: {exception.Message}");
+            }
+        }
+    }
+
+    private static string? UnescapeOsc3008(string value)
+    {
+        if (value.Length is 0 or > 256)
+            return null;
+        var result = value.Replace("\\x3b", ";", StringComparison.Ordinal)
+            .Replace("\\x5c", "\\", StringComparison.Ordinal);
+        return result.IndexOf('\\') >= 0 || result.Any(character => character is < ' ' or > '~')
+            ? null
+            : result;
+    }
     private void ConfigureFindBar()
     {
         _findBar.Height = 40;
@@ -973,6 +1490,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         if (_terminal != IntPtr.Zero && _api is not null)
             _api.ClearSearch(_terminal);
         _findCount.Text = "";
+        RefreshAnnotations();
         _findBar.Visibility = Visibility.Collapsed;
         UpdateBounds(force: true);
         FocusTerminal();
@@ -1021,6 +1539,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         {
             _api.ClearSearch(_terminal);
             _findCount.Text = "";
+            RefreshAnnotations();
             return;
         }
 
@@ -1038,6 +1557,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 ? "No results"
                 : $"{Math.Max(0, state.CurrentMatch) + 1} of {(state.TotalMatches > 999 ? "999+" : state.TotalMatches)}";
         _findInput.Focus(FocusState.Programmatic);
+        RefreshAnnotations();
     }
 
     private void ApplyNativeTheme()
@@ -1104,6 +1624,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         if (_disposed)
             return;
         _disposed = true;
+        CancelPromptProbes();
         Loaded -= OnLoaded;
         Unloaded -= OnUnloaded;
         LayoutUpdated -= OnLayoutUpdated;

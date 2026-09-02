@@ -1,6 +1,6 @@
 # Native Microsoft Terminal Parity Plan
 
-Status: implementation in progress — Phases 0–4 complete
+Status: implementation in progress — Phases 0–5 complete
 
 Related work:
 
@@ -387,13 +387,16 @@ Exports:
 
 ```text
 ReseshTerminalGetMarks
-ReseshTerminalGetMarkText
-ReseshTerminalGetMarkOutput
+ReseshTerminalGetMarkText(markId, includeOutput)
 ReseshTerminalScrollToMark
 ReseshTerminalAddBookmark
 ReseshTerminalRemoveBookmark
 ReseshTerminalClearBookmarks
 ```
+
+Use one caller-owned, length-reported `GetMarkText` buffer contract for command-only
+and command-plus-output reads. The `includeOutput` flag avoids a second export with
+the same allocation and lifetime rules.
 
 Never expose pointers to `MarkExtents` or other C++ structures.
 
@@ -414,11 +417,13 @@ Add exports for cursor logical-line query and creating an application mark.
 
 ### Ruler
 
-1. Implement the ruler as a docked WinUI column beside the HWND.
-2. Read compact mark rows, search rows, highlight rows, bookmarks, viewport, and buffer height.
-3. Preserve current lane precedence and exit-status colors.
-4. Support click-to-scroll, hover details, next/previous command, and bookmark toggle.
-5. Throttle high-frequency scroll updates, but never reorder mark generations.
+1. Dock a WinUI `AnnotatedScrollBar` beside the child HWND. Use its native pointer, wheel, touch, keyboard, theme, and accessibility behavior instead of implementing scrollbar input.
+2. Add a managed row-coordinate adapter around `AnnotatedScrollBar.ScrollController`. Feed it buffer height, viewport height, and viewport top; forward scroll-to, scroll-by, and velocity requests to TerminalCore; complete requests only after the matching native scroll event.
+3. Paint dense command, bookmark, search, and highlight ticks in a non-hit-test WinUI drawing layer aligned with the control. Aggregate source rows into device-pixel buckets before creating UI work. Do not create one XAML element per buffer match and do not replace the control template.
+4. Draw the proportional viewport window in that layer because `AnnotatedScrollBar` uses a fixed-height indicator. Preserve the current two-lane precedence and exit-status colors.
+5. Use `DetailLabelRequested` for concise hover details. Keep interactive jump and copy-output actions in the commands panel instead of putting buttons in the scrollbar tooltip.
+6. Support click-to-scroll, drag, next/previous command, and bookmark toggle. A rail click may snap to a nearby mark, but dragging must remain continuous.
+7. Throttle high-frequency viewport painting, but never reorder scroll completions or mark generations. Hide annotations for the alternate buffer and disable the controller when there is no scrollback.
 
 ### Commands panel
 

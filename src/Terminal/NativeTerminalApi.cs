@@ -8,7 +8,7 @@ namespace Resesh.Terminal;
 internal sealed class NativeTerminalApi
 {
     internal const ushort AbiMajor = 1;
-    internal const ushort AbiMinor = 3;
+    internal const ushort AbiMinor = 4;
     internal const string DllEnvironmentVariable = "RESESH_NATIVE_TERMINAL_DLL";
 
     private const uint ThemeOption = 0x00000001;
@@ -28,6 +28,7 @@ internal sealed class NativeTerminalApi
     private const uint FilterControlCodes = 0x00000002;
     private const uint LoadLibrarySearchDllLoadDir = 0x00000100;
     private const uint LoadLibrarySearchSystem32 = 0x00000800;
+    private const int InsufficientBuffer = unchecked((int)0x8007007A);
 
     private static readonly Lazy<NativeTerminalApi> Shared = new(Create);
     internal static NativeTerminalApi Instance => Shared.Value;
@@ -47,6 +48,17 @@ internal sealed class NativeTerminalApi
     private readonly SearchDelegate _search;
     private readonly ClearSearchDelegate _clearSearch;
     private readonly GetSearchStateDelegate _getSearchState;
+    private readonly UserScrollDelegate _userScroll;
+    private readonly GetMarksDelegate _getMarks;
+    private readonly GetSearchRowsDelegate _getSearchRows;
+    private readonly GetMarkTextDelegate _getMarkText;
+    private readonly ScrollToMarkDelegate _scrollToMark;
+    private readonly GetCursorLogicalLineDelegate _getCursorLogicalLine;
+    private readonly CreateApplicationMarkDelegate _createApplicationMark;
+    private readonly DiscardPromptProbeDelegate _discardPromptProbe;
+    private readonly AddBookmarkDelegate _addBookmark;
+    private readonly RemoveBookmarkDelegate _removeBookmark;
+    private readonly ClearBookmarksDelegate _clearBookmarks;
 
     private NativeTerminalApi(IntPtr module, string libraryPath)
     {
@@ -79,6 +91,17 @@ internal sealed class NativeTerminalApi
         _search = Load<SearchDelegate>("ReseshTerminalSearch");
         _clearSearch = Load<ClearSearchDelegate>("ReseshTerminalClearSearch");
         _getSearchState = Load<GetSearchStateDelegate>("ReseshTerminalGetSearchState");
+        _userScroll = Load<UserScrollDelegate>("ReseshTerminalUserScroll");
+        _getMarks = Load<GetMarksDelegate>("ReseshTerminalGetMarks");
+        _getSearchRows = Load<GetSearchRowsDelegate>("ReseshTerminalGetSearchRows");
+        _getMarkText = Load<GetMarkTextDelegate>("ReseshTerminalGetMarkText");
+        _scrollToMark = Load<ScrollToMarkDelegate>("ReseshTerminalScrollToMark");
+        _getCursorLogicalLine = Load<GetCursorLogicalLineDelegate>("ReseshTerminalGetCursorLogicalLine");
+        _createApplicationMark = Load<CreateApplicationMarkDelegate>("ReseshTerminalCreateApplicationMark");
+        _discardPromptProbe = Load<DiscardPromptProbeDelegate>("ReseshTerminalDiscardPromptProbe");
+        _addBookmark = Load<AddBookmarkDelegate>("ReseshTerminalAddBookmark");
+        _removeBookmark = Load<RemoveBookmarkDelegate>("ReseshTerminalRemoveBookmark");
+        _clearBookmarks = Load<ClearBookmarksDelegate>("ReseshTerminalClearBookmarks");
     }
 
     internal string LibraryPath { get; }
@@ -203,6 +226,156 @@ internal sealed class NativeTerminalApi
     {
         ThrowIfFailed(_getSearchState(terminal, out var state));
         return ToSearchState(state);
+    }
+
+    internal void UserScroll(IntPtr terminal, int viewTop) =>
+        ThrowIfFailed(_userScroll(terminal, viewTop));
+
+    internal IReadOnlyList<MarkRecord> GetMarks(IntPtr terminal)
+    {
+        var result = _getMarks(terminal, IntPtr.Zero, 0, out var required);
+        if (required == 0)
+        {
+            ThrowIfFailed(result);
+            return [];
+        }
+        if (result != InsufficientBuffer)
+            ThrowIfFailed(result);
+        var size = Marshal.SizeOf<NativeMarkRecord>();
+        var buffer = Marshal.AllocHGlobal(checked(size * (int)required));
+        try
+        {
+            ThrowIfFailed(_getMarks(terminal, buffer, required, out var written));
+            if (written != required)
+                throw new InvalidDataException("The native terminal changed its mark count.");
+            var records = new MarkRecord[written];
+            for (var index = 0; index < records.Length; index++)
+            {
+                var native = Marshal.PtrToStructure<NativeMarkRecord>(buffer + index * size);
+                records[index] = new MarkRecord(
+                    native.Id,
+                    native.Generation,
+                    (MarkKind)native.Kind,
+                    native.Flags,
+                    native.Category,
+                    native.Color,
+                    (native.Flags & 0x01) != 0 ? native.ExitCode : null,
+                    native.StartY);
+            }
+            return records;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    internal IReadOnlyList<int> GetSearchRows(IntPtr terminal)
+    {
+        var result = _getSearchRows(terminal, IntPtr.Zero, 0, out var required);
+        if (required == 0)
+        {
+            ThrowIfFailed(result);
+            return [];
+        }
+        if (result != InsufficientBuffer)
+            ThrowIfFailed(result);
+        var buffer = Marshal.AllocHGlobal(checked((int)required * sizeof(int)));
+        try
+        {
+            ThrowIfFailed(_getSearchRows(terminal, buffer, required, out var written));
+            if (written != required)
+                throw new InvalidDataException("The native terminal changed its search row count.");
+            var rows = new int[written];
+            Marshal.Copy(buffer, rows, 0, rows.Length);
+            return rows;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    internal string GetMarkText(IntPtr terminal, ulong markId, bool includeOutput) =>
+        ReadNativeText((IntPtr buffer, uint capacity, out uint required) =>
+            _getMarkText(terminal, markId, includeOutput ? (byte)1 : (byte)0, buffer, capacity, out required));
+
+    internal void ScrollToMark(IntPtr terminal, ulong markId) =>
+        ThrowIfFailed(_scrollToMark(terminal, markId));
+
+    internal PromptProbe BeginPromptProbe(IntPtr terminal)
+    {
+        var line = new NativeCursorLogicalLine();
+        var result = _getCursorLogicalLine(terminal, out line, IntPtr.Zero, 0, out var required);
+        if (result != InsufficientBuffer)
+            ThrowIfFailed(result);
+        if (required is 0 or > 1024 * 1024)
+            throw new InvalidDataException("The native terminal returned an invalid cursor line length.");
+        var buffer = Marshal.AllocHGlobal(checked((int)required * sizeof(char)));
+        try
+        {
+            ThrowIfFailed(_getCursorLogicalLine(terminal, out line, buffer, required, out var written));
+            if (written != required)
+                throw new InvalidDataException("The native terminal changed its cursor line length.");
+            return new PromptProbe(
+                line.ProbeId,
+                line.Generation,
+                line.StartRow,
+                line.CursorRow,
+                line.CursorColumn,
+                Marshal.PtrToStringUni(buffer, checked((int)written - 1)) ?? string.Empty);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    internal void CreateApplicationMark(IntPtr terminal, ulong probeId, string command, int? exitCode = null) =>
+        ThrowIfFailed(_createApplicationMark(
+            terminal,
+            probeId,
+            command,
+            checked((uint)command.Length),
+            exitCode ?? 0,
+            exitCode.HasValue ? (byte)1 : (byte)0));
+
+    internal void DiscardPromptProbe(IntPtr terminal, ulong probeId) =>
+        ThrowIfFailed(_discardPromptProbe(terminal, probeId));
+
+    internal ulong AddBookmark(IntPtr terminal, int row, uint? color)
+    {
+        ThrowIfFailed(_addBookmark(terminal, row, color ?? 0, color.HasValue ? (byte)1 : (byte)0, out var bookmarkId));
+        return bookmarkId;
+    }
+
+    internal void RemoveBookmark(IntPtr terminal, ulong bookmarkId) =>
+        ThrowIfFailed(_removeBookmark(terminal, bookmarkId));
+
+    internal void ClearBookmarks(IntPtr terminal) =>
+        ThrowIfFailed(_clearBookmarks(terminal));
+
+    private delegate int NativeTextReader(IntPtr buffer, uint capacity, out uint requiredCapacity);
+
+    private static string ReadNativeText(NativeTextReader reader)
+    {
+        var result = reader(IntPtr.Zero, 0, out var required);
+        if (result != InsufficientBuffer)
+            ThrowIfFailed(result);
+        if (required is 0 or > 4 * 1024 * 1024)
+            throw new InvalidDataException("The native terminal returned an invalid text length.");
+        var buffer = Marshal.AllocHGlobal(checked((int)required * sizeof(char)));
+        try
+        {
+            ThrowIfFailed(reader(buffer, required, out var written));
+            if (written != required)
+                throw new InvalidDataException("The native terminal changed its text length.");
+            return Marshal.PtrToStringUni(buffer, checked((int)written - 1)) ?? string.Empty;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
     }
 
     private static SearchState ToSearchState(NativeSearchState state) =>
@@ -600,6 +773,42 @@ internal sealed class NativeTerminalApi
         internal uint Flags;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeMarkRecord
+    {
+        internal uint StructSize;
+        internal ushort AbiMajor;
+        internal ushort AbiMinor;
+        internal ulong Id;
+        internal ulong Generation;
+        internal uint Kind;
+        internal uint Flags;
+        internal uint Category;
+        internal uint Color;
+        internal int ExitCode;
+        internal int StartX;
+        internal int StartY;
+        internal int PromptEndX;
+        internal int PromptEndY;
+        internal int CommandEndX;
+        internal int CommandEndY;
+        internal int OutputEndX;
+        internal int OutputEndY;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeCursorLogicalLine
+    {
+        internal uint StructSize;
+        internal ushort AbiMajor;
+        internal ushort AbiMinor;
+        internal ulong ProbeId;
+        internal ulong Generation;
+        internal int StartRow;
+        internal int CursorRow;
+        internal int CursorColumn;
+    }
+
     internal readonly record struct NativeTerminalCreationSettings(
         int InitialColumns,
         int InitialRows,
@@ -618,6 +827,31 @@ internal sealed class NativeTerminalApi
         int CurrentMatch,
         bool Invalidated,
         bool InvalidRegex);
+
+    internal enum MarkKind : uint
+    {
+        ExactCommand = 1,
+        ApplicationCommand = 2,
+        Bookmark = 3,
+    }
+
+    internal readonly record struct MarkRecord(
+        ulong Id,
+        ulong Generation,
+        MarkKind Kind,
+        uint Flags,
+        uint Category,
+        uint Color,
+        int? ExitCode,
+        int Row);
+
+    internal readonly record struct PromptProbe(
+        ulong Id,
+        ulong Generation,
+        int StartRow,
+        int CursorRow,
+        int CursorColumn,
+        string Text);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate uint GetAbiVersionDelegate();
@@ -695,4 +929,67 @@ internal sealed class NativeTerminalApi
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int GetSearchStateDelegate(IntPtr terminal, out NativeSearchState state);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int UserScrollDelegate(IntPtr terminal, int viewTop);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetMarksDelegate(
+        IntPtr terminal,
+        IntPtr records,
+        uint capacity,
+        out uint requiredCapacity);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetSearchRowsDelegate(
+        IntPtr terminal,
+        IntPtr rows,
+        uint capacity,
+        out uint requiredCapacity);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetMarkTextDelegate(
+        IntPtr terminal,
+        ulong markId,
+        byte includeOutput,
+        IntPtr buffer,
+        uint capacity,
+        out uint requiredCapacity);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ScrollToMarkDelegate(IntPtr terminal, ulong markId);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetCursorLogicalLineDelegate(
+        IntPtr terminal,
+        out NativeCursorLogicalLine line,
+        IntPtr buffer,
+        uint capacity,
+        out uint requiredCapacity);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
+    private delegate int CreateApplicationMarkDelegate(
+        IntPtr terminal,
+        ulong probeId,
+        [MarshalAs(UnmanagedType.LPWStr)] string command,
+        uint commandLength,
+        int exitCode,
+        byte hasExitCode);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int DiscardPromptProbeDelegate(IntPtr terminal, ulong probeId);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int AddBookmarkDelegate(
+        IntPtr terminal,
+        int row,
+        uint color,
+        byte hasColor,
+        out ulong bookmarkId);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int RemoveBookmarkDelegate(IntPtr terminal, ulong bookmarkId);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ClearBookmarksDelegate(IntPtr terminal);
 }
