@@ -17,7 +17,7 @@ const capabilities = JSON.parse(fs.readFileSync(
   "utf8"
 ));
 
-assert.match(api, /AbiMinor\s*=\s*4/);
+assert.match(api, /AbiMajor\s*=\s*2/);
 for (const eventName of [
   "TitleChanged",
   "WorkingDirectoryChanged",
@@ -28,6 +28,7 @@ for (const eventName of [
   "TerminalModeChanged",
   "OscObserved",
   "OpenLink",
+  "SwapChainChanged",
 ]) {
   assert.match(api, new RegExp(`${eventName}\\s*=\\s*\\d+`), `${eventName} must have a typed ABI value`);
 }
@@ -56,8 +57,8 @@ assert.match(api, /ReseshTerminalClearSearch/);
 assert.match(api, /ReseshTerminalGetSearchState/);
 assert.match(surface, /NativeTerminalFindInput/);
 assert.match(surface, /case NativeTerminalApi\.NativeEventType\.OpenLink:[\s\S]*?TerminalLinkPolicy\.Open/);
-assert.match(surface, /new Windows\.Foundation\.Rect\([\s\S]*?findHeight,[\s\S]*?ActualWidth - chromeWidth/,
-  "the find row and Phase 5 side chrome must reduce the child HWND bounds");
+assert.match(surface, /_terminalPanel\.Margin = new Thickness\(0, findHeight, chromeWidth, 0\)/,
+  "the find row and side chrome must reduce the composition surface bounds");
 
 for (const name of [
   "OSC 7 working-directory event",

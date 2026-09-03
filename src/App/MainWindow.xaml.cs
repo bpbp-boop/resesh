@@ -63,7 +63,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             handledEventsToo: true);
         CommandPalette.CloseRequested += CloseCommandPalette;
         CommandPalette.CommandInvoked += command => _ = ExecuteCommandPaletteEntryAsync(command);
-        ModalDialogPresenter.OpenStateChanged += ModalDialogPresenter_OpenStateChanged;
         RestoreWindowPlacement();
         AppWindow.Changed += AppWindow_Changed;
         ConfigureSplitter(TreeSplitter, TreeSplitterLine);
@@ -101,7 +100,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         AppWindow.Closing += AppWindow_Closing;
         Closed += (_, _) =>
         {
-            ModalDialogPresenter.OpenStateChanged -= ModalDialogPresenter_OpenStateChanged;
             _uiSettings.ColorValuesChanged -= SystemColorsChanged;
             SaveTreePaneWidth();
             App.Workspaces.SaveLastLayout(CaptureWorkspaceLayout());
@@ -287,7 +285,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             ? null
             : FocusManager.GetFocusedElement(Root.XamlRoot) as DependencyObject;
         var commands = BuildCommandPalette();
-        SetTerminalHostsVisible(false);
         CommandPalette.Open(commands);
     }
 
@@ -297,7 +294,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             return;
 
         CommandPalette.Close();
-        SetTerminalHostsVisible(true);
         RestorePaletteFocus();
     }
 
@@ -320,7 +316,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
         finally
         {
-            SetTerminalHostsVisible(true);
             if (!command.KeepActionFocus)
                 FocusActiveTerminal();
             _palettePreviousFocus = null;
@@ -755,28 +750,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         {
             _closePromptOpen = false;
         }
-    }
-
-    private void SetTerminalHostsVisible(bool visible)
-    {
-        if (visible)
-        {
-            foreach (var groupView in _groupViews.Values)
-                groupView.SyncTerminalVisibility();
-            return;
-        }
-
-        foreach (var tab in ViewModel.AllTabs)
-        {
-            if (tab.View is TerminalTabView terminal)
-                terminal.SetHostVisible(false);
-        }
-    }
-
-    private void ModalDialogPresenter_OpenStateChanged(XamlRoot xamlRoot, bool isOpen)
-    {
-        if (ReferenceEquals(xamlRoot, Root.XamlRoot))
-            SetTerminalHostsVisible(!isOpen);
     }
 
     private void PinButton_Click(object sender, RoutedEventArgs e)
@@ -1947,14 +1920,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     internal void SetTabContentDropTargetsVisibleCore(bool visible)
     {
-        if (visible)
-            SetTerminalHostsVisible(false);
 
         foreach (var groupView in _groupViews.Values)
             groupView.SetContentDropTargetVisible(visible);
 
-        if (!visible)
-            SetTerminalHostsVisible(true);
     }
 
     public void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex)

@@ -57,7 +57,7 @@ test("native terminal pointer input focuses its current tab group", () => {
   assert.match(terminalSurface, /event Action\? HostFocusRequested/);
   assert.match(
     nativeSurface,
-    /case WmLeftButtonDown:[\s\S]*?RequestHostFocus\(\);[\s\S]*?SetFocus\(hwnd\)/);
+    /OnPointerPressed[\s\S]*?RequestHostFocus\(\);[\s\S]*?Focus\(FocusState\.Pointer\)/);
   assert.match(
     terminalTab,
     /_terminal\.HostFocusRequested \+= [\s\S]*?FocusRequested\?\.Invoke\(\)/);

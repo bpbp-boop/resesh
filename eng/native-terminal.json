@@ -1,40 +1,50 @@
-{
-  "schemaVersion": 1,
-  "upstream": {
-    "repository": "https://github.com/microsoft/terminal.git",
-    "release": "v1.24.11911.0",
-    "commit": "5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc"
-  },
-  "fork": {
-    "repository": "https://github.com/bpbp-boop/terminal.git",
-    "branch": "resesh-abi-v1",
-    "commit": "95e25194f73f0d721481a5f59ae6f59a27f90b64"
-  },
-  "abi": {
-    "major": 1,
-    "minor": 4,
-    "buildId": "terminal-v1.24.11911.0-resesh-abi1.4"
-  },
-  "supportedArchitectures": ["x64", "arm64"],
-  "configuration": "Release",
-  "toolchain": {
-    "visualStudio": "2022",
-    "platformToolset": "v143",
-    "vcpkgToolCommit": "30ef65cad98f08e7197c9a1656fbd871bcb72f2d",
-    "vcpkgBaseline": "fe1cde61e971d53c9687cf9a46308f8f55da19fa"
-  },
-  "license": {
-    "file": "LICENSE",
-    "sha256": "5d177f23ecfeb0ea8e050b6a5a16355e1ae9a0b286436ca8f83ed08b3795be6b"
-  },
-  "artifacts": {
-    "x64": {
-      "Microsoft.Terminal.Control.dll": "810df6168b7d7510b4c186c627ef337a1a5786dfe0abba1d7fcbb1ffd196fc0d",
-      "Microsoft.Terminal.Control.pdb": "f9f35c0bb33c89dbbd03a75d3761e394545fe0c7bb211743daf993daf7f318c7"
-    },
-    "arm64": {
-      "Microsoft.Terminal.Control.dll": "6532e5046260ddbb47d77790a5e819ce700f335526bc94ed441a46c9d8685e52",
-      "Microsoft.Terminal.Control.pdb": "1176f126605201b114d8ed2f896aefa01d3047445d17c9fa0816ef43129fd5c0"
-    }
-  }
+﻿{
+    "schemaVersion":  1,
+    "upstream":  {
+                     "repository":  "https://github.com/microsoft/terminal.git",
+                     "release":  "v1.24.11911.0",
+                     "commit":  "5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc"
+                 },
+    "fork":  {
+                 "repository":  "https://github.com/bpbp-boop/terminal.git",
+                 "branch":  "resesh-abi-v1",
+                 "commit":  "95e25194f73f0d721481a5f59ae6f59a27f90b64",
+                 "patches":  [
+                                 {
+                                     "file":  "native-terminal-patches/composition-surface.patch",
+                                     "sha256":  "d11566c8e14b2c08c43ea49b985072d8b1d9c15fc58078696090cb4d5ece8912"
+                                 }
+                             ]
+             },
+    "abi":  {
+                "major":  2,
+                "minor":  0,
+                "buildId":  "terminal-v1.24.11911.0-resesh-abi2.0-composition"
+            },
+    "supportedArchitectures":  [
+                                   "x64",
+                                   "arm64"
+                               ],
+    "configuration":  "Release",
+    "toolchain":  {
+                      "visualStudio":  "2026",
+                      "platformToolset":  "v145",
+                      "windowsSdk":  "10.0.26100.0",
+                      "vcpkgToolCommit":  "30ef65cad98f08e7197c9a1656fbd871bcb72f2d",
+                      "vcpkgBaseline":  "fe1cde61e971d53c9687cf9a46308f8f55da19fa"
+                  },
+    "license":  {
+                    "file":  "LICENSE",
+                    "sha256":  "5d177f23ecfeb0ea8e050b6a5a16355e1ae9a0b286436ca8f83ed08b3795be6b"
+                },
+    "artifacts":  {
+                      "x64":  {
+                                  "Microsoft.Terminal.Control.dll":  "2d3731a37915d1392d885f606b3b0509fd19ec0357f9183e63169d40d827e327",
+                                  "Microsoft.Terminal.Control.pdb":  "935971620996480637e859d36aec9f36e343c44f0ebe6bdddab067977c6e103c"
+                              },
+                      "arm64":  {
+                                    "Microsoft.Terminal.Control.dll":  "",
+                                    "Microsoft.Terminal.Control.pdb":  ""
+                                }
+                  }
 }

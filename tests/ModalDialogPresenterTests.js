@@ -17,20 +17,13 @@ function csharpFiles(directory) {
   });
 }
 
-test("the modal presenter tracks each XamlRoot and always releases suppression", () => {
-  assert.match(presenter, /Dictionary<XamlRoot, int> OpenDialogCounts/);
-  assert.match(presenter, /var xamlRoot = dialog\.XamlRoot[\s\S]*?Enter\(xamlRoot\);[\s\S]*?try[\s\S]*?dialog\.ShowAsync\(\)[\s\S]*?finally[\s\S]*?Exit\(xamlRoot\);/);
-  assert.match(presenter, /OpenStateChanged\?\.Invoke\(xamlRoot, true\)/);
-  assert.match(presenter, /if \(count > 1\)[\s\S]*?count - 1[\s\S]*?OpenDialogCounts\.Remove\(xamlRoot\);[\s\S]*?OpenStateChanged\?\.Invoke\(xamlRoot, false\)/);
+test("the modal presenter delegates directly to WinUI composition", () => {
+  assert.match(presenter, /await dialog\.ShowAsync\(\)/);
+  assert.doesNotMatch(presenter, /OpenDialogCounts|OpenStateChanged|SetHostVisible/);
 });
 
-test("each main window hides only its own native terminal hosts", () => {
-  assert.match(windowCode, /ModalDialogPresenter\.OpenStateChanged \+= ModalDialogPresenter_OpenStateChanged/);
-  assert.match(windowCode, /ModalDialogPresenter\.OpenStateChanged -= ModalDialogPresenter_OpenStateChanged/);
-  assert.match(
-    windowCode,
-    /ModalDialogPresenter_OpenStateChanged\(XamlRoot xamlRoot, bool isOpen\)[\s\S]*?ReferenceEquals\(xamlRoot, Root\.XamlRoot\)[\s\S]*?SetTerminalHostsVisible\(!isOpen\)/,
-  );
+test("main windows do not hide terminal surfaces around modal content", () => {
+  assert.doesNotMatch(windowCode, /SetTerminalHostsVisible|ModalDialogPresenter_OpenStateChanged/);
 });
 
 test("every direct ContentDialog display uses the modal presenter", () => {

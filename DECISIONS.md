@@ -574,12 +574,12 @@ keyboard-interactive fallback.
 - ABI 1.3 searches inside TerminalCore and returns exact match counts, the current
   zero-based match, invalidation state, and invalid-regex state. C# does not scan the
   terminal buffer.
-- The native find row uses WinUI controls above the child HWND. Opening it reduces the
-  HWND height. Search navigation keeps focus in the field, and closing restores terminal
-  focus.
-- HwndTerminal updates the upstream URL pattern tree after output and resize. It hit-tests
-  OSC 8 links and detected URLs in child-window cell coordinates, renders upstream hover
-  state, and reports the URI and source through the ordered event queue.
+- The native find row is ordinary WinUI content above the composition-backed terminal
+  panel. Opening it reduces the renderer height. Search navigation keeps focus in the
+  field, and closing restores terminal focus.
+- The native host updates the upstream URL pattern tree after output and resize. It hit-tests
+  OSC 8 links and detected URLs in XAML pointer coordinates, renders upstream hover state,
+  and reports the URI and source through the ordered event queue.
 - URI launch policy stays in resesh. Only absolute HTTP and HTTPS links can reach the
   Windows default browser; the native DLL never calls `ShellExecute`.
 
@@ -592,13 +592,17 @@ keyboard-interactive fallback.
 - Exact OSC 133 shell marks are authoritative. Local prompt discovery starts before Enter,
   waits for echoed input, rejects title-epoch changes, and stops when exact marks appear.
   Prompt parsing is bounded to 4,096 characters and stored commands to 512 characters.
-- The native overview uses WinUI `AnnotatedScrollBar` through `IScrollController`.
-  A non-hit-test drawing layer buckets command, bookmark, and search ticks and draws a
-  separate proportional viewport. Native viewport events complete matching scroll requests.
+- The native overview uses WinUI `ScrollBar`. A non-hit-test drawing layer buckets
+  command, bookmark, and search ticks. Native viewport events complete matching
+  scroll requests. Hover previews and click actions use an in-tree WinUI `TeachingTip`;
+  the composition-backed terminal no longer creates a popup airspace boundary.
 - The docked commands panel uses a virtualized `ListView` data template. Command text and
-  status brushes are created only for realized rows. Jump and copy-output actions stay out
-  of the narrow ruler.
-- Native artifacts are pinned to fork commit
-  `95e25194f73f0d721481a5f59ae6f59a27f90b64`, build ID
-  `terminal-v1.24.11911.0-resesh-abi1.4`, with x64 and ARM64 hashes in
-  `eng/native-terminal.json`.
+  status brushes are created only for realized rows. It remains the complete command list;
+  the narrow ruler TeachingTip adds contextual jump and copy-output actions.
+- ABI 2.0 removes the visible child HWND. Atlas exports its composition surface handle,
+  `NativeTerminalSurface` attaches it to a WinUI 3 `SwapChainPanel`, and XAML routes
+  keyboard and pointer input through the flat ABI. The top-level window handle remains
+  available only for TSF, UIA host integration, and screen-relative accessibility bounds.
+- Native artifacts remain based on fork commit
+  `95e25194f73f0d721481a5f59ae6f59a27f90b64`; the reproducible composition patch and
+  ABI 2.0 artifact hashes live in `eng/native-terminal.json`.

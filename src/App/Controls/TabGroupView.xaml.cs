@@ -337,8 +337,6 @@ public sealed partial class TabGroupView : UserControl
         {
             var visible = ReferenceEquals(child, selected);
             child.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-            if (child is Terminal.TerminalTabView terminal)
-                terminal.SetHostVisible(visible);
         }
     }
 

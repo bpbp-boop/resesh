@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
@@ -11,43 +12,49 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
+using WinRT;
 
 namespace Resesh.Terminal;
 
 /// <summary>
-/// Experimental WinUI host for Microsoft Terminal's HwndTerminal ABI. The child HWND is
-/// deliberately isolated here because it always renders above sibling XAML content.
+/// WinUI host for Microsoft Terminal's composition-surface renderer.
 /// </summary>
 public sealed class NativeTerminalSurface : TerminalSurface
 {
-    private const int GwlWndProc = -4;
-    private const uint SwpNoActivate = 0x0010;
-    private const uint SwpNoZOrder = 0x0004;
-    private const uint SwpShowWindow = 0x0040;
-    private const int SwHide = 0;
-    private const int SwShow = 5;
     private const int PromptParseWindow = 4096;
     private const int MaximumCommandLength = 512;
 
-    private const uint WmSetFocus = 0x0007;
-    private const uint WmKillFocus = 0x0008;
-    private const uint WmMouseActivate = 0x0021;
-    private const uint WmKeyDown = 0x0100;
-    private const uint WmKeyUp = 0x0101;
-    private const uint WmChar = 0x0102;
-    private const uint WmSysKeyDown = 0x0104;
-    private const uint WmSysKeyUp = 0x0105;
+    private const uint WmMouseMove = 0x0200;
     private const uint WmLeftButtonDown = 0x0201;
+    private const uint WmLeftButtonUp = 0x0202;
     private const uint WmRightButtonDown = 0x0204;
+    private const uint WmRightButtonUp = 0x0205;
     private const uint WmMiddleButtonDown = 0x0207;
+    private const uint WmMiddleButtonUp = 0x0208;
+    private const uint WmMouseWheel = 0x020A;
     private const uint WmXButtonDown = 0x020B;
+    private const uint WmXButtonUp = 0x020C;
+    private const uint WmMouseHorizontalWheel = 0x020E;
+    private const uint WmMouseLeave = 0x02A3;
+    private const uint MkLeftButton = 0x0001;
+    private const uint MkRightButton = 0x0002;
+    private const uint MkShift = 0x0004;
+    private const uint MkControl = 0x0008;
+    private const uint MkMiddleButton = 0x0010;
+    private const uint MkXButton1 = 0x0020;
+    private const uint MkXButton2 = 0x0040;
+    private const uint PointerHandled = 0x01;
+    private const uint PointerCapture = 0x02;
+    private const uint PointerRelease = 0x04;
+    private const uint PointerHandCursor = 0x08;
 
     private readonly object _outputGate = new();
     private readonly MemoryStream _pendingOutput = new();
     private readonly Decoder _outputDecoder = new UTF8Encoding(false, false).GetDecoder();
     private readonly NativeTerminalApi.EventCallback _eventCallback;
-    private readonly WindowProc _windowProc;
-
+    private readonly SwapChainPanel _terminalPanel = new();
+    private readonly InputCursor _textCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
+    private readonly InputCursor _linkCursor = InputSystemCursor.Create(InputSystemCursorShape.Hand);
     private readonly Border _findBar = new();
     private readonly TextBox _findInput = new();
     private readonly TextBlock _findCount = new();
@@ -81,16 +88,13 @@ public sealed class NativeTerminalSurface : TerminalSurface
         @"^[A-Z]:[^@\s]+@[^\s#]+#$",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
     private NativeTerminalApi? _api;
-    private IntPtr _parentHwnd;
-    private IntPtr _childHwnd;
+    private IntPtr _hostHwnd;
     private IntPtr _terminal;
-    private IntPtr _originalWindowProc;
     private long _visibilityCallbackToken;
     private bool _outputDispatchPending;
     private bool _initialized;
     private bool _initializationFailed;
     private bool _inputEnabled = true;
-    private bool _hostVisible = true;
     private bool _copyOnSelect = true;
     private bool _rightClickPaste = true;
     private bool _readOnly;
@@ -163,13 +167,25 @@ public sealed class NativeTerminalSurface : TerminalSurface
     public NativeTerminalSurface()
     {
         _eventCallback = OnNativeEvent;
-        _windowProc = ChildWindowProc;
         AutomationProperties.SetAutomationId(this, "NativeTerminalSurface");
         AutomationProperties.SetName(this, "Terminal");
+        IsTabStop = true;
+        _terminalPanel.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        _terminalPanel.PointerPressed += OnPointerPressed;
+        _terminalPanel.PointerReleased += OnPointerReleased;
+        _terminalPanel.PointerMoved += OnPointerMoved;
+        _terminalPanel.PointerWheelChanged += OnPointerWheelChanged;
+        _terminalPanel.PointerExited += OnPointerExited;
+        Children.Add(_terminalPanel);
         ConfigureFindBar();
         ConfigureRuler();
         ConfigureCommandsPanel();
 
+        KeyDown += OnTerminalKeyDown;
+        KeyUp += OnTerminalKeyUp;
+        CharacterReceived += OnTerminalCharacterReceived;
+        GotFocus += OnTerminalGotFocus;
+        LostFocus += OnTerminalLostFocus;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         LayoutUpdated += OnLayoutUpdated;
@@ -184,9 +200,9 @@ public sealed class NativeTerminalSurface : TerminalSurface
         try
         {
             var root = XamlRoot ?? throw new InvalidOperationException("The terminal is not attached to a XAML root.");
-            _parentHwnd = Microsoft.UI.Win32Interop.GetWindowFromWindowId(
+            _hostHwnd = Microsoft.UI.Win32Interop.GetWindowFromWindowId(
                 root.ContentIslandEnvironment.AppWindowId);
-            if (_parentHwnd == IntPtr.Zero)
+            if (_hostHwnd == IntPtr.Zero)
                 throw new InvalidOperationException("The application window handle is not available.");
 
             _api = NativeTerminalApi.Instance;
@@ -202,21 +218,11 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 AllowOscClipboard: false,
                 AllowOscNotifications: false,
                 _readOnly);
-            _terminal = _api.CreateTerminal(_parentHwnd, creationSettings, out _childHwnd);
-            if (_childHwnd == IntPtr.Zero || _terminal == IntPtr.Zero)
+            _terminal = _api.CreateTerminal(_hostHwnd, creationSettings);
+            if (_terminal == IntPtr.Zero)
                 throw new InvalidOperationException("Microsoft Terminal returned an empty terminal handle.");
-
-            Marshal.SetLastPInvokeError(0);
-            _originalWindowProc = SetWindowLongPtr(
-                _childHwnd,
-                GwlWndProc,
-                Marshal.GetFunctionPointerForDelegate(_windowProc));
-            var windowProcError = Marshal.GetLastPInvokeError();
-            if (_originalWindowProc == IntPtr.Zero && windowProcError != 0)
-                throw new InvalidOperationException($"Could not subclass the terminal window (Win32 error {windowProcError}).");
-
             _api.RegisterEventCallback(_terminal, _eventCallback);
-            _dpi = checked((int)GetDpiForWindow(_parentHwnd));
+            _dpi = checked((int)GetDpiForWindow(_hostHwnd));
             ApplyNativeTheme();
             _initialized = true;
             _ruler.UpdateViewport(0, Rows, Rows, alternateBuffer: false);
@@ -289,23 +295,14 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
     public override void FocusTerminal()
     {
-        if (!_disposed && _inputEnabled && _childHwnd != IntPtr.Zero)
-        {
-            ShowWindow(_childHwnd, SwShow);
-            SetFocus(_childHwnd);
-        }
+        if (!_disposed && _inputEnabled)
+            Focus(FocusState.Programmatic);
     }
 
     public override void SetInputEnabled(bool enabled)
     {
         _inputEnabled = enabled;
-        UpdateBounds();
-    }
-
-    public override void SetHostVisible(bool visible)
-    {
-        _hostVisible = visible;
-        UpdateBounds(force: visible);
+        _terminalPanel.IsHitTestVisible = enabled;
     }
     public override void ToggleCommandsPanel() => SetCommandsPanelOpen(!_commandsPanelOpen);
 
@@ -401,17 +398,13 @@ public sealed class NativeTerminalSurface : TerminalSurface
     {
         UnsubscribeFromXamlRoot();
         // Moving a live tab between split groups can queue Unloaded after its new Loaded
-        // event. Defer the decision so a stale event cannot leave the child HWND hidden.
+        // event. Defer the decision so a stale event cannot detach the active surface.
         DispatcherQueue.TryEnqueue(() =>
         {
             if (IsLoaded)
             {
                 SubscribeToXamlRoot();
                 UpdateBounds(force: true);
-            }
-            else if (_childHwnd != IntPtr.Zero)
-            {
-                ShowWindow(_childHwnd, SwHide);
             }
         });
     }
@@ -441,15 +434,16 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
     private void UpdateBounds(bool force = false)
     {
-        if (!_initialized || _childHwnd == IntPtr.Zero || XamlRoot?.Content is not FrameworkElement rootContent)
+        if (!_initialized || _terminal == IntPtr.Zero || XamlRoot?.Content is not FrameworkElement rootContent)
             return;
 
-        if (!IsLoaded || !_hostVisible || Visibility != Visibility.Visible || !_inputEnabled
-            || ActualWidth <= 0 || ActualHeight <= 0)
-        {
-            ShowWindow(_childHwnd, SwHide);
+        var visible = IsLoaded
+            && Visibility == Visibility.Visible
+            && ActualWidth > 0
+            && ActualHeight > 0;
+        _terminalPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (!visible)
             return;
-        }
 
         var findHeight = _findBar.Visibility == Visibility.Visible ? _findBar.Height : 0;
         var rulerWidth = _alternateBufferActive ? 0 : _ruler.Width;
@@ -459,41 +453,35 @@ public sealed class NativeTerminalSurface : TerminalSurface
         if (commandsWidth > 0)
             _commandsPanel.Width = commandsWidth;
         var chromeWidth = rulerWidth + commandsWidth;
+        _terminalPanel.Margin = new Thickness(0, findHeight, chromeWidth, 0);
         _ruler.Margin = new Thickness(0, findHeight, 0, 0);
         _commandsPanel.Margin = new Thickness(0, findHeight, rulerWidth, 0);
         _findBar.Margin = new Thickness(0, 0, chromeWidth, 0);
+
         Windows.Foundation.Rect bounds;
         try
         {
-            bounds = TransformToVisual(rootContent).TransformBounds(
-                new Windows.Foundation.Rect(
-                    0,
-                    findHeight,
-                    Math.Max(0, ActualWidth - chromeWidth),
-                    Math.Max(0, ActualHeight - findHeight)));
+            bounds = _terminalPanel.TransformToVisual(rootContent).TransformBounds(
+                new Windows.Foundation.Rect(0, 0, _terminalPanel.ActualWidth, _terminalPanel.ActualHeight));
         }
         catch (InvalidOperationException)
         {
-            ShowWindow(_childHwnd, SwHide);
             return;
         }
 
-        var left = Math.Max(0, bounds.Left);
-        var top = Math.Max(0, bounds.Top);
-        var right = Math.Min(rootContent.ActualWidth, bounds.Right);
-        var bottom = Math.Min(rootContent.ActualHeight, bounds.Bottom);
         var scale = XamlRoot.RasterizationScale;
-        var x = checked((int)Math.Round(left * scale));
-        var y = checked((int)Math.Round(top * scale));
-        var width = checked((int)Math.Round(Math.Max(0, right - left) * scale));
-        var height = checked((int)Math.Round(Math.Max(0, bottom - top) * scale));
+        var x = checked((int)Math.Round(bounds.X * scale));
+        var y = checked((int)Math.Round(bounds.Y * scale));
+        var width = checked((int)Math.Round(Math.Max(0, bounds.Width) * scale));
+        var height = checked((int)Math.Round(Math.Max(0, bounds.Height) * scale));
         if (width == 0 || height == 0)
-        {
-            ShowWindow(_childHwnd, SwHide);
             return;
-        }
 
-        var newDpi = checked((int)GetDpiForWindow(_parentHwnd));
+        var screenOrigin = new NativePoint { X = x, Y = y };
+        if (!ClientToScreen(_hostHwnd, ref screenOrigin))
+            return;
+
+        var newDpi = checked((int)GetDpiForWindow(_hostHwnd));
         if (newDpi != _dpi)
         {
             _dpi = newDpi;
@@ -501,28 +489,24 @@ public sealed class NativeTerminalSurface : TerminalSurface
             force = true;
         }
 
-        if (!force && x == _lastX && y == _lastY && width == _lastWidth && height == _lastHeight)
+        if (!force
+            && screenOrigin.X == _lastX
+            && screenOrigin.Y == _lastY
+            && width == _lastWidth
+            && height == _lastHeight)
+        {
             return;
+        }
 
-        _lastX = x;
-        _lastY = y;
+        _lastX = screenOrigin.X;
+        _lastY = screenOrigin.Y;
         _lastWidth = width;
         _lastHeight = height;
         TraceHook?.Invoke(
             $"NativeTerminal bounds dip=({bounds.X:F1},{bounds.Y:F1},{bounds.Width:F1},{bounds.Height:F1}) " +
             $"root=({rootContent.ActualWidth:F1},{rootContent.ActualHeight:F1}) scale={scale:F2} " +
-            $"px=({x},{y},{width},{height}) hwnd=0x{_parentHwnd.ToInt64():X}");
-        // The native resize operation always moves its child window to (0, 0).
-        // Position it after that call so the HWND follows the XAML element.
-        var dimensions = _api!.ResizePixels(_terminal, width, height);
-        SetWindowPos(
-            _childHwnd,
-            IntPtr.Zero,
-            x,
-            y,
-            width,
-            height,
-            SwpNoActivate | SwpNoZOrder | SwpShowWindow);
+            $"screen=({_lastX},{_lastY},{width},{height}) hwnd=0x{_hostHwnd.ToInt64():X}");
+        var dimensions = _api!.SetBounds(_terminal, _lastX, _lastY, width, height);
         if (dimensions.X > 0 && dimensions.Y > 0
             && (Columns != dimensions.X || Rows != dimensions.Y))
         {
@@ -731,6 +715,9 @@ public sealed class NativeTerminalSurface : TerminalSurface
                     DispatcherQueue.TryEnqueue(() => TerminalLinkPolicy.Open(uri, TraceHook));
                     break;
                 }
+                case NativeTerminalApi.NativeEventType.SwapChainChanged:
+                    DispatcherQueue.TryEnqueue(AttachSwapChainPanel);
+                    break;
             }
         }
         catch (Exception exception)
@@ -792,10 +779,10 @@ public sealed class NativeTerminalSurface : TerminalSurface
         return true;
     }
 
-    private static void CopyToClipboard(string text, string? html, string? rtf)
+    private static bool CopyToClipboard(string text, string? html, string? rtf)
     {
         if (string.IsNullOrEmpty(text))
-            return;
+            return false;
 
         try
         {
@@ -807,10 +794,12 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 package.SetRtf(rtf);
             Clipboard.SetContent(package);
             Clipboard.Flush();
+            return true;
         }
         catch (Exception exception)
         {
             TraceHook?.Invoke($"native clipboard copy failed: {exception.Message}");
+            return false;
         }
     }
 
@@ -846,74 +835,178 @@ public sealed class NativeTerminalSurface : TerminalSurface
         InputReceived?.Invoke(Encoding.UTF8.GetBytes(data));
     }
 
-    private IntPtr ChildWindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
+    private void AttachSwapChainPanel()
     {
+        if (_disposed || _terminal == IntPtr.Zero || _api is null)
+            return;
         try
         {
-            return ChildWindowProcCore(hwnd, message, wParam, lParam);
+            var nativePanel = ((IWinRTObject)_terminalPanel).NativeObject;
+            _api.AttachSwapChainPanel(_terminal, nativePanel.ThisPtr);
         }
         catch (Exception exception)
         {
-            // Managed exceptions must never cross the Win32 window procedure boundary.
-            try { TraceHook?.Invoke($"native window procedure failed: {exception.Message}"); }
-            catch { }
-            return _originalWindowProc == IntPtr.Zero
-                ? DefWindowProc(hwnd, message, wParam, lParam)
-                : CallWindowProc(_originalWindowProc, hwnd, message, wParam, lParam);
+            TraceHook?.Invoke($"native swap chain attach failed: {exception.Message}");
         }
     }
 
-    private IntPtr ChildWindowProcCore(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
+    private void OnTerminalGotFocus(object sender, RoutedEventArgs args)
     {
-        if (_api is not null && _terminal != IntPtr.Zero)
+        if (_terminal != IntPtr.Zero && _api is not null)
+            _api.SetFocused(_terminal, true);
+    }
+
+    private void OnTerminalLostFocus(object sender, RoutedEventArgs args)
+    {
+        if (_terminal != IntPtr.Zero && _api is not null)
+            _api.SetFocused(_terminal, false);
+    }
+
+    private void OnTerminalKeyDown(object sender, KeyRoutedEventArgs args)
+    {
+        if (_disposed || !_inputEnabled || _terminal == IntPtr.Zero || _api is null)
+            return;
+
+        var virtualKey = checked((ushort)args.Key);
+        if (TryHandleAppShortcut(virtualKey))
         {
-            switch (message)
-            {
-                case WmSetFocus:
-                    _api.SetFocused(_terminal, true);
-                    break;
-                case WmKillFocus:
-                    _api.SetFocused(_terminal, false);
-                    break;
-                case WmMouseActivate:
-                    SetFocus(hwnd);
-                    break;
-                case WmLeftButtonDown:
-                case WmRightButtonDown:
-                case WmMiddleButtonDown:
-                case WmXButtonDown:
-                    RequestHostFocus();
-                    SetFocus(hwnd);
-                    break;
-                case WmKeyDown:
-                case WmSysKeyDown:
-                    if (TryHandleAppShortcut(checked((ushort)wParam.ToInt64())))
-                        return IntPtr.Zero;
-                    UnpackKeyMessage(wParam, lParam, out var downKey, out var downScan, out var downFlags);
-                    if (downKey == 0x0D)
-                        BeginPromptDiscovery();
-                    _api.SendKeyEvent(_terminal, downKey, downScan, downFlags, true);
-                    return IntPtr.Zero;
-                case WmKeyUp:
-                case WmSysKeyUp:
-                    UnpackKeyMessage(wParam, lParam, out var upKey, out var upScan, out var upFlags);
-                    _api.SendKeyEvent(_terminal, upKey, upScan, upFlags, false);
-                    return IntPtr.Zero;
-                case WmChar:
-                    if (_suppressNextCharacter)
-                    {
-                        _suppressNextCharacter = false;
-                        return IntPtr.Zero;
-                    }
-                    UnpackKeyMessage(wParam, lParam, out var character, out var charScan, out var charFlags);
-                    _api.SendCharEvent(_terminal, (char)character, charScan, charFlags);
-                    return IntPtr.Zero;
-            }
+            args.Handled = true;
+            return;
+        }
+        if (args.Key == VirtualKey.Enter)
+            BeginPromptDiscovery();
+        _api.SendKeyEvent(
+            _terminal,
+            virtualKey,
+            checked((ushort)args.KeyStatus.ScanCode),
+            args.KeyStatus.IsExtendedKey ? (ushort)0x0100 : (ushort)0,
+            keyDown: true);
+        args.Handled = true;
+    }
+
+    private void OnTerminalKeyUp(object sender, KeyRoutedEventArgs args)
+    {
+        if (_disposed || !_inputEnabled || _terminal == IntPtr.Zero || _api is null)
+            return;
+        _api.SendKeyEvent(
+            _terminal,
+            checked((ushort)args.Key),
+            checked((ushort)args.KeyStatus.ScanCode),
+            args.KeyStatus.IsExtendedKey ? (ushort)0x0100 : (ushort)0,
+            keyDown: false);
+        args.Handled = true;
+    }
+
+    private void OnTerminalCharacterReceived(UIElement sender, CharacterReceivedRoutedEventArgs args)
+    {
+        if (_disposed || !_inputEnabled || _terminal == IntPtr.Zero || _api is null)
+            return;
+        if (_suppressNextCharacter)
+        {
+            _suppressNextCharacter = false;
+            args.Handled = true;
+            return;
         }
 
-        return _originalWindowProc == IntPtr.Zero
-            ? DefWindowProc(hwnd, message, wParam, lParam)
-            : CallWindowProc(_originalWindowProc, hwnd, message, wParam, lParam);
+        foreach (var character in char.ConvertFromUtf32(checked((int)args.Character)))
+        {
+            _api.SendCharEvent(
+                _terminal,
+                character,
+                checked((ushort)args.KeyStatus.ScanCode),
+                args.KeyStatus.IsExtendedKey ? (ushort)0x0100 : (ushort)0);
+        }
+        args.Handled = true;
+    }
+
+    private void OnPointerPressed(object sender, PointerRoutedEventArgs args)
+    {
+        RequestHostFocus();
+        Focus(FocusState.Pointer);
+        SendPointerEvent(args, PointerMessage(args.GetCurrentPoint(_terminalPanel).Properties.PointerUpdateKind));
+    }
+
+    private void OnPointerReleased(object sender, PointerRoutedEventArgs args) =>
+        SendPointerEvent(args, PointerMessage(args.GetCurrentPoint(_terminalPanel).Properties.PointerUpdateKind));
+
+    private void OnPointerMoved(object sender, PointerRoutedEventArgs args) =>
+        SendPointerEvent(args, WmMouseMove);
+
+    private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs args)
+    {
+        var point = args.GetCurrentPoint(_terminalPanel);
+        SendPointerEvent(
+            args,
+            point.Properties.IsHorizontalMouseWheel ? WmMouseHorizontalWheel : WmMouseWheel,
+            point);
+    }
+
+    private void OnPointerExited(object sender, PointerRoutedEventArgs args) =>
+        SendPointerEvent(args, WmMouseLeave);
+
+    private void SendPointerEvent(
+        PointerRoutedEventArgs args,
+        uint message,
+        PointerPoint? currentPoint = null)
+    {
+        if (_disposed || !_inputEnabled || _terminal == IntPtr.Zero || _api is null || message == 0)
+            return;
+        try
+        {
+            var point = currentPoint ?? args.GetCurrentPoint(_terminalPanel);
+            var properties = point.Properties;
+            var buttons = PointerButtons(properties);
+            var scale = XamlRoot?.RasterizationScale ?? 1;
+            var result = _api.SendPointerEvent(
+                _terminal,
+                message,
+                buttons,
+                checked((int)Math.Round(point.Position.X * scale)),
+                checked((int)Math.Round(point.Position.Y * scale)),
+                checked((short)properties.MouseWheelDelta));
+            ProtectedCursor = (result & PointerHandCursor) != 0
+                ? _linkCursor
+                : _textCursor;
+            args.Handled = (result & PointerHandled) != 0;
+        }
+        catch (Exception exception)
+        {
+            TraceHook?.Invoke($"native pointer input failed: {exception.Message}");
+        }
+    }
+
+    private static uint PointerMessage(PointerUpdateKind updateKind) =>
+        updateKind switch
+        {
+            PointerUpdateKind.LeftButtonPressed => WmLeftButtonDown,
+            PointerUpdateKind.LeftButtonReleased => WmLeftButtonUp,
+            PointerUpdateKind.RightButtonPressed => WmRightButtonDown,
+            PointerUpdateKind.RightButtonReleased => WmRightButtonUp,
+            PointerUpdateKind.MiddleButtonPressed => WmMiddleButtonDown,
+            PointerUpdateKind.MiddleButtonReleased => WmMiddleButtonUp,
+            PointerUpdateKind.XButton1Pressed or PointerUpdateKind.XButton2Pressed => WmXButtonDown,
+            PointerUpdateKind.XButton1Released or PointerUpdateKind.XButton2Released => WmXButtonUp,
+            _ => 0,
+        };
+
+    private static uint PointerButtons(PointerPointProperties properties)
+    {
+        var buttons = 0u;
+        if (properties.IsLeftButtonPressed)
+            buttons |= MkLeftButton;
+        if (properties.IsRightButtonPressed)
+            buttons |= MkRightButton;
+        if (properties.IsMiddleButtonPressed)
+            buttons |= MkMiddleButton;
+        if (properties.IsXButton1Pressed)
+            buttons |= MkXButton1;
+        if (properties.IsXButton2Pressed)
+            buttons |= MkXButton2;
+        if ((GetKeyState(0x10) & 0x8000) != 0)
+            buttons |= MkShift;
+        if ((GetKeyState(0x11) & 0x8000) != 0)
+            buttons |= MkControl;
+        return buttons;
     }
 
     private bool TryHandleAppShortcut(ushort virtualKey)
@@ -976,18 +1069,6 @@ public sealed class NativeTerminalSurface : TerminalSurface
         return true;
     }
 
-    private static void UnpackKeyMessage(
-        IntPtr wParam,
-        IntPtr lParam,
-        out ushort virtualKey,
-        out ushort scanCode,
-        out ushort flags)
-    {
-        var scanCodeAndFlags = ((ulong)lParam.ToInt64() >> 16) & 0xFFFF;
-        scanCode = (ushort)(scanCodeAndFlags & 0x00FF);
-        flags = (ushort)(scanCodeAndFlags & 0xFF00);
-        virtualKey = checked((ushort)wParam.ToInt64());
-    }
 
     private void ConfigureRuler()
     {
@@ -1005,6 +1086,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
             }
         };
         _ruler.MarkRequested += ScrollToMark;
+        _ruler.CopyRequested += CopyMarkOutput;
         Children.Add(_ruler);
     }
 
@@ -1012,7 +1094,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
     {
         _commandsPanel.CloseRequested += () => SetCommandsPanelOpen(false);
         _commandsPanel.JumpRequested += ScrollToMark;
-        _commandsPanel.CopyRequested += CopyMarkOutput;
+        _commandsPanel.CopyRequested += markId => { CopyMarkOutput(markId); };
         Children.Add(_commandsPanel);
     }
 
@@ -1114,18 +1196,19 @@ public sealed class NativeTerminalSurface : TerminalSurface
         }
     }
 
-    private void CopyMarkOutput(ulong markId)
+    private bool CopyMarkOutput(ulong markId)
     {
         if (_terminal == IntPtr.Zero || _api is null)
-            return;
+            return false;
         try
         {
             var text = _api.GetMarkText(_terminal, markId, includeOutput: true);
-            CopyToClipboard(text, null, null);
+            return CopyToClipboard(text, null, null);
         }
         catch (Exception exception)
         {
             TraceHook?.Invoke($"native command output failed: {exception.Message}");
+            return false;
         }
     }
 
@@ -1564,9 +1647,10 @@ public sealed class NativeTerminalSurface : TerminalSurface
     {
         if (_terminal == IntPtr.Zero || _api is null)
             return;
+        var theme = NativeTerminalThemeCatalog.Find(_theme);
         _api.SetTheme(
             _terminal,
-            NativeTerminalThemeCatalog.Find(_theme),
+            theme,
             _fontFamily,
             ToNativePointSize(_fontSize),
             _dpi);
@@ -1614,8 +1698,6 @@ public sealed class NativeTerminalSurface : TerminalSurface
         if (_terminal != IntPtr.Zero && _api is not null)
             _api.DestroyTerminal(_terminal);
         _terminal = IntPtr.Zero;
-        _childHwnd = IntPtr.Zero;
-        _originalWindowProc = IntPtr.Zero;
         _initialized = false;
     }
 
@@ -1631,6 +1713,16 @@ public sealed class NativeTerminalSurface : TerminalSurface
         UnregisterPropertyChangedCallback(VisibilityProperty, _visibilityCallbackToken);
         UnsubscribeFromXamlRoot();
         DestroyNativeTerminal();
+        KeyDown -= OnTerminalKeyDown;
+        KeyUp -= OnTerminalKeyUp;
+        CharacterReceived -= OnTerminalCharacterReceived;
+        GotFocus -= OnTerminalGotFocus;
+        LostFocus -= OnTerminalLostFocus;
+        _terminalPanel.PointerPressed -= OnPointerPressed;
+        _terminalPanel.PointerReleased -= OnPointerReleased;
+        _terminalPanel.PointerMoved -= OnPointerMoved;
+        _terminalPanel.PointerWheelChanged -= OnPointerWheelChanged;
+        _terminalPanel.PointerExited -= OnPointerExited;
         lock (_outputGate)
         {
             _pendingOutput.SetLength(0);
@@ -1639,40 +1731,16 @@ public sealed class NativeTerminalSurface : TerminalSurface
         _pendingOutput.Dispose();
     }
 
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate IntPtr WindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
-
-    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
-    private static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr newValue);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr CallWindowProc(
-        IntPtr previousWindowProc,
-        IntPtr hwnd,
-        uint message,
-        IntPtr wParam,
-        IntPtr lParam);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr DefWindowProc(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        internal int X;
+        internal int Y;
+    }
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetWindowPos(
-        IntPtr hwnd,
-        IntPtr insertAfter,
-        int x,
-        int y,
-        int width,
-        int height,
-        uint flags);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool ShowWindow(IntPtr hwnd, int command);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr SetFocus(IntPtr hwnd);
+    private static extern bool ClientToScreen(IntPtr hwnd, ref NativePoint point);
 
     [DllImport("user32.dll")]
     private static extern short GetKeyState(int virtualKey);

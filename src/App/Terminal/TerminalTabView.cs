@@ -116,7 +116,6 @@ public sealed class TerminalTabView : Grid, IDisposable
     public bool CanRewind => _rewindAvailable;
     public string? RecordingPath => _capture?.RecordingPath;
 
-    internal void SetHostVisible(bool visible) => _terminal.SetHostVisible(visible);
 
     public TerminalTabView(TabViewModel tab, ICredentialService credentials, KnownHostsStore knownHosts,
         SshKeyStore sshKeys,
@@ -519,8 +518,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         _connecting = true;
         _spinner.IsActive = true;
         _tab.State = TabConnectionState.Connecting;
-        // Native HWND terminals cannot sit behind XAML progress and credential dialogs.
-        // WebView2 keeps rendering; it only stops accepting input.
+        // Keep the composition terminal visible while progress or credential UI owns input.
         _terminal.SetInputEnabled(false);
         _workingDirectory.Reset();
 

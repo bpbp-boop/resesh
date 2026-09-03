@@ -49,7 +49,6 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract void WriteNotice(string message);
     public abstract void FocusTerminal();
     public abstract void SetInputEnabled(bool enabled);
-    public abstract void SetHostVisible(bool visible);
     public abstract void ToggleCommandsPanel();
     public abstract void SetRulerPresentation(bool isSplit, bool isGroupFocused);
     public abstract void SetPromptPlatform(string? platform);

@@ -7,8 +7,8 @@ namespace Resesh.Terminal;
 /// <summary>Versioned adapter for the resesh ABI exported by Microsoft.Terminal.Control.dll.</summary>
 internal sealed class NativeTerminalApi
 {
-    internal const ushort AbiMajor = 1;
-    internal const ushort AbiMinor = 4;
+    internal const ushort AbiMajor = 2;
+    internal const ushort AbiMinor = 0;
     internal const string DllEnvironmentVariable = "RESESH_NATIVE_TERMINAL_DLL";
 
     private const uint ThemeOption = 0x00000001;
@@ -41,7 +41,9 @@ internal sealed class NativeTerminalApi
     private readonly SendKeyEventDelegate _sendKeyEvent;
     private readonly SendCharEventDelegate _sendCharEvent;
     private readonly SetFocusedDelegate _setFocused;
-    private readonly ResizePixelsDelegate _resizePixels;
+    private readonly SetBoundsDelegate _setBounds;
+    private readonly AttachSwapChainPanelDelegate _attachSwapChainPanel;
+    private readonly SendPointerEventDelegate _sendPointerEvent;
     private readonly SetOptionsDelegate _setOptions;
     private readonly CopySelectionDelegate _copySelection;
     private readonly PasteTextDelegate _pasteText;
@@ -84,7 +86,9 @@ internal sealed class NativeTerminalApi
         _sendKeyEvent = Load<SendKeyEventDelegate>("ReseshTerminalSendKeyEvent");
         _sendCharEvent = Load<SendCharEventDelegate>("ReseshTerminalSendCharEvent");
         _setFocused = Load<SetFocusedDelegate>("ReseshTerminalSetFocused");
-        _resizePixels = Load<ResizePixelsDelegate>("ReseshTerminalResizePixels");
+        _setBounds = Load<SetBoundsDelegate>("ReseshTerminalSetBounds");
+        _attachSwapChainPanel = Load<AttachSwapChainPanelDelegate>("ReseshTerminalAttachSwapChainPanel");
+        _sendPointerEvent = Load<SendPointerEventDelegate>("ReseshTerminalSendPointerEvent");
         _setOptions = Load<SetOptionsDelegate>("ReseshTerminalSetOptions");
         _copySelection = Load<CopySelectionDelegate>("ReseshTerminalCopySelection");
         _pasteText = Load<PasteTextDelegate>("ReseshTerminalPasteText");
@@ -109,9 +113,8 @@ internal sealed class NativeTerminalApi
     internal string BuildId { get; }
 
     internal IntPtr CreateTerminal(
-        IntPtr parentHwnd,
-        NativeTerminalCreationSettings settings,
-        out IntPtr childHwnd)
+        IntPtr hostHwnd,
+        NativeTerminalCreationSettings settings)
     {
         var theme = settings.Theme;
         var flags = EnableBuiltinGlyphs | EnableColorGlyphs | DetectUrls | SnapOnInput;
@@ -132,7 +135,7 @@ internal sealed class NativeTerminalApi
             StructSize = checked((uint)Marshal.SizeOf<CreateOptions>()),
             AbiMajor = AbiMajor,
             AbiMinor = AbiMinor,
-            ParentHwnd = parentHwnd,
+            HostHwnd = hostHwnd,
             InitialColumns = settings.InitialColumns,
             InitialRows = settings.InitialRows,
             HistorySize = settings.HistorySize,
@@ -152,7 +155,7 @@ internal sealed class NativeTerminalApi
             WordDelimiters = wordDelimiters,
             WordDelimitersLength = checked((uint)wordDelimiters.Length),
         };
-        ThrowIfFailed(_create(in options, out childHwnd, out var terminal));
+        ThrowIfFailed(_create(in options, out var terminal));
         return terminal;
     }
 
@@ -385,12 +388,26 @@ internal sealed class NativeTerminalApi
             (state.Flags & 0x01) != 0,
             (state.Flags & 0x02) != 0);
 
-    internal TilSize ResizePixels(IntPtr terminal, int width, int height)
+    internal TilSize SetBounds(IntPtr terminal, int screenX, int screenY, int width, int height)
     {
-        ThrowIfFailed(_resizePixels(terminal, width, height, out var columns, out var rows));
+        ThrowIfFailed(_setBounds(terminal, screenX, screenY, width, height, out var columns, out var rows));
         return new TilSize { X = columns, Y = rows };
     }
 
+    internal void AttachSwapChainPanel(IntPtr terminal, IntPtr panel) =>
+        ThrowIfFailed(_attachSwapChainPanel(terminal, panel));
+
+    internal uint SendPointerEvent(
+        IntPtr terminal,
+        uint message,
+        uint buttons,
+        int x,
+        int y,
+        short wheelDelta)
+    {
+        ThrowIfFailed(_sendPointerEvent(terminal, message, buttons, x, y, wheelDelta, out var result));
+        return result;
+    }
     internal void SetTheme(IntPtr terminal, TerminalTheme theme, string fontFamily, short fontSize, int dpi)
     {
         var options = new TerminalOptions
@@ -636,7 +653,7 @@ internal sealed class NativeTerminalApi
         internal uint StructSize;
         internal ushort AbiMajor;
         internal ushort AbiMinor;
-        internal IntPtr ParentHwnd;
+        internal IntPtr HostHwnd;
         internal int InitialColumns;
         internal int InitialRows;
         internal int HistorySize;
@@ -698,6 +715,7 @@ internal sealed class NativeTerminalApi
         TerminalModeChanged = 10,
         OscObserved = 11,
         OpenLink = 12,
+        SwapChainChanged = 13,
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -860,7 +878,7 @@ internal sealed class NativeTerminalApi
     private delegate int GetBuildIdDelegate(IntPtr buffer, uint capacity, out uint requiredCapacity);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int CreateDelegate(in CreateOptions options, out IntPtr childHwnd, out IntPtr terminal);
+    private delegate int CreateDelegate(in CreateOptions options, out IntPtr terminal);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int DestroyDelegate(IntPtr terminal);
@@ -899,12 +917,27 @@ internal sealed class NativeTerminalApi
     private delegate int SetFocusedDelegate(IntPtr terminal, byte focused);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int ResizePixelsDelegate(
+    private delegate int SetBoundsDelegate(
         IntPtr terminal,
+        int screenX,
+        int screenY,
         int width,
         int height,
         out int columns,
         out int rows);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int AttachSwapChainPanelDelegate(IntPtr terminal, IntPtr panel);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int SendPointerEventDelegate(
+        IntPtr terminal,
+        uint message,
+        uint buttons,
+        int x,
+        int y,
+        short wheelDelta,
+        out uint result);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int SetOptionsDelegate(IntPtr terminal, in TerminalOptions options);

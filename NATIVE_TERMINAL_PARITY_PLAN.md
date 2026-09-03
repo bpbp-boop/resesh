@@ -35,10 +35,10 @@ The final cutover removes the WebView2 live and playback paths. It does not keep
 
 ## Decisions
 
-1. Keep `HwndTerminal` as the rendering host. Extend it through a resesh-owned, versioned C ABI.
+1. Host Atlas through its composition surface handle in a WinUI 3 `SwapChainPanel`. Extend the terminal core through a resesh-owned, versioned C ABI.
 2. Maintain a separate fork of `microsoft/terminal`. Pin both the upstream base commit and the fork commit.
 3. Keep transport and product policy in resesh. Native code owns terminal parsing, buffer state, hit testing, search spans, and rendering.
-4. Put find, ruler, and commands surfaces beside the child HWND. Do not draw XAML above it.
+4. Keep find, ruler, commands, dialogs, and popups in one WinUI visual tree above the composition terminal.
 5. Queue native events while TerminalCore holds its lock. Invoke managed callbacks only after the lock is released.
 6. Use caller-owned buffers or callbacks with explicit lengths. Do not return borrowed strings with unclear lifetime.
 7. Ship x64 and ARM64 application-local binaries. Never load the DLL from another installed package.
@@ -51,7 +51,7 @@ flowchart LR
     Backend[ConPTY or SSH.NET backend] -->|raw bytes| Host[NativeTerminalSurface]
     Host -->|UTF-8 decode| ABI[Resesh terminal C ABI]
     ABI --> Core[Microsoft TerminalCore]
-    Core --> Renderer[Atlas renderer and child HWND]
+    Core --> Renderer[Atlas composition surface in WinUI SwapChainPanel]
     Core -->|queued typed events| ABI
     ABI -->|title, OSC, marks, links, bell| Host
     Host --> Policy[resesh tab, agent, recording, and URI policy]
@@ -66,13 +66,13 @@ Use a separate fork repository rather than a large nested submodule in the appli
 Add these application-repository assets when implementation starts:
 
 ```text
-eng/native-terminal.json                 pinned upstream and fork commits, ABI version, artifact hashes
-eng/build-native-terminal.ps1            deterministic fork checkout and build entry point
-src/Terminal/Native/ReseshTerminalAbi.cs managed ABI declarations
-src/Terminal/Native/NativeTerminalApi.cs dynamic loading and version validation
-src/Terminal/Native/NativeTerminalSurface.cs HWND host
-src/Terminal/Native/NativeTerminalEvents.cs typed event conversion
-src/Terminal/Native/NativeTerminalSnapshot.cs snapshot envelope validation
+eng/native-terminal.json                         pinned commits, patch hash, ABI version, artifact hashes
+eng/native-terminal-patches/composition-surface.patch
+                                                 reproducible fork delta
+eng/build-native-terminal.ps1                    deterministic checkout, patch, build, and hash update
+src/Terminal/NativeTerminalApi.cs                managed ABI declarations, loading, and validation
+src/Terminal/NativeTerminalSurface.cs            WinUI composition host and input routing
+src/Terminal/NativeTerminalRuler.cs              native marks and TeachingTip actions
 ```
 
 The fork repository owns:
@@ -110,7 +110,9 @@ ReseshTerminalSendOutput
 ReseshTerminalSendKeyEvent
 ReseshTerminalSendCharEvent
 ReseshTerminalSetFocused
-ReseshTerminalResizePixels
+ReseshTerminalSetBounds
+ReseshTerminalAttachSwapChainPanel
+ReseshTerminalSendPointerEvent
 ReseshTerminalSetOptions
 ```
 
@@ -417,13 +419,11 @@ Add exports for cursor logical-line query and creating an application mark.
 
 ### Ruler
 
-1. Dock a WinUI `AnnotatedScrollBar` beside the child HWND. Use its native pointer, wheel, touch, keyboard, theme, and accessibility behavior instead of implementing scrollbar input.
-2. Add a managed row-coordinate adapter around `AnnotatedScrollBar.ScrollController`. Feed it buffer height, viewport height, and viewport top; forward scroll-to, scroll-by, and velocity requests to TerminalCore; complete requests only after the matching native scroll event.
+1. Dock a WinUI `ScrollBar` beside the composition terminal. Use its native pointer, wheel, touch, keyboard, theme, and accessibility behavior instead of implementing scrollbar input.
+2. Feed it buffer height, viewport height, and viewport top; forward scroll requests to TerminalCore; complete requests after the matching native scroll event.
 3. Paint dense command, bookmark, search, and highlight ticks in a non-hit-test WinUI drawing layer aligned with the control. Aggregate source rows into device-pixel buckets before creating UI work. Do not create one XAML element per buffer match and do not replace the control template.
-4. Draw the proportional viewport window in that layer because `AnnotatedScrollBar` uses a fixed-height indicator. Preserve the current two-lane precedence and exit-status colors.
-5. Use `DetailLabelRequested` for concise hover details. Keep interactive jump and copy-output actions in the commands panel instead of putting buttons in the scrollbar tooltip.
-6. Support click-to-scroll, drag, next/previous command, and bookmark toggle. A rail click may snap to a nearby mark, but dragging must remain continuous.
-7. Throttle high-frequency viewport painting, but never reorder scroll completions or mark generations. Hide annotations for the alternate buffer and disable the controller when there is no scrollback.
+4. Use standard scrollbar dragging, paging, and click-to-scroll. Hovering or clicking a command or bookmark tick opens an in-tree WinUI `TeachingTip` with contextual jump/copy actions.
+5. Throttle high-frequency viewport painting, but never reorder scroll completions or mark generations. Hide annotations for the alternate buffer and disable the scrollbar when there is no scrollback.
 
 ### Commands panel
 

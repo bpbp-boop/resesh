@@ -509,10 +509,6 @@ public sealed class TerminalControl : TerminalSurface
     /// Callers must also move keyboard focus off the terminal (the lock overlay does).</summary>
     public override void SetInputEnabled(bool enabled) => _webView.IsHitTestVisible = enabled;
 
-    public override void SetHostVisible(bool visible)
-    {
-        // The XAML visual tree clips WebView2 with its parent.
-    }
 
     /// <summary>Opens or closes the page's commands panel (the annotated scrollbar's
     /// command-mark list). Same action as Ctrl+Shift+O inside the terminal.</summary>

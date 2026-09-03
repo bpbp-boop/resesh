@@ -134,19 +134,16 @@ test("the command palette is built from theme surfaces, not Fluent defaults", ()
   assert.match(mainWindow, /SessionAccentBrush"\]\)\.Color = palette\.Accent/);
 });
 
-test("the command palette hides child terminal windows until it closes", () => {
+test("the command palette composes above terminal surfaces without visibility workarounds", () => {
   assert.match(
     mainWindow,
-    /ShowCommandPalette\(bool openedFromTerminal = false\)[\s\S]*?SetTerminalHostsVisible\(false\);[\s\S]*?CommandPalette\.Open\(commands\)/,
+    /ShowCommandPalette\(bool openedFromTerminal = false\)[\s\S]*?CommandPalette\.Open\(commands\)/,
   );
   assert.match(
     mainWindow,
-    /CloseCommandPalette\(\)[\s\S]*?CommandPalette\.Close\(\);[\s\S]*?SetTerminalHostsVisible\(true\);[\s\S]*?RestorePaletteFocus\(\)/,
+    /CloseCommandPalette\(\)[\s\S]*?CommandPalette\.Close\(\);[\s\S]*?RestorePaletteFocus\(\)/,
   );
-  assert.match(
-    mainWindow,
-    /ExecuteCommandPaletteEntryAsync[\s\S]*?finally[\s\S]*?SetTerminalHostsVisible\(true\)/,
-  );
+  assert.doesNotMatch(mainWindow, /SetTerminalHostsVisible/);
 });
 
 test("dialogs follow the live session palette and light-dark mode", () => {
