@@ -14,6 +14,16 @@ $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 if (-not $ArtifactRoot) { $ArtifactRoot = Join-Path $repoRoot ".artifacts\native-terminal" }
 if (-not $ForkPath) { $ForkPath = Join-Path $repoRoot ".artifacts\terminal-source" }
 
+$invocationRoot = (Get-Location).Path
+function Get-AbsolutePath([string]$Path) {
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path $invocationRoot $Path))
+}
+$ArtifactRoot = Get-AbsolutePath $ArtifactRoot
+$ForkPath = Get-AbsolutePath $ForkPath
+
 if (-not (Test-Path (Join-Path $ForkPath ".git"))) {
     New-Item -ItemType Directory -Force -Path (Split-Path $ForkPath) | Out-Null
     & git clone --filter=blob:none $manifest.fork.repository $ForkPath
@@ -34,23 +44,33 @@ foreach ($patch in $manifest.fork.patches) {
     if (-not (Test-Path $patchPath)) {
         throw "Native terminal patch not found: $patchPath"
     }
-    $actualPatchHash = (Get-FileHash $patchPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    # Git can check the patch out with CRLF even though the repository blob uses LF.
+    # Hash normalized UTF-8 text so the pin is stable across Git configurations.
+    $patchText = [System.IO.File]::ReadAllText($patchPath)
+    $normalizedPatchText = $patchText.Replace("`r`n", "`n").Replace("`r", "`n")
+    $patchBytes = [System.Text.UTF8Encoding]::new($false).GetBytes($normalizedPatchText)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $actualPatchHash = ([System.BitConverter]::ToString($sha256.ComputeHash($patchBytes))).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+    }
     if ($actualPatchHash -ne $patch.sha256) {
         throw "Native terminal patch hash $actualPatchHash does not match $($patch.sha256)."
     }
 
     $ErrorActionPreference = "Continue"
-    & git -C $ForkPath apply --check $patchPath 2>$null
+    & git -C $ForkPath apply --ignore-space-change --check $patchPath 2>$null
     $forwardExitCode = $LASTEXITCODE
     $ErrorActionPreference = "Stop"
     if ($forwardExitCode -eq 0) {
-        & git -C $ForkPath apply $patchPath
+        & git -C $ForkPath apply --ignore-space-change $patchPath
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         continue
     }
 
     $ErrorActionPreference = "Continue"
-    & git -C $ForkPath apply --reverse --check $patchPath 2>$null
+    & git -C $ForkPath apply --ignore-space-change --reverse --check $patchPath 2>$null
     $reverseExitCode = $LASTEXITCODE
     $ErrorActionPreference = "Stop"
     if ($reverseExitCode -ne 0) {
@@ -68,7 +88,12 @@ if ($vcpkgCommit -ne $manifest.toolchain.vcpkgToolCommit) {
 }
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-$msbuild = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find MSBuild\**\Bin\MSBuild.exe |
+$requiredComponents = @("Microsoft.VisualStudio.Component.VC.Tools.x86.x64")
+if ($Architecture -in @("ARM64", "All")) {
+    $requiredComponents += "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+    $requiredComponents += "Microsoft.VisualStudio.Component.UWP.VC.ARM64"
+}
+$msbuild = & $vswhere -latest -products * -requires $requiredComponents -find MSBuild\**\Bin\MSBuild.exe |
     Select-Object -First 1
 if (-not $msbuild) {
     throw "Visual Studio with the $($manifest.toolchain.platformToolset) C++ toolset is required to reproduce native terminal artifacts."
@@ -86,8 +111,10 @@ $env:_CL_ = "/wd4875 $env:_CL_".Trim()
 $architectures = if ($Architecture -eq "All") { @("x64", "ARM64") } else { @($Architecture) }
 foreach ($item in $architectures) {
     & $msbuild (Join-Path $ForkPath "OpenConsole.sln") "/t:Terminal\Control\Microsoft_Terminal_Control" `
-        /m /p:Configuration=Release "/p:Platform=$item" "/p:PlatformToolset=$($manifest.toolchain.platformToolset)" `
-        "/p:WindowsTargetPlatformVersion=$($manifest.toolchain.windowsSdk)" /p:AppxSymbolPackageEnabled=false `
+        /m /nr:false /p:Configuration=Release "/p:Platform=$item" "/p:PlatformToolset=$($manifest.toolchain.platformToolset)" `
+        "/p:WindowsTargetPlatformVersion=$($manifest.toolchain.windowsSdk)" `
+        "/p:TargetPlatformVersion=$($manifest.toolchain.windowsSdk)" "/p:AppxBundlePlatforms=$item" `
+        /p:AppxSymbolPackageEnabled=false `
         "/p:OpenConsoleDir=$ForkPath\" "/p:SolutionDir=$ForkPath\" "/p:VcpkgRoot=$VcpkgRoot"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -112,5 +139,9 @@ foreach ($item in $architectures) {
 }
 
 if ($UpdateManifestHashes) {
-    $manifest | ConvertTo-Json -Depth 10 | Set-Content $manifestPath -Encoding utf8
+    $manifestJson = $manifest | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText(
+        $manifestPath,
+        $manifestJson + [Environment]::NewLine,
+        [System.Text.UTF8Encoding]::new($false))
 }

@@ -1,0 +1,111 @@
+diff --git a/src/cascadia/TerminalControl/HwndTerminal.cpp b/src/cascadia/TerminalControl/HwndTerminal.cpp
+--- a/src/cascadia/TerminalControl/HwndTerminal.cpp
++++ b/src/cascadia/TerminalControl/HwndTerminal.cpp
+@@ -1702,12 +1702,12 @@ catch (...)
+     return false;
+ }
+ 
+-void HwndTerminal::_SendKeyEvent(WORD vkey, WORD scanCode, WORD flags, bool keyDown) noexcept
++bool HwndTerminal::_SendKeyEvent(WORD vkey, WORD scanCode, WORD flags, bool keyDown) noexcept
+ try
+ {
+     if (!_terminal)
+     {
+-        return;
++        return false;
+     }
+ 
+     auto modifiers = getControlKeyState();
+@@ -1728,9 +1728,11 @@ try
+     if (out)
+     {
+         _WriteTextToConnection(*out);
++        return true;
+     }
++    return false;
+ }
+-CATCH_LOG();
++CATCH_LOG_RETURN_FALSE();
+ 
+ void HwndTerminal::_SendCharEvent(wchar_t ch, WORD scanCode, WORD flags) noexcept
+ try
+@@ -1779,13 +1781,13 @@ try
+ }
+ CATCH_LOG();
+ 
+-void _stdcall TerminalSendKeyEvent(void* terminal, WORD vkey, WORD scanCode, WORD flags, bool keyDown)
++bool _stdcall TerminalSendKeyEvent(void* terminal, WORD vkey, WORD scanCode, WORD flags, bool keyDown)
+ try
+ {
+     const auto publicTerminal = static_cast<HwndTerminal*>(terminal);
+-    publicTerminal->_SendKeyEvent(vkey, scanCode, flags, keyDown);
++    return publicTerminal->_SendKeyEvent(vkey, scanCode, flags, keyDown);
+ }
+-CATCH_LOG()
++CATCH_LOG_RETURN_FALSE()
+ 
+ void _stdcall TerminalSendCharEvent(void* terminal, wchar_t ch, WORD scanCode, WORD flags)
+ try
+diff --git a/src/cascadia/TerminalControl/HwndTerminal.hpp b/src/cascadia/TerminalControl/HwndTerminal.hpp
+--- a/src/cascadia/TerminalControl/HwndTerminal.hpp
++++ b/src/cascadia/TerminalControl/HwndTerminal.hpp
+@@ -127,7 +127,7 @@ __declspec(dllexport) bool _stdcall TerminalIsSelectionActive(void* terminal);
+ __declspec(dllexport) void _stdcall DestroyTerminal(void* terminal);
+ __declspec(dllexport) void _stdcall TerminalSetTheme(void* terminal, TerminalTheme theme, LPCWSTR fontFamily, til::CoordType fontSize, int newDpi);
+ __declspec(dllexport) void _stdcall TerminalRegisterWriteCallback(void* terminal, const void __stdcall callback(wchar_t*));
+-__declspec(dllexport) void _stdcall TerminalSendKeyEvent(void* terminal, WORD vkey, WORD scanCode, WORD flags, bool keyDown);
++__declspec(dllexport) bool _stdcall TerminalSendKeyEvent(void* terminal, WORD vkey, WORD scanCode, WORD flags, bool keyDown);
+ __declspec(dllexport) void _stdcall TerminalSendCharEvent(void* terminal, wchar_t ch, WORD flags, WORD scanCode);
+ __declspec(dllexport) void _stdcall TerminalBlinkCursor(void* terminal);
+ __declspec(dllexport) void _stdcall TerminalSetCursorVisible(void* terminal, const bool visible);
+@@ -269,7 +269,7 @@ private:
+     friend void _stdcall TerminalClearSelection(void* terminal);
+     friend const wchar_t* _stdcall TerminalGetSelection(void* terminal);
+     friend bool _stdcall TerminalIsSelectionActive(void* terminal);
+-    friend void _stdcall TerminalSendKeyEvent(void* terminal, WORD vkey, WORD scanCode, WORD flags, bool keyDown);
++    friend bool _stdcall TerminalSendKeyEvent(void* terminal, WORD vkey, WORD scanCode, WORD flags, bool keyDown);
+     friend void _stdcall TerminalSendCharEvent(void* terminal, wchar_t ch, WORD scanCode, WORD flags);
+     friend void _stdcall TerminalSetTheme(void* terminal, TerminalTheme theme, LPCWSTR fontFamily, til::CoordType fontSize, int newDpi);
+     friend void _stdcall TerminalBlinkCursor(void* terminal);
+@@ -300,7 +300,7 @@ private:
+     std::wstring _readRows(til::CoordType first, til::CoordType last) const;
+     til::CoordType _logicalLineStart(til::CoordType row) const;
+     til::CoordType _logicalLineEnd(til::CoordType row) const;
+-    void _SendKeyEvent(WORD vkey, WORD scanCode, WORD flags, bool keyDown) noexcept;
++    bool _SendKeyEvent(WORD vkey, WORD scanCode, WORD flags, bool keyDown) noexcept;
+     void _SendCharEvent(wchar_t ch, WORD scanCode, WORD flags) noexcept;
+ 
+     // Inherited via IControlAccessibilityInfo
+diff --git a/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp b/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
+--- a/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
++++ b/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
+@@ -522,11 +522,14 @@ HRESULT __stdcall ReseshTerminalSendKeyEvent(
+     const uint16_t virtualKey,
+     const uint16_t scanCode,
+     const uint16_t flags,
+-    const uint8_t keyDown)
++    const uint8_t keyDown,
++    uint8_t* handled)
+ try
+ {
++    RETURN_HR_IF(E_POINTER, !handled);
++    *handled = 0;
+     return WithTerminal(terminal, [&](TerminalState& state) {
+-        TerminalSendKeyEvent(state.terminal, virtualKey, scanCode, flags, keyDown != 0);
++        *handled = TerminalSendKeyEvent(state.terminal, virtualKey, scanCode, flags, keyDown != 0) ? 1 : 0;
+         return S_OK;
+     });
+ }
+diff --git a/src/cascadia/TerminalControl/ReseshTerminalAbi.h b/src/cascadia/TerminalControl/ReseshTerminalAbi.h
+--- a/src/cascadia/TerminalControl/ReseshTerminalAbi.h
++++ b/src/cascadia/TerminalControl/ReseshTerminalAbi.h
+@@ -258,7 +258,8 @@ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSendKeyEvent(
+     uint16_t virtualKey,
+     uint16_t scanCode,
+     uint16_t flags,
+-    uint8_t keyDown);
++    uint8_t keyDown,
++    uint8_t* handled);
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSendCharEvent(
+     ReseshTerminalHandle terminal,
+     wchar_t character,

@@ -171,8 +171,18 @@ internal sealed class NativeTerminalApi
     internal void SendOutput(IntPtr terminal, string text) =>
         ThrowIfFailed(_sendOutput(terminal, text, checked((uint)text.Length)));
 
-    internal void SendKeyEvent(IntPtr terminal, ushort virtualKey, ushort scanCode, ushort flags, bool keyDown) =>
-        ThrowIfFailed(_sendKeyEvent(terminal, virtualKey, scanCode, flags, keyDown ? (byte)1 : (byte)0));
+    internal bool SendKeyEvent(IntPtr terminal, ushort virtualKey, ushort scanCode, ushort flags, bool keyDown)
+    {
+        var result = _sendKeyEvent(
+            terminal,
+            virtualKey,
+            scanCode,
+            flags,
+            keyDown ? (byte)1 : (byte)0,
+            out var handled);
+        ThrowIfFailed(result);
+        return handled != 0;
+    }
 
     internal void SendCharEvent(IntPtr terminal, char character, ushort scanCode, ushort flags) =>
         ThrowIfFailed(_sendCharEvent(terminal, character, scanCode, flags));
@@ -569,7 +579,8 @@ internal sealed class NativeTerminalApi
         if (!File.Exists(manifestPath))
             throw new FileNotFoundException("The native terminal artifact manifest is missing.", manifestPath);
 
-        using var document = JsonDocument.Parse(File.ReadAllBytes(manifestPath));
+        // Read as text so StreamReader removes the optional UTF-8 BOM used by older manifests.
+        using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
         var architecture = ArchitectureName();
         var expected = document.RootElement
             .GetProperty("artifacts")
@@ -904,7 +915,8 @@ internal sealed class NativeTerminalApi
         ushort virtualKey,
         ushort scanCode,
         ushort flags,
-        byte keyDown);
+        byte keyDown,
+        out byte handled);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int SendCharEventDelegate(

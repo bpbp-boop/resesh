@@ -1,50 +1,54 @@
-﻿{
-    "schemaVersion":  1,
-    "upstream":  {
-                     "repository":  "https://github.com/microsoft/terminal.git",
-                     "release":  "v1.24.11911.0",
-                     "commit":  "5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc"
-                 },
-    "fork":  {
-                 "repository":  "https://github.com/bpbp-boop/terminal.git",
-                 "branch":  "resesh-abi-v1",
-                 "commit":  "95e25194f73f0d721481a5f59ae6f59a27f90b64",
-                 "patches":  [
-                                 {
-                                     "file":  "native-terminal-patches/composition-surface.patch",
-                                     "sha256":  "d11566c8e14b2c08c43ea49b985072d8b1d9c15fc58078696090cb4d5ece8912"
-                                 }
-                             ]
-             },
-    "abi":  {
-                "major":  2,
-                "minor":  0,
-                "buildId":  "terminal-v1.24.11911.0-resesh-abi2.0-composition"
-            },
-    "supportedArchitectures":  [
-                                   "x64",
-                                   "arm64"
-                               ],
-    "configuration":  "Release",
-    "toolchain":  {
-                      "visualStudio":  "2026",
-                      "platformToolset":  "v145",
-                      "windowsSdk":  "10.0.26100.0",
-                      "vcpkgToolCommit":  "30ef65cad98f08e7197c9a1656fbd871bcb72f2d",
-                      "vcpkgBaseline":  "fe1cde61e971d53c9687cf9a46308f8f55da19fa"
-                  },
-    "license":  {
-                    "file":  "LICENSE",
-                    "sha256":  "5d177f23ecfeb0ea8e050b6a5a16355e1ae9a0b286436ca8f83ed08b3795be6b"
-                },
-    "artifacts":  {
-                      "x64":  {
-                                  "Microsoft.Terminal.Control.dll":  "2d3731a37915d1392d885f606b3b0509fd19ec0357f9183e63169d40d827e327",
-                                  "Microsoft.Terminal.Control.pdb":  "935971620996480637e859d36aec9f36e343c44f0ebe6bdddab067977c6e103c"
-                              },
-                      "arm64":  {
-                                    "Microsoft.Terminal.Control.dll":  "",
-                                    "Microsoft.Terminal.Control.pdb":  ""
-                                }
-                  }
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/microsoft/terminal.git",
+    "release": "v1.24.11911.0",
+    "commit": "5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc"
+  },
+  "fork": {
+    "repository": "https://github.com/bpbp-boop/terminal.git",
+    "branch": "resesh-abi-v1",
+    "commit": "95e25194f73f0d721481a5f59ae6f59a27f90b64",
+    "patches": [
+      {
+        "file": "native-terminal-patches/composition-surface.patch",
+        "sha256": "43c8cc5e73b3f1bf33fc496d3b8b5c8de8eea47804e5ae7f0aac977a51e0721f"
+      },
+      {
+        "file": "native-terminal-patches/input-handled.patch",
+        "sha256": "d45eec363511335ab562a405df4e0a7ac8b5031f5a391bf6a6cffa81a64d598e"
+      }
+    ]
+  },
+  "abi": {
+    "major": 2,
+    "minor": 0,
+    "buildId": "terminal-v1.24.11911.0-resesh-abi2.0-composition"
+  },
+  "supportedArchitectures": [
+    "x64",
+    "arm64"
+  ],
+  "configuration": "Release",
+  "toolchain": {
+    "visualStudio": "2026",
+    "platformToolset": "v145",
+    "windowsSdk": "10.0.26100.0",
+    "vcpkgToolCommit": "30ef65cad98f08e7197c9a1656fbd871bcb72f2d",
+    "vcpkgBaseline": "fe1cde61e971d53c9687cf9a46308f8f55da19fa"
+  },
+  "license": {
+    "file": "LICENSE",
+    "sha256": "5d177f23ecfeb0ea8e050b6a5a16355e1ae9a0b286436ca8f83ed08b3795be6b"
+  },
+  "artifacts": {
+    "x64": {
+      "Microsoft.Terminal.Control.dll": "f864e76364c019c56289f5f8c1ad7b5ad20581a1e418c8dab73e08738823efa8",
+      "Microsoft.Terminal.Control.pdb": "341ea18b91c28c4d3faeebbcb9bdc1b1bea6c36025df629e362b76d7b3d66df1"
+    },
+    "arm64": {
+      "Microsoft.Terminal.Control.dll": "faeed1d554014f26ee2e4760e7dd6fafa0bcf4d7d67514c66e5888b7b6678015",
+      "Microsoft.Terminal.Control.pdb": "bcf4f32702ea7e67638901cb3ccb0a6f6e8053adc1993b0f80e149e40fbce7fa"
+    }
+  }
 }

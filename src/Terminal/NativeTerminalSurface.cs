@@ -170,7 +170,6 @@ public sealed class NativeTerminalSurface : TerminalSurface
         AutomationProperties.SetAutomationId(this, "NativeTerminalSurface");
         AutomationProperties.SetName(this, "Terminal");
         IsTabStop = true;
-        _terminalPanel.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
         _terminalPanel.PointerPressed += OnPointerPressed;
         _terminalPanel.PointerReleased += OnPointerReleased;
         _terminalPanel.PointerMoved += OnPointerMoved;
@@ -181,7 +180,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         ConfigureRuler();
         ConfigureCommandsPanel();
 
-        KeyDown += OnTerminalKeyDown;
+        PreviewKeyDown += OnTerminalKeyDown;
         KeyUp += OnTerminalKeyUp;
         CharacterReceived += OnTerminalCharacterReceived;
         GotFocus += OnTerminalGotFocus;
@@ -875,20 +874,19 @@ public sealed class NativeTerminalSurface : TerminalSurface
         }
         if (args.Key == VirtualKey.Enter)
             BeginPromptDiscovery();
-        _api.SendKeyEvent(
+        args.Handled = _api.SendKeyEvent(
             _terminal,
             virtualKey,
             checked((ushort)args.KeyStatus.ScanCode),
             args.KeyStatus.IsExtendedKey ? (ushort)0x0100 : (ushort)0,
             keyDown: true);
-        args.Handled = true;
     }
 
     private void OnTerminalKeyUp(object sender, KeyRoutedEventArgs args)
     {
         if (_disposed || !_inputEnabled || _terminal == IntPtr.Zero || _api is null)
             return;
-        _api.SendKeyEvent(
+        _ = _api.SendKeyEvent(
             _terminal,
             checked((ushort)args.Key),
             checked((ushort)args.KeyStatus.ScanCode),
@@ -1713,7 +1711,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         UnregisterPropertyChangedCallback(VisibilityProperty, _visibilityCallbackToken);
         UnsubscribeFromXamlRoot();
         DestroyNativeTerminal();
-        KeyDown -= OnTerminalKeyDown;
+        PreviewKeyDown -= OnTerminalKeyDown;
         KeyUp -= OnTerminalKeyUp;
         CharacterReceived -= OnTerminalCharacterReceived;
         GotFocus -= OnTerminalGotFocus;
