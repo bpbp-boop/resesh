@@ -1,0 +1,1946 @@
+diff --git a/src/cascadia/TerminalControl/HwndTerminal.cpp b/src/cascadia/TerminalControl/HwndTerminal.cpp
+index 0e26f57b..5e33ab4c 100644
+--- a/src/cascadia/TerminalControl/HwndTerminal.cpp
++++ b/src/cascadia/TerminalControl/HwndTerminal.cpp
+@@ -18,6 +18,8 @@
+ #include "../../renderer/uia/UiaRenderer.hpp"
+ #include "../../types/viewport.cpp"
+ 
++#include "../../buffer/out/UTextAdapter.h"
++#include <map>
+ #include <unordered_set>
+ MIDL_INTERFACE("88fd8248-10da-4810-bb4c-010dd27faea9")
+ IReseshSwapChainPanelNative2 : public IUnknown
+@@ -305,10 +307,15 @@ void HwndTerminal::RegisterAlternateBufferChangedCallback(std::function<void(boo
+ {
+     if (_terminal)
+     {
+-        _terminal->SetAlternateBufferChangedCallback(std::move(callback));
++        _terminal->SetAlternateBufferChangedCallback([this, cb = std::move(callback)](bool active) {
++            _updateHighlights(true);
++            if (cb)
++            {
++                cb(active);
++            }
++        });
+     }
+ }
+-
+ void HwndTerminal::RegisterShellIntegrationMarkCallback(std::function<void(std::wstring_view)> callback)
+ {
+     if (_terminal)
+@@ -596,11 +603,12 @@ HRESULT HwndTerminal::Refresh(const til::size windowSize, _Out_ til::size* dimen
+     }
+     dimensions->width = size.width;
+     dimensions->height = size.height;
++    _updateHighlights(true);
+ 
+     return S_OK;
+ }
+ 
+-void HwndTerminal::SendOutput(std::wstring_view data)
++void HwndTerminal::SendOutput(std::wstring_view data)
+ {
+     if (!_terminal)
+     {
+@@ -613,6 +621,7 @@ void HwndTerminal::SendOutput(std::wstring_view data)
+     {
+         _searchState.Invalidated = true;
+     }
++    _updateHighlights(false);
+ }
+ 
+ HwndTerminalSearchState HwndTerminal::Search(
+@@ -685,6 +694,280 @@ HwndTerminalSearchState HwndTerminal::GetSearchState() const noexcept
+     return _searchState;
+ }
+ 
++HRESULT HwndTerminal::SetHighlightRules(const std::span<const ReseshTerminalHighlightRule> rules)
++{
++    std::vector<HwndTerminalHighlightRule> compiledRules;
++    compiledRules.reserve(rules.size());
++
++    for (const auto& r : rules)
++    {
++        RETURN_HR_IF(E_INVALIDARG, r.patternLength > 1024 * 1024 || (r.patternLength > 0 && !r.pattern));
++        const std::wstring_view patternView{ r.pattern, r.patternLength };
++        if (patternView.empty())
++        {
++            continue;
++        }
++
++        uint32_t icuFlags{ 0 };
++        if ((r.flags & ReseshTerminalHighlightMatchCase) == 0)
++        {
++            WI_SetFlag(icuFlags, UREGEX_CASE_INSENSITIVE);
++        }
++        if ((r.flags & ReseshTerminalHighlightRegex) != 0)
++        {
++            WI_SetFlag(icuFlags, UREGEX_MULTILINE);
++        }
++        else
++        {
++            WI_SetFlag(icuFlags, UREGEX_LITERAL);
++        }
++
++        UErrorCode status = U_ZERO_ERROR;
++        auto re = til::ICU::CreateRegex(patternView, icuFlags, &status);
++        if (U_FAILURE(status) || !re)
++        {
++            return HRESULT_FROM_WIN32(ERROR_INVALID_DATATYPE);
++        }
++
++        compiledRules.push_back(HwndTerminalHighlightRule{
++            .Id = r.id,
++            .Pattern = std::wstring{ patternView },
++            .RegularExpression = (r.flags & ReseshTerminalHighlightRegex) != 0,
++            .MatchCase = (r.flags & ReseshTerminalHighlightMatchCase) != 0,
++            .ShowInOverview = (r.flags & ReseshTerminalHighlightShowInOverview) != 0,
++            .Foreground = til::color{
++                static_cast<uint8_t>(r.foreground & 0xff),
++                static_cast<uint8_t>((r.foreground >> 8) & 0xff),
++                static_cast<uint8_t>((r.foreground >> 16) & 0xff),
++                255 },
++            .Background = til::color{
++                static_cast<uint8_t>(r.background & 0xff),
++                static_cast<uint8_t>((r.background >> 8) & 0xff),
++                static_cast<uint8_t>((r.background >> 16) & 0xff),
++                static_cast<uint8_t>((r.background >> 24) & 0xff) },
++            .Priority = r.priority,
++            .Regex = std::move(re),
++        });
++    }
++
++    if (_terminal)
++    {
++        const auto lock = _terminal->LockForWriting();
++        _highlightRules = std::move(compiledRules);
++        _lastHighlightMutationId = 0;
++        _updateHighlights(true);
++    }
++    else
++    {
++        _highlightRules = std::move(compiledRules);
++    }
++
++    return S_OK;
++}
++
++void HwndTerminal::ClearHighlightRules()
++{
++    if (_terminal)
++    {
++        const auto lock = _terminal->LockForWriting();
++        _highlightRules.clear();
++        _highlightSpans.clear();
++        _highlightRows.clear();
++        _lastHighlightMutationId = 0;
++        _terminal->SetPersistentHighlights({});
++    }
++    else
++    {
++        _highlightRules.clear();
++        _highlightSpans.clear();
++        _highlightRows.clear();
++        _lastHighlightMutationId = 0;
++    }
++    if (_renderer)
++    {
++        _renderer->TriggerRedrawAll();
++    }
++}
++
++std::vector<HwndTerminalHighlightRow> HwndTerminal::GetHighlightRows() const
++{
++    if (_terminal)
++    {
++        const auto lock = _terminal->LockForReading();
++        return _highlightRows;
++    }
++    return _highlightRows;
++}
++
++void HwndTerminal::_updateHighlights(const bool forceRescan)
++{
++    if (!_terminal)
++    {
++        return;
++    }
++
++    if (_highlightRules.empty() || _terminal->IsAlternateBufferActive())
++    {
++        _highlightSpans.clear();
++        _highlightRows.clear();
++        _terminal->SetPersistentHighlights({});
++        if (_renderer)
++        {
++            _renderer->TriggerRedrawAll();
++        }
++        return;
++    }
++
++    const auto& textBuffer = _terminal->GetTextBuffer();
++    const auto currentMutationId = textBuffer.GetLastMutationId();
++    if (!forceRescan && currentMutationId == _lastHighlightMutationId)
++    {
++        return;
++    }
++
++    const auto bufferGeneration = currentMutationId;
++    const auto totalRows = textBuffer.TotalRowCount();
++    const auto bottomRow = textBuffer.GetSize().BottomInclusive();
++    const auto committedEnd = std::min<til::CoordType>(totalRows, bottomRow + 1);
++
++    std::vector<HwndTerminalHighlightSpan> newSpans;
++
++    for (til::CoordType row = 0; row < committedEnd; )
++    {
++        const auto lineStart = row;
++        const auto lineEnd = std::min<til::CoordType>(committedEnd, _logicalLineEnd(row) + 1);
++        row = lineEnd;
++
++        auto utext = Microsoft::Console::ICU::UTextFromTextBuffer(textBuffer, lineStart, lineEnd);
++
++        for (const auto& rule : _highlightRules)
++        {
++            UErrorCode status = U_ZERO_ERROR;
++            uregex_setUText(rule.Regex.get(), &utext, &status);
++            if (U_SUCCESS(status) && uregex_find(rule.Regex.get(), -1, &status))
++            {
++                do
++                {
++                    auto range = Microsoft::Console::ICU::BufferRangeFromMatch(&utext, rule.Regex.get());
++                    newSpans.push_back({
++                        .RuleId = rule.Id,
++                        .Start = range.start,
++                        .End = range.end,
++                        .BufferGeneration = bufferGeneration,
++                        .Priority = rule.Priority,
++                        .Foreground = rule.Foreground,
++                        .Background = rule.Background,
++                        .ShowInOverview = rule.ShowInOverview,
++                    });
++                } while (uregex_findNext(rule.Regex.get(), &status));
++            }
++        }
++    }
++
++    if (textBuffer.GetLastMutationId() != bufferGeneration)
++    {
++        return;
++    }
++
++    _lastHighlightMutationId = bufferGeneration;
++    _highlightSpans = std::move(newSpans);
++
++    std::sort(_highlightSpans.begin(), _highlightSpans.end(), [](const auto& a, const auto& b) {
++        if (a.Start.y != b.Start.y)
++        {
++            return a.Start.y < b.Start.y;
++        }
++        if (a.Priority != b.Priority)
++        {
++            return a.Priority < b.Priority;
++        }
++        return a.RuleId < b.RuleId;
++    });
++
++    std::vector<Microsoft::Console::Render::RenderDecoration> decorations;
++    const auto bufferWidth = textBuffer.GetSize().Width();
++    for (const auto& span : _highlightSpans)
++    {
++        auto effectiveEnd = span.End;
++        if (effectiveEnd.x == 0 && effectiveEnd.y > span.Start.y)
++        {
++            effectiveEnd.y--;
++            effectiveEnd.x = bufferWidth;
++        }
++
++        if (span.Start.y == effectiveEnd.y)
++        {
++            decorations.push_back({
++                .span = til::point_span{ span.Start, effectiveEnd },
++                .foreground = span.Foreground,
++                .background = span.Background,
++                .priority = span.Priority,
++            });
++        }
++        else
++        {
++            decorations.push_back({
++                .span = til::point_span{ span.Start, til::point{ bufferWidth, span.Start.y } },
++                .foreground = span.Foreground,
++                .background = span.Background,
++                .priority = span.Priority,
++            });
++            for (auto y = span.Start.y + 1; y < effectiveEnd.y; ++y)
++            {
++                decorations.push_back({
++                    .span = til::point_span{ til::point{ 0, y }, til::point{ bufferWidth, y } },
++                    .foreground = span.Foreground,
++                    .background = span.Background,
++                    .priority = span.Priority,
++                });
++            }
++            if (effectiveEnd.x > 0)
++            {
++                decorations.push_back({
++                    .span = til::point_span{ til::point{ 0, effectiveEnd.y }, effectiveEnd },
++                    .foreground = span.Foreground,
++                    .background = span.Background,
++                    .priority = span.Priority,
++                });
++            }
++        }
++    }
++    _terminal->SetPersistentHighlights(std::move(decorations));
++
++    std::map<int32_t, std::pair<uint32_t, uint32_t>> overviewMap;
++    for (const auto& span : _highlightSpans)
++    {
++        if (!span.ShowInOverview)
++        {
++            continue;
++        }
++        const auto colorRef = static_cast<COLORREF>(span.Foreground);
++        const auto lastRow = (span.End.x == 0 && span.End.y > span.Start.y) ? span.End.y - 1 : span.End.y;
++        for (auto r = span.Start.y; r <= lastRow; ++r)
++        {
++            auto& entry = overviewMap[r];
++            entry.first++;
++            entry.second = colorRef;
++        }
++    }
++
++    _highlightRows.clear();
++    _highlightRows.reserve(overviewMap.size());
++    for (const auto& [rowIdx, data] : overviewMap)
++    {
++        _highlightRows.push_back({
++            .Row = rowIdx,
++            .Count = data.first,
++            .Color = data.second,
++        });
++    }
++
++    if (_renderer)
++    {
++        _renderer->TriggerRedrawAll();
++    }
++}
++
+ uint64_t HwndTerminal::_ensureRowMarkId(const til::CoordType row, const uint8_t kind)
+ {
+     auto& buffer = _terminal->GetTextBuffer();
+@@ -1702,12 +1985,12 @@ catch (...)
+     return false;
+ }
+ 
+-bool HwndTerminal::_SendKeyEvent(WORD vkey, WORD scanCode, WORD flags, bool keyDown) noexcept
++bool HwndTerminal::_SendKeyEvent(WORD vkey, WORD scanCode, WORD flags, bool keyDown) noexcept
+ try
+ {
+     if (!_terminal)
+     {
+-        return false;
++        return false;
+     }
+ 
+     auto modifiers = getControlKeyState();
+@@ -1725,73 +2008,74 @@ try
+         const auto lock = _terminal->LockForReading();
+         out = _terminal->SendKeyEvent(vkey, scanCode, modifiers, keyDown);
+     }
+-    if (out)
+-    {
+-        _WriteTextToConnection(*out);
+-        return true;
+-    }
+-    return false;
+-}
+-
+-CATCH_LOG_RETURN_FALSE();
+-
+-HwndTerminalSnapshot HwndTerminal::CaptureSnapshot() const
+-{
+-    if (!_terminal)
+-    {
+-        return {};
+-    }
+-
+-    std::unique_ptr<TextBuffer> bufferCopy;
+-    HwndTerminalSnapshot snapshot;
+-    {
+-        const auto lock = _terminal->LockForReading();
+-        const auto& source = _terminal->GetTextBuffer();
+-        const auto size = source.GetSize().Dimensions();
+-        bufferCopy = std::make_unique<TextBuffer>(size, source.GetCurrentAttributes(), 25, false, nullptr);
+-        bufferCopy->CopyProperties(source);
+-        for (til::CoordType row = 0; row < size.height; ++row)
+-        {
+-            source.CopyRow(row, row, *bufferCopy);
+-        }
+-        bufferCopy->CopyHyperlinkMaps(source);
+-
+-        snapshot.Size = _terminal->GetViewport().Dimensions();
+-        const auto cursor = _terminal->GetCursorPosition();
+-        snapshot.Cursor = { cursor.x, cursor.y - _terminal->ViewStartIndex() };
+-        snapshot.CursorVisible = source.GetCursor().IsVisible();
+-        snapshot.ViewportTop = _terminal->GetScrollOffset();
+-        snapshot.ViewportHeight = _terminal->GetViewport().Height();
+-        snapshot.ScrollOffset = _terminal->ViewStartIndex() - snapshot.ViewportTop;
+-        snapshot.AlternateBuffer = _terminal->IsAlternateBufferActive();
+-    }
+-
+-    bufferCopy->SerializeTo(snapshot.Ansi);
+-    if (!snapshot.Ansi.empty() && snapshot.Ansi.front() == L'\uFEFF')
+-    {
+-        snapshot.Ansi.erase(snapshot.Ansi.begin());
+-    }
+-
+-    const auto cursorRow = std::clamp(snapshot.Cursor.y, 0, std::max(0, snapshot.ViewportHeight - 1));
+-    fmt::format_to(
+-        std::back_inserter(snapshot.Ansi),
+-        FMT_COMPILE(L"\x1b[{};{}H\x1b[?25{}"),
+-        cursorRow + 1,
+-        snapshot.Cursor.x + 1,
+-        snapshot.CursorVisible ? L'h' : L'l');
+-    return snapshot;
+-}
+-
+-HRESULT HwndTerminal::ResizeCharacters(const til::size dimensions)
+-{
+-    RETURN_HR_IF(E_INVALIDARG, dimensions.width <= 0 || dimensions.height <= 0);
+-    RETURN_HR_IF_NULL(E_NOT_VALID_STATE, _terminal);
+-    const auto lock = _terminal->LockForWriting();
+-    RETURN_IF_FAILED(_terminal->UserResize(dimensions));
+-    _terminal->UpdatePatternsUnderLock();
+-    _renderer->TriggerRedrawAll();
+-    return S_OK;
+-}
++    if (out)
++    {
++        _WriteTextToConnection(*out);
++        return true;
++    }
++    return false;
++}
++
++CATCH_LOG_RETURN_FALSE();
++
++HwndTerminalSnapshot HwndTerminal::CaptureSnapshot() const
++{
++    if (!_terminal)
++    {
++        return {};
++    }
++
++    std::unique_ptr<TextBuffer> bufferCopy;
++    HwndTerminalSnapshot snapshot;
++    {
++        const auto lock = _terminal->LockForReading();
++        const auto& source = _terminal->GetTextBuffer();
++        const auto size = source.GetSize().Dimensions();
++        bufferCopy = std::make_unique<TextBuffer>(size, source.GetCurrentAttributes(), 25, false, nullptr);
++        bufferCopy->CopyProperties(source);
++        for (til::CoordType row = 0; row < size.height; ++row)
++        {
++            source.CopyRow(row, row, *bufferCopy);
++        }
++        bufferCopy->CopyHyperlinkMaps(source);
++
++        snapshot.Size = _terminal->GetViewport().Dimensions();
++        const auto cursor = _terminal->GetCursorPosition();
++        snapshot.Cursor = { cursor.x, cursor.y - _terminal->ViewStartIndex() };
++        snapshot.CursorVisible = source.GetCursor().IsVisible();
++        snapshot.ViewportTop = _terminal->GetScrollOffset();
++        snapshot.ViewportHeight = _terminal->GetViewport().Height();
++        snapshot.ScrollOffset = _terminal->ViewStartIndex() - snapshot.ViewportTop;
++        snapshot.AlternateBuffer = _terminal->IsAlternateBufferActive();
++    }
++
++    bufferCopy->SerializeTo(snapshot.Ansi);
++    if (!snapshot.Ansi.empty() && snapshot.Ansi.front() == L'\uFEFF')
++    {
++        snapshot.Ansi.erase(snapshot.Ansi.begin());
++    }
++
++    const auto cursorRow = std::clamp(snapshot.Cursor.y, 0, std::max(0, snapshot.ViewportHeight - 1));
++    fmt::format_to(
++        std::back_inserter(snapshot.Ansi),
++        FMT_COMPILE(L"\x1b[{};{}H\x1b[?25{}"),
++        cursorRow + 1,
++        snapshot.Cursor.x + 1,
++        snapshot.CursorVisible ? L'h' : L'l');
++    return snapshot;
++}
++
++HRESULT HwndTerminal::ResizeCharacters(const til::size dimensions)
++{
++    RETURN_HR_IF(E_INVALIDARG, dimensions.width <= 0 || dimensions.height <= 0);
++    RETURN_HR_IF_NULL(E_NOT_VALID_STATE, _terminal);
++    const auto lock = _terminal->LockForWriting();
++    RETURN_IF_FAILED(_terminal->UserResize(dimensions));
++    _terminal->UpdatePatternsUnderLock();
++    _updateHighlights(true);
++    _renderer->TriggerRedrawAll();
++    return S_OK;
++}
+ 
+ void HwndTerminal::_SendCharEvent(wchar_t ch, WORD scanCode, WORD flags) noexcept
+ try
+@@ -1837,13 +2121,13 @@ try
+ }
+ CATCH_LOG();
+ 
+-bool _stdcall TerminalSendKeyEvent(void* terminal, WORD vkey, WORD scanCode, WORD flags, bool keyDown)
++bool _stdcall TerminalSendKeyEvent(void* terminal, WORD vkey, WORD scanCode, WORD flags, bool keyDown)
+ try
+ {
+     const auto publicTerminal = static_cast<HwndTerminal*>(terminal);
+-    return publicTerminal->_SendKeyEvent(vkey, scanCode, flags, keyDown);
+-}
+-CATCH_LOG_RETURN_FALSE()
++    return publicTerminal->_SendKeyEvent(vkey, scanCode, flags, keyDown);
++}
++CATCH_LOG_RETURN_FALSE()
+ 
+ void _stdcall TerminalSendCharEvent(void* terminal, wchar_t ch, WORD scanCode, WORD flags)
+ try
+diff --git a/src/cascadia/TerminalControl/HwndTerminal.hpp b/src/cascadia/TerminalControl/HwndTerminal.hpp
+index da8fde88..20bb8698 100644
+--- a/src/cascadia/TerminalControl/HwndTerminal.hpp
++++ b/src/cascadia/TerminalControl/HwndTerminal.hpp
+@@ -8,6 +8,8 @@
+ #include "../../renderer/inc/FontInfoDesired.hpp"
+ #include "../../types/IControlAccessibilityInfo.h"
+ #include "../../tsf/Handle.h"
++#include <til/regex.h>
++#include "ReseshTerminalAbi.h"
+ 
+ #include <unordered_map>
+ 
+@@ -105,24 +107,56 @@ struct HwndTerminalPromptProbe
+     std::wstring Text;
+ };
+ 
+-struct HwndTerminalApplicationMark
++struct HwndTerminalApplicationMark
+ {
+     std::wstring Command;
+     til::point CommandStart{};
+     til::point CommandEnd{};
+-};
+-
+-struct HwndTerminalSnapshot
+-{
+-    std::wstring Ansi;
+-    til::size Size{};
+-    til::point Cursor{};
+-    int32_t ViewportTop{};
+-    int32_t ViewportHeight{};
+-    int32_t ScrollOffset{};
+-    bool CursorVisible{};
+-    bool AlternateBuffer{};
+-};
++};
++
++struct HwndTerminalSnapshot
++{
++    std::wstring Ansi;
++    til::size Size{};
++    til::point Cursor{};
++    int32_t ViewportTop{};
++    int32_t ViewportHeight{};
++    int32_t ScrollOffset{};
++    bool CursorVisible{};
++    bool AlternateBuffer{};
++};
++
++struct HwndTerminalHighlightRule
++{
++    uint64_t Id{};
++    std::wstring Pattern;
++    bool RegularExpression{ true };
++    bool MatchCase{ false };
++    bool ShowInOverview{ false };
++    til::color Foreground;
++    til::color Background;
++    int32_t Priority{};
++    til::ICU::unique_uregex Regex;
++};
++
++struct HwndTerminalHighlightSpan
++{
++    uint64_t RuleId{};
++    til::point Start;
++    til::point End;
++    uint64_t BufferGeneration{};
++    int32_t Priority{};
++    til::color Foreground;
++    til::color Background;
++    bool ShowInOverview{};
++};
++
++struct HwndTerminalHighlightRow
++{
++    int32_t Row{};
++    uint32_t Count{};
++    uint32_t Color{};
++};
+ 
+ extern "C" {
+ __declspec(dllexport) void _stdcall AvoidBuggyTSFConsoleFlags();
+@@ -139,7 +173,7 @@ __declspec(dllexport) bool _stdcall TerminalIsSelectionActive(void* terminal);
+ __declspec(dllexport) void _stdcall DestroyTerminal(void* terminal);
+ __declspec(dllexport) void _stdcall TerminalSetTheme(void* terminal, TerminalTheme theme, LPCWSTR fontFamily, til::CoordType fontSize, int newDpi);
+ __declspec(dllexport) void _stdcall TerminalRegisterWriteCallback(void* terminal, const void __stdcall callback(wchar_t*));
+-__declspec(dllexport) bool _stdcall TerminalSendKeyEvent(void* terminal, WORD vkey, WORD scanCode, WORD flags, bool keyDown);
++__declspec(dllexport) bool _stdcall TerminalSendKeyEvent(void* terminal, WORD vkey, WORD scanCode, WORD flags, bool keyDown);
+ __declspec(dllexport) void _stdcall TerminalSendCharEvent(void* terminal, wchar_t ch, WORD flags, WORD scanCode);
+ __declspec(dllexport) void _stdcall TerminalBlinkCursor(void* terminal);
+ __declspec(dllexport) void _stdcall TerminalSetCursorVisible(void* terminal, const bool visible);
+@@ -196,9 +230,12 @@ public:
+     bool DiscardPromptProbe(uint64_t id);
+     uint64_t AddBookmark(int32_t row, std::optional<til::color> color);
+     bool RemoveBookmark(uint64_t id);
+-    void ClearBookmarks();
+-    HwndTerminalSnapshot CaptureSnapshot() const;
+-    HRESULT ResizeCharacters(til::size dimensions);
++    void ClearBookmarks();
++    HwndTerminalSnapshot CaptureSnapshot() const;
++    HRESULT SetHighlightRules(std::span<const ReseshTerminalHighlightRule> rules);
++    void ClearHighlightRules();
++    std::vector<HwndTerminalHighlightRow> GetHighlightRows() const;
++    HRESULT ResizeCharacters(til::size dimensions);
+     uint64_t MarkGeneration() const noexcept;
+     bool CopySelection(bool clearSelection);
+     void PasteText(std::wstring_view text);
+@@ -256,6 +293,12 @@ private:
+     uint64_t _markGeneration{ 1 };
+     std::unordered_map<uint64_t, HwndTerminalApplicationMark> _applicationCommands;
+     ::Microsoft::WRL::ComPtr<HwndTerminalAutomationPeer> _uiaProvider;
++    void _updateHighlights(bool forceRescan = false);
++    std::vector<HwndTerminalHighlightRule> _highlightRules;
++    std::vector<HwndTerminalHighlightSpan> _highlightSpans;
++    std::vector<HwndTerminalHighlightRow> _highlightRows;
++    uint64_t _lastHighlightMutationId{ 0 };
++    uint64_t _highlightScanGeneration{ 0 };
+ 
+     std::unique_ptr<::Microsoft::Terminal::Core::Terminal> _terminal;
+ 
+@@ -283,7 +326,7 @@ private:
+     friend void _stdcall TerminalClearSelection(void* terminal);
+     friend const wchar_t* _stdcall TerminalGetSelection(void* terminal);
+     friend bool _stdcall TerminalIsSelectionActive(void* terminal);
+-    friend bool _stdcall TerminalSendKeyEvent(void* terminal, WORD vkey, WORD scanCode, WORD flags, bool keyDown);
++    friend bool _stdcall TerminalSendKeyEvent(void* terminal, WORD vkey, WORD scanCode, WORD flags, bool keyDown);
+     friend void _stdcall TerminalSendCharEvent(void* terminal, wchar_t ch, WORD scanCode, WORD flags);
+     friend void _stdcall TerminalSetTheme(void* terminal, TerminalTheme theme, LPCWSTR fontFamily, til::CoordType fontSize, int newDpi);
+     friend void _stdcall TerminalBlinkCursor(void* terminal);
+@@ -314,7 +357,7 @@ private:
+     std::wstring _readRows(til::CoordType first, til::CoordType last) const;
+     til::CoordType _logicalLineStart(til::CoordType row) const;
+     til::CoordType _logicalLineEnd(til::CoordType row) const;
+-    bool _SendKeyEvent(WORD vkey, WORD scanCode, WORD flags, bool keyDown) noexcept;
++    bool _SendKeyEvent(WORD vkey, WORD scanCode, WORD flags, bool keyDown) noexcept;
+     void _SendCharEvent(wchar_t ch, WORD scanCode, WORD flags) noexcept;
+ 
+     // Inherited via IControlAccessibilityInfo
+diff --git a/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp b/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
+index eceacf62..5c03c581 100644
+--- a/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
++++ b/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
+@@ -16,12 +16,12 @@
+ namespace
+ {
+     thread_local ReseshTerminalHandle callbackHandle{};
+-    constexpr wchar_t BuildId[]{ L"terminal-v1.24.11911.0-resesh-abi2.1-keyframes" };
++    constexpr wchar_t BuildId[]{ L"terminal-v1.24.11911.0-resesh-abi2.2-highlights" };
+     constexpr size_t MaximumQueuedEventUnits = 16 * 1024 * 1024;
+     constexpr uint32_t MaximumOutputCharacters = 16 * 1024 * 1024;
+     constexpr uint32_t MaximumSearchCharacters = 1024 * 1024;
+-    constexpr uint32_t MaximumClipboardCharacters = 4 * 1024 * 1024;
+-    constexpr uint32_t MaximumSnapshotCharacters = 32 * 1024 * 1024;
++    constexpr uint32_t MaximumClipboardCharacters = 4 * 1024 * 1024;
++    constexpr uint32_t MaximumSnapshotCharacters = 32 * 1024 * 1024;
+     constexpr uint32_t MaximumFontFamilyCharacters = 1024;
+     constexpr uint32_t MaximumWordDelimiterCharacters = 4096;
+     constexpr int32_t MaximumHistorySize = 1'000'000;
+@@ -53,22 +53,22 @@ namespace
+         uint64_t nextSequence{ 1 };
+         ReseshTerminalEventCallback callback{};
+         void* callbackContext{};
+-        uint32_t callbacksInProgress{};
+-        bool destroying{};
+-        std::wstring title;
+-        std::wstring workingDirectory;
+-
+-        void SetTitle(const std::wstring_view value)
+-        {
+-            const std::scoped_lock lock{ eventMutex };
+-            title.assign(value);
+-        }
+-
+-        void SetWorkingDirectory(const std::wstring_view value)
+-        {
+-            const std::scoped_lock lock{ eventMutex };
+-            workingDirectory.assign(value);
+-        }
++        uint32_t callbacksInProgress{};
++        bool destroying{};
++        std::wstring title;
++        std::wstring workingDirectory;
++
++        void SetTitle(const std::wstring_view value)
++        {
++            const std::scoped_lock lock{ eventMutex };
++            title.assign(value);
++        }
++
++        void SetWorkingDirectory(const std::wstring_view value)
++        {
++            const std::scoped_lock lock{ eventMutex };
++            workingDirectory.assign(value);
++        }
+ 
+         void QueueEvent(
+             const uint32_t type,
+@@ -341,9 +341,9 @@ try
+     });
+     state->terminal->RegisterClipboardCallback(
+         [weakState](const std::wstring_view text, const std::string_view html, const std::string_view rtf) {
+-            if (const auto locked = weakState.lock())
+-            {
+-                locked->QueueEvent(
++            if (const auto locked = weakState.lock())
++            {
++                locked->QueueEvent(
+                     ReseshTerminalEventTypeClipboardCopy,
+                     std::wstring{ text },
+                     std::string{ html },
+@@ -356,18 +356,18 @@ try
+             locked->QueueEvent(ReseshTerminalEventTypeClipboardPasteRequest);
+         }
+     });
+-    state->terminal->RegisterTitleChangedCallback([weakState](const std::wstring_view title) {
+-        if (const auto locked = weakState.lock())
+-        {
+-            locked->SetTitle(title);
+-            locked->QueueEvent(ReseshTerminalEventTypeTitleChanged, std::wstring{ title });
++    state->terminal->RegisterTitleChangedCallback([weakState](const std::wstring_view title) {
++        if (const auto locked = weakState.lock())
++        {
++            locked->SetTitle(title);
++            locked->QueueEvent(ReseshTerminalEventTypeTitleChanged, std::wstring{ title });
+         }
+     });
+-    state->terminal->RegisterWorkingDirectoryChangedCallback([weakState](const std::wstring_view uri) {
+-        if (const auto locked = weakState.lock())
+-        {
+-            locked->SetWorkingDirectory(uri);
+-            locked->QueueEvent(ReseshTerminalEventTypeWorkingDirectoryChanged, std::wstring{ uri });
++    state->terminal->RegisterWorkingDirectoryChangedCallback([weakState](const std::wstring_view uri) {
++        if (const auto locked = weakState.lock())
++        {
++            locked->SetWorkingDirectory(uri);
++            locked->QueueEvent(ReseshTerminalEventTypeWorkingDirectoryChanged, std::wstring{ uri });
+         }
+     });
+     state->terminal->RegisterBellCallback([weakState]() {
+@@ -411,16 +411,16 @@ try
+                 gsl::narrow_cast<int64_t>(mode));
+         }
+     });
+-    state->terminal->RegisterOscDispatchCallback([weakState](const size_t code, const std::wstring_view payload) {
+-        if (code <= gsl::narrow_cast<size_t>(INT64_MAX))
+-        {
+-            if (const auto locked = weakState.lock())
+-            {
+-                if (code == 7)
+-                {
+-                    locked->SetWorkingDirectory(payload);
+-                }
+-                locked->QueueEvent(
++    state->terminal->RegisterOscDispatchCallback([weakState](const size_t code, const std::wstring_view payload) {
++        if (code <= gsl::narrow_cast<size_t>(INT64_MAX))
++        {
++            if (const auto locked = weakState.lock())
++            {
++                if (code == 7)
++                {
++                    locked->SetWorkingDirectory(payload);
++                }
++                locked->QueueEvent(
+                     ReseshTerminalEventTypeOscObserved,
+                     std::wstring{ payload },
+                     {},
+@@ -543,19 +543,19 @@ CATCH_RETURN()
+ HRESULT __stdcall ReseshTerminalSendKeyEvent(
+     const ReseshTerminalHandle terminal,
+     const uint16_t virtualKey,
+-    const uint16_t scanCode,
+-    const uint16_t flags,
+-    const uint8_t keyDown,
+-    uint8_t* handled)
+-try
+-{
+-    RETURN_HR_IF(E_POINTER, !handled);
+-    *handled = 0;
+-    return WithTerminal(terminal, [&](TerminalState& state) {
+-        *handled = TerminalSendKeyEvent(state.terminal, virtualKey, scanCode, flags, keyDown != 0) ? 1 : 0;
+-        return S_OK;
+-    });
+-}
++    const uint16_t scanCode,
++    const uint16_t flags,
++    const uint8_t keyDown,
++    uint8_t* handled)
++try
++{
++    RETURN_HR_IF(E_POINTER, !handled);
++    *handled = 0;
++    return WithTerminal(terminal, [&](TerminalState& state) {
++        *handled = TerminalSendKeyEvent(state.terminal, virtualKey, scanCode, flags, keyDown != 0) ? 1 : 0;
++        return S_OK;
++    });
++}
+ CATCH_RETURN()
+ 
+ HRESULT __stdcall ReseshTerminalSendCharEvent(
+@@ -623,22 +623,22 @@ try
+         return S_OK;
+     });
+ }
+-CATCH_RETURN()
+-
+-HRESULT __stdcall ReseshTerminalResizeCharacters(
+-    const ReseshTerminalHandle terminal,
+-    const int32_t columns,
+-    const int32_t rows)
+-try
+-{
+-    RETURN_HR_IF(E_INVALIDARG, columns <= 0 || columns > SHRT_MAX || rows <= 0 || rows > SHRT_MAX);
+-    return WithTerminal(terminal, [&](TerminalState& state) {
+-        return state.terminal->ResizeCharacters({ columns, rows });
+-    });
+-}
+-CATCH_RETURN()
+-
+-HRESULT __stdcall ReseshTerminalAttachSwapChainPanel(
++CATCH_RETURN()
++
++HRESULT __stdcall ReseshTerminalResizeCharacters(
++    const ReseshTerminalHandle terminal,
++    const int32_t columns,
++    const int32_t rows)
++try
++{
++    RETURN_HR_IF(E_INVALIDARG, columns <= 0 || columns > SHRT_MAX || rows <= 0 || rows > SHRT_MAX);
++    return WithTerminal(terminal, [&](TerminalState& state) {
++        return state.terminal->ResizeCharacters({ columns, rows });
++    });
++}
++CATCH_RETURN()
++
++HRESULT __stdcall ReseshTerminalAttachSwapChainPanel(
+     const ReseshTerminalHandle terminal,
+     IUnknown* const panel)
+ try
+@@ -1062,82 +1062,139 @@ try
+ }
+ CATCH_RETURN()
+ 
+-HRESULT __stdcall ReseshTerminalClearBookmarks(const ReseshTerminalHandle terminal)
+-try
++HRESULT __stdcall ReseshTerminalClearBookmarks(const ReseshTerminalHandle terminal)
++try
+ {
+     return WithTerminal(terminal, [&](TerminalState& state) {
+         state.terminal->ClearBookmarks();
+         return S_OK;
+     });
+-}
+-CATCH_RETURN()
+-
+-HRESULT __stdcall ReseshTerminalCaptureSnapshot(
+-    const ReseshTerminalHandle terminal,
+-    ReseshTerminalSnapshot* const snapshot,
+-    wchar_t* const payload,
+-    const uint32_t capacity,
+-    uint32_t* const requiredCapacity)
+-try
+-{
+-    RETURN_HR_IF_NULL(E_INVALIDARG, snapshot);
+-    RETURN_HR_IF_NULL(E_INVALIDARG, requiredCapacity);
+-    RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH),
+-                 !IsCompatible(snapshot->structSize, snapshot->abiMajor, sizeof(ReseshTerminalSnapshot)));
+-
+-    return WithTerminal(terminal, [&](TerminalState& state) {
+-        auto terminalSnapshot = state.terminal->CaptureSnapshot();
+-        std::wstring title;
+-        std::wstring workingDirectory;
+-        uint64_t captureSequence;
+-        {
+-            const std::scoped_lock lock{ state.eventMutex };
+-            title = state.title;
+-            workingDirectory = state.workingDirectory;
+-            captureSequence = state.nextSequence - 1;
+-        }
+-
+-        const auto required64 = terminalSnapshot.Ansi.size() + title.size() + workingDirectory.size();
+-        RETURN_HR_IF(E_OUTOFMEMORY, required64 > MaximumSnapshotCharacters);
+-        const auto required = gsl::narrow<uint32_t>(required64);
+-        *requiredCapacity = required;
+-
+-        const auto ansiLength = gsl::narrow<uint32_t>(terminalSnapshot.Ansi.size());
+-        const auto titleLength = gsl::narrow<uint32_t>(title.size());
+-        const auto workingDirectoryLength = gsl::narrow<uint32_t>(workingDirectory.size());
+-        const auto unixTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+-                                  std::chrono::system_clock::now().time_since_epoch())
+-                                  .count();
+-        *snapshot = {
+-            sizeof(ReseshTerminalSnapshot),
+-            RESESH_TERMINAL_ABI_MAJOR,
+-            RESESH_TERMINAL_ABI_MINOR,
+-            1,
+-            (terminalSnapshot.CursorVisible ? ReseshTerminalSnapshotCursorVisible : 0u) |
+-                (terminalSnapshot.AlternateBuffer ? ReseshTerminalSnapshotAlternateBuffer : 0u),
+-            terminalSnapshot.Size.width,
+-            terminalSnapshot.ViewportHeight,
+-            terminalSnapshot.Cursor.x,
+-            terminalSnapshot.Cursor.y,
+-            terminalSnapshot.ViewportTop,
+-            terminalSnapshot.ViewportHeight,
+-            terminalSnapshot.ScrollOffset,
+-            captureSequence,
+-            unixTime,
+-            0,
+-            ansiLength,
+-            ansiLength,
+-            titleLength,
+-            ansiLength + titleLength,
+-            workingDirectoryLength,
+-        };
+-
+-        RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER), capacity < required || (required > 0 && !payload));
+-        auto output = payload;
+-        output = std::copy(terminalSnapshot.Ansi.begin(), terminalSnapshot.Ansi.end(), output);
+-        output = std::copy(title.begin(), title.end(), output);
+-        std::copy(workingDirectory.begin(), workingDirectory.end(), output);
+-        return S_OK;
+-    });
+-}
+-CATCH_RETURN()
++}
++CATCH_RETURN()
++
++HRESULT __stdcall ReseshTerminalCaptureSnapshot(
++    const ReseshTerminalHandle terminal,
++    ReseshTerminalSnapshot* const snapshot,
++    wchar_t* const payload,
++    const uint32_t capacity,
++    uint32_t* const requiredCapacity)
++try
++{
++    RETURN_HR_IF_NULL(E_INVALIDARG, snapshot);
++    RETURN_HR_IF_NULL(E_INVALIDARG, requiredCapacity);
++    RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH),
++                 !IsCompatible(snapshot->structSize, snapshot->abiMajor, sizeof(ReseshTerminalSnapshot)));
++
++    return WithTerminal(terminal, [&](TerminalState& state) {
++        auto terminalSnapshot = state.terminal->CaptureSnapshot();
++        std::wstring title;
++        std::wstring workingDirectory;
++        uint64_t captureSequence;
++        {
++            const std::scoped_lock lock{ state.eventMutex };
++            title = state.title;
++            workingDirectory = state.workingDirectory;
++            captureSequence = state.nextSequence - 1;
++        }
++
++        const auto required64 = terminalSnapshot.Ansi.size() + title.size() + workingDirectory.size();
++        RETURN_HR_IF(E_OUTOFMEMORY, required64 > MaximumSnapshotCharacters);
++        const auto required = gsl::narrow<uint32_t>(required64);
++        *requiredCapacity = required;
++
++        const auto ansiLength = gsl::narrow<uint32_t>(terminalSnapshot.Ansi.size());
++        const auto titleLength = gsl::narrow<uint32_t>(title.size());
++        const auto workingDirectoryLength = gsl::narrow<uint32_t>(workingDirectory.size());
++        const auto unixTime = std::chrono::duration_cast<std::chrono::milliseconds>(
++                                  std::chrono::system_clock::now().time_since_epoch())
++                                  .count();
++        *snapshot = {
++            sizeof(ReseshTerminalSnapshot),
++            RESESH_TERMINAL_ABI_MAJOR,
++            RESESH_TERMINAL_ABI_MINOR,
++            1,
++            (terminalSnapshot.CursorVisible ? ReseshTerminalSnapshotCursorVisible : 0u) |
++                (terminalSnapshot.AlternateBuffer ? ReseshTerminalSnapshotAlternateBuffer : 0u),
++            terminalSnapshot.Size.width,
++            terminalSnapshot.ViewportHeight,
++            terminalSnapshot.Cursor.x,
++            terminalSnapshot.Cursor.y,
++            terminalSnapshot.ViewportTop,
++            terminalSnapshot.ViewportHeight,
++            terminalSnapshot.ScrollOffset,
++            captureSequence,
++            unixTime,
++            0,
++            ansiLength,
++            ansiLength,
++            titleLength,
++            ansiLength + titleLength,
++            workingDirectoryLength,
++        };
++
++        RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER), capacity < required || (required > 0 && !payload));
++        auto output = payload;
++        output = std::copy(terminalSnapshot.Ansi.begin(), terminalSnapshot.Ansi.end(), output);
++        output = std::copy(title.begin(), title.end(), output);
++        std::copy(workingDirectory.begin(), workingDirectory.end(), output);
++        return S_OK;
++    });
++}
++CATCH_RETURN()
++
++HRESULT __stdcall ReseshTerminalSetHighlightRules(
++    const ReseshTerminalHandle terminal,
++    const ReseshTerminalHighlightRule* const rules,
++    const uint32_t count)
++try
++{
++    RETURN_HR_IF(E_INVALIDARG, count > 1024 || (count > 0 && !rules));
++    for (uint32_t i = 0; i < count; ++i)
++    {
++        RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH),
++                     !IsCompatible(rules[i].structSize, rules[i].abiMajor, sizeof(ReseshTerminalHighlightRule)));
++    }
++    return WithTerminal(terminal, [&](TerminalState& state) {
++        return state.terminal->SetHighlightRules(std::span<const ReseshTerminalHighlightRule>{ rules, count });
++    });
++}
++CATCH_RETURN()
++
++HRESULT __stdcall ReseshTerminalClearHighlightRules(const ReseshTerminalHandle terminal)
++try
++{
++    return WithTerminal(terminal, [&](TerminalState& state) {
++        state.terminal->ClearHighlightRules();
++        return S_OK;
++    });
++}
++CATCH_RETURN()
++
++HRESULT __stdcall ReseshTerminalGetHighlightRows(
++    const ReseshTerminalHandle terminal,
++    ReseshTerminalHighlightRow* const rows,
++    const uint32_t capacity,
++    uint32_t* const requiredCapacity)
++try
++{
++    RETURN_HR_IF_NULL(E_INVALIDARG, requiredCapacity);
++    return WithTerminal(terminal, [&](TerminalState& state) {
++        const auto highlightRows = state.terminal->GetHighlightRows();
++        const auto required = gsl::narrow<uint32_t>(highlightRows.size());
++        *requiredCapacity = required;
++        RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER), capacity < required || (required > 0 && !rows));
++        for (uint32_t i = 0; i < required; ++i)
++        {
++            rows[i] = {
++                .structSize = sizeof(ReseshTerminalHighlightRow),
++                .abiMajor = RESESH_TERMINAL_ABI_MAJOR,
++                .abiMinor = RESESH_TERMINAL_ABI_MINOR,
++                .row = highlightRows[i].Row,
++                .count = highlightRows[i].Count,
++                .color = highlightRows[i].Color,
++            };
++        }
++        return S_OK;
++    });
++}
++CATCH_RETURN()
+diff --git a/src/cascadia/TerminalControl/ReseshTerminalAbi.h b/src/cascadia/TerminalControl/ReseshTerminalAbi.h
+index 07f89b65..07e40c4b 100644
+--- a/src/cascadia/TerminalControl/ReseshTerminalAbi.h
++++ b/src/cascadia/TerminalControl/ReseshTerminalAbi.h
+@@ -7,7 +7,7 @@
+ #include <windows.h>
+ 
+ #define RESESH_TERMINAL_ABI_MAJOR 2u
+-#define RESESH_TERMINAL_ABI_MINOR 1u
++#define RESESH_TERMINAL_ABI_MINOR 2u
+ #define RESESH_TERMINAL_ABI_VERSION ((RESESH_TERMINAL_ABI_MAJOR << 16u) | RESESH_TERMINAL_ABI_MINOR)
+ 
+ #ifdef __cplusplus
+@@ -61,6 +61,13 @@ typedef enum ReseshTerminalSearchFlags
+     ReseshTerminalSearchScrollIntoView = 0x00000010u,
+ } ReseshTerminalSearchFlags;
+ 
++typedef enum ReseshTerminalHighlightFlags
++{
++    ReseshTerminalHighlightRegex = 0x00000001u,
++    ReseshTerminalHighlightMatchCase = 0x00000002u,
++    ReseshTerminalHighlightShowInOverview = 0x00000004u,
++} ReseshTerminalHighlightFlags;
++
+ typedef enum ReseshTerminalSearchStateFlags
+ {
+     ReseshTerminalSearchStateInvalidated = 0x00000001u,
+@@ -106,17 +113,17 @@ typedef enum ReseshTerminalCopyFormatFlags
+     ReseshTerminalCopyFormatRtf = 0x00000002u,
+ } ReseshTerminalCopyFormatFlags;
+ 
+-typedef enum ReseshTerminalPasteFilterFlags
+-{
++typedef enum ReseshTerminalPasteFilterFlags
++{
+     ReseshTerminalPasteFilterCarriageReturnNewline = 0x00000001u,
+     ReseshTerminalPasteFilterControlCodes = 0x00000002u,
+-} ReseshTerminalPasteFilterFlags;
+-
+-typedef enum ReseshTerminalSnapshotFlags
+-{
+-    ReseshTerminalSnapshotCursorVisible = 0x00000001u,
+-    ReseshTerminalSnapshotAlternateBuffer = 0x00000002u,
+-} ReseshTerminalSnapshotFlags;
++} ReseshTerminalPasteFilterFlags;
++
++typedef enum ReseshTerminalSnapshotFlags
++{
++    ReseshTerminalSnapshotCursorVisible = 0x00000001u,
++    ReseshTerminalSnapshotAlternateBuffer = 0x00000002u,
++} ReseshTerminalSnapshotFlags;
+ 
+ typedef struct ReseshTerminalCreateOptions
+ {
+@@ -228,8 +235,8 @@ typedef struct ReseshTerminalMarkRecord
+     int32_t outputEndY;
+ } ReseshTerminalMarkRecord;
+ 
+-typedef struct ReseshTerminalCursorLogicalLine
+-{
++typedef struct ReseshTerminalCursorLogicalLine
++{
+     uint32_t structSize;
+     uint16_t abiMajor;
+     uint16_t abiMinor;
+@@ -238,31 +245,55 @@ typedef struct ReseshTerminalCursorLogicalLine
+     int32_t startRow;
+     int32_t cursorRow;
+     int32_t cursorColumn;
+-} ReseshTerminalCursorLogicalLine;
+-
+-typedef struct ReseshTerminalSnapshot
+-{
+-    uint32_t structSize;
+-    uint16_t abiMajor;
+-    uint16_t abiMinor;
+-    uint32_t schemaVersion;
+-    uint32_t flags;
+-    int32_t columns;
+-    int32_t rows;
+-    int32_t cursorColumn;
+-    int32_t cursorRow;
+-    int32_t viewportTop;
+-    int32_t viewportHeight;
+-    int32_t scrollOffset;
+-    uint64_t captureSequence;
+-    int64_t unixTimeMilliseconds;
+-    uint32_t ansiOffset;
+-    uint32_t ansiLength;
+-    uint32_t titleOffset;
+-    uint32_t titleLength;
+-    uint32_t workingDirectoryOffset;
+-    uint32_t workingDirectoryLength;
+-} ReseshTerminalSnapshot;
++} ReseshTerminalCursorLogicalLine;
++
++typedef struct ReseshTerminalSnapshot
++{
++    uint32_t structSize;
++    uint16_t abiMajor;
++    uint16_t abiMinor;
++    uint32_t schemaVersion;
++    uint32_t flags;
++    int32_t columns;
++    int32_t rows;
++    int32_t cursorColumn;
++    int32_t cursorRow;
++    int32_t viewportTop;
++    int32_t viewportHeight;
++    int32_t scrollOffset;
++    uint64_t captureSequence;
++    int64_t unixTimeMilliseconds;
++    uint32_t ansiOffset;
++    uint32_t ansiLength;
++    uint32_t titleOffset;
++    uint32_t titleLength;
++    uint32_t workingDirectoryOffset;
++    uint32_t workingDirectoryLength;
++} ReseshTerminalSnapshot;
++
++typedef struct ReseshTerminalHighlightRule
++{
++    uint32_t structSize;
++    uint16_t abiMajor;
++    uint16_t abiMinor;
++    uint64_t id;
++    const wchar_t* pattern;
++    uint32_t patternLength;
++    uint32_t flags;
++    uint32_t foreground;
++    uint32_t background;
++    int32_t priority;
++} ReseshTerminalHighlightRule;
++
++typedef struct ReseshTerminalHighlightRow
++{
++    uint32_t structSize;
++    uint16_t abiMajor;
++    uint16_t abiMinor;
++    int32_t row;
++    uint32_t count;
++    uint32_t color;
++} ReseshTerminalHighlightRow;
+ 
+ typedef void(__stdcall* ReseshTerminalEventCallback)(
+     void* context,
+@@ -288,10 +319,10 @@ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSendOutput(
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSendKeyEvent(
+     ReseshTerminalHandle terminal,
+     uint16_t virtualKey,
+-    uint16_t scanCode,
+-    uint16_t flags,
+-    uint8_t keyDown,
+-    uint8_t* handled);
++    uint16_t scanCode,
++    uint16_t flags,
++    uint8_t keyDown,
++    uint8_t* handled);
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSendCharEvent(
+     ReseshTerminalHandle terminal,
+     wchar_t character,
+@@ -300,18 +331,18 @@ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSendCharEvent(
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSetFocused(
+     ReseshTerminalHandle terminal,
+     uint8_t focused);
+-__declspec(dllexport) HRESULT __stdcall ReseshTerminalSetBounds(
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalSetBounds(
+     ReseshTerminalHandle terminal,
+     int32_t screenX,
+     int32_t screenY,
+     int32_t width,
+     int32_t height,
+     int32_t* columns,
+-    int32_t* rows);
+-__declspec(dllexport) HRESULT __stdcall ReseshTerminalResizeCharacters(
+-    ReseshTerminalHandle terminal,
+-    int32_t columns,
+-    int32_t rows);
++    int32_t* rows);
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalResizeCharacters(
++    ReseshTerminalHandle terminal,
++    int32_t columns,
++    int32_t rows);
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalAttachSwapChainPanel(
+     ReseshTerminalHandle terminal,
+     IUnknown* panel);
+@@ -393,13 +424,23 @@ __declspec(dllexport) HRESULT __stdcall ReseshTerminalAddBookmark(
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalRemoveBookmark(
+     ReseshTerminalHandle terminal,
+     uint64_t bookmarkId);
+-__declspec(dllexport) HRESULT __stdcall ReseshTerminalClearBookmarks(ReseshTerminalHandle terminal);
+-__declspec(dllexport) HRESULT __stdcall ReseshTerminalCaptureSnapshot(
+-    ReseshTerminalHandle terminal,
+-    ReseshTerminalSnapshot* snapshot,
+-    wchar_t* payload,
+-    uint32_t capacity,
+-    uint32_t* requiredCapacity);
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalClearBookmarks(ReseshTerminalHandle terminal);
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalCaptureSnapshot(
++    ReseshTerminalHandle terminal,
++    ReseshTerminalSnapshot* snapshot,
++    wchar_t* payload,
++    uint32_t capacity,
++    uint32_t* requiredCapacity);
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalSetHighlightRules(
++    ReseshTerminalHandle terminal,
++    const ReseshTerminalHighlightRule* rules,
++    uint32_t count);
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalClearHighlightRules(ReseshTerminalHandle terminal);
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalGetHighlightRows(
++    ReseshTerminalHandle terminal,
++    ReseshTerminalHighlightRow* rows,
++    uint32_t capacity,
++    uint32_t* requiredCapacity);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def b/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
+index 6ab6f8e9..37cc0b45 100644
+--- a/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
++++ b/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
+@@ -26,8 +26,8 @@ EXPORTS
+   TerminalUserScroll
+   ReseshTerminalClearSelection
+   ReseshTerminalClearSearch
+-  ReseshTerminalClearBookmarks
+-  ReseshTerminalCaptureSnapshot
++  ReseshTerminalClearBookmarks
++  ReseshTerminalCaptureSnapshot
+   ReseshTerminalCopySelection
+   ReseshTerminalCreate
+   ReseshTerminalCreateApplicationMark
+@@ -49,11 +49,14 @@ EXPORTS
+   ReseshTerminalScrollToMark
+   ReseshTerminalAttachSwapChainPanel
+   ReseshTerminalSendPointerEvent
+-  ReseshTerminalSetBounds
+-  ReseshTerminalResizeCharacters
++  ReseshTerminalSetBounds
++  ReseshTerminalResizeCharacters
+   ReseshTerminalSendCharEvent
+   ReseshTerminalSendKeyEvent
+   ReseshTerminalSendOutput
+   ReseshTerminalSetFocused
+   ReseshTerminalSetOptions
+   ReseshTerminalUserScroll
++  ReseshTerminalSetHighlightRules
++  ReseshTerminalClearHighlightRules
++  ReseshTerminalGetHighlightRows
+diff --git a/src/cascadia/TerminalCore/Terminal.cpp b/src/cascadia/TerminalCore/Terminal.cpp
+index b6853a96..93ea54c9 100644
+--- a/src/cascadia/TerminalCore/Terminal.cpp
++++ b/src/cascadia/TerminalCore/Terminal.cpp
+@@ -1320,6 +1320,12 @@ void Terminal::SetSearchHighlights(const std::vector<til::point_span>& highlight
+     _searchHighlights = highlights;
+ }
+ 
++void Terminal::SetPersistentHighlights(std::vector<Microsoft::Console::Render::RenderDecoration> highlights) noexcept
++{
++    _assertLocked();
++    _persistentHighlights = std::move(highlights);
++}
++
+ // Method Description:
+ // - Stores the focused search highlighted region in the terminal
+ // - If the region isn't empty, it will be brought into view
+@@ -1403,16 +1409,16 @@ void Terminal::ApplyScheme(const Scheme& colorScheme)
+     _NotifyScrollEvent();
+ }
+ 
+-bool Terminal::_inAltBuffer() const noexcept
+-{
++bool Terminal::_inAltBuffer() const noexcept
++{
+     _assertLocked();
+     return _altBuffer != nullptr;
+-}
+-
+-bool Terminal::IsAlternateBufferActive() const noexcept
+-{
+-    return _inAltBuffer();
+-}
++}
++
++bool Terminal::IsAlternateBufferActive() const noexcept
++{
++    return _inAltBuffer();
++}
+ 
+ TextBuffer& Terminal::_activeBuffer() const noexcept
+ {
+diff --git a/src/cascadia/TerminalCore/Terminal.hpp b/src/cascadia/TerminalCore/Terminal.hpp
+index 602be0bf..4c3c57f0 100644
+--- a/src/cascadia/TerminalCore/Terminal.hpp
++++ b/src/cascadia/TerminalCore/Terminal.hpp
+@@ -98,8 +98,8 @@ public:
+     void SetCursorStyle(const ::Microsoft::Console::VirtualTerminal::DispatchTypes::CursorStyle cursorStyle);
+     void SetOptionalFeatures(winrt::Microsoft::Terminal::Core::ICoreSettings settings);
+     bool IsXtermBracketedPasteModeEnabled() const noexcept;
+-    std::wstring_view GetWorkingDirectory() noexcept;
+-    bool IsAlternateBufferActive() const noexcept;
++    std::wstring_view GetWorkingDirectory() noexcept;
++    bool IsAlternateBufferActive() const noexcept;
+ 
+     til::point GetViewportRelativeCursorPosition() const noexcept;
+ 
+@@ -217,6 +217,7 @@ public:
+     std::span<const til::point_span> GetSelectionSpans() const noexcept override;
+     std::span<const til::point_span> GetSearchHighlights() const noexcept override;
+     const til::point_span* GetSearchHighlightFocused() const noexcept override;
++    std::span<const Microsoft::Console::Render::RenderDecoration> GetPersistentHighlights() const noexcept override;
+     const bool IsSelectionActive() const noexcept override;
+     const bool IsBlockSelection() const noexcept override;
+     void ClearSelection() override;
+@@ -247,6 +248,7 @@ public:
+     void SetSearchHighlights(const std::vector<til::point_span>& highlights) noexcept;
+     void SetSearchHighlightFocused(size_t focusedIdx) noexcept;
+     void ScrollToSearchHighlight(til::CoordType searchScrollOffset);
++    void SetPersistentHighlights(std::vector<Microsoft::Console::Render::RenderDecoration> highlights) noexcept;
+ 
+     void BlinkCursor() noexcept;
+     void SetCursorOn(const bool isOn) noexcept;
+@@ -373,6 +375,7 @@ private:
+ 
+     std::vector<til::point_span> _searchHighlights;
+     size_t _searchHighlightFocused = 0;
++    std::vector<Microsoft::Console::Render::RenderDecoration> _persistentHighlights;
+ 
+     mutable std::vector<til::point_span> _lastSelectionSpans;
+     mutable til::generation_t _lastSelectionGeneration{};
+diff --git a/src/cascadia/TerminalCore/terminalrenderdata.cpp b/src/cascadia/TerminalCore/terminalrenderdata.cpp
+index 4dcb0ca6..8bf95917 100644
+--- a/src/cascadia/TerminalCore/terminalrenderdata.cpp
++++ b/src/cascadia/TerminalCore/terminalrenderdata.cpp
+@@ -164,6 +164,12 @@ const til::point_span* Terminal::GetSearchHighlightFocused() const noexcept
+     return nullptr;
+ }
+ 
++std::span<const Microsoft::Console::Render::RenderDecoration> Terminal::GetPersistentHighlights() const noexcept
++{
++    _assertLocked();
++    return _persistentHighlights;
++}
++
+ // Method Description:
+ // - If necessary, scrolls the viewport such that the start point is in the
+ //   viewport, and if that's already the case, also brings the end point inside
+diff --git a/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp b/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp
+index 4750af20..a9bd4db9 100644
+--- a/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp
++++ b/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp
+@@ -205,9 +205,10 @@ namespace ControlUnitTests
+         TEST_METHOD(HonorsOscClipboardPolicy);
+         TEST_METHOD(FiltersNormalAndBracketedPaste);
+         TEST_METHOD(EmitsTypedEventsAndObservesOscWithoutConsuming);
+-        TEST_METHOD(SearchesAndRaisesLinks);
+-        TEST_METHOD(DiscoversCommandsAndManagesRulerMarks);
+-        TEST_METHOD(CapturesAnsiSnapshots);
++        TEST_METHOD(SearchesAndRaisesLinks);
++        TEST_METHOD(DiscoversCommandsAndManagesRulerMarks);
++        TEST_METHOD(CapturesAnsiSnapshots);
++        TEST_METHOD(AppliesPersistentHighlightRulesAndPrecedence);
+     };
+ 
+     void ReseshTerminalAbiTests::ReportsVersionBuildIdAndRequiredExports()
+@@ -225,8 +226,8 @@ namespace ControlUnitTests
+             "ReseshTerminalSendKeyEvent",
+             "ReseshTerminalSendCharEvent",
+             "ReseshTerminalSetFocused",
+-            "ReseshTerminalSetBounds",
+-            "ReseshTerminalResizeCharacters",
++            "ReseshTerminalSetBounds",
++            "ReseshTerminalResizeCharacters",
+             "ReseshTerminalAttachSwapChainPanel",
+             "ReseshTerminalSendPointerEvent",
+             "ReseshTerminalSetOptions",
+@@ -247,8 +248,10 @@ namespace ControlUnitTests
+             "ReseshTerminalDiscardPromptProbe",
+             "ReseshTerminalAddBookmark",
+             "ReseshTerminalRemoveBookmark",
+-            "ReseshTerminalClearBookmarks",
+-            "ReseshTerminalCaptureSnapshot",
++            "ReseshTerminalCaptureSnapshot",
++            "ReseshTerminalSetHighlightRules",
++            "ReseshTerminalClearHighlightRules",
++            "ReseshTerminalGetHighlightRows",
+         };
+         for (const auto name : requiredExports)
+         {
+@@ -271,7 +274,7 @@ namespace ControlUnitTests
+         uint32_t written{};
+         VERIFY_SUCCEEDED(getBuildId(buildId.data(), required, &written));
+         VERIFY_ARE_EQUAL(required, written);
+-        VERIFY_IS_TRUE(buildId.starts_with(L"terminal-v1.24.11911.0-resesh-abi2.1-keyframes"));
++        VERIFY_IS_TRUE(buildId.starts_with(L"terminal-v1.24.11911.0-resesh-abi2.2-highlights"));
+     }
+ 
+     void ReseshTerminalAbiTests::RejectsInvalidCreationStructures()
+@@ -777,7 +780,7 @@ namespace ControlUnitTests
+         VERIFY_ARE_EQUAL(std::wstring{ L"https://example.test/detected" }, detectedLink->text);
+     }
+ 
+-    void ReseshTerminalAbiTests::DiscoversCommandsAndManagesRulerMarks()
++    void ReseshTerminalAbiTests::DiscoversCommandsAndManagesRulerMarks()
+     {
+         const auto module = LoadAbiModule();
+         const auto closeModule = wil::scope_exit([&]() noexcept { FreeLibrary(module); });
+@@ -884,57 +887,245 @@ namespace ControlUnitTests
+         VERIFY_ARE_EQUAL(
+             HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
+             getMarks(terminal, nullptr, 0, &requiredMarks));
+-        VERIFY_ARE_EQUAL(1u, requiredMarks);
+-    }
+-
+-    void ReseshTerminalAbiTests::CapturesAnsiSnapshots()
+-    {
+-        const auto module = LoadAbiModule();
+-        const auto closeModule = wil::scope_exit([&]() noexcept { FreeLibrary(module); });
+-        const auto create = LoadExport<decltype(&ReseshTerminalCreate)>(module, "ReseshTerminalCreate");
+-        const auto destroy = LoadExport<decltype(&ReseshTerminalDestroy)>(module, "ReseshTerminalDestroy");
+-        const auto sendOutput = LoadExport<decltype(&ReseshTerminalSendOutput)>(module, "ReseshTerminalSendOutput");
+-        const auto resizeCharacters = LoadExport<decltype(&ReseshTerminalResizeCharacters)>(
+-            module, "ReseshTerminalResizeCharacters");
+-        const auto captureSnapshot = LoadExport<decltype(&ReseshTerminalCaptureSnapshot)>(
+-            module, "ReseshTerminalCaptureSnapshot");
+-        const auto parent = CreateParentWindow();
+-        const auto closeParent = wil::scope_exit([&]() noexcept { DestroyWindow(parent); });
+-        const auto options = DefaultOptions(parent);
+-        ReseshTerminalHandle terminal{};
+-        VERIFY_SUCCEEDED(create(&options, &terminal));
+-        const auto closeTerminal = wil::scope_exit([&]() noexcept { VERIFY_SUCCEEDED(destroy(terminal)); });
+-
+-        VERIFY_SUCCEEDED(resizeCharacters(terminal, 90, 25));
+-        constexpr wchar_t output[]{ L"\x1b]0;snapshot title\x07\x1b]7;file://host/work\x07\x1b[31mwide \x754c\x1b[0m" };
+-        VERIFY_SUCCEEDED(sendOutput(terminal, output, gsl::narrow<uint32_t>(std::size(output) - 1)));
+-
+-        ReseshTerminalSnapshot snapshot{
+-            .structSize = sizeof(ReseshTerminalSnapshot),
+-            .abiMajor = RESESH_TERMINAL_ABI_MAJOR,
+-            .abiMinor = RESESH_TERMINAL_ABI_MINOR,
+-        };
+-        uint32_t required{};
+-        VERIFY_ARE_EQUAL(
+-            HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
+-            captureSnapshot(terminal, &snapshot, nullptr, 0, &required));
+-        VERIFY_IS_GREATER_THAN(required, 0u);
+-        VERIFY_ARE_EQUAL(1u, snapshot.schemaVersion);
+-        VERIFY_ARE_EQUAL(90, snapshot.columns);
+-        VERIFY_ARE_EQUAL(25, snapshot.rows);
+-        VERIFY_IS_TRUE(snapshot.captureSequence > 0);
+-        VERIFY_IS_TRUE(snapshot.unixTimeMilliseconds > 0);
+-
+-        std::wstring payload(required, L'\0');
+-        VERIFY_SUCCEEDED(captureSnapshot(terminal, &snapshot, payload.data(), required, &required));
+-        const std::wstring_view ansi{ payload.data() + snapshot.ansiOffset, snapshot.ansiLength };
+-        const std::wstring_view title{ payload.data() + snapshot.titleOffset, snapshot.titleLength };
+-        const std::wstring_view workingDirectory{
+-            payload.data() + snapshot.workingDirectoryOffset,
+-            snapshot.workingDirectoryLength
+-        };
+-        VERIFY_IS_TRUE(ansi.find(L"wide \x754c") != std::wstring_view::npos);
+-        VERIFY_ARE_EQUAL(std::wstring_view{ L"snapshot title" }, title);
+-        VERIFY_ARE_EQUAL(std::wstring_view{ L"file://host/work" }, workingDirectory);
+-    }
+-}
++        VERIFY_ARE_EQUAL(1u, requiredMarks);
++    }
++
++    void ReseshTerminalAbiTests::CapturesAnsiSnapshots()
++    {
++        const auto module = LoadAbiModule();
++        const auto closeModule = wil::scope_exit([&]() noexcept { FreeLibrary(module); });
++        const auto create = LoadExport<decltype(&ReseshTerminalCreate)>(module, "ReseshTerminalCreate");
++        const auto destroy = LoadExport<decltype(&ReseshTerminalDestroy)>(module, "ReseshTerminalDestroy");
++        const auto sendOutput = LoadExport<decltype(&ReseshTerminalSendOutput)>(module, "ReseshTerminalSendOutput");
++        const auto resizeCharacters = LoadExport<decltype(&ReseshTerminalResizeCharacters)>(
++            module, "ReseshTerminalResizeCharacters");
++        const auto captureSnapshot = LoadExport<decltype(&ReseshTerminalCaptureSnapshot)>(
++            module, "ReseshTerminalCaptureSnapshot");
++        const auto parent = CreateParentWindow();
++        const auto closeParent = wil::scope_exit([&]() noexcept { DestroyWindow(parent); });
++        const auto options = DefaultOptions(parent);
++        ReseshTerminalHandle terminal{};
++        VERIFY_SUCCEEDED(create(&options, &terminal));
++        const auto closeTerminal = wil::scope_exit([&]() noexcept { VERIFY_SUCCEEDED(destroy(terminal)); });
++
++        VERIFY_SUCCEEDED(resizeCharacters(terminal, 90, 25));
++        constexpr wchar_t output[]{ L"\x1b]0;snapshot title\x07\x1b]7;file://host/work\x07\x1b[31mwide \x754c\x1b[0m" };
++        VERIFY_SUCCEEDED(sendOutput(terminal, output, gsl::narrow<uint32_t>(std::size(output) - 1)));
++
++        ReseshTerminalSnapshot snapshot{
++            .structSize = sizeof(ReseshTerminalSnapshot),
++            .abiMajor = RESESH_TERMINAL_ABI_MAJOR,
++            .abiMinor = RESESH_TERMINAL_ABI_MINOR,
++        };
++        uint32_t required{};
++        VERIFY_ARE_EQUAL(
++            HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
++            captureSnapshot(terminal, &snapshot, nullptr, 0, &required));
++        VERIFY_IS_GREATER_THAN(required, 0u);
++        VERIFY_ARE_EQUAL(1u, snapshot.schemaVersion);
++        VERIFY_ARE_EQUAL(90, snapshot.columns);
++        VERIFY_ARE_EQUAL(25, snapshot.rows);
++        VERIFY_IS_TRUE(snapshot.captureSequence > 0);
++        VERIFY_IS_TRUE(snapshot.unixTimeMilliseconds > 0);
++
++        std::wstring payload(required, L'\0');
++        VERIFY_SUCCEEDED(captureSnapshot(terminal, &snapshot, payload.data(), required, &required));
++        const std::wstring_view ansi{ payload.data() + snapshot.ansiOffset, snapshot.ansiLength };
++        const std::wstring_view title{ payload.data() + snapshot.titleOffset, snapshot.titleLength };
++        const std::wstring_view workingDirectory{
++            payload.data() + snapshot.workingDirectoryOffset,
++            snapshot.workingDirectoryLength
++        };
++        VERIFY_IS_TRUE(ansi.find(L"wide \x754c") != std::wstring_view::npos);
++        VERIFY_ARE_EQUAL(std::wstring_view{ L"snapshot title" }, title);
++        VERIFY_ARE_EQUAL(std::wstring_view{ L"file://host/work" }, workingDirectory);
++    }
++
++    void ReseshTerminalAbiTests::AppliesPersistentHighlightRulesAndPrecedence()
++    {
++        const auto module = LoadAbiModule();
++        const auto closeModule = wil::scope_exit([&]() noexcept { FreeLibrary(module); });
++        const auto create = LoadExport<decltype(&ReseshTerminalCreate)>(module, "ReseshTerminalCreate");
++        const auto destroy = LoadExport<decltype(&ReseshTerminalDestroy)>(module, "ReseshTerminalDestroy");
++        const auto sendOutput = LoadExport<decltype(&ReseshTerminalSendOutput)>(module, "ReseshTerminalSendOutput");
++        const auto setRules = LoadExport<decltype(&ReseshTerminalSetHighlightRules)>(
++            module, "ReseshTerminalSetHighlightRules");
++        const auto resizeCharacters = LoadExport<decltype(&ReseshTerminalResizeCharacters)>(
++            module, "ReseshTerminalResizeCharacters");
++        const auto clearRules = LoadExport<decltype(&ReseshTerminalClearHighlightRules)>(
++            module, "ReseshTerminalClearHighlightRules");
++        const auto getHighlightRows = LoadExport<decltype(&ReseshTerminalGetHighlightRows)>(
++            module, "ReseshTerminalGetHighlightRows");
++        const auto parent = CreateParentWindow();
++        const auto closeParent = wil::scope_exit([&]() noexcept { DestroyWindow(parent); });
++        const auto options = DefaultOptions(parent);
++        ReseshTerminalHandle terminal{};
++        VERIFY_SUCCEEDED(create(&options, &terminal));
++        const auto closeTerminal = wil::scope_exit([&]() noexcept { VERIFY_SUCCEEDED(destroy(terminal)); });
++
++        VERIFY_SUCCEEDED(resizeCharacters(terminal, 80, 10));
++        constexpr wchar_t sampleOutput[]{
++            L"Interface GigabitEthernet0/1 is down, eth0 is up\r\n"
++            L"Host 192.168.1.1 error critical timeout alert\r\n"
++            L"Server ok reachable synchronized\r\n"
++        };
++        VERIFY_SUCCEEDED(sendOutput(terminal, sampleOutput, gsl::narrow<uint32_t>(std::size(sampleOutput) - 1)));
++
++        constexpr wchar_t ifacePattern[]{ LR"(\b(?:GigabitEthernet|eth)\d+(?:/\d+)*\b)" };
++        constexpr wchar_t downPattern[]{ LR"(\b(?:down|error|critical|timeout|alert)\b)" };
++        constexpr wchar_t upPattern[]{ LR"(\b(?:up|ok|reachable|synchronized)\b)" };
++
++        std::array<ReseshTerminalHighlightRule, 3> validRules{
++            ReseshTerminalHighlightRule{
++                .structSize = sizeof(ReseshTerminalHighlightRule),
++                .abiMajor = RESESH_TERMINAL_ABI_MAJOR,
++                .abiMinor = RESESH_TERMINAL_ABI_MINOR,
++                .id = 1,
++                .pattern = ifacePattern,
++                .patternLength = gsl::narrow<uint32_t>(std::size(ifacePattern) - 1),
++                .flags = ReseshTerminalHighlightRegex,
++                .foreground = 0x007BC0E5, // #e5c07b
++                .background = 0,
++                .priority = 10,
++            },
++            ReseshTerminalHighlightRule{
++                .structSize = sizeof(ReseshTerminalHighlightRule),
++                .abiMajor = RESESH_TERMINAL_ABI_MAJOR,
++                .abiMinor = RESESH_TERMINAL_ABI_MINOR,
++                .id = 2,
++                .pattern = downPattern,
++                .patternLength = gsl::narrow<uint32_t>(std::size(downPattern) - 1),
++                .flags = ReseshTerminalHighlightRegex | ReseshTerminalHighlightShowInOverview,
++                .foreground = 0x005555FF, // #ff5555
++                .background = 0x385555FF, // bold tint
++                .priority = 20,
++            },
++            ReseshTerminalHighlightRule{
++                .structSize = sizeof(ReseshTerminalHighlightRule),
++                .abiMajor = RESESH_TERMINAL_ABI_MAJOR,
++                .abiMinor = RESESH_TERMINAL_ABI_MINOR,
++                .id = 3,
++                .pattern = upPattern,
++                .patternLength = gsl::narrow<uint32_t>(std::size(upPattern) - 1),
++                .flags = ReseshTerminalHighlightRegex,
++                .foreground = 0x008BD123, // #23d18b
++                .background = 0,
++                .priority = 10,
++            },
++        };
++
++        // 1. Valid rules apply
++        VERIFY_SUCCEEDED(setRules(terminal, validRules.data(), gsl::narrow<uint32_t>(validRules.size())));
++
++        // Check overview rows for the ruler (downPattern has showInOverview, matches rows 0 and 1)
++        uint32_t requiredRows{};
++        VERIFY_ARE_EQUAL(
++            HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
++            getHighlightRows(terminal, nullptr, 0, &requiredRows));
++        VERIFY_ARE_EQUAL(2u, requiredRows);
++        std::vector<ReseshTerminalHighlightRow> rows(requiredRows);
++        VERIFY_SUCCEEDED(getHighlightRows(terminal, rows.data(), requiredRows, &requiredRows));
++        VERIFY_ARE_EQUAL(0, rows[0].row);
++        VERIFY_ARE_EQUAL(1u, rows[0].count); // "down"
++        VERIFY_ARE_EQUAL(1, rows[1].row);
++        VERIFY_ARE_EQUAL(4u, rows[1].count); // "error", "critical", "timeout", "alert"
++
++        // 2. Invalid regex reports typed error and does NOT alter active rules
++        constexpr wchar_t invalidPattern[]{ L"(unclosed group" };
++        std::array<ReseshTerminalHighlightRule, 1> invalidRules{
++            ReseshTerminalHighlightRule{
++                .structSize = sizeof(ReseshTerminalHighlightRule),
++                .abiMajor = RESESH_TERMINAL_ABI_MAJOR,
++                .abiMinor = RESESH_TERMINAL_ABI_MINOR,
++                .id = 99,
++                .pattern = invalidPattern,
++                .patternLength = gsl::narrow<uint32_t>(std::size(invalidPattern) - 1),
++                .flags = ReseshTerminalHighlightRegex,
++                .foreground = 0x00FFFFFF,
++                .background = 0,
++                .priority = 100,
++            },
++        };
++        VERIFY_ARE_EQUAL(HRESULT_FROM_WIN32(ERROR_INVALID_DATATYPE),
++            setRules(terminal, invalidRules.data(), gsl::narrow<uint32_t>(invalidRules.size())));
++
++        // Active overview rows still intact
++        uint32_t rowsStillIntact{};
++        VERIFY_ARE_EQUAL(
++            HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
++            getHighlightRows(terminal, nullptr, 0, &rowsStillIntact));
++        VERIFY_ARE_EQUAL(2u, rowsStillIntact);
++
++        // 3. Catastrophic regex with cancellation / timeout policy without hanging
++        constexpr wchar_t catastrophicPattern[]{ L"(a+)+$" };
++        std::array<ReseshTerminalHighlightRule, 1> catastrophicRules{
++            ReseshTerminalHighlightRule{
++                .structSize = sizeof(ReseshTerminalHighlightRule),
++                .abiMajor = RESESH_TERMINAL_ABI_MAJOR,
++                .abiMinor = RESESH_TERMINAL_ABI_MINOR,
++                .id = 100,
++                .pattern = catastrophicPattern,
++                .patternLength = gsl::narrow<uint32_t>(std::size(catastrophicPattern) - 1),
++                .flags = ReseshTerminalHighlightRegex,
++                .foreground = 0x00FFFFFF,
++                .background = 0,
++                .priority = 1,
++            },
++        };
++        VERIFY_SUCCEEDED(setRules(terminal, catastrophicRules.data(), gsl::narrow<uint32_t>(catastrophicRules.size())));
++        constexpr wchar_t backtrackingPayload[]{ L"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaX\r\n" };
++        VERIFY_SUCCEEDED(sendOutput(terminal, backtrackingPayload, gsl::narrow<uint32_t>(std::size(backtrackingPayload) - 1)));
++
++        // 4. Clear highlight rules resets active highlights and ruler rows
++        VERIFY_SUCCEEDED(clearRules(terminal));
++        uint32_t clearedRows{};
++        VERIFY_SUCCEEDED(getHighlightRows(terminal, nullptr, 0, &clearedRows));
++        VERIFY_ARE_EQUAL(0u, clearedRows);
++
++        // 5. Exercises the search-highlights-marks-and-bookmarks parity fixture
++        constexpr wchar_t chunk1[]{ L"\x1b]133;A\x07PS C:\\Work> \x1b]133;B\x07echo ERROR-42\r\n" };
++        constexpr wchar_t chunk2[]{ L"\x1b]133;C\x07ERROR-42 at https://example.test/error/42\r\n" };
++        constexpr wchar_t chunk3[]{ L"\x1b]133;D;0\x07PS C:\\Work> " };
++        VERIFY_SUCCEEDED(sendOutput(terminal, chunk1, gsl::narrow<uint32_t>(std::size(chunk1) - 1)));
++        VERIFY_SUCCEEDED(sendOutput(terminal, chunk2, gsl::narrow<uint32_t>(std::size(chunk2) - 1)));
++        VERIFY_SUCCEEDED(sendOutput(terminal, chunk3, gsl::narrow<uint32_t>(std::size(chunk3) - 1)));
++
++        constexpr wchar_t errorPattern[]{ L"ERROR-[0-9]+" };
++        std::array<ReseshTerminalHighlightRule, 1> errorHighlightRules{
++            ReseshTerminalHighlightRule{
++                .structSize = sizeof(ReseshTerminalHighlightRule),
++                .abiMajor = RESESH_TERMINAL_ABI_MAJOR,
++                .abiMinor = RESESH_TERMINAL_ABI_MINOR,
++                .id = 200,
++                .pattern = errorPattern,
++                .patternLength = gsl::narrow<uint32_t>(std::size(errorPattern) - 1),
++                .flags = ReseshTerminalHighlightRegex | ReseshTerminalHighlightShowInOverview,
++                .foreground = 0x000000FF,
++                .background = 0,
++                .priority = 50,
++            },
++        };
++        VERIFY_SUCCEEDED(setRules(terminal, errorHighlightRules.data(), gsl::narrow<uint32_t>(errorHighlightRules.size())));
++
++        uint32_t errorOverviewRows{};
++        VERIFY_ARE_EQUAL(HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER), getHighlightRows(terminal, nullptr, 0, &errorOverviewRows));
++        VERIFY_IS_GREATER_THAN_OR_EQUAL(errorOverviewRows, 2u);
++        std::vector<ReseshTerminalHighlightRow> errorRows(errorOverviewRows);
++        VERIFY_SUCCEEDED(getHighlightRows(terminal, errorRows.data(), errorOverviewRows, &errorOverviewRows));
++
++        const auto search = LoadExport<decltype(&ReseshTerminalSearch)>(module, "ReseshTerminalSearch");
++        constexpr wchar_t queryError[]{ L"ERROR-42" };
++        ReseshTerminalSearchRequest searchReq{
++            .structSize = sizeof(ReseshTerminalSearchRequest),
++            .abiMajor = RESESH_TERMINAL_ABI_MAJOR,
++            .abiMinor = RESESH_TERMINAL_ABI_MINOR,
++            .query = queryError,
++            .queryLength = gsl::narrow<uint32_t>(std::size(queryError) - 1),
++            .flags = ReseshTerminalSearchForward | ReseshTerminalSearchExecute,
++            .scrollOffset = 0,
++        };
++        ReseshTerminalSearchState searchRes{};
++        VERIFY_SUCCEEDED(search(terminal, &searchReq, &searchRes));
++        VERIFY_ARE_EQUAL(2, searchRes.totalMatches);
++    }
++}
+diff --git a/src/renderer/atlas/AtlasEngine.cpp b/src/renderer/atlas/AtlasEngine.cpp
+index af9a92f8..deb55bba 100644
+--- a/src/renderer/atlas/AtlasEngine.cpp
++++ b/src/renderer/atlas/AtlasEngine.cpp
+@@ -315,6 +315,7 @@ CATCH_RETURN()
+         }
+ 
+         _api.selectionSpans = til::point_span_subspan_within_rect(info.selectionSpans, dr);
++        _api.persistentHighlights = info.persistentHighlights;
+ 
+         const u32 newSelectionColor{ static_cast<COLORREF>(info.selectionBackground) | 0xff000000 };
+         if (_api.s->misc->selectionColor != newSelectionColor)
+@@ -474,6 +475,79 @@ try
+ }
+ CATCH_RETURN()
+ 
++[[nodiscard]] HRESULT AtlasEngine::_drawPersistentHighlights(std::span<const RenderDecoration>& highlights, const u16 row, const u16 begX, const u16 endX) noexcept
++try
++{
++    if (highlights.empty())
++    {
++        return S_OK;
++    }
++
++    const til::CoordType y = row;
++    const auto offset = til::point{ _api.viewportOffset.x, _api.viewportOffset.y };
++
++    while (!highlights.empty())
++    {
++        const auto hiEnd = highlights.front().span.end - offset;
++        if (hiEnd.y < y)
++        {
++            highlights = highlights.subspan(1);
++        }
++        else
++        {
++            break;
++        }
++    }
++
++    for (const auto& deco : highlights)
++    {
++        const auto hiStart = deco.span.start - offset;
++        const auto hiEnd = deco.span.end - offset;
++        if (hiStart.y > y)
++        {
++            break;
++        }
++        if (hiEnd.y < y)
++        {
++            continue;
++        }
++
++        const til::CoordType xStart = (hiStart.y == y) ? std::max<til::CoordType>(begX, hiStart.x) : begX;
++        const til::CoordType xEnd = (hiEnd.y == y) ? std::min<til::CoordType>(endX, hiEnd.x) : endX;
++        if (xStart >= xEnd)
++        {
++            continue;
++        }
++
++        const auto fgColor = static_cast<COLORREF>(deco.foreground) | 0xff000000;
++        const auto bgAlpha = deco.background.a;
++        if (bgAlpha == 0)
++        {
++            const auto bitmap = _p.colorBitmap.begin() + _p.colorBitmapRowStride * row;
++            const auto shift = gsl::narrow_cast<u8>(_p.rows[row]->lineRendition != LineRendition::SingleWidth);
++            auto fgBeg = bitmap + _p.colorBitmapDepthStride + (xStart << shift);
++            auto fgEnd = bitmap + _p.colorBitmapDepthStride + (xEnd << shift);
++            for (auto it = fgBeg; it != fgEnd; ++it)
++            {
++                if (*it != fgColor)
++                {
++                    _p.colorBitmapGenerations[1].bump();
++                    std::fill(it, fgEnd, fgColor);
++                    break;
++                }
++            }
++        }
++        else
++        {
++            const auto bgColor = static_cast<COLORREF>(deco.background) | (static_cast<u32>(bgAlpha) << 24);
++            _fillColorBitmap(row, xStart, xEnd, fgColor, bgColor);
++        }
++    }
++
++    return S_OK;
++}
++CATCH_RETURN()
++
+ [[nodiscard]] HRESULT AtlasEngine::PaintBufferLine(std::span<const Cluster> clusters, til::point coord, const bool fTrimLeft, const bool lineWrapped) noexcept
+ try
+ {
+@@ -520,6 +594,8 @@ try
+     _fillColorBitmap(y, x, columnEnd, _api.currentForeground, _api.currentBackground);
+ 
+     // Apply the highlighting colors to the highlighted cells
++    // Apply persistent highlight decorations before search highlights (lower precedence than search)
++    RETURN_IF_FAILED(_drawPersistentHighlights(_api.persistentHighlights, y, x, columnEnd));
+     RETURN_IF_FAILED(_drawHighlighted(_api.searchHighlights, y, x, columnEnd, highlightFg, highlightBg));
+     RETURN_IF_FAILED(_drawHighlighted(_api.searchHighlightFocused, y, x, columnEnd, highlightFocusFg, highlightFocusBg));
+     RETURN_IF_FAILED(_drawHighlighted(_api.selectionSpans, y, x, columnEnd, _p.s->misc->selectionForeground, _p.s->misc->selectionColor));
+diff --git a/src/renderer/atlas/AtlasEngine.h b/src/renderer/atlas/AtlasEngine.h
+index af77dcfe..92b94743 100644
+--- a/src/renderer/atlas/AtlasEngine.h
++++ b/src/renderer/atlas/AtlasEngine.h
+@@ -91,6 +91,7 @@ namespace Microsoft::Console::Render::Atlas
+         ATLAS_ATTR_COLD void _mapReplacementCharacter(u32 from, u32 to, ShapedRow& row);
+         void _fillColorBitmap(const size_t y, const size_t x1, const size_t x2, const u32 fgColor, const u32 bgColor) noexcept;
+         [[nodiscard]] HRESULT _drawHighlighted(std::span<const til::point_span>& highlights, const u16 row, const u16 begX, const u16 endX, const u32 fgColor, const u32 bgColor) noexcept;
++        [[nodiscard]] HRESULT _drawPersistentHighlights(std::span<const RenderDecoration>& highlights, const u16 row, const u16 begX, const u16 endX) noexcept;
+ 
+         // AtlasEngine.api.cpp
+         void _resolveTransparencySettings() noexcept;
+@@ -170,6 +171,7 @@ namespace Microsoft::Console::Render::Atlas
+             // These tracks the highlighted regions on the screen that are yet to be painted.
+             std::span<const til::point_span> searchHighlights;
+             std::span<const til::point_span> searchHighlightFocused;
++            std::span<const RenderDecoration> persistentHighlights;
+             std::span<const til::point_span> selectionSpans;
+ 
+             // dirtyRect is a computed value based on invalidatedRows.
+diff --git a/src/renderer/base/renderer.cpp b/src/renderer/base/renderer.cpp
+index f254070c..7534671b 100644
+--- a/src/renderer/base/renderer.cpp
++++ b/src/renderer/base/renderer.cpp
+@@ -1385,6 +1385,7 @@ void Renderer::_PaintCursor(_In_ IRenderEngine* const pEngine)
+     RenderFrameInfo info;
+     info.searchHighlights = _pData->GetSearchHighlights();
+     info.searchHighlightFocused = _pData->GetSearchHighlightFocused();
++    info.persistentHighlights = _pData->GetPersistentHighlights();
+     info.selectionSpans = _pData->GetSelectionSpans();
+     info.selectionBackground = _renderSettings.GetColorTableEntry(TextColor::SELECTION_BACKGROUND);
+     return pEngine->PrepareRenderInfo(std::move(info));
+diff --git a/src/renderer/inc/IRenderData.hpp b/src/renderer/inc/IRenderData.hpp
+index c2923df0..26843c64 100644
+--- a/src/renderer/inc/IRenderData.hpp
++++ b/src/renderer/inc/IRenderData.hpp
+@@ -36,6 +36,15 @@ namespace Microsoft::Console::Render
+         size_t cursorPos = 0;
+     };
+ 
++    // A renderer-only decoration. These colors never mutate TextAttribute cells.
++    struct RenderDecoration
++    {
++        til::point_span span;
++        til::color foreground;
++        til::color background;
++        int32_t priority{};
++    };
++
+     class IRenderData
+     {
+     public:
+@@ -48,6 +57,10 @@ namespace Microsoft::Console::Render
+         virtual const FontInfo& GetFontInfo() const noexcept = 0;
+         virtual std::span<const til::point_span> GetSearchHighlights() const noexcept = 0;
+         virtual const til::point_span* GetSearchHighlightFocused() const noexcept = 0;
++        virtual std::span<const RenderDecoration> GetPersistentHighlights() const noexcept
++        {
++            return {};
++        }
+         virtual std::span<const til::point_span> GetSelectionSpans() const noexcept = 0;
+         virtual void LockConsole() noexcept = 0;
+         virtual void UnlockConsole() noexcept = 0;
+diff --git a/src/renderer/inc/IRenderEngine.hpp b/src/renderer/inc/IRenderEngine.hpp
+index a2cc944f..17c76c8e 100644
+--- a/src/renderer/inc/IRenderEngine.hpp
++++ b/src/renderer/inc/IRenderEngine.hpp
+@@ -32,6 +32,7 @@ namespace Microsoft::Console::Render
+     {
+         std::span<const til::point_span> searchHighlights;
+         const til::point_span* searchHighlightFocused;
++        std::span<const RenderDecoration> persistentHighlights;
+         std::span<const til::point_span> selectionSpans;
+         til::color selectionBackground;
+     };

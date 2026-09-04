@@ -8,7 +8,7 @@ namespace Resesh.Terminal;
 internal sealed class NativeTerminalApi
 {
     internal const ushort AbiMajor = 2;
-    internal const ushort AbiMinor = 1;
+    internal const ushort AbiMinor = 2;
     internal const string DllEnvironmentVariable = "RESESH_NATIVE_TERMINAL_DLL";
 
     private const uint ThemeOption = 0x00000001;
@@ -63,6 +63,9 @@ internal sealed class NativeTerminalApi
     private readonly ClearBookmarksDelegate _clearBookmarks;
     private readonly ResizeCharactersDelegate _resizeCharacters;
     private readonly CaptureSnapshotDelegate _captureSnapshot;
+    private readonly SetHighlightRulesDelegate _setHighlightRules;
+    private readonly ClearHighlightRulesDelegate _clearHighlightRules;
+    private readonly GetHighlightRowsDelegate _getHighlightRows;
 
     private NativeTerminalApi(IntPtr module, string libraryPath)
     {
@@ -110,6 +113,9 @@ internal sealed class NativeTerminalApi
         _clearBookmarks = Load<ClearBookmarksDelegate>("ReseshTerminalClearBookmarks");
         _resizeCharacters = Load<ResizeCharactersDelegate>("ReseshTerminalResizeCharacters");
         _captureSnapshot = Load<CaptureSnapshotDelegate>("ReseshTerminalCaptureSnapshot");
+        _setHighlightRules = Load<SetHighlightRulesDelegate>("ReseshTerminalSetHighlightRules");
+        _clearHighlightRules = Load<ClearHighlightRulesDelegate>("ReseshTerminalClearHighlightRules");
+        _getHighlightRows = Load<GetHighlightRowsDelegate>("ReseshTerminalGetHighlightRows");
     }
 
     internal string LibraryPath { get; }
@@ -366,6 +372,70 @@ internal sealed class NativeTerminalApi
             var rows = new int[written];
             Marshal.Copy(buffer, rows, 0, rows.Length);
             return rows;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    internal void SetHighlightRules(IntPtr terminal, IReadOnlyList<HighlightRulePayload> rules)
+    {
+        var native = new NativeHighlightRule[rules.Count];
+        for (var i = 0; i < rules.Count; i++)
+        {
+            var r = rules[i];
+            uint flags = 0;
+            if (r.RegularExpression)
+                flags |= 0x01;
+            if (r.MatchCase)
+                flags |= 0x02;
+            if (r.ShowInOverview)
+                flags |= 0x04;
+            native[i] = new NativeHighlightRule
+            {
+                StructSize = checked((uint)Marshal.SizeOf<NativeHighlightRule>()),
+                AbiMajor = AbiMajor,
+                AbiMinor = AbiMinor,
+                Id = r.Id,
+                Pattern = r.Pattern,
+                PatternLength = checked((uint)r.Pattern.Length),
+                Flags = flags,
+                Foreground = r.Foreground,
+                Background = r.Background,
+                Priority = r.Priority,
+            };
+        }
+        ThrowIfFailed(_setHighlightRules(terminal, native, checked((uint)native.Length)));
+    }
+
+    internal void ClearHighlightRules(IntPtr terminal) =>
+        ThrowIfFailed(_clearHighlightRules(terminal));
+
+    internal IReadOnlyList<HighlightRowRecord> GetHighlightRows(IntPtr terminal)
+    {
+        var result = _getHighlightRows(terminal, IntPtr.Zero, 0, out var required);
+        if (required == 0)
+        {
+            ThrowIfFailed(result);
+            return [];
+        }
+        if (result != InsufficientBuffer)
+            ThrowIfFailed(result);
+        var size = Marshal.SizeOf<NativeHighlightRow>();
+        var buffer = Marshal.AllocHGlobal(checked(size * (int)required));
+        try
+        {
+            ThrowIfFailed(_getHighlightRows(terminal, buffer, required, out var written));
+            if (written != required)
+                throw new InvalidDataException("The native terminal changed its highlight row count.");
+            var records = new HighlightRowRecord[written];
+            for (var index = 0; index < records.Length; index++)
+            {
+                var item = Marshal.PtrToStructure<NativeHighlightRow>(buffer + index * size);
+                records[index] = new HighlightRowRecord(item.Row, item.Count, item.Color);
+            }
+            return records;
         }
         finally
         {
@@ -902,6 +972,47 @@ internal sealed class NativeTerminalApi
         internal uint Flags;
     }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct NativeHighlightRule
+    {
+        internal uint StructSize;
+        internal ushort AbiMajor;
+        internal ushort AbiMinor;
+        internal ulong Id;
+
+        [MarshalAs(UnmanagedType.LPWStr)]
+        internal string Pattern;
+
+        internal uint PatternLength;
+        internal uint Flags;
+        internal uint Foreground;
+        internal uint Background;
+        internal int Priority;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeHighlightRow
+    {
+        internal uint StructSize;
+        internal ushort AbiMajor;
+        internal ushort AbiMinor;
+        internal int Row;
+        internal uint Count;
+        internal uint Color;
+    }
+
+    internal sealed record HighlightRulePayload(
+        ulong Id,
+        string Pattern,
+        bool RegularExpression,
+        bool MatchCase,
+        bool ShowInOverview,
+        uint Foreground,
+        uint Background,
+        int Priority);
+
+    internal readonly record struct HighlightRowRecord(int Row, uint Count, uint Color);
+
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeMarkRecord
     {
@@ -1188,6 +1299,22 @@ internal sealed class NativeTerminalApi
         IntPtr terminal,
         ref NativeSnapshot snapshot,
         IntPtr payload,
+        uint capacity,
+        out uint requiredCapacity);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
+    private delegate int SetHighlightRulesDelegate(
+        IntPtr terminal,
+        [In] NativeHighlightRule[] rules,
+        uint count);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ClearHighlightRulesDelegate(IntPtr terminal);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int GetHighlightRowsDelegate(
+        IntPtr terminal,
+        IntPtr rows,
         uint capacity,
         out uint requiredCapacity);
 }

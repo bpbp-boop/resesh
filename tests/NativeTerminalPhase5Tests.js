@@ -23,7 +23,7 @@ const capabilities = JSON.parse(fs.readFileSync(
 
 test("ABI 2.1 owns composition hosting and stable annotation data", () => {
   assert.match(api, /AbiMajor\s*=\s*2/);
-  assert.match(api, /AbiMinor\s*=\s*1/);
+  assert.match(api, /AbiMinor\s*=\s*[1-9]/);
   for (const name of [
     "ReseshTerminalSetBounds",
     "ReseshTerminalAttachSwapChainPanel",

@@ -17,7 +17,7 @@ const capabilities = JSON.parse(read("eng", "native-terminal-capabilities.json")
 
 test("ABI 2.1 exports versioned in-memory ANSI snapshots", () => {
   assert.match(api, /AbiMajor\s*=\s*2/);
-  assert.match(api, /AbiMinor\s*=\s*1/);
+  assert.match(api, /AbiMinor\s*=\s*[1-9]/);
   assert.match(api, /ReseshTerminalCaptureSnapshot/);
   assert.match(api, /ReseshTerminalResizeCharacters/);
   assert.match(api, /record struct Snapshot\([\s\S]*?CaptureSequence[\s\S]*?UnixTimeMilliseconds[\s\S]*?Ansi[\s\S]*?WorkingDirectory/);

@@ -58,7 +58,7 @@ try {
         $stackValid = $LASTEXITCODE -eq 0
     }
     if ($stackValid) {
-        & git -C $ForkPath diff --quiet --ignore-submodules --
+        & git -C $ForkPath diff --quiet --ignore-space-at-eol --ignore-submodules --
         $patchStackApplied = $LASTEXITCODE -eq 0
     }
 } finally {

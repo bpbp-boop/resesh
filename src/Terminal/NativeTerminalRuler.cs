@@ -59,6 +59,7 @@ internal sealed class NativeTerminalRuler : Grid
     private readonly HashSet<(int Lane, int Bucket, uint Color)> _paintBuckets = [];
     private IReadOnlyList<NativeTerminalApi.MarkRecord> _marks = [];
     private IReadOnlyList<int> _searchRows = [];
+    private IReadOnlyList<NativeTerminalApi.HighlightRowRecord> _highlightRows = [];
     private Func<ulong, string>? _markLabel;
     private ulong _activeMarkId;
     private ulong _pendingMarkTipId;
@@ -203,10 +204,18 @@ internal sealed class NativeTerminalRuler : Grid
     internal void UpdateAnnotations(
         IReadOnlyList<NativeTerminalApi.MarkRecord> marks,
         IReadOnlyList<int> searchRows,
+        Func<ulong, string> markLabel) =>
+        UpdateAnnotations(marks, searchRows, [], markLabel);
+
+    internal void UpdateAnnotations(
+        IReadOnlyList<NativeTerminalApi.MarkRecord> marks,
+        IReadOnlyList<int> searchRows,
+        IReadOnlyList<NativeTerminalApi.HighlightRowRecord> highlightRows,
         Func<ulong, string> markLabel)
     {
         _marks = marks;
         _searchRows = searchRows;
+        _highlightRows = highlightRows;
         _markLabel = markLabel;
         if (_activeMarkId != 0 && !_marks.Any(mark => mark.Id == _activeMarkId))
             CloseMarkPreview();
@@ -473,6 +482,9 @@ internal sealed class NativeTerminalRuler : Grid
             else
                 AddTick(mark.Row, lane: 0, mark.Color, calmOpacity, _paintBuckets, railHeight);
         }
+
+        foreach (var highlight in _highlightRows)
+            AddTick(highlight.Row, lane: 2, highlight.Color, _isSplit ? Math.Max(calmOpacity * 0.7, 0.4) : 0.75, _paintBuckets, railHeight);
 
         var searchColor = GetThemeColor("AccentFillColorDefaultBrush", Color.FromArgb(255, 242, 204, 96));
         foreach (var row in _searchRows)

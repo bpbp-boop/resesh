@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "fixture": "tests/Fixtures/Terminal/vt-parity.json",
   "statusValues": ["pass", "partial", "missing", "not-applicable"],
-  "evidence": "Phase 0 fixtures plus Phase 2 settings, Phase 3 typed events, Phase 4 search and links, Phase 5 native ABI and UI verification, and Phase 6 bounded native rewind",
+  "evidence": "Phase 0 fixtures plus Phase 2 settings, Phase 3 typed events, Phase 4 search and links, Phase 5 native ABI and UI verification, Phase 6 bounded native rewind, and Phase 7 persistent multi-rule highlights",
   "capabilities": [
     { "capability": "normal buffer rendering", "webView": "pass", "native": "pass" },
     { "capability": "alternate buffer rendering", "webView": "pass", "native": "pass" },
@@ -14,7 +14,7 @@
     { "capability": "OSC 3008 context event", "webView": "pass", "native": "pass" },
     { "capability": "OSC 7377, 9, and 777 agent evidence", "webView": "pass", "native": "pass" },
     { "capability": "search", "webView": "pass", "native": "pass" },
-    { "capability": "persistent highlights", "webView": "pass", "native": "missing" },
+    { "capability": "persistent highlights", "webView": "pass", "native": "pass", "note": "Persistent multi-rule highlights render in Atlas with selection and search precedence, exporting compact overview rows for the ruler without mutating TextAttribute cells." },
     { "capability": "command marks", "webView": "pass", "native": "pass" },
     { "capability": "overview ruler", "webView": "pass", "native": "pass" },
     { "capability": "bookmarks", "webView": "pass", "native": "pass" },

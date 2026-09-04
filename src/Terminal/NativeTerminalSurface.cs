@@ -143,6 +143,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private bool _annotationRefreshPending;
     private ulong _commandsFingerprint = ulong.MaxValue;
     private ulong _lastPromptProbeId;
+    private List<NativeTerminalApi.HighlightRulePayload> _currentHighlightRules = [];
     private long _keyframeBytes;
     private long _lastKeyframeUnixMilliseconds;
     private int _replayGeneration;
@@ -249,6 +250,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
             if (_terminal == IntPtr.Zero)
                 throw new InvalidOperationException("Microsoft Terminal returned an empty terminal handle.");
             _api.RegisterEventCallback(_terminal, _eventCallback);
+            if (_currentHighlightRules.Count > 0)
+                _api.SetHighlightRules(_terminal, _currentHighlightRules);
             _dpi = checked((int)GetDpiForWindow(_hostHwnd));
             ApplyNativeTheme();
             _initialized = true;
@@ -358,6 +361,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
         _rightClickPaste = rightClickPaste;
         _scrollback = scrollback;
         _readOnly = readOnly;
+        if (highlights is not null)
+            _currentHighlightRules = ParseHighlightRules(highlights);
         ApplyNativeTheme();
     }
 
@@ -389,7 +394,27 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
     public override void ApplyHighlights(IReadOnlyList<object> rules)
     {
-        // HwndTerminal has no highlight-rule ABI.
+        var parsed = ParseHighlightRules(rules);
+        _currentHighlightRules = parsed;
+        if (_terminal != IntPtr.Zero && _api is not null)
+        {
+            try
+            {
+                if (parsed.Count == 0)
+                {
+                    _api.ClearHighlightRules(_terminal);
+                }
+                else
+                {
+                    _api.SetHighlightRules(_terminal, parsed);
+                }
+                QueueAnnotationRefresh();
+            }
+            catch (Exception ex)
+            {
+                TraceHook?.Invoke($"failed to apply native highlight rules: {ex.Message}");
+            }
+        }
     }
 
     public override Task<(string Context, string? Platform)?> RequestPromptContextAsync()
@@ -1435,7 +1460,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
         {
             _marks = _api.GetMarks(_terminal);
             var searchRows = _api.GetSearchRows(_terminal);
-            _ruler.UpdateAnnotations(_marks, searchRows, MarkLabel);
+            var highlightRows = _api.GetHighlightRows(_terminal);
+            _ruler.UpdateAnnotations(_marks, searchRows, highlightRows, MarkLabel);
             UpdateJumpHighlightBounds();
             var fingerprint = CommandFingerprint(_marks);
             if (_commandsPanelOpen && fingerprint != _commandsFingerprint)
@@ -1460,6 +1486,67 @@ public sealed class NativeTerminalSurface : TerminalSurface
             _annotationRefreshPending = false;
             RefreshAnnotations();
         });
+    }
+
+    private static List<NativeTerminalApi.HighlightRulePayload> ParseHighlightRules(IReadOnlyList<object> rules)
+    {
+        var list = new List<NativeTerminalApi.HighlightRulePayload>();
+        ulong nextId = 1;
+        var priority = 10;
+        foreach (var rule in rules)
+        {
+            if (rule is null)
+                continue;
+            string pattern = string.Empty;
+            string color = "#ffffff";
+            bool matchCase = false;
+            bool showInOverview = false;
+            bool bold = false;
+            ulong id = nextId++;
+
+            var type = rule.GetType();
+            pattern = type.GetProperty("pattern")?.GetValue(rule)?.ToString()
+                ?? type.GetProperty("Pattern")?.GetValue(rule)?.ToString() ?? string.Empty;
+            color = type.GetProperty("color")?.GetValue(rule)?.ToString()
+                ?? type.GetProperty("Color")?.GetValue(rule)?.ToString() ?? "#ffffff";
+            matchCase = type.GetProperty("matchCase")?.GetValue(rule) as bool?
+                ?? type.GetProperty("MatchCase")?.GetValue(rule) as bool? ?? false;
+            showInOverview = type.GetProperty("showInOverview")?.GetValue(rule) as bool?
+                ?? type.GetProperty("ShowInOverview")?.GetValue(rule) as bool? ?? false;
+            bold = type.GetProperty("bold")?.GetValue(rule) as bool?
+                ?? type.GetProperty("Bold")?.GetValue(rule) as bool? ?? false;
+
+            if (string.IsNullOrEmpty(pattern))
+                continue;
+
+            var fg = ParseColorRef(color);
+            uint bg = 0;
+            if (bold)
+                bg = fg | (56u << 24);
+
+            list.Add(new NativeTerminalApi.HighlightRulePayload(
+                Id: id,
+                Pattern: pattern,
+                RegularExpression: true,
+                MatchCase: matchCase,
+                ShowInOverview: showInOverview,
+                Foreground: fg,
+                Background: bg,
+                Priority: priority++));
+        }
+        return list;
+    }
+
+    private static uint ParseColorRef(string color)
+    {
+        if (color.StartsWith('#') && color.Length == 7
+            && byte.TryParse(color.Substring(1, 2), System.Globalization.NumberStyles.HexNumber, null, out var r)
+            && byte.TryParse(color.Substring(3, 2), System.Globalization.NumberStyles.HexNumber, null, out var g)
+            && byte.TryParse(color.Substring(5, 2), System.Globalization.NumberStyles.HexNumber, null, out var b))
+        {
+            return r | ((uint)g << 8) | ((uint)b << 16);
+        }
+        return 0x00ffffff;
     }
 
     private void ScrollToMark(ulong markId)
