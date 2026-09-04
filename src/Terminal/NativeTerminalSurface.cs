@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -23,6 +24,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
 {
     private const int PromptParseWindow = 4096;
     private const int MaximumCommandLength = 512;
+    private const long KeyframeByteInterval = 1024 * 1024;
+    private const long KeyframeTimeIntervalMilliseconds = 10_000;
 
     private const uint WmMouseMove = 0x0200;
     private const uint WmLeftButtonDown = 0x0201;
@@ -53,6 +56,19 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private readonly Decoder _outputDecoder = new UTF8Encoding(false, false).GetDecoder();
     private readonly NativeTerminalApi.EventCallback _eventCallback;
     private readonly SwapChainPanel _terminalPanel = new();
+    private readonly Border _inputPanel = new()
+    {
+        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+    };
+    private readonly Border _jumpHighlight = new()
+    {
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        VerticalAlignment = VerticalAlignment.Top,
+        IsHitTestVisible = false,
+        Visibility = Visibility.Collapsed,
+    };
+    private readonly SolidColorBrush _jumpHighlightBrush = new();
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _jumpHighlightTimer;
     private readonly InputCursor _textCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
     private readonly InputCursor _linkCursor = InputSystemCursor.Create(InputSystemCursorShape.Hand);
     private readonly Border _findBar = new();
@@ -119,26 +135,27 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private IReadOnlyList<NativeTerminalApi.MarkRecord> _marks = [];
     private int _viewTop;
     private int _bufferHeight = 24;
-    private long _titleEpoch;
     private bool _commandsPanelOpen;
-    private bool _exactShellMarksSeen;
+    private ulong _jumpHighlightMarkId;
     private string? _promptPlatform;
     private string _promptContext = string.Empty;
     private string? _promptContextPlatform;
     private bool _annotationRefreshPending;
     private ulong _commandsFingerprint = ulong.MaxValue;
     private ulong _lastPromptProbeId;
+    private long _keyframeBytes;
+    private long _lastKeyframeUnixMilliseconds;
+    private int _replayGeneration;
+    private double _pendingPlaybackSeek;
+    private IReadOnlyList<TerminalTimedReplayEvent>? _playbackEvents;
+    private IReadOnlyList<NativePlaybackFrame>? _playbackFrames;
 
     public static Action<string>? TraceHook { get; set; }
 
     public override event Action<byte[]>? InputReceived;
     public override event Action<int, int>? Resized;
     public override event TerminalOutputObservedHandler? OutputObserved;
-    public override event Action<string, int, int, long>? KeyframeCaptured
-    {
-        add { }
-        remove { }
-    }
+    public override event Action<string, int, int, long>? KeyframeCaptured;
     public override event Action? ReconnectRequested;
     public override event Action? CloseTabRequested;
     public override event Action? SplitRequested;
@@ -157,7 +174,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
     public override event Action<string>? CommandObserved;
     public override event Action<bool>? CommandsPanelOpenChanged;
 
-    public override bool SupportsRewindCapture => false;
+    public override bool SupportsRewindCapture => true;
     internal bool IsAlternateBufferActive => _alternateBufferActive;
     internal bool IsBracketedPasteModeEnabled => _bracketedPasteModeEnabled;
 
@@ -167,15 +184,26 @@ public sealed class NativeTerminalSurface : TerminalSurface
     public NativeTerminalSurface()
     {
         _eventCallback = OnNativeEvent;
+        _jumpHighlight.Background = _jumpHighlightBrush;
+        _jumpHighlightTimer = DispatcherQueue.CreateTimer();
+        _jumpHighlightTimer.Interval = TimeSpan.FromMilliseconds(700);
+        _jumpHighlightTimer.IsRepeating = false;
+        _jumpHighlightTimer.Tick += OnJumpHighlightTimerTick;
         AutomationProperties.SetAutomationId(this, "NativeTerminalSurface");
         AutomationProperties.SetName(this, "Terminal");
+        AutomationProperties.SetAutomationId(_inputPanel, "NativeTerminalInput");
+        AutomationProperties.SetName(_inputPanel, "Terminal input");
         IsTabStop = true;
-        _terminalPanel.PointerPressed += OnPointerPressed;
-        _terminalPanel.PointerReleased += OnPointerReleased;
-        _terminalPanel.PointerMoved += OnPointerMoved;
-        _terminalPanel.PointerWheelChanged += OnPointerWheelChanged;
-        _terminalPanel.PointerExited += OnPointerExited;
+        Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        _terminalPanel.IsHitTestVisible = false;
+        _inputPanel.PointerPressed += OnPointerPressed;
+        _inputPanel.PointerReleased += OnPointerReleased;
+        _inputPanel.PointerMoved += OnPointerMoved;
+        _inputPanel.PointerExited += OnPointerExited;
+        PointerWheelChanged += OnPointerWheelChanged;
         Children.Add(_terminalPanel);
+        Children.Add(_jumpHighlight);
+        Children.Add(_inputPanel);
         ConfigureFindBar();
         ConfigureRuler();
         ConfigureCommandsPanel();
@@ -227,7 +255,9 @@ public sealed class NativeTerminalSurface : TerminalSurface
             _ruler.UpdateViewport(0, Rows, Rows, alternateBuffer: false);
             RefreshAnnotations();
             UpdateBounds();
-            QueueOutputFlush();
+            FlushOutput();
+            if (_lastKeyframeUnixMilliseconds == 0)
+                CaptureNativeKeyframe(force: true);
             Ready?.Invoke(Columns, Rows);
         }
         catch (Exception exception)
@@ -301,7 +331,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
     public override void SetInputEnabled(bool enabled)
     {
         _inputEnabled = enabled;
-        _terminalPanel.IsHitTestVisible = enabled;
+        _inputPanel.IsHitTestVisible = enabled;
     }
     public override void ToggleCommandsPanel() => SetCommandsPanelOpen(!_commandsPanelOpen);
 
@@ -328,6 +358,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         _rightClickPaste = rightClickPaste;
         _scrollback = scrollback;
         _readOnly = readOnly;
+        ApplyNativeTheme();
     }
 
     public override void ApplyOptions(
@@ -441,21 +472,29 @@ public sealed class NativeTerminalSurface : TerminalSurface
             && ActualWidth > 0
             && ActualHeight > 0;
         _terminalPanel.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        _inputPanel.Visibility = _terminalPanel.Visibility;
         if (!visible)
+        {
+            _jumpHighlight.Visibility = Visibility.Collapsed;
             return;
+        }
 
         var findHeight = _findBar.Visibility == Visibility.Visible ? _findBar.Height : 0;
         var rulerWidth = _alternateBufferActive ? 0 : _ruler.Width;
-        var commandsWidth = _commandsPanelOpen && !_alternateBufferActive
-            ? Math.Min(NativeTerminalCommandsPanel.PreferredWidth, ActualWidth * 0.7)
-            : 0;
-        if (commandsWidth > 0)
-            _commandsPanel.Width = commandsWidth;
-        var chromeWidth = rulerWidth + commandsWidth;
-        _terminalPanel.Margin = new Thickness(0, findHeight, chromeWidth, 0);
+        if (_commandsPanelOpen && !_alternateBufferActive)
+        {
+            _commandsPanel.Width = Math.Min(NativeTerminalCommandsPanel.PreferredWidth, ActualWidth * 0.7);
+            var commandsTop = findHeight > 0 ? findHeight : 8;
+            _commandsPanel.Height = Math.Min(
+                _commandsPanel.DesiredHeight,
+                Math.Max(0, ActualHeight - commandsTop - 20));
+            _commandsPanel.Margin = new Thickness(0, commandsTop, rulerWidth + 6, 0);
+        }
+        _terminalPanel.Margin = new Thickness(0, findHeight, rulerWidth, 0);
+        _inputPanel.Margin = _terminalPanel.Margin;
         _ruler.Margin = new Thickness(0, findHeight, 0, 0);
-        _commandsPanel.Margin = new Thickness(0, findHeight, rulerWidth, 0);
-        _findBar.Margin = new Thickness(0, 0, chromeWidth, 0);
+        _findBar.Margin = new Thickness(0, 0, rulerWidth, 0);
+        UpdateJumpHighlightBounds();
 
         Windows.Foundation.Rect bounds;
         try
@@ -561,6 +600,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
             var charCount = _outputDecoder.GetChars(bytes.AsSpan(0, byteCount), chars, flush: false);
             if (charCount > 0)
                 _api.SendOutput(_terminal, new string(chars, 0, charCount));
+            _keyframeBytes = Math.Min(long.MaxValue - byteCount, _keyframeBytes) + byteCount;
+            CaptureNativeKeyframe(force: false);
         }
         finally
         {
@@ -578,6 +619,250 @@ public sealed class NativeTerminalSurface : TerminalSurface
         if (_terminal != IntPtr.Zero && _api is not null)
             _api.SendOutput(_terminal, text);
     }
+
+    private void CaptureNativeKeyframe(bool force)
+    {
+        if (_readOnly || !_initialized || _terminal == IntPtr.Zero || _api is null)
+            return;
+
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        if (!force
+            && _keyframeBytes < KeyframeByteInterval
+            && now - _lastKeyframeUnixMilliseconds < KeyframeTimeIntervalMilliseconds)
+        {
+            return;
+        }
+
+        try
+        {
+            var snapshot = _api.CaptureSnapshot(_terminal);
+            var state = NativeTerminalKeyframeCodec.Encode(snapshot, _api.BuildId);
+            _keyframeBytes = 0;
+            _lastKeyframeUnixMilliseconds = snapshot.UnixTimeMilliseconds;
+            KeyframeCaptured?.Invoke(state, snapshot.Columns, snapshot.Rows, snapshot.UnixTimeMilliseconds);
+        }
+        catch (Exception exception)
+        {
+            TraceHook?.Invoke($"native keyframe capture failed: {exception.Message}");
+        }
+    }
+
+    public async Task ShowReplayAsync(
+        int columns,
+        int rows,
+        string? keyframe,
+        IReadOnlyList<TerminalReplayEvent> events)
+    {
+        var generation = ++_replayGeneration;
+        await RestoreReplayAsync(generation, columns, rows, keyframe, events);
+    }
+
+    public async Task LoadPlaybackAsync(
+        int columns,
+        int rows,
+        IReadOnlyList<TerminalTimedReplayEvent> events)
+    {
+        _pendingPlaybackSeek = 0;
+        _playbackEvents = null;
+        _playbackFrames = null;
+        var generation = ++_replayGeneration;
+        _terminalPanel.Opacity = 0;
+        try
+        {
+            ResetPlaybackTerminal(columns, rows);
+
+            var frames = new List<NativePlaybackFrame>
+            {
+                new(0, 0, columns, rows, CaptureEncodedSnapshot()),
+            };
+            var currentColumns = columns;
+            var currentRows = rows;
+            var lastFrameTime = 0d;
+            long bytesSinceFrame = 0;
+            for (var index = 0; index < events.Count; index++)
+            {
+                if (generation != _replayGeneration || _disposed)
+                    return;
+                var item = events[index];
+                ApplyReplayEvent(item.Type, item.Data, ref currentColumns, ref currentRows);
+                if (item.Type == "o")
+                    bytesSinceFrame += Encoding.UTF8.GetByteCount(item.Data);
+
+                if (item.Time - lastFrameTime >= 10 || bytesSinceFrame >= KeyframeByteInterval)
+                {
+                    frames.Add(new NativePlaybackFrame(
+                        item.Time,
+                        index + 1,
+                        currentColumns,
+                        currentRows,
+                        CaptureEncodedSnapshot()));
+                    lastFrameTime = item.Time;
+                    bytesSinceFrame = 0;
+                }
+                if ((index & 127) == 127)
+                    await Task.Yield();
+            }
+
+            if (generation != _replayGeneration || _disposed)
+                return;
+            _playbackEvents = events;
+            _playbackFrames = frames;
+            _terminalPanel.Opacity = 1;
+            await SeekPlaybackAsync(_pendingPlaybackSeek);
+        }
+        finally
+        {
+            if (generation == _replayGeneration && !_disposed)
+                _terminalPanel.Opacity = 1;
+        }
+    }
+
+    public async Task SeekPlaybackAsync(double time)
+    {
+        _pendingPlaybackSeek = Math.Max(0, time);
+        if (_playbackEvents is not { } events || _playbackFrames is not { Count: > 0 } frames)
+            return;
+        var generation = ++_replayGeneration;
+
+        var frame = frames[0];
+        for (var index = frames.Count - 1; index >= 0; index--)
+        {
+            if (frames[index].Time <= _pendingPlaybackSeek)
+            {
+                frame = frames[index];
+                break;
+            }
+        }
+
+        var replay = new List<TerminalReplayEvent>();
+        for (var index = frame.EventIndex; index < events.Count; index++)
+        {
+            if (events[index].Time > _pendingPlaybackSeek)
+                break;
+            replay.Add(new TerminalReplayEvent(events[index].Type, events[index].Data));
+        }
+
+        await RestoreReplayAsync(generation, frame.Columns, frame.Rows, frame.State, replay);
+    }
+
+    private async Task RestoreReplayAsync(
+        int generation,
+        int columns,
+        int rows,
+        string? state,
+        IReadOnlyList<TerminalReplayEvent> events)
+    {
+        NativeTerminalKeyframe? keyframe = null;
+        if (state is not null
+            && (!NativeTerminalKeyframeCodec.TryDecode(state, out keyframe)
+                || keyframe is null
+                || _api is null
+                || !string.Equals(keyframe.BuildId, _api.BuildId, StringComparison.Ordinal)))
+        {
+            throw new InvalidDataException("The native terminal keyframe is not compatible with this renderer.");
+        }
+
+        ResetPlaybackTerminal(keyframe?.Columns ?? columns, keyframe?.Rows ?? rows);
+        if (keyframe is not null)
+        {
+            if (keyframe.AlternateBuffer)
+                _api!.SendOutput(_terminal, "\x1b[?1049h");
+            _api!.SendOutput(_terminal, keyframe.Ansi);
+        }
+
+        var currentColumns = keyframe?.Columns ?? columns;
+        var currentRows = keyframe?.Rows ?? rows;
+        for (var index = 0; index < events.Count; index++)
+        {
+            if (generation != _replayGeneration || _disposed)
+                return;
+            ApplyReplayEvent(events[index].Type, events[index].Data, ref currentColumns, ref currentRows);
+            if ((index & 127) == 127)
+                await Task.Yield();
+        }
+        if (generation == _replayGeneration && events.Count == 0 && keyframe is not null)
+            _api!.UserScroll(_terminal, keyframe.ViewportTop);
+    }
+
+    private string CaptureEncodedSnapshot()
+    {
+        if (_terminal == IntPtr.Zero || _api is null)
+            throw new InvalidOperationException("The native playback terminal is not ready.");
+        return NativeTerminalKeyframeCodec.Encode(_api.CaptureSnapshot(_terminal), _api.BuildId);
+    }
+
+    private void ApplyReplayEvent(string type, string data, ref int columns, ref int rows)
+    {
+        if (_terminal == IntPtr.Zero || _api is null)
+            return;
+        if (type == "o")
+        {
+            _api.SendOutput(_terminal, data);
+        }
+        else if (type == "r" && TryParseReplaySize(data, out var newColumns, out var newRows))
+        {
+            columns = newColumns;
+            rows = newRows;
+            _api.ResizeCharacters(_terminal, columns, rows);
+            Columns = columns;
+            Rows = rows;
+        }
+    }
+
+    private void ResetPlaybackTerminal(int columns, int rows)
+    {
+        if (!_readOnly || _api is null || _hostHwnd == IntPtr.Zero)
+            throw new InvalidOperationException("The native playback terminal is not ready.");
+
+        DestroyNativeTerminal();
+        var playbackColumns = Math.Max(1, columns);
+        var playbackRows = Math.Max(1, rows);
+        Columns = playbackColumns;
+        Rows = playbackRows;
+        _lastNativeEventSequence = 0;
+        _alternateBufferActive = false;
+        _viewTop = 0;
+        _bufferHeight = Rows;
+        var settings = new NativeTerminalApi.NativeTerminalCreationSettings(
+            Columns,
+            Rows,
+            _scrollback,
+            _fontFamily,
+            ToNativePointSize(_fontSize),
+            NativeTerminalThemeCatalog.Find(_theme),
+            CopyOnSelect: true,
+            RightClickPaste: false,
+            AllowOscClipboard: false,
+            AllowOscNotifications: false,
+            ReadOnly: true);
+        _terminal = _api.CreateTerminal(_hostHwnd, settings);
+        _api.RegisterEventCallback(_terminal, _eventCallback);
+        _initialized = true;
+        _lastX = int.MinValue;
+        _lastY = int.MinValue;
+        _lastWidth = -1;
+        _lastHeight = -1;
+        ApplyNativeTheme();
+        UpdateBounds(force: true);
+        _api.ResizeCharacters(_terminal, playbackColumns, playbackRows);
+        Columns = playbackColumns;
+        Rows = playbackRows;
+    }
+
+    private static bool TryParseReplaySize(string value, out int columns, out int rows)
+    {
+        columns = 0;
+        rows = 0;
+        var separator = value.IndexOf('x');
+        return separator > 0
+            && separator < value.Length - 1
+            && int.TryParse(value.AsSpan(0, separator), NumberStyles.None, CultureInfo.InvariantCulture, out columns)
+            && int.TryParse(value.AsSpan(separator + 1), NumberStyles.None, CultureInfo.InvariantCulture, out rows)
+            && columns > 0
+            && rows > 0;
+    }
+
+    private sealed record NativePlaybackFrame(double Time, int EventIndex, int Columns, int Rows, string State);
 
     private void OnNativeEvent(IntPtr context, in NativeTerminalApi.NativeEvent eventData)
     {
@@ -627,7 +912,6 @@ public sealed class NativeTerminalSurface : TerminalSurface
                         title = title[..512];
                     DispatcherQueue.TryEnqueue(() =>
                     {
-                        _titleEpoch++;
                         TitleChanged?.Invoke(title);
                     });
                     break;
@@ -651,6 +935,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
                         _viewTop = viewTop;
                         _bufferHeight = bufferHeight;
                         _ruler.UpdateViewport(viewTop, viewportHeight, bufferHeight, _alternateBufferActive);
+                        UpdateJumpHighlightBounds();
                         QueueAnnotationRefresh();
                         if (_findBar.Visibility == Visibility.Visible
                             && _findInput.Text.Length > 0
@@ -673,6 +958,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
                     {
                         _alternateBufferActive = active;
                         _ruler.UpdateViewport(_viewTop, Rows, _bufferHeight, active);
+                        if (active)
+                            ClearJumpHighlight();
                         _commandsPanel.Visibility = _commandsPanelOpen && !active
                             ? Visibility.Visible
                             : Visibility.Collapsed;
@@ -691,7 +978,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
                         command = command[..MaximumCommandLength];
                     DispatcherQueue.TryEnqueue(() =>
                     {
-                        CancelPromptProbes();
+                        // Keep the Enter probe until an exact command mark exists. Some remote
+                        // integrations emit only part of the OSC 133 sequence.
                         if (action == 'C' && !string.IsNullOrWhiteSpace(command))
                         {
                             CommandObserved?.Invoke(command);
@@ -748,7 +1036,6 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 var separator = payload.IndexOf(';');
                 var action = separator < 0 ? payload : payload[..separator];
                 _pendingShellMarkAction = action is "A" or "B" or "C" or "D" ? action[0] : null;
-                _exactShellMarksSeen = _pendingShellMarkAction is not null;
                 if (_pendingShellMarkAction == 'D')
                     DispatcherQueue.TryEnqueue(() => CommandChanged?.Invoke(string.Empty));
                 break;
@@ -919,39 +1206,52 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
     private void OnPointerPressed(object sender, PointerRoutedEventArgs args)
     {
+        _ruler.DismissMarkPreview();
         RequestHostFocus();
         Focus(FocusState.Pointer);
-        SendPointerEvent(args, PointerMessage(args.GetCurrentPoint(_terminalPanel).Properties.PointerUpdateKind));
+        SendPointerEvent(args, PointerMessage(args.GetCurrentPoint(_inputPanel).Properties.PointerUpdateKind));
     }
 
     private void OnPointerReleased(object sender, PointerRoutedEventArgs args) =>
-        SendPointerEvent(args, PointerMessage(args.GetCurrentPoint(_terminalPanel).Properties.PointerUpdateKind));
+        SendPointerEvent(args, PointerMessage(args.GetCurrentPoint(_inputPanel).Properties.PointerUpdateKind));
 
     private void OnPointerMoved(object sender, PointerRoutedEventArgs args) =>
         SendPointerEvent(args, WmMouseMove);
 
     private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs args)
     {
-        var point = args.GetCurrentPoint(_terminalPanel);
-        SendPointerEvent(
+        if (args.OriginalSource is not DependencyObject source
+            || !IsDescendantOrSelf(source, _inputPanel))
+        {
+            return;
+        }
+
+        var point = args.GetCurrentPoint(_inputPanel);
+        var result = SendPointerEvent(
             args,
             point.Properties.IsHorizontalMouseWheel ? WmMouseHorizontalWheel : WmMouseWheel,
             point);
+        if (!point.Properties.IsHorizontalMouseWheel
+            && (result & PointerHandled) == 0
+            && _ruler.ScrollByWheelDelta(point.Properties.MouseWheelDelta))
+        {
+            args.Handled = true;
+        }
     }
 
     private void OnPointerExited(object sender, PointerRoutedEventArgs args) =>
         SendPointerEvent(args, WmMouseLeave);
 
-    private void SendPointerEvent(
+    private uint SendPointerEvent(
         PointerRoutedEventArgs args,
         uint message,
         PointerPoint? currentPoint = null)
     {
         if (_disposed || !_inputEnabled || _terminal == IntPtr.Zero || _api is null || message == 0)
-            return;
+            return 0;
         try
         {
-            var point = currentPoint ?? args.GetCurrentPoint(_terminalPanel);
+            var point = currentPoint ?? args.GetCurrentPoint(_inputPanel);
             var properties = point.Properties;
             var buttons = PointerButtons(properties);
             var scale = XamlRoot?.RasterizationScale ?? 1;
@@ -966,10 +1266,12 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 ? _linkCursor
                 : _textCursor;
             args.Handled = (result & PointerHandled) != 0;
+            return result;
         }
         catch (Exception exception)
         {
             TraceHook?.Invoke($"native pointer input failed: {exception.Message}");
+            return 0;
         }
     }
 
@@ -986,6 +1288,16 @@ public sealed class NativeTerminalSurface : TerminalSurface
             PointerUpdateKind.XButton1Released or PointerUpdateKind.XButton2Released => WmXButtonUp,
             _ => 0,
         };
+
+    private static bool IsDescendantOrSelf(DependencyObject source, DependencyObject ancestor)
+    {
+        for (DependencyObject? current = source; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (ReferenceEquals(current, ancestor))
+                return true;
+        }
+        return false;
+    }
 
     private static uint PointerButtons(PointerPointProperties properties)
     {
@@ -1093,6 +1405,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         _commandsPanel.CloseRequested += () => SetCommandsPanelOpen(false);
         _commandsPanel.JumpRequested += ScrollToMark;
         _commandsPanel.CopyRequested += markId => { CopyMarkOutput(markId); };
+        _commandsPanel.DesiredHeightChanged += () => UpdateBounds(force: true);
         Children.Add(_commandsPanel);
     }
 
@@ -1123,6 +1436,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
             _marks = _api.GetMarks(_terminal);
             var searchRows = _api.GetSearchRows(_terminal);
             _ruler.UpdateAnnotations(_marks, searchRows, MarkLabel);
+            UpdateJumpHighlightBounds();
             var fingerprint = CommandFingerprint(_marks);
             if (_commandsPanelOpen && fingerprint != _commandsFingerprint)
             {
@@ -1155,6 +1469,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         try
         {
             _api.ScrollToMark(_terminal, markId);
+            ShowJumpHighlight(markId);
             FocusTerminal();
         }
         catch (Exception exception)
@@ -1162,6 +1477,55 @@ public sealed class NativeTerminalSurface : TerminalSurface
             TraceHook?.Invoke($"native mark jump failed: {exception.Message}");
             RefreshAnnotations();
         }
+    }
+
+    private void ShowJumpHighlight(ulong markId)
+    {
+        _jumpHighlightTimer.Stop();
+        _jumpHighlightMarkId = markId;
+        UpdateJumpHighlightBounds();
+    }
+
+    private void UpdateJumpHighlightBounds()
+    {
+        if (_jumpHighlightMarkId == 0
+            || _alternateBufferActive
+            || Rows <= 0
+            || _terminalPanel.ActualHeight <= 0)
+        {
+            _jumpHighlight.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var mark = _marks.FirstOrDefault(item => item.Id == _jumpHighlightMarkId);
+        var visibleRow = mark.Id == 0 ? -1 : mark.Row - _viewTop;
+        if (visibleRow < 0 || visibleRow >= Rows)
+        {
+            _jumpHighlight.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var rowHeight = _terminalPanel.ActualHeight / Rows;
+        _jumpHighlight.Height = Math.Max(1, rowHeight);
+        _jumpHighlight.Margin = new Thickness(
+            _terminalPanel.Margin.Left,
+            _terminalPanel.Margin.Top + visibleRow * rowHeight,
+            _terminalPanel.Margin.Right,
+            0);
+        _jumpHighlight.Visibility = Visibility.Visible;
+        if (!_jumpHighlightTimer.IsRunning)
+            _jumpHighlightTimer.Start();
+    }
+
+    private void OnJumpHighlightTimerTick(
+        Microsoft.UI.Dispatching.DispatcherQueueTimer sender,
+        object args) => ClearJumpHighlight();
+
+    private void ClearJumpHighlight()
+    {
+        _jumpHighlightTimer.Stop();
+        _jumpHighlightMarkId = 0;
+        _jumpHighlight.Visibility = Visibility.Collapsed;
     }
 
     private static ulong CommandFingerprint(IReadOnlyList<NativeTerminalApi.MarkRecord> marks)
@@ -1234,7 +1598,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
     private void BeginPromptDiscovery()
     {
-        if (_terminal == IntPtr.Zero || _api is null || _exactShellMarksSeen || _alternateBufferActive)
+        if (_terminal == IntPtr.Zero || _api is null || _alternateBufferActive)
             return;
         try
         {
@@ -1247,7 +1611,6 @@ public sealed class NativeTerminalSurface : TerminalSurface
             _probeExitCodes.Clear();
             _osc3008Probes.Clear();
             _lastPromptProbeId = probe.Id;
-            var epoch = _titleEpoch;
             var immediate = ParseCommand(probe.Text);
             if (immediate is not null)
             {
@@ -1256,7 +1619,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 CommandObserved?.Invoke(immediate);
                 CommandChanged?.Invoke(immediate);
             }
-            _ = SettlePromptProbeAsync(probe.Id, epoch, cancellation.Token);
+            _ = SettlePromptProbeAsync(probe.Id, cancellation.Token);
         }
         catch (Exception exception)
         {
@@ -1264,17 +1627,17 @@ public sealed class NativeTerminalSurface : TerminalSurface
         }
     }
 
-    private async Task SettlePromptProbeAsync(ulong probeId, long epoch, CancellationToken cancellationToken)
+    private async Task SettlePromptProbeAsync(
+        ulong probeId,
+        CancellationToken cancellationToken)
     {
         for (var attempt = 0; attempt < 2; attempt++)
         {
             try
             {
                 await Task.Delay(attempt == 0 ? 300 : 900, cancellationToken);
-                if (_disposed || _terminal == IntPtr.Zero || _api is null || _exactShellMarksSeen)
+                if (_disposed || _terminal == IntPtr.Zero || _api is null)
                     return;
-                if (epoch != _titleEpoch)
-                    break;
                 var line = _api.GetMarkText(_terminal, probeId, includeOutput: false);
                 var command = ParseCommand(line);
                 if (command is null)
@@ -1316,10 +1679,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         }
         finally
         {
-            if (_promptProbes.Remove(probeId, out var abandonedProbe))
-                abandonedProbe.Dispose();
-            if (_lastPromptProbeId == probeId)
-                _lastPromptProbeId = 0;
+            ForgetPromptProbe(probeId);
         }
     }
 
@@ -1403,6 +1763,23 @@ public sealed class NativeTerminalSurface : TerminalSurface
         _lastPromptProbeId = 0;
     }
 
+    private void ForgetPromptProbe(ulong probeId)
+    {
+        if (_promptProbes.Remove(probeId, out var probe))
+            probe.Dispose();
+        _probeCommands.Remove(probeId);
+        _probeExitCodes.Remove(probeId);
+        foreach (var contextId in _osc3008Probes
+            .Where(entry => entry.Value == probeId)
+            .Select(entry => entry.Key)
+            .ToArray())
+        {
+            _osc3008Probes.Remove(contextId);
+        }
+        if (_lastPromptProbeId == probeId)
+            _lastPromptProbeId = 0;
+    }
+
     private void ObserveOsc3008(string payload)
     {
         var fields = payload.Split(';');
@@ -1418,6 +1795,11 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
         if (action == "start")
         {
+            var type = fields.Skip(1)
+                .Select(field => field.Split('=', 2))
+                .FirstOrDefault(parts => parts.Length == 2 && parts[0] == "type")?[1];
+            if (type != "command")
+                return;
             var probeId = _lastPromptProbeId;
             if (probeId != 0 && (_promptProbes.ContainsKey(probeId) || _probeCommands.ContainsKey(probeId)))
                 _osc3008Probes[id] = probeId;
@@ -1427,6 +1809,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
             return;
 
         int? exitCode = null;
+        string? exitKind = null;
         foreach (var field in fields.Skip(1))
         {
             var split = field.IndexOf('=');
@@ -1434,11 +1817,12 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 continue;
             var key = field[..split];
             var value = field[(split + 1)..];
-            if (key == "status" && int.TryParse(value, out var status))
+            if (key == "status" && int.TryParse(value, out var status) && status is >= 0 and <= 255)
                 exitCode = status;
-            else if (key == "exit" && value == "success")
-                exitCode = 0;
+            else if (key == "exit" && value is "success" or "failure" or "crash" or "interrupt")
+                exitKind = value;
         }
+        exitCode ??= exitKind == "success" ? 0 : exitKind is "failure" or "crash" or "interrupt" ? 1 : null;
         _probeExitCodes[associatedProbe] = exitCode;
         if (_terminal != IntPtr.Zero
             && _api is not null
@@ -1643,9 +2027,12 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
     private void ApplyNativeTheme()
     {
+        var theme = NativeTerminalThemeCatalog.Find(_theme);
+        _commandsPanel.ApplyTheme(theme, _fontFamily);
+        var selection = NativeTerminalRuler.FromColorRef(theme.DefaultSelectionBackground);
+        _jumpHighlightBrush.Color = Windows.UI.Color.FromArgb(0x78, selection.R, selection.G, selection.B);
         if (_terminal == IntPtr.Zero || _api is null)
             return;
-        var theme = NativeTerminalThemeCatalog.Find(_theme);
         _api.SetTheme(
             _terminal,
             theme,
@@ -1710,17 +2097,19 @@ public sealed class NativeTerminalSurface : TerminalSurface
         LayoutUpdated -= OnLayoutUpdated;
         UnregisterPropertyChangedCallback(VisibilityProperty, _visibilityCallbackToken);
         UnsubscribeFromXamlRoot();
+        _jumpHighlightTimer.Stop();
+        _jumpHighlightTimer.Tick -= OnJumpHighlightTimerTick;
         DestroyNativeTerminal();
         PreviewKeyDown -= OnTerminalKeyDown;
         KeyUp -= OnTerminalKeyUp;
         CharacterReceived -= OnTerminalCharacterReceived;
         GotFocus -= OnTerminalGotFocus;
         LostFocus -= OnTerminalLostFocus;
-        _terminalPanel.PointerPressed -= OnPointerPressed;
-        _terminalPanel.PointerReleased -= OnPointerReleased;
-        _terminalPanel.PointerMoved -= OnPointerMoved;
-        _terminalPanel.PointerWheelChanged -= OnPointerWheelChanged;
-        _terminalPanel.PointerExited -= OnPointerExited;
+        _inputPanel.PointerPressed -= OnPointerPressed;
+        _inputPanel.PointerReleased -= OnPointerReleased;
+        _inputPanel.PointerMoved -= OnPointerMoved;
+        _inputPanel.PointerExited -= OnPointerExited;
+        PointerWheelChanged -= OnPointerWheelChanged;
         lock (_outputGate)
         {
             _pendingOutput.SetLength(0);

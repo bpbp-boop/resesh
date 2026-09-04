@@ -39,6 +39,39 @@ if ($actualCommit -ne $manifest.fork.commit) {
     throw "Terminal fork commit $actualCommit does not match $($manifest.fork.commit)."
 }
 
+# A later patch can change context that an earlier patch needs for its reverse check.
+# Build one temporary index with the full expected patch stack, then compare that index
+# with the working tree. This accepts an already-applied stack only when every tracked
+# source file has the exact expected content.
+$patchStackApplied = $false
+$temporaryIndex = [System.IO.Path]::GetTempFileName()
+$priorIndex = $env:GIT_INDEX_FILE
+try {
+    [System.IO.File]::Delete($temporaryIndex)
+    $env:GIT_INDEX_FILE = $temporaryIndex
+    & git -C $ForkPath read-tree HEAD
+    $stackValid = $LASTEXITCODE -eq 0
+    foreach ($patch in $manifest.fork.patches) {
+        if (-not $stackValid) { break }
+        $patchPath = Join-Path $PSScriptRoot $patch.file
+        & git -C $ForkPath apply --cached --ignore-space-change $patchPath
+        $stackValid = $LASTEXITCODE -eq 0
+    }
+    if ($stackValid) {
+        & git -C $ForkPath diff --quiet --ignore-submodules --
+        $patchStackApplied = $LASTEXITCODE -eq 0
+    }
+} finally {
+    if ($null -eq $priorIndex) {
+        Remove-Item Env:GIT_INDEX_FILE -ErrorAction SilentlyContinue
+    } else {
+        $env:GIT_INDEX_FILE = $priorIndex
+    }
+    if ([System.IO.File]::Exists($temporaryIndex)) {
+        [System.IO.File]::Delete($temporaryIndex)
+    }
+}
+
 foreach ($patch in $manifest.fork.patches) {
     $patchPath = Join-Path $PSScriptRoot $patch.file
     if (-not (Test-Path $patchPath)) {
@@ -57,6 +90,10 @@ foreach ($patch in $manifest.fork.patches) {
     }
     if ($actualPatchHash -ne $patch.sha256) {
         throw "Native terminal patch hash $actualPatchHash does not match $($patch.sha256)."
+    }
+
+    if ($patchStackApplied) {
+        continue
     }
 
     $ErrorActionPreference = "Continue"

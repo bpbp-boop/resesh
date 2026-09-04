@@ -17,13 +17,17 @@
       {
         "file": "native-terminal-patches/input-handled.patch",
         "sha256": "d45eec363511335ab562a405df4e0a7ac8b5031f5a391bf6a6cffa81a64d598e"
+      },
+      {
+        "file": "native-terminal-patches/ansi-keyframes.patch",
+        "sha256": "acfd39ce5a8ebf9e566893a543052cf836fa4d34663c2b8a5d83a80fe135beb1"
       }
     ]
   },
   "abi": {
     "major": 2,
-    "minor": 0,
-    "buildId": "terminal-v1.24.11911.0-resesh-abi2.0-composition"
+    "minor": 1,
+    "buildId": "terminal-v1.24.11911.0-resesh-abi2.1-keyframes"
   },
   "supportedArchitectures": [
     "x64",
@@ -43,12 +47,12 @@
   },
   "artifacts": {
     "x64": {
-      "Microsoft.Terminal.Control.dll": "f864e76364c019c56289f5f8c1ad7b5ad20581a1e418c8dab73e08738823efa8",
-      "Microsoft.Terminal.Control.pdb": "341ea18b91c28c4d3faeebbcb9bdc1b1bea6c36025df629e362b76d7b3d66df1"
+      "Microsoft.Terminal.Control.dll": "8115f36ab1e2ac8ed038e95e5ed40dda6789c5264733bf0a085b3813089a9dfa",
+      "Microsoft.Terminal.Control.pdb": "915477aeff5fb8aebe54a343e301a48be5849936bc70ba4daba88197545fcb53"
     },
     "arm64": {
-      "Microsoft.Terminal.Control.dll": "faeed1d554014f26ee2e4760e7dd6fafa0bcf4d7d67514c66e5888b7b6678015",
-      "Microsoft.Terminal.Control.pdb": "bcf4f32702ea7e67638901cb3ccb0a6f6e8053adc1993b0f80e149e40fbce7fa"
+      "Microsoft.Terminal.Control.dll": "53f19464de80aa5c50922d6f6ad0600bbc34bcf94b5a7cc10d54f13557196e50",
+      "Microsoft.Terminal.Control.pdb": "e319f15295ac0480f830f967dd8937ad80a1c36ae94d9cfa1fbd7131b5fcd40c"
     }
   }
 }

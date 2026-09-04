@@ -77,7 +77,7 @@ test("native palettes exactly match the WebView palettes", () => {
 });
 
 test("native font size preserves the WebView CSS-pixel scale", () => {
-  assert.equal([...nativeSurface.matchAll(/ToNativePointSize\(_fontSize\)/g)].length, 2);
+  assert.equal([...nativeSurface.matchAll(/ToNativePointSize\(_fontSize\)/g)].length, 3);
   assert.match(
     nativeSurface,
     /ToNativePointSize\(int cssPixels\)[\s\S]*?\(cssPixels \* 3 \+ 2\) \/ 4/,

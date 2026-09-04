@@ -49,6 +49,7 @@ public sealed class TerminalCapture : IDisposable
     private long _eventBytes;
     private long _keyframeBytes;
     private double _latestTime;
+    private bool _hasCaptureTimestamp;
     private int _currentColumns;
     private int _currentRows;
     private TerminalKeyframe? _anchor;
@@ -260,16 +261,18 @@ public sealed class TerminalCapture : IDisposable
 
     private double ToElapsedLocked(long unixTimeMilliseconds)
     {
-        var elapsed = (unixTimeMilliseconds - StartedAt.ToUnixTimeMilliseconds()) / 1000d;
-        _latestTime = Math.Max(_latestTime, Math.Max(0, elapsed));
+        var elapsed = Math.Max(
+            0,
+            (unixTimeMilliseconds - StartedAt.ToUnixTimeMilliseconds()) / 1000d);
+        if (_hasCaptureTimestamp && elapsed <= _latestTime)
+            elapsed = Math.BitIncrement(_latestTime);
+        _latestTime = elapsed;
+        _hasCaptureTimestamp = true;
         return _latestTime;
     }
 
     private void TrimLocked()
     {
-        if (_events.Count == 0)
-            return;
-
         var cutoff = _latestTime - _maximumAge.TotalSeconds;
         TerminalKeyframe? ageFrame = null;
         foreach (var frame in _keyframes)

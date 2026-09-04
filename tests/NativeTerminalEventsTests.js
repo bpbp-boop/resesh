@@ -48,7 +48,7 @@ assert.match(surface, /case 7377 or 9 or 777 when IsValidOscPayload\(payload, 20
 assert.match(surface, /new UTF8Encoding\(false, false\)\.GetDecoder\(\)/,
   "one persistent decoder must preserve UTF-8 split across backend reads");
 assert.match(surface, /_outputDecoder\.GetChars\([\s\S]*?flush:\s*false\)/);
-assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) =>[\s\S]*?_titleEpoch\+\+;[\s\S]*?TitleChanged\?\.Invoke/,
+assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) =>[\s\S]*?TitleChanged\?\.Invoke/,
   "native callbacks must queue application state changes");
 assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) => WorkingDirectoryReported\?\.Invoke/);
 assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) => AgentOscReceived\?\.Invoke/);
@@ -57,8 +57,10 @@ assert.match(api, /ReseshTerminalClearSearch/);
 assert.match(api, /ReseshTerminalGetSearchState/);
 assert.match(surface, /NativeTerminalFindInput/);
 assert.match(surface, /case NativeTerminalApi\.NativeEventType\.OpenLink:[\s\S]*?TerminalLinkPolicy\.Open/);
-assert.match(surface, /_terminalPanel\.Margin = new Thickness\(0, findHeight, chromeWidth, 0\)/,
-  "the find row and side chrome must reduce the composition surface bounds");
+assert.match(surface, /_terminalPanel\.Margin = new Thickness\(0, findHeight, rulerWidth, 0\)/,
+  "the find row and ruler must reduce the composition surface bounds");
+assert.match(surface, /_inputPanel\.Margin = _terminalPanel\.Margin/,
+  "the transparent input layer must follow the composition surface bounds");
 
 for (const name of [
   "OSC 7 working-directory event",

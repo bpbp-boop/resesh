@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "fixture": "tests/Fixtures/Terminal/vt-parity.json",
   "statusValues": ["pass", "partial", "missing", "not-applicable"],
-  "evidence": "Phase 0 fixtures plus Phase 2 settings, Phase 3 typed events, Phase 4 search and links, and Phase 5 native ABI and UI verification",
+  "evidence": "Phase 0 fixtures plus Phase 2 settings, Phase 3 typed events, Phase 4 search and links, Phase 5 native ABI and UI verification, and Phase 6 bounded native rewind",
   "capabilities": [
     { "capability": "normal buffer rendering", "webView": "pass", "native": "pass" },
     { "capability": "alternate buffer rendering", "webView": "pass", "native": "pass" },
@@ -25,7 +25,8 @@
     { "capability": "normal and bracketed paste filtering", "webView": "pass", "native": "pass" },
     { "capability": "configured scrollback at terminal creation", "webView": "pass", "native": "pass" },
     { "capability": "stable terminal theme palettes", "webView": "pass", "native": "pass" },
-    { "capability": "bounded instant rewind", "webView": "pass", "native": "not-applicable", "note": "Phase 0 disables native in-memory rewind until native keyframes exist; disk recording remains available." },
+    { "capability": "bounded instant rewind", "webView": "pass", "native": "pass", "note": "Versioned ANSI keyframes use the 10-second or 1-MiB capture policy and the shared 30-minute or 32-MiB bounds." },
+    { "capability": "asciicast playback", "webView": "pass", "native": "pass", "note": "Native playback builds periodic seek keyframes once and restores from the nearest frame." },
     { "capability": "local ConPTY transport", "webView": "pass", "native": "pass" },
     { "capability": "SSH.NET transport", "webView": "pass", "native": "pass" },
     { "capability": "input, focus, resize, DPI, split visibility, and teardown", "webView": "pass", "native": "pass" }

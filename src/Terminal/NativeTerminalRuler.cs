@@ -21,6 +21,14 @@ internal sealed class NativeTerminalRuler : Grid
 
     private readonly ScrollBar _scrollBar = new();
     private readonly Canvas _annotations = new() { IsHitTestVisible = false };
+    private readonly Canvas _markTipLayer = new() { IsHitTestVisible = false };
+    private readonly Border _markTipAnchor = new()
+    {
+        Width = GutterWidth,
+        Height = TickHeight,
+        Background = new SolidColorBrush(Colors.Transparent),
+        IsHitTestVisible = false,
+    };
     private readonly Border _annotationInput = new()
     {
         Width = GutterWidth,
@@ -31,7 +39,7 @@ internal sealed class NativeTerminalRuler : Grid
     private readonly TeachingTip _markTip = new()
     {
         PreferredPlacement = TeachingTipPlacementMode.Left,
-        IsLightDismissEnabled = true,
+        IsLightDismissEnabled = false,
         ShouldConstrainToRootBounds = true,
     };
     private readonly TextBlock _markTitle = new()
@@ -53,6 +61,7 @@ internal sealed class NativeTerminalRuler : Grid
     private IReadOnlyList<int> _searchRows = [];
     private Func<ulong, string>? _markLabel;
     private ulong _activeMarkId;
+    private ulong _pendingMarkTipId;
     private int _viewTop;
     private int _viewportHeight = 1;
     private int _bufferHeight = 1;
@@ -61,6 +70,8 @@ internal sealed class NativeTerminalRuler : Grid
     private bool _isGroupFocused = true;
     private bool _paintPending;
     private bool _updatingFromTerminal;
+    private bool _markTipClosing;
+    private double _wheelDelta;
 
     internal event Action<int>? ScrollRequested;
     internal event Action<ulong>? MarkRequested;
@@ -68,7 +79,7 @@ internal sealed class NativeTerminalRuler : Grid
 
     internal NativeTerminalRuler()
     {
-        _markTip.Target = _annotationInput;
+        _markTip.Target = _markTipAnchor;
         _markTip.Content = new StackPanel
         {
             Children =
@@ -96,6 +107,11 @@ internal sealed class NativeTerminalRuler : Grid
                 CopyRequested?.Invoke(_activeMarkId);
             CloseMarkPreview();
         };
+        _markTip.Closed += (_, _) =>
+        {
+            _markTipClosing = false;
+            QueueOpenMarkPreview();
+        };
         Width = RulerWidth;
         HorizontalAlignment = HorizontalAlignment.Right;
         VerticalAlignment = VerticalAlignment.Stretch;
@@ -122,9 +138,15 @@ internal sealed class NativeTerminalRuler : Grid
         _annotations.HorizontalAlignment = HorizontalAlignment.Left;
         _annotations.VerticalAlignment = VerticalAlignment.Stretch;
         Grid.SetColumn(_annotations, 0);
+        _markTipLayer.Width = GutterWidth;
+        _markTipLayer.HorizontalAlignment = HorizontalAlignment.Left;
+        _markTipLayer.VerticalAlignment = VerticalAlignment.Stretch;
+        _markTipLayer.Children.Add(_markTipAnchor);
+        Grid.SetColumn(_markTipLayer, 0);
         Grid.SetColumn(_annotationInput, 0);
         AutomationProperties.SetAutomationId(_annotationInput, "NativeTerminalAnnotations");
         AutomationProperties.SetName(_annotationInput, "Terminal annotations");
+        AutomationProperties.SetAutomationId(_markTipAnchor, "NativeTerminalMarkTipAnchor");
 
         _annotationInput.AddHandler(PointerMovedEvent, new PointerEventHandler(OnPointerMoved), handledEventsToo: true);
         _annotationInput.AddHandler(PointerExitedEvent, new PointerEventHandler(OnPointerExited), handledEventsToo: true);
@@ -134,6 +156,7 @@ internal sealed class NativeTerminalRuler : Grid
         Children.Add(_annotations);
         Children.Add(_annotationInput);
         Children.Add(_scrollBar);
+        Children.Add(_markTipLayer);
         Children.Add(_markTip);
         SizeChanged += (_, _) => QueuePaint();
     }
@@ -147,22 +170,6 @@ internal sealed class NativeTerminalRuler : Grid
         if (alternateBuffer)
             CloseMarkPreview();
 
-        var maximum = Math.Max(0, _bufferHeight - _viewportHeight);
-        _updatingFromTerminal = true;
-        try
-        {
-            _scrollBar.Minimum = 0;
-            _scrollBar.Maximum = maximum;
-            _scrollBar.Value = Math.Min(_viewTop, maximum);
-            _scrollBar.ViewportSize = _viewportHeight;
-            _scrollBar.LargeChange = Math.Max(1, _viewportHeight);
-            _scrollBar.IsEnabled = maximum > 0 && !alternateBuffer;
-        }
-        finally
-        {
-            _updatingFromTerminal = false;
-        }
-
         if (_pendingScrolls.Any(scroll => scroll.Target == _viewTop))
         {
             while (_pendingScrolls.Count > 0)
@@ -172,6 +179,24 @@ internal sealed class NativeTerminalRuler : Grid
                     break;
             }
         }
+
+        var maximum = Math.Max(0, _bufferHeight - _viewportHeight);
+        var displayedTop = _pendingScrolls.Count > 0 ? _pendingScrolls.Last().Target : _viewTop;
+        _updatingFromTerminal = true;
+        try
+        {
+            _scrollBar.Minimum = 0;
+            _scrollBar.Maximum = maximum;
+            _scrollBar.Value = Math.Min(displayedTop, maximum);
+            _scrollBar.ViewportSize = _viewportHeight;
+            _scrollBar.LargeChange = Math.Max(1, _viewportHeight);
+            _scrollBar.IsEnabled = maximum > 0 && !alternateBuffer;
+        }
+        finally
+        {
+            _updatingFromTerminal = false;
+        }
+
         QueuePaint();
     }
 
@@ -223,15 +248,43 @@ internal sealed class NativeTerminalRuler : Grid
         _marks.FirstOrDefault(mark => mark.Kind == NativeTerminalApi.MarkKind.Bookmark && mark.Row == row) is var mark
             && mark.Id != 0 ? mark : null;
 
+    internal bool ScrollByWheelDelta(int delta)
+    {
+        if (!_scrollBar.IsEnabled || delta == 0)
+            return false;
+
+        _wheelDelta += delta;
+        var wheelSteps = (int)(_wheelDelta / 120);
+        if (wheelSteps == 0)
+            return true;
+
+        _wheelDelta -= wheelSteps * 120;
+        var current = _pendingScrolls.Count > 0 ? _pendingScrolls.Last().Target : _viewTop;
+        QueueScroll(current - wheelSteps * 3);
+        return true;
+    }
+
+    internal void DismissMarkPreview() => CloseMarkPreview();
+
     private int QueueScroll(double requestedOffset)
     {
         var maximum = Math.Max(0, _bufferHeight - _viewportHeight);
         var target = Math.Clamp((int)Math.Round(requestedOffset), 0, maximum);
-        if (target == _viewTop)
+        var currentTarget = _pendingScrolls.Count > 0 ? _pendingScrolls.Last().Target : _viewTop;
+        if (target == currentTarget)
             return -1;
         _nextCorrelationId = _nextCorrelationId == int.MaxValue ? 0 : _nextCorrelationId + 1;
         var correlationId = _nextCorrelationId;
         _pendingScrolls.Enqueue((correlationId, target));
+        _updatingFromTerminal = true;
+        try
+        {
+            _scrollBar.Value = target;
+        }
+        finally
+        {
+            _updatingFromTerminal = false;
+        }
         ScrollRequested?.Invoke(target);
         return correlationId;
     }
@@ -276,7 +329,7 @@ internal sealed class NativeTerminalRuler : Grid
 
     private void OnPointerExited(object sender, PointerRoutedEventArgs e)
     {
-        // TeachingTip owns light-dismiss once the pointer leaves the annotation gutter.
+        // Keep the preview open so its actions remain reachable. A terminal click closes it.
     }
 
     private bool TryGetRow(double pointerY, out int row, out int rowTolerance)
@@ -332,12 +385,46 @@ internal sealed class NativeTerminalRuler : Grid
 
     private void ShowMarkPreview(NativeTerminalApi.MarkRecord mark)
     {
+        if (_activeMarkId == mark.Id && (_markTip.IsOpen || _pendingMarkTipId == mark.Id))
+            return;
+
         _activeMarkId = mark.Id;
+        var railHeight = ActualHeight - RailInset * 2;
+        if (railHeight > 0)
+            Canvas.SetTop(_markTipAnchor, MarkTop(mark.Row, railHeight));
         var (title, metadata, canCopy) = DescribeMark(mark);
         _markTitle.Text = title;
         _markMetadata.Text = metadata;
         _copyButton.Visibility = canCopy ? Visibility.Visible : Visibility.Collapsed;
-        _markTip.IsOpen = true;
+        _pendingMarkTipId = mark.Id;
+
+        if (_markTip.IsOpen)
+        {
+            _markTipClosing = true;
+            _markTip.IsOpen = false;
+            return;
+        }
+        if (_markTipClosing)
+            return;
+
+        QueueOpenMarkPreview();
+    }
+
+    private void QueueOpenMarkPreview()
+    {
+        var markId = _pendingMarkTipId;
+        if (markId == 0 || _markTipClosing)
+            return;
+
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_activeMarkId != markId || _pendingMarkTipId != markId || _markTipClosing)
+                return;
+            _markTipLayer.UpdateLayout();
+            _markTip.Target = _markTipAnchor;
+            _pendingMarkTipId = 0;
+            _markTip.IsOpen = true;
+        });
     }
 
     private void ScheduleCloseMarkPreview()
@@ -348,8 +435,13 @@ internal sealed class NativeTerminalRuler : Grid
 
     private void CloseMarkPreview()
     {
-        _markTip.IsOpen = false;
+        _pendingMarkTipId = 0;
         _activeMarkId = 0;
+        if (_markTip.IsOpen)
+        {
+            _markTipClosing = true;
+            _markTip.IsOpen = false;
+        }
     }
 
 
@@ -395,10 +487,7 @@ internal sealed class NativeTerminalRuler : Grid
         HashSet<(int Lane, int Bucket, uint Color)> buckets,
         double railHeight)
     {
-        var bucket = Math.Clamp(
-            (int)Math.Round(row / (double)Math.Max(1, _bufferHeight) * railHeight / TickHeight),
-            0,
-            Math.Max(0, (int)(railHeight / TickHeight) - 1));
+        var bucket = MarkBucket(row, railHeight);
         if (!buckets.Add((lane, bucket, colorRef)))
             return;
 
@@ -414,6 +503,13 @@ internal sealed class NativeTerminalRuler : Grid
         Canvas.SetTop(rectangle, RailInset + bucket * TickHeight);
         _annotations.Children.Add(rectangle);
     }
+
+    private int MarkBucket(int row, double railHeight) => Math.Clamp(
+        (int)Math.Round(row / (double)Math.Max(1, _bufferHeight) * railHeight / TickHeight),
+        0,
+        Math.Max(0, (int)(railHeight / TickHeight) - 1));
+
+    private double MarkTop(int row, double railHeight) => RailInset + MarkBucket(row, railHeight) * TickHeight;
 
     private static Brush GetThemeBrush(string key, Brush? fallback = null) =>
         Application.Current.Resources.TryGetValue(key, out var value) && value is Brush brush

@@ -98,7 +98,7 @@ public static class TerminalSurfaceFactory
 {
     public const string SurfaceEnvironmentVariable = "RESESH_TERMINAL_SURFACE";
 
-    /// <summary>Creates the live surface. Playback stays on xterm.js because it requires serialization.</summary>
+    /// <summary>Creates the selected live terminal surface.</summary>
     public static TerminalSurface CreateLive() =>
         string.Equals(
             Environment.GetEnvironmentVariable(SurfaceEnvironmentVariable),
@@ -106,4 +106,7 @@ public static class TerminalSurfaceFactory
             StringComparison.OrdinalIgnoreCase)
             ? new NativeTerminalSurface()
             : new TerminalControl();
+
+    /// <summary>Uses the selected renderer for read-only rewind and recording playback.</summary>
+    public static TerminalSurface CreatePlayback() => CreateLive();
 }

@@ -1,0 +1,775 @@
+diff --git a/src/buffer/out/textBuffer.cpp b/src/buffer/out/textBuffer.cpp
+index 6f0336e8..f132f40e 100644
+--- a/src/buffer/out/textBuffer.cpp
++++ b/src/buffer/out/textBuffer.cpp
+@@ -2628,15 +2628,33 @@ void TextBuffer::_AppendRTFText(std::string& contentBuilder, const std::wstring_
+     }
+ }
+ 
+-void TextBuffer::SerializeToPath(const wchar_t* destination) const
+-{
+-    const wil::unique_handle file{ CreateFileW(destination, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr) };
+-    THROW_LAST_ERROR_IF(!file);
+-
+-    static constexpr size_t writeThreshold = 32 * 1024;
+-    std::wstring buffer;
+-    buffer.reserve(writeThreshold + writeThreshold / 2);
+-    buffer.push_back(L'\uFEFF');
++void TextBuffer::SerializeToPath(const wchar_t* destination) const
++{
++    const wil::unique_handle file{ CreateFileW(destination, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr) };
++    THROW_LAST_ERROR_IF(!file);
++
++    SerializeTo([&](const std::wstring_view chunk) {
++        const auto fileSize = gsl::narrow<DWORD>(chunk.size() * sizeof(wchar_t));
++        DWORD bytesWritten = 0;
++        THROW_IF_WIN32_BOOL_FALSE(WriteFile(file.get(), chunk.data(), fileSize, &bytesWritten, nullptr));
++        THROW_WIN32_IF_MSG(ERROR_WRITE_FAULT, bytesWritten != fileSize, "failed to write");
++    });
++}
++
++void TextBuffer::SerializeTo(std::wstring& destination) const
++{
++    destination.clear();
++    SerializeTo([&](const std::wstring_view chunk) {
++        destination.append(chunk);
++    });
++}
++
++void TextBuffer::SerializeTo(const std::function<void(std::wstring_view)>& sink) const
++{
++    std::wstring buffer;
++    static constexpr size_t writeThreshold = 32 * 1024;
++    buffer.reserve(writeThreshold + writeThreshold / 2);
++    buffer.push_back(L'\uFEFF');
+ 
+     std::optional<TextAttribute> previousTextAttr;
+     bool delayedLineBreak = false;
+@@ -2657,14 +2675,11 @@ void TextBuffer::SerializeToPath(const wchar_t* destination) const
+ 
+         _SerializeRow(row, startX, endX, addLineBreak, isLastRow, buffer, previousTextAttr, delayedLineBreak);
+ 
+-        if (buffer.size() >= writeThreshold || isLastRow)
+-        {
+-            const auto fileSize = gsl::narrow<DWORD>(buffer.size() * sizeof(wchar_t));
+-            DWORD bytesWritten = 0;
+-            THROW_IF_WIN32_BOOL_FALSE(WriteFile(file.get(), buffer.data(), fileSize, &bytesWritten, nullptr));
+-            THROW_WIN32_IF_MSG(ERROR_WRITE_FAULT, bytesWritten != fileSize, "failed to write");
+-            buffer.clear();
+-        }
++        if (buffer.size() >= writeThreshold || isLastRow)
++        {
++            sink(buffer);
++            buffer.clear();
++        }
+ 
+         if (isLastRow)
+         {
+diff --git a/src/buffer/out/textBuffer.hpp b/src/buffer/out/textBuffer.hpp
+index fca973f5..b3d5a985 100644
+--- a/src/buffer/out/textBuffer.hpp
++++ b/src/buffer/out/textBuffer.hpp
+@@ -288,7 +288,9 @@ public:
+                        const bool isIntenseBold,
+                        std::function<std::tuple<COLORREF, COLORREF, COLORREF>(const TextAttribute&)> GetAttributeColors) const noexcept;
+ 
+-    void SerializeToPath(const wchar_t* destination) const;
++    void SerializeToPath(const wchar_t* destination) const;
++    void SerializeTo(std::wstring& destination) const;
++    void SerializeTo(const std::function<void(std::wstring_view)>& sink) const;
+ 
+     struct PositionInformation
+     {
+diff --git a/src/cascadia/TerminalControl/HwndTerminal.cpp b/src/cascadia/TerminalControl/HwndTerminal.cpp
+index 3c78b487..0e26f57b 100644
+--- a/src/cascadia/TerminalControl/HwndTerminal.cpp
++++ b/src/cascadia/TerminalControl/HwndTerminal.cpp
+@@ -600,7 +600,7 @@ HRESULT HwndTerminal::Refresh(const til::size windowSize, _Out_ til::size* dimen
+     return S_OK;
+ }
+ 
+-void HwndTerminal::SendOutput(std::wstring_view data)
++void HwndTerminal::SendOutput(std::wstring_view data)
+ {
+     if (!_terminal)
+     {
+@@ -1725,14 +1725,73 @@ try
+         const auto lock = _terminal->LockForReading();
+         out = _terminal->SendKeyEvent(vkey, scanCode, modifiers, keyDown);
+     }
+-    if (out)
+-    {
+-        _WriteTextToConnection(*out);
++    if (out)
++    {
++        _WriteTextToConnection(*out);
+         return true;
+-    }
++    }
+     return false;
+-}
++}
++
+ CATCH_LOG_RETURN_FALSE();
++
++HwndTerminalSnapshot HwndTerminal::CaptureSnapshot() const
++{
++    if (!_terminal)
++    {
++        return {};
++    }
++
++    std::unique_ptr<TextBuffer> bufferCopy;
++    HwndTerminalSnapshot snapshot;
++    {
++        const auto lock = _terminal->LockForReading();
++        const auto& source = _terminal->GetTextBuffer();
++        const auto size = source.GetSize().Dimensions();
++        bufferCopy = std::make_unique<TextBuffer>(size, source.GetCurrentAttributes(), 25, false, nullptr);
++        bufferCopy->CopyProperties(source);
++        for (til::CoordType row = 0; row < size.height; ++row)
++        {
++            source.CopyRow(row, row, *bufferCopy);
++        }
++        bufferCopy->CopyHyperlinkMaps(source);
++
++        snapshot.Size = _terminal->GetViewport().Dimensions();
++        const auto cursor = _terminal->GetCursorPosition();
++        snapshot.Cursor = { cursor.x, cursor.y - _terminal->ViewStartIndex() };
++        snapshot.CursorVisible = source.GetCursor().IsVisible();
++        snapshot.ViewportTop = _terminal->GetScrollOffset();
++        snapshot.ViewportHeight = _terminal->GetViewport().Height();
++        snapshot.ScrollOffset = _terminal->ViewStartIndex() - snapshot.ViewportTop;
++        snapshot.AlternateBuffer = _terminal->IsAlternateBufferActive();
++    }
++
++    bufferCopy->SerializeTo(snapshot.Ansi);
++    if (!snapshot.Ansi.empty() && snapshot.Ansi.front() == L'\uFEFF')
++    {
++        snapshot.Ansi.erase(snapshot.Ansi.begin());
++    }
++
++    const auto cursorRow = std::clamp(snapshot.Cursor.y, 0, std::max(0, snapshot.ViewportHeight - 1));
++    fmt::format_to(
++        std::back_inserter(snapshot.Ansi),
++        FMT_COMPILE(L"\x1b[{};{}H\x1b[?25{}"),
++        cursorRow + 1,
++        snapshot.Cursor.x + 1,
++        snapshot.CursorVisible ? L'h' : L'l');
++    return snapshot;
++}
++
++HRESULT HwndTerminal::ResizeCharacters(const til::size dimensions)
++{
++    RETURN_HR_IF(E_INVALIDARG, dimensions.width <= 0 || dimensions.height <= 0);
++    RETURN_HR_IF_NULL(E_NOT_VALID_STATE, _terminal);
++    const auto lock = _terminal->LockForWriting();
++    RETURN_IF_FAILED(_terminal->UserResize(dimensions));
++    _terminal->UpdatePatternsUnderLock();
++    _renderer->TriggerRedrawAll();
++    return S_OK;
++}
+ 
+ void HwndTerminal::_SendCharEvent(wchar_t ch, WORD scanCode, WORD flags) noexcept
+ try
+@@ -1783,7 +1842,7 @@ try
+ {
+     const auto publicTerminal = static_cast<HwndTerminal*>(terminal);
+     return publicTerminal->_SendKeyEvent(vkey, scanCode, flags, keyDown);
+-}
++}
+ CATCH_LOG_RETURN_FALSE()
+ 
+ void _stdcall TerminalSendCharEvent(void* terminal, wchar_t ch, WORD scanCode, WORD flags)
+diff --git a/src/cascadia/TerminalControl/HwndTerminal.hpp b/src/cascadia/TerminalControl/HwndTerminal.hpp
+index 57d667cf..da8fde88 100644
+--- a/src/cascadia/TerminalControl/HwndTerminal.hpp
++++ b/src/cascadia/TerminalControl/HwndTerminal.hpp
+@@ -105,12 +105,24 @@ struct HwndTerminalPromptProbe
+     std::wstring Text;
+ };
+ 
+-struct HwndTerminalApplicationMark
++struct HwndTerminalApplicationMark
+ {
+     std::wstring Command;
+     til::point CommandStart{};
+     til::point CommandEnd{};
+-};
++};
++
++struct HwndTerminalSnapshot
++{
++    std::wstring Ansi;
++    til::size Size{};
++    til::point Cursor{};
++    int32_t ViewportTop{};
++    int32_t ViewportHeight{};
++    int32_t ScrollOffset{};
++    bool CursorVisible{};
++    bool AlternateBuffer{};
++};
+ 
+ extern "C" {
+ __declspec(dllexport) void _stdcall AvoidBuggyTSFConsoleFlags();
+@@ -184,7 +196,9 @@ public:
+     bool DiscardPromptProbe(uint64_t id);
+     uint64_t AddBookmark(int32_t row, std::optional<til::color> color);
+     bool RemoveBookmark(uint64_t id);
+-    void ClearBookmarks();
++    void ClearBookmarks();
++    HwndTerminalSnapshot CaptureSnapshot() const;
++    HRESULT ResizeCharacters(til::size dimensions);
+     uint64_t MarkGeneration() const noexcept;
+     bool CopySelection(bool clearSelection);
+     void PasteText(std::wstring_view text);
+diff --git a/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp b/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
+index 4f546925..eceacf62 100644
+--- a/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
++++ b/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
+@@ -16,11 +16,12 @@
+ namespace
+ {
+     thread_local ReseshTerminalHandle callbackHandle{};
+-    constexpr wchar_t BuildId[]{ L"terminal-v1.24.11911.0-resesh-abi2.0-composition" };
++    constexpr wchar_t BuildId[]{ L"terminal-v1.24.11911.0-resesh-abi2.1-keyframes" };
+     constexpr size_t MaximumQueuedEventUnits = 16 * 1024 * 1024;
+     constexpr uint32_t MaximumOutputCharacters = 16 * 1024 * 1024;
+     constexpr uint32_t MaximumSearchCharacters = 1024 * 1024;
+-    constexpr uint32_t MaximumClipboardCharacters = 4 * 1024 * 1024;
++    constexpr uint32_t MaximumClipboardCharacters = 4 * 1024 * 1024;
++    constexpr uint32_t MaximumSnapshotCharacters = 32 * 1024 * 1024;
+     constexpr uint32_t MaximumFontFamilyCharacters = 1024;
+     constexpr uint32_t MaximumWordDelimiterCharacters = 4096;
+     constexpr int32_t MaximumHistorySize = 1'000'000;
+@@ -52,8 +53,22 @@ namespace
+         uint64_t nextSequence{ 1 };
+         ReseshTerminalEventCallback callback{};
+         void* callbackContext{};
+-        uint32_t callbacksInProgress{};
+-        bool destroying{};
++        uint32_t callbacksInProgress{};
++        bool destroying{};
++        std::wstring title;
++        std::wstring workingDirectory;
++
++        void SetTitle(const std::wstring_view value)
++        {
++            const std::scoped_lock lock{ eventMutex };
++            title.assign(value);
++        }
++
++        void SetWorkingDirectory(const std::wstring_view value)
++        {
++            const std::scoped_lock lock{ eventMutex };
++            workingDirectory.assign(value);
++        }
+ 
+         void QueueEvent(
+             const uint32_t type,
+@@ -326,9 +341,9 @@ try
+     });
+     state->terminal->RegisterClipboardCallback(
+         [weakState](const std::wstring_view text, const std::string_view html, const std::string_view rtf) {
+-            if (const auto locked = weakState.lock())
+-            {
+-                locked->QueueEvent(
++            if (const auto locked = weakState.lock())
++            {
++                locked->QueueEvent(
+                     ReseshTerminalEventTypeClipboardCopy,
+                     std::wstring{ text },
+                     std::string{ html },
+@@ -341,16 +356,18 @@ try
+             locked->QueueEvent(ReseshTerminalEventTypeClipboardPasteRequest);
+         }
+     });
+-    state->terminal->RegisterTitleChangedCallback([weakState](const std::wstring_view title) {
+-        if (const auto locked = weakState.lock())
+-        {
+-            locked->QueueEvent(ReseshTerminalEventTypeTitleChanged, std::wstring{ title });
++    state->terminal->RegisterTitleChangedCallback([weakState](const std::wstring_view title) {
++        if (const auto locked = weakState.lock())
++        {
++            locked->SetTitle(title);
++            locked->QueueEvent(ReseshTerminalEventTypeTitleChanged, std::wstring{ title });
+         }
+     });
+-    state->terminal->RegisterWorkingDirectoryChangedCallback([weakState](const std::wstring_view uri) {
+-        if (const auto locked = weakState.lock())
+-        {
+-            locked->QueueEvent(ReseshTerminalEventTypeWorkingDirectoryChanged, std::wstring{ uri });
++    state->terminal->RegisterWorkingDirectoryChangedCallback([weakState](const std::wstring_view uri) {
++        if (const auto locked = weakState.lock())
++        {
++            locked->SetWorkingDirectory(uri);
++            locked->QueueEvent(ReseshTerminalEventTypeWorkingDirectoryChanged, std::wstring{ uri });
+         }
+     });
+     state->terminal->RegisterBellCallback([weakState]() {
+@@ -394,12 +411,16 @@ try
+                 gsl::narrow_cast<int64_t>(mode));
+         }
+     });
+-    state->terminal->RegisterOscDispatchCallback([weakState](const size_t code, const std::wstring_view payload) {
+-        if (code <= gsl::narrow_cast<size_t>(INT64_MAX))
+-        {
+-            if (const auto locked = weakState.lock())
+-            {
+-                locked->QueueEvent(
++    state->terminal->RegisterOscDispatchCallback([weakState](const size_t code, const std::wstring_view payload) {
++        if (code <= gsl::narrow_cast<size_t>(INT64_MAX))
++        {
++            if (const auto locked = weakState.lock())
++            {
++                if (code == 7)
++                {
++                    locked->SetWorkingDirectory(payload);
++                }
++                locked->QueueEvent(
+                     ReseshTerminalEventTypeOscObserved,
+                     std::wstring{ payload },
+                     {},
+@@ -522,19 +543,19 @@ CATCH_RETURN()
+ HRESULT __stdcall ReseshTerminalSendKeyEvent(
+     const ReseshTerminalHandle terminal,
+     const uint16_t virtualKey,
+-    const uint16_t scanCode,
+-    const uint16_t flags,
++    const uint16_t scanCode,
++    const uint16_t flags,
+     const uint8_t keyDown,
+     uint8_t* handled)
+-try
+-{
++try
++{
+     RETURN_HR_IF(E_POINTER, !handled);
+     *handled = 0;
+-    return WithTerminal(terminal, [&](TerminalState& state) {
++    return WithTerminal(terminal, [&](TerminalState& state) {
+         *handled = TerminalSendKeyEvent(state.terminal, virtualKey, scanCode, flags, keyDown != 0) ? 1 : 0;
+-        return S_OK;
+-    });
+-}
++        return S_OK;
++    });
++}
+ CATCH_RETURN()
+ 
+ HRESULT __stdcall ReseshTerminalSendCharEvent(
+@@ -602,9 +623,22 @@ try
+         return S_OK;
+     });
+ }
+-CATCH_RETURN()
+-
+-HRESULT __stdcall ReseshTerminalAttachSwapChainPanel(
++CATCH_RETURN()
++
++HRESULT __stdcall ReseshTerminalResizeCharacters(
++    const ReseshTerminalHandle terminal,
++    const int32_t columns,
++    const int32_t rows)
++try
++{
++    RETURN_HR_IF(E_INVALIDARG, columns <= 0 || columns > SHRT_MAX || rows <= 0 || rows > SHRT_MAX);
++    return WithTerminal(terminal, [&](TerminalState& state) {
++        return state.terminal->ResizeCharacters({ columns, rows });
++    });
++}
++CATCH_RETURN()
++
++HRESULT __stdcall ReseshTerminalAttachSwapChainPanel(
+     const ReseshTerminalHandle terminal,
+     IUnknown* const panel)
+ try
+@@ -1028,12 +1062,82 @@ try
+ }
+ CATCH_RETURN()
+ 
+-HRESULT __stdcall ReseshTerminalClearBookmarks(const ReseshTerminalHandle terminal)
+-try
++HRESULT __stdcall ReseshTerminalClearBookmarks(const ReseshTerminalHandle terminal)
++try
+ {
+     return WithTerminal(terminal, [&](TerminalState& state) {
+         state.terminal->ClearBookmarks();
+         return S_OK;
+     });
+-}
+-CATCH_RETURN()
++}
++CATCH_RETURN()
++
++HRESULT __stdcall ReseshTerminalCaptureSnapshot(
++    const ReseshTerminalHandle terminal,
++    ReseshTerminalSnapshot* const snapshot,
++    wchar_t* const payload,
++    const uint32_t capacity,
++    uint32_t* const requiredCapacity)
++try
++{
++    RETURN_HR_IF_NULL(E_INVALIDARG, snapshot);
++    RETURN_HR_IF_NULL(E_INVALIDARG, requiredCapacity);
++    RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH),
++                 !IsCompatible(snapshot->structSize, snapshot->abiMajor, sizeof(ReseshTerminalSnapshot)));
++
++    return WithTerminal(terminal, [&](TerminalState& state) {
++        auto terminalSnapshot = state.terminal->CaptureSnapshot();
++        std::wstring title;
++        std::wstring workingDirectory;
++        uint64_t captureSequence;
++        {
++            const std::scoped_lock lock{ state.eventMutex };
++            title = state.title;
++            workingDirectory = state.workingDirectory;
++            captureSequence = state.nextSequence - 1;
++        }
++
++        const auto required64 = terminalSnapshot.Ansi.size() + title.size() + workingDirectory.size();
++        RETURN_HR_IF(E_OUTOFMEMORY, required64 > MaximumSnapshotCharacters);
++        const auto required = gsl::narrow<uint32_t>(required64);
++        *requiredCapacity = required;
++
++        const auto ansiLength = gsl::narrow<uint32_t>(terminalSnapshot.Ansi.size());
++        const auto titleLength = gsl::narrow<uint32_t>(title.size());
++        const auto workingDirectoryLength = gsl::narrow<uint32_t>(workingDirectory.size());
++        const auto unixTime = std::chrono::duration_cast<std::chrono::milliseconds>(
++                                  std::chrono::system_clock::now().time_since_epoch())
++                                  .count();
++        *snapshot = {
++            sizeof(ReseshTerminalSnapshot),
++            RESESH_TERMINAL_ABI_MAJOR,
++            RESESH_TERMINAL_ABI_MINOR,
++            1,
++            (terminalSnapshot.CursorVisible ? ReseshTerminalSnapshotCursorVisible : 0u) |
++                (terminalSnapshot.AlternateBuffer ? ReseshTerminalSnapshotAlternateBuffer : 0u),
++            terminalSnapshot.Size.width,
++            terminalSnapshot.ViewportHeight,
++            terminalSnapshot.Cursor.x,
++            terminalSnapshot.Cursor.y,
++            terminalSnapshot.ViewportTop,
++            terminalSnapshot.ViewportHeight,
++            terminalSnapshot.ScrollOffset,
++            captureSequence,
++            unixTime,
++            0,
++            ansiLength,
++            ansiLength,
++            titleLength,
++            ansiLength + titleLength,
++            workingDirectoryLength,
++        };
++
++        RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER), capacity < required || (required > 0 && !payload));
++        auto output = payload;
++        output = std::copy(terminalSnapshot.Ansi.begin(), terminalSnapshot.Ansi.end(), output);
++        output = std::copy(title.begin(), title.end(), output);
++        std::copy(workingDirectory.begin(), workingDirectory.end(), output);
++        return S_OK;
++    });
++}
++CATCH_RETURN()
+diff --git a/src/cascadia/TerminalControl/ReseshTerminalAbi.h b/src/cascadia/TerminalControl/ReseshTerminalAbi.h
+index 86156fe2..07f89b65 100644
+--- a/src/cascadia/TerminalControl/ReseshTerminalAbi.h
++++ b/src/cascadia/TerminalControl/ReseshTerminalAbi.h
+@@ -7,7 +7,7 @@
+ #include <windows.h>
+ 
+ #define RESESH_TERMINAL_ABI_MAJOR 2u
+-#define RESESH_TERMINAL_ABI_MINOR 0u
++#define RESESH_TERMINAL_ABI_MINOR 1u
+ #define RESESH_TERMINAL_ABI_VERSION ((RESESH_TERMINAL_ABI_MAJOR << 16u) | RESESH_TERMINAL_ABI_MINOR)
+ 
+ #ifdef __cplusplus
+@@ -106,11 +106,17 @@ typedef enum ReseshTerminalCopyFormatFlags
+     ReseshTerminalCopyFormatRtf = 0x00000002u,
+ } ReseshTerminalCopyFormatFlags;
+ 
+-typedef enum ReseshTerminalPasteFilterFlags
+-{
++typedef enum ReseshTerminalPasteFilterFlags
++{
+     ReseshTerminalPasteFilterCarriageReturnNewline = 0x00000001u,
+     ReseshTerminalPasteFilterControlCodes = 0x00000002u,
+-} ReseshTerminalPasteFilterFlags;
++} ReseshTerminalPasteFilterFlags;
++
++typedef enum ReseshTerminalSnapshotFlags
++{
++    ReseshTerminalSnapshotCursorVisible = 0x00000001u,
++    ReseshTerminalSnapshotAlternateBuffer = 0x00000002u,
++} ReseshTerminalSnapshotFlags;
+ 
+ typedef struct ReseshTerminalCreateOptions
+ {
+@@ -222,8 +228,8 @@ typedef struct ReseshTerminalMarkRecord
+     int32_t outputEndY;
+ } ReseshTerminalMarkRecord;
+ 
+-typedef struct ReseshTerminalCursorLogicalLine
+-{
++typedef struct ReseshTerminalCursorLogicalLine
++{
+     uint32_t structSize;
+     uint16_t abiMajor;
+     uint16_t abiMinor;
+@@ -232,7 +238,31 @@ typedef struct ReseshTerminalCursorLogicalLine
+     int32_t startRow;
+     int32_t cursorRow;
+     int32_t cursorColumn;
+-} ReseshTerminalCursorLogicalLine;
++} ReseshTerminalCursorLogicalLine;
++
++typedef struct ReseshTerminalSnapshot
++{
++    uint32_t structSize;
++    uint16_t abiMajor;
++    uint16_t abiMinor;
++    uint32_t schemaVersion;
++    uint32_t flags;
++    int32_t columns;
++    int32_t rows;
++    int32_t cursorColumn;
++    int32_t cursorRow;
++    int32_t viewportTop;
++    int32_t viewportHeight;
++    int32_t scrollOffset;
++    uint64_t captureSequence;
++    int64_t unixTimeMilliseconds;
++    uint32_t ansiOffset;
++    uint32_t ansiLength;
++    uint32_t titleOffset;
++    uint32_t titleLength;
++    uint32_t workingDirectoryOffset;
++    uint32_t workingDirectoryLength;
++} ReseshTerminalSnapshot;
+ 
+ typedef void(__stdcall* ReseshTerminalEventCallback)(
+     void* context,
+@@ -258,8 +288,8 @@ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSendOutput(
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSendKeyEvent(
+     ReseshTerminalHandle terminal,
+     uint16_t virtualKey,
+-    uint16_t scanCode,
+-    uint16_t flags,
++    uint16_t scanCode,
++    uint16_t flags,
+     uint8_t keyDown,
+     uint8_t* handled);
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSendCharEvent(
+@@ -270,14 +300,18 @@ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSendCharEvent(
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSetFocused(
+     ReseshTerminalHandle terminal,
+     uint8_t focused);
+-__declspec(dllexport) HRESULT __stdcall ReseshTerminalSetBounds(
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalSetBounds(
+     ReseshTerminalHandle terminal,
+     int32_t screenX,
+     int32_t screenY,
+     int32_t width,
+     int32_t height,
+     int32_t* columns,
+-    int32_t* rows);
++    int32_t* rows);
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalResizeCharacters(
++    ReseshTerminalHandle terminal,
++    int32_t columns,
++    int32_t rows);
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalAttachSwapChainPanel(
+     ReseshTerminalHandle terminal,
+     IUnknown* panel);
+@@ -359,7 +393,13 @@ __declspec(dllexport) HRESULT __stdcall ReseshTerminalAddBookmark(
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalRemoveBookmark(
+     ReseshTerminalHandle terminal,
+     uint64_t bookmarkId);
+-__declspec(dllexport) HRESULT __stdcall ReseshTerminalClearBookmarks(ReseshTerminalHandle terminal);
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalClearBookmarks(ReseshTerminalHandle terminal);
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalCaptureSnapshot(
++    ReseshTerminalHandle terminal,
++    ReseshTerminalSnapshot* snapshot,
++    wchar_t* payload,
++    uint32_t capacity,
++    uint32_t* requiredCapacity);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def b/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
+index adfeaf92..6ab6f8e9 100644
+--- a/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
++++ b/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
+@@ -26,7 +26,8 @@ EXPORTS
+   TerminalUserScroll
+   ReseshTerminalClearSelection
+   ReseshTerminalClearSearch
+-  ReseshTerminalClearBookmarks
++  ReseshTerminalClearBookmarks
++  ReseshTerminalCaptureSnapshot
+   ReseshTerminalCopySelection
+   ReseshTerminalCreate
+   ReseshTerminalCreateApplicationMark
+@@ -48,7 +49,8 @@ EXPORTS
+   ReseshTerminalScrollToMark
+   ReseshTerminalAttachSwapChainPanel
+   ReseshTerminalSendPointerEvent
+-  ReseshTerminalSetBounds
++  ReseshTerminalSetBounds
++  ReseshTerminalResizeCharacters
+   ReseshTerminalSendCharEvent
+   ReseshTerminalSendKeyEvent
+   ReseshTerminalSendOutput
+diff --git a/src/cascadia/TerminalCore/Terminal.cpp b/src/cascadia/TerminalCore/Terminal.cpp
+index 954aa1e0..b6853a96 100644
+--- a/src/cascadia/TerminalCore/Terminal.cpp
++++ b/src/cascadia/TerminalCore/Terminal.cpp
+@@ -1403,11 +1403,16 @@ void Terminal::ApplyScheme(const Scheme& colorScheme)
+     _NotifyScrollEvent();
+ }
+ 
+-bool Terminal::_inAltBuffer() const noexcept
+-{
++bool Terminal::_inAltBuffer() const noexcept
++{
+     _assertLocked();
+     return _altBuffer != nullptr;
+-}
++}
++
++bool Terminal::IsAlternateBufferActive() const noexcept
++{
++    return _inAltBuffer();
++}
+ 
+ TextBuffer& Terminal::_activeBuffer() const noexcept
+ {
+diff --git a/src/cascadia/TerminalCore/Terminal.hpp b/src/cascadia/TerminalCore/Terminal.hpp
+index 406f82e7..602be0bf 100644
+--- a/src/cascadia/TerminalCore/Terminal.hpp
++++ b/src/cascadia/TerminalCore/Terminal.hpp
+@@ -98,7 +98,8 @@ public:
+     void SetCursorStyle(const ::Microsoft::Console::VirtualTerminal::DispatchTypes::CursorStyle cursorStyle);
+     void SetOptionalFeatures(winrt::Microsoft::Terminal::Core::ICoreSettings settings);
+     bool IsXtermBracketedPasteModeEnabled() const noexcept;
+-    std::wstring_view GetWorkingDirectory() noexcept;
++    std::wstring_view GetWorkingDirectory() noexcept;
++    bool IsAlternateBufferActive() const noexcept;
+ 
+     til::point GetViewportRelativeCursorPosition() const noexcept;
+ 
+diff --git a/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp b/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp
+index 233d8676..4750af20 100644
+--- a/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp
++++ b/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp
+@@ -205,8 +205,9 @@ namespace ControlUnitTests
+         TEST_METHOD(HonorsOscClipboardPolicy);
+         TEST_METHOD(FiltersNormalAndBracketedPaste);
+         TEST_METHOD(EmitsTypedEventsAndObservesOscWithoutConsuming);
+-        TEST_METHOD(SearchesAndRaisesLinks);
+-        TEST_METHOD(DiscoversCommandsAndManagesRulerMarks);
++        TEST_METHOD(SearchesAndRaisesLinks);
++        TEST_METHOD(DiscoversCommandsAndManagesRulerMarks);
++        TEST_METHOD(CapturesAnsiSnapshots);
+     };
+ 
+     void ReseshTerminalAbiTests::ReportsVersionBuildIdAndRequiredExports()
+@@ -224,7 +225,8 @@ namespace ControlUnitTests
+             "ReseshTerminalSendKeyEvent",
+             "ReseshTerminalSendCharEvent",
+             "ReseshTerminalSetFocused",
+-            "ReseshTerminalSetBounds",
++            "ReseshTerminalSetBounds",
++            "ReseshTerminalResizeCharacters",
+             "ReseshTerminalAttachSwapChainPanel",
+             "ReseshTerminalSendPointerEvent",
+             "ReseshTerminalSetOptions",
+@@ -245,7 +247,8 @@ namespace ControlUnitTests
+             "ReseshTerminalDiscardPromptProbe",
+             "ReseshTerminalAddBookmark",
+             "ReseshTerminalRemoveBookmark",
+-            "ReseshTerminalClearBookmarks",
++            "ReseshTerminalClearBookmarks",
++            "ReseshTerminalCaptureSnapshot",
+         };
+         for (const auto name : requiredExports)
+         {
+@@ -268,7 +271,7 @@ namespace ControlUnitTests
+         uint32_t written{};
+         VERIFY_SUCCEEDED(getBuildId(buildId.data(), required, &written));
+         VERIFY_ARE_EQUAL(required, written);
+-        VERIFY_IS_TRUE(buildId.starts_with(L"terminal-v1.24.11911.0-resesh-abi2.0-composition"));
++        VERIFY_IS_TRUE(buildId.starts_with(L"terminal-v1.24.11911.0-resesh-abi2.1-keyframes"));
+     }
+ 
+     void ReseshTerminalAbiTests::RejectsInvalidCreationStructures()
+@@ -774,7 +777,7 @@ namespace ControlUnitTests
+         VERIFY_ARE_EQUAL(std::wstring{ L"https://example.test/detected" }, detectedLink->text);
+     }
+ 
+-    void ReseshTerminalAbiTests::DiscoversCommandsAndManagesRulerMarks()
++    void ReseshTerminalAbiTests::DiscoversCommandsAndManagesRulerMarks()
+     {
+         const auto module = LoadAbiModule();
+         const auto closeModule = wil::scope_exit([&]() noexcept { FreeLibrary(module); });
+@@ -881,6 +884,57 @@ namespace ControlUnitTests
+         VERIFY_ARE_EQUAL(
+             HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
+             getMarks(terminal, nullptr, 0, &requiredMarks));
+-        VERIFY_ARE_EQUAL(1u, requiredMarks);
+-    }
+-}
++        VERIFY_ARE_EQUAL(1u, requiredMarks);
++    }
++
++    void ReseshTerminalAbiTests::CapturesAnsiSnapshots()
++    {
++        const auto module = LoadAbiModule();
++        const auto closeModule = wil::scope_exit([&]() noexcept { FreeLibrary(module); });
++        const auto create = LoadExport<decltype(&ReseshTerminalCreate)>(module, "ReseshTerminalCreate");
++        const auto destroy = LoadExport<decltype(&ReseshTerminalDestroy)>(module, "ReseshTerminalDestroy");
++        const auto sendOutput = LoadExport<decltype(&ReseshTerminalSendOutput)>(module, "ReseshTerminalSendOutput");
++        const auto resizeCharacters = LoadExport<decltype(&ReseshTerminalResizeCharacters)>(
++            module, "ReseshTerminalResizeCharacters");
++        const auto captureSnapshot = LoadExport<decltype(&ReseshTerminalCaptureSnapshot)>(
++            module, "ReseshTerminalCaptureSnapshot");
++        const auto parent = CreateParentWindow();
++        const auto closeParent = wil::scope_exit([&]() noexcept { DestroyWindow(parent); });
++        const auto options = DefaultOptions(parent);
++        ReseshTerminalHandle terminal{};
++        VERIFY_SUCCEEDED(create(&options, &terminal));
++        const auto closeTerminal = wil::scope_exit([&]() noexcept { VERIFY_SUCCEEDED(destroy(terminal)); });
++
++        VERIFY_SUCCEEDED(resizeCharacters(terminal, 90, 25));
++        constexpr wchar_t output[]{ L"\x1b]0;snapshot title\x07\x1b]7;file://host/work\x07\x1b[31mwide \x754c\x1b[0m" };
++        VERIFY_SUCCEEDED(sendOutput(terminal, output, gsl::narrow<uint32_t>(std::size(output) - 1)));
++
++        ReseshTerminalSnapshot snapshot{
++            .structSize = sizeof(ReseshTerminalSnapshot),
++            .abiMajor = RESESH_TERMINAL_ABI_MAJOR,
++            .abiMinor = RESESH_TERMINAL_ABI_MINOR,
++        };
++        uint32_t required{};
++        VERIFY_ARE_EQUAL(
++            HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
++            captureSnapshot(terminal, &snapshot, nullptr, 0, &required));
++        VERIFY_IS_GREATER_THAN(required, 0u);
++        VERIFY_ARE_EQUAL(1u, snapshot.schemaVersion);
++        VERIFY_ARE_EQUAL(90, snapshot.columns);
++        VERIFY_ARE_EQUAL(25, snapshot.rows);
++        VERIFY_IS_TRUE(snapshot.captureSequence > 0);
++        VERIFY_IS_TRUE(snapshot.unixTimeMilliseconds > 0);
++
++        std::wstring payload(required, L'\0');
++        VERIFY_SUCCEEDED(captureSnapshot(terminal, &snapshot, payload.data(), required, &required));
++        const std::wstring_view ansi{ payload.data() + snapshot.ansiOffset, snapshot.ansiLength };
++        const std::wstring_view title{ payload.data() + snapshot.titleOffset, snapshot.titleLength };
++        const std::wstring_view workingDirectory{
++            payload.data() + snapshot.workingDirectoryOffset,
++            snapshot.workingDirectoryLength
++        };
++        VERIFY_IS_TRUE(ansi.find(L"wide \x754c") != std::wstring_view::npos);
++        VERIFY_ARE_EQUAL(std::wstring_view{ L"snapshot title" }, title);
++        VERIFY_ARE_EQUAL(std::wstring_view{ L"file://host/work" }, workingDirectory);
++    }
++}

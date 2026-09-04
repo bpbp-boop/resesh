@@ -150,6 +150,39 @@ public sealed class TerminalRecordingTests : IDisposable
         Assert.Empty(snapshot.Events);
     }
 
+    [Fact]
+    public void EqualTimestampsKeepEventsOnTheCorrectSideOfAKeyframe()
+    {
+        var started = DateTimeOffset.UtcNow;
+        var time = started.AddSeconds(1).ToUnixTimeMilliseconds();
+        using var capture = new TerminalCapture(80, 24, startedAt: started);
+
+        capture.CaptureOutput(Encoding.UTF8.GetBytes("before"), time);
+        capture.CaptureKeyframe("full-state", 80, 24, time);
+        capture.CaptureOutput(Encoding.UTF8.GetBytes("after"), time);
+        capture.CaptureResize(100, 30, time);
+
+        var snapshot = capture.Snapshot();
+        Assert.Equal("full-state", snapshot.Keyframe?.State);
+        Assert.Collection(
+            snapshot.Events,
+            item => Assert.Equal(new TerminalRecordingEvent(item.Time, "o", "after"), item),
+            item => Assert.Equal(new TerminalRecordingEvent(item.Time, "r", "100x30"), item));
+    }
+
+    [Fact]
+    public void OversizedKeyframeDisablesRewindWithoutOutputEvents()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(80, 24, startedAt: started, maximumBytes: 128);
+
+        capture.CaptureKeyframe(new string('x', 256), 80, 24, started.ToUnixTimeMilliseconds());
+
+        var snapshot = capture.Snapshot();
+        Assert.Null(snapshot.Keyframe);
+        Assert.Empty(snapshot.Events);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))
