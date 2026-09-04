@@ -37,11 +37,11 @@ public sealed class TerminalRecordingTests : IDisposable
         using var capture = new TerminalCapture(
             80, 24, startedAt: started, maximumAge: TimeSpan.FromSeconds(5), maximumBytes: 1024 * 1024);
         capture.CaptureOutput(Encoding.UTF8.GetBytes("old"), started.AddSeconds(1).ToUnixTimeMilliseconds());
-        capture.CaptureKeyframe("full-state", 90, 25, started.AddSeconds(2).ToUnixTimeMilliseconds());
+        capture.CaptureKeyframe(Encoding.UTF8.GetBytes("full-state"), 90, 25, started.AddSeconds(2).ToUnixTimeMilliseconds());
         capture.CaptureOutput(Encoding.UTF8.GetBytes("new"), started.AddSeconds(10).ToUnixTimeMilliseconds());
 
         var snapshot = capture.Snapshot();
-        Assert.Equal("full-state", snapshot.Keyframe?.State);
+        Assert.Equal(Encoding.UTF8.GetBytes("full-state"), snapshot.Keyframe?.State.ToArray());
         Assert.Equal(2, snapshot.EarliestTime);
         Assert.Single(snapshot.Events);
         Assert.Equal("new", snapshot.Events[0].Data);
@@ -158,12 +158,12 @@ public sealed class TerminalRecordingTests : IDisposable
         using var capture = new TerminalCapture(80, 24, startedAt: started);
 
         capture.CaptureOutput(Encoding.UTF8.GetBytes("before"), time);
-        capture.CaptureKeyframe("full-state", 80, 24, time);
+        capture.CaptureKeyframe(Encoding.UTF8.GetBytes("full-state"), 80, 24, time);
         capture.CaptureOutput(Encoding.UTF8.GetBytes("after"), time);
         capture.CaptureResize(100, 30, time);
 
         var snapshot = capture.Snapshot();
-        Assert.Equal("full-state", snapshot.Keyframe?.State);
+        Assert.Equal(Encoding.UTF8.GetBytes("full-state"), snapshot.Keyframe?.State.ToArray());
         Assert.Collection(
             snapshot.Events,
             item => Assert.Equal(new TerminalRecordingEvent(item.Time, "o", "after"), item),
@@ -176,7 +176,7 @@ public sealed class TerminalRecordingTests : IDisposable
         var started = DateTimeOffset.UtcNow;
         using var capture = new TerminalCapture(80, 24, startedAt: started, maximumBytes: 128);
 
-        capture.CaptureKeyframe(new string('x', 256), 80, 24, started.ToUnixTimeMilliseconds());
+        capture.CaptureKeyframe(new byte[256], 80, 24, started.ToUnixTimeMilliseconds());
 
         var snapshot = capture.Snapshot();
         Assert.Null(snapshot.Keyframe);

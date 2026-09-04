@@ -24,14 +24,22 @@
       },
       {
         "file": "native-terminal-patches/persistent-highlights.patch",
-        "sha256": "0d6178e3a734ee028f08c3ce4068437708a1eca5f24ba58a2cc32cabc4e022f8"
+        "sha256": "f62ebba4031fb92a1f0ece8c41075bef5527306f30ce9bd6a74573b3a573f459"
+      },
+      {
+        "file": "native-terminal-patches/exact-snapshots.patch",
+        "sha256": "fcf1cea559543acde9fc10cb332073d869ec6731b8a83954be88c96c56bc8aea"
+      },
+      {
+        "file": "native-terminal-patches/live-history-resize.patch",
+        "sha256": "3efffe88f5321522b28ea17300137ca4e8cbeef66f9b528d6a7c1813f66f765c"
       }
     ]
   },
   "abi": {
-    "major": 2,
-    "minor": 2,
-    "buildId": "terminal-v1.24.11911.0-resesh-abi2.2-highlights"
+    "major": 3,
+    "minor": 1,
+    "buildId": "terminal-v1.24.11911.0-resesh-abi3.1-history-resize"
   },
   "supportedArchitectures": [
     "x64",
@@ -51,12 +59,12 @@
   },
   "artifacts": {
     "x64": {
-      "Microsoft.Terminal.Control.dll": "adb8af1d69180be90df4f91f4b50c1c02619ca667900aecba9544b01d43d0903",
-      "Microsoft.Terminal.Control.pdb": "0708be7c8b44461ea0e8afe6f949635c76d6094cdb846be5593e814040b73d85"
+      "Microsoft.Terminal.Control.dll": "152c97f2f4872f72c8df4f1f2994815898a2f331405a7a2ae7ced54ab4bc957f",
+      "Microsoft.Terminal.Control.pdb": "a09e0aa51b7a1e93ee213c38b6c4c022f8df41056c1d225992b8eafabc2cc63d"
     },
     "arm64": {
-      "Microsoft.Terminal.Control.dll": "53f19464de80aa5c50922d6f6ad0600bbc34bcf94b5a7cc10d54f13557196e50",
-      "Microsoft.Terminal.Control.pdb": "e319f15295ac0480f830f967dd8937ad80a1c36ae94d9cfa1fbd7131b5fcd40c"
+      "Microsoft.Terminal.Control.dll": "37668707c25424c6f55058b6813bf840eb4ec7d8b47cf7fb4f42822246500d2a",
+      "Microsoft.Terminal.Control.pdb": "88f16843f743bd4ee7098a4ca4a782f9dbbb31d681761cb80d1562167c88229c"
     }
   }
 }

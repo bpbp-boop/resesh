@@ -13,12 +13,16 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Resesh.Terminal.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.6" />
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.6" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- xterm.js page + assets; flows into the referencing app's output directory -->
+    <!-- xterm.js live terminal fallback assets; recording playback is native-only -->
     <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

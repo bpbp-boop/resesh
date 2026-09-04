@@ -12,7 +12,7 @@ public sealed record TerminalRecordingEvent(double Time, string Type, string Dat
     public bool IsResize => Type == "r";
 }
 
-public sealed record TerminalKeyframe(double Time, int Columns, int Rows, string State);
+public sealed record TerminalKeyframe(double Time, int Columns, int Rows, ReadOnlyMemory<byte> State);
 
 public sealed record TerminalRewindSlice(
     DateTimeOffset StartedAt,
@@ -107,6 +107,16 @@ public sealed class TerminalCapture : IDisposable
     public event Action? Changed;
     public event Action<bool, string?>? RecordingChanged;
 
+    /// <summary>Checks availability without building a replay slice on every output chunk.</summary>
+    public bool HasRewindData
+    {
+        get
+        {
+            lock (_gate)
+                return _anchor is not null || _keyframes.Count > 0 || _events.Count > 0;
+        }
+    }
+
     public void CaptureOutput(ReadOnlySpan<byte> data, long unixTimeMilliseconds)
     {
         if (data.IsEmpty)
@@ -159,10 +169,10 @@ public sealed class TerminalCapture : IDisposable
             Changed?.Invoke();
     }
 
-    public void CaptureKeyframe(string state, int columns, int rows, long unixTimeMilliseconds)
+    public void CaptureKeyframe(ReadOnlyMemory<byte> state, int columns, int rows, long unixTimeMilliseconds)
     {
-        if (state is null)
-            throw new ArgumentNullException(nameof(state));
+        if (state.IsEmpty)
+            throw new ArgumentException("A terminal keyframe cannot be empty.", nameof(state));
         if (columns <= 0 || rows <= 0)
             return;
 
@@ -174,7 +184,8 @@ public sealed class TerminalCapture : IDisposable
             _currentRows = rows;
             if (_retainForRewind && !_rewindDisabled)
             {
-                var frame = new TerminalKeyframe(ToElapsedLocked(unixTimeMilliseconds), columns, rows, state);
+                var frame = new TerminalKeyframe(
+                    ToElapsedLocked(unixTimeMilliseconds), columns, rows, state.ToArray());
                 _keyframes.Add(frame);
                 _keyframeBytes += FrameBytes(frame);
                 changed = true;
@@ -332,7 +343,7 @@ public sealed class TerminalCapture : IDisposable
         32L + Encoding.UTF8.GetByteCount(item.Data);
 
     private static long FrameBytes(TerminalKeyframe frame) =>
-        48L + Encoding.UTF8.GetByteCount(frame.State);
+        48L + frame.State.Length;
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 

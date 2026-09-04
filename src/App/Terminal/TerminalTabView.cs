@@ -267,8 +267,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     {
         if (_capture is null)
             return;
-        var snapshot = _capture.Snapshot();
-        var available = snapshot.Keyframe is not null || snapshot.Events.Count > 0;
+        var available = _capture.HasRewindData;
         if (_rewindAvailable == available)
             return;
         _rewindAvailable = available;

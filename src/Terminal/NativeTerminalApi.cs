@@ -7,12 +7,13 @@ namespace Resesh.Terminal;
 /// <summary>Versioned adapter for the resesh ABI exported by Microsoft.Terminal.Control.dll.</summary>
 internal sealed class NativeTerminalApi
 {
-    internal const ushort AbiMajor = 2;
-    internal const ushort AbiMinor = 2;
+    internal const ushort AbiMajor = 3;
+    internal const ushort AbiMinor = 1;
     internal const string DllEnvironmentVariable = "RESESH_NATIVE_TERMINAL_DLL";
 
     private const uint ThemeOption = 0x00000001;
     private const uint InteractionOption = 0x00000002;
+    private const uint HistorySizeOption = 0x00000004;
     private const uint EnableBuiltinGlyphs = 0x00000001;
     private const uint EnableColorGlyphs = 0x00000002;
     private const uint DetectUrls = 0x00000004;
@@ -62,7 +63,8 @@ internal sealed class NativeTerminalApi
     private readonly RemoveBookmarkDelegate _removeBookmark;
     private readonly ClearBookmarksDelegate _clearBookmarks;
     private readonly ResizeCharactersDelegate _resizeCharacters;
-    private readonly CaptureSnapshotDelegate _captureSnapshot;
+    private readonly CaptureExactSnapshotDelegate _captureExactSnapshot;
+    private readonly RestoreExactSnapshotDelegate _restoreExactSnapshot;
     private readonly SetHighlightRulesDelegate _setHighlightRules;
     private readonly ClearHighlightRulesDelegate _clearHighlightRules;
     private readonly GetHighlightRowsDelegate _getHighlightRows;
@@ -112,7 +114,8 @@ internal sealed class NativeTerminalApi
         _removeBookmark = Load<RemoveBookmarkDelegate>("ReseshTerminalRemoveBookmark");
         _clearBookmarks = Load<ClearBookmarksDelegate>("ReseshTerminalClearBookmarks");
         _resizeCharacters = Load<ResizeCharactersDelegate>("ReseshTerminalResizeCharacters");
-        _captureSnapshot = Load<CaptureSnapshotDelegate>("ReseshTerminalCaptureSnapshot");
+        _captureExactSnapshot = Load<CaptureExactSnapshotDelegate>("ReseshTerminalCaptureExactSnapshot");
+        _restoreExactSnapshot = Load<RestoreExactSnapshotDelegate>("ReseshTerminalRestoreExactSnapshot");
         _setHighlightRules = Load<SetHighlightRulesDelegate>("ReseshTerminalSetHighlightRules");
         _clearHighlightRules = Load<ClearHighlightRulesDelegate>("ReseshTerminalClearHighlightRules");
         _getHighlightRows = Load<GetHighlightRowsDelegate>("ReseshTerminalGetHighlightRows");
@@ -203,60 +206,60 @@ internal sealed class NativeTerminalApi
     internal void ResizeCharacters(IntPtr terminal, int columns, int rows) =>
         ThrowIfFailed(_resizeCharacters(terminal, columns, rows));
 
-    internal Snapshot CaptureSnapshot(IntPtr terminal)
+    internal byte[] CaptureExactSnapshot(IntPtr terminal)
     {
-        var snapshot = new NativeSnapshot
-        {
-            StructSize = checked((uint)Marshal.SizeOf<NativeSnapshot>()),
-            AbiMajor = AbiMajor,
-            AbiMinor = AbiMinor,
-        };
-        var result = _captureSnapshot(terminal, ref snapshot, IntPtr.Zero, 0, out var required);
+        var result = _captureExactSnapshot(terminal, IntPtr.Zero, 0, out var required);
         if (result != InsufficientBuffer)
             ThrowIfFailed(result);
         if (required is 0 or > 32 * 1024 * 1024)
             throw new InvalidDataException("The native terminal returned an invalid snapshot length.");
 
-        var payload = Marshal.AllocHGlobal(checked((int)required * sizeof(char)));
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var snapshot = new byte[required];
+            var pinned = GCHandle.Alloc(snapshot, GCHandleType.Pinned);
+            uint written;
+            try
+            {
+                result = _captureExactSnapshot(
+                    terminal,
+                    pinned.AddrOfPinnedObject(),
+                    checked((uint)snapshot.Length),
+                    out written);
+            }
+            finally
+            {
+                pinned.Free();
+            }
+            if (result == InsufficientBuffer && written > snapshot.Length && written <= 32 * 1024 * 1024)
+            {
+                required = written;
+                continue;
+            }
+            ThrowIfFailed(result);
+            if (written != snapshot.Length)
+                throw new InvalidDataException("The native terminal changed its snapshot length.");
+            return snapshot;
+        }
+        throw new InvalidDataException("The native terminal snapshot changed size too often.");
+    }
+
+    internal void RestoreExactSnapshot(IntPtr terminal, byte[] snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (snapshot.Length is 0 or > 32 * 1024 * 1024)
+            throw new InvalidDataException("The native terminal snapshot length is invalid.");
+        var pinned = GCHandle.Alloc(snapshot, GCHandleType.Pinned);
         try
         {
-            for (var attempt = 0; attempt < 3; attempt++)
-            {
-                result = _captureSnapshot(terminal, ref snapshot, payload, required, out var written);
-                if (result == InsufficientBuffer && written > required && written <= 32 * 1024 * 1024)
-                {
-                    var oldPayload = payload;
-                    payload = IntPtr.Zero;
-                    Marshal.FreeHGlobal(oldPayload);
-                    required = written;
-                    payload = Marshal.AllocHGlobal(checked((int)required * sizeof(char)));
-                    continue;
-                }
-                ThrowIfFailed(result);
-                ValidateSnapshot(in snapshot, written);
-                return new Snapshot(
-                    snapshot.SchemaVersion,
-                    snapshot.Columns,
-                    snapshot.Rows,
-                    snapshot.CursorColumn,
-                    snapshot.CursorRow,
-                    snapshot.ViewportTop,
-                    snapshot.ViewportHeight,
-                    snapshot.ScrollOffset,
-                    (snapshot.Flags & 1) != 0,
-                    (snapshot.Flags & 2) != 0,
-                    snapshot.CaptureSequence,
-                    snapshot.UnixTimeMilliseconds,
-                    ReadSnapshotText(payload, snapshot.AnsiOffset, snapshot.AnsiLength),
-                    ReadSnapshotText(payload, snapshot.TitleOffset, snapshot.TitleLength),
-                    ReadSnapshotText(payload, snapshot.WorkingDirectoryOffset, snapshot.WorkingDirectoryLength));
-            }
-            throw new InvalidDataException("The native terminal snapshot changed size too often.");
+            ThrowIfFailed(_restoreExactSnapshot(
+                terminal,
+                pinned.AddrOfPinnedObject(),
+                checked((uint)snapshot.Length)));
         }
         finally
         {
-            if (payload != IntPtr.Zero)
-                Marshal.FreeHGlobal(payload);
+            pinned.Free();
         }
     }
 
@@ -600,6 +603,21 @@ internal sealed class NativeTerminalApi
         ThrowIfFailed(_setOptions(terminal, in options));
     }
 
+    internal void SetHistorySize(IntPtr terminal, int historySize)
+    {
+        var options = new TerminalOptions
+        {
+            StructSize = checked((uint)Marshal.SizeOf<TerminalOptions>()),
+            AbiMajor = AbiMajor,
+            AbiMinor = AbiMinor,
+            Flags = HistorySizeOption,
+            ColorTable = new uint[16],
+            FontFamily = string.Empty,
+            HistorySize = historySize,
+        };
+        ThrowIfFailed(_setOptions(terminal, in options));
+    }
+
     private static NativeTerminalApi Create()
     {
         var path = ResolveLibraryPath();
@@ -762,41 +780,6 @@ internal sealed class NativeTerminalApi
         }
     }
 
-    private static void ValidateSnapshot(in NativeSnapshot snapshot, uint payloadLength)
-    {
-        if (snapshot.StructSize < Marshal.SizeOf<NativeSnapshot>()
-            || snapshot.AbiMajor != AbiMajor
-            || snapshot.AbiMinor < AbiMinor
-            || snapshot.SchemaVersion != 1
-            || snapshot.Columns <= 0
-            || snapshot.Rows <= 0
-            || snapshot.ViewportHeight <= 0
-            || snapshot.ViewportHeight != snapshot.Rows
-            || snapshot.CursorColumn < 0
-            || snapshot.CursorColumn >= snapshot.Columns
-            || snapshot.CursorRow < 0
-            || snapshot.CursorRow >= snapshot.ViewportHeight
-            || snapshot.ViewportTop < 0
-            || snapshot.ScrollOffset < 0
-            || (snapshot.Flags & ~3u) != 0
-            || snapshot.UnixTimeMilliseconds < 0
-            || !Fits(snapshot.AnsiOffset, snapshot.AnsiLength, payloadLength)
-            || !Fits(snapshot.TitleOffset, snapshot.TitleLength, payloadLength)
-            || !Fits(snapshot.WorkingDirectoryOffset, snapshot.WorkingDirectoryLength, payloadLength))
-        {
-            throw new InvalidDataException("The native terminal returned an invalid snapshot.");
-        }
-    }
-
-    private static bool Fits(uint offset, uint length, uint payloadLength) =>
-        offset <= payloadLength && length <= payloadLength - offset;
-
-    private static string ReadSnapshotText(IntPtr payload, uint offset, uint length) =>
-        length == 0
-            ? string.Empty
-            : Marshal.PtrToStringUni(
-                IntPtr.Add(payload, checked((int)offset * sizeof(char))),
-                checked((int)length)) ?? string.Empty;
 
     private T Load<T>(string exportName) where T : Delegate
     {
@@ -944,6 +927,7 @@ internal sealed class NativeTerminalApi
         internal uint InteractionFlags;
         internal uint CopyFormatting;
         internal uint PasteFiltering;
+        internal int HistorySize;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -1049,30 +1033,6 @@ internal sealed class NativeTerminalApi
         internal int CursorColumn;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativeSnapshot
-    {
-        internal uint StructSize;
-        internal ushort AbiMajor;
-        internal ushort AbiMinor;
-        internal uint SchemaVersion;
-        internal uint Flags;
-        internal int Columns;
-        internal int Rows;
-        internal int CursorColumn;
-        internal int CursorRow;
-        internal int ViewportTop;
-        internal int ViewportHeight;
-        internal int ScrollOffset;
-        internal ulong CaptureSequence;
-        internal long UnixTimeMilliseconds;
-        internal uint AnsiOffset;
-        internal uint AnsiLength;
-        internal uint TitleOffset;
-        internal uint TitleLength;
-        internal uint WorkingDirectoryOffset;
-        internal uint WorkingDirectoryLength;
-    }
 
     internal readonly record struct NativeTerminalCreationSettings(
         int InitialColumns,
@@ -1118,22 +1078,6 @@ internal sealed class NativeTerminalApi
         int CursorColumn,
         string Text);
 
-    internal readonly record struct Snapshot(
-        uint SchemaVersion,
-        int Columns,
-        int Rows,
-        int CursorColumn,
-        int CursorRow,
-        int ViewportTop,
-        int ViewportHeight,
-        int ScrollOffset,
-        bool CursorVisible,
-        bool AlternateBuffer,
-        ulong CaptureSequence,
-        long UnixTimeMilliseconds,
-        string Ansi,
-        string Title,
-        string WorkingDirectory);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate uint GetAbiVersionDelegate();
@@ -1295,12 +1239,17 @@ internal sealed class NativeTerminalApi
     private delegate int ClearBookmarksDelegate(IntPtr terminal);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int CaptureSnapshotDelegate(
+    private delegate int CaptureExactSnapshotDelegate(
         IntPtr terminal,
-        ref NativeSnapshot snapshot,
         IntPtr payload,
         uint capacity,
         out uint requiredCapacity);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int RestoreExactSnapshotDelegate(
+        IntPtr terminal,
+        IntPtr payload,
+        uint payloadLength);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
     private delegate int SetHighlightRulesDelegate(

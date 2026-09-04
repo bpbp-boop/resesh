@@ -45,7 +45,6 @@ public sealed class TerminalControl : TerminalSurface
             ("<script src=\"addon-web-links.js\"></script>", "addon-web-links.js", "<script>", "</script>"),
             ("<script src=\"addon-search.js\"></script>", "addon-search.js", "<script>", "</script>"),
             ("<script src=\"addon-highlight.js\"></script>", "addon-highlight.js", "<script>", "</script>"),
-            ("<script src=\"addon-serialize.js\"></script>", "addon-serialize.js", "<script>", "</script>"),
             ("<script src=\"addon-ruler.js\"></script>", "addon-ruler.js", "<script>", "</script>"),
         };
 
@@ -102,8 +101,11 @@ public sealed class TerminalControl : TerminalSurface
     /// <summary>Raw host bytes with their pre-batch arrival time, for recording and rewind.</summary>
     public override event TerminalOutputObservedHandler? OutputObserved;
 
-    /// <summary>Full serialized xterm state captured after output parsing.</summary>
-    public override event Action<string, int, int, long>? KeyframeCaptured;
+    public override event Action<ReadOnlyMemory<byte>, int, int, long>? KeyframeCaptured
+    {
+        add { }
+        remove { }
+    }
     public override event Action? ReconnectRequested;
 
     /// <summary>Ctrl+F4 pressed inside the terminal page.</summary>
@@ -162,7 +164,7 @@ public sealed class TerminalControl : TerminalSurface
     /// toggle button can mirror the true state.</summary>
     public override event Action<bool>? CommandsPanelOpenChanged;
 
-    public override bool SupportsRewindCapture => true;
+    public override bool SupportsRewindCapture => false;
 
     public override int Columns { get; protected set; } = 80;
     public override int Rows { get; protected set; } = 24;
@@ -260,25 +262,6 @@ public sealed class TerminalControl : TerminalSurface
                     Columns = root.GetProperty("cols").GetInt32();
                     Rows = root.GetProperty("rows").GetInt32();
                     Resized?.Invoke(Columns, Rows);
-                    break;
-                case "keyframe":
-                    if (root.TryGetProperty("data", out var keyframeData) &&
-                        root.TryGetProperty("cols", out var keyframeColumns) &&
-                        root.TryGetProperty("rows", out var keyframeRows) &&
-                        root.TryGetProperty("unixMs", out var keyframeTime))
-                    {
-                        try
-                        {
-                            var state = Encoding.UTF8.GetString(
-                                Convert.FromBase64String(keyframeData.GetString() ?? ""));
-                            KeyframeCaptured?.Invoke(
-                                state, keyframeColumns.GetInt32(), keyframeRows.GetInt32(), keyframeTime.GetInt64());
-                        }
-                        catch (Exception exception) when (exception is FormatException or InvalidOperationException)
-                        {
-                            TraceHook?.Invoke($"keyframe decode failed: {exception.Message}");
-                        }
-                    }
                     break;
                 case "reconnect":
                     ReconnectRequested?.Invoke();
@@ -619,53 +602,6 @@ public sealed class TerminalControl : TerminalSurface
         }
     }
 
-    /// <summary>Atomically resets a read-only terminal and replays one state slice.</summary>
-    public void ShowReplay(
-        int columns,
-        int rows,
-        string? keyframe,
-        IReadOnlyList<TerminalReplayEvent> events)
-    {
-        static string Encode(string value) =>
-            Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
-
-        Post(new
-        {
-            type = "showReplay",
-            columns,
-            rows,
-            keyframe = keyframe is null ? null : Encode(keyframe),
-            events = events.Select(item => new
-            {
-                type = item.Type,
-                data = item.Type == "o" ? Encode(item.Data) : item.Data,
-            }).ToArray(),
-        });
-    }
-
-    /// <summary>Loads a complete asciicast stream; the page builds seek keyframes once.</summary>
-    public void LoadPlayback(
-        int columns,
-        int rows,
-        IReadOnlyList<TerminalTimedReplayEvent> events)
-    {
-        Post(new
-        {
-            type = "loadPlayback",
-            columns,
-            rows,
-            events = events.Select(item => new
-            {
-                time = item.Time,
-                type = item.Type,
-                data = item.Type == "o"
-                    ? Convert.ToBase64String(Encoding.UTF8.GetBytes(item.Data))
-                    : item.Data,
-            }).ToArray(),
-        });
-    }
-
-    public void SeekPlayback(double time) => Post(new { type = "seekPlayback", time });
 
     private void Post(object message)
     {

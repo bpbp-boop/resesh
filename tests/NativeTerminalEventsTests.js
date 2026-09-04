@@ -17,7 +17,7 @@ const capabilities = JSON.parse(fs.readFileSync(
   "utf8"
 ));
 
-assert.match(api, /AbiMajor\s*=\s*2/);
+assert.match(api, /AbiMajor\s*=\s*3/);
 for (const eventName of [
   "TitleChanged",
   "WorkingDirectoryChanged",
@@ -45,9 +45,9 @@ assert.match(surface, /case 7 when IsValidOscPayload\(payload, 2048\)/);
 assert.match(surface, /case 133 when IsValidOscPayload\(payload, 4096\)/);
 assert.match(surface, /case 3008 when IsValidOscPayload\(payload, 4096\)/);
 assert.match(surface, /case 7377 or 9 or 777 when IsValidOscPayload\(payload, 2048\)/);
-assert.match(surface, /new UTF8Encoding\(false, false\)\.GetDecoder\(\)/,
-  "one persistent decoder must preserve UTF-8 split across backend reads");
-assert.match(surface, /_outputDecoder\.GetChars\([\s\S]*?flush:\s*false\)/);
+assert.match(surface, /SnapshotUtf8Decoder _outputDecoder = new\(\)/,
+  "one snapshot-aware decoder must preserve UTF-8 split across backend reads");
+assert.match(surface, /_outputDecoder\.Decode\(/);
 assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) =>[\s\S]*?TitleChanged\?\.Invoke/,
   "native callbacks must queue application state changes");
 assert.match(surface, /DispatcherQueue\.TryEnqueue\(\(\) => WorkingDirectoryReported\?\.Invoke/);

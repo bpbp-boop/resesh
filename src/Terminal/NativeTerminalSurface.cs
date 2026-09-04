@@ -52,8 +52,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private const uint PointerHandCursor = 0x08;
 
     private readonly object _outputGate = new();
-    private readonly MemoryStream _pendingOutput = new();
-    private readonly Decoder _outputDecoder = new UTF8Encoding(false, false).GetDecoder();
+    private readonly TerminalOutputBuffer _pendingOutput = new();
+    private readonly SnapshotUtf8Decoder _outputDecoder = new();
     private readonly NativeTerminalApi.EventCallback _eventCallback;
     private readonly SwapChainPanel _terminalPanel = new();
     private readonly Border _inputPanel = new()
@@ -69,6 +69,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
     };
     private readonly SolidColorBrush _jumpHighlightBrush = new();
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _jumpHighlightTimer;
+    private bool _annotationRefreshPending;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _keyframeCaptureTimer;
     private readonly InputCursor _textCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
     private readonly InputCursor _linkCursor = InputSystemCursor.Create(InputSystemCursorShape.Hand);
     private readonly Border _findBar = new();
@@ -135,12 +137,15 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private IReadOnlyList<NativeTerminalApi.MarkRecord> _marks = [];
     private int _viewTop;
     private int _bufferHeight = 24;
+    private int _pendingViewTop;
+    private int _pendingViewportHeight = 24;
+    private int _pendingBufferHeight = 24;
+    private int _viewportRefreshPending;
     private bool _commandsPanelOpen;
     private ulong _jumpHighlightMarkId;
     private string? _promptPlatform;
     private string _promptContext = string.Empty;
     private string? _promptContextPlatform;
-    private bool _annotationRefreshPending;
     private ulong _commandsFingerprint = ulong.MaxValue;
     private ulong _lastPromptProbeId;
     private List<NativeTerminalApi.HighlightRulePayload> _currentHighlightRules = [];
@@ -156,7 +161,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
     public override event Action<byte[]>? InputReceived;
     public override event Action<int, int>? Resized;
     public override event TerminalOutputObservedHandler? OutputObserved;
-    public override event Action<string, int, int, long>? KeyframeCaptured;
+    public override event Action<ReadOnlyMemory<byte>, int, int, long>? KeyframeCaptured;
     public override event Action? ReconnectRequested;
     public override event Action? CloseTabRequested;
     public override event Action? SplitRequested;
@@ -190,6 +195,10 @@ public sealed class NativeTerminalSurface : TerminalSurface
         _jumpHighlightTimer.Interval = TimeSpan.FromMilliseconds(700);
         _jumpHighlightTimer.IsRepeating = false;
         _jumpHighlightTimer.Tick += OnJumpHighlightTimerTick;
+        _keyframeCaptureTimer = DispatcherQueue.CreateTimer();
+        _keyframeCaptureTimer.Interval = TimeSpan.FromSeconds(1);
+        _keyframeCaptureTimer.IsRepeating = false;
+        _keyframeCaptureTimer.Tick += OnKeyframeCaptureTimerTick;
         AutomationProperties.SetAutomationId(this, "NativeTerminalSurface");
         AutomationProperties.SetName(this, "Terminal");
         AutomationProperties.SetAutomationId(_inputPanel, "NativeTerminalInput");
@@ -269,8 +278,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
             _initializationFailed = true;
             lock (_outputGate)
             {
-                _pendingOutput.SetLength(0);
-                _pendingOutput.Position = 0;
+                _pendingOutput.Dispose();
                 _outputDispatchPending = false;
             }
             ShowInitializationError(exception.Message);
@@ -314,7 +322,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
     public override void NotifyDisconnected(string message, string action = "reconnect", bool neutral = false)
     {
-        FlushOutput();
+        FlushOutput(drain: true);
         _reconnectOnEnter = true;
         var color = neutral ? "\x1b[90m" : "\x1b[33m";
         SendDisplayText($"\r\n{color}{SanitizeNotice(message)}\x1b[0m\r\nPress Enter to {SanitizeNotice(action)}.\r\n");
@@ -374,6 +382,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         bool? rightClickPaste = null,
         int? scrollback = null)
     {
+        var scrollbackChanged = scrollback is not null && scrollback.Value != _scrollback;
         if (fontSize is not null)
             _fontSize = fontSize.Value;
         if (fontFamily is not null)
@@ -384,6 +393,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
             _copyOnSelect = copyOnSelect.Value;
         if (rightClickPaste is not null)
             _rightClickPaste = rightClickPaste.Value;
+        if (scrollbackChanged && _terminal != IntPtr.Zero && _api is not null)
+            _api.SetHistorySize(_terminal, scrollback!.Value);
         if (scrollback is not null)
             _scrollback = scrollback.Value;
         ApplyNativeTheme();
@@ -583,19 +594,22 @@ public sealed class NativeTerminalSurface : TerminalSurface
         bool queue;
         lock (_outputGate)
         {
-            queue = !_disposed && !_outputDispatchPending && _pendingOutput.Length > 0;
+            queue = !_disposed && !_outputDispatchPending && _pendingOutput.HasData;
             if (queue)
                 _outputDispatchPending = true;
         }
 
-        if (queue && !DispatcherQueue.TryEnqueue(FlushOutput))
+        // Batch reads already waiting, but do not add a frame of latency. Low priority
+        // lets keyboard input and layout run between bounded output blocks.
+        if (queue && !DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => FlushOutput()))
         {
             lock (_outputGate)
                 _outputDispatchPending = false;
         }
     }
 
-    private void FlushOutput()
+    private void FlushOutput(bool drain = false)
     {
         if (_terminal == IntPtr.Zero || _api is null)
         {
@@ -604,37 +618,39 @@ public sealed class NativeTerminalSurface : TerminalSurface
             return;
         }
 
-        byte[]? bytes = null;
-        char[]? chars = null;
-        try
+        // Explicit disconnect drains preserve notice ordering. Normal dispatches
+        // yield after one block, including when the producer outruns the renderer.
+        do
         {
-            int byteCount;
-            lock (_outputGate)
+            byte[]? bytes = null;
+            try
             {
-                _outputDispatchPending = false;
-                byteCount = checked((int)_pendingOutput.Length);
-                if (byteCount == 0)
-                    return;
-                bytes = ArrayPool<byte>.Shared.Rent(byteCount);
-                _pendingOutput.GetBuffer().AsSpan(0, byteCount).CopyTo(bytes);
-                _pendingOutput.SetLength(0);
-                _pendingOutput.Position = 0;
-            }
+                int byteCount;
+                lock (_outputGate)
+                {
+                    _outputDispatchPending = true;
+                    bytes = _pendingOutput.Read(out byteCount);
+                    if (bytes is null)
+                        break;
+                }
 
-            chars = ArrayPool<char>.Shared.Rent(Encoding.UTF8.GetMaxCharCount(byteCount));
-            var charCount = _outputDecoder.GetChars(bytes.AsSpan(0, byteCount), chars, flush: false);
-            if (charCount > 0)
-                _api.SendOutput(_terminal, new string(chars, 0, charCount));
-            _keyframeBytes = Math.Min(long.MaxValue - byteCount, _keyframeBytes) + byteCount;
-            CaptureNativeKeyframe(force: false);
-        }
-        finally
-        {
-            if (chars is not null)
-                ArrayPool<char>.Shared.Return(chars);
-            if (bytes is not null)
-                ArrayPool<byte>.Shared.Return(bytes);
-        }
+                var text = _outputDecoder.Decode(bytes.AsSpan(0, byteCount));
+                if (text.Length > 0)
+                {
+                    _api.SendOutput(_terminal, text);
+                    QueueAnnotationRefresh();
+                }
+                _keyframeBytes = Math.Min(long.MaxValue - byteCount, _keyframeBytes) + byteCount;
+                QueueNativeKeyframeCapture();
+            }
+            finally
+            {
+                if (bytes is not null)
+                    ArrayPool<byte>.Shared.Return(bytes);
+                lock (_outputGate)
+                    _outputDispatchPending = false;
+            }
+        } while (drain);
 
         QueueOutputFlush();
     }
@@ -642,13 +658,41 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private void SendDisplayText(string text)
     {
         if (_terminal != IntPtr.Zero && _api is not null)
+        {
             _api.SendOutput(_terminal, text);
+            QueueAnnotationRefresh();
+        }
+    }
+
+    private void QueueNativeKeyframeCapture()
+    {
+        if (_readOnly || !_initialized || _terminal == IntPtr.Zero || _api is null)
+            return;
+        _keyframeCaptureTimer.Stop();
+        _keyframeCaptureTimer.Start();
+    }
+
+    private void OnKeyframeCaptureTimerTick(
+        Microsoft.UI.Dispatching.DispatcherQueueTimer sender,
+        object args)
+    {
+        sender.Stop();
+        CaptureNativeKeyframe(force: false);
     }
 
     private void CaptureNativeKeyframe(bool force)
     {
         if (_readOnly || !_initialized || _terminal == IntPtr.Zero || _api is null)
             return;
+
+        lock (_outputGate)
+        {
+            if (_pendingOutput.HasData)
+            {
+                QueueNativeKeyframeCapture();
+                return;
+            }
+        }
 
         var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         if (!force
@@ -660,22 +704,31 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
         try
         {
-            var snapshot = _api.CaptureSnapshot(_terminal);
-            var state = NativeTerminalKeyframeCodec.Encode(snapshot, _api.BuildId);
+            var nativeSnapshot = _api.CaptureExactSnapshot(_terminal);
+            var state = NativeTerminalSnapshotCodec.Encode(
+                nativeSnapshot,
+                _api.BuildId,
+                _outputDecoder.CapturePending(),
+                _findInput.Text ?? string.Empty,
+                _findCase.IsChecked == true,
+                _findRegex.IsChecked == true,
+                _currentHighlightRules);
             _keyframeBytes = 0;
-            _lastKeyframeUnixMilliseconds = snapshot.UnixTimeMilliseconds;
-            KeyframeCaptured?.Invoke(state, snapshot.Columns, snapshot.Rows, snapshot.UnixTimeMilliseconds);
+            _lastKeyframeUnixMilliseconds = now;
+            KeyframeCaptured?.Invoke(state, Columns, Rows, now);
         }
         catch (Exception exception)
         {
             TraceHook?.Invoke($"native keyframe capture failed: {exception.Message}");
+            _keyframeBytes = 0;
+            _lastKeyframeUnixMilliseconds = now;
         }
     }
 
     public async Task ShowReplayAsync(
         int columns,
         int rows,
-        string? keyframe,
+        ReadOnlyMemory<byte> keyframe,
         IReadOnlyList<TerminalReplayEvent> events)
     {
         var generation = ++_replayGeneration;
@@ -694,7 +747,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         _terminalPanel.Opacity = 0;
         try
         {
-            ResetPlaybackTerminal(columns, rows);
+            ReplacePlaybackTerminal(columns, rows, envelope: null);
 
             var frames = new List<NativePlaybackFrame>
             {
@@ -774,29 +827,20 @@ public sealed class NativeTerminalSurface : TerminalSurface
         int generation,
         int columns,
         int rows,
-        string? state,
+        ReadOnlyMemory<byte> state,
         IReadOnlyList<TerminalReplayEvent> events)
     {
-        NativeTerminalKeyframe? keyframe = null;
-        if (state is not null
-            && (!NativeTerminalKeyframeCodec.TryDecode(state, out keyframe)
-                || keyframe is null
-                || _api is null
-                || !string.Equals(keyframe.BuildId, _api.BuildId, StringComparison.Ordinal)))
+        NativeTerminalSnapshotEnvelope? envelope = null;
+        if (!state.IsEmpty)
         {
-            throw new InvalidDataException("The native terminal keyframe is not compatible with this renderer.");
+            envelope = NativeTerminalSnapshotCodec.Decode(state.Span);
+            if (_api is null || !string.Equals(envelope.BuildId, _api.BuildId, StringComparison.Ordinal))
+                throw new InvalidDataException("The native terminal snapshot is not compatible with this renderer.");
         }
 
-        ResetPlaybackTerminal(keyframe?.Columns ?? columns, keyframe?.Rows ?? rows);
-        if (keyframe is not null)
-        {
-            if (keyframe.AlternateBuffer)
-                _api!.SendOutput(_terminal, "\x1b[?1049h");
-            _api!.SendOutput(_terminal, keyframe.Ansi);
-        }
-
-        var currentColumns = keyframe?.Columns ?? columns;
-        var currentRows = keyframe?.Rows ?? rows;
+        ReplacePlaybackTerminal(columns, rows, envelope);
+        var currentColumns = columns;
+        var currentRows = rows;
         for (var index = 0; index < events.Count; index++)
         {
             if (generation != _replayGeneration || _disposed)
@@ -805,15 +849,20 @@ public sealed class NativeTerminalSurface : TerminalSurface
             if ((index & 127) == 127)
                 await Task.Yield();
         }
-        if (generation == _replayGeneration && events.Count == 0 && keyframe is not null)
-            _api!.UserScroll(_terminal, keyframe.ViewportTop);
     }
 
-    private string CaptureEncodedSnapshot()
+    private byte[] CaptureEncodedSnapshot()
     {
         if (_terminal == IntPtr.Zero || _api is null)
             throw new InvalidOperationException("The native playback terminal is not ready.");
-        return NativeTerminalKeyframeCodec.Encode(_api.CaptureSnapshot(_terminal), _api.BuildId);
+        return NativeTerminalSnapshotCodec.Encode(
+            _api.CaptureExactSnapshot(_terminal),
+            _api.BuildId,
+            _outputDecoder.CapturePending(),
+            _findInput.Text ?? string.Empty,
+            _findCase.IsChecked == true,
+            _findRegex.IsChecked == true,
+            _currentHighlightRules);
     }
 
     private void ApplyReplayEvent(string type, string data, ref int columns, ref int rows)
@@ -834,23 +883,19 @@ public sealed class NativeTerminalSurface : TerminalSurface
         }
     }
 
-    private void ResetPlaybackTerminal(int columns, int rows)
+    private void ReplacePlaybackTerminal(
+        int columns,
+        int rows,
+        NativeTerminalSnapshotEnvelope? envelope)
     {
         if (!_readOnly || _api is null || _hostHwnd == IntPtr.Zero)
             throw new InvalidOperationException("The native playback terminal is not ready.");
 
-        DestroyNativeTerminal();
         var playbackColumns = Math.Max(1, columns);
         var playbackRows = Math.Max(1, rows);
-        Columns = playbackColumns;
-        Rows = playbackRows;
-        _lastNativeEventSequence = 0;
-        _alternateBufferActive = false;
-        _viewTop = 0;
-        _bufferHeight = Rows;
         var settings = new NativeTerminalApi.NativeTerminalCreationSettings(
-            Columns,
-            Rows,
+            playbackColumns,
+            playbackRows,
             _scrollback,
             _fontFamily,
             ToNativePointSize(_fontSize),
@@ -860,18 +905,104 @@ public sealed class NativeTerminalSurface : TerminalSurface
             AllowOscClipboard: false,
             AllowOscNotifications: false,
             ReadOnly: true);
-        _terminal = _api.CreateTerminal(_hostHwnd, settings);
-        _api.RegisterEventCallback(_terminal, _eventCallback);
-        _initialized = true;
-        _lastX = int.MinValue;
-        _lastY = int.MinValue;
-        _lastWidth = -1;
-        _lastHeight = -1;
-        ApplyNativeTheme();
-        UpdateBounds(force: true);
-        _api.ResizeCharacters(_terminal, playbackColumns, playbackRows);
-        Columns = playbackColumns;
-        Rows = playbackRows;
+        var candidate = _api.CreateTerminal(_hostHwnd, settings);
+        try
+        {
+            if (envelope is not null)
+            {
+                _api.RestoreExactSnapshot(candidate, envelope.NativeSnapshot);
+                if (envelope.HighlightRules.Count > 0)
+                    _api.SetHighlightRules(candidate, envelope.HighlightRules);
+                if (!string.IsNullOrEmpty(envelope.SearchQuery))
+                {
+                    _api.Search(
+                        candidate,
+                        envelope.SearchQuery,
+                        forward: true,
+                        caseSensitive: envelope.SearchCaseSensitive,
+                        regularExpression: envelope.SearchRegularExpression,
+                        executeSearch: false,
+                        scrollIntoView: false);
+                }
+            }
+        }
+        catch
+        {
+            _api.DestroyTerminal(candidate);
+            throw;
+        }
+
+        var previous = _terminal;
+        var previousColumns = Columns;
+        var previousRows = Rows;
+        var previousSequence = _lastNativeEventSequence;
+        var previousAlternateBuffer = _alternateBufferActive;
+        var previousBracketedPasteMode = _bracketedPasteModeEnabled;
+        var previousViewTop = _viewTop;
+        var previousBufferHeight = _bufferHeight;
+        var previousInitialized = _initialized;
+        var previousLastX = _lastX;
+        var previousLastY = _lastY;
+        var previousLastWidth = _lastWidth;
+        var previousLastHeight = _lastHeight;
+        var previousHighlightRules = _currentHighlightRules;
+        var previousSearchQuery = _findInput.Text;
+        var previousSearchCase = _findCase.IsChecked;
+        var previousSearchRegex = _findRegex.IsChecked;
+        try
+        {
+            _terminal = candidate;
+            Columns = playbackColumns;
+            Rows = playbackRows;
+            _lastNativeEventSequence = 0;
+            _alternateBufferActive = false;
+            _bracketedPasteModeEnabled = false;
+            _viewTop = 0;
+            _bufferHeight = Rows;
+            _initialized = true;
+            _lastX = int.MinValue;
+            _lastY = int.MinValue;
+            _lastWidth = -1;
+            _lastHeight = -1;
+            AttachSwapChainPanel();
+            _api.RegisterEventCallback(candidate, _eventCallback);
+
+            if (envelope is not null)
+            {
+                _currentHighlightRules = envelope.HighlightRules.ToList();
+                _findInput.Text = envelope.SearchQuery;
+                _findCase.IsChecked = envelope.SearchCaseSensitive;
+                _findRegex.IsChecked = envelope.SearchRegularExpression;
+            }
+            RefreshAnnotations();
+        }
+        catch
+        {
+            _terminal = previous;
+            Columns = previousColumns;
+            Rows = previousRows;
+            _lastNativeEventSequence = previousSequence;
+            _alternateBufferActive = previousAlternateBuffer;
+            _bracketedPasteModeEnabled = previousBracketedPasteMode;
+            _viewTop = previousViewTop;
+            _bufferHeight = previousBufferHeight;
+            _initialized = previousInitialized;
+            _lastX = previousLastX;
+            _lastY = previousLastY;
+            _lastWidth = previousLastWidth;
+            _lastHeight = previousLastHeight;
+            _currentHighlightRules = previousHighlightRules;
+            _findInput.Text = previousSearchQuery;
+            _findCase.IsChecked = previousSearchCase;
+            _findRegex.IsChecked = previousSearchRegex;
+            _api.DestroyTerminal(candidate);
+            if (previous != IntPtr.Zero)
+                AttachSwapChainPanel();
+            throw;
+        }
+
+        if (previous != IntPtr.Zero)
+            _api.DestroyTerminal(previous);
     }
 
     private static bool TryParseReplaySize(string value, out int columns, out int rows)
@@ -887,7 +1018,12 @@ public sealed class NativeTerminalSurface : TerminalSurface
             && rows > 0;
     }
 
-    private sealed record NativePlaybackFrame(double Time, int EventIndex, int Columns, int Rows, string State);
+    private sealed record NativePlaybackFrame(
+        double Time,
+        int EventIndex,
+        int Columns,
+        int Rows,
+        ReadOnlyMemory<byte> State);
 
     private void OnNativeEvent(IntPtr context, in NativeTerminalApi.NativeEvent eventData)
     {
@@ -952,28 +1088,14 @@ public sealed class NativeTerminalSurface : TerminalSurface
                     break;
                 case NativeTerminalApi.NativeEventType.BufferOrViewportChanged:
                 {
-                    var viewTop = checked((int)eventData.Value0);
-                    var viewportHeight = checked((int)eventData.Value1);
-                    var bufferHeight = checked((int)eventData.Value2);
-                    DispatcherQueue.TryEnqueue(() =>
+                    Volatile.Write(ref _pendingViewTop, checked((int)eventData.Value0));
+                    Volatile.Write(ref _pendingViewportHeight, checked((int)eventData.Value1));
+                    Volatile.Write(ref _pendingBufferHeight, checked((int)eventData.Value2));
+                    if (Interlocked.Exchange(ref _viewportRefreshPending, 1) == 0
+                        && !DispatcherQueue.TryEnqueue(RefreshViewportFromNativeEvent))
                     {
-                        _viewTop = viewTop;
-                        _bufferHeight = bufferHeight;
-                        _ruler.UpdateViewport(viewTop, viewportHeight, bufferHeight, _alternateBufferActive);
-                        UpdateJumpHighlightBounds();
-                        QueueAnnotationRefresh();
-                        if (_findBar.Visibility == Visibility.Visible
-                            && _findInput.Text.Length > 0
-                            && !_searchRefreshPending)
-                        {
-                            _searchRefreshPending = true;
-                            DispatcherQueue.TryEnqueue(() =>
-                            {
-                                _searchRefreshPending = false;
-                                RunFind(forward: true, execute: false);
-                            });
-                        }
-                    });
+                        Interlocked.Exchange(ref _viewportRefreshPending, 0);
+                    }
                     break;
                 }
                 case NativeTerminalApi.NativeEventType.AlternateBufferChanged:
@@ -1452,6 +1574,30 @@ public sealed class NativeTerminalSurface : TerminalSurface
             FocusTerminal();
     }
 
+    private void RefreshViewportFromNativeEvent()
+    {
+        Interlocked.Exchange(ref _viewportRefreshPending, 0);
+        var viewTop = Volatile.Read(ref _pendingViewTop);
+        var viewportHeight = Volatile.Read(ref _pendingViewportHeight);
+        var bufferHeight = Volatile.Read(ref _pendingBufferHeight);
+        _viewTop = viewTop;
+        _bufferHeight = bufferHeight;
+        _ruler.UpdateViewport(viewTop, viewportHeight, bufferHeight, _alternateBufferActive);
+        UpdateJumpHighlightBounds();
+        QueueAnnotationRefresh();
+        if (_findBar.Visibility == Visibility.Visible
+            && _findInput.Text.Length > 0
+            && !_searchRefreshPending)
+        {
+            _searchRefreshPending = true;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _searchRefreshPending = false;
+                RunFind(forward: true, execute: false);
+            });
+        }
+    }
+
     private void RefreshAnnotations()
     {
         if (_terminal == IntPtr.Zero || _api is null)
@@ -1478,14 +1624,22 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
     private void QueueAnnotationRefresh()
     {
-        if (_annotationRefreshPending || _alternateBufferActive)
+        if (_disposed || _alternateBufferActive || _annotationRefreshPending)
             return;
+
+        // Coalesce notifications from this output block. Normal priority updates
+        // decorations before the next low-priority output block, without waiting
+        // for an idle period that continuous output might never provide.
         _annotationRefreshPending = true;
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        if (!DispatcherQueue.TryEnqueue(() =>
         {
             _annotationRefreshPending = false;
-            RefreshAnnotations();
-        });
+            if (!_disposed && !_alternateBufferActive)
+                RefreshAnnotations();
+        }))
+        {
+            _annotationRefreshPending = false;
+        }
     }
 
     private static List<NativeTerminalApi.HighlightRulePayload> ParseHighlightRules(IReadOnlyList<object> rules)
@@ -2184,6 +2338,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
         LayoutUpdated -= OnLayoutUpdated;
         UnregisterPropertyChangedCallback(VisibilityProperty, _visibilityCallbackToken);
         UnsubscribeFromXamlRoot();
+        _keyframeCaptureTimer.Stop();
+        _keyframeCaptureTimer.Tick -= OnKeyframeCaptureTimerTick;
         _jumpHighlightTimer.Stop();
         _jumpHighlightTimer.Tick -= OnJumpHighlightTimerTick;
         DestroyNativeTerminal();
@@ -2199,10 +2355,9 @@ public sealed class NativeTerminalSurface : TerminalSurface
         PointerWheelChanged -= OnPointerWheelChanged;
         lock (_outputGate)
         {
-            _pendingOutput.SetLength(0);
+            _pendingOutput.Dispose();
             _outputDispatchPending = false;
         }
-        _pendingOutput.Dispose();
     }
 
     [StructLayout(LayoutKind.Sequential)]

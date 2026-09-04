@@ -21,9 +21,9 @@ const capabilities = JSON.parse(fs.readFileSync(
   "utf8"
 ));
 
-test("ABI 2.1 owns composition hosting and stable annotation data", () => {
-  assert.match(api, /AbiMajor\s*=\s*2/);
-  assert.match(api, /AbiMinor\s*=\s*[1-9]/);
+test("current ABI retains composition hosting and stable annotation data", () => {
+  assert.match(api, /AbiMajor\s*=\s*3/);
+  assert.match(api, /AbiMinor\s*=\s*1/);
   for (const name of [
     "ReseshTerminalSetBounds",
     "ReseshTerminalAttachSwapChainPanel",

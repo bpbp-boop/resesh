@@ -12,7 +12,7 @@ namespace Resesh.App.Terminal;
 /// <summary>Read-only terminal player shared by live rewind and asciicast playback.</summary>
 public sealed class TerminalPlayerView : Grid, IDisposable
 {
-    private readonly TerminalSurface _terminal = TerminalSurfaceFactory.CreatePlayback();
+    private readonly NativeTerminalSurface _terminal = (NativeTerminalSurface)TerminalSurfaceFactory.CreatePlayback();
     private readonly TerminalCapture? _capture;
     private readonly TerminalRecording? _recording;
     private readonly Slider _timeline = new() { Minimum = 0, StepFrequency = 0.01 };
@@ -150,10 +150,7 @@ public sealed class TerminalPlayerView : Grid, IDisposable
             var events = _recording.Events
                 .Select(item => new TerminalTimedReplayEvent(item.Time, item.Type, item.Data))
                 .ToArray();
-            if (_terminal is NativeTerminalSurface native)
-                await native.LoadPlaybackAsync(_recording.Width, _recording.Height, events);
-            else if (_terminal is TerminalControl web)
-                web.LoadPlayback(_recording.Width, _recording.Height, events);
+            await _terminal.LoadPlaybackAsync(_recording.Width, _recording.Height, events);
         }
     }
 
@@ -217,29 +214,16 @@ public sealed class TerminalPlayerView : Grid, IDisposable
             var events = snapshot.Events
                 .Select(item => new TerminalReplayEvent(item.Type, item.Data))
                 .ToArray();
-            if (_terminal is NativeTerminalSurface native)
-            {
-                await native.ShowReplayAsync(
-                    snapshot.Keyframe?.Columns ?? snapshot.InitialColumns,
-                    snapshot.Keyframe?.Rows ?? snapshot.InitialRows,
-                    snapshot.Keyframe?.State,
-                    events);
-            }
-            else if (_terminal is TerminalControl web)
-            {
-                web.ShowReplay(
-                    snapshot.Keyframe?.Columns ?? snapshot.InitialColumns,
-                    snapshot.Keyframe?.Rows ?? snapshot.InitialRows,
-                    snapshot.Keyframe?.State,
-                    events);
-            }
+            await _terminal.ShowReplayAsync(
+                snapshot.Keyframe?.Columns ?? snapshot.InitialColumns,
+                snapshot.Keyframe?.Rows ?? snapshot.InitialRows,
+                snapshot.Keyframe?.State ?? ReadOnlyMemory<byte>.Empty,
+                events);
         }
-        else if (_terminal is NativeTerminalSurface native)
+        else
         {
-            await native.SeekPlaybackAsync(time);
+            await _terminal.SeekPlaybackAsync(time);
         }
-        else if (_terminal is TerminalControl web)
-            web.SeekPlayback(time);
     }
 
     private void SetPlaying(bool playing)

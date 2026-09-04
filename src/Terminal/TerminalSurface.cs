@@ -12,7 +12,7 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract event Action<byte[]>? InputReceived;
     public abstract event Action<int, int>? Resized;
     public abstract event TerminalOutputObservedHandler? OutputObserved;
-    public abstract event Action<string, int, int, long>? KeyframeCaptured;
+    public abstract event Action<ReadOnlyMemory<byte>, int, int, long>? KeyframeCaptured;
     public abstract event Action? ReconnectRequested;
     public abstract event Action? CloseTabRequested;
     public abstract event Action? SplitRequested;
@@ -107,6 +107,6 @@ public static class TerminalSurfaceFactory
             ? new NativeTerminalSurface()
             : new TerminalControl();
 
-    /// <summary>Uses the selected renderer for read-only rewind and recording playback.</summary>
-    public static TerminalSurface CreatePlayback() => CreateLive();
+    /// <summary>Playback always uses the exact-snapshot native terminal.</summary>
+    public static TerminalSurface CreatePlayback() => new NativeTerminalSurface();
 }

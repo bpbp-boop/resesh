@@ -12,24 +12,24 @@ const surface = read("src", "Terminal", "NativeTerminalSurface.cs");
 const keyframe = read("src", "Terminal", "NativeTerminalKeyframe.cs");
 const player = read("src", "App", "Terminal", "TerminalPlayerView.cs");
 const factory = read("src", "Terminal", "TerminalSurface.cs");
-const patch = read("eng", "native-terminal-patches", "ansi-keyframes.patch");
+const patch = read("eng", "native-terminal-patches", "exact-snapshots.patch");
 const capabilities = JSON.parse(read("eng", "native-terminal-capabilities.json"));
 
-test("ABI 2.1 exports versioned in-memory ANSI snapshots", () => {
-  assert.match(api, /AbiMajor\s*=\s*2/);
-  assert.match(api, /AbiMinor\s*=\s*[1-9]/);
-  assert.match(api, /ReseshTerminalCaptureSnapshot/);
-  assert.match(api, /ReseshTerminalResizeCharacters/);
-  assert.match(api, /record struct Snapshot\([\s\S]*?CaptureSequence[\s\S]*?UnixTimeMilliseconds[\s\S]*?Ansi[\s\S]*?WorkingDirectory/);
-  assert.match(api, /ValidateSnapshot\(in snapshot, written\)/);
-  assert.match(keyframe, /resesh-native-keyframe-v1:/);
-  assert.match(keyframe, /SchemaVersion[\s\S]*?BuildId[\s\S]*?ViewportTop[\s\S]*?AlternateBuffer[\s\S]*?CaptureSequence/);
-  assert.match(patch, /void TextBuffer::SerializeTo\(std::wstring& destination\) const/);
-  assert.match(patch, /CopyRow\(row, row, \*bufferCopy\)/);
-  assert.match(patch, /snapshot\.Size = _terminal->GetViewport\(\)\.Dimensions\(\)/);
-  assert.match(patch, /bufferCopy->SerializeTo\(snapshot\.Ansi\)/);
-  assert.match(patch, /if \(code == 7\)[\s\S]*?SetWorkingDirectory\(payload\)/);
-  assert.match(patch, /ReseshTerminalCaptureSnapshot/);
+test("ABI 3 replaces interim ANSI snapshots with exact binary snapshots", () => {
+  assert.match(api, /AbiMajor\s*=\s*3/);
+  assert.match(api, /AbiMinor\s*=\s*1/);
+  assert.match(api, /ReseshTerminalCaptureExactSnapshot/);
+  assert.match(api, /ReseshTerminalRestoreExactSnapshot/);
+  assert.doesNotMatch(api, /ReseshTerminalCaptureSnapshot/);
+  assert.match(keyframe, /Magic = 0x504E5352/);
+  assert.match(keyframe, /SchemaMajor = 1/);
+  assert.match(keyframe, /Crc32\(fieldBytes\)/);
+  assert.match(patch, /SnapshotMainBuffer/);
+  assert.match(patch, /SnapshotAlternateBuffer/);
+  assert.match(patch, /WriteDispatchState/);
+  assert.match(patch, /ReseshTerminalRestoreExactSnapshot/);
+  assert.match(patch, /RestorePendingSequence/);
+  assert.doesNotMatch(surface, /resesh-native-keyframe-v1:/);
 });
 
 test("native live capture uses the 10-second or 1-MiB policy", () => {
@@ -38,16 +38,16 @@ test("native live capture uses the 10-second or 1-MiB policy", () => {
   assert.match(surface, /SupportsRewindCapture => true/);
   assert.match(surface, /CaptureNativeKeyframe\(force: true\)/);
   assert.match(surface, /_keyframeBytes < KeyframeByteInterval[\s\S]*?now - _lastKeyframeUnixMilliseconds < KeyframeTimeIntervalMilliseconds/);
-  assert.match(surface, /_api\.CaptureSnapshot\(_terminal\)/);
-  assert.match(surface, /KeyframeCaptured\?\.Invoke\(state, snapshot\.Columns, snapshot\.Rows, snapshot\.UnixTimeMilliseconds\)/);
+  assert.match(surface, /_api\.CaptureExactSnapshot\(_terminal\)/);
+  assert.match(surface, /KeyframeCaptured\?\.Invoke\(state, Columns, Rows, now\)/);
 });
 
 test("native rewind and asciicast playback seek from generated keyframes", () => {
-  assert.match(factory, /CreatePlayback\(\) => CreateLive\(\)/);
+  assert.match(factory, /CreatePlayback\(\) => new NativeTerminalSurface\(\)/);
   assert.match(player, /TerminalSurfaceFactory\.CreatePlayback\(\)/);
-  assert.match(player, /_terminal is NativeTerminalSurface native[\s\S]*?native\.LoadPlaybackAsync/);
-  assert.match(player, /native\.ShowReplayAsync/);
-  assert.match(player, /native\.SeekPlaybackAsync/);
+  assert.match(player, /_terminal\.LoadPlaybackAsync/);
+  assert.match(player, /_terminal\.ShowReplayAsync/);
+  assert.match(player, /_terminal\.SeekPlaybackAsync/);
   assert.match(surface, /LoadPlaybackAsync[\s\S]*?NativePlaybackFrame/);
   assert.match(surface, /item\.Time - lastFrameTime >= 10 \|\| bytesSinceFrame >= KeyframeByteInterval/);
   assert.match(surface, /for \(var index = frames\.Count - 1; index >= 0; index--\)/);
@@ -55,7 +55,7 @@ test("native rewind and asciicast playback seek from generated keyframes", () =>
   assert.match(surface, /var generation = \+\+_replayGeneration/);
   assert.match(surface, /generation != _replayGeneration/);
   assert.match(surface, /_terminalPanel\.Opacity = 1;[\s\S]*?await SeekPlaybackAsync/);
-  assert.match(surface, /ResetPlaybackTerminal/);
+  assert.match(surface, /ReplacePlaybackTerminal/);
   assert.match(surface, /_api\.ResizeCharacters/);
 });
 

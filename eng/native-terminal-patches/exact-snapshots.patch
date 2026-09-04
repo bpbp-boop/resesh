@@ -1,0 +1,1877 @@
+diff --git a/src/buffer/out/textBuffer.cpp b/src/buffer/out/textBuffer.cpp
+index f132f40e57a2a9ba692fa2657db396a81fecd812..5561001170556f16cbe3081d9ce1830473f385c1 100644
+--- a/src/buffer/out/textBuffer.cpp
++++ b/src/buffer/out/textBuffer.cpp
+@@ -3332,6 +3332,34 @@ void TextBuffer::CopyHyperlinkMaps(const TextBuffer& other)
+     _currentHyperlinkId = other._currentHyperlinkId;
+ }
+ 
++const std::unordered_map<uint16_t, std::wstring>& TextBuffer::ReseshHyperlinkMap() const noexcept
++{
++    return _hyperlinkMap;
++}
++
++uint16_t TextBuffer::ReseshNextHyperlinkId() const noexcept
++{
++    return _currentHyperlinkId;
++}
++
++void TextBuffer::ReseshRestoreHyperlink(
++    const uint16_t id,
++    const std::wstring_view uri,
++    const std::wstring_view customId)
++{
++    THROW_HR_IF(E_INVALIDARG, id == 0 || uri.empty() || !_hyperlinkMap.emplace(id, uri).second);
++    if (!customId.empty())
++    {
++        THROW_HR_IF(E_INVALIDARG, !_hyperlinkCustomIdMap.emplace(customId, id).second);
++    }
++}
++
++void TextBuffer::ReseshRestoreNextHyperlinkId(const uint16_t id)
++{
++    THROW_HR_IF(E_INVALIDARG, id == 0);
++    _currentHyperlinkId = id;
++}
++
+ // Searches through the entire (committed) text buffer for `needle` and returns the coordinates in absolute coordinates.
+ // The end coordinates of the returned ranges are considered inclusive.
+ std::optional<std::vector<til::point_span>> TextBuffer::SearchText(const std::wstring_view& needle, SearchFlag flags) const
+diff --git a/src/buffer/out/textBuffer.hpp b/src/buffer/out/textBuffer.hpp
+index b3d5a985bd408735589879741ef170bd94c7b9e5..50ab691237d0efde441c348e5dff82c4976b344f 100644
+--- a/src/buffer/out/textBuffer.hpp
++++ b/src/buffer/out/textBuffer.hpp
+@@ -198,6 +198,10 @@ public:
+     void RemoveHyperlinkFromMap(uint16_t id) noexcept;
+     std::wstring GetCustomIdFromId(uint16_t id) const;
+     void CopyHyperlinkMaps(const TextBuffer& OtherBuffer);
++    const std::unordered_map<uint16_t, std::wstring>& ReseshHyperlinkMap() const noexcept;
++    uint16_t ReseshNextHyperlinkId() const noexcept;
++    void ReseshRestoreHyperlink(uint16_t id, std::wstring_view uri, std::wstring_view customId);
++    void ReseshRestoreNextHyperlinkId(uint16_t id);
+ 
+     std::wstring GetPlainText(til::point start, til::point end) const;
+ 
+diff --git a/src/cascadia/TerminalControl/HwndTerminal.cpp b/src/cascadia/TerminalControl/HwndTerminal.cpp
+index 5e33ab4ce184c21c8eac300b8d5a5620df8d6681..f5f6fffa143e8f16544f78145ebe65fe5eb76be2 100644
+--- a/src/cascadia/TerminalControl/HwndTerminal.cpp
++++ b/src/cascadia/TerminalControl/HwndTerminal.cpp
+@@ -18,6 +18,7 @@
+ #include "../../renderer/uia/UiaRenderer.hpp"
+ #include "../../types/viewport.cpp"
+ 
++#include "../../terminal/adapter/adaptDispatch.hpp"
+ #include "../../buffer/out/UTextAdapter.h"
+ #include <map>
+ #include <unordered_set>
+@@ -2018,51 +2019,781 @@ try
+ 
+ CATCH_LOG_RETURN_FALSE();
+ 
+-HwndTerminalSnapshot HwndTerminal::CaptureSnapshot() const
++namespace
+ {
+-    if (!_terminal)
++    constexpr uint32_t SnapshotMagic = 0x38544E52; // "RNT8"
++    constexpr uint16_t SnapshotMajor = 1;
++    constexpr uint16_t SnapshotMinor = 0;
++    constexpr size_t SnapshotHeaderSize = 24;
++    constexpr size_t SnapshotFieldHeaderSize = 8;
++    constexpr size_t MaximumSnapshotBytes = 32 * 1024 * 1024;
++    constexpr uint32_t RequiredSnapshotFeatures = 0x000000ff;
++    constexpr uint32_t MaximumSnapshotRows = 1'000'000;
++    constexpr uint32_t MaximumSnapshotCells = 16 * 1024 * 1024;
++    constexpr uint32_t MaximumSnapshotString = 16 * 1024 * 1024;
++
++    enum SnapshotField : uint16_t
++    {
++        SnapshotMetadata = 1,
++        SnapshotMainBuffer = 2,
++        SnapshotAlternateBuffer = 3,
++        SnapshotTextState = 4,
++        SnapshotApplicationMarks = 5,
++        SnapshotDispatchState = 6,
++    };
++
++    struct SnapshotWriter
+     {
+-        return {};
++        std::vector<uint8_t> Data;
++
++        void U8(const uint8_t value) { Data.push_back(value); }
++        void U16(const uint16_t value)
++        {
++            U8(static_cast<uint8_t>(value));
++            U8(static_cast<uint8_t>(value >> 8));
++        }
++        void U32(const uint32_t value)
++        {
++            U16(static_cast<uint16_t>(value));
++            U16(static_cast<uint16_t>(value >> 16));
++        }
++        void I32(const int32_t value) { U32(static_cast<uint32_t>(value)); }
++        void U64(const uint64_t value)
++        {
++            U32(static_cast<uint32_t>(value));
++            U32(static_cast<uint32_t>(value >> 32));
++        }
++        void I64(const int64_t value) { U64(static_cast<uint64_t>(value)); }
++        void Bytes(const std::span<const uint8_t> value)
++        {
++            THROW_HR_IF(E_OUTOFMEMORY, value.size() > MaximumSnapshotBytes - Data.size());
++            Data.insert(Data.end(), value.begin(), value.end());
++        }
++        void String(const std::wstring_view value)
++        {
++            const auto utf8 = til::u16u8(value);
++            THROW_HR_IF(E_OUTOFMEMORY, utf8.size() > MaximumSnapshotString);
++            U32(gsl::narrow<uint32_t>(utf8.size()));
++            Bytes({ reinterpret_cast<const uint8_t*>(utf8.data()), utf8.size() });
++        }
++        void Field(const uint16_t id, const SnapshotWriter& value)
++        {
++            U16(id);
++            U16(0);
++            U32(gsl::narrow<uint32_t>(value.Data.size()));
++            Bytes(value.Data);
++        }
++    };
++
++    struct SnapshotReader
++    {
++        std::span<const uint8_t> Data;
++        size_t Offset{};
++
++        void Need(const size_t count) const
++        {
++            THROW_HR_IF(E_INVALIDARG, count > Data.size() - std::min(Offset, Data.size()));
++        }
++        uint8_t U8()
++        {
++            Need(1);
++            return Data[Offset++];
++        }
++        uint16_t U16()
++        {
++            const auto low = U8();
++            return static_cast<uint16_t>(low | static_cast<uint16_t>(U8()) << 8);
++        }
++        uint32_t U32()
++        {
++            const auto low = U16();
++            return static_cast<uint32_t>(low | static_cast<uint32_t>(U16()) << 16);
++        }
++        int32_t I32() { return static_cast<int32_t>(U32()); }
++        uint64_t U64()
++        {
++            const auto low = U32();
++            return static_cast<uint64_t>(low) | static_cast<uint64_t>(U32()) << 32;
++        }
++        int64_t I64() { return static_cast<int64_t>(U64()); }
++        std::span<const uint8_t> Bytes(const size_t count)
++        {
++            Need(count);
++            const auto result = Data.subspan(Offset, count);
++            Offset += count;
++            return result;
++        }
++        std::wstring String()
++        {
++            const auto length = U32();
++            THROW_HR_IF(E_INVALIDARG, length > MaximumSnapshotString);
++            const auto bytes = Bytes(length);
++            return til::u8u16(std::string_view{ reinterpret_cast<const char*>(bytes.data()), bytes.size() });
++        }
++        bool Done() const noexcept { return Offset == Data.size(); }
++    };
++
++    bool ReadSnapshotBool(SnapshotReader& reader);
++
++    uint32_t SnapshotCrc32(const std::span<const uint8_t> value) noexcept
++    {
++        auto crc = UINT32_MAX;
++        for (const auto item : value)
++        {
++            crc ^= item;
++            for (size_t bit = 0; bit < 8; ++bit)
++            {
++                crc = (crc >> 1) ^ (0xedb88320u & (0u - (crc & 1u)));
++            }
++        }
++        return ~crc;
+     }
+ 
+-    std::unique_ptr<TextBuffer> bufferCopy;
+-    HwndTerminalSnapshot snapshot;
++    void WriteColor(SnapshotWriter& writer, const TextColor color)
+     {
+-        const auto lock = _terminal->LockForReading();
+-        const auto& source = _terminal->GetTextBuffer();
+-        const auto size = source.GetSize().Dimensions();
+-        bufferCopy = std::make_unique<TextBuffer>(size, source.GetCurrentAttributes(), 25, false, nullptr);
+-        bufferCopy->CopyProperties(source);
+-        for (til::CoordType row = 0; row < size.height; ++row)
++        writer.U8(static_cast<uint8_t>(color.GetType()));
++        writer.U8(color.GetR());
++        writer.U8(color.GetG());
++        writer.U8(color.GetB());
++    }
++
++    TextColor ReadColor(SnapshotReader& reader)
++    {
++        const auto type = reader.U8();
++        const auto red = reader.U8();
++        const auto green = reader.U8();
++        const auto blue = reader.U8();
++        THROW_HR_IF(E_INVALIDARG, type > static_cast<uint8_t>(ColorType::IsRgb));
++        switch (static_cast<ColorType>(type))
++        {
++        case ColorType::IsDefault:
++            return {};
++        case ColorType::IsIndex16:
++            return TextColor{ red, false };
++        case ColorType::IsIndex256:
++            return TextColor{ red, true };
++        case ColorType::IsRgb:
++            return TextColor{ RGB(red, green, blue) };
++        default:
++            THROW_HR(E_INVALIDARG);
++        }
++    }
++
++    void WriteAttribute(SnapshotWriter& writer, const TextAttribute& attribute)
++    {
++        writer.U16(static_cast<uint16_t>(attribute.GetCharacterAttributes()));
++        writer.U16(attribute.GetHyperlinkId());
++        writer.U16(static_cast<uint16_t>(attribute.GetMarkAttributes()));
++        WriteColor(writer, attribute.GetForeground());
++        WriteColor(writer, attribute.GetBackground());
++        WriteColor(writer, attribute.GetUnderlineColor());
++    }
++
++    TextAttribute ReadAttribute(SnapshotReader& reader)
++    {
++        const auto character = reader.U16();
++        const auto hyperlink = reader.U16();
++        const auto mark = reader.U16();
++        THROW_HR_IF(E_INVALIDARG, mark > static_cast<uint16_t>(MarkKind::Output));
++        const auto foreground = ReadColor(reader);
++        const auto background = ReadColor(reader);
++        const auto underline = ReadColor(reader);
++        TextAttribute result{
++            static_cast<CharacterAttributes>(character),
++            foreground,
++            background,
++            hyperlink,
++            underline
++        };
++        result.SetMarkAttributes(static_cast<MarkKind>(mark));
++        return result;
++    }
++
++    struct SnapshotCell
++    {
++        std::wstring Text;
++        DbcsAttribute Width{};
++        TextAttribute Attribute;
++    };
++
++    struct SnapshotRow
++    {
++        bool Wrapped{};
++        bool DoubleBytePadded{};
++        LineRendition Rendition{};
++        std::optional<ScrollbarData> Mark;
++        std::vector<SnapshotCell> Cells;
++    };
++
++    struct SnapshotLink
++    {
++        uint16_t Id{};
++        std::wstring Uri;
++        std::wstring CustomId;
++    };
++
++    struct SnapshotBufferData
++    {
++        til::size Size{};
++        TextAttribute CurrentAttribute;
++        til::point Cursor{};
++        uint32_t CursorSize{};
++        CursorType CursorTypeValue{};
++        bool CursorVisible{};
++        bool CursorOn{};
++        bool CursorBlink{};
++        bool CursorDelayedWrap{};
++        uint16_t NextHyperlinkId{ 1 };
++        std::vector<SnapshotRow> Rows;
++        std::vector<SnapshotLink> Links;
++    };
++
++    void WriteBuffer(SnapshotWriter& writer, const TextBuffer& buffer)
++    {
++        const auto size = buffer.GetSize().Dimensions();
++        writer.I32(size.width);
++        writer.I32(size.height);
++        WriteAttribute(writer, buffer.GetCurrentAttributes());
++        const auto& cursor = buffer.GetCursor();
++        writer.I32(cursor.GetPosition().x);
++        writer.I32(cursor.GetPosition().y);
++        writer.U32(cursor.GetSize());
++        writer.U32(static_cast<uint32_t>(cursor.GetType()));
++        writer.U8(cursor.IsVisible());
++        writer.U8(cursor.IsOn());
++        writer.U8(cursor.IsBlinkingAllowed());
++        writer.U8(cursor.IsDelayedEOLWrap());
++        writer.U32(gsl::narrow<uint32_t>(size.height));
++
++        for (til::CoordType y = 0; y < size.height; ++y)
++        {
++            const auto& row = buffer.GetRowByOffset(y);
++            writer.U8(row.WasWrapForced());
++            writer.U8(row.WasDoubleBytePadded());
++            writer.U8(static_cast<uint8_t>(row.GetLineRendition()));
++            writer.U8(row.GetScrollbarData().has_value());
++            if (const auto& mark = row.GetScrollbarData())
++            {
++                writer.U8(static_cast<uint8_t>(mark->category));
++                writer.U8(mark->color.has_value());
++                writer.U8(mark->exitCode.has_value());
++                writer.U8(mark->reseshBookmarkColor.has_value());
++                writer.U32(mark->color ? static_cast<uint32_t>(*mark->color) : 0);
++                writer.U32(mark->exitCode.value_or(0));
++                writer.U64(mark->reseshId);
++                writer.U8(mark->reseshKind);
++                writer.U64(mark->reseshBookmarkId);
++                writer.U32(mark->reseshBookmarkColor ? static_cast<uint32_t>(*mark->reseshBookmarkColor) : 0);
++            }
++            writer.U32(gsl::narrow<uint32_t>(size.width));
++            for (til::CoordType x = 0; x < size.width; ++x)
++            {
++                const auto attribute = row.GetAttrByColumn(x);
++                writer.String(row.GlyphAt(x));
++                writer.U8(static_cast<uint8_t>(row.DbcsAttrAt(x)));
++                WriteAttribute(writer, attribute);
++            }
++        }
++        writer.U16(buffer.ReseshNextHyperlinkId());
++        const auto& hyperlinkMap = buffer.ReseshHyperlinkMap();
++        writer.U32(gsl::narrow<uint32_t>(hyperlinkMap.size()));
++        std::vector<uint16_t> hyperlinkIds;
++        hyperlinkIds.reserve(hyperlinkMap.size());
++        for (const auto& [id, uri] : hyperlinkMap)
++            hyperlinkIds.emplace_back(id);
++        std::ranges::sort(hyperlinkIds);
++        for (const auto id : hyperlinkIds)
++        {
++            writer.U16(id);
++            writer.String(hyperlinkMap.at(id));
++            writer.String(buffer.GetCustomIdFromId(id));
++        }
++    }
++
++    SnapshotBufferData ReadBuffer(SnapshotReader& reader)
++    {
++        SnapshotBufferData result;
++        result.Size = { reader.I32(), reader.I32() };
++        THROW_HR_IF(E_INVALIDARG,
++                    result.Size.width <= 0 || result.Size.width > SHRT_MAX ||
++                        result.Size.height <= 0 || result.Size.height > SHRT_MAX);
++        result.CurrentAttribute = ReadAttribute(reader);
++        result.Cursor = { reader.I32(), reader.I32() };
++        result.CursorSize = reader.U32();
++        result.CursorTypeValue = static_cast<CursorType>(reader.U32());
++        result.CursorVisible = ReadSnapshotBool(reader);
++        result.CursorOn = ReadSnapshotBool(reader);
++        result.CursorBlink = ReadSnapshotBool(reader);
++        result.CursorDelayedWrap = ReadSnapshotBool(reader);
++        const auto rowCount = reader.U32();
++        THROW_HR_IF(E_INVALIDARG,
++                    rowCount != static_cast<uint32_t>(result.Size.height) ||
++                        rowCount > MaximumSnapshotRows ||
++                        static_cast<uint64_t>(rowCount) * result.Size.width > MaximumSnapshotCells ||
++                        result.Cursor.x < 0 || result.Cursor.x >= result.Size.width ||
++                        result.Cursor.y < 0 || result.Cursor.y >= result.Size.height ||
++                        result.CursorSize > 100 ||
++                        static_cast<uint32_t>(result.CursorTypeValue) > 6);
++        result.Rows.reserve(rowCount);
++        for (uint32_t y = 0; y < rowCount; ++y)
++        {
++            SnapshotRow row;
++            row.Wrapped = ReadSnapshotBool(reader);
++            row.DoubleBytePadded = ReadSnapshotBool(reader);
++            row.Rendition = static_cast<LineRendition>(reader.U8());
++            THROW_HR_IF(E_INVALIDARG, static_cast<uint8_t>(row.Rendition) > 3);
++            const auto hasMark = ReadSnapshotBool(reader);
++            if (hasMark)
++            {
++                ScrollbarData mark;
++                mark.category = static_cast<MarkCategory>(reader.U8());
++                const auto hasColor = ReadSnapshotBool(reader);
++                const auto hasExitCode = ReadSnapshotBool(reader);
++                const auto hasBookmarkColor = ReadSnapshotBool(reader);
++                const auto color = reader.U32();
++                const auto exitCode = reader.U32();
++                mark.reseshId = reader.U64();
++                mark.reseshKind = reader.U8();
++                mark.reseshBookmarkId = reader.U64();
++                const auto bookmarkColor = reader.U32();
++                THROW_HR_IF(E_INVALIDARG, static_cast<uint8_t>(mark.category) > static_cast<uint8_t>(MarkCategory::Prompt));
++                if (hasColor)
++                    mark.color = til::color{ color };
++                if (hasExitCode)
++                    mark.exitCode = exitCode;
++                if (hasBookmarkColor)
++                    mark.reseshBookmarkColor = til::color{ bookmarkColor };
++                row.Mark = mark;
++            }
++            const auto cellCount = reader.U32();
++            THROW_HR_IF(E_INVALIDARG, cellCount != static_cast<uint32_t>(result.Size.width));
++            row.Cells.reserve(cellCount);
++            for (uint32_t x = 0; x < cellCount; ++x)
++            {
++                SnapshotCell cell;
++                cell.Text = reader.String();
++                cell.Width = static_cast<DbcsAttribute>(reader.U8());
++                THROW_HR_IF(E_INVALIDARG, static_cast<uint8_t>(cell.Width) > 2);
++                cell.Attribute = ReadAttribute(reader);
++                row.Cells.emplace_back(std::move(cell));
++            }
++            result.Rows.emplace_back(std::move(row));
++        }
++        result.NextHyperlinkId = reader.U16();
++        THROW_HR_IF(E_INVALIDARG, result.NextHyperlinkId == 0);
++        const auto linkCount = reader.U32();
++        THROW_HR_IF(E_INVALIDARG, linkCount > UINT16_MAX);
++        result.Links.reserve(linkCount);
++        std::unordered_set<uint16_t> hyperlinkIds;
++        for (uint32_t i = 0; i < linkCount; ++i)
++        {
++            const auto id = reader.U16();
++            auto uri = reader.String();
++            auto customId = reader.String();
++            THROW_HR_IF(E_INVALIDARG, id == 0 || uri.empty() || !hyperlinkIds.emplace(id).second);
++            result.Links.emplace_back(SnapshotLink{ id, std::move(uri), std::move(customId) });
++        }
++        const auto currentHyperlinkId = result.CurrentAttribute.GetHyperlinkId();
++        THROW_HR_IF(E_INVALIDARG, currentHyperlinkId != 0 && !hyperlinkIds.contains(currentHyperlinkId));
++        for (const auto& row : result.Rows)
++        {
++            for (const auto& cell : row.Cells)
++            {
++                const auto id = cell.Attribute.GetHyperlinkId();
++                THROW_HR_IF(E_INVALIDARG, id != 0 && !hyperlinkIds.contains(id));
++            }
++        }
++        THROW_HR_IF(E_INVALIDARG, !reader.Done());
++        return result;
++    }
++    void WriteTerminalOutputState(
++        SnapshotWriter& writer,
++        const TerminalOutput::ReseshSnapshot& state)
++    {
++        writer.U32(state.UserPreferenceCharset);
++        writer.U8(state.UserPreferenceCharsetIs96);
++        for (size_t i = 0; i < state.CharacterSets.size(); ++i)
+         {
+-            source.CopyRow(row, row, *bufferCopy);
++            writer.U32(state.CharacterSets[i]);
++            writer.U8(state.CharacterSetsAre96[i]);
+         }
+-        bufferCopy->CopyHyperlinkMaps(source);
++        writer.U32(state.LeftSet);
++        writer.U32(state.RightSet);
++        writer.U32(state.SingleShiftSet);
++        writer.U8(state.GrTranslationEnabled);
++        writer.U32(state.DrcsCharset);
++        writer.U8(state.DrcsCharsetIs96);
++    }
+ 
+-        snapshot.Size = _terminal->GetViewport().Dimensions();
+-        const auto cursor = _terminal->GetCursorPosition();
+-        snapshot.Cursor = { cursor.x, cursor.y - _terminal->ViewStartIndex() };
+-        snapshot.CursorVisible = source.GetCursor().IsVisible();
+-        snapshot.ViewportTop = _terminal->GetScrollOffset();
+-        snapshot.ViewportHeight = _terminal->GetViewport().Height();
+-        snapshot.ScrollOffset = _terminal->ViewStartIndex() - snapshot.ViewportTop;
+-        snapshot.AlternateBuffer = _terminal->IsAlternateBufferActive();
++    bool ReadSnapshotBool(SnapshotReader& reader)
++    {
++        const auto value = reader.U8();
++        THROW_HR_IF(E_INVALIDARG, value > 1);
++        return value != 0;
+     }
+ 
+-    bufferCopy->SerializeTo(snapshot.Ansi);
+-    if (!snapshot.Ansi.empty() && snapshot.Ansi.front() == L'\uFEFF')
++    TerminalOutput::ReseshSnapshot ReadTerminalOutputState(SnapshotReader& reader)
+     {
+-        snapshot.Ansi.erase(snapshot.Ansi.begin());
++        TerminalOutput::ReseshSnapshot state;
++        state.UserPreferenceCharset = reader.U32();
++        state.UserPreferenceCharsetIs96 = ReadSnapshotBool(reader);
++        for (size_t i = 0; i < state.CharacterSets.size(); ++i)
++        {
++            state.CharacterSets[i] = reader.U32();
++            state.CharacterSetsAre96[i] = ReadSnapshotBool(reader);
++        }
++        state.LeftSet = reader.U32();
++        state.RightSet = reader.U32();
++        state.SingleShiftSet = reader.U32();
++        state.GrTranslationEnabled = ReadSnapshotBool(reader);
++        state.DrcsCharset = reader.U32();
++        state.DrcsCharsetIs96 = ReadSnapshotBool(reader);
++        THROW_HR_IF(E_INVALIDARG,
++                    state.LeftSet > 3 ||
++                        state.RightSet == 0 || state.RightSet > 3 ||
++                        (state.SingleShiftSet != 0 && state.SingleShiftSet != 2 && state.SingleShiftSet != 3));
++        TerminalOutput validator;
++        validator.RestoreReseshSnapshot(state);
++        return state;
++    }
++
++    void WriteDispatchState(
++        SnapshotWriter& writer,
++        const AdaptDispatch::ReseshSnapshot& state)
++    {
++        writer.U32(gsl::narrow<uint32_t>(state.TabStops.size()));
++        writer.Bytes(state.TabStops);
++        writer.U8(state.InitializeDefaultTabStops);
++        writer.U8(state.UsingAlternateBuffer);
++        writer.I32(state.ScrollMargins.left);
++        writer.I32(state.ScrollMargins.top);
++        writer.I32(state.ScrollMargins.right);
++        writer.I32(state.ScrollMargins.bottom);
++        writer.U32(state.Modes);
++        WriteTerminalOutputState(writer, state.Output);
++        for (const auto& cursor : state.SavedCursors)
++        {
++            writer.I32(cursor.Row);
++            writer.I32(cursor.Column);
++            writer.I32(cursor.Page);
++            writer.U8(cursor.DelayedWrap);
++            writer.U8(cursor.OriginRelative);
++            WriteAttribute(writer, cursor.Attributes);
++            WriteTerminalOutputState(writer, cursor.Output);
++        }
++    }
++
++    AdaptDispatch::ReseshSnapshot ReadDispatchState(SnapshotReader& reader)
++    {
++        AdaptDispatch::ReseshSnapshot state;
++        const auto tabCount = reader.U32();
++        THROW_HR_IF(E_INVALIDARG, tabCount > SHRT_MAX);
++        const auto tabStops = reader.Bytes(tabCount);
++        state.TabStops.assign(tabStops.begin(), tabStops.end());
++        THROW_HR_IF(E_INVALIDARG, std::ranges::any_of(state.TabStops, [](const auto stop) { return stop > 1; }));
++        state.InitializeDefaultTabStops = ReadSnapshotBool(reader);
++        state.UsingAlternateBuffer = ReadSnapshotBool(reader);
++        state.ScrollMargins = { reader.I32(), reader.I32(), reader.I32(), reader.I32() };
++        state.Modes = reader.U32();
++        state.Output = ReadTerminalOutputState(reader);
++        for (auto& cursor : state.SavedCursors)
++        {
++            cursor.Row = reader.I32();
++            cursor.Column = reader.I32();
++            cursor.Page = reader.I32();
++            cursor.DelayedWrap = ReadSnapshotBool(reader);
++            cursor.OriginRelative = ReadSnapshotBool(reader);
++            cursor.Attributes = ReadAttribute(reader);
++            cursor.Output = ReadTerminalOutputState(reader);
++            THROW_HR_IF(E_INVALIDARG,
++                        cursor.Row <= 0 || cursor.Row > SHRT_MAX ||
++                            cursor.Column <= 0 || cursor.Column > SHRT_MAX ||
++                            cursor.Page <= 0 || cursor.Page > SHRT_MAX);
++        }
++        THROW_HR_IF(E_INVALIDARG, !reader.Done());
++        return state;
++    }
++}
++
++std::vector<uint8_t> HwndTerminal::CaptureExactSnapshot(
++    const std::wstring_view title,
++    const std::wstring_view workingDirectory,
++    const uint64_t captureSequence,
++    const int64_t unixTimeMilliseconds) const
++{
++    THROW_HR_IF_NULL(E_NOT_VALID_STATE, _terminal);
++    SnapshotWriter payload;
++    const auto lock = _terminal->LockForReading();
++
++    SnapshotWriter metadata;
++    metadata.String(L"v1.24.11911.0");
++    metadata.String(L"terminal-parser-v1");
++    const auto viewport = _terminal->ReseshMutableViewport().ToInclusive();
++    metadata.I32(viewport.left);
++    metadata.I32(viewport.top);
++    metadata.I32(viewport.right);
++    metadata.I32(viewport.bottom);
++    metadata.I32(_terminal->ReseshUserScrollOffset());
++    metadata.U32(_terminal->ReseshSystemModes());
++    metadata.U32(_terminal->ReseshInputModes());
++    metadata.U8(_terminal->IsAlternateBufferActive());
++    metadata.U64(captureSequence);
++    metadata.I64(unixTimeMilliseconds);
++    const auto& colors = _terminal->GetRenderSettings().GetColorTable();
++    metadata.U32(gsl::narrow<uint32_t>(colors.size()));
++    for (const auto color : colors)
++        metadata.U32(color);
++    for (size_t alias = 0; alias < static_cast<size_t>(ColorAlias::ENUM_COUNT); ++alias)
++        metadata.U32(gsl::narrow<uint32_t>(_terminal->GetRenderSettings().GetColorAliasIndex(static_cast<ColorAlias>(alias))));
++    payload.Field(SnapshotMetadata, metadata);
++
++    SnapshotWriter main;
++    WriteBuffer(main, _terminal->ReseshMainBuffer());
++    payload.Field(SnapshotMainBuffer, main);
++    if (const auto alternate = _terminal->ReseshAlternateBuffer())
++    {
++        SnapshotWriter alt;
++        WriteBuffer(alt, *alternate);
++        payload.Field(SnapshotAlternateBuffer, alt);
++    }
++
++    SnapshotWriter text;
++    text.String(title);
++    text.String(workingDirectory);
++    text.String(_terminal->ReseshPendingSequence());
++    payload.Field(SnapshotTextState, text);
++
++    SnapshotWriter marks;
++    marks.U64(_nextMarkId);
++    marks.U64(_markGeneration);
++    marks.U32(gsl::narrow<uint32_t>(_applicationCommands.size()));
++    for (const auto& [id, command] : _applicationCommands)
++    {
++        marks.U64(id);
++        marks.String(command.Command);
++        marks.I32(command.CommandStart.x);
++        marks.I32(command.CommandStart.y);
++        marks.I32(command.CommandEnd.x);
++        marks.I32(command.CommandEnd.y);
++    }
++    payload.Field(SnapshotApplicationMarks, marks);
++
++    SnapshotWriter dispatch;
++    WriteDispatchState(dispatch, _terminal->ReseshDispatch().CaptureReseshSnapshot());
++    payload.Field(SnapshotDispatchState, dispatch);
++
++    THROW_HR_IF(E_OUTOFMEMORY, payload.Data.size() > MaximumSnapshotBytes - SnapshotHeaderSize);
++    SnapshotWriter result;
++    result.U32(SnapshotMagic);
++    result.U16(SnapshotMajor);
++    result.U16(SnapshotMinor);
++    result.U32(0x000000ff);
++    result.U32(gsl::narrow<uint32_t>(payload.Data.size()));
++    result.U32(SnapshotCrc32(payload.Data));
++    result.U32(0);
++    result.Bytes(payload.Data);
++    return result.Data;
++}
++
++HwndTerminalSnapshotMetadata HwndTerminal::RestoreExactSnapshot(const std::span<const uint8_t> snapshot)
++{
++    THROW_HR_IF_NULL(E_NOT_VALID_STATE, _terminal);
++    THROW_HR_IF(E_INVALIDARG, snapshot.size() < SnapshotHeaderSize || snapshot.size() > MaximumSnapshotBytes);
++    SnapshotReader header{ snapshot };
++    THROW_HR_IF(E_INVALIDARG, header.U32() != SnapshotMagic);
++    THROW_HR_IF(HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH), header.U16() != SnapshotMajor);
++    const auto minor = header.U16();
++    const auto features = header.U32();
++    const auto payloadLength = header.U32();
++    const auto checksum = header.U32();
++    const auto reserved = header.U32();
++    THROW_HR_IF(E_INVALIDARG,
++                reserved != 0 ||
++                    payloadLength != snapshot.size() - SnapshotHeaderSize ||
++                    SnapshotCrc32(snapshot.subspan(SnapshotHeaderSize)) != checksum ||
++                    (features & RequiredSnapshotFeatures) != RequiredSnapshotFeatures ||
++                    (minor <= SnapshotMinor && features != RequiredSnapshotFeatures));
++
++    std::optional<SnapshotBufferData> mainData;
++    std::optional<SnapshotBufferData> alternateData;
++    std::optional<Viewport> viewport;
++    til::CoordType scrollOffset{};
++    uint32_t systemModes{};
++    uint32_t inputModes{};
++    bool alternateActive{};
++    HwndTerminalSnapshotMetadata restored;
++    std::wstring pendingSequence;
++    std::array<COLORREF, TextColor::TABLE_SIZE> colors{};
++    std::array<uint32_t, static_cast<size_t>(ColorAlias::ENUM_COUNT)> aliases{};
++    bool hasMetadata{};
++    uint64_t nextMarkId{};
++    uint64_t markGeneration{};
++    std::unordered_map<uint64_t, HwndTerminalApplicationMark> applicationCommands;
++    bool hasMarks{};
++    bool hasText{};
++    std::optional<AdaptDispatch::ReseshSnapshot> dispatchState;
++
++    SnapshotReader fields{ snapshot.subspan(SnapshotHeaderSize) };
++    while (!fields.Done())
++    {
++        fields.Need(SnapshotFieldHeaderSize);
++        const auto id = fields.U16();
++        const auto fieldFlags = fields.U16();
++        THROW_HR_IF(E_INVALIDARG, id <= SnapshotDispatchState && fieldFlags != 0);
++        const auto length = fields.U32();
++        const auto bytes = fields.Bytes(length);
++        SnapshotReader field{ bytes };
++        switch (id)
++        {
++        case SnapshotMetadata:
++        {
++            THROW_HR_IF(E_INVALIDARG, hasMetadata);
++            THROW_HR_IF(E_INVALIDARG, field.String() != L"v1.24.11911.0");
++            field.String(); // parser version is informational within schema major 1.
++            const til::inclusive_rect rect{ field.I32(), field.I32(), field.I32(), field.I32() };
++            THROW_HR_IF(E_INVALIDARG, rect.left != 0 || rect.right < rect.left || rect.bottom < rect.top);
++            viewport = Viewport::FromInclusive(rect);
++            scrollOffset = field.I32();
++            systemModes = field.U32();
++            inputModes = field.U32();
++            alternateActive = ReadSnapshotBool(field);
++            restored.CaptureSequence = field.U64();
++            restored.UnixTimeMilliseconds = field.I64();
++            const auto colorCount = field.U32();
++            THROW_HR_IF(E_INVALIDARG, colorCount != colors.size());
++            for (auto& color : colors)
++                color = field.U32();
++            for (auto& alias : aliases)
++            {
++                alias = field.U32();
++                THROW_HR_IF(E_INVALIDARG, alias >= colors.size());
++            }
++            THROW_HR_IF(E_INVALIDARG, !field.Done());
++            hasMetadata = true;
++            break;
++        }
++        case SnapshotMainBuffer:
++            THROW_HR_IF(E_INVALIDARG, mainData.has_value());
++            mainData = ReadBuffer(field);
++            break;
++        case SnapshotAlternateBuffer:
++            THROW_HR_IF(E_INVALIDARG, alternateData.has_value());
++            alternateData = ReadBuffer(field);
++            break;
++        case SnapshotTextState:
++            THROW_HR_IF(E_INVALIDARG, hasText);
++            restored.Title = field.String();
++            restored.WorkingDirectory = field.String();
++            pendingSequence = field.String();
++            THROW_HR_IF(E_INVALIDARG, !field.Done());
++            hasText = true;
++            break;
++        case SnapshotApplicationMarks:
++        {
++            THROW_HR_IF(E_INVALIDARG, hasMarks);
++            nextMarkId = field.U64();
++            markGeneration = field.U64();
++            const auto count = field.U32();
++            THROW_HR_IF(E_INVALIDARG, count > MaximumSnapshotRows);
++            for (uint32_t i = 0; i < count; ++i)
++            {
++                const auto idValue = field.U64();
++                HwndTerminalApplicationMark command{
++                    field.String(),
++                    { field.I32(), field.I32() },
++                    { field.I32(), field.I32() },
++                };
++                THROW_HR_IF(E_INVALIDARG, idValue == 0 || !applicationCommands.emplace(idValue, std::move(command)).second);
++            }
++            THROW_HR_IF(E_INVALIDARG, !field.Done());
++            hasMarks = true;
++            break;
++        }
++        case SnapshotDispatchState:
++            THROW_HR_IF(E_INVALIDARG, dispatchState.has_value());
++            dispatchState = ReadDispatchState(field);
++            break;
++        default:
++            THROW_HR_IF(E_INVALIDARG, minor <= SnapshotMinor);
++            break;
++        }
+     }
++    THROW_HR_IF(E_INVALIDARG,
++                !hasMetadata || !mainData || !viewport || !hasText || !hasMarks || !dispatchState ||
++                    alternateActive != alternateData.has_value() ||
++                    alternateActive != dispatchState->UsingAlternateBuffer ||
++                    viewport->Width() != mainData->Size.width ||
++                    viewport->BottomInclusive() >= mainData->Size.height ||
++                    (alternateData && alternateData->Size != viewport->Dimensions()) ||
++                    (!dispatchState->TabStops.empty() &&
++                     dispatchState->TabStops.size() != static_cast<size_t>(viewport->Width())) ||
++                    dispatchState->ScrollMargins.left < 0 ||
++                    dispatchState->ScrollMargins.top < 0 ||
++                    dispatchState->ScrollMargins.right >= viewport->Width() ||
++                    dispatchState->ScrollMargins.bottom >= viewport->Height() ||
++                    nextMarkId == 0 || markGeneration == 0);
++
++    const auto buildBuffer = [&](SnapshotBufferData& data, const bool active) {
++        auto buffer = std::make_unique<TextBuffer>(
++            data.Size,
++            data.CurrentAttribute,
++            data.CursorSize,
++            active,
++            _renderer.get());
++        for (const auto& link : data.Links)
++            buffer->ReseshRestoreHyperlink(link.Id, link.Uri, link.CustomId);
++        buffer->ReseshRestoreNextHyperlinkId(data.NextHyperlinkId);
++        for (til::CoordType y = 0; y < data.Size.height; ++y)
++        {
++            auto& row = buffer->GetMutableRowByOffset(y);
++            std::vector<OutputCell> cells;
++            cells.reserve(data.Size.width);
++            for (const auto& cell : data.Rows[y].Cells)
++                cells.emplace_back(cell.Text, cell.Width, cell.Attribute);
++            row.WriteCells(OutputCellIterator{ std::span<const OutputCell>{ cells } }, 0);
++            row.SetWrapForced(data.Rows[y].Wrapped);
++            row.SetDoubleBytePadded(data.Rows[y].DoubleBytePadded);
++            row.SetLineRendition(data.Rows[y].Rendition);
++            row.SetScrollbarData(data.Rows[y].Mark);
++        }
++        auto& cursor = buffer->GetCursor();
++        cursor.SetPosition(data.Cursor);
++        cursor.SetStyle(data.CursorSize, data.CursorTypeValue);
++        cursor.SetIsVisible(data.CursorVisible);
++        cursor.SetIsOn(data.CursorOn);
++        cursor.SetBlinkingAllowed(data.CursorBlink);
++        if (data.CursorDelayedWrap)
++            cursor.DelayEOLWrap();
++        return buffer;
++    };
+ 
+-    const auto cursorRow = std::clamp(snapshot.Cursor.y, 0, std::max(0, snapshot.ViewportHeight - 1));
+-    fmt::format_to(
+-        std::back_inserter(snapshot.Ansi),
+-        FMT_COMPILE(L"\x1b[{};{}H\x1b[?25{}"),
+-        cursorRow + 1,
+-        snapshot.Cursor.x + 1,
+-        snapshot.CursorVisible ? L'h' : L'l');
+-    return snapshot;
++    auto mainBuffer = buildBuffer(*mainData, !alternateActive);
++    auto alternateBuffer = alternateData ? buildBuffer(*alternateData, true) : nullptr;
++    const auto lock = _terminal->LockForWriting();
++    auto& renderSettings = _terminal->GetRenderSettings();
++    for (size_t i = 0; i < colors.size(); ++i)
++        renderSettings.SetColorTableEntry(i, colors[i]);
++    for (size_t i = 0; i < aliases.size(); ++i)
++        renderSettings.SetColorAliasIndex(static_cast<ColorAlias>(i), aliases[i]);
++    _terminal->RestoreReseshSnapshot(
++        std::move(mainBuffer),
++        std::move(alternateBuffer),
++        *viewport,
++        scrollOffset,
++        systemModes,
++        inputModes,
++        pendingSequence,
++        restored.Title,
++        restored.WorkingDirectory);
++    _terminal->ReseshDispatch().RestoreReseshSnapshot(*dispatchState);
++    _nextMarkId = nextMarkId;
++    _markGeneration = markGeneration;
++    _applicationCommands = std::move(applicationCommands);
++    ClearSearch();
++    _updateHighlights(true);
++    restored.SystemModes = systemModes;
++    restored.AlternateActive = alternateActive;
++    return restored;
+ }
+ 
+ HRESULT HwndTerminal::ResizeCharacters(const til::size dimensions)
+diff --git a/src/cascadia/TerminalControl/HwndTerminal.hpp b/src/cascadia/TerminalControl/HwndTerminal.hpp
+index 20bb869815e686009058777e51a97d80be21bd40..0ed316dbc5e3fa91bb739f56f41bb0ab7cc7eba5 100644
+--- a/src/cascadia/TerminalControl/HwndTerminal.hpp
++++ b/src/cascadia/TerminalControl/HwndTerminal.hpp
+@@ -114,16 +114,14 @@ struct HwndTerminalApplicationMark
+     til::point CommandEnd{};
+ };
+ 
+-struct HwndTerminalSnapshot
++struct HwndTerminalSnapshotMetadata
+ {
+-    std::wstring Ansi;
+-    til::size Size{};
+-    til::point Cursor{};
+-    int32_t ViewportTop{};
+-    int32_t ViewportHeight{};
+-    int32_t ScrollOffset{};
+-    bool CursorVisible{};
+-    bool AlternateBuffer{};
++    std::wstring Title;
++    std::wstring WorkingDirectory;
++    uint64_t CaptureSequence{};
++    int64_t UnixTimeMilliseconds{};
++    uint32_t SystemModes{};
++    bool AlternateActive{};
+ };
+ 
+ struct HwndTerminalHighlightRule
+@@ -231,7 +229,12 @@ public:
+     uint64_t AddBookmark(int32_t row, std::optional<til::color> color);
+     bool RemoveBookmark(uint64_t id);
+     void ClearBookmarks();
+-    HwndTerminalSnapshot CaptureSnapshot() const;
++    std::vector<uint8_t> CaptureExactSnapshot(
++        std::wstring_view title,
++        std::wstring_view workingDirectory,
++        uint64_t captureSequence,
++        int64_t unixTimeMilliseconds) const;
++    HwndTerminalSnapshotMetadata RestoreExactSnapshot(std::span<const uint8_t> payload);
+     HRESULT SetHighlightRules(std::span<const ReseshTerminalHighlightRule> rules);
+     void ClearHighlightRules();
+     std::vector<HwndTerminalHighlightRow> GetHighlightRows() const;
+diff --git a/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp b/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
+index 5c03c58158a68b48b5967a645d66ac775a9ac6f5..a32498ff09d73f2d57082029dfafdde170b1fbda 100644
+--- a/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
++++ b/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
+@@ -16,12 +16,12 @@
+ namespace
+ {
+     thread_local ReseshTerminalHandle callbackHandle{};
+-    constexpr wchar_t BuildId[]{ L"terminal-v1.24.11911.0-resesh-abi2.2-highlights" };
++    constexpr wchar_t BuildId[]{ L"terminal-v1.24.11911.0-resesh-abi3.0-snapshots" };
+     constexpr size_t MaximumQueuedEventUnits = 16 * 1024 * 1024;
+     constexpr uint32_t MaximumOutputCharacters = 16 * 1024 * 1024;
+     constexpr uint32_t MaximumSearchCharacters = 1024 * 1024;
+     constexpr uint32_t MaximumClipboardCharacters = 4 * 1024 * 1024;
+-    constexpr uint32_t MaximumSnapshotCharacters = 32 * 1024 * 1024;
++    constexpr uint32_t MaximumSnapshotBytes = 32 * 1024 * 1024;
+     constexpr uint32_t MaximumFontFamilyCharacters = 1024;
+     constexpr uint32_t MaximumWordDelimiterCharacters = 4096;
+     constexpr int32_t MaximumHistorySize = 1'000'000;
+@@ -55,6 +55,7 @@ namespace
+         void* callbackContext{};
+         uint32_t callbacksInProgress{};
+         bool destroying{};
++        bool readOnly{};
+         std::wstring title;
+         std::wstring workingDirectory;
+ 
+@@ -332,6 +333,7 @@ try
+ 
+     state->handle = NewHandle();
+     state->terminal = innerTerminal.get();
++    state->readOnly = creation.ReadOnly;
+     const std::weak_ptr<TerminalState> weakState{ state };
+     state->terminal->RegisterWriteCallback([weakState](const std::wstring_view input) {
+         if (const auto locked = weakState.lock())
+@@ -1072,21 +1074,15 @@ try
+ }
+ CATCH_RETURN()
+ 
+-HRESULT __stdcall ReseshTerminalCaptureSnapshot(
++HRESULT __stdcall ReseshTerminalCaptureExactSnapshot(
+     const ReseshTerminalHandle terminal,
+-    ReseshTerminalSnapshot* const snapshot,
+-    wchar_t* const payload,
++    uint8_t* const payload,
+     const uint32_t capacity,
+     uint32_t* const requiredCapacity)
+ try
+ {
+-    RETURN_HR_IF_NULL(E_INVALIDARG, snapshot);
+     RETURN_HR_IF_NULL(E_INVALIDARG, requiredCapacity);
+-    RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH),
+-                 !IsCompatible(snapshot->structSize, snapshot->abiMajor, sizeof(ReseshTerminalSnapshot)));
+-
+     return WithTerminal(terminal, [&](TerminalState& state) {
+-        auto terminalSnapshot = state.terminal->CaptureSnapshot();
+         std::wstring title;
+         std::wstring workingDirectory;
+         uint64_t captureSequence;
+@@ -1096,47 +1092,58 @@ try
+             workingDirectory = state.workingDirectory;
+             captureSequence = state.nextSequence - 1;
+         }
+-
+-        const auto required64 = terminalSnapshot.Ansi.size() + title.size() + workingDirectory.size();
+-        RETURN_HR_IF(E_OUTOFMEMORY, required64 > MaximumSnapshotCharacters);
+-        const auto required = gsl::narrow<uint32_t>(required64);
+-        *requiredCapacity = required;
+-
+-        const auto ansiLength = gsl::narrow<uint32_t>(terminalSnapshot.Ansi.size());
+-        const auto titleLength = gsl::narrow<uint32_t>(title.size());
+-        const auto workingDirectoryLength = gsl::narrow<uint32_t>(workingDirectory.size());
+         const auto unixTime = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::system_clock::now().time_since_epoch())
+                                   .count();
+-        *snapshot = {
+-            sizeof(ReseshTerminalSnapshot),
+-            RESESH_TERMINAL_ABI_MAJOR,
+-            RESESH_TERMINAL_ABI_MINOR,
+-            1,
+-            (terminalSnapshot.CursorVisible ? ReseshTerminalSnapshotCursorVisible : 0u) |
+-                (terminalSnapshot.AlternateBuffer ? ReseshTerminalSnapshotAlternateBuffer : 0u),
+-            terminalSnapshot.Size.width,
+-            terminalSnapshot.ViewportHeight,
+-            terminalSnapshot.Cursor.x,
+-            terminalSnapshot.Cursor.y,
+-            terminalSnapshot.ViewportTop,
+-            terminalSnapshot.ViewportHeight,
+-            terminalSnapshot.ScrollOffset,
++        const auto snapshot = state.terminal->CaptureExactSnapshot(
++            title,
++            workingDirectory,
+             captureSequence,
+-            unixTime,
+-            0,
+-            ansiLength,
+-            ansiLength,
+-            titleLength,
+-            ansiLength + titleLength,
+-            workingDirectoryLength,
+-        };
++            unixTime);
++        RETURN_HR_IF(E_OUTOFMEMORY, snapshot.size() > MaximumSnapshotBytes);
++        const auto required = gsl::narrow<uint32_t>(snapshot.size());
++        *requiredCapacity = required;
++        RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
++                     capacity < required || (required > 0 && !payload));
++        std::copy(snapshot.begin(), snapshot.end(), payload);
++        return S_OK;
++    });
++}
++CATCH_RETURN()
+ 
+-        RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER), capacity < required || (required > 0 && !payload));
+-        auto output = payload;
+-        output = std::copy(terminalSnapshot.Ansi.begin(), terminalSnapshot.Ansi.end(), output);
+-        output = std::copy(title.begin(), title.end(), output);
+-        std::copy(workingDirectory.begin(), workingDirectory.end(), output);
++HRESULT __stdcall ReseshTerminalRestoreExactSnapshot(
++    const ReseshTerminalHandle terminal,
++    const uint8_t* const payload,
++    const uint32_t payloadLength)
++try
++{
++    RETURN_HR_IF(E_INVALIDARG,
++                 payloadLength == 0 ||
++                     payloadLength > MaximumSnapshotBytes ||
++                     !payload);
++    return WithTerminal(terminal, [&](TerminalState& state) {
++        RETURN_HR_IF(E_ACCESSDENIED, !state.readOnly);
++        const auto restored = state.terminal->RestoreExactSnapshot(
++            std::span<const uint8_t>{ payload, payloadLength });
++        {
++            const std::scoped_lock lock{ state.eventMutex };
++            state.title = restored.Title;
++            state.workingDirectory = restored.WorkingDirectory;
++            state.nextSequence = std::max(state.nextSequence, restored.CaptureSequence + 1);
++        }
++        state.QueueEvent(
++            ReseshTerminalEventTypeAlternateBufferChanged,
++            {},
++            {},
++            {},
++            restored.AlternateActive ? ReseshTerminalEventFlagEnabled : 0);
++        state.QueueEvent(
++            ReseshTerminalEventTypeTerminalModeChanged,
++            {},
++            {},
++            {},
++            (restored.SystemModes & (1u << 2)) != 0 ? ReseshTerminalEventFlagEnabled : 0,
++            2);
+         return S_OK;
+     });
+ }
+diff --git a/src/cascadia/TerminalControl/ReseshTerminalAbi.h b/src/cascadia/TerminalControl/ReseshTerminalAbi.h
+index 07e40c4b95e3d6c3498043f2ef3d9a1f86299447..14db0f3e30fa707edbd6e75062885600b66d126d 100644
+--- a/src/cascadia/TerminalControl/ReseshTerminalAbi.h
++++ b/src/cascadia/TerminalControl/ReseshTerminalAbi.h
+@@ -6,8 +6,8 @@
+ #include <stdint.h>
+ #include <windows.h>
+ 
+-#define RESESH_TERMINAL_ABI_MAJOR 2u
+-#define RESESH_TERMINAL_ABI_MINOR 2u
++#define RESESH_TERMINAL_ABI_MAJOR 3u
++#define RESESH_TERMINAL_ABI_MINOR 0u
+ #define RESESH_TERMINAL_ABI_VERSION ((RESESH_TERMINAL_ABI_MAJOR << 16u) | RESESH_TERMINAL_ABI_MINOR)
+ 
+ #ifdef __cplusplus
+@@ -119,11 +119,6 @@ typedef enum ReseshTerminalPasteFilterFlags
+     ReseshTerminalPasteFilterControlCodes = 0x00000002u,
+ } ReseshTerminalPasteFilterFlags;
+ 
+-typedef enum ReseshTerminalSnapshotFlags
+-{
+-    ReseshTerminalSnapshotCursorVisible = 0x00000001u,
+-    ReseshTerminalSnapshotAlternateBuffer = 0x00000002u,
+-} ReseshTerminalSnapshotFlags;
+ 
+ typedef struct ReseshTerminalCreateOptions
+ {
+@@ -247,29 +242,6 @@ typedef struct ReseshTerminalCursorLogicalLine
+     int32_t cursorColumn;
+ } ReseshTerminalCursorLogicalLine;
+ 
+-typedef struct ReseshTerminalSnapshot
+-{
+-    uint32_t structSize;
+-    uint16_t abiMajor;
+-    uint16_t abiMinor;
+-    uint32_t schemaVersion;
+-    uint32_t flags;
+-    int32_t columns;
+-    int32_t rows;
+-    int32_t cursorColumn;
+-    int32_t cursorRow;
+-    int32_t viewportTop;
+-    int32_t viewportHeight;
+-    int32_t scrollOffset;
+-    uint64_t captureSequence;
+-    int64_t unixTimeMilliseconds;
+-    uint32_t ansiOffset;
+-    uint32_t ansiLength;
+-    uint32_t titleOffset;
+-    uint32_t titleLength;
+-    uint32_t workingDirectoryOffset;
+-    uint32_t workingDirectoryLength;
+-} ReseshTerminalSnapshot;
+ 
+ typedef struct ReseshTerminalHighlightRule
+ {
+@@ -425,12 +397,15 @@ __declspec(dllexport) HRESULT __stdcall ReseshTerminalRemoveBookmark(
+     ReseshTerminalHandle terminal,
+     uint64_t bookmarkId);
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalClearBookmarks(ReseshTerminalHandle terminal);
+-__declspec(dllexport) HRESULT __stdcall ReseshTerminalCaptureSnapshot(
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalCaptureExactSnapshot(
+     ReseshTerminalHandle terminal,
+-    ReseshTerminalSnapshot* snapshot,
+-    wchar_t* payload,
++    uint8_t* payload,
+     uint32_t capacity,
+     uint32_t* requiredCapacity);
++__declspec(dllexport) HRESULT __stdcall ReseshTerminalRestoreExactSnapshot(
++    ReseshTerminalHandle terminal,
++    const uint8_t* payload,
++    uint32_t payloadLength);
+ __declspec(dllexport) HRESULT __stdcall ReseshTerminalSetHighlightRules(
+     ReseshTerminalHandle terminal,
+     const ReseshTerminalHighlightRule* rules,
+diff --git a/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def b/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
+index 37cc0b459b6e30e57871a9668b1006534dd5cb19..fb589fd7d7f07cbac0acf773cdbee94b854a0b1d 100644
+--- a/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
++++ b/src/cascadia/TerminalControl/dll/Microsoft.Terminal.Control.def
+@@ -27,7 +27,8 @@ EXPORTS
+   ReseshTerminalClearSelection
+   ReseshTerminalClearSearch
+   ReseshTerminalClearBookmarks
+-  ReseshTerminalCaptureSnapshot
++  ReseshTerminalCaptureExactSnapshot
++  ReseshTerminalRestoreExactSnapshot
+   ReseshTerminalCopySelection
+   ReseshTerminalCreate
+   ReseshTerminalCreateApplicationMark
+diff --git a/src/cascadia/TerminalCore/Terminal.cpp b/src/cascadia/TerminalCore/Terminal.cpp
+index 93ea54c95e5e3a68956dce59864c570e3796376c..3b16177e92387fe62524ab8fd8eaf532617e1438 100644
+--- a/src/cascadia/TerminalCore/Terminal.cpp
++++ b/src/cascadia/TerminalCore/Terminal.cpp
+@@ -55,6 +55,124 @@ void Terminal::Create(til::size viewportSize, til::CoordType scrollbackLines, Re
+     _stateMachine = std::make_unique<StateMachine>(std::move(engine));
+ }
+ 
++const TextBuffer& Terminal::ReseshMainBuffer() const noexcept
++{
++    return *_mainBuffer;
++}
++
++const TextBuffer* Terminal::ReseshAlternateBuffer() const noexcept
++{
++    return _altBuffer.get();
++}
++
++Viewport Terminal::ReseshMutableViewport() const noexcept
++{
++    return _mutableViewport;
++}
++
++til::CoordType Terminal::ReseshUserScrollOffset() const noexcept
++{
++    return _scrollOffset;
++}
++
++uint32_t Terminal::ReseshSystemModes() const noexcept
++{
++    uint32_t result{};
++    for (size_t i = 0; i <= static_cast<size_t>(Mode::BracketedPaste); ++i)
++    {
++        if (_systemMode.test(static_cast<Mode>(i)))
++        {
++            result |= 1u << i;
++        }
++    }
++    return result;
++}
++
++uint32_t Terminal::ReseshInputModes() const noexcept
++{
++    uint32_t result{};
++    for (size_t i = 0; i <= static_cast<size_t>(TerminalInput::Mode::AlternateScroll); ++i)
++    {
++        if (_terminalInput.GetInputMode(static_cast<TerminalInput::Mode>(i)))
++        {
++            result |= 1u << i;
++        }
++    }
++    return result;
++}
++
++std::wstring_view Terminal::ReseshPendingSequence() const noexcept
++{
++    return _stateMachine->GetPendingSequence();
++}
++
++AdaptDispatch& Terminal::ReseshDispatch() noexcept
++{
++    auto& engine = reinterpret_cast<OutputStateMachineEngine&>(_stateMachine->Engine());
++    return static_cast<AdaptDispatch&>(engine.Dispatch());
++}
++
++void Terminal::RestoreReseshSnapshot(
++    std::unique_ptr<TextBuffer> mainBuffer,
++    std::unique_ptr<TextBuffer> alternateBuffer,
++    const Viewport mutableViewport,
++    const til::CoordType scrollOffset,
++    const uint32_t systemModes,
++    const uint32_t inputModes,
++    const std::wstring_view pendingSequence,
++    const std::wstring_view title,
++    const std::wstring_view workingDirectory)
++{
++    _assertLocked();
++    THROW_HR_IF_NULL(E_INVALIDARG, mainBuffer);
++    const auto mainSize = mainBuffer->GetSize().Dimensions();
++    const auto viewport = mutableViewport.ToInclusive();
++    THROW_HR_IF(E_INVALIDARG,
++                viewport.left != 0 ||
++                    viewport.right != mainSize.width - 1 ||
++                    viewport.top < 0 ||
++                    viewport.bottom >= mainSize.height ||
++                    scrollOffset < 0 ||
++                    scrollOffset > viewport.top);
++
++    const auto alternateActive = alternateBuffer != nullptr;
++    mainBuffer->SetAsActiveBuffer(!alternateActive);
++    if (alternateBuffer)
++    {
++        THROW_HR_IF(E_INVALIDARG, alternateBuffer->GetSize().Dimensions() != mutableViewport.Dimensions());
++        alternateBuffer->SetAsActiveBuffer(true);
++    }
++
++    _mainBuffer = std::move(mainBuffer);
++    _altBuffer = std::move(alternateBuffer);
++    _mutableViewport = mutableViewport;
++    _scrollbackLines = mainSize.height - mutableViewport.Height();
++    _scrollOffset = scrollOffset;
++    _altBufferSize = _altBuffer ? _altBuffer->GetSize().Dimensions() : mutableViewport.Dimensions();
++    _title = std::wstring{ title };
++    _workingDirectory.assign(workingDirectory);
++
++    for (size_t i = 0; i <= static_cast<size_t>(Mode::BracketedPaste); ++i)
++    {
++        _systemMode.set(static_cast<Mode>(i), (systemModes & (uint32_t{ 1 } << i)) != 0);
++    }
++    for (size_t i = 0; i <= static_cast<size_t>(TerminalInput::Mode::AlternateScroll); ++i)
++    {
++        _terminalInput.SetInputMode(
++            static_cast<TerminalInput::Mode>(i),
++            (inputModes & (uint32_t{ 1 } << i)) != 0);
++    }
++    _stateMachine->RestorePendingSequence(pendingSequence);
++
++    _selection = {};
++    _searchHighlights.clear();
++    _persistentHighlights.clear();
++    _clearPatternTree();
++    UpdatePatternsUnderLock();
++    _activeBuffer().TriggerRedrawAll();
++    _NotifyScrollEvent();
++}
++
+ // Method Description:
+ // - Resets all VT state to defaults without clearing the buffer content.
+ // Called when a connection is restarted so that any dirty modes left
+diff --git a/src/cascadia/TerminalCore/Terminal.hpp b/src/cascadia/TerminalCore/Terminal.hpp
+index 4c3c57f0b59ade0aebc93251f50bc6eb27b4d4e8..f1e563efbe3c0fc13c2bb346c20c16f34ba4b4b4 100644
+--- a/src/cascadia/TerminalCore/Terminal.hpp
++++ b/src/cascadia/TerminalCore/Terminal.hpp
+@@ -129,6 +129,24 @@ public:
+     std::wstring CurrentCommand() const;
+ 
+     void SerializeMainBuffer(const wchar_t* destination) const;
++    const TextBuffer& ReseshMainBuffer() const noexcept;
++    const TextBuffer* ReseshAlternateBuffer() const noexcept;
++    Microsoft::Console::Types::Viewport ReseshMutableViewport() const noexcept;
++    til::CoordType ReseshUserScrollOffset() const noexcept;
++    uint32_t ReseshSystemModes() const noexcept;
++    uint32_t ReseshInputModes() const noexcept;
++    std::wstring_view ReseshPendingSequence() const noexcept;
++    Microsoft::Console::VirtualTerminal::AdaptDispatch& ReseshDispatch() noexcept;
++    void RestoreReseshSnapshot(
++        std::unique_ptr<TextBuffer> mainBuffer,
++        std::unique_ptr<TextBuffer> alternateBuffer,
++        Microsoft::Console::Types::Viewport mutableViewport,
++        til::CoordType scrollOffset,
++        uint32_t systemModes,
++        uint32_t inputModes,
++        std::wstring_view pendingSequence,
++        std::wstring_view title,
++        std::wstring_view workingDirectory);
+ 
+ #pragma region ITerminalApi
+     // These methods are defined in TerminalApi.cpp
+diff --git a/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp b/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp
+index a9bd4db908629e4bd8d8ab2aaa67362ad6f4b9e7..5e0dcb90a837abb5217acea326d752bd53dc4f10 100644
+--- a/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp
++++ b/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp
+@@ -23,6 +23,54 @@ namespace
+         ReseshTerminalCreateRightClickPaste |
+         ReseshTerminalCreateSnapOnInput;
+ 
++    uint32_t ReadSnapshotU32(const std::span<const uint8_t> bytes, const size_t offset)
++    {
++        return static_cast<uint32_t>(bytes[offset]) |
++               static_cast<uint32_t>(bytes[offset + 1]) << 8 |
++               static_cast<uint32_t>(bytes[offset + 2]) << 16 |
++               static_cast<uint32_t>(bytes[offset + 3]) << 24;
++    }
++
++    void WriteSnapshotU16(std::vector<uint8_t>& bytes, const size_t offset, const uint16_t value)
++    {
++        bytes[offset] = static_cast<uint8_t>(value);
++        bytes[offset + 1] = static_cast<uint8_t>(value >> 8);
++    }
++
++    void WriteSnapshotU32(std::vector<uint8_t>& bytes, const size_t offset, const uint32_t value)
++    {
++        for (size_t index = 0; index < 4; ++index)
++            bytes[offset + index] = static_cast<uint8_t>(value >> (index * 8));
++    }
++
++    uint32_t SnapshotCrc32(const std::span<const uint8_t> bytes)
++    {
++        auto crc = UINT32_MAX;
++        for (const auto value : bytes)
++        {
++            crc ^= value;
++            for (size_t bit = 0; bit < 8; ++bit)
++                crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
++        }
++        return ~crc;
++    }
++
++    std::vector<uint8_t> SnapshotStateFields(const std::span<const uint8_t> snapshot)
++    {
++        std::vector<uint8_t> state;
++        for (size_t offset = 24; offset < snapshot.size();)
++        {
++            const auto id = static_cast<uint16_t>(snapshot[offset] | snapshot[offset + 1] << 8);
++            const auto length = ReadSnapshotU32(snapshot, offset + 4);
++            const auto end = offset + 8 + length;
++            VERIFY_IS_TRUE(end <= snapshot.size());
++            if (id != 1)
++                state.insert(state.end(), snapshot.begin() + offset, snapshot.begin() + end);
++            offset = end;
++        }
++        return state;
++    }
++
+     HMODULE LoadAbiModule()
+     {
+         std::array<wchar_t, 32768> path{};
+@@ -207,7 +255,7 @@ namespace ControlUnitTests
+         TEST_METHOD(EmitsTypedEventsAndObservesOscWithoutConsuming);
+         TEST_METHOD(SearchesAndRaisesLinks);
+         TEST_METHOD(DiscoversCommandsAndManagesRulerMarks);
+-        TEST_METHOD(CapturesAnsiSnapshots);
++        TEST_METHOD(CapturesAndRestoresExactSnapshots);
+         TEST_METHOD(AppliesPersistentHighlightRulesAndPrecedence);
+     };
+ 
+@@ -248,7 +296,8 @@ namespace ControlUnitTests
+             "ReseshTerminalDiscardPromptProbe",
+             "ReseshTerminalAddBookmark",
+             "ReseshTerminalRemoveBookmark",
+-            "ReseshTerminalCaptureSnapshot",
++            "ReseshTerminalCaptureExactSnapshot",
++            "ReseshTerminalRestoreExactSnapshot",
+             "ReseshTerminalSetHighlightRules",
+             "ReseshTerminalClearHighlightRules",
+             "ReseshTerminalGetHighlightRows",
+@@ -274,7 +323,7 @@ namespace ControlUnitTests
+         uint32_t written{};
+         VERIFY_SUCCEEDED(getBuildId(buildId.data(), required, &written));
+         VERIFY_ARE_EQUAL(required, written);
+-        VERIFY_IS_TRUE(buildId.starts_with(L"terminal-v1.24.11911.0-resesh-abi2.2-highlights"));
++        VERIFY_IS_TRUE(buildId.starts_with(L"terminal-v1.24.11911.0-resesh-abi3.0-snapshots"));
+     }
+ 
+     void ReseshTerminalAbiTests::RejectsInvalidCreationStructures()
+@@ -890,55 +939,170 @@ namespace ControlUnitTests
+         VERIFY_ARE_EQUAL(1u, requiredMarks);
+     }
+ 
+-    void ReseshTerminalAbiTests::CapturesAnsiSnapshots()
++    void ReseshTerminalAbiTests::CapturesAndRestoresExactSnapshots()
+     {
+         const auto module = LoadAbiModule();
+         const auto closeModule = wil::scope_exit([&]() noexcept { FreeLibrary(module); });
+         const auto create = LoadExport<decltype(&ReseshTerminalCreate)>(module, "ReseshTerminalCreate");
+         const auto destroy = LoadExport<decltype(&ReseshTerminalDestroy)>(module, "ReseshTerminalDestroy");
++        const auto registerCallback = LoadExport<decltype(&ReseshTerminalRegisterEventCallback)>(
++            module, "ReseshTerminalRegisterEventCallback");
+         const auto sendOutput = LoadExport<decltype(&ReseshTerminalSendOutput)>(module, "ReseshTerminalSendOutput");
+         const auto resizeCharacters = LoadExport<decltype(&ReseshTerminalResizeCharacters)>(
+             module, "ReseshTerminalResizeCharacters");
+-        const auto captureSnapshot = LoadExport<decltype(&ReseshTerminalCaptureSnapshot)>(
+-            module, "ReseshTerminalCaptureSnapshot");
++        const auto capture = LoadExport<decltype(&ReseshTerminalCaptureExactSnapshot)>(
++            module, "ReseshTerminalCaptureExactSnapshot");
++        const auto restore = LoadExport<decltype(&ReseshTerminalRestoreExactSnapshot)>(
++            module, "ReseshTerminalRestoreExactSnapshot");
++        const auto search = LoadExport<decltype(&ReseshTerminalSearch)>(module, "ReseshTerminalSearch");
++        const auto getMarks = LoadExport<decltype(&ReseshTerminalGetMarks)>(module, "ReseshTerminalGetMarks");
+         const auto parent = CreateParentWindow();
+         const auto closeParent = wil::scope_exit([&]() noexcept { DestroyWindow(parent); });
+-        const auto options = DefaultOptions(parent);
+-        ReseshTerminalHandle terminal{};
+-        VERIFY_SUCCEEDED(create(&options, &terminal));
+-        const auto closeTerminal = wil::scope_exit([&]() noexcept { VERIFY_SUCCEEDED(destroy(terminal)); });
+ 
+-        VERIFY_SUCCEEDED(resizeCharacters(terminal, 90, 25));
+-        constexpr wchar_t output[]{ L"\x1b]0;snapshot title\x07\x1b]7;file://host/work\x07\x1b[31mwide \x754c\x1b[0m" };
+-        VERIFY_SUCCEEDED(sendOutput(terminal, output, gsl::narrow<uint32_t>(std::size(output) - 1)));
++        const auto captureBytes = [&](const ReseshTerminalHandle terminal, const wchar_t* const scenario) {
++            uint32_t required{};
++            const auto queryResult = capture(terminal, nullptr, 0, &required);
++            VERIFY_ARE_EQUAL(
++                HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
++                queryResult,
++                scenario);
++            THROW_HR_IF(E_UNEXPECTED, queryResult != HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER));
++            VERIFY_IS_TRUE(required > 24 && required <= 32u * 1024u * 1024u, scenario);
++            std::vector<uint8_t> bytes(required);
++            VERIFY_SUCCEEDED(capture(terminal, bytes.data(), gsl::narrow<uint32_t>(bytes.size()), &required), scenario);
++            VERIFY_ARE_EQUAL(gsl::narrow<uint32_t>(bytes.size()), required, scenario);
++            return bytes;
++        };
+ 
+-        ReseshTerminalSnapshot snapshot{
+-            .structSize = sizeof(ReseshTerminalSnapshot),
+-            .abiMajor = RESESH_TERMINAL_ABI_MAJOR,
+-            .abiMinor = RESESH_TERMINAL_ABI_MINOR,
++        auto sourceOptions = DefaultOptions(parent);
++        ReseshTerminalHandle source{};
++        VERIFY_SUCCEEDED(create(&sourceOptions, &source));
++        const auto emptySnapshot = captureBytes(source, L"initialized terminal");
++        const auto closeSource = wil::scope_exit([&]() noexcept { VERIFY_SUCCEEDED(destroy(source)); });
++        VERIFY_SUCCEEDED(resizeCharacters(source, 40, 8));
++        constexpr wchar_t metadata[]{
++            L"\x1b]0;captured title\x07"
++            L"\x1b]7;file://host/work\x07"
+         };
+-        uint32_t required{};
++        VERIFY_SUCCEEDED(sendOutput(source, metadata, gsl::narrow<uint32_t>(std::size(metadata) - 1)));
++        const auto metadataSnapshot = captureBytes(source, L"metadata");
++        constexpr wchar_t marks[]{
++            L"\x1b]133;A\x07PS> \x1b]133;B\x07echo wide\x1b]133;C\x07\r\n"
++            L"\x1b]133;D;7\x07"
++        };
++        VERIFY_SUCCEEDED(sendOutput(source, marks, gsl::narrow<uint32_t>(std::size(marks) - 1)));
++        const auto marksSnapshot = captureBytes(source, L"marks");
++        constexpr wchar_t styledWide[]{ L"\x1b[31;44;1mwide \x754c e\x0301\x1b[0m " };
++        VERIFY_SUCCEEDED(sendOutput(source, styledWide, gsl::narrow<uint32_t>(std::size(styledWide) - 1)));
++        const auto styledWideSnapshot = captureBytes(source, L"styled wide and combining cells");
++        constexpr wchar_t hyperlink[]{ L"\x1b]8;id=link;https://example.com\x07link\x1b]8;;\x07\r\n" };
++        VERIFY_SUCCEEDED(sendOutput(source, hyperlink, gsl::narrow<uint32_t>(std::size(hyperlink) - 1)));
++        const auto mainSnapshot = captureBytes(source, L"hyperlinks");
++        constexpr wchar_t modes[]{ L"\x1b[2;6r\x1b[?6h\x1b[?2004h\x1bH\x1b""7\x1b(B\x1b)0\x0eqq\x0f\x1b""8" };
++        VERIFY_SUCCEEDED(sendOutput(source, modes, gsl::narrow<uint32_t>(std::size(modes) - 1)));
++        const auto modesSnapshot = captureBytes(source, L"margins, modes, tabs, character sets, and saved cursors");
++        constexpr wchar_t alternate[]{ L"\x1b[?1049halternate \x754c\r\n" };
++        VERIFY_SUCCEEDED(sendOutput(source, alternate, gsl::narrow<uint32_t>(std::size(alternate) - 1)));
++        const auto alternateSnapshot = captureBytes(source, L"alternate buffer");
++        constexpr wchar_t partialOsc[]{ L"\x1b]0;restored" };
++        VERIFY_SUCCEEDED(sendOutput(source, partialOsc, gsl::narrow<uint32_t>(std::size(partialOsc) - 1)));
++        const auto snapshot = captureBytes(source, L"partial OSC");
++        VERIFY_ARE_EQUAL(static_cast<uint8_t>('R'), snapshot[0]);
++        VERIFY_ARE_EQUAL(static_cast<uint8_t>('N'), snapshot[1]);
++        VERIFY_ARE_EQUAL(static_cast<uint8_t>('T'), snapshot[2]);
++        VERIFY_ARE_EQUAL(static_cast<uint8_t>('8'), snapshot[3]);
++        auto targetOptions = DefaultOptions(parent);
++        targetOptions.flags |= ReseshTerminalCreateReadOnly;
++        ReseshTerminalHandle target{};
++        VERIFY_SUCCEEDED(create(&targetOptions, &target));
++        const auto closeTarget = wil::scope_exit([&]() noexcept { VERIFY_SUCCEEDED(destroy(target)); });
++        VERIFY_SUCCEEDED(restore(target, emptySnapshot.data(), gsl::narrow<uint32_t>(emptySnapshot.size())));
++        captureBytes(target, L"initialized terminal round trip");
++        VERIFY_SUCCEEDED(restore(target, metadataSnapshot.data(), gsl::narrow<uint32_t>(metadataSnapshot.size())));
++        captureBytes(target, L"metadata round trip");
++        VERIFY_SUCCEEDED(restore(target, marksSnapshot.data(), gsl::narrow<uint32_t>(marksSnapshot.size())));
++        captureBytes(target, L"marks round trip");
++        VERIFY_SUCCEEDED(restore(target, styledWideSnapshot.data(), gsl::narrow<uint32_t>(styledWideSnapshot.size())));
++        captureBytes(target, L"styled wide and combining cells round trip");
++        VERIFY_SUCCEEDED(restore(target, mainSnapshot.data(), gsl::narrow<uint32_t>(mainSnapshot.size())));
++        captureBytes(target, L"hyperlinks round trip");
++        VERIFY_SUCCEEDED(restore(target, modesSnapshot.data(), gsl::narrow<uint32_t>(modesSnapshot.size())));
++        captureBytes(target, L"margins, modes, tabs, character sets, and saved cursors round trip");
++        VERIFY_SUCCEEDED(restore(target, alternateSnapshot.data(), gsl::narrow<uint32_t>(alternateSnapshot.size())));
++        captureBytes(target, L"alternate buffer round trip");
++        VERIFY_ARE_EQUAL(E_ACCESSDENIED, restore(source, snapshot.data(), gsl::narrow<uint32_t>(snapshot.size())));
++        VERIFY_SUCCEEDED(restore(target, snapshot.data(), gsl::narrow<uint32_t>(snapshot.size())));
++
++        const auto roundTripped = captureBytes(target, L"round trip");
++        VERIFY_IS_TRUE(SnapshotStateFields(snapshot) == SnapshotStateFields(roundTripped));
++
++        EventLog events;
++        VERIFY_SUCCEEDED(registerCallback(target, CaptureCallback, &events));
++        constexpr wchar_t finishParser[]{ L" title\x07\x1b[?1049l" };
++        VERIFY_SUCCEEDED(sendOutput(target, finishParser, gsl::narrow<uint32_t>(std::size(finishParser) - 1)));
++        const auto restoredEvents = events.Snapshot();
++        const auto title = std::find_if(restoredEvents.begin(), restoredEvents.end(), [](const CapturedEvent& event) {
++            return event.type == ReseshTerminalEventTypeTitleChanged;
++        });
++        VERIFY_IS_TRUE(title != restoredEvents.end());
++        VERIFY_ARE_EQUAL(std::wstring{ L"restored title" }, title->text);
++        const auto restoredBracketedPaste = std::find_if(restoredEvents.begin(), restoredEvents.end(), [](const CapturedEvent& event) {
++            return event.type == ReseshTerminalEventTypeTerminalModeChanged &&
++                   event.value0 == 2 &&
++                   (event.flags & ReseshTerminalEventFlagEnabled) != 0;
++        });
++        VERIFY_IS_TRUE(restoredBracketedPaste != restoredEvents.end());
++
++        constexpr wchar_t query[]{ L"link" };
++        ReseshTerminalSearchRequest request{
++            sizeof(ReseshTerminalSearchRequest),
++            RESESH_TERMINAL_ABI_MAJOR,
++            RESESH_TERMINAL_ABI_MINOR,
++            query,
++            gsl::narrow<uint32_t>(std::size(query) - 1),
++            ReseshTerminalSearchForward | ReseshTerminalSearchExecute,
++            0,
++        };
++        ReseshTerminalSearchState searchState{};
++        VERIFY_SUCCEEDED(search(target, &request, &searchState));
++        VERIFY_IS_GREATER_THAN(searchState.totalMatches, 0);
++        uint32_t requiredMarks{};
+         VERIFY_ARE_EQUAL(
+             HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
+-            captureSnapshot(terminal, &snapshot, nullptr, 0, &required));
+-        VERIFY_IS_GREATER_THAN(required, 0u);
+-        VERIFY_ARE_EQUAL(1u, snapshot.schemaVersion);
+-        VERIFY_ARE_EQUAL(90, snapshot.columns);
+-        VERIFY_ARE_EQUAL(25, snapshot.rows);
+-        VERIFY_IS_TRUE(snapshot.captureSequence > 0);
+-        VERIFY_IS_TRUE(snapshot.unixTimeMilliseconds > 0);
+-
+-        std::wstring payload(required, L'\0');
+-        VERIFY_SUCCEEDED(captureSnapshot(terminal, &snapshot, payload.data(), required, &required));
+-        const std::wstring_view ansi{ payload.data() + snapshot.ansiOffset, snapshot.ansiLength };
+-        const std::wstring_view title{ payload.data() + snapshot.titleOffset, snapshot.titleLength };
+-        const std::wstring_view workingDirectory{
+-            payload.data() + snapshot.workingDirectoryOffset,
+-            snapshot.workingDirectoryLength
+-        };
+-        VERIFY_IS_TRUE(ansi.find(L"wide \x754c") != std::wstring_view::npos);
+-        VERIFY_ARE_EQUAL(std::wstring_view{ L"snapshot title" }, title);
+-        VERIFY_ARE_EQUAL(std::wstring_view{ L"file://host/work" }, workingDirectory);
++            getMarks(target, nullptr, 0, &requiredMarks));
++        VERIFY_IS_GREATER_THAN(requiredMarks, 0u);
++
++        constexpr wchar_t partialCsi[]{ L" title\x07\x1b[38;2;10;20" };
++        VERIFY_SUCCEEDED(sendOutput(source, partialCsi, gsl::narrow<uint32_t>(std::size(partialCsi) - 1)));
++        const auto csiSnapshot = captureBytes(source, L"partial CSI");
++        VERIFY_SUCCEEDED(restore(target, csiSnapshot.data(), gsl::narrow<uint32_t>(csiSnapshot.size())));
++        constexpr wchar_t finishCsi[]{ L";30mcolor" };
++        VERIFY_SUCCEEDED(sendOutput(source, finishCsi, gsl::narrow<uint32_t>(std::size(finishCsi) - 1)));
++        VERIFY_SUCCEEDED(sendOutput(target, finishCsi, gsl::narrow<uint32_t>(std::size(finishCsi) - 1)));
++        VERIFY_IS_TRUE(
++            SnapshotStateFields(captureBytes(source, L"completed CSI source")) ==
++            SnapshotStateFields(captureBytes(target, L"completed CSI restored")));
++
++        auto corrupt = snapshot;
++        corrupt[16] ^= 0xff;
++        VERIFY_ARE_EQUAL(E_INVALIDARG, restore(target, corrupt.data(), gsl::narrow<uint32_t>(corrupt.size())));
++        VERIFY_ARE_EQUAL(
++            E_INVALIDARG,
++            restore(target, snapshot.data(), gsl::narrow<uint32_t>(snapshot.size() - 1)));
++        auto wrongMajor = snapshot;
++        WriteSnapshotU16(wrongMajor, 4, 2);
++        VERIFY_ARE_EQUAL(
++            HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH),
++            restore(target, wrongMajor.data(), gsl::narrow<uint32_t>(wrongMajor.size())));
++        std::vector<uint8_t> oversized(32u * 1024u * 1024u + 1u);
++        VERIFY_ARE_EQUAL(E_INVALIDARG, restore(target, oversized.data(), gsl::narrow<uint32_t>(oversized.size())));
++
++        auto newerMinor = snapshot;
++        WriteSnapshotU16(newerMinor, 6, 1);
++        newerMinor.insert(newerMinor.end(), { 0xff, 0x7f, 0, 0, 3, 0, 0, 0, 1, 2, 3 });
++        WriteSnapshotU32(newerMinor, 12, gsl::narrow<uint32_t>(newerMinor.size() - 24));
++        WriteSnapshotU32(newerMinor, 16, SnapshotCrc32(std::span<const uint8_t>{ newerMinor }.subspan(24)));
++        VERIFY_SUCCEEDED(restore(target, newerMinor.data(), gsl::narrow<uint32_t>(newerMinor.size())));
+     }
+ 
+     void ReseshTerminalAbiTests::AppliesPersistentHighlightRulesAndPrecedence()
+diff --git a/src/terminal/adapter/adaptDispatch.cpp b/src/terminal/adapter/adaptDispatch.cpp
+index c80c98a007d1bf27a96cc772acd6f4188bf5903d..dfd87357223e038b29ed027f6a6b416d89c6e8a8 100644
+--- a/src/terminal/adapter/adaptDispatch.cpp
++++ b/src/terminal/adapter/adaptDispatch.cpp
+@@ -48,6 +48,75 @@ AdaptDispatch::AdaptDispatch(ITerminalApi& api, Renderer* renderer, RenderSettin
+ {
+ }
+ 
++AdaptDispatch::ReseshSnapshot AdaptDispatch::CaptureReseshSnapshot() const
++{
++    ReseshSnapshot snapshot;
++    snapshot.TabStops = _tabStopColumns;
++    snapshot.InitializeDefaultTabStops = _initDefaultTabStops;
++    snapshot.UsingAlternateBuffer = _usingAltBuffer;
++    snapshot.ScrollMargins = _scrollMargins;
++    snapshot.Output = _termOutput.CaptureReseshSnapshot();
++    for (size_t i = 0; i < snapshot.SavedCursors.size(); ++i)
++    {
++        const auto& source = _savedCursorState[i];
++        auto& destination = snapshot.SavedCursors[i];
++        destination.Row = source.Row;
++        destination.Column = source.Column;
++        destination.Page = source.Page;
++        destination.DelayedWrap = source.IsDelayedEOLWrap;
++        destination.OriginRelative = source.IsOriginModeRelative;
++        destination.Attributes = source.Attributes;
++        destination.Output = source.TermOutput.CaptureReseshSnapshot();
++    }
++    for (size_t i = 0; i <= static_cast<size_t>(Mode::PageCursorCoupling); ++i)
++    {
++        if (_modes.test(static_cast<Mode>(i)))
++        {
++            snapshot.Modes |= uint32_t{ 1 } << i;
++        }
++    }
++    return snapshot;
++}
++
++void AdaptDispatch::RestoreReseshSnapshot(const ReseshSnapshot& snapshot)
++{
++    THROW_HR_IF(E_INVALIDARG,
++                snapshot.TabStops.size() > SHRT_MAX ||
++                    std::ranges::any_of(snapshot.TabStops, [](const auto stop) { return stop > 1; }) ||
++                    (snapshot.Modes >> (static_cast<size_t>(Mode::PageCursorCoupling) + 1)) != 0);
++
++    auto output = TerminalOutput{};
++    output.RestoreReseshSnapshot(snapshot.Output);
++    std::array<CursorState, 2> savedCursors;
++    for (size_t i = 0; i < savedCursors.size(); ++i)
++    {
++        const auto& source = snapshot.SavedCursors[i];
++        auto& destination = savedCursors[i];
++        destination.Row = source.Row;
++        destination.Column = source.Column;
++        destination.Page = source.Page;
++        destination.IsDelayedEOLWrap = source.DelayedWrap;
++        destination.IsOriginModeRelative = source.OriginRelative;
++        destination.Attributes = source.Attributes;
++        destination.TermOutput.RestoreReseshSnapshot(source.Output);
++    }
++
++    _tabStopColumns = snapshot.TabStops;
++    _initDefaultTabStops = snapshot.InitializeDefaultTabStops;
++    _savedCursorState = std::move(savedCursors);
++    _usingAltBuffer = snapshot.UsingAlternateBuffer;
++    _scrollMargins = snapshot.ScrollMargins;
++    _termOutput = std::move(output);
++    for (size_t i = 0; i <= static_cast<size_t>(Mode::PageCursorCoupling); ++i)
++    {
++        _modes.set(static_cast<Mode>(i), (snapshot.Modes & (uint32_t{ 1 } << i)) != 0);
++    }
++    if (_sixelParser)
++    {
++        _sixelParser->SetDisplayMode(_modes.test(Mode::SixelDisplay));
++    }
++}
++
+ // Routine Description:
+ // - Translates and displays a single character
+ // Arguments:
+diff --git a/src/terminal/adapter/adaptDispatch.hpp b/src/terminal/adapter/adaptDispatch.hpp
+index 97c346565ae6e8ed9d162f5ba72b10607a20d402..3a155e1d09421cfbfd2a8ad67ff30de68d1156d4 100644
+--- a/src/terminal/adapter/adaptDispatch.hpp
++++ b/src/terminal/adapter/adaptDispatch.hpp
+@@ -190,6 +190,31 @@ namespace Microsoft::Console::VirtualTerminal
+ 
+         void SetOptionalFeatures(const til::enumset<OptionalFeature> features) noexcept override;
+ 
++        struct ReseshCursorState
++        {
++            int32_t Row = 1;
++            int32_t Column = 1;
++            int32_t Page = 1;
++            bool DelayedWrap = false;
++            bool OriginRelative = false;
++            TextAttribute Attributes{};
++            TerminalOutput::ReseshSnapshot Output{};
++        };
++
++        struct ReseshSnapshot
++        {
++            std::vector<uint8_t> TabStops;
++            bool InitializeDefaultTabStops = true;
++            std::array<ReseshCursorState, 2> SavedCursors;
++            bool UsingAlternateBuffer = false;
++            til::inclusive_rect ScrollMargins{};
++            uint32_t Modes = 0;
++            TerminalOutput::ReseshSnapshot Output{};
++        };
++
++        ReseshSnapshot CaptureReseshSnapshot() const;
++        void RestoreReseshSnapshot(const ReseshSnapshot& snapshot);
++
+     private:
+         enum class Mode
+         {
+diff --git a/src/terminal/adapter/terminalOutput.cpp b/src/terminal/adapter/terminalOutput.cpp
+index a7f1f2a08ad738e27525627becabad296b70bfbb..f4644f40483c04465434fcff1bab4e168e3a74c1 100644
+--- a/src/terminal/adapter/terminalOutput.cpp
++++ b/src/terminal/adapter/terminalOutput.cpp
+@@ -47,6 +47,73 @@ void TerminalOutput::RestoreFrom(const TerminalOutput& savedState) noexcept
+     _grTranslationEnabled = preserveGrTranslation;
+ }
+ 
++TerminalOutput::ReseshSnapshot TerminalOutput::CaptureReseshSnapshot() const noexcept
++{
++    ReseshSnapshot snapshot;
++    snapshot.UserPreferenceCharset = static_cast<uint32_t>(_upssId);
++    snapshot.UserPreferenceCharsetIs96 = _upssTranslationTable.size() == 96;
++    for (size_t i = 0; i < snapshot.CharacterSets.size(); ++i)
++    {
++        snapshot.CharacterSets[i] = static_cast<uint32_t>(_gsetIds[i]);
++        snapshot.CharacterSetsAre96[i] = _gsetTranslationTables[i].size() == 96;
++    }
++    snapshot.LeftSet = gsl::narrow_cast<uint32_t>(_glSetNumber);
++    snapshot.RightSet = gsl::narrow_cast<uint32_t>(_grSetNumber);
++    snapshot.SingleShiftSet = gsl::narrow_cast<uint32_t>(_ssSetNumber);
++    snapshot.GrTranslationEnabled = _grTranslationEnabled;
++    snapshot.DrcsCharset = static_cast<uint32_t>(_drcsId);
++    snapshot.DrcsCharsetIs96 = _drcsTranslationTable.size() == 96;
++    return snapshot;
++}
++
++void TerminalOutput::RestoreReseshSnapshot(const ReseshSnapshot& snapshot)
++{
++    THROW_HR_IF(E_INVALIDARG,
++                snapshot.LeftSet > 3 ||
++                    snapshot.RightSet > 3 ||
++                    snapshot.SingleShiftSet > 3);
++
++    TerminalOutput restored{ snapshot.GrTranslationEnabled };
++    restored.AssignUserPreferenceCharset(
++        static_cast<VTID>(snapshot.UserPreferenceCharset),
++        snapshot.UserPreferenceCharsetIs96);
++    THROW_HR_IF(E_INVALIDARG,
++                static_cast<uint32_t>(restored.GetUserPreferenceCharsetId()) != snapshot.UserPreferenceCharset ||
++                    (restored.GetUserPreferenceCharsetSize() == 96) != snapshot.UserPreferenceCharsetIs96);
++    for (size_t i = 0; i < snapshot.CharacterSets.size(); ++i)
++    {
++        if (snapshot.CharacterSetsAre96[i])
++        {
++            restored.Designate96Charset(i, static_cast<VTID>(snapshot.CharacterSets[i]));
++        }
++        else
++        {
++            restored.Designate94Charset(i, static_cast<VTID>(snapshot.CharacterSets[i]));
++        }
++        THROW_HR_IF(E_INVALIDARG,
++                    static_cast<uint32_t>(restored.GetCharsetId(i)) != snapshot.CharacterSets[i] ||
++                        (restored.GetCharsetSize(i) == 96) != snapshot.CharacterSetsAre96[i]);
++    }
++    if (snapshot.DrcsCharset != 0)
++    {
++        if (snapshot.DrcsCharsetIs96)
++        {
++            restored.SetDrcs96Designation(static_cast<VTID>(snapshot.DrcsCharset));
++        }
++        else
++        {
++            restored.SetDrcs94Designation(static_cast<VTID>(snapshot.DrcsCharset));
++        }
++    }
++    restored.LockingShift(snapshot.LeftSet);
++    restored.LockingShiftRight(snapshot.RightSet);
++    if (snapshot.SingleShiftSet != 0)
++    {
++        restored.SingleShift(snapshot.SingleShiftSet);
++    }
++    *this = std::move(restored);
++}
++
+ void TerminalOutput::AssignUserPreferenceCharset(const VTID charset, const bool size96)
+ {
+     const auto translationTable = size96 ? _LookupTranslationTable96(charset) : _LookupTranslationTable94(charset);
+diff --git a/src/terminal/adapter/terminalOutput.hpp b/src/terminal/adapter/terminalOutput.hpp
+index 9143a2dba6417e9c8546964311e946ceec6f7943..dd49993fe52c44d43b53f41577c0416e1652c103 100644
+--- a/src/terminal/adapter/terminalOutput.hpp
++++ b/src/terminal/adapter/terminalOutput.hpp
+@@ -46,6 +46,23 @@ namespace Microsoft::Console::VirtualTerminal
+         bool NeedToTranslate() const noexcept;
+         void EnableGrTranslation(const bool enabled);
+ 
++        struct ReseshSnapshot
++        {
++            uint32_t UserPreferenceCharset = 0;
++            bool UserPreferenceCharsetIs96 = false;
++            std::array<uint32_t, 4> CharacterSets{};
++            std::array<bool, 4> CharacterSetsAre96{};
++            uint32_t LeftSet = 0;
++            uint32_t RightSet = 2;
++            uint32_t SingleShiftSet = 0;
++            bool GrTranslationEnabled = false;
++            uint32_t DrcsCharset = 0;
++            bool DrcsCharsetIs96 = false;
++        };
++
++        ReseshSnapshot CaptureReseshSnapshot() const noexcept;
++        void RestoreReseshSnapshot(const ReseshSnapshot& snapshot);
++
+     private:
+         const std::wstring_view _LookupTranslationTable94(const VTID charset) const;
+         const std::wstring_view _LookupTranslationTable96(const VTID charset) const;
+diff --git a/src/terminal/parser/stateMachine.cpp b/src/terminal/parser/stateMachine.cpp
+index c45e2fc2f43979d1fc042a244b34fa61ffd941ec..6c36388a5b48c8b9d6a84e7e7ec7c0b4d39f2269 100644
+--- a/src/terminal/parser/stateMachine.cpp
++++ b/src/terminal/parser/stateMachine.cpp
+@@ -2143,6 +2143,21 @@ void StateMachine::ResetState() noexcept
+     _EnterGround();
+ }
+ 
++std::wstring_view StateMachine::GetPendingSequence() const noexcept
++{
++    return _cachedSequence ? std::wstring_view{ *_cachedSequence } : std::wstring_view{};
++}
++
++void StateMachine::RestorePendingSequence(const std::wstring_view sequence)
++{
++    ResetState();
++    if (!sequence.empty())
++    {
++        ProcessString(sequence);
++        THROW_HR_IF(E_INVALIDARG, _state == VTStates::Ground || !_cachedSequence);
++    }
++}
++
+ // Routine Description:
+ // - Takes the given printable character and accumulates it as the new ones digit
+ //   into the given size_t. All existing value is moved up by 10.
+diff --git a/src/terminal/parser/stateMachine.hpp b/src/terminal/parser/stateMachine.hpp
+index 42756abd15d893216e55cf6b7dbaa1cb12003292..9b426c73fef5d1b08cef6aad9c90f73d8d75b6ae 100644
+--- a/src/terminal/parser/stateMachine.hpp
++++ b/src/terminal/parser/stateMachine.hpp
+@@ -89,6 +89,8 @@ namespace Microsoft::Console::VirtualTerminal
+         void OnCsiComplete(const std::function<void()> callback);
+         void ResetState() noexcept;
+         bool FlushToTerminal();
++        std::wstring_view GetPendingSequence() const noexcept;
++        void RestorePendingSequence(std::wstring_view sequence);
+ 
+         const IStateMachineEngine& Engine() const noexcept;
+         IStateMachineEngine& Engine() noexcept;

@@ -569,7 +569,6 @@ keyboard-interactive fallback.
   SFTP path selection, and agent attention mapping.
 - Native callbacks only copy data and enqueue application work. They do not call back into
   the terminal handle.
-
 ## 2026-09-02 - Native terminal search and links
 - ABI 1.3 searches inside TerminalCore and returns exact match counts, the current
   zero-based match, invalidation state, and invalid-regex state. C# does not scan the
@@ -606,3 +605,31 @@ keyboard-interactive fallback.
 - Native artifacts remain based on fork commit
   `95e25194f73f0d721481a5f59ae6f59a27f90b64`; the reproducible composition patch and
   ABI 2.0 artifact hashes live in `eng/native-terminal.json`.
+
+## 2026-09-04 - Exact native terminal snapshots
+- ABI 3.0 replaces interim ANSI keyframes with the native `RNT8` snapshot and managed
+  `RSNP` playback envelope. Both formats use fixed-width little-endian fields, bounded
+  length-delimited records, feature flags, major/minor compatibility rules, and CRC-32.
+- The native snapshot owns complete logical state: both cell buffers, row and cursor
+  metadata, links, marks, viewport and user scroll offset, active buffer, colors, modes,
+  dispatch state, title, working directory, and partial parser input. The managed envelope
+  adds the partial UTF-8 decoder bytes plus rebuildable search and highlight state.
+- Playback validates and restores a detached read-only native terminal before attaching
+  its composition surface. A failed restore destroys the candidate and keeps the previous
+  frame; successful seeks replay only later output and resize events.
+- New live captures and generated asciicast keyframes use exact snapshots. Native playback
+  no longer depends on xterm.js, and the xterm serialize addon and replay APIs are removed.
+- The patch and generated x64 and ARM64 binaries are pinned by normalized SHA-256 in
+  `eng/native-terminal.json`; the capability matrix records exact restoration as passing.
+
+## 2026-09-04 - Live native scrollback resizing
+- ABI 3.1 adds `historySize` to `ReseshTerminalOptions`; older structures remain compatible,
+  while malformed sizes and truncated ABI 3.1 structures are rejected.
+- Normal-buffer history resizes in place. Shrinking retains the newest rows, cursor, live
+  viewport, and any still-reachable visible region; growing preserves existing row positions.
+- Buffer-relative links, images, application marks, bookmarks, search matches, and persistent
+  highlights are rebased or dropped with trimmed rows. The alternate buffer remains
+  viewport-sized.
+- Each resize advances the buffer generation and emits one coherent viewport event.
+  `NativeTerminalSurface.ApplyOptions` now applies saved scrollback changes without replacing
+  the terminal handle.

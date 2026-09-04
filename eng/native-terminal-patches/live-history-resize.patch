@@ -1,0 +1,655 @@
+diff --git a/src/buffer/out/textBuffer.cpp b/src/buffer/out/textBuffer.cpp
+index 55610011..cdb3073b 100644
+--- a/src/buffer/out/textBuffer.cpp
++++ b/src/buffer/out/textBuffer.cpp
+@@ -1056,6 +1056,40 @@ void TextBuffer::ResizeTraditional(til::size newSize)
+     _SetFirstRowIndex(0);
+ }
+ 
++void TextBuffer::ResizeHeight(const til::CoordType newHeight, const til::CoordType rowsToDrop)
++{
++    THROW_HR_IF(E_INVALIDARG, newHeight <= 0 || rowsToDrop < 0 || rowsToDrop > _height);
++
++    const auto cursorPosition = GetCursor().GetPosition();
++    THROW_HR_IF(E_INVALIDARG, rowsToDrop > cursorPosition.y);
++
++    TextBuffer newBuffer{ { _width, newHeight }, _currentAttributes, 0, _isActiveBuffer, _renderer };
++    const auto copyableRows = std::min<til::CoordType>(_height - rowsToDrop, newHeight);
++    for (til::CoordType row = 0; row < copyableRows; ++row)
++    {
++        CopyRow(row + rowsToDrop, row, newBuffer);
++        newBuffer.GetMutableRowByOffset(row).SetScrollbarData(
++            GetRowByOffset(row + rowsToDrop).GetScrollbarData());
++    }
++
++    // Keep this in sync with ResizeTraditional(). The hyperlink maps and current
++    // attributes belong to this buffer and remain valid for every retained row.
++    _buffer = std::move(newBuffer._buffer);
++    _bufferEnd = newBuffer._bufferEnd;
++    _commitWatermark = newBuffer._commitWatermark;
++    _initialAttributes = newBuffer._initialAttributes;
++    _bufferRowStride = newBuffer._bufferRowStride;
++    _bufferOffsetChars = newBuffer._bufferOffsetChars;
++    _bufferOffsetCharOffsets = newBuffer._bufferOffsetCharOffsets;
++    _height = gsl::narrow<uint16_t>(newHeight);
++    _SetFirstRowIndex(0);
++    ++_lastMutationId;
++
++    auto adjustedCursor = cursorPosition;
++    adjustedCursor.y -= rowsToDrop;
++    GetCursor().SetPosition(ClampPositionWithinLine(adjustedCursor));
++}
++
+ void TextBuffer::SetAsActiveBuffer(const bool isActiveBuffer) noexcept
+ {
+     _isActiveBuffer = isActiveBuffer;
+diff --git a/src/buffer/out/textBuffer.hpp b/src/buffer/out/textBuffer.hpp
+index 50ab6912..d6406c31 100644
+--- a/src/buffer/out/textBuffer.hpp
++++ b/src/buffer/out/textBuffer.hpp
+@@ -158,6 +158,7 @@ public:
+     void ClearScrollback(const til::CoordType start, const til::CoordType height);
+ 
+     void ResizeTraditional(const til::size newSize);
++    void ResizeHeight(const til::CoordType newHeight, const til::CoordType rowsToDrop);
+ 
+     void SetAsActiveBuffer(const bool isActiveBuffer) noexcept;
+     bool IsActiveBuffer() const noexcept;
+diff --git a/src/cascadia/TerminalControl/HwndTerminal.cpp b/src/cascadia/TerminalControl/HwndTerminal.cpp
+index f5f6fffa..05cf86e9 100644
+--- a/src/cascadia/TerminalControl/HwndTerminal.cpp
++++ b/src/cascadia/TerminalControl/HwndTerminal.cpp
+@@ -609,6 +609,65 @@ HRESULT HwndTerminal::Refresh(const til::size windowSize, _Out_ til::size* dimen
+     return S_OK;
+ }
+ 
++HRESULT HwndTerminal::SetHistorySize(const int32_t historySize)
++{
++    RETURN_HR_IF_NULL(E_NOT_VALID_STATE, _terminal);
++
++    const auto lock = _terminal->LockForWriting();
++    const auto wasAlternateBufferActive = _terminal->IsAlternateBufferActive();
++    const auto focusedSearch = _searcher.GetCurrent();
++    const auto focusedSearchStart = focusedSearch ? std::optional{ focusedSearch->start } : std::nullopt;
++
++    til::CoordType rowsRemoved{};
++    const auto result = _terminal->SetHistorySize(historySize, &rowsRemoved);
++    RETURN_IF_FAILED(result);
++    if (result == S_FALSE)
++    {
++        return S_FALSE;
++    }
++
++    _terminal->UpdatePatternsUnderLock();
++    if (_searchActive && !wasAlternateBufferActive)
++    {
++        auto oldResults = _searcher.ExtractResults();
++        _searcher.Reset(*_terminal, _searchQuery, _searchFlags, _searchReverse);
++        if (focusedSearchStart)
++        {
++            auto rebased = *focusedSearchStart;
++            rebased.y = std::max(0, rebased.y - rowsRemoved);
++            _searcher.MoveToPoint(rebased);
++        }
++
++        _terminal->SetSearchHighlights(_searcher.Results());
++        _terminal->SetSearchHighlightFocused(
++            gsl::narrow<size_t>(std::max<ptrdiff_t>(0, _searcher.CurrentMatch())));
++        _renderer->TriggerSearchHighlight(oldResults);
++        _searchState = {
++            .TotalMatches = gsl::narrow<int32_t>(_searcher.Results().size()),
++            .CurrentMatch = gsl::narrow<int32_t>(_searcher.CurrentMatch()),
++            .Invalidated = true,
++            .InvalidRegex = !_searcher.IsOk(),
++        };
++    }
++    std::erase_if(_applicationCommands, [&](auto& entry) {
++        auto& command = entry.second;
++        if (command.CommandStart.y < rowsRemoved)
++        {
++            return true;
++        }
++        command.CommandStart.y -= rowsRemoved;
++        command.CommandEnd.y = std::max(0, command.CommandEnd.y - rowsRemoved);
++        return false;
++    });
++    _hoveredHyperlinkId = 0;
++    _hoveredHyperlinkInterval.reset();
++    _pressedLink.reset();
++
++    ++_markGeneration;
++    _updateHighlights(true);
++    return S_OK;
++}
++
+ void HwndTerminal::SendOutput(std::wstring_view data)
+ {
+     if (!_terminal)
+@@ -643,6 +702,9 @@ HwndTerminalSearchState HwndTerminal::Search(
+     SearchFlag flags{};
+     WI_SetFlagIf(flags, SearchFlag::CaseInsensitive, !caseSensitive);
+     WI_SetFlagIf(flags, SearchFlag::RegularExpression, regularExpression);
++    _searchQuery.assign(query);
++    _searchFlags = flags;
++    _searchReverse = !forward;
+     const auto invalidated = _searcher.IsStale(*_terminal, query, flags);
+     if (invalidated || executeSearch)
+     {
+@@ -687,6 +749,9 @@ void HwndTerminal::ClearSearch()
+     _terminal->SetSearchHighlightFocused(0);
+     _renderer->TriggerSearchHighlight(_searcher.Results());
+     _searcher = {};
++    _searchQuery.clear();
++    _searchFlags = {};
++    _searchReverse = false;
+     _searchState = {};
+ }
+ 
+diff --git a/src/cascadia/TerminalControl/HwndTerminal.hpp b/src/cascadia/TerminalControl/HwndTerminal.hpp
+index 0ed316db..f4a3f0cb 100644
+--- a/src/cascadia/TerminalControl/HwndTerminal.hpp
++++ b/src/cascadia/TerminalControl/HwndTerminal.hpp
+@@ -239,6 +239,7 @@ public:
+     void ClearHighlightRules();
+     std::vector<HwndTerminalHighlightRow> GetHighlightRows() const;
+     HRESULT ResizeCharacters(til::size dimensions);
++    HRESULT SetHistorySize(int32_t historySize);
+     uint64_t MarkGeneration() const noexcept;
+     bool CopySelection(bool clearSelection);
+     void PasteText(std::wstring_view text);
+@@ -288,6 +289,9 @@ private:
+     ::Search _searcher;
+     HwndTerminalSearchState _searchState;
+     bool _searchActive{};
++    std::wstring _searchQuery;
++    SearchFlag _searchFlags{};
++    bool _searchReverse{};
+     uint16_t _hoveredHyperlinkId{};
+     std::optional<interval_tree::IntervalTree<til::point, size_t>::interval> _hoveredHyperlinkInterval;
+     std::optional<std::pair<std::wstring, uint32_t>> _pressedLink;
+diff --git a/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp b/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
+index a32498ff..651658d9 100644
+--- a/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
++++ b/src/cascadia/TerminalControl/ReseshTerminalAbi.cpp
+@@ -16,7 +16,7 @@
+ namespace
+ {
+     thread_local ReseshTerminalHandle callbackHandle{};
+-    constexpr wchar_t BuildId[]{ L"terminal-v1.24.11911.0-resesh-abi3.0-snapshots" };
++    constexpr wchar_t BuildId[]{ L"terminal-v1.24.11911.0-resesh-abi3.1-history-resize" };
+     constexpr size_t MaximumQueuedEventUnits = 16 * 1024 * 1024;
+     constexpr uint32_t MaximumOutputCharacters = 16 * 1024 * 1024;
+     constexpr uint32_t MaximumSearchCharacters = 1024 * 1024;
+@@ -682,9 +682,13 @@ HRESULT __stdcall ReseshTerminalSetOptions(
+ try
+ {
+     RETURN_HR_IF_NULL(E_INVALIDARG, options);
++    constexpr auto baseOptionsSize = offsetof(ReseshTerminalOptions, historySize);
+     RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH),
+-                 !IsCompatible(options->structSize, options->abiMajor, sizeof(ReseshTerminalOptions)));
+-    RETURN_HR_IF(E_INVALIDARG, (options->flags & ~0x3u) != 0);
++                 !IsCompatible(options->structSize, options->abiMajor, baseOptionsSize));
++    RETURN_HR_IF(E_INVALIDARG, (options->flags & ~0x7u) != 0);
++    RETURN_HR_IF(HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH),
++                 WI_IsFlagSet(options->flags, ReseshTerminalOptionHistorySize) &&
++                     options->structSize < sizeof(ReseshTerminalOptions));
+     if (WI_IsFlagSet(options->flags, ReseshTerminalOptionTheme))
+     {
+         RETURN_HR_IF(E_INVALIDARG,
+@@ -702,6 +706,10 @@ try
+                          (options->copyFormatting & ~0x3u) != 0 ||
+                          (options->pasteFiltering & ~0x3u) != 0);
+     }
++    if (WI_IsFlagSet(options->flags, ReseshTerminalOptionHistorySize))
++    {
++        RETURN_HR_IF(E_INVALIDARG, options->historySize < 0 || options->historySize > MaximumHistorySize);
++    }
+ 
+     return WithTerminal(terminal, [&](TerminalState& state) {
+         if ((options->flags & ReseshTerminalOptionTheme) != 0)
+@@ -723,6 +731,10 @@ try
+                 options->copyFormatting,
+                 options->pasteFiltering);
+         }
++        if (WI_IsFlagSet(options->flags, ReseshTerminalOptionHistorySize))
++        {
++            RETURN_IF_FAILED(state.terminal->SetHistorySize(options->historySize));
++        }
+         return S_OK;
+     });
+ }
+diff --git a/src/cascadia/TerminalControl/ReseshTerminalAbi.h b/src/cascadia/TerminalControl/ReseshTerminalAbi.h
+index 14db0f3e..82dda1fd 100644
+--- a/src/cascadia/TerminalControl/ReseshTerminalAbi.h
++++ b/src/cascadia/TerminalControl/ReseshTerminalAbi.h
+@@ -7,7 +7,7 @@
+ #include <windows.h>
+ 
+ #define RESESH_TERMINAL_ABI_MAJOR 3u
+-#define RESESH_TERMINAL_ABI_MINOR 0u
++#define RESESH_TERMINAL_ABI_MINOR 1u
+ #define RESESH_TERMINAL_ABI_VERSION ((RESESH_TERMINAL_ABI_MAJOR << 16u) | RESESH_TERMINAL_ABI_MINOR)
+ 
+ #ifdef __cplusplus
+@@ -92,6 +92,7 @@ typedef enum ReseshTerminalOptionFlags
+ {
+     ReseshTerminalOptionTheme = 0x00000001u,
+     ReseshTerminalOptionInteraction = 0x00000002u,
++    ReseshTerminalOptionHistorySize = 0x00000004u,
+ } ReseshTerminalOptionFlags;
+ 
+ typedef enum ReseshTerminalCreateFlags
+@@ -185,6 +186,7 @@ typedef struct ReseshTerminalOptions
+     uint32_t interactionFlags;
+     uint32_t copyFormatting;
+     uint32_t pasteFiltering;
++    int32_t historySize;
+ } ReseshTerminalOptions;
+ 
+ typedef struct ReseshTerminalSearchRequest
+diff --git a/src/cascadia/TerminalCore/Terminal.cpp b/src/cascadia/TerminalCore/Terminal.cpp
+index 3b16177e..91ab1b94 100644
+--- a/src/cascadia/TerminalCore/Terminal.cpp
++++ b/src/cascadia/TerminalCore/Terminal.cpp
+@@ -575,6 +575,58 @@ try
+     return S_OK;
+ }
+ CATCH_RETURN()
++[[nodiscard]] HRESULT Terminal::SetHistorySize(const til::CoordType historySize, til::CoordType* const rowsRemoved) noexcept
++try
++{
++    RETURN_HR_IF_NULL(E_INVALIDARG, rowsRemoved);
++    RETURN_HR_IF(E_INVALIDARG, historySize < 0);
++    RETURN_HR_IF_NULL(E_NOT_VALID_STATE, _mainBuffer);
++    _assertLocked();
++
++    *rowsRemoved = 0;
++    const auto viewportSize = _mutableViewport.Dimensions();
++    const auto newBufferHeight = std::clamp(viewportSize.height + historySize, 1, SHRT_MAX);
++    const auto oldBufferHeight = _mainBuffer->GetSize().Height();
++    const auto configuredSizeChanged = historySize != _scrollbackLines;
++    _scrollbackLines = historySize;
++
++    if (newBufferHeight == oldBufferHeight)
++    {
++        if (!configuredSizeChanged)
++        {
++            return S_FALSE;
++        }
++        _NotifyScrollEvent();
++        return S_OK;
++    }
++
++    ClearSelection();
++
++    const auto oldMutableTop = _mutableViewport.Top();
++    const auto oldVisibleTop = std::max(0, oldMutableTop - _scrollOffset);
++    const auto retainedHistory = newBufferHeight - viewportSize.height;
++    const auto removed = std::max(0, oldMutableTop - retainedHistory);
++
++    _mainBuffer->ResizeHeight(newBufferHeight, removed);
++    *rowsRemoved = removed;
++
++    const auto newMutableTop = oldMutableTop - removed;
++    _mutableViewport = Viewport::FromDimensions({ 0, newMutableTop }, viewportSize);
++    const auto newVisibleTop = std::clamp(oldVisibleTop - removed, 0, newMutableTop);
++    _scrollOffset = newMutableTop - newVisibleTop;
++
++    _searchHighlights.clear();
++    _persistentHighlights.clear();
++    _clearPatternTree();
++
++    if (!_inAltBuffer())
++    {
++        _mainBuffer->TriggerRedrawAll();
++    }
++    _NotifyScrollEvent();
++    return S_OK;
++}
++CATCH_RETURN()
+ 
+ void Terminal::Write(std::wstring_view stringView)
+ {
+diff --git a/src/cascadia/TerminalCore/Terminal.hpp b/src/cascadia/TerminalCore/Terminal.hpp
+index f1e563ef..703be5b1 100644
+--- a/src/cascadia/TerminalCore/Terminal.hpp
++++ b/src/cascadia/TerminalCore/Terminal.hpp
+@@ -196,6 +196,7 @@ public:
+     [[nodiscard]] ::Microsoft::Console::VirtualTerminal::TerminalInput::OutputType FocusChanged(const bool focused) override;
+ 
+     [[nodiscard]] HRESULT UserResize(const til::size viewportSize) noexcept override;
++    [[nodiscard]] HRESULT SetHistorySize(til::CoordType historySize, til::CoordType* rowsRemoved) noexcept;
+     void UserScrollViewport(const int viewTop) override;
+     int GetScrollOffset() noexcept override;
+ 
+diff --git a/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp b/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp
+index 5e0dcb90..f6244624 100644
+--- a/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp
++++ b/src/cascadia/UnitTests_Control/ReseshTerminalAbiTests.cpp
+@@ -234,6 +234,17 @@ namespace
+         options.pasteFiltering = pasteFiltering;
+         return options;
+     }
++
++    ReseshTerminalOptions HistoryOptions(const int32_t historySize)
++    {
++        ReseshTerminalOptions options{};
++        options.structSize = sizeof(options);
++        options.abiMajor = RESESH_TERMINAL_ABI_MAJOR;
++        options.abiMinor = RESESH_TERMINAL_ABI_MINOR;
++        options.flags = ReseshTerminalOptionHistorySize;
++        options.historySize = historySize;
++        return options;
++    }
+ }
+ 
+ namespace ControlUnitTests
+@@ -247,6 +258,7 @@ namespace ControlUnitTests
+         TEST_METHOD(ReportsVersionBuildIdAndRequiredExports);
+         TEST_METHOD(RejectsInvalidCreationStructures);
+         TEST_METHOD(CreatesConfiguredHistorySizes);
++        TEST_METHOD(ResizesLiveHistoryWithoutRecreatingTerminal);
+         TEST_METHOD(CreatesAndDestroys100Terminals);
+         TEST_METHOD(CopiesSelectionWithConfiguredFormats);
+         TEST_METHOD(HonorsCopyOnSelectAndRightClickSettings);
+@@ -323,7 +335,7 @@ namespace ControlUnitTests
+         uint32_t written{};
+         VERIFY_SUCCEEDED(getBuildId(buildId.data(), required, &written));
+         VERIFY_ARE_EQUAL(required, written);
+-        VERIFY_IS_TRUE(buildId.starts_with(L"terminal-v1.24.11911.0-resesh-abi3.0-snapshots"));
++        VERIFY_IS_TRUE(buildId.starts_with(L"terminal-v1.24.11911.0-resesh-abi3.1-history-resize"));
+     }
+ 
+     void ReseshTerminalAbiTests::RejectsInvalidCreationStructures()
+@@ -401,6 +413,291 @@ namespace ControlUnitTests
+         }
+     }
+ 
++    void ReseshTerminalAbiTests::ResizesLiveHistoryWithoutRecreatingTerminal()
++    {
++        const auto module = LoadAbiModule();
++        auto closeModule = wil::scope_exit([&]() noexcept { FreeLibrary(module); });
++        const auto create = LoadExport<decltype(&ReseshTerminalCreate)>(module, "ReseshTerminalCreate");
++        const auto destroy = LoadExport<decltype(&ReseshTerminalDestroy)>(module, "ReseshTerminalDestroy");
++        const auto registerCallback = LoadExport<decltype(&ReseshTerminalRegisterEventCallback)>(
++            module, "ReseshTerminalRegisterEventCallback");
++        const auto sendOutput = LoadExport<decltype(&ReseshTerminalSendOutput)>(module, "ReseshTerminalSendOutput");
++        const auto setOptions = LoadExport<decltype(&ReseshTerminalSetOptions)>(module, "ReseshTerminalSetOptions");
++        const auto userScroll = LoadExport<decltype(&ReseshTerminalUserScroll)>(module, "ReseshTerminalUserScroll");
++        const auto search = LoadExport<decltype(&ReseshTerminalSearch)>(module, "ReseshTerminalSearch");
++        const auto clearSearch = LoadExport<decltype(&ReseshTerminalClearSearch)>(
++            module, "ReseshTerminalClearSearch");
++        const auto getSearchRows = LoadExport<decltype(&ReseshTerminalGetSearchRows)>(
++            module, "ReseshTerminalGetSearchRows");
++        const auto getMarks = LoadExport<decltype(&ReseshTerminalGetMarks)>(module, "ReseshTerminalGetMarks");
++        const auto getCursorLogicalLine = LoadExport<decltype(&ReseshTerminalGetCursorLogicalLine)>(
++            module, "ReseshTerminalGetCursorLogicalLine");
++        const auto createApplicationMark = LoadExport<decltype(&ReseshTerminalCreateApplicationMark)>(
++            module, "ReseshTerminalCreateApplicationMark");
++        const auto addBookmark = LoadExport<decltype(&ReseshTerminalAddBookmark)>(module, "ReseshTerminalAddBookmark");
++        const auto setHighlightRules = LoadExport<decltype(&ReseshTerminalSetHighlightRules)>(
++            module, "ReseshTerminalSetHighlightRules");
++        const auto clearHighlightRules = LoadExport<decltype(&ReseshTerminalClearHighlightRules)>(
++            module, "ReseshTerminalClearHighlightRules");
++        const auto getHighlightRows = LoadExport<decltype(&ReseshTerminalGetHighlightRows)>(
++            module, "ReseshTerminalGetHighlightRows");
++        const auto capture = LoadExport<decltype(&ReseshTerminalCaptureExactSnapshot)>(
++            module, "ReseshTerminalCaptureExactSnapshot");
++
++        const auto parent = CreateParentWindow();
++        const auto closeParent = wil::scope_exit([&]() noexcept { DestroyWindow(parent); });
++        auto createOptions = DefaultOptions(parent, 8);
++        createOptions.initialColumns = 12;
++        createOptions.initialRows = 4;
++        EventLog events;
++        ReseshTerminalHandle terminal{};
++        VERIFY_SUCCEEDED(create(&createOptions, &terminal));
++        auto closeTerminal = wil::scope_exit([&]() noexcept { VERIFY_SUCCEEDED(destroy(terminal)); });
++
++        const auto captureBytes = [&](const ReseshTerminalHandle handle) {
++            uint32_t required{};
++            VERIFY_ARE_EQUAL(
++                HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
++                capture(handle, nullptr, 0, &required));
++            std::vector<uint8_t> bytes(required);
++            VERIFY_SUCCEEDED(capture(handle, bytes.data(), gsl::narrow<uint32_t>(bytes.size()), &required));
++            return bytes;
++        };
++
++        VERIFY_SUCCEEDED(registerCallback(terminal, CaptureCallback, &events));
++        constexpr wchar_t oldRows[]{ L"old-0\r\nold-1\r\nold-2\r\nold-3" };
++        VERIFY_SUCCEEDED(sendOutput(terminal, oldRows, gsl::narrow<uint32_t>(std::size(oldRows) - 1)));
++        uint64_t oldBookmark{};
++        VERIFY_SUCCEEDED(addBookmark(terminal, -1, 0, 0, &oldBookmark));
++
++        constexpr wchar_t retainedRows[]{
++            L"\r\n\x1b]8;;https://example.test/retained\x1b\\keep-0\x1b]8;;\x1b\\"
++            L"\r\nkeep-1\r\nkeep-2\r\nkeep-3\r\nkeep-4\r\nkeep-5"
++        };
++        VERIFY_SUCCEEDED(sendOutput(
++            terminal, retainedRows, gsl::narrow<uint32_t>(std::size(retainedRows) - 1)));
++        ReseshTerminalCursorLogicalLine retainedLine{};
++        uint32_t retainedLineLength{};
++        VERIFY_ARE_EQUAL(
++            HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
++            getCursorLogicalLine(terminal, &retainedLine, nullptr, 0, &retainedLineLength));
++        std::wstring retainedLineText(retainedLineLength, L'\0');
++        VERIFY_SUCCEEDED(getCursorLogicalLine(
++            terminal, &retainedLine, retainedLineText.data(), retainedLineLength, &retainedLineLength));
++        constexpr wchar_t retainedCommand[]{ L"keep-5" };
++        VERIFY_SUCCEEDED(createApplicationMark(
++            terminal,
++            retainedLine.probeId,
++            retainedCommand,
++            gsl::narrow<uint32_t>(std::size(retainedCommand) - 1),
++            0,
++            1));
++        uint64_t retainedBookmark{};
++        VERIFY_SUCCEEDED(addBookmark(terminal, -1, 0x0000CCFF, 1, &retainedBookmark));
++
++        constexpr wchar_t keepQuery[]{ L"keep-" };
++        ReseshTerminalSearchRequest searchRequest{
++            sizeof(ReseshTerminalSearchRequest),
++            RESESH_TERMINAL_ABI_MAJOR,
++            RESESH_TERMINAL_ABI_MINOR,
++            keepQuery,
++            gsl::narrow<uint32_t>(std::size(keepQuery) - 1),
++            ReseshTerminalSearchForward | ReseshTerminalSearchExecute,
++            0,
++        };
++        ReseshTerminalSearchState searchState{};
++        VERIFY_SUCCEEDED(search(terminal, &searchRequest, &searchState));
++        VERIFY_ARE_EQUAL(6, searchState.totalMatches);
++
++        ReseshTerminalHighlightRule highlightRule{
++            sizeof(ReseshTerminalHighlightRule),
++            RESESH_TERMINAL_ABI_MAJOR,
++            RESESH_TERMINAL_ABI_MINOR,
++            1,
++            keepQuery,
++            gsl::narrow<uint32_t>(std::size(keepQuery) - 1),
++            ReseshTerminalHighlightShowInOverview,
++            0x00FFFFFF,
++            0x00000000,
++            1,
++        };
++        VERIFY_SUCCEEDED(setHighlightRules(terminal, &highlightRule, 1));
++        const auto beforeResizeSnapshot = captureBytes(terminal);
++
++        VERIFY_SUCCEEDED(userScroll(terminal, 4));
++        const auto eventsBeforeShrink = events.Snapshot();
++        const auto bufferEventsBeforeShrink = std::count_if(
++            eventsBeforeShrink.begin(), eventsBeforeShrink.end(), [](const auto& item) {
++                return item.type == ReseshTerminalEventTypeBufferOrViewportChanged;
++            });
++
++        auto historyOptions = HistoryOptions(2);
++        VERIFY_SUCCEEDED(setOptions(terminal, &historyOptions));
++
++        const auto eventsAfterShrink = events.Snapshot();
++        const auto bufferEventsAfterShrink = std::count_if(
++            eventsAfterShrink.begin(), eventsAfterShrink.end(), [](const auto& item) {
++                return item.type == ReseshTerminalEventTypeBufferOrViewportChanged;
++            });
++        VERIFY_ARE_EQUAL(bufferEventsBeforeShrink + 1, bufferEventsAfterShrink);
++        const auto resizedEvent = std::find_if(
++            eventsAfterShrink.rbegin(), eventsAfterShrink.rend(), [](const auto& item) {
++                return item.type == ReseshTerminalEventTypeBufferOrViewportChanged;
++            });
++        VERIFY_IS_TRUE(resizedEvent != eventsAfterShrink.rend());
++        VERIFY_ARE_EQUAL(0ll, resizedEvent->value0);
++        VERIFY_ARE_EQUAL(4ll, resizedEvent->value1);
++        VERIFY_ARE_EQUAL(6ll, resizedEvent->value2);
++        const auto afterResizeSnapshot = captureBytes(terminal);
++        SendPointer(module, terminal, WM_MOUSEMOVE, 0, 2, 2);
++        SendPointer(module, terminal, WM_LBUTTONDOWN, 0, 2, 2);
++        SendPointer(module, terminal, WM_LBUTTONUP, 0, 2, 2);
++        PumpPostedMessages();
++        const auto eventsAfterLinkClick = events.Snapshot();
++        const auto retainedLink = std::find_if(
++            eventsAfterLinkClick.begin(), eventsAfterLinkClick.end(), [](const auto& item) {
++                return item.type == ReseshTerminalEventTypeOpenLink &&
++                       item.text == L"https://example.test/retained";
++            });
++        VERIFY_IS_TRUE(retainedLink != eventsAfterLinkClick.end());
++
++        uint32_t requiredMarks{};
++        VERIFY_ARE_EQUAL(
++            HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
++            getMarks(terminal, nullptr, 0, &requiredMarks));
++        VERIFY_ARE_EQUAL(2u, requiredMarks);
++        std::vector<ReseshTerminalMarkRecord> marks(requiredMarks);
++        VERIFY_SUCCEEDED(getMarks(
++            terminal, marks.data(), gsl::narrow<uint32_t>(marks.size()), &requiredMarks));
++        const auto retainedBookmarkMark = std::find_if(marks.begin(), marks.end(), [&](const auto& mark) {
++            return mark.id == retainedBookmark && mark.kind == ReseshTerminalMarkBookmark;
++        });
++        VERIFY_IS_TRUE(retainedBookmarkMark != marks.end());
++        VERIFY_ARE_EQUAL(5, retainedBookmarkMark->startY);
++        VERIFY_IS_GREATER_THAN(retainedBookmarkMark->generation, 1ull);
++        const auto retainedApplicationMark = std::find_if(marks.begin(), marks.end(), [](const auto& mark) {
++            return mark.kind == ReseshTerminalMarkApplicationCommand;
++        });
++        VERIFY_IS_TRUE(retainedApplicationMark != marks.end());
++        VERIFY_ARE_EQUAL(5, retainedApplicationMark->startY);
++        VERIFY_IS_TRUE(std::none_of(marks.begin(), marks.end(), [&](const auto& mark) {
++            return mark.id == oldBookmark;
++        }));
++
++        uint32_t requiredSearchRows{};
++        VERIFY_ARE_EQUAL(
++            HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
++            getSearchRows(terminal, nullptr, 0, &requiredSearchRows));
++        VERIFY_ARE_EQUAL(6u, requiredSearchRows);
++        std::vector<int32_t> searchRows(requiredSearchRows);
++        VERIFY_SUCCEEDED(getSearchRows(
++            terminal, searchRows.data(), gsl::narrow<uint32_t>(searchRows.size()), &requiredSearchRows));
++        VERIFY_ARE_EQUAL(0, searchRows.front());
++        VERIFY_ARE_EQUAL(5, searchRows.back());
++
++        uint32_t requiredHighlightRows{};
++        VERIFY_ARE_EQUAL(
++            HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER),
++            getHighlightRows(terminal, nullptr, 0, &requiredHighlightRows));
++        VERIFY_ARE_EQUAL(6u, requiredHighlightRows);
++        std::vector<ReseshTerminalHighlightRow> highlightRows(requiredHighlightRows);
++        VERIFY_SUCCEEDED(getHighlightRows(
++            terminal,
++            highlightRows.data(),
++            gsl::narrow<uint32_t>(highlightRows.size()),
++            &requiredHighlightRows));
++        VERIFY_ARE_EQUAL(0, highlightRows.front().row);
++        VERIFY_ARE_EQUAL(5, highlightRows.back().row);
++
++        constexpr wchar_t removedQuery[]{ L"old-3" };
++        searchRequest.query = removedQuery;
++        searchRequest.queryLength = gsl::narrow<uint32_t>(std::size(removedQuery) - 1);
++        VERIFY_SUCCEEDED(search(terminal, &searchRequest, &searchState));
++        VERIFY_ARE_EQUAL(0, searchState.totalMatches);
++
++        VERIFY_IS_TRUE(
++            SnapshotStateFields(beforeResizeSnapshot) != SnapshotStateFields(afterResizeSnapshot));
++
++        const auto eventsBeforeGrow = events.Snapshot();
++        const auto bufferEventsBeforeGrow = std::count_if(
++            eventsBeforeGrow.begin(), eventsBeforeGrow.end(), [](const auto& item) {
++                return item.type == ReseshTerminalEventTypeBufferOrViewportChanged;
++            });
++        historyOptions = HistoryOptions(8);
++        VERIFY_SUCCEEDED(setOptions(terminal, &historyOptions));
++        const auto eventsAfterGrow = events.Snapshot();
++        const auto bufferEventsAfterGrow = std::count_if(
++            eventsAfterGrow.begin(), eventsAfterGrow.end(), [](const auto& item) {
++                return item.type == ReseshTerminalEventTypeBufferOrViewportChanged;
++            });
++        VERIFY_ARE_EQUAL(bufferEventsBeforeGrow + 1, bufferEventsAfterGrow);
++        const auto grownEvent = std::find_if(
++            eventsAfterGrow.rbegin(), eventsAfterGrow.rend(), [](const auto& item) {
++                return item.type == ReseshTerminalEventTypeBufferOrViewportChanged;
++            });
++        VERIFY_IS_TRUE(grownEvent != eventsAfterGrow.rend());
++        VERIFY_ARE_EQUAL(4ll, grownEvent->value1);
++        VERIFY_ARE_EQUAL(6ll, grownEvent->value2);
++
++        constexpr wchar_t enterAlternate[]{ L"\x1b[?1049h" };
++        constexpr wchar_t leaveAlternate[]{ L"\x1b[?1049l" };
++        VERIFY_SUCCEEDED(sendOutput(
++            terminal, enterAlternate, gsl::narrow<uint32_t>(std::size(enterAlternate) - 1)));
++        historyOptions = HistoryOptions(3);
++        VERIFY_SUCCEEDED(setOptions(terminal, &historyOptions));
++        const auto eventsInAlternate = events.Snapshot();
++        const auto alternateResizeEvent = std::find_if(
++            eventsInAlternate.rbegin(), eventsInAlternate.rend(), [](const auto& item) {
++                return item.type == ReseshTerminalEventTypeBufferOrViewportChanged;
++            });
++        VERIFY_IS_TRUE(alternateResizeEvent != eventsInAlternate.rend());
++        VERIFY_ARE_EQUAL(4ll, alternateResizeEvent->value1);
++        VERIFY_ARE_EQUAL(4ll, alternateResizeEvent->value2);
++        VERIFY_SUCCEEDED(sendOutput(
++            terminal, leaveAlternate, gsl::narrow<uint32_t>(std::size(leaveAlternate) - 1)));
++
++        searchRequest.query = keepQuery;
++        searchRequest.queryLength = gsl::narrow<uint32_t>(std::size(keepQuery) - 1);
++        VERIFY_SUCCEEDED(search(terminal, &searchRequest, &searchState));
++        VERIFY_ARE_EQUAL(6, searchState.totalMatches);
++
++        std::atomic<HRESULT> outputResult{ S_OK };
++        std::atomic<HRESULT> resizeResult{ S_OK };
++        std::jthread outputThread{ [&]() {
++            constexpr wchar_t streamedRow[]{ L"\r\nstream" };
++            for (auto index = 0; index < 32 && SUCCEEDED(outputResult.load()); ++index)
++            {
++                outputResult = sendOutput(
++                    terminal, streamedRow, gsl::narrow<uint32_t>(std::size(streamedRow) - 1));
++            }
++        } };
++        for (auto index = 0; index < 32 && SUCCEEDED(resizeResult.load()); ++index)
++        {
++            historyOptions = HistoryOptions(1 + index % 8);
++            resizeResult = setOptions(terminal, &historyOptions);
++        }
++        outputThread.join();
++        VERIFY_SUCCEEDED(outputResult.load());
++        VERIFY_SUCCEEDED(resizeResult.load());
++
++        auto invalidHistory = HistoryOptions(-1);
++        VERIFY_ARE_EQUAL(E_INVALIDARG, setOptions(terminal, &invalidHistory));
++        invalidHistory = HistoryOptions(1'000'001);
++        VERIFY_ARE_EQUAL(E_INVALIDARG, setOptions(terminal, &invalidHistory));
++        invalidHistory = HistoryOptions(2);
++        invalidHistory.structSize = offsetof(ReseshTerminalOptions, historySize);
++        VERIFY_ARE_EQUAL(
++            HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH),
++            setOptions(terminal, &invalidHistory));
++        VERIFY_SUCCEEDED(clearSearch(terminal));
++        VERIFY_SUCCEEDED(registerCallback(terminal, nullptr, nullptr));
++        VERIFY_SUCCEEDED(clearHighlightRules(terminal));
++        // TAEF has no compositor consuming Atlas swap-chain frames; process isolation owns cleanup
++        // after this test has produced enough invalidations to saturate the frame queue.
++        closeTerminal.release();
++        closeModule.release();
++    }
++
+     void ReseshTerminalAbiTests::CreatesAndDestroys100Terminals()
+     {
+         const auto module = LoadAbiModule();

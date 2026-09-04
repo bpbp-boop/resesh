@@ -43,15 +43,23 @@ index 0e26f57b..5e33ab4c 100644
  {
      if (!_terminal)
      {
-@@ -613,6 +621,7 @@ void HwndTerminal::SendOutput(std::wstring_view data)
+@@ -609,10 +617,14 @@ void HwndTerminal::SendOutput(std::wstring_view data)
+     const auto lock = _terminal->LockForWriting();
+     _terminal->Write(data);
+-    _terminal->UpdatePatternsUnderLock();
+     if (_searchActive)
      {
          _searchState.Invalidated = true;
      }
-+    _updateHighlights(false);
++    if (!_highlightRules.empty() &&
++        _lastHighlightMutationId != _terminal->GetTextBuffer().GetLastMutationId())
++    {
++        _terminal->SetPersistentHighlights({});
++    }
  }
  
  HwndTerminalSearchState HwndTerminal::Search(
-@@ -685,6 +694,280 @@ HwndTerminalSearchState HwndTerminal::GetSearchState() const noexcept
+@@ -685,6 +698,292 @@ HwndTerminalSearchState HwndTerminal::GetSearchState() const noexcept
      return _searchState;
  }
  
@@ -154,13 +162,20 @@ index 0e26f57b..5e33ab4c 100644
 +{
 +    if (_terminal)
 +    {
-+        const auto lock = _terminal->LockForReading();
++        const auto lock = _terminal->LockForWriting();
++        const auto currentMutationId = _terminal->GetTextBuffer().GetLastMutationId();
++        if (_lastPatternMutationId != currentMutationId)
++        {
++            _terminal->UpdatePatternsUnderLock();
++            _lastPatternMutationId = currentMutationId;
++        }
++        _updateHighlights(false);
 +        return _highlightRows;
 +    }
 +    return _highlightRows;
 +}
 +
-+void HwndTerminal::_updateHighlights(const bool forceRescan)
++void HwndTerminal::_updateHighlights(const bool forceRescan) const
 +{
 +    if (!_terminal)
 +    {
@@ -169,6 +184,11 @@ index 0e26f57b..5e33ab4c 100644
 +
 +    if (_highlightRules.empty() || _terminal->IsAlternateBufferActive())
 +    {
++        if (_highlightSpans.empty() && _highlightRows.empty())
++        {
++            return;
++        }
++
 +        _highlightSpans.clear();
 +        _highlightRows.clear();
 +        _terminal->SetPersistentHighlights({});
@@ -332,7 +352,7 @@ index 0e26f57b..5e33ab4c 100644
  uint64_t HwndTerminal::_ensureRowMarkId(const til::CoordType row, const uint8_t kind)
  {
      auto& buffer = _terminal->GetTextBuffer();
-@@ -1702,12 +1985,12 @@ catch (...)
+@@ -1702,12 +1996,12 @@ catch (...)
      return false;
  }
  
@@ -347,7 +367,7 @@ index 0e26f57b..5e33ab4c 100644
      }
  
      auto modifiers = getControlKeyState();
-@@ -1725,73 +2008,74 @@ try
+@@ -1725,73 +2019,74 @@ try
          const auto lock = _terminal->LockForReading();
          out = _terminal->SendKeyEvent(vkey, scanCode, modifiers, keyDown);
      }
@@ -489,7 +509,7 @@ index 0e26f57b..5e33ab4c 100644
  
  void HwndTerminal::_SendCharEvent(wchar_t ch, WORD scanCode, WORD flags) noexcept
  try
-@@ -1837,13 +2121,13 @@ try
+@@ -1837,13 +2132,13 @@ try
  }
  CATCH_LOG();
  
@@ -616,20 +636,21 @@ index da8fde88..20bb8698 100644
      uint64_t MarkGeneration() const noexcept;
      bool CopySelection(bool clearSelection);
      void PasteText(std::wstring_view text);
-@@ -256,6 +293,12 @@ private:
+@@ -256,6 +293,13 @@ private:
      uint64_t _markGeneration{ 1 };
      std::unordered_map<uint64_t, HwndTerminalApplicationMark> _applicationCommands;
      ::Microsoft::WRL::ComPtr<HwndTerminalAutomationPeer> _uiaProvider;
-+    void _updateHighlights(bool forceRescan = false);
++    void _updateHighlights(bool forceRescan = false) const;
 +    std::vector<HwndTerminalHighlightRule> _highlightRules;
-+    std::vector<HwndTerminalHighlightSpan> _highlightSpans;
-+    std::vector<HwndTerminalHighlightRow> _highlightRows;
-+    uint64_t _lastHighlightMutationId{ 0 };
-+    uint64_t _highlightScanGeneration{ 0 };
++    mutable std::vector<HwndTerminalHighlightSpan> _highlightSpans;
++    mutable std::vector<HwndTerminalHighlightRow> _highlightRows;
++    mutable uint64_t _lastHighlightMutationId{ 0 };
++    mutable uint64_t _lastPatternMutationId{ 0 };
++    mutable uint64_t _highlightScanGeneration{ 0 };
  
      std::unique_ptr<::Microsoft::Terminal::Core::Terminal> _terminal;
  
-@@ -283,7 +326,7 @@ private:
+@@ -283,7 +327,7 @@ private:
      friend void _stdcall TerminalClearSelection(void* terminal);
      friend const wchar_t* _stdcall TerminalGetSelection(void* terminal);
      friend bool _stdcall TerminalIsSelectionActive(void* terminal);
@@ -638,7 +659,7 @@ index da8fde88..20bb8698 100644
      friend void _stdcall TerminalSendCharEvent(void* terminal, wchar_t ch, WORD scanCode, WORD flags);
      friend void _stdcall TerminalSetTheme(void* terminal, TerminalTheme theme, LPCWSTR fontFamily, til::CoordType fontSize, int newDpi);
      friend void _stdcall TerminalBlinkCursor(void* terminal);
-@@ -314,7 +357,7 @@ private:
+@@ -314,7 +358,7 @@ private:
      std::wstring _readRows(til::CoordType first, til::CoordType last) const;
      til::CoordType _logicalLineStart(til::CoordType row) const;
      til::CoordType _logicalLineEnd(til::CoordType row) const;
