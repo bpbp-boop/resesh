@@ -121,6 +121,7 @@ public static class PuttyRegistryImporter
             Port = port,
             Username = username.Trim(),
             Protocol = protocol == "SSH" ? "SSH2" : protocol,
+            PrivateKeyPath = ImportKeyPath.Resolve(GetString(values, "PublicKeyFile")),
         };
     }
 

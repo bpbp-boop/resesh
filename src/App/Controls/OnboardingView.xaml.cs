@@ -172,7 +172,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
             if (preview.Confirmed is not { Count: > 0 } confirmed)
                 return;
 
-            var (imported, duplicates) = SecureCrtImporter.Commit(App.Store, confirmed);
+            var (imported, duplicates) = SecureCrtImporter.Commit(App.Store, confirmed, App.SshKeys);
             _sessionsChanged();
             button.IsEnabled = false;
             label.Text = "Imported";

@@ -25,7 +25,10 @@ public sealed class ImportCandidateVm : ObservableObject
         {
             var target = Candidate.Port == 22 ? Candidate.Host : $"{Candidate.Host}:{Candidate.Port}";
             var user = Candidate.Username.Length > 0 ? $"{Candidate.Username}@" : "";
-            return $"{user}{target}";
+            var key = Candidate.PrivateKeyPath is { Length: > 0 } path
+                ? $"\nSSH key: {path}" + (System.IO.File.Exists(path) ? "" : " (file not found)")
+                : "";
+            return $"{user}{target}{key}";
         }
     }
 

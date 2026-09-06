@@ -64,7 +64,7 @@
         </Expander>
 
         <TextBlock
-            Text="Passwords are not imported. Imported sessions will prompt on first connect and can save passwords in Windows Credential Manager."
+            Text="SSH keys are added to SSH Keys and linked to the selected sessions. Key files stay in their current location. Passwords and key passphrases are not imported. OpenSSH sessions use the first configured IdentityFile."
             TextWrapping="Wrap"
             Opacity="0.7"
             FontSize="12" />

@@ -47,6 +47,10 @@ public static class SshKeyInspector
 
         var publicInspection = TryInspectPublicFile(path + ".pub");
         var encrypted = DetectEncryption(path);
+        if (encrypted == true && string.IsNullOrEmpty(passphrase))
+            return publicInspection is null
+                ? new SshKeyInspection(null, null, null, true, null)
+                : publicInspection with { IsEncrypted = true };
         try
         {
             using var keyFile = string.IsNullOrEmpty(passphrase)
@@ -69,7 +73,7 @@ public static class SshKeyInspector
                 : publicInspection with { IsEncrypted = true };
         }
         catch (Exception ex) when (ex is SshException or InvalidOperationException or ArgumentException
-            or CryptographicException)
+            or CryptographicException or Org.BouncyCastle.Crypto.CryptoException)
         {
             if (string.IsNullOrEmpty(passphrase) && encrypted == true)
             {

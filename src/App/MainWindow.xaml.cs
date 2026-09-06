@@ -3305,7 +3305,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             if (preview.Confirmed is not { Count: > 0 } confirmed)
                 return;
 
-            var (imported, duplicates) = Core.Import.SecureCrtImporter.Commit(App.Store, confirmed);
+            var (imported, duplicates) = Core.Import.SecureCrtImporter.Commit(App.Store, confirmed, App.SshKeys);
             ViewModel.RebuildTree();
             await new ContentDialog
             {

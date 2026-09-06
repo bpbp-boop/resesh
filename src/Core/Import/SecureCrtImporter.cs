@@ -16,6 +16,7 @@ public sealed record ImportCandidate
     public int Port { get; init; } = 22;
     public string Username { get; init; } = "";
     public string Protocol { get; init; } = "";
+    public string? PrivateKeyPath { get; init; }
 
     /// <summary>Only SSH sessions are importable; Telnet/serial/etc. are listed as skipped.</summary>
     public bool IsSupported => Protocol is "SSH2" or "SSH1";
@@ -68,7 +69,7 @@ internal sealed class WindowsSecureCrtConfigSource : ISecureCrtConfigSource
 /// Reads SecureCRT's Config\Sessions directory and overlays usernames from the matching
 /// personal-data session files when separate personal storage is enabled. The directory
 /// structure is the folder tree. Passwords stay encrypted and are intentionally not imported;
-/// imported sessions are marked "credential needed" instead.
+/// password sessions are marked "credential needed"; key sessions use shared key references.
 /// </summary>
 public static class SecureCrtImporter
 {
@@ -116,15 +117,42 @@ public static class SecureCrtImporter
 
             var relative = Path.GetRelativePath(sessionsDir, file);
             var folder = FolderPaths.Normalize(Path.GetDirectoryName(relative) ?? "");
-            var candidate = Parse(File.ReadAllText(file), Path.GetFileNameWithoutExtension(fileName), folder, relative);
+            var content = File.ReadAllText(file);
+            var candidate = Parse(content, Path.GetFileNameWithoutExtension(fileName), folder, relative);
             if (personalSessionsDir is not null)
             {
                 var personalFile = Path.Combine(personalSessionsDir, relative);
-                if (File.Exists(personalFile)
-                    && GetStringValue(File.ReadAllText(personalFile), "Username") is { } personalUsername)
+                if (File.Exists(personalFile))
                 {
-                    candidate = candidate with { Username = personalUsername.Trim() };
+                    var personalContent = File.ReadAllText(personalFile);
+                    content += "\n" + personalContent;
+                    candidate = candidate with
+                    {
+                        Username = GetStringValue(personalContent, "Username")?.Trim() ?? candidate.Username,
+                        PrivateKeyPath = GetIdentity(personalContent) ?? candidate.PrivateKeyPath,
+                    };
                 }
+            }
+            var configRoot = Path.GetFullPath(Path.Combine(sessionsDir, ".."));
+            var personalRoot = personalSessionsDir is null ? configRoot
+                : Path.GetFullPath(Path.Combine(personalSessionsDir, ".."));
+            if (UsesGlobalKey(content))
+            {
+                var globalFile = Path.Combine(configRoot, "Global.ini");
+                var globalContent = File.Exists(globalFile) ? File.ReadAllText(globalFile) : "";
+                var personalGlobal = Path.Combine(personalRoot, "Global.ini");
+                if (personalRoot != configRoot && File.Exists(personalGlobal))
+                    globalContent += "\n" + File.ReadAllText(personalGlobal);
+                candidate = candidate with { PrivateKeyPath = GetIdentity(globalContent) };
+            }
+            if (candidate.PrivateKeyPath is { } identity)
+            {
+                identity = identity.Replace("${VDS_CONFIG_PATH}", configRoot)
+                    .Replace("${VDS_USER_DATA_PATH}", personalRoot);
+                var resolved = ImportKeyPath.Resolve(identity, configRoot);
+                if (resolved?.EndsWith(".pub", StringComparison.OrdinalIgnoreCase) == true)
+                    resolved = resolved[..^4];
+                candidate = candidate with { PrivateKeyPath = resolved };
             }
             (candidate.IsSupported ? importable : skipped).Add(candidate);
         }
@@ -179,7 +207,24 @@ public static class SecureCrtImporter
             Port = port ?? 22,
             Username = username.Trim(),
             Protocol = protocol,
+            PrivateKeyPath = GetIdentity(iniContent),
         };
+    }
+
+    private static string? GetIdentity(string content) =>
+        GetStringValue(content, "Identity Filename V2")
+        ?? GetStringValue(content, "Identity Filename")
+        ?? GetStringValue(content, "SSH1 Identity Filename V2");
+
+    private static bool UsesGlobalKey(string content)
+    {
+        var enabled = false;
+        foreach (var line in content.Split('\n'))
+            if (TryParseLine(line.Trim(), out var kind, out var key, out var value)
+                && kind == 'D' && key == "Use Global Public Key")
+                enabled = int.TryParse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var flag)
+                    && flag != 0;
+        return enabled;
     }
 
     private static string? GetStringValue(string iniContent, string expectedKey)
@@ -221,7 +266,8 @@ public static class SecureCrtImporter
     /// Adds the selected candidates to the store. A candidate whose name+host+port already
     /// exists is skipped. Returns (imported, duplicatesSkipped).
     /// </summary>
-    public static (int Imported, int Duplicates) Commit(SessionStore store, IEnumerable<ImportCandidate> selected)
+    public static (int Imported, int Duplicates) Commit(SessionStore store, IEnumerable<ImportCandidate> selected,
+        SshKeyStore? keys = null)
     {
         var imported = 0;
         var duplicates = 0;
@@ -238,6 +284,11 @@ public static class SecureCrtImporter
                 continue;
             }
 
+            var key = !string.IsNullOrWhiteSpace(candidate.PrivateKeyPath)
+                ? (keys ?? throw new InvalidOperationException("An SSH key store is required to import keys."))
+                    .RegisterExternal(candidate.PrivateKeyPath, allowMissing: true)
+                : null;
+
             store.Add(new Session
             {
                 Name = candidate.Name,
@@ -245,8 +296,9 @@ public static class SecureCrtImporter
                 Host = candidate.Host,
                 Port = candidate.Port,
                 Username = candidate.Username,
-                AuthMethod = AuthMethod.Password,
-                CredentialNeeded = true,
+                AuthMethod = key is null ? AuthMethod.Password : AuthMethod.PrivateKey,
+                PrivateKeyId = key?.Id,
+                CredentialNeeded = key is null,
             });
             imported++;
         }

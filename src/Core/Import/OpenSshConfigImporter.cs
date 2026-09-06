@@ -64,6 +64,12 @@ public static class OpenSshConfigImporter
                 continue;
             }
 
+            if (key.Equals("Match", StringComparison.OrdinalIgnoreCase))
+            {
+                CommitBlock();
+                aliases = null;
+                continue;
+            }
             if (aliases is null)
                 continue;
 
@@ -78,6 +84,10 @@ public static class OpenSshConfigImporter
         }
 
         CommitBlock();
+        importable = importable.Select(candidate => candidate with
+        {
+            PrivateKeyPath = FindIdentity(content, candidate),
+        }).ToList();
         return new ImportScanResult
         {
             Importable = importable
@@ -88,6 +98,47 @@ public static class OpenSshConfigImporter
             Skipped = [],
         };
     }
+
+    // Evaluate matching Host blocks in file order, including shared Host * keys.
+    // Sessions currently select one key; the first configured identity is used.
+    private static string? FindIdentity(string content, ImportCandidate candidate)
+    {
+        var matches = true;
+        foreach (var rawLine in content.Split('\n'))
+        {
+            var line = StripComment(rawLine).Trim();
+            var separator = line.IndexOfAny([' ', '\t', '=']);
+            if (separator < 0)
+                continue;
+            var directive = line[..separator];
+            var value = line[(separator + 1)..].TrimStart(' ', '\t', '=').Trim();
+            if (directive.Equals("Host", StringComparison.OrdinalIgnoreCase))
+            {
+                var patterns = SplitArguments(value).ToList();
+                matches = patterns.Any(pattern => !pattern.StartsWith('!') && Matches(pattern, candidate.Name))
+                    && !patterns.Any(pattern => pattern.StartsWith('!') && Matches(pattern[1..], candidate.Name));
+            }
+            else if (directive.Equals("Match", StringComparison.OrdinalIgnoreCase))
+                matches = false;
+            else if (matches && directive.Equals("IdentityFile", StringComparison.OrdinalIgnoreCase))
+            {
+                value = Unquote(value);
+                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                value = System.Text.RegularExpressions.Regex.Replace(value, "%[%dhru]", match => match.Value switch
+                {
+                    "%%" => "%", "%d" => home, "%h" => candidate.Host,
+                    "%r" => candidate.Username, "%u" => Environment.UserName, _ => match.Value,
+                });
+                return ImportKeyPath.Resolve(value);
+            }
+        }
+        return null;
+    }
+
+    private static bool Matches(string pattern, string host) =>
+        System.Text.RegularExpressions.Regex.IsMatch(host,
+            "^" + System.Text.RegularExpressions.Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     private static ImportScanResult EmptyResult() => new()
     {

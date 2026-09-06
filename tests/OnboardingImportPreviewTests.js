@@ -28,7 +28,7 @@ test("Welcome import buttons open a preview before importing", () => {
 test("Welcome commits only the candidates confirmed in the preview", () => {
   assert.match(
     onboarding,
-    /preview\.Confirmed is not \{ Count: > 0 \} confirmed[\s\S]*?return;[\s\S]*?SecureCrtImporter\.Commit\(App\.Store, confirmed\)/);
+    /preview\.Confirmed is not \{ Count: > 0 \} confirmed[\s\S]*?return;[\s\S]*?SecureCrtImporter\.Commit\(App\.Store, confirmed, App\.SshKeys\)/);
   assert.doesNotMatch(
     onboarding,
     /SecureCrtImporter\.Commit\(App\.Store, scan\.Importable\)/);
