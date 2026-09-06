@@ -70,9 +70,9 @@ public sealed partial class OnboardingView : UserControl, IDisposable
             return;
         _scanStarted = true;
 
-        var puttyTask = Task.Run(() => PuttyRegistryImporter.Scan());
-        var openSshTask = Task.Run(() => OpenSshConfigImporter.Scan(OpenSshConfigImporter.DefaultConfigPath));
-        var secureCrtTask = Task.Run(SecureCrtImporter.ScanDefault);
+        var puttyTask = Task.Run(() => DemoMode.IsEnabled ? DemoMode.EmptyImportScan() : PuttyRegistryImporter.Scan());
+        var openSshTask = Task.Run(() => DemoMode.IsEnabled ? DemoMode.EmptyImportScan() : OpenSshConfigImporter.Scan(OpenSshConfigImporter.DefaultConfigPath));
+        var secureCrtTask = Task.Run(DemoMode.ScanSecureCrt);
 
         try
         {

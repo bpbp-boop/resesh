@@ -1,4 +1,5 @@
 using Resesh.Core.Credentials;
+using Resesh.Core.Import;
 using Resesh.Core.Models;
 using Resesh.Core.Storage;
 
@@ -8,6 +9,32 @@ namespace Resesh.App;
 internal static class DemoMode
 {
     private static readonly Lazy<string> DataDirectory = new(CreateDataDirectory);
+    private static readonly Lazy<ImportScanResult> SecureCrtSamples = new(CreateSecureCrtSamples);
+
+    public static ImportScanResult EmptyImportScan() => new() { Importable = [], Skipped = [] };
+
+    public static ImportScanResult ScanSecureCrt() =>
+        IsEnabled ? SecureCrtSamples.Value : SecureCrtImporter.ScanDefault();
+
+    private static ImportScanResult CreateSecureCrtSamples()
+    {
+        var root = StorePath("SecureCRT");
+        foreach (var (folder, name, protocol) in new[]
+        {
+            ("Sydney DC/Subscriber/BNG", "syd-bng-03", "SSH2"),
+            ("Sydney DC/Fabric/Leaf", "syd-leaf-05", "SSH2"),
+            ("Melbourne DC/Services/RADIUS", "mel-radius-03", "SSH2"),
+            ("Perth PoP/Edge & Security/Peering", "per-ix-03", "SSH2"),
+            ("Lab/Console", "lab-console-01", "Telnet"),
+        })
+        {
+            var directory = Path.Combine(root, folder);
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, name + ".ini"),
+                $"S:\"Protocol Name\"={protocol}\nS:\"Hostname\"={name}.mgmt.isp.example\nS:\"Username\"=netops\nD:\"[SSH2] Port\"=00000016\n");
+        }
+        return SecureCrtImporter.Scan(root);
+    }
 
     public static bool IsEnabled { get; } = Environment.GetCommandLineArgs()
         .Skip(1)
@@ -20,271 +47,91 @@ internal static class DemoMode
 
     public static void Seed(SessionStore store)
     {
-        foreach (var folder in new[]
-        {
-            "Sydney DC/Network",
-            "Sydney DC/Hypervisors",
-            "Melbourne DC/Network",
-            "Melbourne DC/Hypervisors",
-            "Edge & Security",
-            "Core Services",
-            "Staging & Lab",
-        })
-        {
-            store.CreateFolder(folder);
-        }
+        foreach (var folder in Sessions.Select(session => session.FolderPath)
+            .Where(path => !string.IsNullOrEmpty(path)).Distinct())
+            store.CreateFolder(folder!);
 
         foreach (var session in Sessions)
             store.Add(session);
     }
 
-    private static readonly Session[] Sessions =
-    [
-        new()
+    private static readonly Session[] Sessions = CreateSessions();
+
+    private static Session[] CreateSessions()
+    {
+        var sessions = new List<Session>
         {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393901"),
-            Name = "PowerShell 7",
-            Kind = SessionKind.Local,
-            Local = new LocalTarget { Executable = "pwsh.exe" },
-            Icon = "windows",
-            Notes = "Administrative PowerShell environment",
-        },
-        new()
+            new() { Id = DemoId(1), Name = "PowerShell 7", Kind = SessionKind.Local,
+                Local = new LocalTarget { Executable = "pwsh.exe" }, Icon = "windows" },
+            new() { Id = DemoId(2), Name = "Command Prompt", Kind = SessionKind.Local,
+                Local = new LocalTarget { Executable = "cmd.exe" }, Icon = "windows" },
+            new() { Id = DemoId(3), Name = "Ubuntu 24.04", Kind = SessionKind.Local,
+                Local = new LocalTarget { Executable = "wsl.exe", Arguments = ["-d", "Ubuntu-24.04"] }, Icon = "ubuntu" },
+        };
+
+        // Fictional management endpoints: demo data never contains customer addresses.
+        void Add(string site, string role, int node, string folder, string icon, string notes,
+            bool persistent = false, string? color = null)
         {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393902"),
-            Name = "Command Prompt",
-            Kind = SessionKind.Local,
-            Local = new LocalTarget { Executable = "cmd.exe" },
-            Icon = "windows",
-            Notes = "Local Windows command prompt",
-        },
-        new()
+            var name = $"{site}-{role}-{node:00}";
+            sessions.Add(new Session
+            {
+                Id = DemoId(sessions.Count + 1), Name = name, FolderPath = folder,
+                Host = $"{name}.mgmt.isp.example", Username = persistent ? "sysops" : "netops",
+                AuthMethod = AuthMethod.PrivateKey, Icon = icon, Notes = notes,
+                Persistent = persistent, ColorTag = color,
+            });
+        }
+
+        foreach (var (site, city) in new[] { ("syd", "Sydney DC"), ("mel", "Melbourne DC"),
+            ("bne", "Brisbane PoP"), ("per", "Perth PoP") })
         {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393903"),
-            Name = "Ubuntu 24.04",
-            Kind = SessionKind.Local,
-            Local = new LocalTarget { Executable = "wsl.exe", Arguments = ["-d", "Ubuntu-24.04"] },
-            Icon = "ubuntu",
-            Notes = "Local WSL Linux environment",
-        },
-        new()
+            var dc = city;
+            for (var node = 1; node <= 2; node++)
+            {
+                Add(site, "p", node, $"{dc}/Network/Core", "cisco", $"{city} MPLS core router; diverse national backbone paths", color: "#0078D4");
+                Add(site, "pe", node, $"{dc}/Network/Provider edge", "juniper", $"{city} enterprise L3VPN and EVPN provider edge");
+                Add(site, "ix", node, $"{dc}/Edge & Security/Peering", "juniper", $"{city} public IX and private peering edge; IPv4 and IPv6");
+                Add(site, "transit", node, $"{dc}/Edge & Security/Transit", "cisco", $"{city} upstream transit edge; independent upstream paths");
+                Add(site, "bng", node, $"{dc}/Subscriber/BNG", "nokia", $"{city} broadband subscriber termination; IPoE and PPPoE", color: "#FFB900");
+                Add(site, "cgn", node, $"{dc}/Subscriber/CGNAT", "juniper", $"{city} carrier-grade NAT pool and translation logging");
+                Add(site, "agg", node, $"{dc}/Network/Access aggregation", "nokia", $"{city} wholesale NNI and metro access aggregation");
+                Add(site, "radius", node, $"{dc}/Services/RADIUS", "debian", $"{city} subscriber authentication, authorisation and accounting", true);
+                Add(site, "resolver", node, $"{dc}/Services/DNS recursive", "debian", $"{city} subscriber recursive DNS; anycast and DNSSEC validation", true);
+            }
+        }
+
+        foreach (var (site, city) in new[] { ("syd", "Sydney DC"), ("mel", "Melbourne DC") })
         {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393904"),
-            Name = "syd-spine-01",
-            FolderPath = "Sydney DC/Network",
-            Host = "10.10.1.11",
-            Username = "netops",
-            AuthMethod = AuthMethod.PrivateKey,
-            Icon = "arista",
-            Notes = "Sydney fabric spine switch 01",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393905"),
-            Name = "syd-spine-02",
-            FolderPath = "Sydney DC/Network",
-            Host = "10.10.1.12",
-            Username = "netops",
-            AuthMethod = AuthMethod.PrivateKey,
-            Icon = "arista",
-            Notes = "Sydney fabric spine switch 02",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393906"),
-            Name = "syd-leaf-01",
-            FolderPath = "Sydney DC/Network",
-            Host = "10.10.2.11",
-            Username = "netops",
-            AuthMethod = AuthMethod.PrivateKey,
-            Icon = "arista",
-            Notes = "Sydney compute leaf switch 01",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393907"),
-            Name = "syd-leaf-02",
-            FolderPath = "Sydney DC/Network",
-            Host = "10.10.2.12",
-            Username = "netops",
-            AuthMethod = AuthMethod.PrivateKey,
-            Icon = "arista",
-            Notes = "Sydney compute leaf switch 02",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393908"),
-            Name = "syd-hv-01",
-            FolderPath = "Sydney DC/Hypervisors",
-            Host = "syd-hv01.corp.internal",
-            Username = "root",
-            AuthMethod = AuthMethod.PrivateKey,
-            Persistent = true,
-            Icon = "proxmox",
-            Notes = "Sydney Proxmox VE cluster node 01",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393909"),
-            Name = "syd-hv-02",
-            FolderPath = "Sydney DC/Hypervisors",
-            Host = "syd-hv02.corp.internal",
-            Username = "root",
-            AuthMethod = AuthMethod.PrivateKey,
-            Persistent = true,
-            Icon = "proxmox",
-            Notes = "Sydney Proxmox VE cluster node 02",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393910"),
-            Name = "mel-spine-01",
-            FolderPath = "Melbourne DC/Network",
-            Host = "10.20.1.11",
-            Username = "netops",
-            AuthMethod = AuthMethod.PrivateKey,
-            Icon = "juniper",
-            Notes = "Melbourne fabric spine switch 01",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393911"),
-            Name = "mel-leaf-01",
-            FolderPath = "Melbourne DC/Network",
-            Host = "10.20.2.11",
-            Username = "netops",
-            AuthMethod = AuthMethod.PrivateKey,
-            Icon = "juniper",
-            Notes = "Melbourne compute leaf switch 01",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393912"),
-            Name = "mel-hv-01",
-            FolderPath = "Melbourne DC/Hypervisors",
-            Host = "mel-hv01.corp.internal",
-            Username = "root",
-            AuthMethod = AuthMethod.PrivateKey,
-            Persistent = true,
-            Icon = "proxmox",
-            Notes = "Melbourne Proxmox VE cluster node 01",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393913"),
-            Name = "edge-gw-01",
-            FolderPath = "Edge & Security",
-            Host = "203.0.113.1",
-            Username = "netops",
-            AuthMethod = AuthMethod.PrivateKey,
-            Icon = "cisco",
-            ColorTag = "#E74856",
-            Notes = "Primary perimeter gateway router",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393914"),
-            Name = "edge-fw-01",
-            FolderPath = "Edge & Security",
-            Host = "198.51.100.1",
-            Username = "admin",
-            AuthMethod = AuthMethod.PrivateKey,
-            Icon = "paloalto",
-            ColorTag = "#E74856",
-            Notes = "Perimeter firewall cluster active node",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393915"),
-            Name = "vpn-gw-01",
-            FolderPath = "Edge & Security",
-            Host = "198.51.100.10",
-            Username = "admin",
-            AuthMethod = AuthMethod.PrivateKey,
-            Icon = "fortinet",
-            Notes = "Corporate VPN gateway",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393916"),
-            Name = "bgp-peer-01",
-            FolderPath = "Edge & Security",
-            Host = "198.51.100.254",
-            Username = "netops",
-            AuthMethod = AuthMethod.PrivateKey,
-            Icon = "vyos",
-            Notes = "Internet exchange BGP peering router",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393917"),
-            Name = "auth-radius-01",
-            FolderPath = "Core Services",
-            Host = "auth01.corp.internal",
-            Username = "sysadmin",
-            AuthMethod = AuthMethod.PrivateKey,
-            Icon = "debian",
-            Notes = "RADIUS authentication and accounting server",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393918"),
-            Name = "dns-primary-01",
-            FolderPath = "Core Services",
-            Host = "ns1.corp.internal",
-            Username = "sysadmin",
-            AuthMethod = AuthMethod.PrivateKey,
-            Icon = "debian",
-            Notes = "Authoritative internal DNS service",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393919"),
-            Name = "monitoring-01",
-            FolderPath = "Core Services",
-            Host = "mon01.corp.internal",
-            Username = "infra",
-            AuthMethod = AuthMethod.PrivateKey,
-            Persistent = true,
-            Icon = "ubuntu",
-            Notes = "Prometheus and Alertmanager cluster",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393920"),
-            Name = "jumpbox-prod",
-            FolderPath = "Core Services",
-            Host = "bastion.corp.internal",
-            Username = "ops",
-            AuthMethod = AuthMethod.PrivateKey,
-            Persistent = true,
-            Icon = "ubuntu",
-            ColorTag = "#10893E",
-            Notes = "Production management jump host",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393921"),
-            Name = "dev-sandbox",
-            FolderPath = "Staging & Lab",
-            Host = "sandbox.lab.internal",
-            Username = "developer",
-            AuthMethod = AuthMethod.Password,
-            Icon = "fedora",
-            Notes = "Disposable development and integration sandbox",
-        },
-        new()
-        {
-            Id = Guid.Parse("c7fe3f75-8527-4ba7-aef7-c16498393922"),
-            Name = "lab-router-01",
-            FolderPath = "Staging & Lab",
-            Host = "172.16.0.1",
-            Username = "admin",
-            AuthMethod = AuthMethod.Password,
-            Icon = "mikrotik",
-            Notes = "Lab testbed router",
-        },
-    ];
+            var dc = city;
+            for (var node = 1; node <= 2; node++)
+            {
+                Add(site, "spine", node, $"{dc}/Fabric/Spine", "arista", "EVPN/VXLAN fabric spine; independent failure domain");
+                Add(site, "border", node, $"{dc}/Fabric/Border leaf", "arista", "Fabric border leaf; routed handoff to provider edge");
+                Add(site, "fw", node, $"{dc}/Edge & Security/Firewalls", "paloalto", "Service-zone firewall HA pair", color: "#E74856");
+                Add(site, "authdns", node, $"{dc}/Services/DNS authoritative", "debian", "Public authoritative DNS; separate from subscriber resolvers", true);
+                Add(site, "dhcp", node, $"{dc}/Services/DHCP", "ubuntu", "Subscriber address allocation and lease service", true);
+                Add(site, "bastion", node, $"{dc}/Management/Bastions", "ubuntu", "Audited production management jump host", true, "#10893E");
+                Add(site, "oob", node, $"{dc}/Management/Out-of-band", "cisco", "Console access over independent management network");
+            }
+            for (var node = 1; node <= 4; node++)
+                Add(site, "leaf", node, $"{dc}/Fabric/Leaf", "arista", $"Compute rack {node:00}; redundant server uplinks");
+            for (var node = 1; node <= 6; node++)
+                Add(site, "hv", node, $"{dc}/Hypervisors", "proxmox", "Proxmox VE service cluster node", true);
+            Add(site, "metrics", 1, $"{dc}/Management/Monitoring", "ubuntu", "Prometheus, Alertmanager and network telemetry", true);
+            Add(site, "syslog", 1, $"{dc}/Management/Logging", "debian", "Central network syslog and subscriber accounting logs", true);
+            Add(site, "rpki", 1, $"{dc}/Services/RPKI", "debian", "RPKI validator; RTR feeds to peering and transit routers", true);
+            Add(site, "ntp", 1, $"{dc}/Services/NTP", "debian", "Internal time service for network and subscriber systems", true);
+        }
+        Add("lab", "bng", 1, "Lab/Subscriber validation", "nokia", "Isolated subscriber policy and software qualification");
+        Add("lab", "evpn", 1, "Lab/Fabric validation", "arista", "Pre-production EVPN change validation");
+        Add("lab", "automation", 1, "Lab/Automation", "ubuntu", "Network configuration and rollback testing", true);
+        Add("syd", "legacy-pe", 1, "Archived/Decommissioned", "cisco", "Retired provider edge; reference configuration only");
+        return sessions.ToArray();
+    }
+
+    private static Guid DemoId(int index) =>
+        Guid.Parse($"c7fe3f75-8527-4ba7-aef7-{index:000000000000}");
 
     private static string CreateDataDirectory()
     {

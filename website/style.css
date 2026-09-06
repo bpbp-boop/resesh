@@ -346,6 +346,9 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
 
 .frame--shadow { box-shadow: 0 40px 80px -40px rgba(0, 0, 0, 0.55); }
 
+.frame > img { display: block; width: 100%; height: auto; }
+.frame > .session-tree-image { max-height: 560px; object-fit: contain; }
+
 .frame__bar {
   display: flex;
   align-items: center;

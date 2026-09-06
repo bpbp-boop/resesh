@@ -3258,10 +3258,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         try
         {
-            var puttyTask = Task.Run(() => Core.Import.PuttyRegistryImporter.Scan());
+            var puttyTask = Task.Run(() => DemoMode.IsEnabled ? DemoMode.EmptyImportScan() : Core.Import.PuttyRegistryImporter.Scan());
             var openSshTask = Task.Run(() =>
-                Core.Import.OpenSshConfigImporter.Scan(Core.Import.OpenSshConfigImporter.DefaultConfigPath));
-            var secureCrtTask = Task.Run(Core.Import.SecureCrtImporter.ScanDefault);
+                DemoMode.IsEnabled ? DemoMode.EmptyImportScan() : Core.Import.OpenSshConfigImporter.Scan(Core.Import.OpenSshConfigImporter.DefaultConfigPath));
+            var secureCrtTask = Task.Run(DemoMode.ScanSecureCrt);
 
             await Task.WhenAll(puttyTask, openSshTask, secureCrtTask);
             var puttyScan = await puttyTask;
