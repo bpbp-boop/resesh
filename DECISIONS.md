@@ -538,3 +538,98 @@ keyboard-interactive fallback.
   the terminal find field has focus.
 - Escape or a backdrop click closes the palette. A terminal-opened palette restores xterm
   focus so the next keystroke returns to terminal input.
+
+## 2026-09-01 - Native terminal parity phases 0 and 1
+- Keep `TerminalControl` and WebView2 as the default live surface. The native surface is
+  selected only when `RESESH_TERMINAL_SURFACE=native`; this is not a product cutover.
+- Own the Microsoft Terminal changes in the separate
+  `https://github.com/bpbp-boop/terminal` fork. Pin the upstream release, fork commit,
+  vcpkg dependency baseline, vcpkg tool commit, architecture, artifact hashes, symbols,
+  and license in `eng/native-terminal.json`.
+- Use a versioned C ABI with opaque handles. Every input structure carries its size and
+  ABI version. Native callbacks use copied, bounded payloads, run outside the TerminalCore
+  lock, reject callback reentry, and finish before destruction returns.
+- Load only the selected app-local DLL directory and System32. Validate the PE machine,
+  app-local SHA-256, ABI major version, build ID export, and all required exports before
+  terminal creation.
+- Native rewind stays unavailable until native snapshots exist. Recording to disk remains
+  available, but native live capture does not retain an unbounded raw-event history.
+  Capture without keyframes also stops and clears retained events at its byte limit.
+- `tests/Fixtures/Terminal/vt-parity.json` is the Phase 0 behavior baseline.
+  `eng/native-terminal-performance.json` records the approved regression budgets and the
+  measured WebView2 and native-foundation startup and private-memory baselines.
+
+## 2026-09-02 - Native terminal typed events
+- ABI 1.2 reports title, working-directory, bell, buffer or viewport, alternate-buffer,
+  shell-mark, terminal-mode, and generic OSC events through the existing ordered queue.
+- `OutputStateMachineEngine` observes every complete OSC before normal dispatch. Observation
+  never consumes the sequence, so OSC 9 and all other upstream actions still run.
+- OSC payloads cross the ABI with their exact UTF-16 length. C# keeps the resesh policy:
+  bounded payload validation, OSC 7 and OSC 3008 parsing, title and command precedence,
+  SFTP path selection, and agent attention mapping.
+- Native callbacks only copy data and enqueue application work. They do not call back into
+  the terminal handle.
+## 2026-09-02 - Native terminal search and links
+- ABI 1.3 searches inside TerminalCore and returns exact match counts, the current
+  zero-based match, invalidation state, and invalid-regex state. C# does not scan the
+  terminal buffer.
+- The native find row is ordinary WinUI content above the composition-backed terminal
+  panel. Opening it reduces the renderer height. Search navigation keeps focus in the
+  field, and closing restores terminal focus.
+- The native host updates the upstream URL pattern tree after output and resize. It hit-tests
+  OSC 8 links and detected URLs in XAML pointer coordinates, renders upstream hover state,
+  and reports the URI and source through the ordered event queue.
+- URI launch policy stays in resesh. Only absolute HTTP and HTTPS links can reach the
+  Windows default browser; the native DLL never calls `ShellExecute`.
+
+## 2026-09-02 - Native terminal command navigation
+- ABI 1.4 keeps command marks, search rows, prompt probes, and bookmarks in
+  TerminalCore-owned row metadata. Command and bookmark identities can coexist on one
+  row and survive normal buffer movement, reflow, and scrollback trimming.
+- Every variable-size ABI result uses caller-owned storage with a required-length query.
+  `GetMarkText(markId, includeOutput)` is the single command and transcript text contract.
+- Exact OSC 133 shell marks are authoritative. Local prompt discovery starts before Enter,
+  waits for echoed input, rejects title-epoch changes, and stops when exact marks appear.
+  Prompt parsing is bounded to 4,096 characters and stored commands to 512 characters.
+- The native overview uses WinUI `ScrollBar`. A non-hit-test drawing layer buckets
+  command, bookmark, and search ticks. Native viewport events complete matching
+  scroll requests. Hover previews and click actions use an in-tree WinUI `TeachingTip`;
+  the composition-backed terminal no longer creates a popup airspace boundary.
+- The docked commands panel uses a virtualized `ListView` data template. Command text and
+  status brushes are created only for realized rows. It remains the complete command list;
+  the narrow ruler TeachingTip adds contextual jump and copy-output actions.
+- ABI 2.0 removes the visible child HWND. Atlas exports its composition surface handle,
+  `NativeTerminalSurface` attaches it to a WinUI 3 `SwapChainPanel`, and XAML routes
+  keyboard and pointer input through the flat ABI. The top-level window handle remains
+  available only for TSF, UIA host integration, and screen-relative accessibility bounds.
+- Native artifacts remain based on fork commit
+  `95e25194f73f0d721481a5f59ae6f59a27f90b64`; the reproducible composition patch and
+  ABI 2.0 artifact hashes live in `eng/native-terminal.json`.
+
+## 2026-09-04 - Exact native terminal snapshots
+- ABI 3.0 replaces interim ANSI keyframes with the native `RNT8` snapshot and managed
+  `RSNP` playback envelope. Both formats use fixed-width little-endian fields, bounded
+  length-delimited records, feature flags, major/minor compatibility rules, and CRC-32.
+- The native snapshot owns complete logical state: both cell buffers, row and cursor
+  metadata, links, marks, viewport and user scroll offset, active buffer, colors, modes,
+  dispatch state, title, working directory, and partial parser input. The managed envelope
+  adds the partial UTF-8 decoder bytes plus rebuildable search and highlight state.
+- Playback validates and restores a detached read-only native terminal before attaching
+  its composition surface. A failed restore destroys the candidate and keeps the previous
+  frame; successful seeks replay only later output and resize events.
+- New live captures and generated asciicast keyframes use exact snapshots. Native playback
+  no longer depends on xterm.js, and the xterm serialize addon and replay APIs are removed.
+- The patch and generated x64 and ARM64 binaries are pinned by normalized SHA-256 in
+  `eng/native-terminal.json`; the capability matrix records exact restoration as passing.
+
+## 2026-09-04 - Live native scrollback resizing
+- ABI 3.1 adds `historySize` to `ReseshTerminalOptions`; older structures remain compatible,
+  while malformed sizes and truncated ABI 3.1 structures are rejected.
+- Normal-buffer history resizes in place. Shrinking retains the newest rows, cursor, live
+  viewport, and any still-reachable visible region; growing preserves existing row positions.
+- Buffer-relative links, images, application marks, bookmarks, search matches, and persistent
+  highlights are rebased or dropped with trimmed rows. The alternate buffer remains
+  viewport-sized.
+- Each resize advances the buffer generation and emits one coherent viewport event.
+  `NativeTerminalSurface.ApplyOptions` now applies saved scrollback changes without replacing
+  the terminal handle.

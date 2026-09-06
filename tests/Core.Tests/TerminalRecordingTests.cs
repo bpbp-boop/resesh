@@ -37,11 +37,11 @@ public sealed class TerminalRecordingTests : IDisposable
         using var capture = new TerminalCapture(
             80, 24, startedAt: started, maximumAge: TimeSpan.FromSeconds(5), maximumBytes: 1024 * 1024);
         capture.CaptureOutput(Encoding.UTF8.GetBytes("old"), started.AddSeconds(1).ToUnixTimeMilliseconds());
-        capture.CaptureKeyframe("full-state", 90, 25, started.AddSeconds(2).ToUnixTimeMilliseconds());
+        capture.CaptureKeyframe(Encoding.UTF8.GetBytes("full-state"), 90, 25, started.AddSeconds(2).ToUnixTimeMilliseconds());
         capture.CaptureOutput(Encoding.UTF8.GetBytes("new"), started.AddSeconds(10).ToUnixTimeMilliseconds());
 
         var snapshot = capture.Snapshot();
-        Assert.Equal("full-state", snapshot.Keyframe?.State);
+        Assert.Equal(Encoding.UTF8.GetBytes("full-state"), snapshot.Keyframe?.State.ToArray());
         Assert.Equal(2, snapshot.EarliestTime);
         Assert.Single(snapshot.Events);
         Assert.Equal("new", snapshot.Events[0].Data);
@@ -108,6 +108,79 @@ public sealed class TerminalRecordingTests : IDisposable
 
         var exception = Assert.Throws<InvalidDataException>(() => AsciicastReader.Read(path));
         Assert.Contains("ordered", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DisabledRewindRetainsNoEventsButStillRecordsToDisk()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(
+            80, 24, startedAt: started, maximumBytes: 128, retainForRewind: false);
+        var path = capture.StartRecording(_directory, "native");
+
+        capture.CaptureOutput(
+            Encoding.UTF8.GetBytes(new string('x', 4096)),
+            started.AddSeconds(1).ToUnixTimeMilliseconds());
+        capture.CaptureResize(100, 30, started.AddSeconds(2).ToUnixTimeMilliseconds());
+        capture.StopRecording();
+
+        Assert.Empty(capture.Snapshot().Events);
+        var recording = AsciicastReader.Read(path);
+        Assert.Equal(2, recording.Events.Count);
+        Assert.Equal(4096, recording.Events[0].Data.Length);
+        Assert.Equal("100x30", recording.Events[1].Data);
+    }
+
+    [Fact]
+    public void RewindWithoutAKeyframeDisablesBeforeItExceedsTheByteLimit()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(
+            80, 24, startedAt: started, maximumBytes: 128);
+
+        capture.CaptureOutput(
+            Encoding.UTF8.GetBytes(new string('x', 256)),
+            started.AddSeconds(1).ToUnixTimeMilliseconds());
+        capture.CaptureOutput(
+            Encoding.UTF8.GetBytes("later"),
+            started.AddSeconds(2).ToUnixTimeMilliseconds());
+
+        var snapshot = capture.Snapshot();
+        Assert.Null(snapshot.Keyframe);
+        Assert.Empty(snapshot.Events);
+    }
+
+    [Fact]
+    public void EqualTimestampsKeepEventsOnTheCorrectSideOfAKeyframe()
+    {
+        var started = DateTimeOffset.UtcNow;
+        var time = started.AddSeconds(1).ToUnixTimeMilliseconds();
+        using var capture = new TerminalCapture(80, 24, startedAt: started);
+
+        capture.CaptureOutput(Encoding.UTF8.GetBytes("before"), time);
+        capture.CaptureKeyframe(Encoding.UTF8.GetBytes("full-state"), 80, 24, time);
+        capture.CaptureOutput(Encoding.UTF8.GetBytes("after"), time);
+        capture.CaptureResize(100, 30, time);
+
+        var snapshot = capture.Snapshot();
+        Assert.Equal(Encoding.UTF8.GetBytes("full-state"), snapshot.Keyframe?.State.ToArray());
+        Assert.Collection(
+            snapshot.Events,
+            item => Assert.Equal(new TerminalRecordingEvent(item.Time, "o", "after"), item),
+            item => Assert.Equal(new TerminalRecordingEvent(item.Time, "r", "100x30"), item));
+    }
+
+    [Fact]
+    public void OversizedKeyframeDisablesRewindWithoutOutputEvents()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(80, 24, startedAt: started, maximumBytes: 128);
+
+        capture.CaptureKeyframe(new byte[256], 80, 24, started.ToUnixTimeMilliseconds());
+
+        var snapshot = capture.Snapshot();
+        Assert.Null(snapshot.Keyframe);
+        Assert.Empty(snapshot.Events);
     }
 
     public void Dispose()

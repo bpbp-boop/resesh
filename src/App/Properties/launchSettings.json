@@ -3,6 +3,12 @@
     "Resesh.App (Unpackaged)": {
       "commandName": "Project"
     },
+    "Resesh.App Native Terminal (Unpackaged)": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "RESESH_TERMINAL_SURFACE": "native"
+      }
+    },
     "Resesh.App Demo (Unpackaged)": {
       "commandName": "Project",
       "commandLineArgs": "--demo"

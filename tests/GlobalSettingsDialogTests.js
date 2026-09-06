@@ -53,6 +53,14 @@ test("the complete dialog follows the live application palette", () => {
   assert.match(dialog, /Background = \(Brush\)Application\.Current\.Resources\["SettingsCardBackgroundBrush"\]/);
 });
 
+test("settings uses the shared modal presenter without terminal visibility workarounds", () => {
+  assert.match(dialog, /result = await dialog\.ShowModalAsync\(\)/);
+  assert.doesNotMatch(
+    windowCode,
+    /ShowSettingsAsync\(GlobalSettingsTarget target\)[\s\S]*?SetTerminalHostsVisible\(/,
+  );
+});
+
 test("settings fields and section tabs have stable automation IDs", () => {
   for (const [control, automationId] of [
     ["theme", "SettingsTheme"],

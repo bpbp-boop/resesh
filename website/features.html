@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>features — resesh</title>
 <link rel="canonical" href="https://resesh.net/features.html">
-<meta name="description" content="everything shipped in the resesh beta and everything planned next, in one list — sessions, highlighting, recording, workspaces, sftp, keys and backups.">
+<meta name="description" content="Current and planned resesh features: saved sessions, highlighting, recordings, workspaces, file transfers and backups.">
 <link rel="icon" href="assets/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -40,8 +40,8 @@
 
 <section class="container page-head">
   <div class="breadcrumb"><a href="index.html">./resesh</a> <span class="breadcrumb__sep">/</span> features</div>
-  <h1 class="h1-features">everything in the app, and what comes next.</h1>
-  <p class="page-head__lede">a tabbed ssh and local-terminal client for windows, built for daily use.</p>
+  <h1 class="h1-features">features and planned work</h1>
+  <p class="page-head__lede">manage SSH sessions and local terminals on windows.</p>
   <div class="chips">
     <span class="chip">winui 3 · .net 10</span>
     <span class="chip">ssh.net transport</span>
@@ -52,7 +52,7 @@
 
 <section class="section section--alt" id="list">
   <div class="container list">
-    <p class="legend">everything in the beta, then everything planned, in order. rows marked <span class="badge">planned</span> aren't built yet.</p>
+    <p class="legend">current features are listed first. rows marked <span class="badge">planned</span> aren't built yet.</p>
 
     <div class="rows">
 
@@ -60,23 +60,24 @@
         <div class="row__head">
           <div class="row__label">
             <span class="row__index">01</span>
-            <span class="row__title">sessions and identity</span>
+            <span class="row__title">saved sessions</span>
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">a folder tree of saved sessions with fast search, per-session settings overrides, and icon packs — linux distros, network os vendors, or your own drop-in icons — so a tab is recognisable at a glance.</p>
+          <p class="row__text">save sessions in folders, filter by name, and set terminal options for each host. choose an included icon or add your own.</p>
           <ul class="row__bullets">
-            <li>local shell profiles on conpty: powershell, cmd, wsl, git bash</li>
-            <li>agent-aware tabs with attention badges (claude code, codex, gemini cli)</li>
+            <li>local profiles for powershell, cmd, wsl and git bash</li>
+            <li>tab badges for claude code, codex and gemini cli</li>
             <li>color tags carried onto the tab accent</li>
           </ul>
         </div>
         <div class="row__media">
-          <div class="placeholder placeholder--sm">
-            <div class="placeholder__inner">
-              <span class="placeholder__tag">[ IMAGE ]</span>
-              <span class="placeholder__desc">sessions.png — tree with icons and color tags</span>
-            </div>
+          <button class="screenshot-trigger" type="button" popovertarget="sessions-screenshot" aria-label="Enlarge the sessions screenshot">
+            <img src="assets/sessions.png" alt="Sessions folder tree with custom icons and color tags" width="398" height="729" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="sessions-screenshot" popover aria-label="Enlarged sessions screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="sessions-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/sessions.png" alt="Sessions folder tree with custom icons and color tags" width="398" height="729">
           </div>
         </div>
       </div>
@@ -89,18 +90,19 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">regex rule packs for the things you actually scan for — interfaces, ip and mac addresses, up/down states, routing protocols — toggled per session, extended with your own rules.</p>
+          <p class="row__text">highlight interfaces, IP and MAC addresses, link states and routing protocols. enable rules per session or write your own regular expressions.</p>
           <div class="example">
             <span>GigabitEthernet0/1 is <span class="example__ok">up</span>, line protocol is <span class="example__ok">up</span></span>
             <span>GigabitEthernet0/2 is <span class="example__bad">down</span>, line protocol is <span class="example__bad">down</span></span>
           </div>
         </div>
         <div class="row__media">
-          <div class="placeholder placeholder--sm">
-            <div class="placeholder__inner">
-              <span class="placeholder__tag">[ IMAGE ]</span>
-              <span class="placeholder__desc">highlighting.png — rule editor beside live output</span>
-            </div>
+          <button class="screenshot-trigger" type="button" popovertarget="highlighting-screenshot" aria-label="Enlarge the keyword highlighting screenshot">
+            <img src="assets/highlighting.png" alt="Keyword highlighting rule editor beside live output" width="1106" height="1016" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="highlighting-screenshot" popover aria-label="Enlarged keyword highlighting screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="highlighting-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/highlighting.png" alt="Keyword highlighting rule editor beside live output" width="1106" height="1016">
           </div>
         </div>
       </div>
@@ -113,18 +115,19 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">an overview ruler mapping the whole scrollback: search matches, highlight hits, bookmarks and command marks with exit-status colors, plus per-line timestamps.</p>
+          <p class="row__text">the scrollbar shows search matches, highlighted text, bookmarks and command positions. command marks can show exit status; line timestamps show when output arrived.</p>
           <ul class="row__bullets">
-            <li>command discovery via osc 133, osc 3008 and enter-gated marks</li>
+            <li>command detection from shell signals and terminal input</li>
             <li>terminal search on <span class="key">ctrl shift f</span></li>
           </ul>
         </div>
         <div class="row__media">
-          <div class="placeholder placeholder--sm">
-            <div class="placeholder__inner">
-              <span class="placeholder__tag">[ IMAGE ]</span>
-              <span class="placeholder__desc">ruler.png — marks on the overview ruler</span>
-            </div>
+          <button class="screenshot-trigger" type="button" popovertarget="ruler-screenshot" aria-label="Enlarge the ruler screenshot">
+            <img src="assets/ruler.png" alt="Overview ruler with search marks beside a fictional ISP log" width="1554" height="875" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="ruler-screenshot" popover aria-label="Enlarged ruler screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="ruler-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/ruler.png" alt="Overview ruler with search marks beside a fictional ISP log" width="1554" height="875">
           </div>
         </div>
       </div>
@@ -137,7 +140,7 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">every command the session ran, listed in order with its exit status. jump straight to where it happened in the scrollback, or copy just that command's output — no selecting across a screenful of prompts.</p>
+          <p class="row__text">view detected commands in order, with exit status where available. select a command to find it in the terminal or copy its output.</p>
           <div class="cmdlist">
             <div class="cmdlist__row">
               <span class="cmdlist__dot"></span>
@@ -158,11 +161,12 @@
           </div>
         </div>
         <div class="row__media">
-          <div class="placeholder placeholder--sm">
-            <div class="placeholder__inner">
-              <span class="placeholder__tag">[ IMAGE ]</span>
-              <span class="placeholder__desc">commands.png — command list with jump and copy</span>
-            </div>
+          <button class="screenshot-trigger" type="button" popovertarget="commands-screenshot" aria-label="Enlarge the command list screenshot">
+            <img src="assets/commands.png" alt="Command list panel with jump and copy actions" width="507" height="270" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="commands-screenshot" popover aria-label="Enlarged command list screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="commands-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/commands.png" alt="Command list panel with jump and copy actions" width="507" height="270">
           </div>
         </div>
       </div>
@@ -175,19 +179,14 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">bounded in-memory rewind with xterm state keyframes, so you can scrub backwards through a live terminal without disconnecting. every session writes paired asciicast v2 and timestamped plain-text logs.</p>
+          <p class="row__text">rewind earlier output in the native terminal while the session continues. enable recording to save an asciicast file and a timestamped text log.</p>
           <ul class="row__bullets">
             <li>.cast playback with pause, speed and seek</li>
-            <li>plain logs you can grep six months later for the post-mortem</li>
+            <li>text logs for searches and change records</li>
           </ul>
         </div>
         <div class="row__media">
-          <div class="placeholder placeholder--sm">
-            <div class="placeholder__inner">
-              <span class="placeholder__tag">[ IMAGE ]</span>
-              <span class="placeholder__desc">rewind.png — scrubber over a live terminal</span>
-            </div>
-          </div>
+          <video src="assets/rewind.mp4" width="1166" height="956" autoplay loop muted playsinline aria-label="Rewind scrubber over a live terminal"></video>
         </div>
       </div>
 
@@ -199,18 +198,19 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">named tab-group layouts that remember order, pinned and active tabs. open one to replace what's on screen or add to it, adopting connections that are already live.</p>
+          <p class="row__text">save pane sizes, tab order, pinned tabs and the active tab. open a workspace on its own or add it to the current layout.</p>
           <ul class="row__bullets">
-            <li>clean-exit startup restore</li>
-            <li>conflict-aware remapping when a backup is imported</li>
+            <li>restore the last layout on startup</li>
+            <li>keep workspace session references when importing backups</li>
           </ul>
         </div>
         <div class="row__media">
-          <div class="placeholder placeholder--sm">
-            <div class="placeholder__inner">
-              <span class="placeholder__tag">[ IMAGE ]</span>
-              <span class="placeholder__desc">workspaces.png — workspace picker with tab groups</span>
-            </div>
+          <button class="screenshot-trigger" type="button" popovertarget="workspaces-screenshot" aria-label="Enlarge the workspaces screenshot">
+            <img src="assets/workspace.png" alt="Workspaces sidebar with saved tab groups" width="1916" height="1011" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="workspaces-screenshot" popover aria-label="Enlarged workspaces screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="workspaces-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/workspace.png" alt="Workspaces sidebar with saved tab groups" width="1916" height="1011">
           </div>
         </div>
       </div>
@@ -223,18 +223,19 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">local and sftp file panes in the app, following the terminal's current directory — cmd and powershell prompts, tmux, osc 7, a /proc probe, and prompt parsing as fallback.</p>
+          <p class="row__text">browse local files and transfer remote files over SFTP. the file pane can follow the terminal folder when resesh can detect it.</p>
           <ul class="row__bullets">
             <li>open local folders straight in explorer</li>
             <li>remote folders through sshfs-win when it's installed</li>
           </ul>
         </div>
         <div class="row__media">
-          <div class="placeholder placeholder--sm">
-            <div class="placeholder__inner">
-              <span class="placeholder__tag">[ IMAGE ]</span>
-              <span class="placeholder__desc">sftp.png — file pane following the terminal</span>
-            </div>
+          <button class="screenshot-trigger" type="button" popovertarget="sftp-screenshot" aria-label="Enlarge the file transfer screenshot">
+            <img src="assets/sftp.png" alt="SFTP file pane following the terminal directory" width="599" height="518" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="sftp-screenshot" popover aria-label="Enlarged file transfer screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="sftp-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/sftp.png" alt="SFTP file pane following the terminal directory" width="599" height="518">
           </div>
         </div>
       </div>
@@ -247,18 +248,19 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">private keys are shared named resources with fingerprint pinning and path repair. passphrases and passwords live in windows credential manager, never in the json store.</p>
+          <p class="row__text">name and reuse private-key references across sessions. view fingerprints and update the path if a key file moves. passwords and passphrases are stored in windows credential manager.</p>
           <ul class="row__bullets">
             <li>explicit keyboard-interactive prompts</li>
-            <li>host-key mismatch override dialog, accepted keys stored locally</li>
+            <li>review changed host keys before accepting them</li>
           </ul>
         </div>
         <div class="row__media">
-          <div class="placeholder placeholder--sm">
-            <div class="placeholder__inner">
-              <span class="placeholder__tag">[ IMAGE ]</span>
-              <span class="placeholder__desc">keys.png — key registry with fingerprints</span>
-            </div>
+          <button class="screenshot-trigger" type="button" popovertarget="keys-screenshot" aria-label="Enlarge the keys screenshot">
+            <img src="assets/keys.png" alt="SSH key registry with a disposable demo key and its fingerprint" width="601" height="451" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="keys-screenshot" popover aria-label="Enlarged keys screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="keys-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/keys.png" alt="SSH key registry with a disposable demo key and its fingerprint" width="601" height="451">
           </div>
         </div>
       </div>
@@ -271,18 +273,19 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">*.reseshbackup archives with a versioned schema and merge-on-import. secrets are excluded by default; include them and the whole archive is encrypted with its passphrase.</p>
+          <p class="row__text">export a .reseshbackup archive and merge it into another installation. passwords and passphrases are excluded by default. including them requires an encrypted backup.</p>
           <ul class="row__bullets">
-            <li>securecrt session import</li>
-            <li>atomic writes with one .bak rotation</li>
+            <li>review sessions before importing them</li>
+            <li>keep a previous copy of saved data</li>
           </ul>
         </div>
         <div class="row__media">
-          <div class="placeholder placeholder--sm">
-            <div class="placeholder__inner">
-              <span class="placeholder__tag">[ IMAGE ]</span>
-              <span class="placeholder__desc">import.png — securecrt import summary</span>
-            </div>
+          <button class="screenshot-trigger" type="button" popovertarget="import-screenshot" aria-label="Enlarge the import screenshot">
+            <img src="assets/import.png" alt="SecureCRT import preview with four fictional SSH hosts and one skipped session" width="533" height="518" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="import-screenshot" popover aria-label="Enlarged import screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="import-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/import.png" alt="SecureCRT import preview with four fictional SSH hosts and one skipped session" width="533" height="518">
           </div>
         </div>
       </div>
@@ -296,7 +299,7 @@
           <span class="badge row__badge">planned</span>
         </div>
         <div class="row__body">
-          <p class="row__text">log in with the windows ad ticket — no password or key stored anywhere. a timeboxed spike settles the approach first, since ssh.net has no gssapi-with-mic support. clear failure messaging for missing tickets, clock skew and spn mismatch, falling back to a password prompt.</p>
+          <p class="row__text">use an existing windows domain ticket for SSH authentication. support is still under investigation.</p>
         </div>
         <div class="row__media row__media--empty">
           <div class="placeholder placeholder--empty">
@@ -314,7 +317,7 @@
           <span class="badge row__badge">planned</span>
         </div>
         <div class="row__body">
-          <p class="row__text">a per-session tunnel list — local, remote and dynamic socks — started with the connection, with live status in the tab and an add-tunnel action on a running session. then agent auth over the windows openssh named pipe and pageant. then jump hosts: pick an existing session as the hop, chains resolved recursively with a cycle check.</p>
+          <p class="row__text">planned support for local, remote and SOCKS tunnels, SSH agent authentication, and connections through jump hosts.</p>
         </div>
         <div class="row__media row__media--empty">
           <div class="placeholder placeholder--empty">
@@ -332,7 +335,7 @@
           <span class="badge row__badge">planned</span>
         </div>
         <div class="row__body">
-          <p class="row__text">console-cable and terminal-server access. telnet with minimal iac negotiation and naws wired to resize; quick connect takes <strong>telnet host:2003</strong> for terminal-server line ports. serial with baud, parity and flow control, friendly com-port names, live device arrival, cable-yank survival, and send break for boot interrupts. highlighting, the ruler and recording work unchanged on both.</p>
+          <p class="row__text">planned telnet and serial connections for console access. serial settings will include baud rate, parity and flow control.</p>
         </div>
         <div class="row__media row__media--empty">
           <div class="placeholder placeholder--empty">
@@ -345,12 +348,12 @@
         <div class="row__head">
           <div class="row__label">
             <span class="row__index">13</span>
-            <span class="row__title">backlog candidates</span>
+            <span class="row__title">other planned work</span>
           </div>
           <span class="badge row__badge">planned</span>
         </div>
         <div class="row__body">
-          <p class="row__text">command snippets with placeholders and per-folder scoping. more importers: putty registry, mremoteng, openssh config. auto-reconnect with backoff and tmux reattach. per-session color schemes. unordered — these move when someone asks for them.</p>
+          <p class="row__text">saved command snippets, mremoteng import, and automatic reconnect with tmux reattach. priorities may change.</p>
         </div>
         <div class="row__media row__media--empty">
           <div class="placeholder placeholder--empty">
@@ -366,21 +369,21 @@
 <section class="section" id="non-goals">
   <div class="container nongoals">
     <div class="head-block">
-      <h2 class="h2-sm">deliberately not doing</h2>
-      <p class="lede lede--tight">resesh doesn't want to do it all</p>
+      <h2 class="h2-sm">scope</h2>
+      <p class="lede lede--tight">resesh is a terminal client. these functions stay outside the app.</p>
     </div>
     <div class="nongoals__list">
       <div class="nongoal">
         <span class="nongoal__title">no embedded scripting language</span>
-        <span class="nongoal__body">personally I think automation belongs in ansible or netconf/gnmi style tooling, run from a trusted host where it's versioned and reviewed.</span>
+        <span class="nongoal__body">run automation with tools such as ansible from your shell.</span>
       </div>
       <div class="nongoal">
         <span class="nongoal__title">no broadcast input</span>
-        <span class="nongoal__body">the classic multi-device-typo footgun on a heterogeneous fleet. anything worth sending to n devices at once is worth a playbook.</span>
+        <span class="nongoal__body">keyboard input goes to one terminal at a time. use an automation tool to run commands across several hosts.</span>
       </div>
       <div class="nongoal nongoal--soft">
         <span class="nongoal__title">no automatic shell-integration injection</span>
-        <span class="nongoal__body">osc 133 and osc 7 setup can be shown and copied if you want it. resesh never sends setup code to your shell on its own.</span>
+        <span class="nongoal__body">resesh reads shell integration signals when available. it does not send setup commands to remote shells.</span>
       </div>
     </div>
   </div>
@@ -427,7 +430,7 @@
 <footer class="site-footer">
   <div class="site-footer__brand">
     <span class="logo__tile logo__tile--sm">./</span>
-    <span>resesh · beta · made for people with too many tabs</span>
+    <span>resesh · beta · windows</span>
   </div>
   <div class="site-footer__links">
     <a href="https://github.com/bpbp-boop/resesh">github</a>

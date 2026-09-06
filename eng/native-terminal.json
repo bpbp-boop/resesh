@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "upstream": {
+    "repository": "https://github.com/microsoft/terminal.git",
+    "release": "v1.24.11911.0",
+    "commit": "5a830b2bf7c053d5c7ac22208fe5a346cb5dd3dc"
+  },
+  "fork": {
+    "repository": "https://github.com/bpbp-boop/terminal.git",
+    "branch": "resesh-abi-v1",
+    "commit": "95e25194f73f0d721481a5f59ae6f59a27f90b64",
+    "patches": [
+      {
+        "file": "native-terminal-patches/composition-surface.patch",
+        "sha256": "43c8cc5e73b3f1bf33fc496d3b8b5c8de8eea47804e5ae7f0aac977a51e0721f"
+      },
+      {
+        "file": "native-terminal-patches/input-handled.patch",
+        "sha256": "d45eec363511335ab562a405df4e0a7ac8b5031f5a391bf6a6cffa81a64d598e"
+      },
+      {
+        "file": "native-terminal-patches/ansi-keyframes.patch",
+        "sha256": "acfd39ce5a8ebf9e566893a543052cf836fa4d34663c2b8a5d83a80fe135beb1"
+      },
+      {
+        "file": "native-terminal-patches/persistent-highlights.patch",
+        "sha256": "f62ebba4031fb92a1f0ece8c41075bef5527306f30ce9bd6a74573b3a573f459"
+      },
+      {
+        "file": "native-terminal-patches/exact-snapshots.patch",
+        "sha256": "fcf1cea559543acde9fc10cb332073d869ec6731b8a83954be88c96c56bc8aea"
+      },
+      {
+        "file": "native-terminal-patches/live-history-resize.patch",
+        "sha256": "3efffe88f5321522b28ea17300137ca4e8cbeef66f9b528d6a7c1813f66f765c"
+      }
+    ]
+  },
+  "abi": {
+    "major": 3,
+    "minor": 1,
+    "buildId": "terminal-v1.24.11911.0-resesh-abi3.1-history-resize"
+  },
+  "supportedArchitectures": [
+    "x64",
+    "arm64"
+  ],
+  "configuration": "Release",
+  "toolchain": {
+    "visualStudio": "2026",
+    "platformToolset": "v145",
+    "windowsSdk": "10.0.26100.0",
+    "vcpkgToolCommit": "30ef65cad98f08e7197c9a1656fbd871bcb72f2d",
+    "vcpkgBaseline": "fe1cde61e971d53c9687cf9a46308f8f55da19fa"
+  },
+  "license": {
+    "file": "LICENSE",
+    "sha256": "5d177f23ecfeb0ea8e050b6a5a16355e1ae9a0b286436ca8f83ed08b3795be6b"
+  },
+  "artifacts": {
+    "x64": {
+      "Microsoft.Terminal.Control.dll": "152c97f2f4872f72c8df4f1f2994815898a2f331405a7a2ae7ced54ab4bc957f",
+      "Microsoft.Terminal.Control.pdb": "a09e0aa51b7a1e93ee213c38b6c4c022f8df41056c1d225992b8eafabc2cc63d"
+    },
+    "arm64": {
+      "Microsoft.Terminal.Control.dll": "37668707c25424c6f55058b6813bf840eb4ec7d8b47cf7fb4f42822246500d2a",
+      "Microsoft.Terminal.Control.pdb": "88f16843f743bd4ee7098a4ca4a782f9dbbb31d681761cb80d1562167c88229c"
+    }
+  }
+}

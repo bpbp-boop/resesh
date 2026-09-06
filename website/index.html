@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>resesh — rethinking session management.</title>
+<title>resesh — SSH and local terminals for Windows</title>
 <link rel="canonical" href="https://resesh.net/">
-<meta name="description" content="resesh is a session and connection manager for windows. every server in one tree, open in tabs, split, saved workspaces, and a recording of what you typed.">
+<meta name="description" content="Manage SSH sessions and local terminals on Windows with folders, split panes, saved workspaces and terminal recordings.">
 <link rel="icon" href="assets/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -48,12 +48,12 @@
       <span><span data-release-version>latest</span> beta &nbsp;·&nbsp; windows 10 21h2+ &nbsp;·&nbsp; x64 + arm64</span>
     </div>
 
-    <h1 class="hero__title">a modern session mananger</h1>
+    <h1 class="hero__title">ssh and local terminals for windows</h1>
 
-    <p class="hero__lede">a session and connection manager for windows. every server in one tree, open in tabs, split, saved workspaces, however you need — and a recording of what you typed when someone asks tomorrow.</p>
+    <p class="hero__lede">keep your hosts in folders, open terminals side by side, and save the layout for next time.</p>
 
     <div class="btn-row">
-      <a class="btn-fill" href="#downloads"><span class="btn-prompt">$</span> ./resesh --install</a>
+      <a class="btn-fill" href="#downloads"><span class="btn-prompt">$</span> download resesh</a>
       <a class="btn-outline" href="#features">see the features →</a>
     </div>
 
@@ -72,17 +72,11 @@
           <span></span>
           <span></span>
         </span>
-        <span>resesh — splits · 2 groups, 4 tabs</span>
+        <span>resesh — splits · 2 groups, 2 tabs</span>
       </div>
-      <div class="placeholder">
-        <div class="placeholder__inner">
-          <span class="placeholder__tag">[ IMAGE ]</span>
-          <span class="placeholder__desc">hero.png — main window: session tree left, two live terminals side by side</span>
-          <span class="placeholder__hint">drop the real screenshot here · 2560×1440</span>
-        </div>
-      </div>
+      <img src="assets/hero.png" alt="ISP site tree with Sydney and Melbourne sample reports in Phthalo Green" width="1916" height="865" fetchpriority="high">
     </div>
-    <div class="frame__caption">split view, two live connections</div>
+    <div class="frame__caption">split view with fictional ISP data</div>
   </div>
 </section>
 
@@ -91,18 +85,18 @@
     <div class="summary">
       <div class="summary__cell">
         <span class="summary__index">01</span>
-        <h3 class="summary__title">one tree, every host</h3>
-        <p class="summary__body">folders, icons, colors. type in the filter box, press <span class="key">enter</span>, you're on the box.</p>
+        <h3 class="summary__title">saved sessions</h3>
+        <p class="summary__body">organise hosts by site or role. filter the list and press <span class="key">enter</span> to connect.</p>
       </div>
       <div class="summary__cell">
         <span class="summary__index">02</span>
         <h3 class="summary__title">tabs, splits, and state</h3>
-        <p class="summary__body">green dot connected, blue dot output you haven't read. as many panes as the change window needs.</p>
+        <p class="summary__body">open sessions in tabs or split panes. status dots show connections and unread output.</p>
       </div>
       <div class="summary__cell">
         <span class="summary__index">03</span>
-        <h3 class="summary__title">record, rewind, replay</h3>
-        <p class="summary__body">rewind a live terminal on the spot. every recording writes an asciicast plus a timestamped log.</p>
+        <h3 class="summary__title">terminal recordings</h3>
+        <p class="summary__body">save terminal output as an asciicast recording and a timestamped text log.</p>
       </div>
     </div>
     <div class="scrollcue">
@@ -119,39 +113,29 @@
     <div class="beat">
       <div class="beat__copy">
         <span class="eyebrow">01 / sessions</span>
-        <h2 class="beat__title">every host catalogued</h2>
-        <p class="beat__body">nest folders. tag groups. duplicate sessions.</p>
+        <h2 class="beat__title">organise your hosts</h2>
+        <p class="beat__body">group related sessions in folders and give each one a name, icon and colour.</p>
         <ul class="bullets">
-          <li><span class="bullets__mark">·</span> ssh, telnet, serial, rdp and local shells in one list</li>
-          <li><span class="bullets__mark">·</span> credentials stored per host or inherited from the folder</li>
-          <li><span class="bullets__mark">·</span> jump hosts and port forwards saved with the session</li>
+          <li><span class="bullets__mark">·</span> ssh sessions and local shells in one list</li>
+          <li><span class="bullets__mark">·</span> passwords and passphrases in windows credential manager</li>
+          <li><span class="bullets__mark">·</span> terminal settings saved per session</li>
         </ul>
       </div>
       <div class="frame">
-        <div class="frame__bar">sessions.png — session tree with folder colors</div>
-        <div class="placeholder placeholder--4x3">
-          <div class="placeholder__inner">
-            <span class="placeholder__tag">[ IMAGE ]</span>
-            <span class="placeholder__desc">drop screenshot here</span>
-          </div>
-        </div>
+        <div class="frame__bar">sessions — devices grouped by site</div>
+        <img class="session-tree-image" src="assets/sessions.png" alt="ISP sessions grouped by data centre and point of presence" width="398" height="729" loading="lazy">
       </div>
     </div>
 
     <div class="beat">
       <div class="frame">
-        <div class="frame__bar">workspace.png — four panes, mixed protocols</div>
-        <div class="placeholder placeholder--4x3">
-          <div class="placeholder__inner">
-            <span class="placeholder__tag">[ IMAGE ]</span>
-            <span class="placeholder__desc">drop screenshot here</span>
-          </div>
-        </div>
+        <div class="frame__bar">workspace — two panes, one maintenance window</div>
+        <img src="assets/workspace.png" alt="Saved maintenance workspace with two terminal panes" width="1916" height="1011" loading="lazy">
       </div>
       <div class="beat__copy">
         <span class="eyebrow">02 / workspaces</span>
         <h2 class="beat__title">save your workspaces</h2>
-        <p class="beat__body">save a layout — the tabs, the split ratios, which pane sits where — and reopen it tomorrow morning exactly as you left it. one workspace per maintenance window, per customer, per rack.</p>
+        <p class="beat__body">save your tabs, pane sizes and positions as a named workspace. reopen it when you return to the job.</p>
         <div class="keycaps">
           <span class="keycap">ctrl</span>
           <span class="keycap">shift</span>
@@ -164,8 +148,8 @@
     <div class="beat">
       <div class="beat__copy">
         <span class="eyebrow">03 / recordings</span>
-        <h2 class="beat__title">every session, on the record</h2>
-        <p class="beat__body">instant rewind on by default. scrub backwards through a live terminal without disconnecting. turn on recording and export an asciicast for the change ticket, or grep the plain-text log six months later when the post-mortem asks who ran what.</p>
+        <h2 class="beat__title">review terminal output</h2>
+        <p class="beat__body">use the timeline to review earlier output. enable recording to keep an asciicast file for playback and a text log you can search.</p>
         <div class="termblock">
           <span><span class="termblock__prompt">$</span> ls ~/resesh/recordings/</span>
           <span class="termblock__out">core-sw-01_2026-08-27_0914.cast&nbsp;&nbsp;&nbsp;core-sw-01_2026-08-27_0914.log</span>
@@ -173,13 +157,8 @@
         </div>
       </div>
       <div class="frame">
-        <div class="frame__bar">rewind.png — scrubber over a live terminal</div>
-        <div class="placeholder placeholder--4x3">
-          <div class="placeholder__inner">
-            <span class="placeholder__tag">[ IMAGE ]</span>
-            <span class="placeholder__desc">drop screenshot here</span>
-          </div>
-        </div>
+        <div class="frame__bar">rewind — review output on the timeline</div>
+        <img src="assets/rewind.png" alt="Terminal rewind with a timeline and return-to-live control" width="1916" height="1011" loading="lazy">
       </div>
     </div>
 
@@ -193,25 +172,25 @@
   <div class="container stack">
     <div class="head-block">
       <span class="eyebrow">04 / migration</span>
-      <h2 class="h2-md">bring your sessions with you</h2>
-      <p class="lede">point resesh at your existing config and it reads the hosts, folders and options it recognises. nothing is uploaded anywhere.</p>
+      <h2 class="h2-md">import existing sessions</h2>
+      <p class="lede">import saved SSH sessions from securecrt, putty or openssh. review the list and choose which sessions to add. passwords are not imported.</p>
     </div>
     <div class="cards">
       <div class="card">
         <span class="card__name">securecrt</span>
-        <span class="card__note">sessions folder, per-host protocol and colors</span>
+        <span class="card__note">SSH hosts and session folders</span>
       </div>
       <div class="card">
         <span class="card__name">putty</span>
-        <span class="card__note">registry saved sessions and tunnels</span>
+        <span class="card__note">saved SSH sessions from the registry</span>
       </div>
       <div class="card">
         <span class="card__name">openssh</span>
-        <span class="card__note">~/.ssh/config hosts, jump hosts, identities</span>
+        <span class="card__note">host aliases from ~/.ssh/config</span>
       </div>
       <div class="card">
-        <span class="card__name">csv</span>
-        <span class="card__note">whatever your inventory tool exports</span>
+        <span class="card__name">resesh backup</span>
+        <span class="card__note">restore sessions from a .reseshbackup file</span>
       </div>
     </div>
   </div>
@@ -222,10 +201,10 @@
     <div class="downloads__copy">
       <span class="eyebrow">./resesh</span>
       <h2 class="h2-xl">download the beta</h2>
-      <p class="lede">free while in beta, and free after. no account, no telemetry, no license server to phone home to.</p>
+      <p class="lede">free and open source. no account required.</p>
       <div class="specs">
         <span>windows 10 21h2 or newer</span>
-        <span>signed installer · sha256 published per release</span>
+        <span>installers and portable zip on github</span>
       </div>
     </div>
     <div class="downloads__list">
@@ -262,12 +241,12 @@
     </div>
     <div class="faq__list">
       <div class="faq__item">
-        <span class="faq__q">is it actually free?</span>
-        <span class="faq__a">yes. free during the beta and free after it. the source is on github.</span>
+        <span class="faq__q">is it free?</span>
+        <span class="faq__a">yes. the source code is available on github.</span>
       </div>
       <div class="faq__item">
-        <span class="faq__q">does anything leave my machine?</span>
-        <span class="faq__a">no. sessions, credentials and recordings stay in your local profile. there is no account and no telemetry.</span>
+        <span class="faq__q">where is my session data stored?</span>
+        <span class="faq__a">saved sessions and recordings are stored locally. resesh does not require a cloud account.</span>
       </div>
       <div class="faq__item">
         <span class="faq__q">where are credentials kept?</span>
@@ -275,15 +254,15 @@
       </div>
       <div class="faq__item">
         <span class="faq__q">which protocols are supported?</span>
-        <span class="faq__a">ssh, telnet, serial and local shells today. rdp is in progress for a later beta.</span>
+        <span class="faq__a">ssh and local shells. telnet and serial support are planned.</span>
       </div>
       <div class="faq__item">
         <span class="faq__q">mac or linux?</span>
-        <span class="faq__a">not yet. windows is the focus while the beta stabilises.</span>
+        <span class="faq__a">resesh currently runs on windows only.</span>
       </div>
       <div class="faq__item">
         <span class="faq__q">can i script it?</span>
-        <span class="faq__a">sessions and workspaces are plain files, so they diff and version-control cleanly. a cli for launching a workspace is planned.</span>
+        <span class="faq__a">sessions and workspaces are stored as JSON files. there is no scripting interface in the app.</span>
       </div>
     </div>
   </div>
@@ -292,7 +271,7 @@
 <footer class="site-footer">
   <div class="site-footer__brand">
     <span class="logo__tile logo__tile--sm">./</span>
-    <span>resesh · beta · made for people with too many tabs</span>
+    <span>resesh · beta · windows</span>
   </div>
   <div class="site-footer__links">
     <a href="https://github.com/bpbp-boop/resesh">github</a>

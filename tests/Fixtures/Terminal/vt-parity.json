@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "encoding": "utf-8",
+  "defaultSize": { "columns": 80, "rows": 24 },
+  "cases": [
+    {
+      "id": "normal-and-alternate-buffers",
+      "chunks": [
+        "normal line\r\n",
+        "\u001b[?1049halt screen\r\n",
+        "\u001b[?1049lback on normal\r\n"
+      ],
+      "expected": {
+        "activeBuffer": "normal",
+        "textContains": ["normal line", "back on normal"],
+        "textExcludes": ["alt screen"]
+      }
+    },
+    {
+      "id": "unicode-wide-and-combining",
+      "chunks": ["ASCII café 中 é 😀\r\n"],
+      "expected": {
+        "textContains": ["ASCII café 中 é 😀"],
+        "cursorColumn": 21
+      }
+    },
+    {
+      "id": "colors-and-line-rendition",
+      "chunks": [
+        "\u001b[31mred\u001b[0m \u001b[38;2;12;34;56mtruecolor\u001b[0m\r\n",
+        "\u001b#6double-width\r\n"
+      ],
+      "expected": {
+        "textContains": ["red truecolor", "double-width"],
+        "sgr": [31, 0, "38;2;12;34;56", 0],
+        "lineRendition": "double-width"
+      }
+    },
+    {
+      "id": "osc-8-link",
+      "chunks": [
+        "before ",
+        "\u001b]8;id=resesh;https://example.test/a?b=1\u001b\\example",
+        "\u001b]8;;\u001b\\ after\r\n"
+      ],
+      "expected": {
+        "textContains": ["before example after"],
+        "links": [
+          { "text": "example", "uri": "https://example.test/a?b=1", "id": "resesh" }
+        ]
+      }
+    },
+    {
+      "id": "metadata-osc-order-and-chunking",
+      "chunks": [
+        "\u001b]7;file://host/C:/Work",
+        "\u001b\\\u001b]133;A\u0007",
+        "\u001b]3008;start;type=shell;cwd=C%3A%5CWork\u001b\\",
+        "\u001b]7377;agent=codex;state=working\u0007",
+        "\u001b]9;4;1\u001b\\\u001b]777;notify;done\u0007"
+      ],
+      "expected": {
+        "events": [
+          { "code": 7, "payload": "file://host/C:/Work" },
+          { "code": 133, "payload": "A" },
+          { "code": 3008, "payload": "start;type=shell;cwd=C%3A%5CWork" },
+          { "code": 7377, "payload": "agent=codex;state=working" },
+          { "code": 9, "payload": "4;1" },
+          { "code": 777, "payload": "notify;done" }
+        ]
+      }
+    },
+    {
+      "id": "search-highlights-marks-and-bookmarks",
+      "chunks": [
+        "\u001b]133;A\u0007PS C:\\Work> \u001b]133;B\u0007echo ERROR-42\r\n",
+        "\u001b]133;C\u0007ERROR-42 at https://example.test/error/42\r\n",
+        "\u001b]133;D;0\u0007PS C:\\Work> "
+      ],
+      "interactions": [
+        { "type": "search", "query": "ERROR-42", "expectedMatches": 2 },
+        { "type": "highlight", "pattern": "ERROR-[0-9]+", "expectedMatches": 2 },
+        { "type": "bookmark", "row": 0 }
+      ],
+      "expected": {
+        "command": "echo ERROR-42",
+        "exitCode": 0,
+        "markCount": 1,
+        "bookmarkCount": 1
+      }
+    },
+    {
+      "id": "clipboard-policy",
+      "chunks": ["first line\r\nsecond line\r\n"],
+      "interactions": [
+        { "type": "select", "text": "first line", "copyOnSelect": true, "expectedClipboard": "first line" },
+        { "type": "rightClickPaste", "enabled": true, "clipboard": "echo pasted\r\n", "expectedInput": "echo pasted\r" },
+        { "type": "rightClickPaste", "enabled": false, "clipboard": "blocked", "expectedInput": "" }
+      ]
+    }
+  ]
+}

@@ -925,7 +925,7 @@ public sealed class FilePaneView : UserControl, IDisposable
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = XamlRoot,
         };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary ? box.Text : null;
+        return await dialog.ShowModalAsync() == ContentDialogResult.Primary ? box.Text : null;
     }
 
     private async Task<bool> ConfirmAsync(string title, string message, string primaryText = "Delete")
@@ -939,7 +939,7 @@ public sealed class FilePaneView : UserControl, IDisposable
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = XamlRoot,
         };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        return await dialog.ShowModalAsync() == ContentDialogResult.Primary;
     }
 
     public void Dispose()

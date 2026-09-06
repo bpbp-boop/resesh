@@ -12,13 +12,21 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(EnableNativeTerminalWip)'=='true'">
+    <DefineConstants>$(DefineConstants);NATIVE_TERMINAL_WIP</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Resesh.Terminal.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.6" />
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.6" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- xterm.js page + assets; flows into the referencing app's output directory -->
+    <!-- xterm.js assets for default live terminals, rewind, and recording playback -->
     <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

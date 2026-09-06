@@ -8,7 +8,7 @@
     CloseButtonText="Cancel"
     DefaultButton="Primary">
 
-    <StackPanel Spacing="12" MinWidth="520">
+    <StackPanel Spacing="12">
         <TextBlock x:Name="SummaryText" TextWrapping="Wrap" />
 
         <ListView

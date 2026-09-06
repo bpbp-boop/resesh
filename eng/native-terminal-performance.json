@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "measuredAtUtc": "2026-09-01T12:00:09.7307058Z",
+  "machine": {
+    "os": "Windows 11 Pro 10.0.26200",
+    "architecture": "x64",
+    "cpu": "AMD Ryzen 7 7700X",
+    "configuration": "Release"
+  },
+  "method": {
+    "script": "eng/measure-terminal-baseline.ps1",
+    "surfaces": ["webview", "native"],
+    "samples": 5,
+    "scenario": "Launch the app in demo mode, expose the main window, open the default local PowerShell tab, wait for tab chrome, settle for 500 ms, then read private memory."
+  },
+  "webViewBaseline": {
+    "startupMilliseconds": [2375.6, 2383.2, 2431.2, 2424.3, 2359.8],
+    "startupMedianMilliseconds": 2383.2,
+    "startupP95Milliseconds": 2431.2,
+    "privateMemoryMiB": [162.0, 158.0, 163.1, 164.7, 163.7],
+    "privateMemoryMedianMiB": 163.1,
+    "privateMemoryP95MiB": 164.7
+  },
+  "nativeFoundation": {
+    "forkCommit": "7de6e458e8c77106c57141ae6bc655407726187b",
+    "startupMilliseconds": [2367.0, 2373.0, 2380.2, 2335.0, 2396.3],
+    "startupMedianMilliseconds": 2373.0,
+    "startupP95Milliseconds": 2396.3,
+    "privateMemoryMiB": [189.3, 194.0, 193.4, 194.6, 194.7],
+    "privateMemoryMedianMiB": 194.0,
+    "privateMemoryP95MiB": 194.7
+  },
+  "approvedBudgets": {
+    "startupP95Milliseconds": 3000,
+    "privateMemoryP95MiB": 210,
+    "sustainedOutputThroughput": {
+      "minimumRelativeToWebView": 0.85,
+      "fixtureBytes": 10485760,
+      "note": "Measure end-to-end fixture submission through the real backend and completion on the terminal UI thread."
+    },
+    "inputToPaintP95": {
+      "maximumRelativeToWebView": 1.25,
+      "maximumAddedMilliseconds": 8
+    },
+    "resizeP95": {
+      "maximumRelativeToWebView": 1.25,
+      "maximumAddedMilliseconds": 16
+    },
+    "snapshotP95": {
+      "maximumRelativeToWebView": 1.25,
+      "maximumAddedMilliseconds": 25
+    }
+  },
+  "rules": [
+    "Use the same fixture, dimensions, hardware, configuration, and five-sample minimum for both surfaces.",
+    "Startup and memory must pass their absolute budgets.",
+    "Throughput and latency measurements must pass both the relative limit and any absolute added-latency limit before final cutover.",
+    "Do not replace a missing measurement with an estimate."
+  ]
+}

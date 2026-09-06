@@ -154,6 +154,28 @@ Automation behind a small C ABI used by Microsoft's C# WPF wrapper.
 - Preserve the current `TerminalControl` host contract so the native experiment
   can be compared with WebView2 without rewriting tab and backend lifecycle code.
 
+### MVP spike
+
+- `TerminalSurface` keeps the live-tab contract, with WebView2 as the default and
+  `NativeTerminalSurface` selected only when `RESESH_TERMINAL_SURFACE=native`.
+- The versioned C# adapter loads a pinned `Microsoft.Terminal.Control.dll` from
+  `NativeTerminal/<architecture>` beside the app, or from
+  `RESESH_NATIVE_TERMINAL_DLL`. A DLL cannot be loaded directly from another
+  package's protected `WindowsApps` directory; the spike requires an app-local
+  copy. No Microsoft binary is committed or shipped.
+- The adapter supports both the Windows Terminal 1.24 focus exports and the
+  current combined focus export. It incrementally decodes UTF-8 across backend
+  chunks and preserves raw-byte recording timestamps before decode.
+- Verified in the existing app: local ConPTY and SSH.NET sessions, keyboard
+  input, output, backend resize, file-pane resize, focus/UI Automation, split
+  reparenting, and teardown. The native child is hidden while connecting, locked,
+  or rewinding so those XAML surfaces remain usable.
+- Still blocked: keyframe/rewind serialization, OSC/title/prompt/agent events,
+  links, highlights, search, command marks/ruler/panel, configurable scrollback,
+  copy-on-select, full theme parity, and general XAML-over-HWND overlays.
+  Performance, Unicode/IME, alternate-screen, mouse, DPI, x64/ARM64 packaging,
+  and servicing measurements remain part of the full exploration acceptance.
+
 ### Questions to resolve
 
 - Whether a child HWND can coexist reliably with tab dragging, split groups,

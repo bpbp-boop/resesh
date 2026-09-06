@@ -370,7 +370,7 @@ test("the native Show commands button reaches the page panel through the tab vie
   const groupCode = fs.readFileSync(
     path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"), "utf8");
 
-  assert.match(control, /public void ToggleCommandsPanel\(\) => Post\(new \{ type = "toggleCommands" \}\)/);
+  assert.match(control, /public override void ToggleCommandsPanel\(\) => Post\(new \{ type = "toggleCommands" \}\)/);
   assert.match(tabView, /public void ToggleCommandsPanel\(\)[\s\S]*?!_tab\.IsLocked[\s\S]*?_terminal\.ToggleCommandsPanel\(\)/);
   assert.match(groupXaml, /<ToggleButton[\s\S]{0,400}?x:Name="ShowCommandsButton"[\s\S]*?Click="ShowCommandsButton_Click"/);
   assert.match(groupXaml, /x:Name="ShowCommandsButton"[\s\S]*?Glyph="&#xE756;"/);

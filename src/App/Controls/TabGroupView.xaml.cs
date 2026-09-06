@@ -334,7 +334,10 @@ public sealed partial class TabGroupView : UserControl
         var selected = Group.SelectedTab?.View;
         MainWindow.Trace($"SyncTerminalVisibility: selected='{Group.SelectedTab?.Header}' children={TerminalHost.Children.Count}");
         foreach (var child in TerminalHost.Children)
-            child.Visibility = ReferenceEquals(child, selected) ? Visibility.Visible : Visibility.Collapsed;
+        {
+            var visible = ReferenceEquals(child, selected);
+            child.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     // ---- tab-bar action buttons (show commands, current folder, file pane) ----
@@ -853,7 +856,7 @@ public sealed partial class TabGroupView : UserControl
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = XamlRoot,
         };
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(box.Text))
+        if (await dialog.ShowModalAsync() == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(box.Text))
             tab.TitleOverride = box.Text.Trim();
     }
 

@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Resesh.Core.Agents;
 
 /// <summary>
@@ -51,6 +53,14 @@ public static class AgentDetection
         "sh", "bash", "zsh", "fish", "dash", "ash", "ksh", "mksh", "csh", "tcsh", "nu",
     };
 
+    // Codex's default OSC 2 title is an animated spinner followed by the project name.
+    // It does not contain the word "codex", which makes this the only title evidence
+    // available when Codex runs on a remote host without the structured adapter.
+    private const string CodexTitleSpinnerFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+
+    private static readonly Regex ShellPromptTitle =
+        new(@"^[^@\s]+@[^:\s]+:\s*(?<cwd>\S.*)$", RegexOptions.Compiled);
+
     /// <summary>
     /// The agent started by a command line, or null when it starts no agent we know.
     /// Null is a real answer for the caller ("this is a plain shell command"), which is
@@ -89,6 +99,13 @@ public static class AgentDetection
     {
         if (string.IsNullOrWhiteSpace(title))
             return null;
+        var titleSpan = title.AsSpan().TrimStart();
+        if (CodexTitleSpinnerFrames.Contains(titleSpan[0])
+            && (titleSpan.Length == 1 || char.IsWhiteSpace(titleSpan[1])))
+        {
+            return "codex";
+        }
+
         foreach (var raw in title.Split((char[])[' ', '\t', ':', ',', '|', '(', ')', '[', ']'],
                      StringSplitOptions.RemoveEmptyEntries))
         {
@@ -104,11 +121,27 @@ public static class AgentDetection
         return null;
     }
 
-    /// <summary>True only for an exact shell-process title. A path or prose that happens
-    /// to contain a shell name is not an exit signal.</summary>
+    /// <summary>True for an exact shell-process title or a stock user-host prompt title.
+    /// Both are definite evidence that an agent returned control to the shell.</summary>
     public static bool IsShellTitle(string? title) =>
         !string.IsNullOrWhiteSpace(title)
-        && ShellTitles.Contains(title.Trim().TrimStart('-'));
+        && (ShellTitles.Contains(title.Trim().TrimStart('-'))
+            || TryGetShellPromptDirectory(title, out _));
+
+    /// <summary>Extracts the directory from a stock shell OSC title such as
+    /// <c>root@host:/srv/app</c>. This title is also definite evidence that control
+    /// returned to the shell.</summary>
+    public static bool TryGetShellPromptDirectory(string? title, out string directory)
+    {
+        directory = "";
+        if (string.IsNullOrWhiteSpace(title))
+            return false;
+        var match = ShellPromptTitle.Match(title);
+        if (!match.Success)
+            return false;
+        directory = match.Groups["cwd"].Value;
+        return true;
+    }
 
     /// <summary>The agent identified by a process name (local tabs enumerate the processes
     /// inside their own job object, which is the strongest local signal we have).</summary>

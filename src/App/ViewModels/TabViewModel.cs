@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Resesh.Core.Agents;
 using Resesh.Core.Backend;
@@ -362,11 +361,6 @@ public sealed class TabViewModel : ObservableObject
 
     private string? _terminalTitle;
 
-    /// <summary>Stock .bashrc's per-prompt title: "user@host: cwd". The shape means "sitting at
-    /// a prompt", so the cwd is the useful half; any other title was set by what's running.</summary>
-    private static readonly Regex PromptTitle =
-        new(@"^[^@\s]+@[^:\s]+:\s*(?<cwd>\S.*)$", RegexOptions.Compiled);
-
     /// <summary>
     /// OSC 0/2 title reported by the terminal page — the only process hint a host without
     /// tmux gives us for free. Null until something sets one.
@@ -396,8 +390,7 @@ public sealed class TabViewModel : ObservableObject
         // A prompt-shaped title means the shell is drawing a prompt again. Persistent
         // sessions report the foreground shell name instead because tmux owns OSC titles.
         // Both are definite end signals for the last detected command.
-        if ((TerminalTitle is { } t && PromptTitle.IsMatch(t))
-            || (Session.Persistent && AgentDetection.IsShellTitle(TerminalTitle)))
+        if (AgentDetection.IsShellTitle(TerminalTitle))
         {
             RunningCommand = null;
         }
@@ -468,10 +461,9 @@ public sealed class TabViewModel : ObservableObject
                 return persistentCommand;
             if (TerminalTitle is not { } title)
                 return RunningCommand ?? PromptContext ?? FallbackSubtitle;
-            var match = PromptTitle.Match(title);
-            if (!match.Success)
+            if (!AgentDetection.TryGetShellPromptDirectory(title, out var directory))
                 return title; // a program's own title beats a guessed command name
-            return RunningCommand ?? PromptContext ?? match.Groups["cwd"].Value;
+            return RunningCommand ?? PromptContext ?? directory;
         }
     }
 

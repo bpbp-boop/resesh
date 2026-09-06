@@ -20,7 +20,7 @@ public static class ConnectDialogs
         await dialogGate.WaitAsync();
         try
         {
-            return await dialog.ShowAsync();
+            return await dialog.ShowModalAsync();
         }
         finally
         {

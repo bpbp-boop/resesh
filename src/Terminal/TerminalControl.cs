@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.UI.Dispatching;
@@ -19,7 +18,7 @@ public sealed record TerminalTimedReplayEvent(double Time, string Type, string D
 /// SSH→UI writes are batched (flushed every ~16 ms or at 32 KB, whichever first)
 /// so large outputs don't drown the message channel.
 /// </summary>
-public sealed class TerminalControl : Grid, IDisposable
+public sealed class TerminalControl : TerminalSurface
 {
     private const int FlushThresholdBytes = 32 * 1024;
 
@@ -46,7 +45,6 @@ public sealed class TerminalControl : Grid, IDisposable
             ("<script src=\"addon-web-links.js\"></script>", "addon-web-links.js", "<script>", "</script>"),
             ("<script src=\"addon-search.js\"></script>", "addon-search.js", "<script>", "</script>"),
             ("<script src=\"addon-highlight.js\"></script>", "addon-highlight.js", "<script>", "</script>"),
-            ("<script src=\"addon-serialize.js\"></script>", "addon-serialize.js", "<script>", "</script>"),
             ("<script src=\"addon-ruler.js\"></script>", "addon-ruler.js", "<script>", "</script>"),
         };
 
@@ -98,73 +96,74 @@ public sealed class TerminalControl : Grid, IDisposable
     /// <summary>Debug diagnostics sink (same pattern as SshTerminalSession.TraceHook).</summary>
     public static Action<string>? TraceHook { get; set; }
 
-    public event Action<byte[]>? InputReceived;
-    public event Action<int, int>? Resized;
+    public override event Action<byte[]>? InputReceived;
+    public override event Action<int, int>? Resized;
     /// <summary>Raw host bytes with their pre-batch arrival time, for recording and rewind.</summary>
-    public event TerminalOutputObservedHandler? OutputObserved;
+    public override event TerminalOutputObservedHandler? OutputObserved;
 
-    /// <summary>Full serialized xterm state captured after output parsing.</summary>
-    public event Action<string, int, int, long>? KeyframeCaptured;
-    public event Action? ReconnectRequested;
+    public override event Action<ReadOnlyMemory<byte>, int, int, long>? KeyframeCaptured;
+    public override event Action? ReconnectRequested;
 
     /// <summary>Ctrl+F4 pressed inside the terminal page.</summary>
-    public event Action? CloseTabRequested;
+    public override event Action? CloseTabRequested;
 
     /// <summary>Ctrl+Shift+\ pressed inside the terminal page.</summary>
-    public event Action? SplitRequested;
+    public override event Action? SplitRequested;
 
     /// <summary>Ctrl+Shift+E pressed inside the terminal page (toggle file pane).</summary>
-    public event Action? FilePaneRequested;
+    public override event Action? FilePaneRequested;
 
     /// <summary>Ctrl+Shift+T pressed inside the terminal page (open default local profile).</summary>
-    public event Action? NewLocalTabRequested;
+    public override event Action? NewLocalTabRequested;
 
     /// <summary>Ctrl+Shift+P pressed inside the terminal page.</summary>
-    public event Action? CommandPaletteRequested;
+    public override event Action? CommandPaletteRequested;
 
     /// <summary>Ctrl+Shift+K pressed inside the terminal page.</summary>
-    public event Action? QuickConnectRequested;
+    public override event Action? QuickConnectRequested;
 
     /// <summary>Fires once when the xterm page is loaded and measured (initial cols/rows).</summary>
-    public event Action<int, int>? Ready;
+    public override event Action<int, int>? Ready;
 
     /// <summary>OSC 0/2 window title set by the remote shell or a full-screen program.</summary>
-    public event Action<string>? TitleChanged;
+    public override event Action<string>? TitleChanged;
 
     /// <summary>Command the page saw start (ruler discovery / OSC 133); "" = it ended.
     /// Drives the tab's subtitle; the page epoch-gates it against the title stream.</summary>
-    public event Action<string>? CommandChanged;
+    public override event Action<string>? CommandChanged;
 
     /// <summary>Current location read from a known idle prompt, plus an optional detected
     /// platform key. Examples: a Windows directory or a Nokia MD-CLI cli-path.</summary>
-    public event Action<string, string?>? PromptContextChanged;
+    public override event Action<string, string?>? PromptContextChanged;
 
     /// <summary>Raw OSC 7 payload. The app validates it before it can select an SFTP path.</summary>
-    public event Action<string>? WorkingDirectoryReported;
+    public override event Action<string>? WorkingDirectoryReported;
 
     /// <summary>Raw OSC 3008 payload. The app validates this auxiliary context signal.</summary>
-    public event Action<string>? ContextReported;
+    public override event Action<string>? ContextReported;
 
     // ---- agent-awareness evidence (Phase 6.2); raw, unmapped, from this tab's page only ----
 
     /// <summary>An OSC sequence we watch for agent events: the code and its payload.</summary>
-    public event Action<int, string>? AgentOscReceived;
+    public override event Action<int, string>? AgentOscReceived;
 
     /// <summary>The terminal rang the bell.</summary>
-    public event Action? BellReceived;
+    public override event Action? BellReceived;
 
     /// <summary>A command was marked at a shell prompt (OSC 133 or Enter-gated discovery).
     /// Every mark, never an end and never epoch-gated — unlike <see cref="CommandChanged"/>,
     /// which the subtitle needs. <see cref="TitleChanged"/> feeds agent tracking as well.</summary>
-    public event Action<string>? CommandObserved;
+    public override event Action<string>? CommandObserved;
 
     /// <summary>Raised when the page's commands panel opens or closes — from the host's
     /// toggle button, Ctrl+Shift+O, or the panel's own close button — so the native
     /// toggle button can mirror the true state.</summary>
-    public event Action<bool>? CommandsPanelOpenChanged;
+    public override event Action<bool>? CommandsPanelOpenChanged;
 
-    public int Columns { get; private set; } = 80;
-    public int Rows { get; private set; } = 24;
+    public override bool SupportsRewindCapture => true;
+
+    public override int Columns { get; protected set; } = 80;
+    public override int Rows { get; protected set; } = 24;
 
     public TerminalControl()
     {
@@ -174,7 +173,7 @@ public sealed class TerminalControl : Grid, IDisposable
         Children.Add(_webView);
     }
 
-    public async Task InitializeAsync()
+    public override async Task InitializeAsync()
     {
         var environment = await SharedEnvironment.Value;
         await _webView.EnsureCoreWebView2Async(environment);
@@ -268,8 +267,7 @@ public sealed class TerminalControl : Grid, IDisposable
                     {
                         try
                         {
-                            var state = Encoding.UTF8.GetString(
-                                Convert.FromBase64String(keyframeData.GetString() ?? ""));
+                            var state = Convert.FromBase64String(keyframeData.GetString() ?? "");
                             KeyframeCaptured?.Invoke(
                                 state, keyframeColumns.GetInt32(), keyframeRows.GetInt32(), keyframeTime.GetInt64());
                         }
@@ -301,19 +299,8 @@ public sealed class TerminalControl : Grid, IDisposable
                     QuickConnectRequested?.Invoke();
                     break;
                 case "openLink":
-                    if (root.TryGetProperty("uri", out var uriProperty) &&
-                        Uri.TryCreate(uriProperty.GetString(), UriKind.Absolute, out var uri) &&
-                        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
-                    {
-                        try
-                        {
-                            Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
-                        }
-                        catch (Exception exception)
-                        {
-                            TraceHook?.Invoke($"openLink failed: {exception.Message}");
-                        }
-                    }
+                    if (root.TryGetProperty("uri", out var uriProperty))
+                        TerminalLinkPolicy.Open(uriProperty.GetString(), TraceHook);
                     break;
                 case "agentOsc":
                     if (root.TryGetProperty("code", out var oscCode))
@@ -397,7 +384,7 @@ public sealed class TerminalControl : Grid, IDisposable
 
     // ---- SSH -> UI (batched; callable from any thread) ----
 
-    public void WriteOutput(ReadOnlySpan<byte> data)
+    public override void WriteOutput(ReadOnlySpan<byte> data)
     {
         if (_disposed || data.IsEmpty)
             return;
@@ -492,22 +479,22 @@ public sealed class TerminalControl : Grid, IDisposable
 
     // ---- control messages (UI thread) ----
 
-    public void NotifyConnected() => Post(new { type = "connected" });
+    public override void NotifyConnected() => Post(new { type = "connected" });
 
     /// <summary>Shell-over notice. <paramref name="action"/> is the verb in the
     /// "Press Enter to …" hint ("reconnect"/"restart"); <paramref name="neutral"/> renders
     /// the message dimmed instead of warning-yellow (clean local exits are not errors).</summary>
-    public void NotifyDisconnected(string message, string action = "reconnect", bool neutral = false)
+    public override void NotifyDisconnected(string message, string action = "reconnect", bool neutral = false)
     {
         FlushOutput();
         Post(new { type = "disconnected", message, action, severity = neutral ? "info" : "warn" });
     }
 
-    public void WriteDivider() => Post(new { type = "divider" });
+    public override void WriteDivider() => Post(new { type = "divider" });
 
-    public void WriteNotice(string message) => Post(new { type = "notice", message });
+    public override void WriteNotice(string message) => Post(new { type = "notice", message });
 
-    public void FocusTerminal()
+    public override void FocusTerminal()
     {
         // XAML focus must land on the WebView2 first, or keystrokes go to whatever
         // control had focus (e.g. the search box); then focus xterm inside the page.
@@ -517,15 +504,16 @@ public sealed class TerminalControl : Grid, IDisposable
 
     /// <summary>Blocks or restores pointer input to the page (used by session lock).
     /// Callers must also move keyboard focus off the terminal (the lock overlay does).</summary>
-    public void SetInputEnabled(bool enabled) => _webView.IsHitTestVisible = enabled;
+    public override void SetInputEnabled(bool enabled) => _webView.IsHitTestVisible = enabled;
+
 
     /// <summary>Opens or closes the page's commands panel (the annotated scrollbar's
     /// command-mark list). Same action as Ctrl+Shift+O inside the terminal.</summary>
-    public void ToggleCommandsPanel() => Post(new { type = "toggleCommands" });
+    public override void ToggleCommandsPanel() => Post(new { type = "toggleCommands" });
 
     /// <summary>Uses the quieter ruler presentation while two terminal groups are visible.
     /// The inactive group is dimmer, but pointer hover restores the full presentation.</summary>
-    public void SetRulerPresentation(bool isSplit, bool isGroupFocused)
+    public override void SetRulerPresentation(bool isSplit, bool isGroupFocused)
     {
         if (_rulerIsSplit == isSplit && _rulerIsGroupFocused == isGroupFocused)
             return;
@@ -545,7 +533,7 @@ public sealed class TerminalControl : Grid, IDisposable
 
     /// <summary>Gives the page a vendor hint from trusted session metadata or the SSH
     /// version banner. The page still requires a matching prompt before it reports context.</summary>
-    public void SetPromptPlatform(string? platform)
+    public override void SetPromptPlatform(string? platform)
     {
         _promptPlatform = platform;
         if (_pageReady)
@@ -556,7 +544,7 @@ public sealed class TerminalControl : Grid, IDisposable
 
     /// <summary>Options the page's terminal is constructed with. Must be set before
     /// <see cref="InitializeAsync"/>; later changes go through <see cref="ApplyOptions"/>.</summary>
-    public void SetInitialOptions(
+    public override void SetInitialOptions(
         int fontSize, string fontFamily, string theme,
         bool copyOnSelect, bool rightClickPaste, int scrollback,
         IReadOnlyList<object>? highlights = null,
@@ -570,7 +558,7 @@ public sealed class TerminalControl : Grid, IDisposable
         };
     }
 
-    public void ApplyOptions(
+    public override void ApplyOptions(
         int? fontSize = null, string? fontFamily = null, string? theme = null,
         bool? copyOnSelect = null, bool? rightClickPaste = null, int? scrollback = null)
     {
@@ -599,12 +587,12 @@ public sealed class TerminalControl : Grid, IDisposable
 
     /// <summary>Replaces the page's active highlight rule set (enabled rules only,
     /// already resolved for the session). The page recompiles and rescans the viewport.</summary>
-    public void ApplyHighlights(IReadOnlyList<object> rules) =>
+    public override void ApplyHighlights(IReadOnlyList<object> rules) =>
         Post(new { type = "setHighlights", rules });
 
     /// <summary>Asks the live terminal buffer to identify its current idle prompt.
     /// This catches cmd and PowerShell locations even when no later output triggered a scan.</summary>
-    public async Task<(string Context, string? Platform)?> RequestPromptContextAsync()
+    public override async Task<(string Context, string? Platform)?> RequestPromptContextAsync()
     {
         if (_disposed || !_pageReady || _webView.CoreWebView2 is null)
             return null;
@@ -628,11 +616,12 @@ public sealed class TerminalControl : Grid, IDisposable
         }
     }
 
+
     /// <summary>Atomically resets a read-only terminal and replays one state slice.</summary>
-    public void ShowReplay(
+    public override Task ShowReplayAsync(
         int columns,
         int rows,
-        string? keyframe,
+        ReadOnlyMemory<byte> keyframe,
         IReadOnlyList<TerminalReplayEvent> events)
     {
         static string Encode(string value) =>
@@ -643,17 +632,18 @@ public sealed class TerminalControl : Grid, IDisposable
             type = "showReplay",
             columns,
             rows,
-            keyframe = keyframe is null ? null : Encode(keyframe),
+            keyframe = keyframe.IsEmpty ? null : Convert.ToBase64String(keyframe.Span),
             events = events.Select(item => new
             {
                 type = item.Type,
                 data = item.Type == "o" ? Encode(item.Data) : item.Data,
             }).ToArray(),
         });
+        return Task.CompletedTask;
     }
 
     /// <summary>Loads a complete asciicast stream; the page builds seek keyframes once.</summary>
-    public void LoadPlayback(
+    public override Task LoadPlaybackAsync(
         int columns,
         int rows,
         IReadOnlyList<TerminalTimedReplayEvent> events)
@@ -672,9 +662,14 @@ public sealed class TerminalControl : Grid, IDisposable
                     : item.Data,
             }).ToArray(),
         });
+        return Task.CompletedTask;
     }
 
-    public void SeekPlayback(double time) => Post(new { type = "seekPlayback", time });
+    public override Task SeekPlaybackAsync(double time)
+    {
+        Post(new { type = "seekPlayback", time });
+        return Task.CompletedTask;
+    }
 
     private void Post(object message)
     {
@@ -699,7 +694,7 @@ public sealed class TerminalControl : Grid, IDisposable
             core.PostWebMessageAsJson(json);
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         if (_disposed)
             return;

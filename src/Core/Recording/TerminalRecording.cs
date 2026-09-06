@@ -12,7 +12,7 @@ public sealed record TerminalRecordingEvent(double Time, string Type, string Dat
     public bool IsResize => Type == "r";
 }
 
-public sealed record TerminalKeyframe(double Time, int Columns, int Rows, string State);
+public sealed record TerminalKeyframe(double Time, int Columns, int Rows, ReadOnlyMemory<byte> State);
 
 public sealed record TerminalRewindSlice(
     DateTimeOffset StartedAt,
@@ -45,21 +45,25 @@ public sealed class TerminalCapture : IDisposable
     private readonly List<TerminalKeyframe> _keyframes = [];
     private readonly TimeSpan _maximumAge;
     private readonly long _maximumBytes;
+    private readonly bool _retainForRewind;
     private long _eventBytes;
     private long _keyframeBytes;
     private double _latestTime;
+    private bool _hasCaptureTimestamp;
     private int _currentColumns;
     private int _currentRows;
     private TerminalKeyframe? _anchor;
     private TerminalDiskRecorder? _recorder;
     private bool _disposed;
+    private bool _rewindDisabled;
 
     public TerminalCapture(
         int initialColumns,
         int initialRows,
         DateTimeOffset? startedAt = null,
         TimeSpan? maximumAge = null,
-        long maximumBytes = 32L * 1024 * 1024)
+        long maximumBytes = 32L * 1024 * 1024,
+        bool retainForRewind = true)
     {
         if (initialColumns <= 0)
             throw new ArgumentOutOfRangeException(nameof(initialColumns));
@@ -75,6 +79,7 @@ public sealed class TerminalCapture : IDisposable
         StartedAt = startedAt ?? DateTimeOffset.UtcNow;
         _maximumAge = maximumAge ?? TimeSpan.FromMinutes(30);
         _maximumBytes = maximumBytes;
+        _retainForRewind = retainForRewind;
     }
 
     public DateTimeOffset StartedAt { get; }
@@ -102,6 +107,16 @@ public sealed class TerminalCapture : IDisposable
     public event Action? Changed;
     public event Action<bool, string?>? RecordingChanged;
 
+    /// <summary>Checks availability without building a replay slice on every output chunk.</summary>
+    public bool HasRewindData
+    {
+        get
+        {
+            lock (_gate)
+                return _anchor is not null || _keyframes.Count > 0 || _events.Count > 0;
+        }
+    }
+
     public void CaptureOutput(ReadOnlySpan<byte> data, long unixTimeMilliseconds)
     {
         if (data.IsEmpty)
@@ -115,12 +130,15 @@ public sealed class TerminalCapture : IDisposable
             lock (_gate)
             {
                 ThrowIfDisposed();
+                if (!_retainForRewind && _recorder is null)
+                    return;
+
                 var count = _decoder.GetChars(data, rented.AsSpan(), flush: false);
                 if (count > 0)
                 {
                     var text = new string(rented, 0, count);
-                    AppendLocked(new TerminalRecordingEvent(ToElapsedLocked(unixTimeMilliseconds), "o", text));
-                    appended = true;
+                    appended = AppendLocked(new TerminalRecordingEvent(
+                        ToElapsedLocked(unixTimeMilliseconds), "o", text));
                 }
             }
         }
@@ -137,36 +155,45 @@ public sealed class TerminalCapture : IDisposable
         if (columns <= 0 || rows <= 0)
             return;
 
+        var changed = false;
         lock (_gate)
         {
             ThrowIfDisposed();
             _currentColumns = columns;
             _currentRows = rows;
-            AppendLocked(new TerminalRecordingEvent(
+            changed = AppendLocked(new TerminalRecordingEvent(
                 ToElapsedLocked(unixTimeMilliseconds), "r",
                 string.Create(CultureInfo.InvariantCulture, $"{columns}x{rows}")));
         }
-        Changed?.Invoke();
+        if (changed)
+            Changed?.Invoke();
     }
 
-    public void CaptureKeyframe(string state, int columns, int rows, long unixTimeMilliseconds)
+    public void CaptureKeyframe(ReadOnlyMemory<byte> state, int columns, int rows, long unixTimeMilliseconds)
     {
-        if (state is null)
-            throw new ArgumentNullException(nameof(state));
+        if (state.IsEmpty)
+            throw new ArgumentException("A terminal keyframe cannot be empty.", nameof(state));
         if (columns <= 0 || rows <= 0)
             return;
 
+        var changed = false;
         lock (_gate)
         {
             ThrowIfDisposed();
             _currentColumns = columns;
             _currentRows = rows;
-            var frame = new TerminalKeyframe(ToElapsedLocked(unixTimeMilliseconds), columns, rows, state);
-            _keyframes.Add(frame);
-            _keyframeBytes += FrameBytes(frame);
-            TrimLocked();
+            if (_retainForRewind && !_rewindDisabled)
+            {
+                var frame = new TerminalKeyframe(
+                    ToElapsedLocked(unixTimeMilliseconds), columns, rows, state.ToArray());
+                _keyframes.Add(frame);
+                _keyframeBytes += FrameBytes(frame);
+                changed = true;
+                TrimLocked();
+            }
         }
-        Changed?.Invoke();
+        if (changed)
+            Changed?.Invoke();
     }
 
     public TerminalRewindSlice Snapshot(double? atTime = null)
@@ -230,27 +257,33 @@ public sealed class TerminalCapture : IDisposable
         return path;
     }
 
-    private void AppendLocked(TerminalRecordingEvent item)
+    private bool AppendLocked(TerminalRecordingEvent item)
     {
-        _events.AddLast(item);
-        _eventBytes += EventBytes(item);
         _latestTime = Math.Max(_latestTime, item.Time);
         _recorder?.Write(item);
+        if (!_retainForRewind || _rewindDisabled)
+            return false;
+
+        _events.AddLast(item);
+        _eventBytes += EventBytes(item);
         TrimLocked();
+        return true;
     }
 
     private double ToElapsedLocked(long unixTimeMilliseconds)
     {
-        var elapsed = (unixTimeMilliseconds - StartedAt.ToUnixTimeMilliseconds()) / 1000d;
-        _latestTime = Math.Max(_latestTime, Math.Max(0, elapsed));
+        var elapsed = Math.Max(
+            0,
+            (unixTimeMilliseconds - StartedAt.ToUnixTimeMilliseconds()) / 1000d);
+        if (_hasCaptureTimestamp && elapsed <= _latestTime)
+            elapsed = Math.BitIncrement(_latestTime);
+        _latestTime = elapsed;
+        _hasCaptureTimestamp = true;
         return _latestTime;
     }
 
     private void TrimLocked()
     {
-        if (_events.Count == 0)
-            return;
-
         var cutoff = _latestTime - _maximumAge.TotalSeconds;
         TerminalKeyframe? ageFrame = null;
         foreach (var frame in _keyframes)
@@ -262,12 +295,30 @@ public sealed class TerminalCapture : IDisposable
         if (ageFrame is not null)
             PromoteAnchorLocked(ageFrame);
 
-        while (_eventBytes + _keyframeBytes + (_anchor is null ? 0 : FrameBytes(_anchor)) > _maximumBytes)
+        while (RetainedBytesLocked() > _maximumBytes)
         {
-            if (_keyframes.Count == 0)
-                break;
-            PromoteAnchorLocked(_keyframes[0]);
+            if (_keyframes.Count > 0)
+            {
+                PromoteAnchorLocked(_keyframes[0]);
+                continue;
+            }
+
+            DisableRewindLocked();
+            break;
         }
+    }
+
+    private long RetainedBytesLocked() =>
+        _eventBytes + _keyframeBytes + (_anchor is null ? 0 : FrameBytes(_anchor));
+
+    private void DisableRewindLocked()
+    {
+        _events.Clear();
+        _keyframes.Clear();
+        _eventBytes = 0;
+        _keyframeBytes = 0;
+        _anchor = null;
+        _rewindDisabled = true;
     }
 
     private void PromoteAnchorLocked(TerminalKeyframe frame)
@@ -292,7 +343,7 @@ public sealed class TerminalCapture : IDisposable
         32L + Encoding.UTF8.GetByteCount(item.Data);
 
     private static long FrameBytes(TerminalKeyframe frame) =>
-        48L + Encoding.UTF8.GetByteCount(frame.State);
+        48L + frame.State.Length;
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 

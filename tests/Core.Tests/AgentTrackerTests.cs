@@ -70,17 +70,19 @@ public class AgentTrackerTests
         Assert.Equal("claude", tracker.Current.Key);
         Assert.Equal(AgentSource.Title, tracker.Current.Source);
 
-        Assert.False(tracker.ObserveTitle("bpg@host: ~/src"));
+        Assert.False(tracker.ObserveTitle("project dashboard"));
         Assert.Equal("claude", tracker.Current.Key);
     }
 
-    [Fact]
-    public void TmuxShellTitleRetiresAnAgentWithAStalePaneTitle()
+    [Theory]
+    [InlineData("bash")]
+    [InlineData("root@rct-keep:/srv/rct-keep")]
+    public void ShellTitleRetiresAnAgentWithAStaleTitle(string shellTitle)
     {
         var tracker = new AgentTracker();
         tracker.ObserveEvent(Structured("agent;id=codex;state=complete"));
 
-        Assert.True(tracker.ObserveTitle("bash"));
+        Assert.True(tracker.ObserveTitle(shellTitle));
         Assert.False(tracker.Current.IsAgent);
         Assert.Equal(AgentAttention.None, tracker.Current.Attention);
     }
