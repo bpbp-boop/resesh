@@ -6,7 +6,7 @@ const path = require("path");
 const test = require("node:test");
 
 const root = path.join(__dirname, "..");
-const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8");
+const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8").replace(/\r\n/g, "\n");
 const api = read("src", "Terminal", "NativeTerminalApi.cs");
 const surface = read("src", "Terminal", "NativeTerminalSurface.cs");
 const ruler = read("src", "Terminal", "NativeTerminalRuler.cs");
