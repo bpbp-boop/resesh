@@ -45,6 +45,7 @@ public sealed class TerminalControl : TerminalSurface
             ("<script src=\"addon-web-links.js\"></script>", "addon-web-links.js", "<script>", "</script>"),
             ("<script src=\"addon-search.js\"></script>", "addon-search.js", "<script>", "</script>"),
             ("<script src=\"addon-highlight.js\"></script>", "addon-highlight.js", "<script>", "</script>"),
+            ("<script src=\"addon-serialize.js\"></script>", "addon-serialize.js", "<script>", "</script>"),
             ("<script src=\"addon-ruler.js\"></script>", "addon-ruler.js", "<script>", "</script>"),
         };
 
