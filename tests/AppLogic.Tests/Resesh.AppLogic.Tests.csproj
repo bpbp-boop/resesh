@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <Using Include="Xunit" />
+    <ProjectReference Include="../../src/Core/Resesh.Core.csproj" />
+    <!-- Execute the production view models without loading a WinUI application. -->
+    <Compile Include="../../src/App/ViewModels/MainViewModel.cs" Link="ViewModels/MainViewModel.cs" />
+    <Compile Include="../../src/App/ViewModels/TabViewModel.cs" Link="ViewModels/TabViewModel.cs" />
+    <Compile Include="../../src/App/ViewModels/TabGroupViewModel.cs" Link="ViewModels/TabGroupViewModel.cs" />
+    <Compile Include="../../src/App/ViewModels/TreeNodeViewModel.cs" Link="ViewModels/TreeNodeViewModel.cs" />
+    <Compile Include="../../src/App/ViewModels/ViewModelEnvironment.cs" Link="ViewModels/ViewModelEnvironment.cs" />
+  </ItemGroup>
+</Project>

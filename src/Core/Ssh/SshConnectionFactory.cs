@@ -61,17 +61,21 @@ internal static class SshConnectionFactory
         _ => new SshSessionException(SshFailureKind.Other, ex.Message, ex),
     };
 
-    internal static void PreflightTcp(string host, int port, TimeSpan timeout)
+    internal static void PreflightTcp(string host, int port, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         using var socket = new System.Net.Sockets.Socket(
             System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
         try
         {
-            if (!socket.ConnectAsync(host, port).Wait(timeout))
-                throw new SshSessionException(
-                    SshFailureKind.HostUnreachable, $"Could not reach {host}:{port} (connection timed out).");
+            socket.ConnectAsync(host, port, cancellationToken).AsTask()
+                .WaitAsync(timeout, cancellationToken).GetAwaiter().GetResult();
         }
-        catch (AggregateException e) when (e.InnerException is System.Net.Sockets.SocketException se)
+        catch (TimeoutException)
+        {
+            throw new SshSessionException(
+                SshFailureKind.HostUnreachable, $"Could not reach {host}:{port} (connection timed out).");
+        }
+        catch (System.Net.Sockets.SocketException se)
         {
             throw new SshSessionException(
                 SshFailureKind.HostUnreachable, $"Could not reach {host}:{port}: {se.Message}", se);

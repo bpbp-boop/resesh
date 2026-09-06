@@ -103,6 +103,9 @@ public sealed class SettingsStore
     private readonly string _path;
     private readonly object _gate = new();
 
+    public string? LoadWarning { get; private set; }
+    private bool _preserveBackup;
+
     public AppSettings Current { get; private set; } = new();
 
     public SettingsStore(string path)
@@ -117,20 +120,27 @@ public sealed class SettingsStore
     {
         lock (_gate)
         {
+            LoadWarning = null;
+            _preserveBackup = false;
             try
             {
-                if (File.Exists(_path))
-                {
-                    Current = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_path), JsonOptions) ?? new AppSettings();
-                }
-                else
-                {
-                    Current = new AppSettings { OnboardingCompleted = false };
-                }
+                Current = Read(_path);
             }
-            catch (Exception e) when (e is JsonException or IOException)
+            catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
             {
-                Current = new AppSettings();
+                try
+                {
+                    Current = Read(_path + ".bak");
+                    _preserveBackup = true;
+                    LoadWarning = "Settings were recovered from the backup file.";
+                }
+                catch (Exception backupError) when (backupError is JsonException or IOException or UnauthorizedAccessException)
+                {
+                    Current = new AppSettings { OnboardingCompleted = File.Exists(_path) ? null : false };
+                    if (e is not (FileNotFoundException or DirectoryNotFoundException)
+                        || backupError is not (FileNotFoundException or DirectoryNotFoundException))
+                        LoadWarning = "Settings could not be loaded. Default settings are in use. " + e.Message;
+                }
             }
         }
     }
@@ -139,16 +149,15 @@ public sealed class SettingsStore
     {
         lock (_gate)
         {
+            AtomicFile.Write(_path, JsonSerializer.Serialize(settings, JsonOptions), _preserveBackup);
             Current = settings;
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            var tmp = _path + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(settings, JsonOptions));
-            if (File.Exists(_path))
-                File.Replace(tmp, _path, null);
-            else
-                File.Move(tmp, _path);
+            _preserveBackup = false;
         }
     }
+
+    private static AppSettings Read(string path) =>
+        JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions)
+        ?? throw new JsonException("The settings file is empty.");
 
     /// <summary>Moves a saved session to the front of the bounded recent list.</summary>
     public void RecordRecentSession(Guid sessionId, int maximumCount = 12)

@@ -93,8 +93,10 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
     public void Connect(Session session, string? secret, string terminalType, int columns, int rows,
         string? bootstrapCommand = null,
         Func<SshTerminalSession, string?>? bootstrapCommandFactory = null,
-        Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder = null)
+        Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (_client is not null)
             throw new InvalidOperationException("Session already used; create a new instance per connection.");
         if (bootstrapCommand is not null && bootstrapCommandFactory is not null)
@@ -102,7 +104,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
 
         // Fast pre-flight so unreachable hosts fail in seconds; the real connect then gets a
         // generous timeout because the first-connect host key dialog sits inside the handshake.
-        SshConnectionFactory.PreflightTcp(session.Host, session.Port, TimeSpan.FromSeconds(10));
+        SshConnectionFactory.PreflightTcp(session.Host, session.Port, TimeSpan.FromSeconds(10), cancellationToken);
 
         var auth = SshConnectionFactory.BuildAuthMethods(session, secret, interactiveResponder);
         var connectionInfo = new ConnectionInfo(session.Host, session.Port, session.Username, auth)
@@ -115,6 +117,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         SshSessionException? hostKeyFailure = null;
         client.HostKeyReceived += (_, e) =>
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var sha256 = Convert.ToBase64String(SHA256.HashData(e.HostKey)).TrimEnd('=');
             HostKeyFingerprint = $"{e.HostKeyName} SHA256:{sha256}";
             var verdict = _knownHosts.Check(session.Host, session.Port, e.HostKeyName, sha256);
@@ -131,6 +134,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
                         : null;
                     var info = new HostKeyInfo(session.Host, session.Port, e.HostKeyName, sha256, verdict, previous);
                     var trusted = HostKeyDecision?.Invoke(info) ?? false;
+                    cancellationToken.ThrowIfCancellationRequested();
                     if (trusted)
                         _knownHosts.Accept(session.Host, session.Port, e.HostKeyName, sha256);
                     else
@@ -148,11 +152,12 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
 
         try
         {
-            client.Connect();
+            client.ConnectAsync(cancellationToken).GetAwaiter().GetResult();
         }
         catch (Exception ex)
         {
             client.Dispose();
+            cancellationToken.ThrowIfCancellationRequested();
             if (hostKeyFailure is not null)
                 throw hostKeyFailure;
             throw SshConnectionFactory.Classify(ex);
@@ -161,8 +166,11 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         _client = client;
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             bootstrapCommand = bootstrapCommandFactory?.Invoke(this) ?? bootstrapCommand;
+            cancellationToken.ThrowIfCancellationRequested();
             _shell = client.CreateShellStream(terminalType, (uint)columns, (uint)rows, 0, 0, 64 * 1024);
+            cancellationToken.ThrowIfCancellationRequested();
             if (bootstrapCommand is not null)
             {
                 // The pty buffers this until the login shell reads stdin; its echo is short-lived

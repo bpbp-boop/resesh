@@ -29,7 +29,7 @@ const terminalTab = fs.readFileSync(
   "utf8");
 
 test("tab colors use the live saved theme instead of the launch-only application theme", () => {
-  assert.match(viewModel, /_appTheme = App\.Settings\.Current\.Theme/);
+  assert.match(viewModel, /_appTheme = environment\.ResolveTheme\(environment\.CurrentTheme\(\)\)/);
   assert.match(presentation, /ThemeCatalog\.IsLight\(appTheme\)/);
   assert.doesNotMatch(viewModel, /Application\.Current\.RequestedTheme/);
 });
@@ -63,7 +63,7 @@ test("native terminal pointer input focuses its current tab group", () => {
     /_terminal\.HostFocusRequested \+= [\s\S]*?FocusRequested\?\.Invoke\(\)/);
   assert.match(
     mainWindow,
-    /view\.FocusRequested \+= \(\) => FocusGroup\(ViewModel\.GroupOf\(tab\)\)/);
+    /view\.FocusRequested \+= [\s\S]*?App\.WindowFor\(tab\)[\s\S]*?owner\.FocusGroup\(owner\.ViewModel\.GroupOf\(tab\)\)/);
 });
 
 test("an empty tab group does not draw a tab-strip divider", () => {

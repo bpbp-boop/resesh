@@ -60,7 +60,8 @@ public partial class App : Application
         UnhandledException += (_, e) =>
         {
             LogCrash(e.Exception);
-            e.Handled = true; // keep the app alive; the failure is logged
+            // Unexpected UI failures have no proven recovery path. Let WinUI terminate.
+            e.Handled = false;
         };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => LogCrash(e.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, e) => LogCrash(e.Exception);
@@ -82,6 +83,27 @@ public partial class App : Application
         catch (Exception ex)
         {
             LogCrash(ex);
+        }
+    }
+
+    internal static bool SaveSettings(AppSettings settings)
+    {
+        try { Settings.Save(settings); return true; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            ReportRecoverableError(exception);
+            return false;
+        }
+    }
+
+    internal static void ReportRecoverableError(Exception exception)
+    {
+        LogCrash(exception);
+        if (Current is not App app) return;
+        foreach (var window in app._windows.ToList())
+        {
+            try { window.ShowOperationNotice("The operation could not finish", exception.Message); }
+            catch (Exception displayError) { LogCrash(displayError); } // The window may already be closed.
         }
     }
 
@@ -151,6 +173,10 @@ public partial class App : Application
 
         ApplyLaunchArguments(window, Environment.GetCommandLineArgs());
 
+        var loadMessages = new[] { Settings.LoadWarning, Workspaces.LoadWarning, KnownHosts.LoadWarning, KnownHosts.LoadError }
+            .Where(message => message is not null).ToList();
+        if (loadMessages.Count > 0)
+            window.ShowOperationNotice("Stored data needs attention", string.Join("\n", loadMessages));
         Program.SetActivationTarget(this);
     }
 
@@ -163,6 +189,9 @@ public partial class App : Application
     /// <summary>Creates a blank, app-owned window. Keeping every window rooted here is
     /// required because WinUI does not expose an application window collection.</summary>
     public static MainWindow OpenNewWindow() => ((App)Current).CreateWindowCore();
+
+    internal static MainWindow? WindowFor(Resesh.App.ViewModels.TabViewModel tab) =>
+        Current is App app ? app._windows.FirstOrDefault(window => window.ViewModel.AllTabs.Contains(tab)) : null;
 
     internal static void RefreshWindowTitles()
     {

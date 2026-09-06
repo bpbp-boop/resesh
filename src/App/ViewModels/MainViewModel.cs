@@ -9,6 +9,7 @@ namespace Resesh.App.ViewModels;
 
 public sealed class MainViewModel : ObservableObject
 {
+    private readonly ViewModelEnvironment _environment;
     private readonly SessionStore _store;
     private readonly ICredentialService _credentials;
 
@@ -29,8 +30,9 @@ public sealed class MainViewModel : ObservableObject
     /// <summary>All tab groups in visual traversal order.</summary>
     public ObservableCollection<TabGroupViewModel> Groups { get; } = [];
 
-    public MainViewModel(SessionStore store, ICredentialService credentials)
+    public MainViewModel(SessionStore store, ICredentialService credentials, ViewModelEnvironment environment)
     {
+        _environment = environment;
         _store = store;
         _credentials = credentials;
         var initial = new TabGroupViewModel();
@@ -126,8 +128,7 @@ public sealed class MainViewModel : ObservableObject
 
     /// <summary>Built-in local profiles whose shell is not installed right now are hidden
     /// everywhere (tree, search, quick connect) but never deleted.</summary>
-    private static bool IsVisible(Session session) =>
-        !session.IsLocal || !session.BuiltIn || App.AvailableLocalShells.Contains(session.Id);
+    private bool IsVisible(Session session) => _environment.IsSessionVisible(session);
 
     public IEnumerable<Session> VisibleSessions => _store.Sessions.Where(IsVisible);
 
@@ -144,7 +145,7 @@ public sealed class MainViewModel : ObservableObject
     public TabViewModel Connect(Session session, TabGroupViewModel? group = null)
     {
         group ??= FocusedGroup;
-        var tab = new TabViewModel(session);
+        var tab = new TabViewModel(session, _environment);
         if (session.Persistent)
         {
             // Lowest unused slot, so a clone gets its own tmux session and a reopened
@@ -202,7 +203,8 @@ public sealed class MainViewModel : ObservableObject
             foreach (var tab in group.Tabs.ToList())
             {
                 tab.PropertyChanged -= Tab_PropertyChanged;
-                (tab.View as IDisposable)?.Dispose();
+                Resesh.Core.Backend.CleanupActions.Run(_environment.ReportError,
+                    () => (tab.View as IDisposable)?.Dispose());
             }
             group.Tabs.Clear();
             group.SelectedTab = null;
@@ -232,11 +234,7 @@ public sealed class MainViewModel : ObservableObject
         {
             tab.Session = session;
             // Appearance overrides take effect immediately; connection fields apply on next connect.
-            if (tab.View is Terminal.TerminalTabView view)
-            {
-                view.ApplyTheme(App.Settings.Current.Theme);
-                view.ApplyNonThemeSettings(App.Settings.Current);
-            }
+            _environment.ApplySessionSettings(tab);
         }
         // Preserve realized containers for presentation-only edits (icon, color, endpoint,
         // terminal settings, etc.). Rebuild only when membership, hierarchy, ordering, or

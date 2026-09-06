@@ -6,7 +6,7 @@ const test = require("node:test");
 const root = path.join(__dirname, "..", "src", "App");
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8");
 const presenter = read("ModalDialogPresenter.cs");
-const windowCode = read("MainWindow.xaml.cs");
+const windowCode = read("MainWindow.xaml.cs") + read("MainWindow.Workspaces.cs");
 
 function csharpFiles(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

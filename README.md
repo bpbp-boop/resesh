@@ -57,7 +57,14 @@ semantic-version tag such as `v1.2.3`.
 
 ```
 dotnet test tests/Core.Tests
+dotnet test tests/AppLogic.Tests
+dotnet test tests/Terminal.Tests -p:Platform=x64
 ```
+
+The app-logic tests execute the production view models without a WinUI window. They cover
+live tab ownership and cleanup. Core tests cover connection cancellation, failed writes,
+host-key recovery, and exact workspace pane measurements. JavaScript source checks remain
+useful for UI wiring; they do not replace interactive UI tests.
 
 ## Data locations
 

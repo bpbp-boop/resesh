@@ -47,6 +47,12 @@ jobs:
           --
           RunConfiguration.MaxCpuCount=1
 
+      - name: Run app logic tests
+        run: dotnet test tests/AppLogic.Tests/Resesh.AppLogic.Tests.csproj --configuration Release
+
+      - name: Run terminal .NET tests
+        run: dotnet test tests/Terminal.Tests/Resesh.Terminal.Tests.csproj --configuration Release -p:Platform=x64
+
       - name: Run terminal tests
         shell: pwsh
         run: |

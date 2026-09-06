@@ -1,4 +1,4 @@
-﻿using Microsoft.UI.Dispatching;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Resesh.App.Controls;
@@ -33,6 +33,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     private readonly TerminalSurface _terminal = TerminalSurfaceFactory.CreateLive();
     private readonly ProgressRing _spinner = new() { IsActive = false, Width = 48, Height = 48 };
 
+    private TerminalConnectionLifetime _connection = new();
     private ITerminalBackend? _backend;
     private SshTerminalSession? _ssh; // set when _backend is the SSH implementation
     private bool _connecting;
@@ -522,10 +523,10 @@ public sealed class TerminalTabView : Grid, IDisposable
         _workingDirectory.Reset();
 
         // Tear down the previous (dead) backend so its blocked reader thread is released.
-        var stale = _backend;
+        _connection.Dispose();
+        _connection = new TerminalConnectionLifetime();
         _backend = null;
         _ssh = null;
-        stale?.Stop();
 
         try
         {
@@ -537,8 +538,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         finally
         {
             _connecting = false;
-            _spinner.IsActive = false;
-            if (!_tab.IsLocked && _rewindPlayer is null)
+            if (!_disposed) _spinner.IsActive = false;
+            if (!_disposed && !_connection.Token.IsCancellationRequested && !_tab.IsLocked && _rewindPlayer is null)
             {
                 _terminal.SetInputEnabled(true);
                 if (_tab.State == TabConnectionState.Connected)
@@ -551,6 +552,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// tab open, reports the exit code neutrally, and Enter/Restart relaunches.</summary>
     private async Task LaunchLocalAsync(bool isReconnect)
     {
+        var connection = _connection;
         try
         {
             if (isReconnect)
@@ -559,12 +561,17 @@ public sealed class TerminalTabView : Grid, IDisposable
             var local = new LocalTerminalSession();
             local.OutputReceived += data =>
             {
+                if (connection.Token.IsCancellationRequested) return;
                 _terminal.WriteOutput(data);
                 if (!_tab.IsActive && !_tab.HasUnseenOutput)
-                    DispatcherQueue.TryEnqueue(() => _tab.NotifyOutputActivity());
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
+                    });
             };
             local.Exited += code => DispatcherQueue.TryEnqueue(() =>
             {
+                if (connection.Token.IsCancellationRequested) return;
                 _tab.ExitCode = code;
                 _tab.State = TabConnectionState.Exited;
                 _tab.ConnectionSummary = "";
@@ -576,7 +583,8 @@ public sealed class TerminalTabView : Grid, IDisposable
             var rows = _terminal.Rows;
             _backendColumns = cols;
             _backendRows = rows;
-            await Task.Run(() => local.Start(Session, cols, rows));
+            await connection.StartAsync(local, () => local.Start(Session, cols, rows));
+            connection.Token.ThrowIfCancellationRequested();
 
             _backend = local;
             ResizeBackend(_terminal.Columns, _terminal.Rows);
@@ -587,14 +595,17 @@ public sealed class TerminalTabView : Grid, IDisposable
             _terminal.FocusTerminal();
             StartAgentPolling();
         }
+        catch (OperationCanceledException) when (connection.Token.IsCancellationRequested) { }
         catch (LocalSessionException ex)
         {
+            if (connection.Token.IsCancellationRequested) return;
             // Launch failure (unlike a normal exit) is an error state — red dot, warning text.
             _tab.State = TabConnectionState.Disconnected;
             _terminal.NotifyDisconnected(ex.Message, action: "restart");
         }
         catch (Exception ex)
         {
+            if (connection.Token.IsCancellationRequested) return;
             _tab.State = TabConnectionState.Disconnected;
             _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}", action: "restart");
         }
@@ -602,6 +613,7 @@ public sealed class TerminalTabView : Grid, IDisposable
 
     private async Task ConnectSshAsync(bool isReconnect)
     {
+        var connection = _connection;
         try
         {
             if (string.IsNullOrWhiteSpace(Session.Username))
@@ -612,7 +624,8 @@ public sealed class TerminalTabView : Grid, IDisposable
                 return;
             }
 
-            var resolved = await ResolveSshCredentialAsync();
+            var resolved = await ResolveSshCredentialAsync(connection.Token);
+            connection.Token.ThrowIfCancellationRequested();
             if (resolved is null)
             {
                 _tab.State = TabConnectionState.Disconnected;
@@ -629,17 +642,22 @@ public sealed class TerminalTabView : Grid, IDisposable
 
             var session = new SshTerminalSession(_knownHosts)
             {
-                HostKeyDecision = info => ConfirmHostKeyBlocking(info),
+                HostKeyDecision = info => ConfirmHostKeyBlocking(info, connection.Token),
             };
             session.OutputReceived += data =>
             {
+                if (connection.Token.IsCancellationRequested) return;
                 _terminal.WriteOutput(data);
                 // Benign cross-thread reads: worst case is one redundant enqueue.
                 if (!_tab.IsActive && !_tab.HasUnseenOutput)
-                    DispatcherQueue.TryEnqueue(() => _tab.NotifyOutputActivity());
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
+                    });
             };
             session.Closed += ex => DispatcherQueue.TryEnqueue(() =>
             {
+                if (connection.Token.IsCancellationRequested) return;
                 _tab.State = TabConnectionState.Disconnected;
                 _tab.ConnectionSummary = "";
                 EndAgentTracking();
@@ -651,12 +669,14 @@ public sealed class TerminalTabView : Grid, IDisposable
             _backendColumns = cols;
             _backendRows = rows;
             Func<SshTerminalSession, string?>? bootstrapFactory = Session.Persistent
-                ? connected => SelectTmuxBootstrapBlocking(connected, isReconnect)
+                ? connected => SelectTmuxBootstrapBlocking(connected, isReconnect, connection.Token)
                 : null;
-            await Task.Run(() => session.Connect(
+            await connection.StartAsync(session, () => session.Connect(
                 connectionSession, secret, Session.TerminalType, cols, rows,
                 bootstrapCommandFactory: bootstrapFactory,
-                interactiveResponder: PromptKeyboardInteractiveBlocking));
+                interactiveResponder: prompts => PromptKeyboardInteractiveBlocking(prompts, connection.Token),
+                cancellationToken: connection.Token));
+            connection.Token.ThrowIfCancellationRequested();
 
             _backend = session;
             _ssh = session;
@@ -678,25 +698,30 @@ public sealed class TerminalTabView : Grid, IDisposable
         }
         catch (SshSessionException ex)
         {
+            if (connection.Token.IsCancellationRequested) return;
             _tab.State = TabConnectionState.Disconnected;
             _terminal.NotifyDisconnected(ex.Message);
         }
         catch (OperationCanceledException)
         {
+            if (connection.Token.IsCancellationRequested) return;
             _tab.State = TabConnectionState.Disconnected;
             _terminal.NotifyDisconnected("Connection cancelled.");
         }
         catch (Exception ex)
         {
+            if (connection.Token.IsCancellationRequested) return;
             _tab.State = TabConnectionState.Disconnected;
             _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}");
         }
     }
 
     /// <summary>Runs after SSH authentication and before the interactive shell opens.</summary>
-    private string SelectTmuxBootstrapBlocking(SshTerminalSession connected, bool isReconnect)
+    private string SelectTmuxBootstrapBlocking(SshTerminalSession connected, bool isReconnect, CancellationToken token)
     {
+        token.ThrowIfCancellationRequested();
         var result = connected.RunCommand(TmuxPersistence.DiscoveryCommand());
+        token.ThrowIfCancellationRequested();
         var remoteSessions = result is { Success: true }
             ? TmuxPersistence.ParseSessions(result.Output, Session.Id)
             : [];
@@ -716,20 +741,21 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             0 => newSlot,
             1 => available[0].Slot,
-            _ => SelectTmuxSessionBlocking(available, newSlot),
+            _ => SelectTmuxSessionBlocking(available, newSlot, token),
         };
         _tab.TmuxSlot = selectedSlot;
         return TmuxPersistence.BootstrapCommand(Session.Id, selectedSlot);
     }
 
     /// <summary>Marshals tmux selection onto the UI thread while the SSH worker waits.</summary>
-    private int SelectTmuxSessionBlocking(IReadOnlyList<TmuxSessionInfo> sessions, int newSlot)
+    private int SelectTmuxSessionBlocking(IReadOnlyList<TmuxSessionInfo> sessions, int newSlot, CancellationToken token)
     {
         var tcs = new TaskCompletionSource<int?>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!DispatcherQueue.TryEnqueue(async () =>
         {
             try
             {
+                if (token.IsCancellationRequested) return;
                 tcs.TrySetResult(await ConnectDialogs.SelectTmuxSessionAsync(XamlRoot, sessions, newSlot));
             }
             catch (Exception ex)
@@ -740,20 +766,20 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             throw new OperationCanceledException("The tmux session selector could not open.");
         }
-        return tcs.Task.GetAwaiter().GetResult()
+        return tcs.Task.WaitAsync(token).GetAwaiter().GetResult()
             ?? throw new OperationCanceledException("tmux session selection was cancelled.");
     }
 
     private sealed record ResolvedSshCredential(Session Session, string Secret);
 
     /// <summary>Resolves a session password or a registered key plus its shared passphrase.</summary>
-    private async Task<ResolvedSshCredential?> ResolveSshCredentialAsync()
+    private async Task<ResolvedSshCredential?> ResolveSshCredentialAsync(CancellationToken token)
     {
         if (Session.AuthMethod == AuthMethod.None)
             return new ResolvedSshCredential(Session, "");
 
         if (Session.AuthMethod == AuthMethod.PrivateKey)
-            return await ResolvePrivateKeyAsync();
+            return await ResolvePrivateKeyAsync(token);
 
         var stored = _credentials.Read(Session.Id);
         if (!string.IsNullOrEmpty(stored))
@@ -762,7 +788,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         var result = await ConnectDialogs.PromptCredentialAsync(
             XamlRoot,
             $"Connect to {Session.Name}",
-            $"Password for {Session.Username}@{Session.Host}");
+            $"Password for {Session.Username}@{Session.Host}").WaitAsync(token);
+        token.ThrowIfCancellationRequested();
         if (result is not { } cred)
             return null;
 
@@ -771,7 +798,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         return new ResolvedSshCredential(Session, cred.Secret);
     }
 
-    private async Task<ResolvedSshCredential?> ResolvePrivateKeyAsync()
+    private async Task<ResolvedSshCredential?> ResolvePrivateKeyAsync(CancellationToken token)
     {
         if (Session.PrivateKeyId is not { } keyId || _sshKeys.Find(keyId) is not { } key)
             throw new InvalidOperationException("The session does not have a registered SSH key.");
@@ -786,7 +813,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         SshKeyReference validated;
         if (key.IsEncrypted == true && string.IsNullOrEmpty(secret))
         {
-            var prompted = await PromptAndValidateKeyAsync(key);
+            var prompted = await PromptAndValidateKeyAsync(key, token);
             if (prompted is null)
                 return null;
             (validated, secret) = prompted.Value;
@@ -795,10 +822,10 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             try
             {
-                validated = await ValidateKeyAsync(keyId, secret);
+                validated = await ValidateKeyAsync(keyId, secret, token);
                 if (validated.IsEncrypted == true && string.IsNullOrEmpty(secret))
                 {
-                    var prompted = await PromptAndValidateKeyAsync(validated);
+                    var prompted = await PromptAndValidateKeyAsync(validated, token);
                     if (prompted is null)
                         return null;
                     (validated, secret) = prompted.Value;
@@ -807,7 +834,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             catch (SshKeyPassphraseException)
             {
                 var prompted = await PromptAndValidateKeyAsync(
-                    key, "The stored passphrase was not accepted.");
+                    key, token, "The stored passphrase was not accepted.");
                 if (prompted is null)
                     return null;
                 (validated, secret) = prompted.Value;
@@ -820,19 +847,21 @@ public sealed class TerminalTabView : Grid, IDisposable
     }
 
     private async Task<(SshKeyReference Key, string Secret)?> PromptAndValidateKeyAsync(
-        SshKeyReference key, string? notice = null)
+        SshKeyReference key, CancellationToken token, string? notice = null)
     {
         while (true)
         {
             var prompted = await ConnectDialogs.PromptCredentialAsync(
                 XamlRoot,
                 $"Unlock {key.Name}",
-                notice is null ? $"Passphrase for {key.Name}" : $"{notice} Passphrase for {key.Name}");
+                notice is null ? $"Passphrase for {key.Name}" : $"{notice} Passphrase for {key.Name}").WaitAsync(token);
+            token.ThrowIfCancellationRequested();
             if (prompted is null)
                 return null;
             try
             {
-                var validated = await ValidateKeyAsync(key.Id, prompted.Value.Secret);
+                var validated = await ValidateKeyAsync(key.Id, prompted.Value.Secret, token);
+                token.ThrowIfCancellationRequested();
                 if (prompted.Value.Save && prompted.Value.Secret.Length > 0)
                     _credentials.WriteKey(key.Id, prompted.Value.Secret);
                 return (validated, prompted.Value.Secret);
@@ -844,47 +873,49 @@ public sealed class TerminalTabView : Grid, IDisposable
         }
     }
 
-    private async Task<SshKeyReference> ValidateKeyAsync(Guid keyId, string? passphrase)
+    private async Task<SshKeyReference> ValidateKeyAsync(Guid keyId, string? passphrase, CancellationToken token)
     {
         try
         {
-            return await Task.Run(() => _sshKeys.Validate(keyId, passphrase));
+            return await Task.Run(() => _sshKeys.Validate(keyId, passphrase), token).WaitAsync(token);
         }
         catch (SshKeyChangedException change)
         {
-            if (!await ConnectDialogs.ConfirmChangedPrivateKeyAsync(XamlRoot, change))
+            if (!await ConnectDialogs.ConfirmChangedPrivateKeyAsync(XamlRoot, change).WaitAsync(token))
                 throw new OperationCanceledException("SSH key replacement was not accepted.");
-            return await Task.Run(() => _sshKeys.Validate(keyId, passphrase, acceptChanged: true));
+            return await Task.Run(() => _sshKeys.Validate(keyId, passphrase, acceptChanged: true), token).WaitAsync(token);
         }
     }
 
     /// <summary>Marshals the host-key decision onto the UI thread; called from the connect thread.</summary>
-    private bool ConfirmHostKeyBlocking(HostKeyInfo info)
+    private bool ConfirmHostKeyBlocking(HostKeyInfo info, CancellationToken token)
     {
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        DispatcherQueue.TryEnqueue(async () =>
+        if (!DispatcherQueue.TryEnqueue(async () =>
         {
             try
             {
+                if (token.IsCancellationRequested) return;
                 tcs.TrySetResult(await ConnectDialogs.ConfirmHostKeyAsync(XamlRoot, info));
             }
             catch (Exception ex)
             {
                 tcs.TrySetException(ex);
             }
-        });
-        return tcs.Task.GetAwaiter().GetResult();
+        })) throw new OperationCanceledException("The host-key dialog could not open.");
+        return tcs.Task.WaitAsync(token).GetAwaiter().GetResult();
     }
 
     /// <summary>Marshals server keyboard-interactive challenges onto the UI thread.</summary>
     private IReadOnlyList<string>? PromptKeyboardInteractiveBlocking(
-        IReadOnlyList<KeyboardInteractivePrompt> prompts)
+        IReadOnlyList<KeyboardInteractivePrompt> prompts, CancellationToken token)
     {
         var tcs = new TaskCompletionSource<IReadOnlyList<string>?>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!DispatcherQueue.TryEnqueue(async () =>
         {
             try
             {
+                if (token.IsCancellationRequested) return;
                 tcs.TrySetResult(await ConnectDialogs.PromptKeyboardInteractiveAsync(
                     XamlRoot, $"Authenticate to {Session.Name}", prompts));
             }
@@ -896,7 +927,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             return null;
         }
-        return tcs.Task.GetAwaiter().GetResult();
+        return tcs.Task.WaitAsync(token).GetAwaiter().GetResult();
     }
 
     /// <summary>Applies the app chrome theme and this session's effective terminal theme
@@ -957,10 +988,9 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// notice. Stopping a local shell kills its whole process tree via the job object.</summary>
     public void DisconnectLocal()
     {
-        var backend = _backend;
+        _connection.Dispose();
         _backend = null;
         _ssh = null;
-        backend?.Stop();
         _tab.ConnectionSummary = "";
         EndAgentTracking();
         if (Session.IsLocal)
@@ -1255,9 +1285,12 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// (prompting only if the tab never connected) and the shared host-key trust.</summary>
     private async Task<SftpSession> CreateSftpSessionAsync()
     {
+        var connection = _connection;
+        connection.Token.ThrowIfCancellationRequested();
         var resolved = _resolvedSshSession is { } active
             ? new ResolvedSshCredential(active, _secret ?? "")
-            : await ResolveSshCredentialAsync();
+            : await ResolveSshCredentialAsync(connection.Token);
+        connection.Token.ThrowIfCancellationRequested();
         if (resolved is null)
             throw new SshSessionException(SshFailureKind.AuthenticationFailed, "No credential provided.");
         var (session, secret) = resolved;
@@ -1266,7 +1299,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         var sftp = new SftpSession(_knownHosts);
         try
         {
-            await Task.Run(() => sftp.Connect(session, secret, PromptKeyboardInteractiveBlocking));
+            await Task.Run(() => sftp.Connect(session, secret, prompts => PromptKeyboardInteractiveBlocking(prompts, connection.Token)));
+            connection.Token.ThrowIfCancellationRequested();
         }
         catch
         {
@@ -1280,7 +1314,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     {
         var width = ColumnDefinitions[2].Width.Value;
         if (width > 100 && Math.Abs(width - (App.Settings.Current.FilePaneWidth ?? 0)) > 1)
-            App.Settings.Save(App.Settings.Current with { FilePaneWidth = width });
+            App.SaveSettings(App.Settings.Current with { FilePaneWidth = width });
     }
 
     // ---- lock overlay (per plan: obscure output, block input, buffer continues) ----
@@ -1341,21 +1375,21 @@ public sealed class TerminalTabView : Grid, IDisposable
         _disposed = true;
         _agentPoll?.Stop();
         _agentPoll = null;
-        if (IsFilePaneOpen)
-            SaveFilePaneWidth();
-        _filePane?.Dispose();
+        CleanupActions.Run(App.ReportRecoverableError,
+            () => _connection.Dispose(),
+            () => { if (IsFilePaneOpen) SaveFilePaneWidth(); },
+            () => _filePane?.Dispose(),
+            () => _sshfsMount?.Dispose(),
+            () => _rewindPlayer?.Dispose(),
+            () => _terminal.Dispose(),
+            () => _capture?.Dispose());
         _filePane = null;
-        _sshfsMount?.Dispose(); // killing the sshfs process unmounts the drive
         _sshfsMount = null;
-        _rewindPlayer?.Dispose();
         _rewindPlayer = null;
-        // Plan-mandated order: reader â†’ shell â†’ client (inside Stop) â†’ WebView2.
-        // For local tabs, Stop kills the process tree via the job object — no orphans.
-        _backend?.Stop();
         _backend = null;
         _ssh = null;
-        _terminal.Dispose();
-        _capture?.Dispose();
         _capture = null;
+        _secret = null;
+        _resolvedSshSession = null;
     }
 }

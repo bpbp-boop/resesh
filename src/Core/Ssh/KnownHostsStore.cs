@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Resesh.Core.Storage;
 
 namespace Resesh.Core.Ssh;
 
@@ -23,6 +24,10 @@ public sealed class KnownHostsStore
     private readonly object _gate = new();
     private Dictionary<string, KnownHostEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
 
+    public string? LoadWarning { get; private set; }
+    public string? LoadError { get; private set; }
+    private bool _preserveBackup;
+
     public KnownHostsStore(string path)
     {
         _path = path;
@@ -35,20 +40,29 @@ public sealed class KnownHostsStore
     {
         lock (_gate)
         {
+            LoadWarning = null;
+            LoadError = null;
+            _preserveBackup = false;
             try
             {
-                if (File.Exists(_path))
-                {
-                    var loaded = JsonSerializer.Deserialize<Dictionary<string, KnownHostEntry>>(
-                        File.ReadAllText(_path), JsonOptions);
-                    _entries = loaded is null
-                        ? new(StringComparer.OrdinalIgnoreCase)
-                        : new(loaded, StringComparer.OrdinalIgnoreCase);
-                }
+                _entries = Read(_path);
             }
-            catch (Exception e) when (e is JsonException or IOException)
+            catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException)
             {
-                _entries = new(StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    _entries = Read(_path + ".bak");
+                    _preserveBackup = true;
+                    LoadWarning = "Accepted host keys were recovered from the backup file.";
+                }
+                catch (Exception backupError) when (backupError is JsonException or IOException or UnauthorizedAccessException)
+                {
+                    if (error is (FileNotFoundException or DirectoryNotFoundException)
+                        && backupError is (FileNotFoundException or DirectoryNotFoundException))
+                        _entries = new(StringComparer.OrdinalIgnoreCase);
+                    else
+                        LoadError = $"Accepted host keys could not be loaded. SSH is blocked. Restore {_path} from a trusted backup and restart resesh. {error.Message}";
+                }
             }
         }
     }
@@ -57,6 +71,7 @@ public sealed class KnownHostsStore
     {
         lock (_gate)
         {
+            EnsureAvailable();
             if (!_entries.TryGetValue(Key(host, port), out var entry))
                 return HostKeyVerdict.Unknown;
             return entry.Sha256 == sha256 && entry.KeyType.Equals(keyType, StringComparison.OrdinalIgnoreCase)
@@ -68,7 +83,10 @@ public sealed class KnownHostsStore
     public KnownHostEntry? Lookup(string host, int port)
     {
         lock (_gate)
+        {
+            EnsureAvailable();
             return _entries.GetValueOrDefault(Key(host, port));
+        }
     }
 
     /// <summary>A stable copy for backup export.</summary>
@@ -77,6 +95,7 @@ public sealed class KnownHostsStore
         get
         {
             lock (_gate)
+                EnsureAvailable();
                 return new Dictionary<string, KnownHostEntry>(_entries, StringComparer.OrdinalIgnoreCase);
         }
     }
@@ -90,15 +109,17 @@ public sealed class KnownHostsStore
     {
         lock (_gate)
         {
+            EnsureAvailable();
+            var updated = new Dictionary<string, KnownHostEntry>(_entries, StringComparer.OrdinalIgnoreCase);
             var added = 0;
             foreach (var (key, value) in entries)
             {
-                if (_entries.TryAdd(key, value))
+                if (updated.TryAdd(key, value))
                     added++;
             }
 
             if (added > 0)
-                Save();
+                Save(updated);
             return added;
         }
     }
@@ -107,20 +128,33 @@ public sealed class KnownHostsStore
     {
         lock (_gate)
         {
-            _entries[Key(host, port)] = new KnownHostEntry(keyType, sha256);
-            Save();
+            EnsureAvailable();
+            var updated = new Dictionary<string, KnownHostEntry>(_entries, StringComparer.OrdinalIgnoreCase);
+            updated[Key(host, port)] = new KnownHostEntry(keyType, sha256);
+            Save(updated);
         }
     }
 
-    private void Save()
+    private void Save(Dictionary<string, KnownHostEntry> entries)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var tmpPath = _path + ".tmp";
-        File.WriteAllText(tmpPath, JsonSerializer.Serialize(_entries, JsonOptions));
-        if (File.Exists(_path))
-            File.Replace(tmpPath, _path, null);
-        else
-            File.Move(tmpPath, _path);
+        AtomicFile.Write(_path, JsonSerializer.Serialize(entries, JsonOptions), _preserveBackup);
+        _entries = entries;
+        _preserveBackup = false;
+    }
+
+    private void EnsureAvailable()
+    {
+        if (LoadError is not null) throw new IOException(LoadError);
+    }
+
+    private static Dictionary<string, KnownHostEntry> Read(string path)
+    {
+        var entries = JsonSerializer.Deserialize<Dictionary<string, KnownHostEntry>>(
+            File.ReadAllText(path), JsonOptions) ?? throw new JsonException("The host-key file is empty.");
+        if (entries.Any(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null
+            || string.IsNullOrWhiteSpace(pair.Value.KeyType) || string.IsNullOrWhiteSpace(pair.Value.Sha256)))
+            throw new JsonException("The host-key file contains an invalid entry.");
+        return new(entries, StringComparer.OrdinalIgnoreCase);
     }
 
     private static string Key(string host, int port) => $"{host}:{port}";

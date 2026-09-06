@@ -60,6 +60,8 @@ public sealed class WorkspaceStore
     private readonly object _gate = new();
     private List<Workspace> _workspaces = [];
     private WorkspaceLayout? _lastLayout;
+    private bool _preserveBackup;
+    public string? LoadWarning { get; private set; }
 
     public WorkspaceStore(string path)
     {
@@ -86,7 +88,13 @@ public sealed class WorkspaceStore
     {
         lock (_gate)
         {
-            var data = TryRead(_path) ?? TryRead(_bakPath) ?? new WorkspaceStoreData { Workspaces = [] };
+            var primary = TryRead(_path);
+            var backup = primary is null ? TryRead(_bakPath) : null;
+            _preserveBackup = primary is null && backup is not null;
+            LoadWarning = _preserveBackup ? "Workspaces were recovered from the backup file."
+                : primary is null && (File.Exists(_path) || File.Exists(_bakPath))
+                    ? "Workspaces could not be loaded. Restore the workspace file from a backup." : null;
+            var data = primary ?? backup ?? new WorkspaceStoreData { Workspaces = [] };
             _workspaces = data.Workspaces!;
             _lastLayout = data.LastLayout;
         }
@@ -108,8 +116,7 @@ public sealed class WorkspaceStore
                 Groups = normalized.Groups,
                 Layout = normalized.Layout,
             };
-            _workspaces.Add(workspace);
-            Save();
+            Commit([.. _workspaces, workspace], _lastLayout);
             return workspace;
         }
     }
@@ -126,8 +133,9 @@ public sealed class WorkspaceStore
             }
 
             var index = FindIndex(id);
-            _workspaces[index] = _workspaces[index] with { Name = name };
-            Save();
+            var updated = _workspaces.ToList();
+            updated[index] = updated[index] with { Name = name };
+            Commit(updated, _lastLayout);
         }
     }
 
@@ -137,12 +145,13 @@ public sealed class WorkspaceStore
         {
             var index = FindIndex(id);
             var normalized = NormalizeLayout(layout);
-            _workspaces[index] = _workspaces[index] with
+            var updated = _workspaces.ToList();
+            updated[index] = updated[index] with
             {
                 Groups = normalized.Groups,
                 Layout = normalized.Layout,
             };
-            Save();
+            Commit(updated, _lastLayout);
         }
     }
 
@@ -150,9 +159,10 @@ public sealed class WorkspaceStore
     {
         lock (_gate)
         {
-            var removed = _workspaces.RemoveAll(workspace => workspace.Id == id) > 0;
+            var updated = _workspaces.Where(workspace => workspace.Id != id).ToList();
+            var removed = updated.Count != _workspaces.Count;
             if (removed)
-                Save();
+                Commit(updated, _lastLayout);
             return removed;
         }
     }
@@ -171,8 +181,7 @@ public sealed class WorkspaceStore
             if (_workspaces.Select(workspace => workspace.Id).SequenceEqual(orderedIds))
                 return;
 
-            _workspaces = orderedIds.Select(id => byId[id]).ToList();
-            Save();
+            Commit(orderedIds.Select(id => byId[id]).ToList(), _lastLayout);
         }
     }
 
@@ -180,8 +189,7 @@ public sealed class WorkspaceStore
     {
         lock (_gate)
         {
-            _lastLayout = NormalizeLayout(layout);
-            Save();
+            Commit(_workspaces, NormalizeLayout(layout));
         }
     }
 
@@ -201,11 +209,13 @@ public sealed class WorkspaceStore
             : throw new ArgumentException("Workspace name cannot be empty.", nameof(name));
     }
 
-    private void Save() => WriteAtomic(_path, new WorkspaceStoreData
+    private void Commit(List<Workspace> workspaces, WorkspaceLayout? lastLayout)
     {
-        Workspaces = _workspaces,
-        LastLayout = _lastLayout,
-    });
+        WriteAtomic(_path, new WorkspaceStoreData { Workspaces = workspaces, LastLayout = lastLayout }, _preserveBackup);
+        _preserveBackup = false;
+        _workspaces = workspaces;
+        _lastLayout = lastLayout;
+    }
 
     private static WorkspaceStoreData? TryRead(string path)
     {
@@ -213,7 +223,7 @@ public sealed class WorkspaceStore
         {
             return File.Exists(path) ? ParsePayload(File.ReadAllBytes(path)) : null;
         }
-        catch (Exception exception) when (exception is InvalidDataException or IOException)
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
         {
             return null;
         }
@@ -434,16 +444,9 @@ public sealed class WorkspaceStore
         };
     }
 
-    private static void WriteAtomic(string path, WorkspaceStoreData data)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var tempPath = path + ".tmp";
-        File.WriteAllText(tempPath, JsonSerializer.Serialize(data, JsonOptions));
-        if (File.Exists(path))
-            File.Replace(tempPath, path, path + ".bak");
-        else
-            File.Move(tempPath, path);
-    }
+    private static void WriteAtomic(string path, WorkspaceStoreData data, bool preserveBackup = false) =>
+        AtomicFile.Write(path, JsonSerializer.Serialize(data, JsonOptions), preserveBackup);
+
 }
 
 internal sealed record WorkspaceStoreData

@@ -191,7 +191,7 @@ test("the status bar is visible by default and follows the saved setting", () =>
 
 test("saving rebases only the dialog's fields onto the live settings", () => {
   const method = windowCode.match(/private async Task ShowSettingsAsync[\s\S]*?\n    \}/)?.[0] ?? "";
-  assert.match(method, /App\.Settings\.Save\(App\.Settings\.Current with/);
+  assert.match(method, /App\.SaveSettings\(App\.Settings\.Current with/);
   assert.match(method, /Theme = updated\.Theme/);
   assert.match(method, /AgentAlertSound = updated\.AgentAlertSound/);
   assert.doesNotMatch(windowCode, /GlobalSettingsAction/);

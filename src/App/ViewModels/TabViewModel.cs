@@ -26,6 +26,7 @@ public enum TabConnectionState
 /// <summary>One open tab: a session plus its terminal view and connection state.</summary>
 public sealed class TabViewModel : ObservableObject
 {
+    private readonly ViewModelEnvironment _environment;
     private readonly Guid _tabInstanceId = Guid.NewGuid();
     private Session _session;
     private string? _titleOverride;
@@ -34,20 +35,20 @@ public sealed class TabViewModel : ObservableObject
     private object? _view;
     private string _appTheme;
 
-    public TabViewModel(Session session)
-        : this(session, isOnboarding: false)
+    public TabViewModel(Session session, ViewModelEnvironment environment)
+        : this(session, environment, isOnboarding: false)
     {
     }
 
-    private TabViewModel(Session session, bool isOnboarding)
+    private TabViewModel(Session session, ViewModelEnvironment environment, bool isOnboarding)
     {
+        _environment = environment;
         _session = session;
-        _appTheme = App.Settings.Current.Theme;
-        _appTheme = App.ResolveTheme(_appTheme);
+        _appTheme = environment.ResolveTheme(environment.CurrentTheme());
         IsOnboarding = isOnboarding;
     }
 
-    public static TabViewModel CreateOnboarding() => new(
+    public static TabViewModel CreateOnboarding(ViewModelEnvironment environment) => new(
         new Session
         {
             Id = Guid.Empty,
@@ -55,7 +56,7 @@ public sealed class TabViewModel : ObservableObject
             Kind = SessionKind.Local,
             Local = new LocalTarget(),
         },
-        isOnboarding: true)
+        environment, isOnboarding: true)
     {
         State = TabConnectionState.Playback,
     };
@@ -252,7 +253,7 @@ public sealed class TabViewModel : ObservableObject
         OnPropertyChanged(nameof(AgentTooltip));
     }
 
-    private static bool AgentIconsEnabled => App.Settings.Current.ShowAgentIcons;
+    private bool AgentIconsEnabled => _environment.ShowAgentIcons();
 
     /// <summary>The key passed to compiled function bindings in the tab template. This must
     /// stay non-null: generated x:Bind code skips function updates when a nullable string
@@ -344,7 +345,7 @@ public sealed class TabViewModel : ObservableObject
     public void ApplyAppTheme(string theme)
     {
         _appTheme = theme;
-        _appTheme = App.ResolveTheme(_appTheme);
+        _appTheme = _environment.ResolveTheme(_appTheme);
         OnPropertyChanged(nameof(AppTheme));
     }
 
