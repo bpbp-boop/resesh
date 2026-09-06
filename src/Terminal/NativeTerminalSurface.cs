@@ -725,7 +725,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         }
     }
 
-    public async Task ShowReplayAsync(
+    public override async Task ShowReplayAsync(
         int columns,
         int rows,
         ReadOnlyMemory<byte> keyframe,
@@ -735,7 +735,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         await RestoreReplayAsync(generation, columns, rows, keyframe, events);
     }
 
-    public async Task LoadPlaybackAsync(
+    public override async Task LoadPlaybackAsync(
         int columns,
         int rows,
         IReadOnlyList<TerminalTimedReplayEvent> events)
@@ -795,7 +795,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
         }
     }
 
-    public async Task SeekPlaybackAsync(double time)
+    public override async Task SeekPlaybackAsync(double time)
     {
         _pendingPlaybackSeek = Math.Max(0, time);
         if (_playbackEvents is not { } events || _playbackFrames is not { Count: > 0 } frames)

@@ -70,6 +70,9 @@ public abstract class TerminalSurface : Grid, IDisposable
         int? scrollback = null);
     public abstract void ApplyHighlights(IReadOnlyList<object> rules);
     public abstract Task<(string Context, string? Platform)?> RequestPromptContextAsync();
+    public abstract Task ShowReplayAsync(int columns, int rows, ReadOnlyMemory<byte> keyframe, IReadOnlyList<TerminalReplayEvent> events);
+    public abstract Task LoadPlaybackAsync(int columns, int rows, IReadOnlyList<TerminalTimedReplayEvent> events);
+    public abstract Task SeekPlaybackAsync(double time);
     public abstract void Dispose();
 }
 
@@ -98,15 +101,17 @@ public static class TerminalSurfaceFactory
 {
     public const string SurfaceEnvironmentVariable = "RESESH_TERMINAL_SURFACE";
 
-    /// <summary>Creates the selected live terminal surface.</summary>
-    public static TerminalSurface CreateLive() =>
-        string.Equals(
-            Environment.GetEnvironmentVariable(SurfaceEnvironmentVariable),
-            "native",
-            StringComparison.OrdinalIgnoreCase)
-            ? new NativeTerminalSurface()
-            : new TerminalControl();
+    /// <summary>WebView2 is the default. Native requires a WIP build and an explicit environment setting.</summary>
+    public static TerminalSurface CreateLive()
+    {
+#if NATIVE_TERMINAL_WIP
+        if (string.Equals(Environment.GetEnvironmentVariable(SurfaceEnvironmentVariable),
+            "native", StringComparison.OrdinalIgnoreCase))
+            return new NativeTerminalSurface();
+#endif
+        return new TerminalControl();
+    }
 
-    /// <summary>Playback always uses the exact-snapshot native terminal.</summary>
-    public static TerminalSurface CreatePlayback() => new NativeTerminalSurface();
+    /// <summary>Playback uses the same renderer as live terminals.</summary>
+    public static TerminalSurface CreatePlayback() => CreateLive();
 }

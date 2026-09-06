@@ -12,6 +12,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(EnableNativeTerminalWip)'=='true'">
+    <DefineConstants>$(DefineConstants);NATIVE_TERMINAL_WIP</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Resesh.Terminal.Tests" />
   </ItemGroup>
@@ -22,7 +26,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- xterm.js live terminal fallback assets; recording playback is native-only -->
+    <!-- xterm.js assets for default live terminals, rewind, and recording playback -->
     <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

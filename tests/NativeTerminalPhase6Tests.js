@@ -43,7 +43,7 @@ test("native live capture uses the 10-second or 1-MiB policy", () => {
 });
 
 test("native rewind and asciicast playback seek from generated keyframes", () => {
-  assert.match(factory, /CreatePlayback\(\) => new NativeTerminalSurface\(\)/);
+  assert.match(factory, /CreatePlayback\(\) => CreateLive\(\)/);
   assert.match(player, /TerminalSurfaceFactory\.CreatePlayback\(\)/);
   assert.match(player, /_terminal\.LoadPlaybackAsync/);
   assert.match(player, /_terminal\.ShowReplayAsync/);

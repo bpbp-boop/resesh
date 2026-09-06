@@ -36,7 +36,7 @@
     <Content Include="Assets\AgentIcons\*.svg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(EnableNativeTerminalWip)'=='true'">
     <None Include="..\..\eng\native-terminal.json"
           Link="NativeTerminal\native-terminal.json"
           CopyToOutputDirectory="PreserveNewest"

@@ -56,12 +56,13 @@ test("restore validates a detached read-only candidate before renderer attachmen
   assert.ok(create >= 0 && create < restore && restore < publish && publish < attach && attach < callback);
   assert.match(surface, /ReadOnly: true/);
   assert.match(surface, /catch[\s\S]*?_api\.DestroyTerminal\(candidate\);[\s\S]*?throw;/);
-  assert.match(player, /private readonly NativeTerminalSurface _terminal/);
+  assert.match(player, /private readonly TerminalSurface _terminal/);
 });
 
-test("ANSI and xterm serializer playback paths are absent after cutover", () => {
-  assert.ok(!fs.existsSync(path.join(root, "src", "Terminal", "wwwroot", "addon-serialize.js")));
-  assert.doesNotMatch(html, /SerializeAddon|loadPlayback|seekPlayback|showReplay/);
+test("xterm playback remains available while native snapshots stay independent", () => {
+  assert.ok(fs.existsSync(path.join(root, "src", "Terminal", "wwwroot", "addon-serialize.js")));
+  for (const token of ["SerializeAddon", "loadPlayback", "seekPlayback", "showReplay"])
+    assert.ok(html.includes(token));
   assert.doesNotMatch(surface, /CaptureSnapshot|serializer|resesh-native-keyframe-v1/);
 });
 
@@ -75,4 +76,20 @@ test("ABI 3 snapshot patch pin is normalized and exact", () => {
     minor: 1,
     buildId: "terminal-v1.24.11911.0-resesh-abi3.1-history-resize",
   });
+});
+
+
+test("native selection and assets require an explicit WIP build", () => {
+  const factory = read("src", "Terminal", "TerminalSurface.cs");
+  const enabled = factory.match(/#if NATIVE_TERMINAL_WIP([\s\S]*?)#endif/)[1];
+  assert.match(enabled, /Environment.GetEnvironmentVariable/);
+  assert.match(enabled, /return new NativeTerminalSurface\(\)/);
+  assert.doesNotMatch(factory.replace(/#if NATIVE_TERMINAL_WIP[\s\S]*?#endif/, ""), /new NativeTerminalSurface/);
+  assert.match(factory, /return new TerminalControl\(\)/);
+  const project = read("src", "App", "Resesh.App.csproj");
+  const nativeItems = project.match(/<ItemGroup Condition="'\$\(EnableNativeTerminalWip\)'=='true'">([\s\S]*?)<\/ItemGroup>/)[1];
+  assert.match(nativeItems, /Microsoft.Terminal.Control.dll/);
+  const webview = read("src", "Terminal", "TerminalControl.cs");
+  assert.match(webview, /SupportsRewindCapture => true/);
+  assert.match(webview, /case "keyframe":[\s\S]*?KeyframeCaptured\?\.Invoke/);
 });
