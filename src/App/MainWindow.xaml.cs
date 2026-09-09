@@ -129,7 +129,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         if (!showContext)
         {
-            Title = "resesh";
+            Title = ViewModel.ActiveTab is { } tab ? $"{tab.Session.Name} - resesh" : "resesh";
             return;
         }
 

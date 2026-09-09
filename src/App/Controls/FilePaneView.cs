@@ -64,6 +64,8 @@ public sealed class FilePaneView : UserControl, IDisposable
     private string _currentPath = "/";
     private bool _busy;
     private CancellationTokenSource? _opCts;
+    private readonly TransferProgressBuffer _transferProgress = new();
+    private readonly DispatcherTimer _transferTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
     private RemoteFileEntry? _menuEntry;
     private bool _disposed;
 
@@ -93,6 +95,7 @@ public sealed class FilePaneView : UserControl, IDisposable
         _connectFactory = connectFactory;
         _openInExplorer = openInExplorer;
         _localFiles = localFiles;
+        _transferTimer.Tick += (_, _) => RenderTransferProgress();
         _pathBox.PlaceholderText = localFiles is null ? "/" : @"C:\";
         // Compact rows in the codebase's tree style (default ListViewItems are 40px tall).
         var itemStyle = new Style(typeof(ListViewItem));
@@ -543,6 +546,8 @@ public sealed class FilePaneView : UserControl, IDisposable
         }
         _busy = true;
         _opCts = new CancellationTokenSource();
+        _transferProgress.Start();
+        _transferTimer.Start();
         try
         {
             var sftp = await EnsureConnectedAsync();
@@ -558,6 +563,8 @@ public sealed class FilePaneView : UserControl, IDisposable
         }
         finally
         {
+            _transferTimer.Stop();
+            _transferProgress.Stop();
             _busy = false;
             _opCts.Dispose();
             _opCts = null;
@@ -573,23 +580,29 @@ public sealed class FilePaneView : UserControl, IDisposable
 
     private void ReportTransfer(string verb, string name, int index, int count, long done, long total)
     {
-        DispatcherQueue.TryEnqueue(() =>
+        // Called for every copy buffer on the worker. Never queue work per chunk.
+        _transferProgress.Report(new(verb, name, index, count, done, total));
+    }
+
+    private void RenderTransferProgress()
+    {
+        if (_disposed || _transferProgress.TakeLatest() is not { } progress)
+            return;
+        var (verb, name, index, count, done, total) = progress;
+        _transferStrip.Visibility = Visibility.Visible;
+        var position = count > 1 ? $" ({index}/{count})" : "";
+        if (total > 0)
         {
-            _transferStrip.Visibility = Visibility.Visible;
-            var position = count > 1 ? $" ({index}/{count})" : "";
-            if (total > 0)
-            {
-                _transferBar.IsIndeterminate = false;
-                _transferBar.Maximum = total;
-                _transferBar.Value = Math.Min(done, total);
-                _transferText.Text = $"{verb} {name}{position} — {FormatSize(done)} / {FormatSize(total)}";
-            }
-            else
-            {
-                _transferBar.IsIndeterminate = true;
-                _transferText.Text = $"{verb} {name}{position}";
-            }
-        });
+            _transferBar.IsIndeterminate = false;
+            _transferBar.Maximum = total;
+            _transferBar.Value = Math.Min(done, total);
+            _transferText.Text = $"{verb} {name}{position} — {FormatSize(done)} / {FormatSize(total)}";
+        }
+        else
+        {
+            _transferBar.IsIndeterminate = true;
+            _transferText.Text = $"{verb} {name}{position}";
+        }
     }
 
     private void ShowStatus(string message, bool isError)
@@ -947,6 +960,8 @@ public sealed class FilePaneView : UserControl, IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        _transferTimer.Stop();
+        _transferProgress.Stop();
         _opCts?.Cancel();
         var sftp = _sftp;
         _sftp = null;
