@@ -48,6 +48,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     private TerminalPlayerView? _rewindPlayer;
     private bool _rewindAvailable;
     private readonly Osc7WorkingDirectoryTracker _workingDirectory = new();
+    private string? _windowsWorkingDirectory;
 
     // Agent awareness (Phase 6.2). One tracker per tab, fed only by this tab's own page
     // and backend — a session cannot describe another tab's agent, whatever it writes.
@@ -172,7 +173,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             CaptureResize(cols, rows);
         });
         _terminal.TitleChanged += title => DispatcherQueue.TryEnqueue(() => _tab.ApplyTerminalTitle(title));
-        _terminal.CommandChanged += text => DispatcherQueue.TryEnqueue(() => _tab.ApplyRunningCommand(text));
+        _terminal.CommandChanged += (text, exact) => DispatcherQueue.TryEnqueue(() => _tab.ApplyRunningCommand(text, exact));
         _terminal.PromptContextChanged += (context, platform) =>
             DispatcherQueue.TryEnqueue(() =>
             {
@@ -183,7 +184,15 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.WorkingDirectoryReported += payload => DispatcherQueue.TryEnqueue(() =>
         {
             if (Osc7WorkingDirectoryParser.TryParse(payload, out var report) && report is not null)
+            {
                 _workingDirectory.Observe(report);
+                _tab.ApplyReportedWorkingDirectory(report);
+            }
+        });
+        _terminal.WindowsWorkingDirectoryReported += payload => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (Session.IsLocal && Osc9WorkingDirectory.TryParse(payload, out var path))
+                _windowsWorkingDirectory = path;
         });
         _terminal.ContextReported += payload => DispatcherQueue.TryEnqueue(() =>
         {
@@ -406,7 +415,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.BellReceived += () =>
             ApplyAgent(tracker => tracker.ObserveEvent(AgentOsc.Bell()));
         _terminal.TitleChanged += title => ApplyAgent(tracker => tracker.ObserveTitle(title));
-        _terminal.CommandChanged += command => ApplyAgent(tracker => tracker.ObserveCommand(command));
+        _terminal.CommandChanged += (command, _) => ApplyAgent(tracker => tracker.ObserveCommand(command));
         _terminal.CommandObserved += command => ApplyAgent(tracker => tracker.ObserveCommand(command));
         _terminal.PromptContextChanged += (_, _) => ApplyAgent(tracker => tracker.ObserveCommand(""));
 
@@ -523,6 +532,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         // Keep the composition terminal visible while progress or credential UI owns input.
         _terminal.SetInputEnabled(false);
         _workingDirectory.Reset();
+        _windowsWorkingDirectory = null;
 
         // Tear down the previous (dead) backend so its blocked reader thread is released.
         _connection.Dispose();
@@ -587,6 +597,8 @@ public sealed class TerminalTabView : Grid, IDisposable
             _backendRows = rows;
             await connection.StartAsync(local, () => local.Start(Session, cols, rows));
             connection.Token.ThrowIfCancellationRequested();
+            if (local.ShellIntegrationMessage is { } integrationMessage)
+                _terminal.WriteNotice(integrationMessage);
 
             _backend = local;
             ResizeBackend(_terminal.Columns, _terminal.Rows);
@@ -642,9 +654,17 @@ public sealed class TerminalTabView : Grid, IDisposable
                 _terminal.WriteDivider();
             _terminal.WriteNotice($"Connecting to {Session.Username}@{Session.Host}:{Session.Port} …");
 
+            // Connect and its integration diagnostics run on the backend worker.
+            // WebView2 notices must be delivered on this view's UI thread.
+            var uiDispatcher = DispatcherQueue;
             var session = new SshTerminalSession(_knownHosts)
             {
                 HostKeyDecision = info => ConfirmHostKeyBlocking(info, connection.Token),
+                ShellIntegrationNotice = message => uiDispatcher.TryEnqueue(() =>
+                {
+                    if (!_disposed && !connection.Token.IsCancellationRequested)
+                        _terminal.WriteNotice(message);
+                }),
             };
             session.OutputReceived += data =>
             {
@@ -739,7 +759,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         // Reconnect keeps the target selected for this tab. If it no longer exists, the
         // normal bootstrap recreates it with the same name.
         if (isReconnect)
-            return TmuxPersistence.BootstrapCommand(Session.Id, _tab.TmuxSlot);
+            return BuildTmuxBootstrap(_tab.TmuxSlot);
 
         var available = remoteSessions
             .Where(remote => !_tmuxSlotsAlreadyOpen.Contains(remote.Slot))
@@ -754,7 +774,14 @@ public sealed class TerminalTabView : Grid, IDisposable
             _ => SelectTmuxSessionBlocking(available, newSlot, token),
         };
         _tab.TmuxSlot = selectedSlot;
-        return TmuxPersistence.BootstrapCommand(Session.Id, selectedSlot);
+        return BuildTmuxBootstrap(selectedSlot);
+
+        string BuildTmuxBootstrap(int slot)
+        {
+            if (remoteSessions.Any(remote => remote.Slot == slot))
+                return TmuxPersistence.ResumeCommand(Session.Id, slot);
+            return connected.CreatePersistentBootstrap(Session.Id, slot, Session.ShellIntegration, token);
+        }
     }
 
     /// <summary>Marshals tmux selection onto the UI thread while the SSH worker waits.</summary>
@@ -1258,6 +1285,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         failure = null;
         var files = new LocalFileSystem(Session.Local?.StartingDirectory);
         var candidates = new List<string>();
+        if (_windowsWorkingDirectory is not null)
+            candidates.Add(_windowsWorkingDirectory);
         if (requestedPrompt is not null)
             candidates.Add(requestedPrompt);
         if (!_workingDirectory.HostMismatch && _workingDirectory.Path is { } reportedPath)

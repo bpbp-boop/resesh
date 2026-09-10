@@ -155,9 +155,9 @@
       brightBlack: "#3b6b58", brightRed: "#ff8585", brightGreen: "#7ee2aa", brightYellow: "#f1d67b", brightBlue: "#86b8ff", brightMagenta: "#dda8fa", brightCyan: "#78e2d2", brightWhite: "#f1fff9"
     },
     "vaporwave": {
-      background: "#12101a", foreground: "#e8e4f0", cursor: "#ff2d95", selectionBackground: "#4b2e83",
-      black: "#1f1a2b", red: "#ff5c8a", green: "#5ef0b7", yellow: "#ffd76e", blue: "#63ddff", magenta: "#ff6ad5", cyan: "#7cf6e8", white: "#e8e4f0",
-      brightBlack: "#6c6482", brightRed: "#ff8aae", brightGreen: "#8dffd0", brightYellow: "#ffe8a3", brightBlue: "#9beaff", brightMagenta: "#ff9be3", brightCyan: "#a9fbf0", brightWhite: "#ffffff"
+      background: "#151925", foreground: "#eeeaf5", cursor: "#ff4fd8", selectionBackground: "#45415e",
+      black: "#29163f", red: "#ff6b9d", green: "#65f5c4", yellow: "#ffd58a", blue: "#a69bff", magenta: "#ff71e5", cyan: "#55e7ef", white: "#eeeaf5",
+      brightBlack: "#9675b3", brightRed: "#ff9cc4", brightGreen: "#9bffde", brightYellow: "#ffe9b5", brightBlue: "#c5baff", brightMagenta: "#ffa1f0", brightCyan: "#9afaff", brightWhite: "#fff5ff"
     }
   };
   function getTheme(id) { return THEMES[id] || DARK_THEME; }
@@ -293,7 +293,13 @@
     [7377, 9, 777].forEach(function (code) {
       if (!term.parser || !term.parser.registerOscHandler) return;
       term.parser.registerOscHandler(code, function (data) {
-        postAgent({ type: "agentOsc", code: code, data: String(data == null ? "" : data).slice(0, 2048) });
+        var payload = String(data == null ? "" : data);
+        if (code === 9 && (payload === "9" || payload.indexOf("9;") === 0)) {
+          if (payload.length <= 4096)
+            postAgent({ type: "windowsWorkingDirectory", data: payload });
+          return true;
+        }
+        postAgent({ type: "agentOsc", code: code, data: payload.slice(0, 2048) });
         return true;
       });
     });
@@ -358,10 +364,11 @@
     // after the Enter, meaning the command already finished (fast commands) or the
     // program titled itself; either way the title stream owns the subtitle now.
     // OSC 133 rides the output stream itself, already ordered against titles — no epoch.
-    ruler.onRunningCommand = function (text, epoch) {
+    ruler.onRunningCommand = function (text, epoch, exact) {
       if (epoch !== undefined && epoch !== titlesSeen) return;
       host.postMessage({
         type: "runningCommand",
+        exact: exact === true,
         text: typeof text === "string" ? text.slice(0, 256) : "",
       });
     };
@@ -788,12 +795,14 @@
         case "setOptions":
           // Live settings changes only — initial options arrive via the init handshake.
           // Theme first, and layout-affecting setters fenced: a throw must not abort the rest.
-          if (typeof msg.theme === "string") term.options.theme = getTheme(msg.theme);
+          if (typeof msg.theme === "string") {
+            term.options.theme = getTheme(msg.theme);
+            document.body.style.background = term.options.theme.background;
+            document.body.classList.toggle("light-ui", isLightTheme(msg.theme));
+            ruler.setTheme(getRuler(msg.theme));
+          }
           if (typeof msg.copyOnSelect === "boolean") copyOnSelect = msg.copyOnSelect;
           if (typeof msg.rightClickPaste === "boolean") rightClickPaste = msg.rightClickPaste;
-          document.body.style.background = term.options.theme.background;
-          document.body.classList.toggle("light-ui", isLightTheme(msg.theme));
-          ruler.setTheme(getRuler(msg.theme));
           try {
             if (typeof msg.scrollback === "number" && msg.scrollback !== term.options.scrollback)
               term.options.scrollback = msg.scrollback;

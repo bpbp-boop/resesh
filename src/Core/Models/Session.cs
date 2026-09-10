@@ -20,6 +20,17 @@ public enum SessionKind
     Local,
 }
 
+/// <summary>Opt-in shell hooks. Automatic detection is supported only for local profiles.</summary>
+public enum ShellIntegrationMode
+{
+    Disabled = 0,
+    Automatic = 1,
+    Bash = 2,
+    Zsh = 3,
+    Fish = 4,
+    PowerShell = 5,
+}
+
 /// <summary>
 /// A local shell target hosted with ConPTY. Executable and arguments are kept separate
 /// (never an opaque command string) so quoting stays unambiguous.
@@ -128,6 +139,10 @@ public sealed record Session
 
     /// <summary>Run the remote shell inside tmux so it survives disconnects (requires tmux on the host).</summary>
     public bool Persistent { get; init; }
+
+    /// <summary>Shell integration for new terminals; disabled for new and legacy profiles.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public ShellIntegrationMode ShellIntegration { get; init; } = ShellIntegrationMode.Disabled;
 
     public string Notes { get; init; } = "";
 

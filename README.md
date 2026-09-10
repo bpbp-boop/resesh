@@ -75,6 +75,33 @@ The manager shows session age, foreground process, current folder, and attached-
 count. Select a shell to **Resume**, or **End Session…** to terminate it after confirmation.
 **Refresh** updates the list. Closing a terminal tab still only detaches its persistent shell.
 
+## Optional shell integration (experimental)
+
+Shell integration adds prompt and command boundaries, exit results, and current-folder
+reports to the existing command marks and file pane. It is **off by default for every
+session**, including existing profiles and imported connections.
+
+- For a local profile, turn on **Enable shell integration (experimental)** in its editor.
+  Recognized Bash, Zsh, Fish, and PowerShell executables are supported. WSL, Command Prompt,
+  and custom command/script launches keep their ordinary startup and show a skip notice.
+- For SSH, select **Shell integration (experimental)** in the session's **Connection**
+  settings: Bash, Zsh, Fish, or PowerShell (Windows). Choose the shell explicitly; keep
+  **Off** for Cisco, Juniper, and other network CLIs. There is no platform discovery probe.
+
+Changes apply to new shells. A resumed persistent shell keeps its original hooks; start a
+new remote session to apply a changed preference. PowerShell integration cannot be combined
+with tmux persistence. PowerShell's effective execution policy still applies and may block
+the script; resesh shows a short notice and leaves the shell usable. To permit locally
+created scripts for a particular local PowerShell profile, append `-ExecutionPolicy` and
+`RemoteSigned` on separate lines in its Arguments box. This affects that terminal process
+and its children; resesh does not change saved user or machine execution policies.
+
+Bundled scripts load after the user's startup configuration without editing profile files.
+SSH setup uses a separate, bounded exec channel and stores the scripts in the remote user's
+cache. Rejected setup falls back to ordinary startup when the connection remains usable.
+See [the implementation and test notes](SHELL_INTEGRATION_PLAN.md) for shell coverage and
+current limitations.
+
 ## Data locations
 
 | What | Where |

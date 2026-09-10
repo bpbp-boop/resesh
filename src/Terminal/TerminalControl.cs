@@ -131,7 +131,7 @@ public sealed class TerminalControl : TerminalSurface
 
     /// <summary>Command the page saw start (ruler discovery / OSC 133); "" = it ended.
     /// Drives the tab's subtitle; the page epoch-gates it against the title stream.</summary>
-    public override event Action<string>? CommandChanged;
+    public override event Action<string, bool>? CommandChanged;
 
     /// <summary>Current location read from a known idle prompt, plus an optional detected
     /// platform key. Examples: a Windows directory or a Nokia MD-CLI cli-path.</summary>
@@ -139,6 +139,7 @@ public sealed class TerminalControl : TerminalSurface
 
     /// <summary>Raw OSC 7 payload. The app validates it before it can select an SFTP path.</summary>
     public override event Action<string>? WorkingDirectoryReported;
+    public override event Action<string>? WindowsWorkingDirectoryReported;
 
     /// <summary>Raw OSC 3008 payload. The app validates this auxiliary context signal.</summary>
     public override event Action<string>? ContextReported;
@@ -333,7 +334,7 @@ public sealed class TerminalControl : TerminalSurface
                     {
                         var runningText = running.GetString() ?? "";
                         TraceHook?.Invoke($"runningCommand: {runningText}");
-                        CommandChanged?.Invoke(runningText);
+                        CommandChanged?.Invoke(runningText, root.TryGetProperty("exact", out var exactCommand) && exactCommand.ValueKind == JsonValueKind.True);
                     }
                     break;
                 case "promptContext":
@@ -348,6 +349,10 @@ public sealed class TerminalControl : TerminalSurface
                 case "workingDirectory":
                     if (root.TryGetProperty("data", out var workingDirectory))
                         WorkingDirectoryReported?.Invoke(workingDirectory.GetString() ?? "");
+                    break;
+                case "windowsWorkingDirectory":
+                    if (root.TryGetProperty("data", out var windowsDirectory))
+                        WindowsWorkingDirectoryReported?.Invoke(windowsDirectory.GetString() ?? "");
                     break;
                 case "osc3008":
                     if (root.TryGetProperty("data", out var context))
@@ -582,7 +587,7 @@ public sealed class TerminalControl : TerminalSurface
         "tokyo-night" => Windows.UI.Color.FromArgb(255, 0x1A, 0x1B, 0x26),
         "catppuccin-mocha" => Windows.UI.Color.FromArgb(255, 0x1E, 0x1E, 0x2E),
         "phthalo-green" => Windows.UI.Color.FromArgb(255, 0x12, 0x35, 0x24),
-        "vaporwave" => Windows.UI.Color.FromArgb(255, 0x12, 0x10, 0x1A),
+        "vaporwave" => Windows.UI.Color.FromArgb(255, 0x15, 0x19, 0x25),
         _ => Windows.UI.Color.FromArgb(255, 0x0C, 0x0C, 0x0C),
     };
 

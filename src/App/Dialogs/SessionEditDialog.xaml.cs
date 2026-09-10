@@ -88,6 +88,14 @@ public sealed partial class SessionEditDialog : ContentDialog
                 // Editable ComboBox resets Text set before it loads; apply it after.
                 TerminalTypeBox.Loaded += (_, _) => TerminalTypeBox.Text = existing.TerminalType;
             PersistentToggle.IsOn = existing.Persistent;
+            ShellIntegrationBox.SelectedIndex = existing.ShellIntegration switch
+            {
+                ShellIntegrationMode.Bash => 1,
+                ShellIntegrationMode.Zsh => 2,
+                ShellIntegrationMode.Fish => 3,
+                ShellIntegrationMode.PowerShell => 4,
+                _ => 0,
+            };
             NotesBox.Text = existing.Notes;
 
             if (existing.Overrides is { } overrides)
@@ -250,6 +258,15 @@ public sealed partial class SessionEditDialog : ContentDialog
         }
 
         var port = double.IsNaN(PortBox.Value) ? 22 : (int)PortBox.Value;
+        if (PersistentToggle.IsOn && ShellIntegrationBox.SelectedIndex == 4)
+        {
+            ValidationText.Text = "PowerShell shell integration requires Persistent session to be off. Persistent sessions use tmux with a POSIX shell.";
+            ValidationText.Visibility = Visibility.Visible;
+            SectionBar.SelectedItem = TerminalSection;
+            PersistentToggle.Focus(FocusState.Programmatic);
+            args.Cancel = true;
+            return;
+        }
         // An all-null overrides object is stored as null so sessions.json stays clean.
         var overrides = new TerminalOverrides
         {
@@ -281,6 +298,14 @@ public sealed partial class SessionEditDialog : ContentDialog
             PassphraseRequired = false,
             TerminalType = string.IsNullOrWhiteSpace(TerminalTypeBox.Text) ? "xterm-256color" : TerminalTypeBox.Text.Trim(),
             Persistent = PersistentToggle.IsOn,
+            ShellIntegration = ShellIntegrationBox.SelectedIndex switch
+            {
+                1 => ShellIntegrationMode.Bash,
+                2 => ShellIntegrationMode.Zsh,
+                3 => ShellIntegrationMode.Fish,
+                4 => ShellIntegrationMode.PowerShell,
+                _ => ShellIntegrationMode.Disabled,
+            },
             Notes = NotesBox.Text,
             ColorTag = ColorChoices[Math.Max(0, ColorBox.SelectedIndex)].Hex,
             Icon = _selectedIcon,

@@ -171,9 +171,10 @@ public sealed class NativeTerminalSurface : TerminalSurface
     public override event Action? QuickConnectRequested;
     public override event Action<int, int>? Ready;
     public override event Action<string>? TitleChanged;
-    public override event Action<string>? CommandChanged;
+    public override event Action<string, bool>? CommandChanged;
     public override event Action<string, string?>? PromptContextChanged;
     public override event Action<string>? WorkingDirectoryReported;
+    public override event Action<string>? WindowsWorkingDirectoryReported;
     public override event Action<string>? ContextReported;
     public override event Action<int, string>? AgentOscReceived;
     public override event Action? BellReceived;
@@ -1130,7 +1131,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
                         if (action == 'C' && !string.IsNullOrWhiteSpace(command))
                         {
                             CommandObserved?.Invoke(command);
-                            CommandChanged?.Invoke(command);
+                            CommandChanged?.Invoke(command, true);
                         }
                         RefreshAnnotations();
                     });
@@ -1178,13 +1179,17 @@ public sealed class NativeTerminalSurface : TerminalSurface
             case 7 when IsValidOscPayload(payload, 2048):
                 DispatcherQueue.TryEnqueue(() => WorkingDirectoryReported?.Invoke(payload));
                 break;
+            case 9 when payload == "9" || payload.StartsWith("9;", StringComparison.Ordinal):
+                if (IsValidOscPayload(payload, 4096))
+                    DispatcherQueue.TryEnqueue(() => WindowsWorkingDirectoryReported?.Invoke(payload));
+                break;
             case 133 when IsValidOscPayload(payload, 4096):
             {
                 var separator = payload.IndexOf(';');
                 var action = separator < 0 ? payload : payload[..separator];
                 _pendingShellMarkAction = action is "A" or "B" or "C" or "D" ? action[0] : null;
                 if (_pendingShellMarkAction == 'D')
-                    DispatcherQueue.TryEnqueue(() => CommandChanged?.Invoke(string.Empty));
+                    DispatcherQueue.TryEnqueue(() => CommandChanged?.Invoke(string.Empty, true));
                 break;
             }
             case 3008 when IsValidOscPayload(payload, 4096):
@@ -1858,7 +1863,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 ReportPromptContext(probe.Text);
                 _probeCommands[probe.Id] = immediate;
                 CommandObserved?.Invoke(immediate);
-                CommandChanged?.Invoke(immediate);
+                CommandChanged?.Invoke(immediate, false);
             }
             _ = SettlePromptProbeAsync(probe.Id, cancellation.Token);
         }
@@ -1888,7 +1893,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 {
                     _probeCommands[probeId] = command;
                     CommandObserved?.Invoke(command);
-                    CommandChanged?.Invoke(command);
+                    CommandChanged?.Invoke(command, false);
                 }
                 _probeCommands[probeId] = command;
                 _probeExitCodes.TryGetValue(probeId, out var exitCode);

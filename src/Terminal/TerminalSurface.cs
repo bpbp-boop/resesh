@@ -22,9 +22,10 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract event Action? QuickConnectRequested;
     public abstract event Action<int, int>? Ready;
     public abstract event Action<string>? TitleChanged;
-    public abstract event Action<string>? CommandChanged;
+    public abstract event Action<string, bool>? CommandChanged;
     public abstract event Action<string, string?>? PromptContextChanged;
     public abstract event Action<string>? WorkingDirectoryReported;
+    public abstract event Action<string>? WindowsWorkingDirectoryReported;
     public abstract event Action<string>? ContextReported;
     public abstract event Action<int, string>? AgentOscReceived;
     public abstract event Action? BellReceived;

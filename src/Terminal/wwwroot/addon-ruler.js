@@ -210,6 +210,7 @@
 
     this._cmdMarks = [];      // [{ marker, exit, src, text }] src "osc"|"guess"; exit int or null
     this._cmdOscSeen = false; // a shell spoke OSC 133: discovery defers to it from then on
+    this._cmdExecuting = false; // exact lifecycle suppresses prompt-shaped output guesses
     this._cmdPromptLine = -1; // absolute line of the last OSC 133;A/B prompt start
     this._cmdPromptCol = -1;  // cursor column at OSC 133;B — where the typed command starts
     this._cmdPending = null;  // mark committed by C, awaiting its D exit code
@@ -819,23 +820,33 @@
   RulerAddon.prototype._onOsc133 = function (data) {
     var buf = this._term.buffer.active;
     if (buf.type === "alternate") return;
-    this._cmdOscSeen = true;
-    var parts = String(data).split(";");
+    if (typeof data !== "string" || data.length === 0 || data.length > 4096 || /[\x00-\x1f\x7f-\x9f]/.test(data)) return;
+    var parts = data.split(";");
     var kind = parts[0];
+    if (kind !== "A" && kind !== "B" && kind !== "C" && kind !== "D") return;
+    if (kind === "D" && parts.length > 1 && parts[1] !== "" &&
+        (!/^-?\d+$/.test(parts[1]) || !Number.isSafeInteger(Number(parts[1])))) return;
+    this._cmdOscSeen = true;
     if (kind === "A" || kind === "B") {
+      if (kind === "A" && this._cmdExecuting) {
+        this._cmdExecuting = false;
+        this._fireCommand("", undefined, true);
+      }
       this._cmdPromptLine = buf.baseY + buf.cursorY;
       // B fires with the prompt painted and the cursor sitting at the input start;
       // A is the prompt's own start, useless for slicing the command text out.
       this._cmdPromptCol = kind === "B" ? buf.cursorX : -1;
     } else if (kind === "C") {
+      this._cmdExecuting = true;
       if (this._cmdPromptLine >= 0) {
         var text = this._cmdText(buf, this._cmdPromptLine, this._cmdPromptCol);
-        if (text) this._fireCommand(text, undefined);
+        if (text) this._fireCommand(text, undefined, true);
         this._cmdPending = this._cmdCommit(this._cmdPromptLine, null, "osc", undefined, text);
         this._cmdPromptLine = -1;
         this._cmdPromptCol = -1;
       }
     } else if (kind === "D") {
+      this._cmdExecuting = false;
       var exit = parts.length > 1 && parts[1] !== "" ? parseInt(parts[1], 10) : null;
       if (exit !== null && isNaN(exit)) exit = null;
       if (this._cmdPending) {
@@ -850,7 +861,7 @@
           this._cmdText(buf, this._cmdPromptLine, this._cmdPromptCol));
         this._cmdPromptLine = -1;
       }
-      this._fireCommand("", undefined); // the command is over, whatever it was
+      this._fireCommand("", undefined, true); // the command is over, whatever it was
     }
   };
 
@@ -939,26 +950,34 @@
     var line = buf.getLine(row);
     if (!line) return "";
     var full = line.translateToString(true);
+    // Recover a wrapped prompt before separating it from the command. Leave room
+    // for the bounded prompt patterns plus the 256-character command label.
+    for (var r = row + 1; full.length < Math.max(col, 0) + 768; r++) {
+      var next = buf.getLine(r);
+      if (!next || !next.isWrapped) break;
+      full += next.translateToString(true);
+    }
     if (col < 0) {
       var m = CMD_SPLIT_RE.exec(full);
       if (!m || !m[2]) return "";
       col = full.length - m[2].length;
+    } else if (col === 0) {
+      // tmux can pass B through before flushing its buffered prompt, leaving B
+      // at column zero. Recover only strong user/host or PowerShell prompt shapes;
+      // bare '$' and '>' could instead begin real commands such as $HOME/bin/run.
+      var prompt = CMD_SPLIT_RE.exec(full);
+      if (prompt && (/^[^\s@]+@[^\s:]+(?:\s|:)/.test(prompt[1]) || prompt[1].indexOf("PS ") === 0))
+        col = full.length - prompt[2].length;
     }
-    var text = full.slice(col);
-    for (var r = row + 1; text.length < 256; r++) {
-      var next = buf.getLine(r);
-      if (!next || !next.isWrapped) break;
-      text += next.translateToString(true);
-    }
-    return text.trim().slice(0, 256);
+    return full.slice(col).trim().slice(0, 256);
   };
 
   /** Hands a command start (or "" = end) to the page without letting a host-side
    * hook error break mark bookkeeping. */
-  RulerAddon.prototype._fireCommand = function (text, epoch) {
+  RulerAddon.prototype._fireCommand = function (text, epoch, exact) {
     if (!this.onRunningCommand) return;
     try {
-      this.onRunningCommand(text, epoch);
+      this.onRunningCommand(text, epoch, exact === true);
     } catch (err) {
       if (window.__pageTrace) window.__pageTrace("ruler onRunningCommand: " + (err && err.message));
     }
@@ -977,7 +996,7 @@
    * cursor line is part of the signature, so returning to the same context after a command
    * still reports that the command ended. */
   RulerAddon.prototype._reportPromptContext = function (force) {
-    if (!this.onPromptContext || !this._term) return;
+    if (!this.onPromptContext || !this._term || this._cmdExecuting) return;
     var buf = this._term.buffer.active;
     if (!buf || buf.type === "alternate") return;
     var row = buf.baseY + buf.cursorY;

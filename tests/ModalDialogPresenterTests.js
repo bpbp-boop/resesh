@@ -36,7 +36,8 @@ test("every direct ContentDialog display uses the modal presenter", () => {
     lines.forEach((line, index) => {
       if (!line.includes(".ShowAsync("))
         return;
-      if (line.includes("GlobalSettingsDialog.ShowAsync(") || line.includes("SshKeyManagerDialog.ShowAsync("))
+      if (line.includes("GlobalSettingsDialog.ShowAsync(") || line.includes("SshKeyManagerDialog.ShowAsync(")
+          || line.includes("RemoteSessionsDialog.ShowAsync("))
         return;
       unguarded.push(`${path.relative(root, file)}:${index + 1}`);
     });

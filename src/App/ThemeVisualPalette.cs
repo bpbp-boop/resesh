@@ -43,18 +43,19 @@ internal sealed record ThemeVisualPalette(
         "tokyo-night" => New(0x1A1B26, 0x16161E, 0x414868, 0xC0CAF5, 0x33467C),
         "catppuccin-mocha" => New(0x1E1E2E, 0x181825, 0x45475A, 0xCDD6F4, 0x45475A),
         "phthalo-green" => New(0x123524, 0x0B2118, 0x2D5A48, 0xD7EEE5, 0x245A46),
-        // Surfaces stay near-neutral with only a violet cast, and step widely apart, so
-        // elevation reads at a glance. The saturated pink is spent on the accent alone.
-        "vaporwave" => New(0x2E2940, 0x1A1724, 0x332C47, 0xE8E4F0, 0x2E2940) with
+        // Cool charcoal surfaces let the pink tab accent and cyan pane focus carry
+        // the theme, with a little violet reserved for raised and selected surfaces.
+        "vaporwave" => New(0x34334B, 0x1D202D, 0x43465F, 0xEEEAF5, 0x45415E) with
         {
-            Shell = Hex(0x231F31),
-            Chrome = Hex(0x1A1724),
-            Input = Hex(0x12101A),
-            HoverTab = Hex(0x231F31),
-            Accent = Hex(0xFF2D95),
-            AccentBarThickness = 1,
-            PaneBorder = Hex(0x231F31),
-            PaneFocusBorder = Hex(0x4B2E83),
+            Shell = Hex(0x272A3B),
+            Chrome = Hex(0x1D202D),
+            Input = Hex(0x151925),
+            HoverTab = Hex(0x3B3D53),
+            TreeMutedForeground = Hex(0xAFB2C8),
+            Accent = Hex(0xFF4FD8),
+            AccentBarThickness = 3,
+            PaneBorder = Hex(0x43465F),
+            PaneFocusBorder = Hex(0x55E7EF),
         },
         "light" => New(0xFFFFFF, 0xF3F3F3, 0xD8D8D8, 0x383A42, 0xBFCEFF),
             _ => New(0x0C0C0C, 0x181818, 0x2B2B2B, 0xCCCCCC, 0x264F78),

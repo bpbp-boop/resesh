@@ -502,6 +502,20 @@ keyboard-interactive fallback.
   Each challenge is marshalled to a serialized UI dialog, with visible or secret input based on
   the server's echo flag. This supports password-plus-OTP and Duo-style flows without guessing.
 
+## 2026-09-10 - Optional shell integration
+- Enable injection only through a saved per-session preference, disabled by default.
+  Local profiles identify supported executables; SSH requires an explicit supported
+  shell choice. Never discover an unknown endpoint's platform by executing commands.
+- Bundle attributed, pinned hooks and stage them without profile edits. Local startup
+  uses arguments/environment; SSH uses a bounded setup exec channel, then PTY+exec.
+  SSH.NET's missing public API is isolated in a tested reflection adapter. An unavailable
+  adapter or rejected setup skips integration; setup is never replayed as terminal input.
+- Inject only new persistent shells, with tmux DCS passthrough. Attach/resume never
+  modifies a running pane. PowerShell plus tmux is unsupported; execution policy remains
+  the user's choice. OSC 9;9 folder reports must not trigger agent attention.
+- This supersedes the manual-snippet-only decision below for explicitly enabled sessions.
+  Coverage and remaining compatibility work are in [SHELL_INTEGRATION_PLAN.md](SHELL_INTEGRATION_PLAN.md).
+
 ## 2026-08-19 - Stock OSC 3008 context support
 - Treat UAPI.15 context data as optional evidence. Parse a maximum 4096-byte payload,
   enforce the 64-byte context ID and 255-byte text limits, decode only the specified

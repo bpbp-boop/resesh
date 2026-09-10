@@ -125,6 +125,24 @@
                         Text="resesh keeps a reference to the key in its current location. Manage registered keys from the File menu."
                         TextWrapping="Wrap"
                         Visibility="Collapsed" />
+
+                    <ComboBox
+                        x:Name="ShellIntegrationBox"
+                        AutomationProperties.AutomationId="SshShellIntegrationBox"
+                        Header="Shell integration (experimental)"
+                        SelectedIndex="0"
+                        HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="Off" />
+                        <ComboBoxItem Content="Bash" />
+                        <ComboBoxItem Content="Zsh" />
+                        <ComboBoxItem Content="Fish" />
+                        <ComboBoxItem Content="PowerShell (Windows)" />
+                    </ComboBox>
+                    <TextBlock
+                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Choose the account's actual shell. Use only for shell accounts, not network-device CLIs. Applies when a new terminal starts; stores a script cache remotely without editing shell profiles. PowerShell requires Persistent session to be off (Terminal section)."
+                        TextWrapping="Wrap" />
                 </StackPanel>
             </ScrollViewer>
 

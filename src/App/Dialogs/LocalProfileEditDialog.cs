@@ -37,6 +37,7 @@ public sealed class LocalProfileEditDialog : ContentDialog
         TextWrapping = TextWrapping.NoWrap,
     };
     private readonly TextBox _startDir = new() { Header = "Starting directory", PlaceholderText = "Blank = your user profile folder" };
+    private readonly ToggleSwitch _shellIntegration = new() { Header = "Enable shell integration (experimental)" };
     private readonly TextBox _environment = new()
     {
         Header = "Environment overrides (NAME=value per line; empty value removes)",
@@ -99,6 +100,8 @@ public sealed class LocalProfileEditDialog : ContentDialog
     {
         DialogTheme.Apply(this);
         _existing = existing;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(_shellIntegration, "LocalShellIntegrationToggle");
+        _shellIntegration.IsOn = existing is { ShellIntegration: not ShellIntegrationMode.Disabled };
         Title = existing is null ? "New Local Profile" : "Edit Local Profile";
         PrimaryButtonText = "Save";
         CloseButtonText = "Cancel";
@@ -161,6 +164,13 @@ public sealed class LocalProfileEditDialog : ContentDialog
         panel.Children.Add(_arguments);
         panel.Children.Add(_startDir);
         panel.Children.Add(_environment);
+        panel.Children.Add(_shellIntegration);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Detects supported shells (Bash, Zsh, Fish and PowerShell) when a new terminal starts. Enables command and working-directory reporting without editing shell profiles.",
+            TextWrapping = TextWrapping.Wrap,
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+        });
         panel.Children.Add(_icon);
         panel.Children.Add(_color);
         panel.Children.Add(_overrideTheme);
@@ -255,6 +265,7 @@ public sealed class LocalProfileEditDialog : ContentDialog
         {
             Id = _existing?.Id ?? Guid.NewGuid(),
             Kind = SessionKind.Local,
+            ShellIntegration = _shellIntegration.IsOn ? ShellIntegrationMode.Automatic : ShellIntegrationMode.Disabled,
             BuiltIn = _existing?.BuiltIn ?? false,
             Name = _name.Text.Trim(),
             FolderPath = FolderPaths.Normalize(_folder.Text),

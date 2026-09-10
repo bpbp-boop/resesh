@@ -122,6 +122,9 @@ public static class AgentOsc
         if (string.IsNullOrWhiteSpace(payload))
             return null;
         var text = payload.Trim();
+        // OSC 9;9 reports a Windows cwd, including malformed reports: never attention.
+        if (text.StartsWith("9;", StringComparison.Ordinal) || text == "9")
+            return null;
         if (text.StartsWith("4;", StringComparison.Ordinal) || text == "4")
             return null;
         return Signal(text);

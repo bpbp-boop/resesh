@@ -85,7 +85,7 @@ test("a throwing listener cannot break command marking", () => {
   assert.equal(addon._cmdMarks.length, 1);
 });
 
-test("the page forwards agent evidence and nothing else", () => {
+test("the page forwards agent evidence with bounded payloads", () => {
   // OSC 7377 (resesh structured events) plus the two generic notification sequences.
   assert.match(pageSource, /\[7377, 9, 777\]\.forEach/);
   assert.match(pageSource, /type: "agentOsc"/);
@@ -93,7 +93,8 @@ test("the page forwards agent evidence and nothing else", () => {
   assert.match(pageSource, /type: "title"/);
   assert.match(pageSource, /type: "command"/);
   // Payloads from the wire are length-capped before they cross into the host.
-  assert.match(pageSource, /data: String\(data == null \? "" : data\)\.slice\(0, 2048\)/);
+  assert.match(pageSource, /payload = String\(data == null \? "" : data\)/);
+  assert.match(pageSource, /data: payload\.slice\(0, 2048\)/);
   assert.match(pageSource, /String\(title \|\| ""\)\.slice\(0, 512\)/);
 });
 
@@ -110,7 +111,7 @@ test("TerminalTabView wires running command changes and prompt context to retire
   // CommandChanged (runningCommand: text on start, "" on 133;D end) feeds agent tracking
   assert.match(
     terminalTabView,
-    /_terminal\.CommandChanged \+= command => ApplyAgent\(tracker => tracker\.ObserveCommand\(command\)\);/);
+    /_terminal\.CommandChanged \+= \(command, _\) => ApplyAgent\(tracker => tracker\.ObserveCommand\(command\)\);/);
 
   // PromptContextChanged (reaching an idle prompt) feeds agent tracking as command end
   assert.match(
@@ -124,4 +125,23 @@ test("TerminalTabView wires running command changes and prompt context to retire
   assert.match(
     terminalTabView,
     /_terminal\.CommandObserved \+= command => ApplyAgent\(tracker => tracker\.ObserveCommand\(command\)\);/);
+});
+
+test("running command bridge preserves exact lifecycle provenance and epoch gating", () => {
+  const start = pageSource.indexOf("ruler.onRunningCommand = function");
+  const end = pageSource.indexOf("ruler.onPromptContext", start);
+  const messages = [];
+  const ruler = {};
+  vm.runInNewContext(pageSource.slice(start, end), {
+    ruler, titlesSeen: 7, host: { postMessage(message) { messages.push(message); } },
+  });
+  ruler.onRunningCommand("ansible-playbook site.yml", undefined, true);
+  ruler.onRunningCommand("", undefined, true);
+  ruler.onRunningCommand("python3", 7, false);
+  ruler.onRunningCommand("stale", 6, false);
+  assert.deepEqual(messages.map(m => [m.text, m.exact]), [
+    ["ansible-playbook site.yml", true], ["", true], ["python3", false],
+  ]);
+  const control = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "TerminalControl.cs"), "utf8");
+  assert.match(control, /CommandChanged\?\.Invoke\(runningText, root\.TryGetProperty\("exact", out var exactCommand\) && exactCommand\.ValueKind == JsonValueKind\.True\)/);
 });

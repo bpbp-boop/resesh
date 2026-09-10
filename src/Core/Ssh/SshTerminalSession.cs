@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
+using System.Text;
 using Renci.SshNet;
 using Renci.SshNet.Common;
 using Resesh.Core.Models;
+using Resesh.Core.ShellIntegration;
 using Session = Resesh.Core.Models.Session;
 
 namespace Resesh.Core.Ssh;
@@ -58,6 +60,9 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
 
     /// <summary>Diagnostic hook (DEBUG builds wire this to a trace log).</summary>
     public static Action<string>? TraceHook { get; set; }
+
+    /// <summary>Optional setup diagnostics, delivered before the interactive stream starts.</summary>
+    public Action<string>? ShellIntegrationNotice { get; set; }
 
     public bool IsConnected => IsConnectionOpen(
         _client?.IsConnected == true,
@@ -174,7 +179,33 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
                 return;
             bootstrapCommand = bootstrapCommandFactory?.Invoke(this) ?? bootstrapCommand;
             cancellationToken.ThrowIfCancellationRequested();
-            _shell = client.CreateShellStream(terminalType, (uint)columns, (uint)rows, 0, 0, 64 * 1024);
+            // Persistent startup supplies the new pane's integrated command through its
+            // bootstrap factory. A resumed pane never gets a new injection.
+            string? initialCommand = null;
+            if (!session.Persistent)
+                initialCommand = PrepareShellIntegration(session.ShellIntegration, cancellationToken);
+            else if (RemoteShellIntegration.IsSupported(session.ShellIntegration) &&
+                session.ShellIntegration != ShellIntegrationMode.PowerShell && bootstrapCommand is not null && IntegratedShellStream.IsSupported)
+                initialCommand = "sh -c " + RemoteShellIntegration.QuotePosix(bootstrapCommand);
+
+            if (initialCommand is not null)
+            {
+                try
+                {
+                    _shell = IntegratedShellStream.Create(client, terminalType, columns, rows, initialCommand, cancellationToken);
+                    bootstrapCommand = null; // no setup is typed into this terminal
+                }
+                catch (Exception ex) when (ex is SshException or IOException or NotSupportedException or InvalidOperationException)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!client.IsConnected) throw;
+                    ShellIntegrationNotice?.Invoke("Shell integration unavailable: the server rejected startup. Opening a normal shell.");
+                    // Do not replay a bootstrap after an exec request may have run. A
+                    // persistent pane, if created, can be selected on the next connection.
+                    bootstrapCommand = null;
+                }
+            }
+            _shell ??= client.CreateShellStream(terminalType, (uint)columns, (uint)rows, 0, 0, 64 * 1024);
             cancellationToken.ThrowIfCancellationRequested();
             if (bootstrapCommand is not null)
             {
@@ -209,6 +240,104 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
                 RaiseClosed(null);
             }
         }, null, dueTime: 5000, period: 5000);
+    }
+
+    /// <summary>Installs only the shell explicitly selected on this SSH profile. Disabled
+    /// and local-only Automatic return before creating any exec channel.</summary>
+    public string? PrepareShellIntegration(ShellIntegrationMode mode, CancellationToken token, bool tmux = false)
+    {
+        var directory = PrepareShellIntegrationDirectory(mode, token, tmux);
+        return directory is null ? null : RemoteShellIntegration.LaunchCommand(mode, directory, tmux);
+    }
+
+    private string? PrepareShellIntegrationDirectory(ShellIntegrationMode mode, CancellationToken token, bool tmux)
+    {
+        if (mode == ShellIntegrationMode.Disabled) return null;
+        if (!RemoteShellIntegration.IsSupported(mode) || (tmux && mode == ShellIntegrationMode.PowerShell))
+        {
+            ShellIntegrationNotice?.Invoke("Shell integration unavailable: select a supported remote shell. PowerShell requires persistence off.");
+            return null;
+        }
+        if (!IntegratedShellStream.IsSupported)
+        {
+            ShellIntegrationNotice?.Invoke("Shell integration unavailable with this SSH transport version.");
+            return null;
+        }
+        token.ThrowIfCancellationRequested();
+        try
+        {
+            var client = _client ?? throw new InvalidOperationException("SSH is not connected.");
+            var script = RemoteShellIntegration.BuildSetup(mode, Guid.NewGuid().ToString("N"));
+            var commandLine = mode == ShellIntegrationMode.PowerShell
+                ? "powershell.exe -NoLogo -NoProfile -NonInteractive -Command -" : "sh -s";
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+            deadline.CancelAfter(TimeSpan.FromSeconds(10));
+            using var command = client.CreateCommand(commandLine);
+            command.CommandTimeout = TimeSpan.FromSeconds(10);
+            using var cancel = deadline.Token.Register(() => command.Dispose());
+            var execution = command.ExecuteAsync(deadline.Token);
+            var output = Task.Run(() => ReadSetupOutput(command.OutputStream, command), CancellationToken.None);
+            var error = Task.Run(() => ReadSetupOutput(command.ExtendedOutputStream, command), CancellationToken.None);
+            {
+                using var input = command.CreateInputStream();
+                // stdin avoids cmd.exe's command-line limit on Windows OpenSSH.
+                if (mode == ShellIntegrationMode.PowerShell)
+                    script = "try { " + script.Replace("\r", "").Replace("\n", "; ") + " } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }; exit 0\n";
+                input.Write(Encoding.UTF8.GetBytes(script));
+            }
+            Task.WhenAll(execution, output, error).GetAwaiter().GetResult();
+            token.ThrowIfCancellationRequested();
+            var directory = command.ExitStatus == 0 ? RemoteShellIntegration.ParseDirectory(mode, output.Result) : null;
+            if (directory is not null)
+                return directory;
+            var reason = RemoteShellIntegration.DescribeSetupFailure(command.ExitStatus, error.Result);
+            ShellIntegrationNotice?.Invoke($"Shell integration unavailable: {reason}. Opening normally.");
+        }
+        catch (Exception ex) when (ex is SshException or IOException or ObjectDisposedException or InvalidOperationException or OperationCanceledException)
+        {
+            token.ThrowIfCancellationRequested();
+            ShellIntegrationNotice?.Invoke("Shell integration unavailable: remote setup failed or timed out. Opening normally.");
+            TraceHook?.Invoke($"shell integration setup: {ex.GetType().Name}");
+        }
+        return null;
+    }
+
+    public string CreatePersistentBootstrap(Guid sessionId, int slot, ShellIntegrationMode mode, CancellationToken token)
+    {
+        var directory = PrepareShellIntegrationDirectory(mode, token, tmux: true);
+        return BuildPersistentBootstrap(sessionId, slot, mode, directory);
+    }
+
+    internal static string BuildPersistentBootstrap(Guid sessionId, int slot, ShellIntegrationMode mode, string? directory)
+    {
+        var launch = directory is null ? null : RemoteShellIntegration.LaunchCommand(mode, directory, tmux: true);
+        var useExec = IntegratedShellStream.IsSupported && RemoteShellIntegration.IsSupported(mode) && mode != ShellIntegrationMode.PowerShell;
+        // On tmux absence or option rejection, an exec-based bootstrap must start its
+        // own interactive fallback; there is no parent interactive shell to return to.
+        // The selected integration shell may be absent (which is why preparation
+        // failed). Use the account's absolute executable shell, never eval its value.
+        // Reuse the successful staging without tmux framing if persistence is unavailable.
+        var fallback = directory is not null ? RemoteShellIntegration.LaunchCommand(mode, directory, tmux: false)
+            : useExec ? "sh -c " + RemoteShellIntegration.QuotePosix(
+                "case \"${SHELL:-}\" in /*) if test -f \"$SHELL\" && test -x \"$SHELL\"; then exec \"$SHELL\" -l -i; fi;; esac; exec sh -i") : null;
+        return TmuxPersistence.BootstrapCommand(sessionId, slot, launch, fallback);
+    }
+
+    private static string ReadSetupOutput(Stream stream, SshCommand command)
+    {
+        using var buffer = new MemoryStream();
+        var bytes = new byte[1024];
+        int count;
+        while ((count = stream.Read(bytes, 0, bytes.Length)) > 0)
+        {
+            if (buffer.Length + count > 8192)
+            {
+                command.Dispose();
+                throw new IOException("Shell integration setup returned too much output.");
+            }
+            buffer.Write(bytes, 0, count);
+        }
+        return Encoding.UTF8.GetString(buffer.ToArray());
     }
 
     /// <summary>Closed fires exactly once, from whichever detector notices first.</summary>

@@ -66,6 +66,59 @@ test("_cmdText recognizes a spaced Bash user, host, and cwd prompt", () => {
   assert.equal(addon._cmdText(addon._term.buffer.active, 0, -1), "htop -d 10");
 });
 
+test("an early tmux B recovers the command after a wrapped user/host prompt", () => {
+  const addon = makeAddon(buffer([
+    line("u@host /a/long/"),
+    line("directory $ tail -f /var/", true),
+    line("log/syslog", true),
+    line("output", false),
+  ]));
+  assert.equal(addon._cmdText(addon._term.buffer.active, 0, 0), "tail -f /var/log/syslog");
+});
+
+test("column-zero recovery preserves promptless commands and exact nonzero boundaries", () => {
+  for (const command of ["$HOME/bin/run", ">file echo hi", "user@example.com>file", "# comment", "printf 'u@h ~ $ text'"]) {
+    const addon = makeAddon(buffer([line(command)]));
+    assert.equal(addon._cmdText(addon._term.buffer.active, 0, 0), command);
+  }
+  const addon = makeAddon(buffer([line("prompt> u@h ~ $ text")]));
+  assert.equal(addon._cmdText(addon._term.buffer.active, 0, 8), "u@h ~ $ text");
+});
+
+test("tmux passthrough before prompt paint produces command-only panel entries and exact exits", async () => {
+  const { Terminal } = require("../src/Terminal/wwwroot/xterm.js");
+  const term = new Terminal({ cols: 100, rows: 30, allowProposedApi: true });
+  const addon = new RulerAddon();
+  addon._term = term;
+  addon._paintQueued = true;
+  const commands = [];
+  addon.onRunningCommand = text => { if (text) commands.push(text); };
+  term.parser.registerOscHandler(133, data => { addon._onOsc133(data); return true; });
+  const osc = data => "\x1b]133;" + data + "\x07";
+  const at = row => "\x1b[" + row + ";1H";
+  // Reduced from a live tmux 3.3a capture. Raw-string forwarding resets the
+  // outer cursor and B precedes the buffered, coloured prompt; C follows echo.
+  const reset = "\x1b(B\x1b[m\x1b[?25h\x1b[1;1H\x1b[1;30r";
+  let stream = "";
+  const expected = ["true", "false", "cd /tmp", "printf 'done\\n'"];
+  for (let i = 0; i < expected.length; i++) {
+    stream += osc("A") + reset + at(i + 1) + osc("B") + reset + at(i + 1)
+      + "u@host \x1b[32m" + (i === 3 ? "/tmp" : "~") + " \x1b[39m$ "
+      + expected[i] + "\r\n" + osc("C") + reset + at(i + 2)
+      + osc("D;" + (i === 1 ? 1 : 0)) + reset;
+  }
+  try {
+    // Deliberately split escape sequences across writes as SSH can do.
+    for (let offset = 0; offset < stream.length; offset += 37)
+      await new Promise(resolve => term.write(stream.slice(offset, offset + 37), resolve));
+    assert.deepEqual(commands, expected);
+    assert.deepEqual(Array.from(addon.getCommands(), c => [c.line, c.text, c.exit]),
+      expected.map((text, i) => [i, text, i === 1 ? 1 : 0]));
+  } finally {
+    term.dispose();
+  }
+});
+
 test("OSC 133 B remembers the input start, C reports the text, D reports the end", () => {
   const lines = [line("")];
   const active = buffer(lines);
@@ -78,6 +131,36 @@ test("OSC 133 B remembers the input start, C reports the text, D reports the end
   addon._onOsc133("C");
   addon._onOsc133("D;0");
   assert.deepEqual(addon.calls, [["htop -d 10", undefined], ["", undefined]]);
+});
+
+test("exact command lifecycle ignores prompt-shaped redraws until completion", () => {
+  const lines = [line("u@h ~/etc $ ansible-playbook site.yml")];
+  const active = buffer(lines);
+  const addon = makeAddon(active);
+  const calls = [];
+  const prompts = [];
+  addon.onRunningCommand = (text, epoch, exact) => calls.push([text, exact]);
+  addon.onPromptContext = text => prompts.push(text);
+  addon._onOsc133("A");
+  active.cursorX = "u@h ~/etc $ ".length;
+  addon._onOsc133("B");
+  addon._onOsc133("C");
+  lines[0] = line("u@h ~/etc $ "); // tmux redraw, or output shaped like a prompt
+  addon._reportPromptContext(true);
+  assert.deepEqual(prompts, []);
+  addon._onOsc133("D;0");
+  addon._reportPromptContext(true);
+  assert.deepEqual(prompts, ["~/etc"]);
+  assert.deepEqual(calls, [["ansible-playbook site.yml", true], ["", true]]);
+});
+
+test("a new exact prompt ends a command even when the shell omitted D", () => {
+  const addon = makeAddon(buffer([line("u@h:~$ sleep 1")]));
+  addon._onOsc133("A");
+  addon._onOsc133("C");
+  addon._onOsc133("A");
+  assert.equal(addon._cmdExecuting, false);
+  assert.deepEqual(addon.calls, [["sleep 1", undefined], ["", undefined]]);
 });
 
 test("OSC 3008 adds the stock systemd command result to a discovered mark", () => {
@@ -353,4 +436,21 @@ test("Cisco-shaped prompts avoid false icon and root-shell detection", () => {
   addon._reportPromptContext();
 
   assert.deepEqual(addon.promptCalls, [["configure \u00b7 routing", null]]);
+});
+
+test("invalid OSC 133 does not disable command discovery", () => {
+  for (const payload of ["", "X", "A\n", "D;12oops", "D;9007199254740992", "A;" + "x".repeat(4096)]) {
+    const addon = makeAddon(buffer([line("PS C:\\work> ")]));
+    addon._onOsc133(payload);
+    assert.equal(addon._cmdOscSeen, false, JSON.stringify(payload));
+    assert.equal(addon._cmdPromptLine, -1);
+  }
+});
+
+test("bounded OSC 133 supports prompt parameters and exact exit codes", () => {
+  const addon = makeAddon(buffer([line("")]));
+  addon._onOsc133("A;cl=m");
+  assert.equal(addon._cmdOscSeen, true);
+  addon._onOsc133("D;-1");
+  assert.equal(addon.calls.at(-1)[0], "");
 });

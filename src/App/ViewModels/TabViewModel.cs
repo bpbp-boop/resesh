@@ -150,7 +150,9 @@ public sealed class TabViewModel : ObservableObject
                 {
                     TerminalTitle = null;
                     RunningCommand = null;
+                    _runningCommandIsExact = false;
                     PromptContext = null;
+                    ReportedWorkingDirectory = null;
                 }
                 OnPropertyChanged(nameof(StateText));
             }
@@ -390,14 +392,16 @@ public sealed class TabViewModel : ObservableObject
             TerminalTitle = trimmed;
         // A prompt-shaped title means the shell is drawing a prompt again. Persistent
         // sessions report the foreground shell name instead because tmux owns OSC titles.
-        // Both are definite end signals for the last detected command.
-        if (AgentDetection.IsShellTitle(TerminalTitle))
+        // These end a discovered command, but tmux can publish an old shell title
+        // after an exact command start. Its OSC lifecycle owns completion instead.
+        if (!_runningCommandIsExact && AgentDetection.IsShellTitle(TerminalTitle))
         {
             RunningCommand = null;
         }
     }
 
     private string? _runningCommand;
+    private bool _runningCommandIsExact;
 
     /// <summary>
     /// Program name of the command the terminal page saw start (Enter-gated discovery or
@@ -415,8 +419,14 @@ public sealed class TabViewModel : ObservableObject
     }
 
     /// <summary>Called (UI thread) when the page reports a command starting ("" = ended).</summary>
-    public void ApplyRunningCommand(string? commandLine) =>
+    public void ApplyRunningCommand(string? commandLine, bool exact = false)
+    {
         RunningCommand = CommandTitle.ProgramName(commandLine);
+        _runningCommandIsExact = exact && RunningCommand is not null;
+        // The process title may still name the interpreter until tmux's next poll.
+        if (Session.Persistent && exact && RunningCommand is null)
+            TerminalTitle = null;
+    }
 
     private string? _promptContext;
 
@@ -436,13 +446,35 @@ public sealed class TabViewModel : ObservableObject
     /// an SFTP path, so current-folder fallback uses this value to exclude it.</summary>
     public string? PromptContextPlatform { get; private set; }
 
+    private string? _reportedWorkingDirectory;
+    private string? ReportedWorkingDirectory
+    {
+        get => _reportedWorkingDirectory;
+        set
+        {
+            if (SetProperty(ref _reportedWorkingDirectory, value))
+                OnPropertyChanged(nameof(Subtitle));
+        }
+    }
+
+    /// <summary>A validated cwd report is location evidence, not a command-end signal.</summary>
+    public void ApplyReportedWorkingDirectory(Resesh.Core.Sftp.Osc7WorkingDirectory report)
+    {
+        // A new location invalidates the previous prompt's display label. Once the
+        // new prompt is painted, prefer its spelling (including ~ for custom homes).
+        if (ReportedWorkingDirectory != report.Path)
+            PromptContext = null;
+        ReportedWorkingDirectory = report.Path;
+    }
+
     /// <summary>A recognized prompt means the shell is idle in this location.</summary>
     public void ApplyPromptContext(string? context, string? platform = null)
     {
         var trimmed = context?.Trim();
         PromptContext = string.IsNullOrEmpty(trimmed) ? null : trimmed;
         PromptContextPlatform = string.IsNullOrWhiteSpace(platform) ? null : platform;
-        RunningCommand = null;
+        if (!_runningCommandIsExact)
+            RunningCommand = null;
     }
 
     /// <summary>
@@ -461,7 +493,12 @@ public sealed class TabViewModel : ObservableObject
             if (Session.Persistent && RunningCommand is { } persistentCommand)
                 return persistentCommand;
             if (TerminalTitle is not { } title)
-                return RunningCommand ?? PromptContext ?? FallbackSubtitle;
+                return RunningCommand ?? PromptContext ?? (Session.Persistent ? ReportedWorkingDirectory : null) ?? FallbackSubtitle;
+            // tmux deliberately reports the shell name to retire sticky program/agent
+            // titles. Keep that signal, but display its reported location while idle.
+            if (Session.Persistent && AgentDetection.IsShellTitle(title)
+                && !AgentDetection.TryGetShellPromptDirectory(title, out _))
+                return PromptContext ?? ReportedWorkingDirectory ?? title;
             if (!AgentDetection.TryGetShellPromptDirectory(title, out var directory))
                 return title; // a program's own title beats a guessed command name
             return RunningCommand ?? PromptContext ?? directory;

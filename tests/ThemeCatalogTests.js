@@ -76,6 +76,47 @@ test("native palettes exactly match the WebView palettes", () => {
   }
 });
 
+test("partial settings updates preserve the terminal, scrollbar, and light UI theme", () => {
+  const vm = require("node:vm");
+  const palettes = terminal.slice(terminal.indexOf("  const DARK_THEME ="), terminal.indexOf("  const host ="));
+  const handler = terminal.match(/case "setOptions":([\s\S]*?)\n\s*break;/)?.[1];
+  assert.ok(handler);
+  let lightUi = false;
+  let rulerTheme;
+  let rulerUpdates = 0;
+  const context = vm.createContext({
+    term: { options: { fontSize: 14, fontFamily: "Consolas", scrollback: 1000 } },
+    document: { body: { style: {}, classList: { toggle(name, value) { lightUi = value; } } } },
+    ruler: { setTheme(theme) { rulerTheme = theme; rulerUpdates++; } },
+    copyOnSelect: false,
+    rightClickPaste: false,
+    fitPreservingTimestamps() {},
+    reportSize() {},
+    pageTrace(error) { assert.fail(error); },
+  });
+  vm.runInContext(palettes + "\nfunction applySettings(msg) {" + handler + "\n}", context);
+  for (const id of ["vaporwave", "light", "solarized-light", "nord", "dark"]) {
+    context.msg = { theme: id };
+    vm.runInContext("applySettings(msg)", context);
+    const activeTheme = context.term.options.theme;
+    const activeRuler = rulerTheme;
+    const activeLightUi = lightUi;
+    const updateCount = rulerUpdates;
+    assert.equal(activeRuler.background, activeTheme.background, id);
+    assert.equal(activeLightUi, id === "light" || id === "solarized-light", id);
+
+    for (const update of [{ theme: null, fontSize: 16 }, { fontFamily: "Cascadia Mono", scrollback: 2000 }, { copyOnSelect: true }]) {
+      context.msg = update;
+      vm.runInContext("applySettings(msg)", context);
+      assert.equal(context.term.options.theme, activeTheme, id);
+      assert.equal(rulerTheme, activeRuler, id);
+      assert.equal(rulerUpdates, updateCount, id);
+      assert.equal(lightUi, activeLightUi, id);
+      assert.equal(context.document.body.style.background, activeTheme.background, id);
+    }
+  }
+});
+
 test("native font size preserves the WebView CSS-pixel scale", () => {
   assert.equal([...nativeSurface.matchAll(/ToNativePointSize\(_fontSize\)/g)].length, 3);
   assert.match(

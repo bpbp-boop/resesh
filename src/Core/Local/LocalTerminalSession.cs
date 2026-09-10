@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Win32.SafeHandles;
 using Resesh.Core.Backend;
 using Resesh.Core.Models;
+using Resesh.Core.ShellIntegration;
 
 namespace Resesh.Core.Local;
 
@@ -44,6 +45,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
     public static Action<string>? TraceHook { get; set; }
 
     public int ProcessId => _processId;
+    public string? ShellIntegrationMessage { get; private set; }
 
     public bool IsRunning => _process != IntPtr.Zero && _exitRaised == 0 && !_disposed;
 
@@ -98,7 +100,13 @@ public sealed class LocalTerminalSession : ITerminalBackend
                     _console, (IntPtr)IntPtr.Size, IntPtr.Zero, IntPtr.Zero))
                 throw new LocalSessionException("Could not prepare the process attributes.", new Win32Exception());
 
-            environment = BuildEnvironmentBlock(target.Environment);
+            var plan = LocalShellIntegration.CreatePlan(executable,
+                target.Arguments.Select(Environment.ExpandEnvironmentVariables).ToArray(),
+                session.ShellIntegration, MergeEnvironment(target.Environment));
+            ShellIntegrationMessage = plan.Message;
+            environment = session.ShellIntegration == ShellIntegrationMode.Disabled && target.Environment is not { Count: > 0 }
+                ? IntPtr.Zero // preserve native inheritance, including hidden per-drive Windows variables
+                : SerializeEnvironment(plan.Environment);
 
             // STARTF_USESTDHANDLES with null handles is load-bearing (same trick Windows
             // Terminal uses): without it, CreateProcess duplicates any redirected std
@@ -111,8 +119,8 @@ public sealed class LocalTerminalSession : ITerminalBackend
                 lpAttributeList = attributes,
             };
             var commandLine = new StringBuilder(Quote(executable));
-            foreach (var argument in target.Arguments)
-                commandLine.Append(' ').Append(Quote(Environment.ExpandEnvironmentVariables(argument)));
+            foreach (var argument in plan.Arguments)
+                commandLine.Append(' ').Append(Quote(argument));
 
             // Suspended so the whole tree is inside the kill-on-close job before it runs.
             var flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED;
@@ -455,20 +463,17 @@ public sealed class LocalTerminalSession : ITerminalBackend
         return sb.Append('\\', backslashes * 2).Append('"').ToString();
     }
 
-    /// <summary>Inherited environment plus the profile's overrides (empty value = remove),
-    /// as a native Unicode block. Zero when there are no overrides (inherit directly).</summary>
-    private static IntPtr BuildEnvironmentBlock(IReadOnlyDictionary<string, string>? overrides)
+    /// <summary>Inherited environment plus the profile's overrides (empty value = remove).
+    /// Integration changes are applied afterwards so generated empty values survive.</summary>
+    internal static IReadOnlyDictionary<string, string> MergeEnvironment(IReadOnlyDictionary<string, string>? overrides)
     {
-        if (overrides is null || overrides.Count == 0)
-            return IntPtr.Zero;
-
         var merged = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
         {
             if (entry.Key is string key && key.Length > 0)
                 merged[key] = entry.Value as string ?? "";
         }
-        foreach (var (key, value) in overrides)
+        foreach (var (key, value) in overrides ?? new Dictionary<string, string>())
         {
             if (string.IsNullOrWhiteSpace(key))
                 continue;
@@ -478,8 +483,13 @@ public sealed class LocalTerminalSession : ITerminalBackend
                 merged[key.Trim()] = Environment.ExpandEnvironmentVariables(value);
         }
 
+        return merged;
+    }
+
+    private static IntPtr SerializeEnvironment(IReadOnlyDictionary<string, string> environment)
+    {
         var block = new StringBuilder();
-        foreach (var (key, value) in merged)
+        foreach (var (key, value) in environment.OrderBy(p => p.Key, StringComparer.OrdinalIgnoreCase))
             block.Append(key).Append('=').Append(value).Append('\0');
         // StringToHGlobalUni appends the final terminator, completing the double null.
         return Marshal.StringToHGlobalUni(block.ToString());

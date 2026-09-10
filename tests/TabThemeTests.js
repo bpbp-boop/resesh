@@ -74,8 +74,8 @@ test("an empty tab group does not draw a tab-strip divider", () => {
   assert.match(emptySelection, /RightTabStripDivider\.Width = 0/);
 });
 
-test("normal themes use a one-pixel focused tab accent", () => {
-  assert.match(visualPalette, /"vaporwave"[\s\S]*?AccentBarThickness = 1/);
+test("vaporwave emphasizes focus while default themes keep a one-pixel accent", () => {
+  assert.match(visualPalette, /"vaporwave"[\s\S]*?AccentBarThickness = 3/);
   assert.match(visualPalette, /Hex\(0x0078D4\), 1, Hex\(divider\)/);
 });
 

@@ -77,10 +77,11 @@ public static class TmuxPersistence
         return format;
     }
 
-    public static string BootstrapCommand(Guid id, int slot)
+    public static string BootstrapCommand(Guid id, int slot, string? newShellCommand = null, string? fallbackCommand = null)
     {
         var name = SessionName(id, slot);
         var tmux = $"tmux -L {Socket}";
+        var exec = fallbackCommand is null ? "exec " : "";
         return
             // Wipe screen and scrollback first — removes this echoed line and the MOTD.
             " printf '\\033[2J\\033[3J\\033[H'; "
@@ -92,23 +93,32 @@ public static class TmuxPersistence
             // version (or with stale options) pick up the current value — the client's tty
             // capabilities are built at attach time.
             + $"{tmux} capture-pane -e -p -t ={name} -S -; "
-            + $"exec {tmux} {TerminalOverrides} \\; {TitleReporting} \\; attach-session -t ={name}; "
+            + $"{exec}{tmux} {TerminalOverrides} \\; {TitleReporting} \\; attach-session -t ={name}; "
             + "else "
-            + $"exec {tmux} -f /dev/null start-server \\; "
+            + $"{exec}{tmux} -f /dev/null start-server \\; "
             + $"set -g history-limit {HistoryLimit} \\; "
             + "set -g status off \\; "
             + "set -g prefix None \\; "
             + "set -s escape-time 25 \\; "
             + $"{TerminalOverrides} \\; "
             + $"{TitleReporting} \\; "
-            + $"new-session -s {name}; "
+            + (newShellCommand is not null ? "set -g allow-passthrough on \\; " : "")
+            + $"new-session -s {name}"
+            + (newShellCommand is not null ? " " + ShellIntegration.RemoteShellIntegration.QuotePosix(newShellCommand) : "")
+            + "; "
             + "fi; "
             + "else "
             + "if type history >/dev/null 2>&1; then "
             + "case \"$(history 1)\" in *resesh-tmux-bootstrap*) "
             + "history -d \"$(history 1 | awk '{print $1;exit}')\" >/dev/null 2>&1;; esac; fi; "
             + "printf '\\n[resesh] tmux not found on this host - continuing without persistence.\\n\\n'; "
-            + "fi # resesh-tmux-bootstrap";
+            + (fallbackCommand is not null ? "false; " : "")
+            + "fi"
+            + (fallbackCommand is not null
+                ? "; resesh_result=$?; if test \"$resesh_result\" -eq 0; then exit 0; fi; "
+                  + "printf '\\n[resesh] Persistent startup failed; opening a non-persistent shell.\\n'; exec " + fallbackCommand
+                : "")
+            + " # resesh-tmux-bootstrap";
     }
 
     public static string KillCommand(Guid id, int slot) =>

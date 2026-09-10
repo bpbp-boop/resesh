@@ -8,6 +8,11 @@ and the git history.
 
 ## Shipped
 
+- **Optional shell integration (experimental)** — off by default, enabled per local
+  profile or SSH session with an explicit remote shell choice. Bundled hooks supply
+  command marks, results, and folders without profile edits or network-device probes.
+  New tmux shells can opt in; resumed shells are never reinjected. Coverage and limitations
+  are in [SHELL_INTEGRATION_PLAN.md](SHELL_INTEGRATION_PLAN.md).
 - **Foundations** — per-session settings overrides, terminal search (Ctrl+Shift+F),
   host-key mismatch override dialog.
 - **Keyword highlighting** — regex rule packs (interfaces, IPs, MACs, up/down states,
@@ -161,8 +166,6 @@ have `synchronize-panes` if they truly want it.
   tmux-persistent.
 - **Per-session color schemes** — extend the settings-override layer + the palettes in
   `terminal.html`; `Session.ColorTag` already exists as the tab accent.
-- **Manual shell-integration snippet** — optionally show and copy OSC 133/OSC 7 setup
-  for users who choose to install it. resesh must never send setup code automatically.
 - **Foreground-process title side channel** — tmux-grade `pane_current_command` on plain
   sessions with zero shell cooperation: each tab owns its SSH connection, so an exec
   channel can locate the shell channel's process ($PPID → our sshd child → its child
