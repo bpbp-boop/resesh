@@ -409,9 +409,10 @@
     }
 
     function pasteText(text) {
-      if (!text || !connected) return;
+      if (!text || !connected || readOnly) return;
       returnToLiveInput();
-      host.postMessage({ type: "input", data: strToB64(text) });
+      // Preserve xterm's newline normalization and negotiated bracketed-paste mode.
+      term.paste(text);
     }
 
     // Runs before xterm consumes a regular browser/textarea paste event.
