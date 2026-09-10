@@ -197,6 +197,9 @@
                 <MenuBarItem Title="Session">
                     <MenuFlyoutItem x:Name="ReconnectMenuItem" Text="Reconnect" Click="ReconnectMenu_Click" />
                     <MenuFlyoutItem x:Name="DisconnectMenuItem" Text="Disconnect" Click="DisconnectMenu_Click" />
+                    <MenuFlyoutItem x:Name="ManageRemoteMenuItem" Text="Manage Remote Sessions…"
+                        AutomationProperties.AutomationId="ManageRemoteSessionsMenu"
+                        Visibility="Collapsed" IsEnabled="False" Click="ManageRemoteMenu_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Clone" Click="CloneMenu_Click" />
                     <MenuFlyoutItem Text="Pin Tab" Click="PinTabMenu_Click" />

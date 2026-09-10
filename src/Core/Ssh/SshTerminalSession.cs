@@ -94,7 +94,8 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         string? bootstrapCommand = null,
         Func<SshTerminalSession, string?>? bootstrapCommandFactory = null,
         Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool openShell = true)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (_client is not null)
@@ -167,6 +168,10 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            // A session manager needs authenticated exec channels without attaching or
+            // creating a persistent shell, including when the originating tab is detached.
+            if (!openShell)
+                return;
             bootstrapCommand = bootstrapCommandFactory?.Invoke(this) ?? bootstrapCommand;
             cancellationToken.ThrowIfCancellationRequested();
             _shell = client.CreateShellStream(terminalType, (uint)columns, (uint)rows, 0, 0, 64 * 1024);

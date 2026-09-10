@@ -114,6 +114,44 @@ public static class TmuxPersistence
     public static string KillCommand(Guid id, int slot) =>
         $"tmux -L {Socket} kill-session -t ={SessionName(id, slot)}";
 
+    /// <summary>Explicit resume never recreates a shell that ended after discovery.</summary>
+    public static string ResumeCommand(Guid id, int slot)
+    {
+        var target = $"={SessionName(id, slot)}";
+        return " printf '\\033[2J\\033[3J\\033[H'; "
+            + $"tmux -L {Socket} capture-pane -e -p -t {target} -S -; "
+            + $"exec tmux -L {Socket} {TerminalOverrides} \\; {TitleReporting} \\; attach-session -t {target}";
+    }
+
+    public static bool IsServerAbsent(SshCommandResult result) => !result.Success &&
+        (result.Error.TrimStart().StartsWith("no server running on ", StringComparison.Ordinal)
+         || (result.Error.TrimStart().StartsWith("error connecting to ", StringComparison.Ordinal)
+             && result.Error.Contains("(No such file or directory)", StringComparison.Ordinal)));
+
+    /// <summary>Only the active pane in the active window represents a session.</summary>
+    public static string ManagementCommand() =>
+        $"tmux -L {Socket} list-panes -a -F '#{{session_name}}|#{{window_active}}#{{pane_active}}|#{{session_attached}}|#{{session_created}}|#{{pane_current_command}}|#{{pane_current_path}}'";
+
+    public static IReadOnlyList<TmuxSessionInfo> ParseManagedSessions(string output, Guid id)
+    {
+        var sessions = new Dictionary<int, TmuxSessionInfo>();
+        foreach (var line in output.Split('\n'))
+        {
+            var parts = line.TrimEnd('\r').Split('|', 6);
+            if (parts is not [var name, "11", var attached, var created, var command, var path]
+                || !TryParseSlot(name, SessionName(id, 0), out var slot)
+                || name != SessionName(id, slot)
+                || !int.TryParse(attached, out var clients) || clients < 0)
+                continue;
+
+            DateTimeOffset? started = null;
+            if (long.TryParse(created, out var seconds) && seconds >= 0 && seconds <= 253402300799)
+                started = DateTimeOffset.FromUnixTimeSeconds(seconds);
+            sessions[slot] = new TmuxSessionInfo(slot, name, path, clients, started, command);
+        }
+        return sessions.Values.OrderBy(session => session.Slot).ToList();
+    }
+
     /// <summary>Lists the active pane, attached-client count, and current path for every
     /// session on the app's private tmux server. The path is last because it can contain
     /// the separator character.</summary>
@@ -199,4 +237,5 @@ public static class TmuxPersistence
 }
 
 /// <summary>One persistent shell found on the app's private tmux server.</summary>
-public sealed record TmuxSessionInfo(int Slot, string Name, string CurrentPath, int AttachedClients);
+public sealed record TmuxSessionInfo(int Slot, string Name, string CurrentPath, int AttachedClients,
+    DateTimeOffset? CreatedAt = null, string CurrentCommand = "");

@@ -183,7 +183,7 @@ public sealed class MainViewModel : ObservableObject
     private void Tab_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(TabViewModel.State) or nameof(TabViewModel.ConnectionSummary)
-            or nameof(TabViewModel.Header))
+            or nameof(TabViewModel.Header) or nameof(TabViewModel.IsLocked))
         {
             OnPropertyChanged(nameof(StatusText));
         }

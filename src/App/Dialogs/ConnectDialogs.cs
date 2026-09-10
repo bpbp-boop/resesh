@@ -10,8 +10,6 @@ public static class ConnectDialogs
 {
     private static readonly ConditionalWeakTable<XamlRoot, SemaphoreSlim> DialogGates = new();
 
-    private sealed record TmuxChoice(string Label, int Slot);
-
     private static async Task<ContentDialogResult> ShowAsync(ContentDialog dialog)
     {
         var xamlRoot = dialog.XamlRoot
@@ -127,19 +125,27 @@ public static class ConnectDialogs
     public static async Task<int?> SelectTmuxSessionAsync(
         XamlRoot xamlRoot, IReadOnlyList<TmuxSessionInfo> sessions, int newSlot)
     {
-        var choices = sessions.Select(session => new TmuxChoice(
-                $"{SlotLabel(session.Slot)} — {PathLabel(session.CurrentPath)} — {AttachmentLabel(session.AttachedClients)}",
-                session.Slot))
-            .Append(new TmuxChoice($"Start a new persistent session ({SlotLabel(newSlot)})", newSlot))
-            .ToList();
-        var picker = new ComboBox
+        var picker = new ListView
         {
-            Header = "Persistent session",
-            ItemsSource = choices,
-            DisplayMemberPath = nameof(TmuxChoice.Label),
-            SelectedIndex = 0,
+            MaxHeight = 340,
+            SelectionMode = ListViewSelectionMode.Single,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(picker, "Persistent session");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(picker, "ConnectRemoteSessionsList");
+        foreach (var session in sessions)
+            picker.Items.Add(TmuxSessionRow.Create(session));
+        picker.Items.Add(new ListViewItem
+        {
+            Tag = newSlot,
+            Content = new TextBlock
+            {
+                Text = $"Start a new persistent session ({SlotLabel(newSlot)})",
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 8, 0, 8),
+            },
+        });
+        picker.SelectedIndex = 0;
         var content = new StackPanel
         {
             Spacing = 12,
@@ -163,23 +169,17 @@ public static class ConnectDialogs
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = xamlRoot,
         };
-        return await ShowAsync(dialog) == ContentDialogResult.Primary
-            && picker.SelectedItem is TmuxChoice choice
-                ? choice.Slot
-                : null;
+        if (await ShowAsync(dialog) != ContentDialogResult.Primary)
+            return null;
+        return (picker.SelectedItem as ListViewItem)?.Tag switch
+        {
+            TmuxSessionInfo session => session.Slot,
+            int slot => slot,
+            _ => null,
+        };
     }
 
     private static string SlotLabel(int slot) => slot == 0 ? "Primary" : $"Session {slot + 1}";
-
-    private static string PathLabel(string path) =>
-        string.IsNullOrWhiteSpace(path) ? "path unavailable" : path;
-
-    private static string AttachmentLabel(int count) => count switch
-    {
-        0 => "detached",
-        1 => "attached by 1 client",
-        _ => $"attached by {count} clients",
-    };
 
     /// <summary>Host key confirmation: first connect, or a changed key (typed confirmation required).</summary>
     public static Task<bool> ConfirmHostKeyAsync(XamlRoot xamlRoot, HostKeyInfo info) =>

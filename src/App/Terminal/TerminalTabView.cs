@@ -30,6 +30,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     private readonly KnownHostsStore _knownHosts;
     private readonly SshKeyStore _sshKeys;
     private readonly IReadOnlySet<int> _tmuxSlotsAlreadyOpen;
+    private int? _resumeTmuxSlot;
     private readonly TerminalSurface _terminal = TerminalSurfaceFactory.CreateLive();
     private readonly ProgressRing _spinner = new() { IsActive = false, Width = 48, Height = 48 };
 
@@ -120,13 +121,14 @@ public sealed class TerminalTabView : Grid, IDisposable
 
     public TerminalTabView(TabViewModel tab, ICredentialService credentials, KnownHostsStore knownHosts,
         SshKeyStore sshKeys,
-        IReadOnlySet<int>? tmuxSlotsAlreadyOpen = null)
+        IReadOnlySet<int>? tmuxSlotsAlreadyOpen = null, int? resumeTmuxSlot = null)
     {
         _tab = tab;
         _credentials = credentials;
         _knownHosts = knownHosts;
         _sshKeys = sshKeys;
         _tmuxSlotsAlreadyOpen = tmuxSlotsAlreadyOpen ?? new HashSet<int>();
+        _resumeTmuxSlot = resumeTmuxSlot;
 
         // Column 0: terminal; column 1: splitter (collapsed); column 2: file pane (width 0
         // until opened). The lock overlay spans all three.
@@ -720,11 +722,19 @@ public sealed class TerminalTabView : Grid, IDisposable
     private string SelectTmuxBootstrapBlocking(SshTerminalSession connected, bool isReconnect, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        var result = connected.RunCommand(TmuxPersistence.DiscoveryCommand());
+        var result = connected.RunCommand(TmuxPersistence.ManagementCommand());
         token.ThrowIfCancellationRequested();
         var remoteSessions = result is { Success: true }
-            ? TmuxPersistence.ParseSessions(result.Output, Session.Id)
+            ? TmuxPersistence.ParseManagedSessions(result.Output, Session.Id)
             : [];
+
+        if (!isReconnect && _resumeTmuxSlot is { } requestedSlot)
+        {
+            if (!remoteSessions.Any(remote => remote.Slot == requestedSlot))
+                throw new InvalidOperationException("That remote session is no longer available. Refresh the remote sessions list.");
+            _tab.TmuxSlot = requestedSlot;
+            return TmuxPersistence.ResumeCommand(Session.Id, requestedSlot);
+        }
 
         // Reconnect keeps the target selected for this tab. If it no longer exists, the
         // normal bootstrap recreates it with the same name.
@@ -970,6 +980,37 @@ public sealed class TerminalTabView : Grid, IDisposable
                 showInOverview = r.ShowInOverview,
             })
             .ToList();
+
+    /// <summary>Reconnects a stopped tab to an explicitly selected existing shell.</summary>
+    public Task ResumeRemoteSessionAsync(int slot)
+    {
+        _resumeTmuxSlot = slot;
+        return ConnectAsync(isReconnect: false);
+    }
+
+    /// <summary>Creates an exec-only connection owned and disposed by the manager.</summary>
+    public async Task<SshTerminalSession?> CreateRemoteManagementConnectionAsync()
+    {
+        var resolved = await ResolveSshCredentialAsync(CancellationToken.None);
+        if (resolved is null) return null;
+        var (profile, secret) = resolved;
+        var connection = new SshTerminalSession(_knownHosts)
+        {
+            HostKeyDecision = info => ConfirmHostKeyBlocking(info, CancellationToken.None),
+        };
+        try
+        {
+            await Task.Run(() => connection.Connect(profile, secret, Session.TerminalType, 80, 24,
+                interactiveResponder: prompts => PromptKeyboardInteractiveBlocking(prompts, CancellationToken.None),
+                openShell: false));
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+    }
 
     /// <summary>
     /// Kills the remote tmux session (persistent sessions only). Waiting for the command

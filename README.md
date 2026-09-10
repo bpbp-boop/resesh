@@ -66,6 +66,15 @@ live tab ownership and cleanup. Core tests cover connection cancellation, failed
 host-key recovery, and exact workspace pane measurements. JavaScript source checks remain
 useful for UI wiring; they do not replace interactive UI tests.
 
+## Persistent sessions
+
+Right-click a persistent SSH tab and choose **Manage Remote Sessions…** to list the
+shells belonging to that saved connection, including when the tab is disconnected.
+The same action is available from the **Session** menu and the command palette for the active tab.
+The manager shows session age, foreground process, current folder, and attached-client
+count. Select a shell to **Resume**, or **End Session…** to terminate it after confirmation.
+**Refresh** updates the list. Closing a terminal tab still only detaches its persistent shell.
+
 ## Data locations
 
 | What | Where |

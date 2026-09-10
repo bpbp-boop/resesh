@@ -32,6 +32,7 @@ public interface ITabGroupHost
     Task OpenSessionOptionsAsync(TabViewModel tab);
     Task LockSessionAsync(TabViewModel tab);
     void ReconnectTab(TabViewModel tab);
+    Task ManageRemoteSessionsAsync(TabViewModel tab);
     void DisconnectTab(TabViewModel tab);
     Task EndRemoteSessionAsync(TabViewModel tab);
     void ToggleFilePane(TabViewModel tab);
@@ -606,7 +607,7 @@ public sealed partial class TabGroupView : UserControl
     private MenuFlyoutItem _rename = null!, _resetName = null!, _reconnect = null!, _disconnect = null!, _endRemote = null!,
         _close = null!, _closeDisconnected = null!, _closeOthers = null!, _closeRight = null!,
         _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _splitDown = null!,
-        _options = null!,
+        _options = null!, _manageRemote = null!,
         _filePane = null!, _filePaneCwd = null!, _workingFolder = null!, _recordingsLocation = null!;
     private MenuFlyoutSubItem _highlight = null!, _agent = null!;
 
@@ -627,6 +628,7 @@ public sealed partial class TabGroupView : UserControl
         _resetName = Item("Reset Name", tab => tab.TitleOverride = null);
         _reconnect = Item("Reconnect", tab => _host.ReconnectTab(tab));
         _disconnect = Item("Disconnect", tab => _host.DisconnectTab(tab));
+        _manageRemote = Item("Manage Remote Sessions…", tab => _ = _host.ManageRemoteSessionsAsync(tab));
         _endRemote = Item("End Remote Session…", tab => _ = _host.EndRemoteSessionAsync(tab));
         _filePane = Item("File Pane", tab => _host.ToggleFilePane(tab));
         _filePane.KeyboardAcceleratorTextOverride = "Ctrl+Shift+E";
@@ -663,6 +665,7 @@ public sealed partial class TabGroupView : UserControl
         menu.Items.Add(_reconnect);
         menu.Items.Add(_disconnect);
         menu.Items.Add(_endRemote);
+        menu.Items.Add(_manageRemote);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_close);
         menu.Items.Add(_closeDisconnected);
@@ -707,6 +710,8 @@ public sealed partial class TabGroupView : UserControl
         var endRemote = caps.RemoteSession && tab.Session.Persistent;
         _endRemote.Visibility = endRemote ? Visibility.Visible : Visibility.Collapsed;
         _endRemote.IsEnabled = endRemote && tab.State == TabConnectionState.Connected;
+        _manageRemote.Visibility = endRemote ? Visibility.Visible : Visibility.Collapsed;
+        _manageRemote.IsEnabled = endRemote && !tab.IsLocked && tab.State != TabConnectionState.Connecting;
         // Bulk closes skip pinned tabs, so they're only offered when an unpinned tab qualifies.
         _closeDisconnected.IsEnabled = Group.Tabs.Any(t => IsStopped(t) && !t.IsPinned);
         _closeOthers.IsEnabled = Group.Tabs.Any(t => t != tab && !t.IsPinned);

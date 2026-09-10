@@ -509,6 +509,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (tab.State == TabConnectionState.Connected)
             Add("Tab", $"{tab.Capabilities.StopVerb} Tab", "current active session",
                 Sync(() => DisconnectTab(tab)));
+        if (CanManageRemoteSessions(tab))
+            Add("Tab", "Manage Remote Sessions", "tmux persistent shells resume end close command running age",
+                () => ManageRemoteSessionsAsync(tab));
         if (!tab.IsPlayback)
         {
             Add("Tab", "Clone Tab", "duplicate current active session",
@@ -785,6 +788,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         EndRemoteMenuItem.Visibility = caps is null || caps.RemoteSession
             ? Visibility.Visible
             : Visibility.Collapsed;
+        var tab = ViewModel.ActiveTab;
+        ManageRemoteMenuItem.Visibility = tab is { IsPlayback: false, IsOnboarding: false }
+            && tab.Capabilities.RemoteSession && tab.Session.Persistent
+                ? Visibility.Visible : Visibility.Collapsed;
+        ManageRemoteMenuItem.IsEnabled = CanManageRemoteSessions(tab);
     }
 
     private void StatusBarMenu_Click(object sender, RoutedEventArgs e) =>
@@ -826,6 +834,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         if (ViewModel.ActiveTab is { } tab)
             DisconnectTab(tab);
+    }
+
+    private void ManageRemoteMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTab is { } tab)
+            _ = ManageRemoteSessionsAsync(tab);
     }
 
     private void CloneMenu_Click(object sender, RoutedEventArgs e)
@@ -1020,15 +1034,18 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private TabViewModel ConnectSession(
         Session session,
         TabGroupViewModel? group = null,
-        bool trackRecent = true)
+        bool trackRecent = true,
+        int? resumeTmuxSlot = null)
     {
         var tab = ViewModel.Connect(session, group);
+        if (resumeTmuxSlot is { } slot)
+            tab.TmuxSlot = slot;
         var tmuxSlotsAlreadyOpen = ViewModel.AllTabs
             .Where(other => other != tab && other.Session.Id == session.Id)
             .Select(other => other.TmuxSlot)
             .ToHashSet();
         var view = new TerminalTabView(
-            tab, App.Credentials, App.KnownHosts, App.SshKeys, tmuxSlotsAlreadyOpen);
+            tab, App.Credentials, App.KnownHosts, App.SshKeys, tmuxSlotsAlreadyOpen, resumeTmuxSlot);
         WireTerminalWindowEvents(tab, view);
         tab.View = view;
         _groupViews[ViewModel.GroupOf(tab)].AddTerminal(view);
@@ -1736,6 +1753,57 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (tab.View is TerminalTabView view && tab.State == TabConnectionState.Connected)
             view.DisconnectLocal();
     }
+
+    private static bool CanManageRemoteSessions(TabViewModel? tab) =>
+        tab is { IsLocked: false, IsPlayback: false, IsOnboarding: false, View: TerminalTabView }
+        && tab.Capabilities.RemoteSession && tab.Session.Persistent
+        && tab.State != TabConnectionState.Connecting;
+
+    public async Task ManageRemoteSessionsAsync(TabViewModel tab)
+    {
+        if (!CanManageRemoteSessions(tab) || tab.View is not TerminalTabView view || _managingRemoteSessions)
+            return;
+        int? slot;
+        _managingRemoteSessions = true;
+        try
+        {
+            using var connection = await view.CreateRemoteManagementConnectionAsync();
+            if (connection is null) return;
+            slot = await RemoteSessionsDialog.ShowAsync(Root.XamlRoot, tab.Session.Name,
+                tab.Session.Id,
+                () => Task.Run(() => connection.RunCommand(Resesh.Core.Ssh.TmuxPersistence.ManagementCommand())),
+                selected => Task.Run(() => connection.TryRunCommand(Resesh.Core.Ssh.TmuxPersistence.KillCommand(tab.Session.Id, selected))));
+        }
+        catch (Exception exception)
+        {
+            await new ContentDialog
+            {
+                Title = "Could Not Manage Remote Sessions", Content = exception.Message,
+                CloseButtonText = "Close", XamlRoot = Root.XamlRoot,
+            }.ShowModalAsync();
+            return;
+        }
+        finally { _managingRemoteSessions = false; }
+        if (slot is not { } selectedSlot)
+            return;
+        var existing = ViewModel.AllTabs.FirstOrDefault(other => other.Session.Id == tab.Session.Id
+            && other.TmuxSlot == selectedSlot && !other.IsPlayback);
+        if (existing is not null)
+        {
+            var group = ViewModel.GroupOf(existing);
+            group.SelectedTab = existing;
+            FocusGroup(group);
+            if (!existing.IsLocked && existing.View is TerminalTabView existingView
+                && existing.State is TabConnectionState.Disconnected or TabConnectionState.Exited)
+                await existingView.ResumeRemoteSessionAsync(selectedSlot);
+        }
+        else
+        {
+            ConnectSession(tab.Session, resumeTmuxSlot: selectedSlot);
+        }
+    }
+
+    private bool _managingRemoteSessions;
 
     public async Task EndRemoteSessionAsync(TabViewModel tab)
     {
