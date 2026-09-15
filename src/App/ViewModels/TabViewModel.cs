@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Resesh.Core.Agents;
 using Resesh.Core.Backend;
 using Resesh.Core.Models;
@@ -34,6 +35,46 @@ public sealed class TabViewModel : ObservableObject
     private string _connectionSummary = "";
     private object? _view;
     private string _appTheme;
+    private readonly CommandCompletionTracker _completionTracker = new();
+    public event Action<CommandCompletion>? CompletionRequested;
+    public CommandCompletion? LastCommandCompletion { get; private set; }
+    public bool CanNotifyCommandCompletion => State == TabConnectionState.Connected && _completionTracker.IsRunning;
+    public bool ShowCompletionNotificationButton => CanNotifyCommandCompletion && !Agent.IsAgent;
+    public bool IsCompletionNotificationArmed => _completionTracker.IsArmed;
+    public string CompletionNotificationAutomationId => "CommandCompletion_" + _tabInstanceId.ToString("N");
+    public string CompletionSubtitleTooltip => LastCommandCompletion is { } result
+        ? $"{Subtitle}\n{result.ProgramName} finished after {result.Duration.TotalSeconds:0.#}s ({(result.ExitCode is { } code ? $"exit {code}" : "exit status unknown")})"
+        : Subtitle;
+    public string CompletionNotificationTooltip => CanNotifyCommandCompletion
+        ? (IsCompletionNotificationArmed ? "Notification armed for " : "Notify when finished: ") + _completionTracker.ProgramName
+        : LastCommandCompletion is { } result
+            ? $"{result.ProgramName} finished after {result.Duration.TotalSeconds:0.#}s ({(result.ExitCode is { } code ? $"exit {code}" : "exit status unknown")})"
+            : "Run a command with shell integration to request a completion notification";
+    private RelayCommand? _toggleCompletionNotificationCommand;
+    public RelayCommand ToggleCompletionNotificationCommand => _toggleCompletionNotificationCommand ??=
+        new RelayCommand(() => { _completionTracker.Toggle(); NotifyCompletionProperties(); }, () => CanNotifyCommandCompletion);
+
+    public void ObserveCommandExecution(long id, string commandLine, bool completed, int? exitCode)
+    {
+        if (State != TabConnectionState.Connected) return;
+        CommandCompletion? result = null;
+        if (completed) result = _completionTracker.Complete(id, exitCode);
+        else _completionTracker.Start(id, commandLine);
+        if (result is not null) LastCommandCompletion = result;
+        NotifyCompletionProperties();
+        if (result is not null) CompletionRequested?.Invoke(result);
+    }
+
+    private void NotifyCompletionProperties()
+    {
+        OnPropertyChanged(nameof(CanNotifyCommandCompletion));
+        OnPropertyChanged(nameof(ShowCompletionNotificationButton));
+        OnPropertyChanged(nameof(IsCompletionNotificationArmed));
+        OnPropertyChanged(nameof(CompletionNotificationTooltip));
+        OnPropertyChanged(nameof(LastCommandCompletion));
+        OnPropertyChanged(nameof(CompletionSubtitleTooltip));
+        _toggleCompletionNotificationCommand?.NotifyCanExecuteChanged();
+    }
 
     public TabViewModel(Session session, ViewModelEnvironment environment)
         : this(session, environment, isOnboarding: false)
@@ -45,6 +86,11 @@ public sealed class TabViewModel : ObservableObject
         _environment = environment;
         _session = session;
         _appTheme = environment.ResolveTheme(environment.CurrentTheme());
+        PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(Subtitle))
+                OnPropertyChanged(nameof(CompletionSubtitleTooltip));
+        };
         IsOnboarding = isOnboarding;
     }
 
@@ -148,6 +194,8 @@ public sealed class TabViewModel : ObservableObject
                 // ran; the next prompt or full-screen app sets a fresh title.
                 if (value != TabConnectionState.Connected)
                 {
+                    _completionTracker.Reset();
+                    NotifyCompletionProperties();
                     TerminalTitle = null;
                     RunningCommand = null;
                     _runningCommandIsExact = false;
@@ -253,6 +301,7 @@ public sealed class TabViewModel : ObservableObject
         OnPropertyChanged(nameof(AgentBadgeGlyph));
         OnPropertyChanged(nameof(AgentBadgeSize));
         OnPropertyChanged(nameof(AgentTooltip));
+        OnPropertyChanged(nameof(ShowCompletionNotificationButton));
     }
 
     private bool AgentIconsEnabled => _environment.ShowAgentIcons();

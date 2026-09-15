@@ -18,6 +18,11 @@ public static class PresentationValues
 {
     public static Visibility Visible(bool value) => value ? Visibility.Visible : Visibility.Collapsed;
 
+    public static Visibility TreeFolderVisibility(bool isFolder, bool isLocalRoot) =>
+        Visible(isFolder && !isLocalRoot);
+
+    public static Visibility TreeSessionVisibility(bool isFolder) => Visible(!isFolder);
+
     public static Visibility FocusedAccentVisibility(bool isActive, bool isGroupFocused) =>
         Visible(isActive && isGroupFocused);
 

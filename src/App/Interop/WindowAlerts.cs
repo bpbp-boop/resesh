@@ -16,6 +16,9 @@ internal static class WindowAlerts
 
     public static bool IsForeground(IntPtr hwnd) => hwnd != IntPtr.Zero && GetForegroundWindow() == hwnd;
 
+    /// <summary>Used only after an explicit notification click; Windows retains foreground policy.</summary>
+    public static bool BringToForeground(IntPtr hwnd) => hwnd != IntPtr.Zero && SetForegroundWindow(hwnd);
+
     /// <summary>Flashes the taskbar button until the window comes to the foreground.</summary>
     public static void Flash(IntPtr hwnd)
     {
@@ -49,6 +52,10 @@ internal static class WindowAlerts
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
 
     [DllImport("user32.dll")]
     private static extern bool MessageBeep(uint uType);

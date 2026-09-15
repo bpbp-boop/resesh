@@ -1,0 +1,57 @@
+<Project>
+  <!-- Component-only self-contained payloads omit this aggregate runtime resource.
+       Foundation 2.3.9 needs it to register notifications. Use the matching, pinned
+       Runtime package payload until https://github.com/microsoft/WindowsAppSDK/pull/6725 ships in Foundation. -->
+  <UsingTask TaskName="ExtractWindowsAppRuntimeInsightsResource"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <ArchivePath ParameterType="System.String" Required="true" />
+      <OutputPath ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.IO.Compression" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        const string resourceName = "Microsoft.WindowsAppRuntime.Insights.Resource.dll";
+        if (File.Exists(OutputPath) && File.GetLastWriteTimeUtc(OutputPath) >= File.GetLastWriteTimeUtc(ArchivePath))
+            return true;
+        using (var stream = File.OpenRead(ArchivePath))
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Read))
+        {
+            var entry = archive.GetEntry(resourceName);
+            if (entry == null)
+            {
+                Log.LogError("The pinned Windows App Runtime MSIX is missing " + resourceName);
+                return false;
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(OutputPath));
+            using (var input = entry.Open())
+            using (var output = File.Create(OutputPath))
+                input.CopyTo(output);
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="IncludeWindowsAppRuntimeInsightsResource"
+          BeforeTargets="AssignTargetPaths;CoreCompile;GetCopyToOutputDirectoryItems"
+          DependsOnTargets="GetWindowsAppSDKNativePlatform"
+          Condition="'$(WindowsAppSDKSelfContained)' == 'true' and '$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <_InsightsResourceArchive>$(PkgMicrosoft_WindowsAppSDK_Runtime)\tools\MSIX\win10-$(NativePlatform)\Microsoft.WindowsAppRuntime.2.msix</_InsightsResourceArchive>
+      <_InsightsResourcePackageVersion>$([System.IO.Path]::GetFileName('$(PkgMicrosoft_WindowsAppSDK_Runtime)'))</_InsightsResourcePackageVersion>
+      <_InsightsResourceOutput>$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'WindowsAppRuntimeResources', '$(_InsightsResourcePackageVersion)', '$(NativePlatform)', 'Microsoft.WindowsAppRuntime.Insights.Resource.dll'))</_InsightsResourceOutput>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(_InsightsResourceArchive)')"
+           Text="The pinned Windows App Runtime package resource payload was not found: $(_InsightsResourceArchive)" />
+    <ExtractWindowsAppRuntimeInsightsResource ArchivePath="$(_InsightsResourceArchive)" OutputPath="$(_InsightsResourceOutput)" />
+    <ItemGroup>
+      <Content Include="$(_InsightsResourceOutput)"
+               Link="Microsoft.WindowsAppRuntime.Insights.Resource.dll"
+               TargetPath="Microsoft.WindowsAppRuntime.Insights.Resource.dll"
+               CopyToOutputDirectory="PreserveNewest"
+               CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+</Project>

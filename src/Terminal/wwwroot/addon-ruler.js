@@ -214,6 +214,10 @@
     this._cmdPromptLine = -1; // absolute line of the last OSC 133;A/B prompt start
     this._cmdPromptCol = -1;  // cursor column at OSC 133;B — where the typed command starts
     this._cmdPending = null;  // mark committed by C, awaiting its D exit code
+    this._executionNextId = 0;
+    this._executionPending = null;
+    this._executionReportingEnabled = true;
+    this.onCommandExecution = null;
     this._cmdObserver = null; // page hook: commands as they are marked (agent detection)
     this._cmdPanel = null;    // commands panel: every command mark as a clickable list
     this._cmdPanelList = null;
@@ -478,6 +482,7 @@
     for (var m = 0; m < cmdMarks.length; m++) cmdMarks[m].marker.dispose();
     this._cmdMarks = [];
     this._cmdPending = null;
+    this._executionPending = null;
     this._timeWrites = [];
     this._timeWriteHead = 0;
     this._timeWriteActive = false;
@@ -828,6 +833,7 @@
         (!/^-?\d+$/.test(parts[1]) || !Number.isSafeInteger(Number(parts[1])))) return;
     this._cmdOscSeen = true;
     if (kind === "A" || kind === "B") {
+      if (kind === "A") this._finishExecution(null);
       if (kind === "A" && this._cmdExecuting) {
         this._cmdExecuting = false;
         this._fireCommand("", undefined, true);
@@ -842,6 +848,14 @@
         var text = this._cmdText(buf, this._cmdPromptLine, this._cmdPromptCol);
         if (text) this._fireCommand(text, undefined, true);
         this._cmdPending = this._cmdCommit(this._cmdPromptLine, null, "osc", undefined, text);
+        if (this._executionReportingEnabled && text && !/[\x00-\x1f\x7f-\x9f]/.test(text) &&
+            this._executionNextId < Number.MAX_SAFE_INTEGER) {
+          this._finishExecution(null);
+          var execution = { id: ++this._executionNextId, commandLine: text.slice(0, 256), completed: false, exitCode: null };
+          this._executionPending = execution;
+          if (this._cmdPending) this._cmdPending.executionId = execution.id;
+          this._emitExecution(execution);
+        }
         this._cmdPromptLine = -1;
         this._cmdPromptCol = -1;
       }
@@ -849,6 +863,7 @@
       this._cmdExecuting = false;
       var exit = parts.length > 1 && parts[1] !== "" ? parseInt(parts[1], 10) : null;
       if (exit !== null && isNaN(exit)) exit = null;
+      this._finishExecution(exit !== null && exit >= -2147483648 && exit <= 2147483647 ? exit : null);
       if (this._cmdPending) {
         this._cmdPending.exit = exit;
         this._cmdPending = null;
@@ -862,6 +877,31 @@
         this._cmdPromptLine = -1;
       }
       this._fireCommand("", undefined, true); // the command is over, whatever it was
+    }
+  };
+
+  RulerAddon.prototype._emitExecution = function (execution) {
+    if (!this._executionReportingEnabled || !this.onCommandExecution) return;
+    try { this.onCommandExecution(execution); } catch (_) { }
+  };
+
+  RulerAddon.prototype._finishExecution = function (exitCode) {
+    var pending = this._executionPending;
+    this._executionPending = null;
+    if (!pending) return;
+    this._emitExecution({ id: pending.id, commandLine: pending.commandLine, completed: true, exitCode: exitCode });
+  };
+
+  // Transport cancellation and playback are not shell completion evidence.
+  RulerAddon.prototype.setExecutionReporting = function (enabled) {
+    this._executionReportingEnabled = enabled === true;
+    this._executionPending = null;
+    this._cmdPending = null;
+    // Initial A/B can be parsed before the transport's connected notification.
+    // Keep that boundary when enabling; only cancellation invalidates it.
+    if (!this._executionReportingEnabled) {
+      this._cmdPromptLine = -1;
+      this._cmdPromptCol = -1;
     }
   };
 
@@ -1382,6 +1422,16 @@
     this._scrollLineToCenter(line);
     this._flashLine(line);
     return true;
+  };
+
+  RulerAddon.prototype.jumpToExecution = function (id) {
+    if (!Number.isSafeInteger(id) || id <= 0) return false;
+    for (var i = 0; i < this._cmdMarks.length; i++) {
+      var mark = this._cmdMarks[i];
+      if (mark.executionId === id && !mark.marker.isDisposed && mark.marker.line >= 0)
+        return this.jumpToCommand(mark.marker.line);
+    }
+    return false;
   };
 
   RulerAddon.prototype._copyCommandOutput = function (line, button, doneLabel, emptyLabel) {

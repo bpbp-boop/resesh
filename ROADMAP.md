@@ -8,6 +8,12 @@ and the git history.
 
 ## Shipped
 
+- **Command completion bell** — explicitly arm one running command from its tab subtitle
+  or the command palette. Shell integration supplies the execution identity and exit result.
+  Foreground completion stays quiet with a result tooltip; background completion sends a
+  Windows notification that returns to the command output. Disconnect cancels the request,
+  unknown exit status stays distinct from success, and later commands are never armed automatically.
+
 - **Optional shell integration (experimental)** — off by default, enabled per local
   profile or SSH session with an explicit remote shell choice. Bundled hooks supply
   command marks, results, and folders without profile edits or network-device probes.

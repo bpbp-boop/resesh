@@ -50,7 +50,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.6" />
-    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.4.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.4.0" GeneratePathProperty="true" />
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.6" />
     <!-- CommunityToolkit.WinUI still declares the old monolithic SDK package. Keep its
          dependency satisfied without importing that package's assets or build targets. -->
@@ -63,5 +63,7 @@
     <ProjectReference Include="..\Core\Resesh.Core.csproj" />
     <ProjectReference Include="..\Terminal\Resesh.Terminal.csproj" />
   </ItemGroup>
+
+  <Import Project="..\..\eng\WindowsAppRuntimeResources.targets" />
 
 </Project>

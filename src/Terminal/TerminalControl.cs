@@ -79,6 +79,11 @@ public sealed class TerminalControl : TerminalSurface
 
     private readonly WebView2 _webView = new();
     private object? _initialOptions;
+    private bool _executionReadOnly;
+    private bool _executionConnected;
+    private long _lastExecutionId;
+    private long _executionGeneration;
+    private TerminalCommandExecution? _activeExecution;
     private readonly object _outputGate = new();
     private readonly MemoryStream _pendingOutput = new(FlushThresholdBytes);
     private List<OutputIngest> _pendingIngest = [];
@@ -132,6 +137,7 @@ public sealed class TerminalControl : TerminalSurface
     /// <summary>Command the page saw start (ruler discovery / OSC 133); "" = it ended.
     /// Drives the tab's subtitle; the page epoch-gates it against the title stream.</summary>
     public override event Action<string, bool>? CommandChanged;
+    public override event Action<TerminalCommandExecution>? CommandExecutionChanged;
 
     /// <summary>Current location read from a known idle prompt, plus an optional detected
     /// platform key. Examples: a Windows directory or a Nokia MD-CLI cli-path.</summary>
@@ -337,6 +343,9 @@ public sealed class TerminalControl : TerminalSurface
                         CommandChanged?.Invoke(runningText, root.TryGetProperty("exact", out var exactCommand) && exactCommand.ValueKind == JsonValueKind.True);
                     }
                     break;
+                case "commandExecution":
+                    ReceiveCommandExecution(root);
+                    break;
                 case "promptContext":
                     if (root.TryGetProperty("text", out var promptContext))
                     {
@@ -485,13 +494,21 @@ public sealed class TerminalControl : TerminalSurface
 
     // ---- control messages (UI thread) ----
 
-    public override void NotifyConnected() => Post(new { type = "connected" });
+    public override void NotifyConnected()
+    {
+        _executionConnected = true;
+        _activeExecution = null;
+        Post(new { type = "connected", executionGeneration = ++_executionGeneration });
+    }
 
     /// <summary>Shell-over notice. <paramref name="action"/> is the verb in the
     /// "Press Enter to …" hint ("reconnect"/"restart"); <paramref name="neutral"/> renders
     /// the message dimmed instead of warning-yellow (clean local exits are not errors).</summary>
     public override void NotifyDisconnected(string message, string action = "reconnect", bool neutral = false)
     {
+        _executionConnected = false;
+        _activeExecution = null;
+        ++_executionGeneration;
         FlushOutput();
         Post(new { type = "disconnected", message, action, severity = neutral ? "info" : "warn" });
     }
@@ -516,6 +533,46 @@ public sealed class TerminalControl : TerminalSurface
     /// <summary>Opens or closes the page's commands panel (the annotated scrollbar's
     /// command-mark list). Same action as Ctrl+Shift+O inside the terminal.</summary>
     public override void ToggleCommandsPanel() => Post(new { type = "toggleCommands" });
+
+    public override void ScrollToCommand(long id)
+    {
+        if (id > 0 && id <= 9007199254740991 && !_disposed)
+            Post(new { type = "scrollToCommand", id });
+    }
+
+    private void ReceiveCommandExecution(JsonElement message)
+    {
+        if (_disposed || _executionReadOnly || !_executionConnected ||
+            !message.TryGetProperty("generation", out var generationValue) || generationValue.ValueKind != JsonValueKind.Number ||
+            !generationValue.TryGetInt64(out var generation) || generation != _executionGeneration ||
+            !message.TryGetProperty("id", out var idValue) || idValue.ValueKind != JsonValueKind.Number ||
+            !idValue.TryGetInt64(out var id) || id <= 0 || id > 9007199254740991 ||
+            !message.TryGetProperty("commandLine", out var commandValue) || commandValue.ValueKind != JsonValueKind.String ||
+            !message.TryGetProperty("completed", out var completedValue) ||
+            completedValue.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+            !message.TryGetProperty("exitCode", out var exitValue)) return;
+        var command = commandValue.GetString()!;
+        if (string.IsNullOrWhiteSpace(command) || command.Length > 256 || command.Any(char.IsControl)) return;
+        int? exit = null;
+        if (exitValue.ValueKind != JsonValueKind.Null)
+        {
+            if (exitValue.ValueKind != JsonValueKind.Number || !exitValue.TryGetInt32(out var parsed)) return;
+            exit = parsed;
+        }
+        var completed = completedValue.GetBoolean();
+        if (!completed)
+        {
+            if (exit is not null || id <= _lastExecutionId) return;
+            _lastExecutionId = id;
+            _activeExecution = new(id, command, false, null);
+            CommandExecutionChanged?.Invoke(_activeExecution);
+        }
+        else if (_activeExecution is { } active && active.Id == id && active.CommandLine == command)
+        {
+            _activeExecution = null;
+            CommandExecutionChanged?.Invoke(active with { Completed = true, ExitCode = exit });
+        }
+    }
 
     /// <summary>Uses the quieter ruler presentation while two terminal groups are visible.
     /// The inactive group is dimmer, but pointer hover restores the full presentation.</summary>
@@ -556,6 +613,7 @@ public sealed class TerminalControl : TerminalSurface
         IReadOnlyList<object>? highlights = null,
         bool readOnly = false)
     {
+        _executionReadOnly = readOnly;
         _webView.DefaultBackgroundColor = ThemeBackground(theme);
         _initialOptions = new
         {
@@ -630,6 +688,9 @@ public sealed class TerminalControl : TerminalSurface
         ReadOnlyMemory<byte> keyframe,
         IReadOnlyList<TerminalReplayEvent> events)
     {
+        _executionConnected = false;
+        _activeExecution = null;
+        ++_executionGeneration;
         static string Encode(string value) =>
             Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
 
@@ -654,6 +715,9 @@ public sealed class TerminalControl : TerminalSurface
         int rows,
         IReadOnlyList<TerminalTimedReplayEvent> events)
     {
+        _executionConnected = false;
+        _activeExecution = null;
+        ++_executionGeneration;
         Post(new
         {
             type = "loadPlayback",

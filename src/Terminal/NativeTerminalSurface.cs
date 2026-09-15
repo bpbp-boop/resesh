@@ -131,6 +131,12 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private XamlRoot? _subscribedRoot;
     private ulong _lastNativeEventSequence;
     private char? _pendingShellMarkAction;
+    private long _executionNextId;
+    private int _executionGeneration;
+    private bool _executionConnected;
+    private bool _executionPromptArmed;
+    private TerminalCommandExecution? _executionPending;
+    private readonly Dictionary<long, ulong> _executionMarks = [];
     private bool _alternateBufferActive;
     private bool _bracketedPasteModeEnabled;
     private bool _searchRefreshPending;
@@ -172,6 +178,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
     public override event Action<int, int>? Ready;
     public override event Action<string>? TitleChanged;
     public override event Action<string, bool>? CommandChanged;
+    public override event Action<TerminalCommandExecution>? CommandExecutionChanged;
     public override event Action<string, string?>? PromptContextChanged;
     public override event Action<string>? WorkingDirectoryReported;
     public override event Action<string>? WindowsWorkingDirectoryReported;
@@ -319,10 +326,21 @@ public sealed class NativeTerminalSurface : TerminalSurface
         QueueOutputFlush();
     }
 
-    public override void NotifyConnected() => _reconnectOnEnter = false;
+    public override void NotifyConnected()
+    {
+        _reconnectOnEnter = false;
+        _executionConnected = true;
+        _executionPending = null;
+        _executionPromptArmed = false;
+        Interlocked.Increment(ref _executionGeneration);
+    }
 
     public override void NotifyDisconnected(string message, string action = "reconnect", bool neutral = false)
     {
+        _executionConnected = false;
+        _executionPending = null;
+        _executionPromptArmed = false;
+        Interlocked.Increment(ref _executionGeneration);
         FlushOutput(drain: true);
         _reconnectOnEnter = true;
         var color = neutral ? "\x1b[90m" : "\x1b[33m";
@@ -346,6 +364,13 @@ public sealed class NativeTerminalSurface : TerminalSurface
         _inputPanel.IsHitTestVisible = enabled;
     }
     public override void ToggleCommandsPanel() => SetCommandsPanelOpen(!_commandsPanelOpen);
+
+    public override void ScrollToCommand(long id)
+    {
+        if (_disposed || _alternateBufferActive || !_executionMarks.TryGetValue(id, out var markId)) return;
+        RefreshAnnotations();
+        if (_marks.Any(mark => mark.Id == markId)) ScrollToMark(markId);
+    }
 
     public override void SetRulerPresentation(bool isSplit, bool isGroupFocused) =>
         _ruler.SetPresentation(isSplit, isGroupFocused);
@@ -732,6 +757,10 @@ public sealed class NativeTerminalSurface : TerminalSurface
         ReadOnlyMemory<byte> keyframe,
         IReadOnlyList<TerminalReplayEvent> events)
     {
+        _executionConnected = false;
+        _executionPending = null;
+        _executionPromptArmed = false;
+        Interlocked.Increment(ref _executionGeneration);
         var generation = ++_replayGeneration;
         await RestoreReplayAsync(generation, columns, rows, keyframe, events);
     }
@@ -741,6 +770,10 @@ public sealed class NativeTerminalSurface : TerminalSurface
         int rows,
         IReadOnlyList<TerminalTimedReplayEvent> events)
     {
+        _executionConnected = false;
+        _executionPending = null;
+        _executionPromptArmed = false;
+        Interlocked.Increment(ref _executionGeneration);
         _pendingPlaybackSeek = 0;
         _playbackEvents = null;
         _playbackFrames = null;
@@ -1119,6 +1152,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 }
                 case NativeTerminalApi.NativeEventType.ShellIntegrationMarkChanged:
                 {
+                    var executionGeneration = Volatile.Read(ref _executionGeneration);
                     var action = _pendingShellMarkAction;
                     _pendingShellMarkAction = null;
                     var command = ReadEventText(in eventData);
@@ -1128,10 +1162,26 @@ public sealed class NativeTerminalSurface : TerminalSurface
                     {
                         // Keep the Enter probe until an exact command mark exists. Some remote
                         // integrations emit only part of the OSC 133 sequence.
+                        var executionCanStart = _executionPromptArmed;
+                        if (action == 'C') _executionPromptArmed = false;
                         if (action == 'C' && !string.IsNullOrWhiteSpace(command))
                         {
                             CommandObserved?.Invoke(command);
                             CommandChanged?.Invoke(command, true);
+                            if (executionCanStart && !_disposed && !_readOnly && _executionConnected && !_alternateBufferActive &&
+                                executionGeneration == _executionGeneration && command.Length <= 256 &&
+                                !command.Any(char.IsControl) && _executionNextId < long.MaxValue)
+                            {
+                                var execution = new TerminalCommandExecution(++_executionNextId, command, false, null);
+                                _executionPending = execution;
+                                RefreshAnnotations();
+                                // This native ABI reports text but no mark ID. Only map a
+                                // unique exact mark; repeated/ambiguous text safely cannot jump.
+                                var candidates = _marks.Where(mark => mark.Kind == NativeTerminalApi.MarkKind.ExactCommand &&
+                                    !_executionMarks.ContainsValue(mark.Id) && MarkLabel(mark.Id) == command).Take(2).ToArray();
+                                if (candidates.Length == 1) _executionMarks[execution.Id] = candidates[0].Id;
+                                CommandExecutionChanged?.Invoke(execution);
+                            }
                         }
                         RefreshAnnotations();
                     });
@@ -1190,6 +1240,40 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 _pendingShellMarkAction = action is "A" or "B" or "C" or "D" ? action[0] : null;
                 if (_pendingShellMarkAction == 'D')
                     DispatcherQueue.TryEnqueue(() => CommandChanged?.Invoke(string.Empty, true));
+                if (action == "B")
+                {
+                    var executionGeneration = Volatile.Read(ref _executionGeneration);
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (!_disposed && !_readOnly && _executionConnected && !_alternateBufferActive &&
+                            executionGeneration == _executionGeneration) _executionPromptArmed = true;
+                    });
+                }
+                if (action == "A" || action == "D")
+                {
+                    int? exit = null;
+                    if (action == "D" && separator >= 0)
+                    {
+                        var status = payload[(separator + 1)..].Split(';')[0];
+                        if (status.Length > 0)
+                        {
+                            if (!Regex.IsMatch(status, @"^-?\d+$") ||
+                                !int.TryParse(status, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var parsed)) break;
+                            exit = parsed;
+                        }
+                    }
+                    var executionGeneration = Volatile.Read(ref _executionGeneration);
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (_disposed || _readOnly || !_executionConnected || _alternateBufferActive ||
+                            executionGeneration != _executionGeneration) return;
+                        _executionPromptArmed = action == "A";
+                        var pending = _executionPending;
+                        _executionPending = null;
+                        if (pending is not null)
+                            CommandExecutionChanged?.Invoke(pending with { Completed = true, ExitCode = exit });
+                    });
+                }
                 break;
             }
             case 3008 when IsValidOscPayload(payload, 4096):
@@ -1610,6 +1694,9 @@ public sealed class NativeTerminalSurface : TerminalSurface
         try
         {
             _marks = _api.GetMarks(_terminal);
+            var liveMarkIds = _marks.Select(mark => mark.Id).ToHashSet();
+            foreach (var id in _executionMarks.Where(pair => !liveMarkIds.Contains(pair.Value)).Select(pair => pair.Key).ToArray())
+                _executionMarks.Remove(id);
             var searchRows = _api.GetSearchRows(_terminal);
             var highlightRows = _api.GetHighlightRows(_terminal);
             _ruler.UpdateAnnotations(_marks, searchRows, highlightRows, MarkLabel);

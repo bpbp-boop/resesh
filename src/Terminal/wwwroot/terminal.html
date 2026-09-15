@@ -235,6 +235,7 @@
     let copyOnSelect = typeof init.copyOnSelect === "boolean" ? init.copyOnSelect : true;
     let rightClickPaste = typeof init.rightClickPaste === "boolean" ? init.rightClickPaste : true;
     let connected = false;
+    let commandExecutionGeneration = 0;
     const readOnly = init.readOnly === true;
 
     term.open(container);
@@ -244,6 +245,7 @@
     // The ruler addon builds DOM inside term.element, so it loads after open().
     const ruler = new RulerAddon.RulerAddon();
     term.loadAddon(ruler);
+    ruler.setExecutionReporting(false);
     ruler.setTheme(getRuler(init.theme));
     if (Array.isArray(init.highlights)) ruler.setHighlightRules(init.highlights);
 
@@ -371,6 +373,15 @@
         exact: exact === true,
         text: typeof text === "string" ? text.slice(0, 256) : "",
       });
+    };
+    ruler.onCommandExecution = function (execution) {
+      if (readOnly || !connected || !execution || !Number.isSafeInteger(execution.id) || execution.id <= 0 ||
+          typeof execution.commandLine !== "string" || !execution.commandLine.trim() || execution.commandLine.length > 256 ||
+          /[\x00-\x1f\x7f-\x9f]/.test(execution.commandLine) || typeof execution.completed !== "boolean" ||
+          (execution.exitCode !== null && (!Number.isInteger(execution.exitCode) || execution.exitCode < -2147483648 || execution.exitCode > 2147483647)) ||
+          (!execution.completed && execution.exitCode !== null)) return;
+      host.postMessage({ type: "commandExecution", generation: commandExecutionGeneration, id: execution.id, commandLine: execution.commandLine,
+        completed: execution.completed, exitCode: execution.exitCode });
     };
     ruler.onPromptContext = function (context, platform) {
       host.postMessage({
@@ -606,6 +617,7 @@
     // atomic even though xterm parses writes asynchronously.
     let replayGeneration = 0;
     function showReplay(msg) {
+      ruler.setExecutionReporting(false);
       const generation = ++replayGeneration;
       term.write("", function () {
         if (generation !== replayGeneration) return;
@@ -643,6 +655,7 @@
     let playbackBuildGeneration = 0;
 
     function loadPlayback(msg) {
+      ruler.setExecutionReporting(false);
       const buildGeneration = ++playbackBuildGeneration;
       ++replayGeneration;
       playback = null;
@@ -762,6 +775,13 @@
           break;
         case "connected":
           connected = true;
+          var connectionGeneration = Number.isSafeInteger(msg.executionGeneration) ? msg.executionGeneration : 0;
+          commandExecutionGeneration = connectionGeneration;
+          // Drain queued output from an older connection before accepting new lifecycles.
+          term.write("", function () {
+            if (connected && !readOnly && connectionGeneration > 0 && commandExecutionGeneration === connectionGeneration)
+              ruler.setExecutionReporting(true);
+          });
           break;
         case "paste":
           pasteText(typeof msg.text === "string" ? msg.text : "");
@@ -777,6 +797,7 @@
           break;
         case "disconnected":
           connected = false;
+          ruler.setExecutionReporting(false);
           ruler.writeOutput("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n", null);
           // Clean local exits arrive as severity "info" (dim, not warning-yellow); the
           // action verb keeps the hint honest for local tabs ("restart", not "reconnect").
@@ -836,6 +857,9 @@
         case "toggleCommands":
           // The native tab-strip button; Ctrl+Shift+O inside the page does the same.
           ruler.toggleCommandsPanel();
+          break;
+        case "scrollToCommand":
+          if (Number.isSafeInteger(msg.id) && msg.id > 0) ruler.jumpToExecution(msg.id);
           break;
         case "requestPromptContext":
           ruler._reportPromptContext(true);

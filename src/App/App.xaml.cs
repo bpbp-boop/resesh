@@ -127,6 +127,7 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+        CommandCompletionNotifications.SetDispatcher(_dispatcherQueue);
 
         Store.Load();
         SshKeys.Load();

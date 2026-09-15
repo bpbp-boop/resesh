@@ -102,6 +102,27 @@ cache. Rejected setup falls back to ordinary startup when the connection remains
 See [the implementation and test notes](SHELL_INTEGRATION_PLAN.md) for shell coverage and
 current limitations.
 
+## Notify when a command finishes
+
+While a command with shell integration is running, click the bell beside its tab subtitle
+to request one completion notification. The command palette offers the same action for
+the active tab. Click again to cancel. Each request applies only to that command;
+notifications are not automatically armed for later commands.
+
+If you are watching that terminal when it finishes, resesh stays quiet and keeps the
+program name, elapsed time, and exit result in the subtitle tooltip. Otherwise it sends
+a Windows notification; clicking it returns to the tab and the command's output when it
+remains in scrollback. Command
+arguments are not included. An unavailable exit status is reported as unknown, not success.
+Disconnecting or starting another command cancels an outstanding request. This requires
+shell integration's command lifecycle reports; there are no automatic notification rules.
+If Windows notifications are unavailable, resesh shows an in-app completion notice and
+flashes the taskbar instead.
+
+Notification clicks target the live originating app; they never reopen a closed session.
+Clicks may not route when separate app processes with different `--data-dir` values run
+concurrently. Multiple windows within one app process are supported.
+
 ## Data locations
 
 | What | Where |

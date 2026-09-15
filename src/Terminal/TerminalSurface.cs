@@ -23,6 +23,7 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract event Action<int, int>? Ready;
     public abstract event Action<string>? TitleChanged;
     public abstract event Action<string, bool>? CommandChanged;
+    public abstract event Action<TerminalCommandExecution>? CommandExecutionChanged;
     public abstract event Action<string, string?>? PromptContextChanged;
     public abstract event Action<string>? WorkingDirectoryReported;
     public abstract event Action<string>? WindowsWorkingDirectoryReported;
@@ -51,6 +52,7 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract void FocusTerminal();
     public abstract void SetInputEnabled(bool enabled);
     public abstract void ToggleCommandsPanel();
+    public abstract void ScrollToCommand(long id);
     public abstract void SetRulerPresentation(bool isSplit, bool isGroupFocused);
     public abstract void SetPromptPlatform(string? platform);
     public abstract void SetInitialOptions(

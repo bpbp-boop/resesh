@@ -19,29 +19,46 @@ internal static class Program
     {
         WinRT.ComWrappersSupport.InitializeComWrappers();
         TaskbarIntegration.SetProcessIdentity();
-
-        if (ActivationKey() is { } key)
+        var key = ActivationKey();
+        CommandCompletionNotifications.TraceHook = message => MainWindow.Trace(message);
+        CommandCompletionNotifications.Register(key);
+        try
         {
             var activationArgs = AppInstance.GetCurrent().GetActivatedEventArgs();
-            var registered = AppInstance.FindOrRegisterForKey(key);
-            if (!registered.IsCurrent)
+            if (activationArgs.Kind == ExtendedActivationKind.AppNotification)
             {
-                Task.Run(async () => await registered.RedirectActivationToAsync(activationArgs))
-                    .GetAwaiter()
-                    .GetResult();
+                // A notification can outlive its originating process. Only redirect to
+                // an existing instance; do not restore sessions or replay launch options.
+                var owner = CommandCompletionNotifications.ActivationOwner(activationArgs);
+                var existing = owner is null ? null : AppInstance.GetInstances()
+                    .FirstOrDefault(instance => !instance.IsCurrent && instance.Key == owner);
+                if (existing is not null)
+                    Task.Run(async () => await existing.RedirectActivationToAsync(activationArgs)).GetAwaiter().GetResult();
                 return 0;
             }
 
-            registered.Activated += OnActivated;
-        }
+            if (key is not null)
+            {
+                var registered = AppInstance.FindOrRegisterForKey(key);
+                if (!registered.IsCurrent)
+                {
+                    Task.Run(async () => await registered.RedirectActivationToAsync(activationArgs))
+                        .GetAwaiter()
+                        .GetResult();
+                    return 0;
+                }
+                registered.Activated += OnActivated;
+            }
 
-        Application.Start(_ =>
-        {
-            SynchronizationContext.SetSynchronizationContext(
-                new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
-            new App();
-        });
-        return 0;
+            Application.Start(_ =>
+            {
+                SynchronizationContext.SetSynchronizationContext(
+                    new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread()));
+                new App();
+            });
+            return 0;
+        }
+        finally { CommandCompletionNotifications.Unregister(); }
     }
 
     internal static string StorePath(string fileName, string defaultPath)
@@ -112,6 +129,7 @@ internal static class Program
 
     private static void OnActivated(object? sender, AppActivationArguments args)
     {
+        if (CommandCompletionNotifications.HandleActivation(args)) return;
         App? target;
         lock (ActivationGate)
         {

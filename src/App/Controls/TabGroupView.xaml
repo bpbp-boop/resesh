@@ -278,6 +278,7 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <Rectangle
                                         Grid.Column="0"
@@ -399,22 +400,36 @@
                                                 <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
                                             </TextBlock.Foreground>
                                         </TextBlock>
-                                        <TextBlock
-                                            x:Name="TabSubtitleText"
-                                            Text="{x:Bind Subtitle, Mode=OneWay}"
-                                            FontSize="11"
-                                            LineHeight="14"
-                                            LineStackingStrategy="BlockLineHeight"
-                                            TextTrimming="CharacterEllipsis"
-                                            Opacity="0.7"
-                                            ToolTipService.ToolTip="{x:Bind Subtitle, Mode=OneWay}">
-                                            <TextBlock.Foreground>
-                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
-                                            </TextBlock.Foreground>
-                                        </TextBlock>
+                                            <TextBlock
+                                                x:Name="TabSubtitleText"
+                                                Text="{x:Bind Subtitle, Mode=OneWay}"
+                                                FontSize="11"
+                                                LineHeight="14"
+                                                LineStackingStrategy="BlockLineHeight"
+                                                TextTrimming="CharacterEllipsis"
+                                                Opacity="0.7"
+                                                ToolTipService.ToolTip="{x:Bind CompletionSubtitleTooltip, Mode=OneWay}">
+                                                <TextBlock.Foreground>
+                                                    <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
+                                                </TextBlock.Foreground>
+                                            </TextBlock>
                                     </StackPanel>
-                                    <Button
+                                    <ToggleButton
                                         Grid.Column="6"
+                                        Width="20" Height="20" MinWidth="0" MinHeight="0" Padding="0"
+                                        Margin="6,0,0,0"
+                                        VerticalAlignment="Center"
+                                        AllowFocusOnInteraction="False"
+                                        IsChecked="{x:Bind IsCompletionNotificationArmed, Mode=OneWay}"
+                                        Command="{x:Bind ToggleCompletionNotificationCommand}"
+                                        Visibility="{x:Bind local:PresentationValues.Visible(ShowCompletionNotificationButton), Mode=OneWay}"
+                                        ToolTipService.ToolTip="{x:Bind CompletionNotificationTooltip, Mode=OneWay}"
+                                        AutomationProperties.Name="{x:Bind CompletionNotificationTooltip, Mode=OneWay}"
+                                        AutomationProperties.AutomationId="{x:Bind CompletionNotificationAutomationId}">
+                                        <FontIcon Glyph="&#xEA8F;" FontSize="11" />
+                                    </ToggleButton>
+                                    <Button
+                                        Grid.Column="7"
                                         Click="TabCloseGlyph_Click"
                                         Padding="3"
                                         Margin="6,0,0,0"

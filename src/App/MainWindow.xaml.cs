@@ -528,6 +528,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
         if (tab.View is TerminalTabView terminalView && !tab.IsLocked)
         {
+            if (tab.CanNotifyCommandCompletion)
+                Add("Tab", tab.IsCompletionNotificationArmed ? "Cancel Completion Notification" : "Notify When Command Finishes",
+                    "current command completion alert bell", Sync(() => tab.ToggleCompletionNotificationCommand.Execute(null)));
             Add("Tab", terminalView.IsCommandsPanelOpen ? "Hide Commands Panel" : "Show Commands Panel",
                 "current active terminal history", Sync(terminalView.ToggleCommandsPanel), "Ctrl+Shift+O");
             if (tab.Capabilities.FilePane)
@@ -1085,6 +1088,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             }
         };
         view.AgentAlert += (sender, snapshot) => App.WindowFor(tab)?.OnAgentAlert(sender, snapshot);
+        tab.CompletionRequested += completion => App.WindowFor(tab)?.OnCommandCompletion(tab, completion);
         view.SplitRequested += () =>
         {
             if (App.WindowFor(tab) is { } owner && owner.ViewModel.GroupOf(tab).Tabs.Count > 1)
@@ -1173,6 +1177,43 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         OpenRecording(AsciicastReader.Read(path), Path.GetFullPath(path));
 
     // ---- agent awareness (Phase 6.2) ----
+
+    private void OnCommandCompletion(TabViewModel tab, Resesh.Core.Backend.CommandCompletion completion)
+    {
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        if (Interop.WindowAlerts.IsForeground(hwnd) && tab.IsActive && !tab.IsLocked
+            && tab.View is TerminalTabView { IsRewinding: false })
+            return; // The tab's completion tooltip is enough when its output is visible.
+
+        var target = new WeakReference<TabViewModel>(tab);
+        if (!Interop.CommandCompletionNotifications.TryShow(tab.Header, completion.ProgramName,
+                completion.ExitCode, completion.Duration, () =>
+                {
+                    if (target.TryGetTarget(out var liveTab) && App.WindowFor(liveTab) is { } owner)
+                        owner.ActivateCommandOutput(liveTab, completion.ExecutionId);
+                }))
+        {
+            Interop.WindowAlerts.Flash(hwnd);
+            ShowOperationNotice("Command finished", "Windows notifications are unavailable. " + tab.CompletionNotificationTooltip);
+        }
+    }
+
+    private void ActivateCommandOutput(TabViewModel tab, long executionId)
+    {
+        if (!ViewModel.AllTabs.Contains(tab) || tab.View is not TerminalTabView view)
+            return;
+        if (AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+            presenter.Restore();
+        var group = ViewModel.GroupOf(tab);
+        group.SelectedTab = tab;
+        FocusGroup(group);
+        Activate();
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+        Interop.WindowAlerts.BringToForeground(hwnd);
+        view.ScrollToCommand(executionId);
+        view.FocusTerminal();
+        Trace($"Command completion activation foreground={Interop.WindowAlerts.IsForeground(hwnd)}");
+    }
 
     /// <summary>
     /// An agent in some tab wants the user. Nothing happens for a tab the user is already

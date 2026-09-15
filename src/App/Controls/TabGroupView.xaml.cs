@@ -559,7 +559,7 @@ public sealed partial class TabGroupView : UserControl
     {
         for (var d = originalSource as DependencyObject; d is not null; d = VisualTreeHelper.GetParent(d))
         {
-            if (d is Button)
+            if (d is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase)
                 return true;
             if (d is TabViewItem)
                 return false;

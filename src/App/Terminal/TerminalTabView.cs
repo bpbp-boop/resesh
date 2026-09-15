@@ -174,6 +174,11 @@ public sealed class TerminalTabView : Grid, IDisposable
         });
         _terminal.TitleChanged += title => DispatcherQueue.TryEnqueue(() => _tab.ApplyTerminalTitle(title));
         _terminal.CommandChanged += (text, exact) => DispatcherQueue.TryEnqueue(() => _tab.ApplyRunningCommand(text, exact));
+        _terminal.CommandExecutionChanged += execution => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_disposed && _tab.State == TabConnectionState.Connected)
+                _tab.ObserveCommandExecution(execution.Id, execution.CommandLine, execution.Completed, execution.ExitCode);
+        });
         _terminal.PromptContextChanged += (context, platform) =>
             DispatcherQueue.TryEnqueue(() =>
             {
@@ -507,6 +512,16 @@ public sealed class TerminalTabView : Grid, IDisposable
     {
         if (!_disposed && !_tab.IsLocked)
             _terminal.FocusTerminal();
+    }
+
+    /// <summary>Notification activation returns to the tracked command without sending input.</summary>
+    public void ScrollToCommand(long id)
+    {
+        if (_disposed || _tab.IsLocked)
+            return;
+        if (_rewindPlayer is not null)
+            ReturnToLive();
+        _terminal.ScrollToCommand(id);
     }
 
     /// <summary>Adjusts the annotated scrollbar for the current group layout and focus.</summary>
