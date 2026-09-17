@@ -26,4 +26,22 @@
     <Error Condition="!Exists('prereqs\vc_redist.$(InstallerPlatform).exe')" Text="Missing prereqs\vc_redist.$(InstallerPlatform).exe. Run installer\download-prereqs.ps1 -Arch $(InstallerPlatform) first." />
     <Error Condition="!Exists('prereqs\MicrosoftEdgeWebView2Setup.exe')" Text="Missing prereqs\MicrosoftEdgeWebView2Setup.exe. Run installer\download-prereqs.ps1 first." />
   </Target>
+
+  <!-- WiX detaches the engine before SignBundleEngine and reattaches it before
+       SignBundle. Signing only the final EXE skips the engine signing step.
+       https://docs.firegiant.com/wix/tools/signing/ -->
+  <Target Name="ValidateBundleSigning" BeforeTargets="BeforeSigning" Condition="'$(SignOutput)' == 'true'">
+    <Error Condition="'$(SIGNTOOL_PATH)' == '' Or !Exists('$(SIGNTOOL_PATH)')" Text="SIGNTOOL_PATH must point to signtool.exe." />
+    <Error Condition="'$(CERTUM_CERT_THUMBPRINT)' == ''" Text="CERTUM_CERT_THUMBPRINT is required for bundle signing." />
+  </Target>
+
+  <Target Name="SignBundleEngine">
+    <Exec Command="&quot;$(SIGNTOOL_PATH)&quot; sign /sha1 $(CERTUM_CERT_THUMBPRINT) /fd sha256 /tr http://time.certum.pl /td sha256 &quot;%(SignBundleEngine.FullPath)&quot;" />
+    <Exec Command="&quot;$(SIGNTOOL_PATH)&quot; verify /pa /all &quot;%(SignBundleEngine.FullPath)&quot;" />
+  </Target>
+
+  <Target Name="SignBundle">
+    <Exec Command="&quot;$(SIGNTOOL_PATH)&quot; sign /sha1 $(CERTUM_CERT_THUMBPRINT) /fd sha256 /tr http://time.certum.pl /td sha256 &quot;%(SignBundle.FullPath)&quot;" />
+    <Exec Command="&quot;$(SIGNTOOL_PATH)&quot; verify /pa /all &quot;%(SignBundle.FullPath)&quot;" />
+  </Target>
 </Project>

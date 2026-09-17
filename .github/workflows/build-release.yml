@@ -424,6 +424,7 @@ jobs:
           ./installer/download-prereqs.ps1 -Arch "${{ matrix.asset_architecture }}"
 
           dotnet build installer/Resesh.Bundle.wixproj `
+            -p:SignOutput=true `
             --configuration Release `
             -p:InstallerPlatform="${{ matrix.installer_platform }}" `
             -p:ProductVersion="$env:VERSION" `
@@ -439,15 +440,6 @@ jobs:
             throw "Bundle build did not produce '$setupPath'."
           }
 
-          & $env:SIGNTOOL_PATH sign `
-            /sha1 $env:CERTUM_CERT_THUMBPRINT `
-            /fd sha256 `
-            /tr http://time.certum.pl `
-            /td sha256 `
-            $setupPath
-          if ($LASTEXITCODE -ne 0) {
-            throw "SignTool failed to sign '$setupPath'."
-          }
           & $env:SIGNTOOL_PATH verify /pa /all $setupPath
           if ($LASTEXITCODE -ne 0) {
             throw "SignTool could not verify '$setupPath'."

@@ -11,8 +11,8 @@
     <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
-    <Icon Id="ReseshIcon" SourceFile="..\src\App\Assets\app.ico" />
-    <Property Id="ARPPRODUCTICON" Value="ReseshIcon" />
+    <Icon Id="ReseshIcon.exe" SourceFile="..\src\App\Assets\app.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ReseshIcon.exe" />
     <Property Id="ARPURLINFOABOUT" Value="https://resesh.net/" />
     <Property Id="ARPHELPLINK" Value="https://github.com/bpbp-boop/resesh/issues" />
 
@@ -32,6 +32,8 @@
           Id="ReseshStartMenuShortcut"
           Directory="ProgramMenuFolder"
           Name="resesh"
+          Icon="ReseshIcon.exe"
+          IconIndex="0"
           WorkingDirectory="INSTALLFOLDER"
           Advertise="yes">
           <ShortcutProperty Key="System.AppUserModel.ID" Value="Resesh.Terminal" />
