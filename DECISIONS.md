@@ -647,3 +647,45 @@ keyboard-interactive fallback.
 - Each resize advances the buffer generation and emits one coherent viewport event.
   `NativeTerminalSurface.ApplyOptions` now applies saved scrollback changes without replacing
   the terminal handle.
+
+## 2026-09-17 - Streaming WebView highlighting and ruler cost
+- Scan visible keyword highlights on parsed output, not on decoration-triggered renders.
+  Scrolling and settings changes still schedule a coalesced frame pass.
+- Cache rows by live marker positions so filling scrollback does not recreate decorations
+  for every surviving line. Share one marker per row and build Unicode column maps only
+  for changed rows with matches.
+- Combine consecutive overview ticks with identical rectangles and colors using composed
+  alpha, preserving density and paint order while reducing canvas calls on dense logs.
+  Timed-out idle callbacks still index a bounded slice, avoiding starvation under load.
+- Verified with sustained timestamped log output through the actual terminal page in
+  Chromium, including full scrollback and first-render highlighting. This is not a
+  measurement of a live SSH server's WebView2 process CPU.
+
+## 2026-09-17 - Accelerated WebView terminal renderer
+- Bundle upstream `@xterm/addon-webgl` 0.19.0 alongside the existing `@xterm/xterm`
+  6.0.0. Both come from upstream commit `f447274f430fd22513f6adbf9862d19524471c04`;
+  its MIT license ships as `LICENSE.xterm.txt`. The renderer includes the canvas-only
+  resize repair recorded in `eng/webgl-canvas-resize.patch`.
+  Source package: https://registry.npmjs.org/@xterm/addon-webgl/-/addon-webgl-0.19.0.tgz
+  Upstream bundle SHA-256: `b85f8d4b3e9756bebb757e3fe47134d70f03ea3d6b187624426d2e2b65dec06c`.
+  Patched bundle SHA-256: `9131d7c7f05c835726879c03c8c4c99ccfccc6a8b4d3ad91a47f80457b5eff35`.
+- Activate after `term.open`, before the initial fit. WebGL caches glyphs in GPU
+  textures rather than recreating DOM text rows during scrolling output.
+- Initialization failure retains DOM rendering. An unrecovered context loss disposes
+  only the renderer addon, refits with timestamp preservation, and reports the new
+  terminal size. It does not recreate the terminal, clear history, or reconnect SSH.
+- Native Edge at 125% display scaling, Intel Iris Xe: a fixed 600-line highlighted
+  stream with full scrollback used 400 ms of renderer-thread task time with WebGL
+  versus 3176 ms with DOM. These browser measurements are not whole-process CPU
+  percentages and do not include GPU-process cost.
+- Visually checked ANSI styles, Unicode, search selection, live theme/font changes,
+  and alternate-screen cursor placement. Forced context loss preserved buffer text,
+  selection, ingest timestamps, and subsequent input/output.
+- The first GPU integration produced a user-reported blank session. A canvas-only
+  pixel-size correction did not update the WebGL viewport or glyph resolution uniform.
+  The resize path now calls the glyph renderer's resize handler and invalidates its
+  matching model before repainting; it does not disable GPU rendering.
+- `tests/Fixtures/Terminal/webgl-resize.html` reads real GPU pixels across canvas
+  shrink, rounding correction, and restoration. It fails with the upstream bundle
+  and passes with the patch. Also verified visible startup, typed commands, and
+  1000 highlighted output lines in an isolated application using actual WebView2.

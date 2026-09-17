@@ -2,9 +2,9 @@
  * Keyword-highlight addon for xterm.js (resesh's own, not vendored).
  *
  * Scans only the rows currently in the viewport — never the raw output stream —
- * and paints regex matches via the decorations API. Rows are cached by absolute
- * buffer line and rescanned only when their text changes, so the recurring
- * onRender storm (each decoration paint triggers a render) settles immediately.
+ * and paints regex matches via the decorations API. Marker-backed cache entries
+ * follow lines through scrollback trimming. Parse events update decorations before
+ * the next paint; decoration-only renders never schedule another scan.
  *
  * Rendering notes:
  *  - color   -> decoration foregroundColor (cell text recolored by the renderer)
@@ -22,19 +22,23 @@
   function HighlightAddon() {
     this._term = null;
     this._rules = [];            // { id, re, color, tint, underline }
-    this._rows = new Map();      // absolute buffer line -> { text, decos: [] }
+    this._rows = new Map();      // current buffer line -> { text, marker, decos: [] }
+    this._nextRows = new Map();  // reused while reconciling marker positions
     this._disposables = [];
-    this._scanQueued = false;
+    this._scanFrame = null;
   }
 
   HighlightAddon.prototype.activate = function (term) {
     var self = this;
     this._term = term;
-    this._disposables.push(term.onRender(function () { self._queueScan(); }));
+    this._disposables.push(term.onWriteParsed(function () { self._scanNow(); }));
+    this._disposables.push(term.onScroll(function () { self._queueScan(); }));
     this._disposables.push(term.onResize(function () { self._clear(); self._queueScan(); }));
   };
 
   HighlightAddon.prototype.dispose = function () {
+    if (this._scanFrame !== null) cancelAnimationFrame(this._scanFrame);
+    this._scanFrame = null;
     this._clear();
     for (var i = 0; i < this._disposables.length; i++) this._disposables[i].dispose();
     this._disposables = [];
@@ -77,24 +81,27 @@
   HighlightAddon.prototype._clear = function () {
     this._rows.forEach(function (entry) {
       for (var i = 0; i < entry.decos.length; i++) entry.decos[i].dispose();
+      entry.marker.dispose();
     });
     this._rows.clear();
   };
 
-  // Coalesce the scans triggered by render events (including renders our own
-  // decorations cause) into one pass per animation frame.
+  // Scrolling and option changes may happen outside a write. Parsed output cancels
+  // this pending pass and scans immediately, instead of waiting an extra frame.
   HighlightAddon.prototype._queueScan = function () {
     var self = this;
-    if (this._scanQueued) return;
-    this._scanQueued = true;
-    requestAnimationFrame(function () {
-      self._scanQueued = false;
-      try {
-        self._scan();
-      } catch (err) {
-        if (window.__pageTrace) window.__pageTrace("highlight scan: " + (err && err.message));
-      }
-    });
+    if (this._scanFrame !== null || !this._term || this._rules.length === 0) return;
+    this._scanFrame = requestAnimationFrame(function () { self._scanNow(); });
+  };
+
+  HighlightAddon.prototype._scanNow = function () {
+    if (this._scanFrame !== null) cancelAnimationFrame(this._scanFrame);
+    this._scanFrame = null;
+    try {
+      this._scan();
+    } catch (err) {
+      if (window.__pageTrace) window.__pageTrace("highlight scan: " + (err && err.message));
+    }
   };
 
   HighlightAddon.prototype._scan = function () {
@@ -109,59 +116,66 @@
     var top = buf.viewportY;
     var bottom = top + term.rows;
 
-    // Drop cache entries that scrolled out of the viewport; their decorations
-    // wouldn't render anyway, and unbounded growth is a leak.
-    var self = this;
-    var stale = [];
-    this._rows.forEach(function (entry, line) {
-      if (line < top || line >= bottom) stale.push(line);
+    // Absolute indices stop advancing when scrollback fills, but markers continue
+    // moving. Re-key by their live positions so unchanged rows keep their decorations.
+    var nextRows = this._nextRows;
+    this._rows.forEach(function (entry) {
+      var line = entry.marker.line;
+      if (!entry.marker.isDisposed && line >= top && line < bottom) {
+        nextRows.set(line, entry);
+      } else {
+        for (var d = 0; d < entry.decos.length; d++) entry.decos[d].dispose();
+        entry.marker.dispose();
+      }
     });
-    for (var i = 0; i < stale.length; i++) {
-      var gone = this._rows.get(stale[i]);
-      for (var d = 0; d < gone.decos.length; d++) gone.decos[d].dispose();
-      this._rows.delete(stale[i]);
-    }
+    this._rows.clear();
+    this._nextRows = this._rows;
+    this._rows = nextRows;
 
     for (var line = top; line < bottom; line++) {
       var bufLine = buf.getLine(line);
       if (!bufLine) continue;
 
-      var row = rowText(bufLine);
+      // The cheap text comparison avoids per-cell objects and Unicode column maps
+      // for unchanged rows. Build those maps only if a changed row actually matches.
+      var text = bufLine.translateToString(true).replace(/\s+$/, "");
       var cached = this._rows.get(line);
-      if (cached && cached.text === row.text) continue;
+      if (cached && cached.text === text) continue;
 
       if (cached) {
         for (var j = 0; j < cached.decos.length; j++) cached.decos[j].dispose();
+      } else {
+        var marker = term.registerMarker(line - (buf.baseY + buf.cursorY));
+        if (!marker) continue;
+        cached = { text: "", marker: marker, decos: [] };
+        this._rows.set(line, cached);
       }
-      var decos = row.text.length > 0 ? this._decorateRow(line, row) : [];
-      this._rows.set(line, { text: row.text, decos: decos });
+      cached.text = text;
+      cached.decos = text.length > 0 ? this._decorateRow(cached.marker, bufLine, text) : [];
     }
   };
 
-  /** Line text plus per-code-unit start/end column maps (wide chars occupy 2 columns,
-   * multi-code-unit chars occupy 1). Regex indexes map through these to cells. */
-  function rowText(bufLine) {
-    var text = "";
+  /** Per-code-unit start/end column maps. Wide and combined characters map regex
+   * indices to their full terminal cells rather than JavaScript string positions. */
+  function rowColumns(bufLine, cell) {
     var starts = [];
     var ends = [];
     for (var x = 0; x < bufLine.length; x++) {
-      var cell = bufLine.getCell(x);
+      cell = bufLine.getCell(x, cell);
       if (!cell) break;
       var width = cell.getWidth();
       if (width === 0) continue; // trailing half of a wide char
       var chars = cell.getChars() || " ";
       for (var k = 0; k < chars.length; k++) {
-        text += chars[k];
         starts.push(x);
         ends.push(x + width);
       }
     }
-    return { text: text.replace(/\s+$/, ""), starts: starts, ends: ends };
+    return { starts: starts, ends: ends };
   }
 
-  HighlightAddon.prototype._decorateRow = function (line, row) {
-    var term = this._term;
-    var buf = term.buffer.active;
+  HighlightAddon.prototype._decorateRow = function (marker, bufLine, text) {
+    var row = null;
     var decos = [];
     var budget = MAX_MATCHES_PER_ROW;
 
@@ -169,14 +183,15 @@
       var rule = this._rules[r];
       rule.re.lastIndex = 0;
       var m;
-      while (budget > 0 && (m = rule.re.exec(row.text)) !== null) {
+      while (budget > 0 && (m = rule.re.exec(text)) !== null) {
         if (m[0].length === 0) { // zero-length match: step forward, don't spin
           rule.re.lastIndex++;
           continue;
         }
+        if (!row) row = rowColumns(bufLine, this._term.buffer.active.getNullCell());
         var startCol = row.starts[m.index];
         var endCol = row.ends[m.index + m[0].length - 1];
-        var deco = this._decorate(line, buf, startCol, endCol - startCol, rule);
+        var deco = this._decorate(marker, startCol, endCol - startCol, rule);
         if (deco) {
           decos.push(deco);
           budget--;
@@ -186,10 +201,7 @@
     return decos;
   };
 
-  HighlightAddon.prototype._decorate = function (line, buf, x, width, rule) {
-    // registerMarker offsets are relative to the cursor's absolute line.
-    var marker = this._term.registerMarker(line - (buf.baseY + buf.cursorY));
-    if (!marker) return null;
+  HighlightAddon.prototype._decorate = function (marker, x, width, rule) {
     var deco = this._term.registerDecoration({
       marker: marker,
       x: x,
@@ -197,10 +209,7 @@
       layer: "bottom",
       foregroundColor: rule.color
     });
-    if (!deco) {
-      marker.dispose();
-      return null;
-    }
+    if (!deco) return null;
     if (rule.underline || rule.tint) {
       var color = rule.color;
       var tint = rule.tint;
@@ -213,13 +222,7 @@
         if (tint) element.style.backgroundColor = tint;
       });
     }
-    var ruleDeco = {
-      dispose: function () {
-        deco.dispose();
-        marker.dispose();
-      }
-    };
-    return ruleDeco;
+    return deco;
   };
 
   window.HighlightAddon = { HighlightAddon: HighlightAddon };

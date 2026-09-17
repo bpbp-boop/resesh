@@ -44,6 +44,7 @@
   body.find-open .scroll-ruler-panel { top: 38px; }
 </style>
 <script src="xterm.js"></script>
+<script src="addon-webgl.js"></script>
 <script src="addon-fit.js"></script>
 <script src="addon-web-links.js"></script>
 <script src="addon-search.js"></script>
@@ -239,6 +240,22 @@
     const readOnly = init.readOnly === true;
 
     term.open(container);
+    // Cache glyphs on the GPU instead of rebuilding DOM text rows during output.
+    // Keep the same terminal (and buffer) if acceleration is unavailable or lost.
+    let webgl = null;
+    try {
+      webgl = new WebglAddon.WebglAddon();
+      webgl.onContextLoss(function () {
+        webgl.dispose();
+        fitPreservingTimestamps();
+        reportSize();
+        pageTrace("WebGL context lost; using DOM renderer");
+      });
+      term.loadAddon(webgl);
+    } catch (err) {
+      if (webgl) webgl.dispose();
+      pageTrace("WebGL unavailable; using DOM renderer: " + (err && err.message));
+    }
     document.body.style.background = term.options.theme.background;
     document.body.classList.toggle("light-ui", isLightTheme(init.theme));
 

@@ -1,0 +1,15 @@
+diff --git a/addons/addon-webgl/src/WebglRenderer.ts b/addons/addon-webgl/src/WebglRenderer.ts
+--- a/addons/addon-webgl/src/WebglRenderer.ts
++++ b/addons/addon-webgl/src/WebglRenderer.ts
+@@ -622,6 +622,11 @@ export class WebglRenderer extends Disposable implements IRenderer {
+     // the change as it's an exact multiple of the cell sizes.
+     this._canvas.width = width;
+     this._canvas.height = height;
++    // Updating the drawing buffer does not update the WebGL viewport or glyph
++    // resolution uniform. handleResize clears glyph vertices, so invalidate the
++    // matching model as well before repainting unchanged terminal contents.
++    this._glyphRenderer.value?.handleResize();
++    this._clearModel(false);
+     this._requestRedrawViewport();
+   }
+ 

@@ -90,7 +90,7 @@
   var THUMB_HIDE_MS = 800;
 
   var HL_MAX_RULES = 32;    // bitmask width; overview rules beyond this are ignored
-  var HL_SLICE = 2048;      // indexer lines per pass when no idle deadline is available
+  var HL_SLICE = 2048;      // hard cap on indexer lines per pass, including idle timeouts
   var HL_IDLE_MIN_MS = 3;   // stop an idle pass when less than this remains
   var HL_REANCHOR_GAP = 4096; // re-anchor the sentinel once the cursor is this far past it
   var HL_TICK_ALPHA = 0.8;  // slight dim keeps opaque search ticks dominant on top
@@ -1692,7 +1692,10 @@
     var scanned = 0;
     var changed = false;
     while (this._hlFrontier < bottomVirt) {
-      if (deadline ? deadline.timeRemaining() < HL_IDLE_MIN_MS : scanned >= HL_SLICE) break;
+      // Timed-out idle callbacks have no remaining time. Still make bounded
+      // progress, otherwise continuous output can starve the index indefinitely.
+      if (scanned >= HL_SLICE ||
+          (deadline && !deadline.didTimeout && deadline.timeRemaining() < HL_IDLE_MIN_MS)) break;
       var bufLine = buf.getLine(this._hlFrontier - offset);
       var virt = this._hlFrontier++;
       scanned++;
@@ -2155,15 +2158,31 @@
     if (this._hlRules.length > 0 && this._hlAnchor) {
       var hlOffset = this._hlAnchor.virtual - this._hlAnchor.marker.line;
       var hlRules = this._hlRules;
-      ctx.globalAlpha = HL_TICK_ALPHA * ordinaryAlpha;
+      var alpha = HL_TICK_ALPHA * ordinaryAlpha;
+      var pendingRow = -1, pendingColor = null, pendingCount = 0;
+      function flushHighlightTick() {
+        if (pendingCount === 0) return;
+        // Identical translucent rectangles compose to this alpha. Combining runs
+        // preserves density and paint order without thousands of canvas calls.
+        ctx.globalAlpha = 1 - Math.pow(1 - alpha, pendingCount);
+        ctx.fillStyle = pendingColor;
+        ctx.fillRect(laneRx, pendingRow, laneRw, tickH);
+      }
       this._hlIndex.forEach(function (mask, virt) {
         var line = virt - hlOffset;
         if (line < 0 || line >= total) return;
         var row = markerRow(line);
         // Highest set bit: the last matching rule wins, as in the viewport decorations.
-        ctx.fillStyle = hlRules[31 - Math.clz32(mask)].color;
-        ctx.fillRect(laneRx, row, laneRw, tickH);
+        var color = hlRules[31 - Math.clz32(mask)].color;
+        if (row !== pendingRow || color !== pendingColor) {
+          flushHighlightTick();
+          pendingRow = row;
+          pendingColor = color;
+          pendingCount = 0;
+        }
+        pendingCount++;
       });
+      flushHighlightTick();
       ctx.globalAlpha = 1;
 
       // Catching-up veil over the span the background indexer hasn't reached yet.

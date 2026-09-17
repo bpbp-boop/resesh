@@ -41,6 +41,7 @@ public sealed class TerminalControl : TerminalSurface
         {
             ("<link rel=\"stylesheet\" href=\"xterm.css\">", "xterm.css", "<style>", "</style>"),
             ("<script src=\"xterm.js\"></script>", "xterm.js", "<script>", "</script>"),
+            ("<script src=\"addon-webgl.js\"></script>", "addon-webgl.js", "<script>", "</script>"),
             ("<script src=\"addon-fit.js\"></script>", "addon-fit.js", "<script>", "</script>"),
             ("<script src=\"addon-web-links.js\"></script>", "addon-web-links.js", "<script>", "</script>"),
             ("<script src=\"addon-search.js\"></script>", "addon-search.js", "<script>", "</script>"),
@@ -49,7 +50,7 @@ public sealed class TerminalControl : TerminalSurface
             ("<script src=\"addon-ruler.js\"></script>", "addon-ruler.js", "<script>", "</script>"),
         };
 
-        var page = new StringBuilder(html.Length + 800 * 1024);
+        var page = new StringBuilder(html.Length + 1024 * 1024);
         var cursor = 0;
         foreach (var (marker, fileName, openTag, closeTag) in assets)
         {

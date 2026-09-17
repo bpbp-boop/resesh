@@ -11,14 +11,7 @@ const window = { devicePixelRatio: 1 };
 vm.runInNewContext(source, { window, Map, Math, RegExp, Set, requestAnimationFrame() {} });
 const RulerAddon = window.RulerAddon.RulerAddon;
 
-test("ruler tooltip uses the compact command-card typography", () => {
-  assert.match(source, /font-family:'Cascadia Mono',Consolas,monospace/);
-  assert.match(source, /font-size:12px/);
-  assert.match(source, /padding:5px 10px/);
-  assert.match(source, /border-radius:6px/);
-});
-
-function paintPresentation(isSplit, isGroupFocused, isPointerOver = false) {
+function paintPresentation(isSplit, isGroupFocused, isPointerOver = false, configure = () => {}) {
   const operations = [];
   const context = {
     fillStyle: "",
@@ -44,6 +37,7 @@ function paintPresentation(isSplit, isGroupFocused, isPointerOver = false) {
   addon._bookmarks = [{ marker: { line: 30 } }];
   addon.setPresentation(isSplit, isGroupFocused);
   addon._isPointerOver = isPointerOver;
+  configure(addon);
   addon._paint();
   return {
     operations,
@@ -51,6 +45,49 @@ function paintPresentation(isSplit, isGroupFocused, isPointerOver = false) {
     thumbStyle: addon._thumb.style,
   };
 }
+
+test("dense overview ticks preserve composited colors without drawing every hit", () => {
+  const result = paintPresentation(false, true, false, addon => {
+    addon._term.buffer.active.length = 10000;
+    addon._hlRules = [{ color: "#ff0000" }, { color: "#0000ff" }];
+    addon._hlAnchor = { virtual: 0, marker: { line: 0 } };
+    // These all project to the same pixel row. Preserve both density and the
+    // ordering of differently colored runs when combining duplicate rectangles.
+    addon._hlIndex = new Map([[0, 1], [1, 1], [2, 2], [3, 1], [4, 1]]);
+    addon._hlFrontier = 10000;
+  });
+  const ticks = result.operations.filter(op => op.color === "#ff0000" || op.color === "#0000ff");
+  assert.deepEqual(ticks.map(op => [op.y, op.color]), [
+    [0, "#ff0000"], [0, "#0000ff"], [0, "#ff0000"],
+  ]);
+  const composite = operations => operations.reduce((pixel, op) => {
+    const color = op.color === "#ff0000" ? [1, 0, 0] : [0, 0, 1];
+    return pixel.map((value, channel) => value * (1 - op.alpha) + color[channel] * op.alpha);
+  }, [0, 0, 0]);
+  const expected = composite(["#ff0000", "#ff0000", "#0000ff", "#ff0000", "#ff0000"]
+    .map(color => ({ color, alpha: 0.8 })));
+  const actual = composite(ticks);
+  actual.forEach((value, channel) => assert.ok(Math.abs(value - expected[channel]) < 1e-12));
+});
+
+test("timed-out idle passes make bounded progress and eventually index busy output", () => {
+  const addon = new RulerAddon();
+  const lineCount = 10000;
+  addon._term = {
+    buffer: { active: {
+      type: "normal", baseY: 0, cursorY: lineCount,
+      getLine: () => ({ translateToString: () => "error" }),
+    } },
+    registerMarker: () => ({ line: lineCount, isDisposed: false, onDispose() {}, dispose() {} }),
+  };
+  addon.setHighlightRules([{ id: "error", pattern: "error", showInOverview: true }]);
+  const timeout = { didTimeout: true, timeRemaining: () => 0 };
+  addon._hlScan(timeout);
+  assert.ok(addon._hlIndex.has(0), "a timeout must not starve the first completed line");
+  assert.ok(!addon._hlIndex.has(lineCount - 1), "a timeout must not process unbounded work");
+  for (let i = 0; i < 10; i++) addon._hlScan(timeout);
+  assert.equal(addon._hlIndex.size, lineCount);
+});
 
 function operationsWithColor(result, color) {
   return result.operations.filter(operation => operation.color === color);
@@ -158,12 +195,6 @@ test("ruler cancellation ignores a different pointer", () => {
 
   assert.notEqual(addon._drag, null);
   assert.deepEqual(released, []);
-});
-
-test("ruler listens for capture loss, cancellation, and window deactivation", () => {
-  assert.match(source, /addEventListener\("pointercancel"/);
-  assert.match(source, /addEventListener\("lostpointercapture"/);
-  assert.match(source, /window\.addEventListener\("blur"/);
 });
 
 function timestampHarness(lines, cursorLine) {

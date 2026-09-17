@@ -11,7 +11,7 @@ version-specific findings and design decisions.
 
 - WinUI 3 (Windows App SDK 2.4.0), C#, .NET 10
 - SSH.NET for transport
-- WebView2 + xterm.js (bundled) as the terminal surface
+- WebView2 + xterm.js (bundled), with GPU rendering and automatic DOM fallback
 - Unpackaged deployment; release builds are self-contained
 
 ## Build & run
@@ -65,6 +65,9 @@ The app-logic tests execute the production view models without a WinUI window. T
 live tab ownership and cleanup. Core tests cover connection cancellation, failed writes,
 host-key recovery, and exact workspace pane measurements. JavaScript source checks remain
 useful for UI wiring; they do not replace interactive UI tests.
+
+Open `tests/Fixtures/Terminal/webgl-resize.html` in a WebGL2-capable browser for the
+GPU canvas-resize regression. It checks rendered pixels and reports PASS/FAIL.
 
 ## Persistent sessions
 

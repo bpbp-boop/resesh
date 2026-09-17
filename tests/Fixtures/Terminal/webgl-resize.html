@@ -1,0 +1,63 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WebGL canvas resize regression</title>
+<link rel="stylesheet" href="../../../src/Terminal/wwwroot/xterm.css">
+<style>body { background: #222; color: white; } #terminal { width: 400px; height: 200px; }</style>
+<div id="terminal"></div>
+<pre id="result">Running</pre>
+<script src="../../../src/Terminal/wwwroot/xterm.js"></script>
+<script src="../../../src/Terminal/wwwroot/addon-webgl.js"></script>
+<script>
+// Open this fixture in a WebGL2-capable browser. It checks actual GPU pixels,
+// not DOM overlays, and fails with the unpatched @xterm/addon-webgl 0.19.0.
+window.done = (async function () {
+  const term = new Terminal({ cols: 40, rows: 10, allowProposedApi: true,
+    cursorBlink: false, theme: { background: '#000000', foreground: '#ffffff' } });
+  term.open(document.getElementById('terminal'));
+  // Preserve pixels only in the fixture so readPixels can inspect a completed frame.
+  const addon = new WebglAddon.WebglAddon(true);
+  term.loadAddon(addon);
+  await new Promise(resolve => term.write('GPU TEXT', resolve));
+  const paint = () => new Promise(resolve => {
+    const listener = term.onRender(() => {
+      listener.dispose();
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    });
+    term.refresh(0, term.rows - 1);
+  });
+  await paint();
+  // This is the pinned upstream ResizeObserver callback boundary. Canvas pixel
+  // corrections can occur without a terminal grid resize in embedded browsers.
+  const renderer = addon._renderer;
+  const canvas = renderer._canvas;
+  const gl = canvas.getContext('webgl2');
+  const original = [canvas.width, canvas.height];
+  function hasTextPixels() {
+    const height = Math.max(1, Math.floor(canvas.height / term.rows));
+    const pixels = new Uint8Array(canvas.width * height * 4);
+    gl.readPixels(0, canvas.height - height, canvas.width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i] > 64 && pixels[i + 1] > 64 && pixels[i + 2] > 64) return true;
+    }
+    return false;
+  }
+  if (!hasTextPixels()) throw new Error('Initial GPU text is not visible');
+  for (const [width, height] of [
+    [Math.floor(original[0] * 0.75), Math.floor(original[1] * 0.5)],
+    [original[0] + 1, original[1] + 1],
+    original,
+  ]) {
+    renderer._setCanvasDevicePixelDimensions(width, height);
+    await paint();
+    if (!hasTextPixels()) throw new Error(`GPU text disappeared at ${width}x${height}`);
+    if (term.cols !== 40 || term.rows !== 10 || term.buffer.active.getLine(0).translateToString(true) !== 'GPU TEXT')
+      throw new Error('Canvas correction changed terminal contents or grid');
+    if (gl.isContextLost() || gl.getError() !== gl.NO_ERROR) throw new Error('GPU context failed');
+  }
+  document.getElementById('result').textContent = 'PASS: GPU text survives canvas-only shrink, rounding correction and restore';
+  return { passed: true };
+})().catch(error => {
+  document.getElementById('result').textContent = 'FAIL: ' + error.message;
+  throw error;
+});
+</script>
