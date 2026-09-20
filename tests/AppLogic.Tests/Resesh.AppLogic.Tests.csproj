@@ -14,6 +14,7 @@
     <ProjectReference Include="../../src/Core/Resesh.Core.csproj" />
     <!-- Execute the production view models without loading a WinUI application. -->
     <Compile Include="../../src/App/Controls/TransferProgressBuffer.cs" Link="Controls/TransferProgressBuffer.cs" />
+    <Compile Include="../../src/App/Controls/TabDragLayout.cs" Link="Controls/TabDragLayout.cs" />
     <Compile Include="../../src/App/ViewModels/MainViewModel.cs" Link="ViewModels/MainViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/TabViewModel.cs" Link="ViewModels/TabViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/TabGroupViewModel.cs" Link="ViewModels/TabGroupViewModel.cs" />

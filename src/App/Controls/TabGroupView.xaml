@@ -220,7 +220,8 @@
                 IsAddTabButtonVisible="False"
                 TabWidthMode="Equal"
                 CanDragTabs="True"
-                CanReorderTabs="True"
+                CanReorderTabs="False"
+                AllowDropTabs="True"
                 TabCloseRequested="Tabs_TabCloseRequested"
                 TabDragStarting="Tabs_TabDragStarting"
                 TabDragCompleted="Tabs_TabDragCompleted"
@@ -232,6 +233,7 @@
                         Style="{StaticResource CodeTabStyle}"
                         IsClosable="False"
                         CanDrag="{x:Bind CanDrag}"
+                        DragStarting="HideSystemTabDragPreview"
                         Height="44">
                         <TabViewItem.Header>
                             <!-- The tab is painted entirely here: background, focus indicators,
@@ -682,6 +684,26 @@
                 VerticalAlignment="Bottom"
                 Fill="{ThemeResource CodeTabSeparatorBrush}"
                 IsHitTestVisible="False" />
+            <Grid
+                x:Name="TabTransferOverlay"
+                Grid.Column="0"
+                Canvas.ZIndex="2"
+                Height="44"
+                VerticalAlignment="Top"
+                Background="{ThemeResource TabDropOverlayBrush}"
+                IsHitTestVisible="False"
+                Visibility="Collapsed">
+                <Border
+                    Width="3"
+                    Margin="0,6"
+                    HorizontalAlignment="Left"
+                    CornerRadius="1.5"
+                    Background="{ThemeResource AccentFillColorDefaultBrush}">
+                    <Border.RenderTransform>
+                        <TranslateTransform x:Name="TabTransferIndicatorPosition" />
+                    </Border.RenderTransform>
+                </Border>
+            </Grid>
         </Grid>
 
         <Grid x:Name="TerminalHost" Grid.Row="1" />
