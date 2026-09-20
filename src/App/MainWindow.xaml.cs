@@ -395,6 +395,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             Sync(OpenDefaultLocalProfile), "Ctrl+Shift+T");
         Add("Application", "Quick Connect", "ssh search sessions connect",
             Sync(() => QuickConnectBox.Focus(FocusState.Programmatic)), "Ctrl+Shift+K", keepActionFocus: true);
+        commands.AddRange(BuildOpenTabCommands());
         Add("View", "Filter Sessions", "search tree",
             Sync(() =>
             {
@@ -514,7 +515,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 () => ManageRemoteSessionsAsync(tab));
         if (!tab.IsPlayback)
         {
-            Add("Tab", "Clone Tab", "duplicate current active session",
+            Add("Tab", "Clone Tab", "duplicate copy current active session next adjacent",
                 Sync(() => CloneSession(tab)));
             Add("Tab", tab.IsPinned ? "Unpin Tab" : "Pin Tab", "current active keep",
                 Sync(() => TogglePin(tab)));
@@ -1038,9 +1039,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         Session session,
         TabGroupViewModel? group = null,
         bool trackRecent = true,
-        int? resumeTmuxSlot = null)
+        int? resumeTmuxSlot = null,
+        TabViewModel? insertAfter = null)
     {
-        var tab = ViewModel.Connect(session, group);
+        var tab = ViewModel.Connect(session, group, insertAfter);
         if (resumeTmuxSlot is { } slot)
             tab.TmuxSlot = slot;
         var tmuxSlotsAlreadyOpen = ViewModel.AllTabs
@@ -1452,9 +1454,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (source == targetGroup)
             return;
 
-        source.Tabs.Remove(tab);
-        if (source.SelectedTab == tab)
-            source.SelectedTab = source.Tabs.LastOrDefault();
+        source.RemoveTab(tab);
 
         targetGroup.Tabs.Insert(Math.Clamp(targetIndex, 0, targetGroup.Tabs.Count), tab);
         targetGroup.SelectedTab = tab;
@@ -1643,8 +1643,40 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         return grid;
     }
 
+    private IReadOnlyList<CommandPaletteEntry> BuildOpenTabCommands()
+    {
+        var commands = new List<CommandPaletteEntry>();
+        for (var pane = 0; pane < ViewModel.Groups.Count; pane++)
+        {
+            var group = ViewModel.Groups[pane];
+            for (var index = 0; index < group.Tabs.Count; index++)
+            {
+                var tab = group.Tabs[index];
+                commands.Add(new CommandPaletteEntry
+                {
+                    Title = tab.Header,
+                    Category = $"Open Tab · Pane {pane + 1} · Tab {index + 1}"
+                        + (string.IsNullOrWhiteSpace(tab.Endpoint) ? "" : $" · {tab.Endpoint}"),
+                    Keywords = $"switch {tab.Session.Name} {tab.Session.Host} {tab.Subtitle}",
+                    ExecuteAsync = () =>
+                    {
+                        // Tabs can close or move while the palette is open.
+                        if (ViewModel.AllTabs.Contains(tab))
+                        {
+                            var currentGroup = ViewModel.GroupOf(tab);
+                            currentGroup.SelectedTab = tab;
+                            FocusGroup(currentGroup);
+                        }
+                        return Task.CompletedTask;
+                    },
+                });
+            }
+        }
+        return commands;
+    }
+
     public void CloneSession(TabViewModel tab) =>
-        ConnectSession(tab.Session, ViewModel.GroupOf(tab));
+        ConnectSession(tab.Session, ViewModel.GroupOf(tab), insertAfter: tab);
 
     // ---- pinning (browser-style; pinned session ids persist and reopen on launch) ----
 

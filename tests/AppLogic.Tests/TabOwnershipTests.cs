@@ -24,6 +24,67 @@ public sealed class TabOwnershipTests : IDisposable
             ReportError = _errors.Add,
         });
 
+    [Theory]
+    [InlineData(0, 0, 1)]
+    [InlineData(1, 1, 2)]
+    [InlineData(3, 3, 2)]
+    [InlineData(0, 2, 2)]
+    [InlineData(3, 1, 1)]
+    public void ClosingSelectsNeighbourOrPreservesInactiveSelection(int closed, int selected, int expected)
+    {
+        var window = Window();
+        var tabs = Enumerable.Range(0, 4).Select(_ => window.Connect(new Session { Id = Guid.NewGuid() })).ToArray();
+        var group = window.FocusedGroup;
+        group.SelectedTab = tabs[selected];
+        // Model the native control selecting another item during its removal handler.
+        group.Tabs.CollectionChanged += (_, _) => group.SelectedTab = group.Tabs.LastOrDefault();
+        window.CloseTab(tabs[closed]);
+        Assert.Same(tabs[expected], group.SelectedTab);
+        Assert.True(tabs[expected].IsActive);
+        Assert.False(tabs[closed].IsActive);
+        Assert.Single(group.Tabs, tab => tab.IsActive);
+    }
+
+    [Fact]
+    public void ClosingOnlyTabClearsSelection()
+    {
+        var window = Window();
+        var tab = window.Connect(new Session { Id = Guid.NewGuid() });
+        window.CloseTab(tab);
+        Assert.Null(window.FocusedGroup.SelectedTab);
+        Assert.False(tab.IsActive);
+    }
+
+    [Theory]
+    [InlineData(0, false, 1)]
+    [InlineData(1, false, 2)]
+    [InlineData(3, false, 4)]
+    [InlineData(0, true, 2)]
+    [InlineData(1, true, 2)]
+    public void CloneOpensBesideSourceAfterPinnedPrefix(int sourceIndex, bool pinFirstTwo, int expectedIndex)
+    {
+        var window = Window();
+        var group = window.FocusedGroup;
+        var tabs = Enumerable.Range(0, 4).Select(_ => window.Connect(new Session { Id = Guid.NewGuid(), Persistent = true })).ToArray();
+        if (pinFirstTwo)
+            tabs[0].IsPinned = tabs[1].IsPinned = true;
+        var otherGroup = new TabGroupViewModel();
+        window.Groups.Add(otherGroup);
+        window.FocusedGroup = otherGroup;
+        var source = tabs[sourceIndex];
+
+        var clone = window.Connect(source.Session, insertAfter: source);
+
+        Assert.Same(clone, group.Tabs[expectedIndex]);
+        Assert.Same(clone, group.SelectedTab);
+        Assert.True(clone.IsActive);
+        Assert.False(clone.IsPinned);
+        Assert.Same(source.Session, clone.Session);
+        Assert.NotEqual(source.TmuxSlot, clone.TmuxSlot);
+        Assert.Equal(tabs, group.Tabs.Where(tab => tab != clone));
+        Assert.Empty(otherGroup.Tabs);
+    }
+
     [Fact]
     public void TransferPreservesLiveViewStateAndMovesNotificationOwnership()
     {

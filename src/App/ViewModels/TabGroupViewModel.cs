@@ -10,6 +10,20 @@ public sealed class TabGroupViewModel : ObservableObject
 
     public ObservableCollection<TabViewModel> Tabs { get; } = [];
 
+    public void RemoveTab(TabViewModel tab)
+    {
+        var index = Tabs.IndexOf(tab);
+        if (index < 0)
+            return;
+        var selection = SelectedTab;
+        if (selection == tab)
+            selection = index + 1 < Tabs.Count ? Tabs[index + 1] : index > 0 ? Tabs[index - 1] : null;
+        Tabs.RemoveAt(index);
+        // TabView can change selection during removal. Apply the intended neighbour
+        // after its collection handler, including when an inactive tab was removed.
+        SelectedTab = selection;
+    }
+
     public TabViewModel? SelectedTab
     {
         get => _selectedTab;

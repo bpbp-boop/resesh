@@ -10,6 +10,13 @@ internal readonly record struct TabDragPlacement(double Left, int Index);
 
 internal static class TabDragLayout
 {
+    public static double ScrollOffset(double offset, double maximum, double pointer, double left, double right)
+    {
+        var edge = Math.Min(32, Math.Max(0, (right - left) / 2));
+        var step = pointer < left + edge ? -12 : pointer > right - edge ? 12 : 0;
+        return Math.Clamp(offset + step, 0, maximum);
+    }
+
     public static TabDragPlacement Resolve(
         IReadOnlyList<TabDragSlot> slots, int source, int firstMovable, double left)
     {

@@ -142,9 +142,18 @@ public sealed class MainViewModel : ObservableObject
         Groups.First(g => g.Tabs.Contains(tab));
 
     /// <summary>Creates a tab in the given group (or the focused one) and selects it.</summary>
-    public TabViewModel Connect(Session session, TabGroupViewModel? group = null)
+    public TabViewModel Connect(Session session, TabGroupViewModel? group = null, TabViewModel? insertAfter = null)
     {
-        group ??= FocusedGroup;
+        group ??= insertAfter is null ? FocusedGroup : GroupOf(insertAfter);
+        var insertionIndex = group.Tabs.Count;
+        if (insertAfter is not null)
+        {
+            var sourceIndex = group.Tabs.IndexOf(insertAfter);
+            if (sourceIndex < 0)
+                throw new ArgumentException("The source tab must belong to the target group.", nameof(insertAfter));
+            // Clones are unpinned, so they must follow the complete pinned prefix.
+            insertionIndex = Math.Max(sourceIndex + 1, group.Tabs.Count(t => t.IsPinned));
+        }
         var tab = new TabViewModel(session, _environment);
         if (session.Persistent)
         {
@@ -154,7 +163,7 @@ public sealed class MainViewModel : ObservableObject
             while (used.Contains(tab.TmuxSlot))
                 tab.TmuxSlot++;
         }
-        AttachTab(tab, group, group.Tabs.Count);
+        AttachTab(tab, group, insertionIndex);
         return tab;
     }
 
@@ -173,9 +182,7 @@ public sealed class MainViewModel : ObservableObject
     {
         var group = GroupOf(tab);
         tab.PropertyChanged -= Tab_PropertyChanged;
-        group.Tabs.Remove(tab);
-        if (group.SelectedTab == tab)
-            group.SelectedTab = group.Tabs.LastOrDefault();
+        group.RemoveTab(tab);
         OnPropertyChanged(nameof(StatusText));
         return group;
     }

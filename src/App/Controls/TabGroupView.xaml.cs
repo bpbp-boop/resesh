@@ -63,6 +63,12 @@ public sealed partial class TabGroupView : UserControl
     private int _dragSourceIndex;
     private int _dragTargetIndex;
     private int _previewVersion;
+    private ScrollViewer? _tabScrollViewer;
+    private ScrollContentPresenter? _tabViewport;
+    private double _dragInitialScrollOffset;
+    private double _dragPointerX;
+    private readonly DispatcherTimer _dragScrollTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
+    private static TabGroupView? _scrollDropTarget;
 
     private readonly ITabGroupHost _host;
     private readonly MenuFlyout _tabMenu;
@@ -165,6 +171,8 @@ public sealed partial class TabGroupView : UserControl
         _tabDragLayer.Children.Add(_tabDragPreview);
         TabStripHost.Children.Add(_tabDragLayer);
         AddHandler(DragOverEvent, new DragEventHandler(UpdateTabDragPreview), true);
+        _dragScrollTimer.Tick += (_, _) => ScrollDraggedTabs();
+        Unloaded += (_, _) => StopDragScroll();
     }
 
     private async Task PrepareTabDragPreviewAsync(TabViewModel tab, Windows.Foundation.Point pointer)
@@ -176,6 +184,8 @@ public sealed partial class TabGroupView : UserControl
 
         var origin = item.TransformToVisual(TabStripHost).TransformPoint(new Windows.Foundation.Point());
         _tabDragPointerOffset = pointer.X - origin.X;
+        _dragPointerX = pointer.X;
+        _dragInitialScrollOffset = _tabScrollViewer?.HorizontalOffset ?? 0;
         _tabDragPreview.Width = item.ActualWidth;
         _tabDragPreview.Height = item.ActualHeight;
         _tabDragPosition.X = origin.X;
@@ -230,6 +240,7 @@ public sealed partial class TabGroupView : UserControl
 
     private void ResetTabDragPreview()
     {
+        StopDragScroll();
         ++_previewVersion;
         _tabDragPreview.Visibility = Visibility.Collapsed;
         _tabDragPreview.Source = null;
@@ -268,21 +279,78 @@ public sealed partial class TabGroupView : UserControl
         if (_dragSource != this || _dragSlots.Count == 0)
             return;
 
+        _dragPointerX = e.GetPosition(TabStripHost).X;
+        PositionTabDragPreview();
+    }
+
+    private Windows.Foundation.Rect TabViewportBounds() => _tabViewport is { } viewport
+        ? viewport.TransformToVisual(TabStripHost).TransformBounds(
+            new Windows.Foundation.Rect(0, 0, viewport.ActualWidth, TabStripHost.ActualHeight))
+        : new Windows.Foundation.Rect(0, 0, Tabs.ActualWidth, TabStripHost.ActualHeight);
+
+    private void PositionTabDragPreview()
+    {
+        if (_dragSource != this || _dragSlots.Count == 0)
+            return;
+        var viewport = TabViewportBounds();
+        var scrollDelta = (_tabScrollViewer?.HorizontalOffset ?? 0) - _dragInitialScrollOffset;
+        var left = Math.Clamp(_dragPointerX - _tabDragPointerOffset,
+            viewport.Left, Math.Max(viewport.Left, viewport.Right - _tabDragPreview.Width));
         // One layout owns the preview and its gap. WinUI's native reordering is off.
         var placement = TabDragLayout.Resolve(_dragSlots, _dragSourceIndex,
-            Group.Tabs.Count(t => t.IsPinned), e.GetPosition(TabStripHost).X - _tabDragPointerOffset);
-        _tabDragPosition.X = placement.Left;
+            Group.Tabs.Count(t => t.IsPinned), left + scrollDelta);
+        _tabDragPosition.X = placement.Left - scrollDelta;
         _dragTargetIndex = placement.Index;
         _tabDragLayer.Clip = new RectangleGeometry
         {
-            Rect = new Windows.Foundation.Rect(0, 0, Tabs.ActualWidth, TabStripHost.ActualHeight),
+            Rect = viewport,
         };
         for (var i = 0; i < _dragItems.Count; i++)
         {
             if (i != _dragSourceIndex)
                 ((TranslateTransform)_dragItems[i].Preview.RenderTransform).X = _dragSlots[i].Left
-                    + TabDragLayout.Offset(i, _dragSourceIndex, _dragTargetIndex, _tabDragPreview.Width);
+                    + TabDragLayout.Offset(i, _dragSourceIndex, _dragTargetIndex, _tabDragPreview.Width) - scrollDelta;
         }
+    }
+
+    private void UpdateDragScroll(DragEventArgs e)
+    {
+        if (_draggedTab is null)
+            return;
+        if (_scrollDropTarget != this)
+            _scrollDropTarget?.StopDragScroll();
+        _scrollDropTarget = this;
+        _dragPointerX = e.GetPosition(TabStripHost).X;
+        _dragScrollTimer.Start();
+    }
+
+    private void StopDragScroll()
+    {
+        _dragScrollTimer.Stop();
+        if (_scrollDropTarget == this)
+            _scrollDropTarget = null;
+    }
+
+    private void ScrollDraggedTabs()
+    {
+        if (_draggedTab is null || _tabScrollViewer is not { } viewer)
+        {
+            StopDragScroll();
+            return;
+        }
+        var viewport = TabViewportBounds();
+        var offset = TabDragLayout.ScrollOffset(viewer.HorizontalOffset, viewer.ScrollableWidth,
+            _dragPointerX, viewport.Left, viewport.Right);
+        if (offset != viewer.HorizontalOffset)
+            viewer.ChangeView(offset, null, null, disableAnimation: true);
+    }
+
+    private void TabScrollViewer_ViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    {
+        PositionTabDragPreview();
+        if (_stripDropTarget == this)
+            PositionTabStripDropIndicator(_dragPointerX);
+        QueueTabDividerRefresh();
     }
 
     private void HideSystemTabDragPreview(UIElement sender, DragStartingEventArgs args)
@@ -331,6 +399,7 @@ public sealed partial class TabGroupView : UserControl
 
         if (FindDescendant(Tabs, "ScrollContentPresenter") is ScrollContentPresenter scrollContent)
         {
+            _tabViewport = scrollContent;
             scrollContent.Padding = new Thickness(0);
 
             if (VisualTreeHelper.GetParent(scrollContent) is Grid scrollViewerGrid &&
@@ -338,6 +407,13 @@ public sealed partial class TabGroupView : UserControl
             {
                 scrollViewerGrid.ColumnDefinitions[0].MinWidth = 0;
             }
+        }
+        if (FindDescendant(Tabs, "ScrollViewer") is ScrollViewer viewer && viewer != _tabScrollViewer)
+        {
+            if (_tabScrollViewer is not null)
+                _tabScrollViewer.ViewChanged -= TabScrollViewer_ViewChanged;
+            _tabScrollViewer = viewer;
+            viewer.ViewChanged += TabScrollViewer_ViewChanged;
         }
     }
 
@@ -1038,6 +1114,7 @@ public sealed partial class TabGroupView : UserControl
         ContentDropSurface.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         if (!visible)
         {
+            StopDragScroll();
             ContentDropOverlay.Visibility = Visibility.Collapsed;
             TabTransferOverlay.Visibility = Visibility.Collapsed;
             if (_stripDropTarget == this)
@@ -1069,6 +1146,7 @@ public sealed partial class TabGroupView : UserControl
 
     private void Tabs_TabStripDragOver(object sender, DragEventArgs e)
     {
+        UpdateDragScroll(e);
         UpdateTabDragPreview(sender, e);
         UpdateTabStripDropIndicator(e);
         if (_draggedTab is not null)
@@ -1091,6 +1169,7 @@ public sealed partial class TabGroupView : UserControl
 
     private void TabStripHost_DragOver(object sender, DragEventArgs e)
     {
+        UpdateDragScroll(e);
         UpdateTabDragPreview(sender, e);
         UpdateTabStripDropIndicator(e);
         if (_draggedTab is not null)
@@ -1144,18 +1223,30 @@ public sealed partial class TabGroupView : UserControl
         if (_stripDropTarget != this)
             HideTabStripDropIndicator();
         _stripDropTarget = this;
-        var insertion = GetTabInsertionPoint(e.GetPosition(Tabs).X);
-        TabTransferIndicatorPosition.X = Math.Clamp(insertion.X - 1.5, 0, Math.Max(0, Tabs.ActualWidth - 3));
+        PositionTabStripDropIndicator(e.GetPosition(TabStripHost).X);
         TabTransferOverlay.Visibility = Visibility.Visible;
+    }
+
+    private void PositionTabStripDropIndicator(double pointerX)
+    {
+        var tabOrigin = Tabs.TransformToVisual(TabStripHost).TransformPoint(new Windows.Foundation.Point()).X;
+        var insertion = GetTabInsertionPoint(pointerX - tabOrigin);
+        var viewport = TabViewportBounds();
+        TabTransferIndicatorPosition.X = Math.Clamp(insertion.X + tabOrigin - 1.5,
+            viewport.Left, Math.Max(viewport.Left, viewport.Right - 3));
     }
 
     private void TabStripHost_DragLeave(object sender, DragEventArgs e)
     {
         var point = e.GetPosition(TabStripHost);
         // Moving between child headers is still a hover over this strip.
-        if (_stripDropTarget == this && (point.X < 0 || point.X >= TabStripHost.ActualWidth
-            || point.Y < 0 || point.Y >= TabStripHost.ActualHeight))
-            HideTabStripDropIndicator();
+        if (point.X < 0 || point.X >= TabStripHost.ActualWidth
+            || point.Y < 0 || point.Y >= TabStripHost.ActualHeight)
+        {
+            StopDragScroll();
+            if (_stripDropTarget == this)
+                HideTabStripDropIndicator();
+        }
     }
 
     private (int Index, double X) GetTabInsertionPoint(double pointerX)
@@ -1202,6 +1293,7 @@ public sealed partial class TabGroupView : UserControl
 
     private void ContentDropSurface_DragOver(object sender, DragEventArgs e)
     {
+        _scrollDropTarget?.StopDragScroll();
         HideTabStripDropIndicator();
         UpdateTabDragPreview(sender, e);
         if (_draggedTab is null || _dragSource is null)
@@ -1284,6 +1376,7 @@ public sealed partial class TabGroupView : UserControl
 
     private void EndTabDrag()
     {
+        _scrollDropTarget?.StopDragScroll();
         HideTabStripDropIndicator();
         if (_dragSource is { } source)
         {

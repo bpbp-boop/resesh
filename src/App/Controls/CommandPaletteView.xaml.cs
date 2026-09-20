@@ -38,6 +38,10 @@ public sealed partial class CommandPaletteView : UserControl
     public void Open(IReadOnlyList<CommandPaletteEntry> commands)
     {
         _commands = commands;
+        const string searchLabel = "Search commands, settings, and open tabs";
+        SearchBox.PlaceholderText = searchLabel;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SearchBox, searchLabel);
+        NoResultsText.Text = "No matching commands or tabs";
         SearchBox.Text = "";
         RefreshResults();
         Visibility = Visibility.Visible;
