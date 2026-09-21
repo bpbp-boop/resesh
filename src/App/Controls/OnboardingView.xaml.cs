@@ -1,9 +1,11 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Resesh.App.Dialogs;
 using Resesh.Core.Import;
 using Resesh.Core.Storage;
+using Windows.UI;
 
 namespace Resesh.App.Controls;
 
@@ -18,13 +20,17 @@ public sealed partial class OnboardingView : UserControl, IDisposable
     private string _selectedTheme;
     private bool _scanStarted;
     private bool _completed;
+    private bool _updatingThemeUi;
 
     public event Action? FinishRequested;
+    public event Action? NewSessionRequested;
+    public event Action? LocalShellRequested;
 
     public OnboardingView(
         AppSettings settings,
         Action<string> previewTheme,
-        Action sessionsChanged)
+        Action sessionsChanged,
+        string? localShellName)
     {
         _savedSettings = settings;
         _previewTheme = previewTheme;
@@ -32,13 +38,18 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         _selectedTheme = settings.Theme;
 
         InitializeComponent();
+        Foreground = Brush("OnboardingPrimaryTextBrush");
+        WelcomeLocalShellLabel.Text = localShellName is null ? "No local shell available" : $"Open {localShellName}";
+        WelcomeLocalShellButton.IsEnabled = localShellName is not null;
 
+        _updatingThemeUi = true;
         ConfirmCloseToggle.IsOn = settings.ConfirmCloseActiveSessions;
         CopyOnSelectToggle.IsOn = settings.CopyOnSelect;
         RightClickPasteToggle.IsOn = settings.RightClickPaste;
         CrashReportsToggle.IsOn = settings.WriteCrashReports;
-        PopulateThemeFlyout();
         UpdateThemeSelection();
+        _updatingThemeUi = false;
+        UpdateSaveButtonState();
         Loaded += OnLoaded;
     }
 
@@ -77,7 +88,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         try
         {
             _puttyScan = await puttyTask;
-            SetImportButton(PuttyImportButton, PuttyImportLabel, PuttyBadge, _puttyScan.Importable.Count);
+            SetImportButton(PuttyImportButton, PuttyImportLabel, _puttyScan.Importable.Count);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -87,7 +98,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         try
         {
             _openSshScan = await openSshTask;
-            SetImportButton(OpenSshImportButton, OpenSshImportLabel, OpenSshBadge, _openSshScan.Importable.Count);
+            SetImportButton(OpenSshImportButton, OpenSshImportLabel, _openSshScan.Importable.Count);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -97,7 +108,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         try
         {
             _secureCrtScan = await secureCrtTask;
-            SetImportButton(SecureCrtImportButton, SecureCrtImportLabel, SecureCrtBadge, _secureCrtScan.Importable.Count);
+            SetImportButton(SecureCrtImportButton, SecureCrtImportLabel, _secureCrtScan.Importable.Count);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -105,18 +116,24 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         }
     }
 
-    private static void SetImportButton(Button button, TextBlock label, InfoBadge badge, int count)
+    private void SetImportButton(Button button, TextBlock label, int count)
     {
         button.IsEnabled = count > 0;
-        label.Text = count > 0 ? "Import" : "None found";
-        badge.Value = count;
-        badge.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        label.Text = count > 0
+            ? $"{count} session{(count == 1 ? "" : "s")} found"
+            : "None found";
+        label.Foreground = Brush(count > 0
+            ? "OnboardingAccentTextBrush"
+            : "OnboardingSecondaryTextBrush");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(button,
+            count > 0 ? $"{count} sessions available" : "No sessions found");
     }
 
-    private static void SetImportUnavailable(Button button, TextBlock label, string text)
+    private void SetImportUnavailable(Button button, TextBlock label, string text)
     {
         button.IsEnabled = false;
         label.Text = text;
+        label.Foreground = Brush("OnboardingSecondaryTextBrush");
     }
 
     private async void PuttyImport_Click(object sender, RoutedEventArgs e)
@@ -127,7 +144,6 @@ public sealed partial class OnboardingView : UserControl, IDisposable
             _puttyScan,
             PuttyImportButton,
             PuttyImportLabel,
-            PuttyBadge,
             "PuTTY");
     }
 
@@ -139,7 +155,6 @@ public sealed partial class OnboardingView : UserControl, IDisposable
             _openSshScan,
             OpenSshImportButton,
             OpenSshImportLabel,
-            OpenSshBadge,
             "OpenSSH");
     }
 
@@ -151,7 +166,6 @@ public sealed partial class OnboardingView : UserControl, IDisposable
             _secureCrtScan,
             SecureCrtImportButton,
             SecureCrtImportLabel,
-            SecureCrtBadge,
             "SecureCRT");
     }
 
@@ -159,7 +173,6 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         ImportScanResult scan,
         Button button,
         TextBlock label,
-        InfoBadge badge,
         string source)
     {
         try
@@ -175,8 +188,8 @@ public sealed partial class OnboardingView : UserControl, IDisposable
             var (imported, duplicates) = SecureCrtImporter.Commit(App.Store, confirmed, App.SshKeys);
             _sessionsChanged();
             button.IsEnabled = false;
-            label.Text = "Imported";
-            badge.Visibility = Visibility.Collapsed;
+            label.Text = $"{imported} imported";
+            label.Foreground = Brush("OnboardingAccentTextBrush");
             ImportStatus.Severity = InfoBarSeverity.Success;
             ImportStatus.Title = $"{source} import complete";
             ImportStatus.Message = duplicates == 0
@@ -199,80 +212,158 @@ public sealed partial class OnboardingView : UserControl, IDisposable
 
     private void SystemTheme_Click(object sender, RoutedEventArgs e) => SelectTheme("system");
 
-    private void TokyoNightTheme_Click(object sender, RoutedEventArgs e) => SelectTheme("tokyo-night");
-
-    private void PhthaloGreenTheme_Click(object sender, RoutedEventArgs e) => SelectTheme("phthalo-green");
-
-    private void PopulateThemeFlyout()
-    {
-        foreach (var theme in ThemeCatalog.All)
-        {
-            var item = new ToggleMenuFlyoutItem
-            {
-                Text = theme.Name,
-                Tag = theme.Id,
-            };
-            item.Click += ThemeFlyoutItem_Click;
-            AllThemesFlyout.Items.Add(item);
-        }
-    }
-
-    private void ThemeFlyoutItem_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is ToggleMenuFlyoutItem { Tag: string theme })
-            SelectTheme(theme);
-    }
-
     private void SelectTheme(string theme)
     {
         _selectedTheme = theme;
-        UpdateThemeSelection();
         _previewTheme(theme);
+        UpdateThemeSelection();
+        UpdateSaveButtonState();
     }
 
     private void UpdateThemeSelection()
     {
-        LightThemeToggle.IsChecked = _selectedTheme == "light";
-        DarkThemeToggle.IsChecked = _selectedTheme == "dark";
-        SystemThemeToggle.IsChecked = _selectedTheme == "system";
+        var wasUpdating = _updatingThemeUi;
+        _updatingThemeUi = true;
+        var isSystem = _selectedTheme == "system";
+        var isLight = !isSystem && ThemeCatalog.IsLight(_selectedTheme);
+        LightThemeToggle.IsChecked = isLight;
+        DarkThemeToggle.IsChecked = !isSystem && !isLight;
+        SystemThemeToggle.IsChecked = isSystem;
 
-        var isTokyo = _selectedTheme == "tokyo-night";
-        var isPhthalo = _selectedTheme == "phthalo-green";
-
-        TokyoNightThemeCard.IsChecked = isTokyo;
-        TokyoNightCheck.Visibility = isTokyo ? Visibility.Visible : Visibility.Collapsed;
-
-        PhthaloGreenThemeCard.IsChecked = isPhthalo;
-        PhthaloGreenCheck.Visibility = isPhthalo ? Visibility.Visible : Visibility.Collapsed;
-
-        foreach (var item in AllThemesFlyout.Items)
+        // Mode is a shortcut, not a second persisted setting. Light and Dark filter
+        // the exact palette choices. Selecting a palette owns the mode. System owns
+        // the palette and disables the fixed-theme picker while it follows Windows.
+        if (isSystem)
         {
-            if (item is ToggleMenuFlyoutItem { Tag: string themeItem } themeMenuItem)
-            {
-                themeMenuItem.IsChecked = string.Equals(
-                    themeItem,
-                    _selectedTheme,
-                    StringComparison.OrdinalIgnoreCase);
-            }
+            ThemePicker.ItemsSource = new[] { ThemeCatalog.Find("system") };
+            ThemePicker.SelectedIndex = 0;
+            ThemePicker.IsEnabled = false;
+        }
+        else
+        {
+            var choices = ThemeCatalog.All
+                .Where(theme => theme.Id != "system" && theme.IsLight == isLight)
+                .ToList();
+            ThemePicker.ItemsSource = choices;
+            ThemePicker.SelectedItem = choices.FirstOrDefault(theme =>
+                string.Equals(theme.Id, _selectedTheme, StringComparison.OrdinalIgnoreCase));
+            ThemePicker.IsEnabled = true;
         }
 
         var resolved = App.ResolveTheme(_selectedTheme);
-        if (_selectedTheme == "system")
+        var palette = ThemeVisualPalette.For(resolved);
+        ApplyPagePalette(palette);
+        if (isSystem)
         {
             var currentMode = resolved == "light" ? "Light" : "Dark";
-            SystemThemeHint.Text = $"System mode tracks your Windows color scheme (currently {currentMode}).";
+            SystemThemeHint.Text = $"System follows your Windows color mode (currently {currentMode}). Choose Light or Dark to select a fixed color theme.";
             SystemThemeHint.Visibility = Visibility.Visible;
         }
         else
         {
             SystemThemeHint.Visibility = Visibility.Collapsed;
         }
+        _updatingThemeUi = wasUpdating;
+    }
+
+    private void ThemePicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_updatingThemeUi && ThemePicker.SelectedItem is ThemeChoice theme)
+            SelectTheme(theme.Id);
+    }
+
+    private void PreferenceToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_updatingThemeUi)
+            UpdateSaveButtonState();
+    }
+
+    private void UpdateSaveButtonState()
+    {
+        if (FinishSetupButton is null)
+            return;
+
+        FinishSetupButton.IsEnabled = _savedSettings.OnboardingCompleted != true
+            || !string.Equals(_selectedTheme, _savedSettings.Theme, StringComparison.OrdinalIgnoreCase)
+            || ConfirmCloseToggle.IsOn != _savedSettings.ConfirmCloseActiveSessions
+            || CopyOnSelectToggle.IsOn != _savedSettings.CopyOnSelect
+            || RightClickPasteToggle.IsOn != _savedSettings.RightClickPaste
+            || CrashReportsToggle.IsOn != _savedSettings.WriteCrashReports;
+    }
+
+    private void ApplyPagePalette(ThemeVisualPalette palette)
+    {
+        var primary = EnsureContrast(palette.TreeForeground, palette.Shell, 4.5);
+        var secondary = EnsureContrast(palette.TreeMutedForeground, palette.Shell, 4.5);
+        var accentText = EnsureContrast(palette.Accent, palette.Shell, 4.5);
+        var accentForeground = BetterContrast(Microsoft.UI.Colors.Black, Microsoft.UI.Colors.White, palette.Accent);
+        var previewBorder = EnsureContrast(palette.Frame, palette.Shell, 3.0);
+
+        SetBrush("OnboardingPrimaryTextBrush", primary);
+        SetBrush("OnboardingSecondaryTextBrush", secondary);
+        SetBrush("OnboardingAccentTextBrush", accentText);
+        SetBrush("OnboardingAccentForegroundBrush", accentForeground);
+        SetBrush("OnboardingPreviewBackgroundBrush", palette.ActiveTab);
+        SetBrush("OnboardingPreviewHeaderBrush", palette.InactiveTab);
+        SetBrush("OnboardingPreviewBorderBrush", previewBorder);
+        SetBrush("OnboardingPreviewTextBrush", EnsureContrast(palette.TreeForeground, palette.ActiveTab, 4.5));
+    }
+
+    private void SetBrush(string key, Color color) => ((SolidColorBrush)Resources[key]).Color = color;
+
+    private Brush Brush(string key) => (Brush)Resources[key];
+
+    private static Color EnsureContrast(Color foreground, Color background, double minimum)
+    {
+        if (ContrastRatio(foreground, background) >= minimum)
+            return foreground;
+
+        var target = BetterContrast(Microsoft.UI.Colors.Black, Microsoft.UI.Colors.White, background);
+        for (var step = 1; step <= 20; step++)
+        {
+            var candidate = Mix(foreground, target, step / 20.0);
+            if (ContrastRatio(candidate, background) >= minimum)
+                return candidate;
+        }
+        return target;
+    }
+
+    private static Color BetterContrast(Color first, Color second, Color background) =>
+        ContrastRatio(first, background) >= ContrastRatio(second, background) ? first : second;
+
+    private static Color Mix(Color first, Color second, double amount) => Color.FromArgb(
+        255,
+        (byte)Math.Round(first.R + ((second.R - first.R) * amount)),
+        (byte)Math.Round(first.G + ((second.G - first.G) * amount)),
+        (byte)Math.Round(first.B + ((second.B - first.B) * amount)));
+
+    private static double ContrastRatio(Color first, Color second)
+    {
+        var firstLuminance = RelativeLuminance(first);
+        var secondLuminance = RelativeLuminance(second);
+        return (Math.Max(firstLuminance, secondLuminance) + 0.05)
+            / (Math.Min(firstLuminance, secondLuminance) + 0.05);
+    }
+
+    private static double RelativeLuminance(Color color) =>
+        (0.2126 * Linear(color.R)) + (0.7152 * Linear(color.G)) + (0.0722 * Linear(color.B));
+
+    private static double Linear(byte channel)
+    {
+        var value = channel / 255.0;
+        return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
     }
 
     private void FinishSetup_Click(object sender, RoutedEventArgs e) => FinishRequested?.Invoke();
 
+    private void NewSession_Click(object sender, RoutedEventArgs e) => NewSessionRequested?.Invoke();
+
+    private void LocalShell_Click(object sender, RoutedEventArgs e) => LocalShellRequested?.Invoke();
+
     private void FinishSetup_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
+        if (!FinishSetupButton.IsEnabled)
+            return;
         args.Handled = true;
         FinishRequested?.Invoke();
     }
