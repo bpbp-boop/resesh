@@ -66,6 +66,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     private string? _secret;
     private Session? _resolvedSshSession;
     private const double DefaultFilePaneWidth = 340;
+    private HighlightsStore? _highlightPreview;
 
     private Session Session => _tab.Session;
 
@@ -136,6 +137,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0) });
+        SizeChanged += (_, _) => UpdateFilePaneWidthLimit();
 
         Children.Add(_terminal);
         Children.Add(_spinner);
@@ -1008,8 +1010,14 @@ public sealed class TerminalTabView : Grid, IDisposable
 
     /// <summary>Enabled highlight rules for this session (global state + session deltas),
     /// shaped for the page's addon.</summary>
+    public void PreviewHighlights(HighlightsStore? draft)
+    {
+        _highlightPreview = draft;
+        _terminal.ApplyHighlights(BuildHighlightPayload());
+    }
+
     private IReadOnlyList<object> BuildHighlightPayload() =>
-        App.Highlights.ResolveForSession(Session.Overrides)
+        (_highlightPreview ?? App.Highlights).ResolveForSession(Session.Overrides)
             .Select(r => (object)new
             {
                 id = r.Id,
@@ -1171,6 +1179,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         }
         _paneSplitter!.Visibility = Visibility.Visible;
         _paneSplitterLine!.Visibility = Visibility.Visible;
+        ColumnDefinitions[1].Width = new GridLength(1);
+        UpdateFilePaneWidthLimit();
         _filePane.Visibility = Visibility.Visible;
         if (!wasOpen)
             FilePaneOpenChanged?.Invoke();
@@ -1188,6 +1198,14 @@ public sealed class TerminalTabView : Grid, IDisposable
         ApplyPaneSplitterTheme();
     }
 
+    private void UpdateFilePaneWidthLimit()
+    {
+        // Keep at least 65% of each terminal group for terminal output. MaxWidth clamps
+        // the layout without overwriting the user's preferred width when the window shrinks.
+        if (ActualWidth > 0)
+            ColumnDefinitions[2].MaxWidth = Math.Min(480, ActualWidth * 0.35);
+    }
+
     private void ApplyPaneSplitterTheme()
     {
         if (_paneSplitterLine is null)
@@ -1203,6 +1221,8 @@ public sealed class TerminalTabView : Grid, IDisposable
             return;
         SaveFilePaneWidth();
         ColumnDefinitions[2].Width = new GridLength(0);
+        ColumnDefinitions[1].Width = new GridLength(0);
+        _filePane!.Visibility = Visibility.Collapsed;
         _paneSplitter!.Visibility = Visibility.Collapsed;
         _paneSplitterLine!.Visibility = Visibility.Collapsed;
         FilePaneOpenChanged?.Invoke();
@@ -1217,15 +1237,19 @@ public sealed class TerminalTabView : Grid, IDisposable
     {
         if (!_tab.Capabilities.FilePane)
             return;
+        var (path, failure) = await ResolveTerminalDirectoryAsync();
+        var fallback = Session.IsLocal ? "the profile folder" : "home";
+        ShowFilePane(path, failure is null ? null : $"Couldn't read the current folder ({failure}) — opened {fallback} instead.");
+    }
+
+    private async Task<(string? Path, string? Failure)> ResolveTerminalDirectoryAsync()
+    {
         if (Session.IsLocal)
         {
             var reported = await _terminal.RequestPromptContextAsync();
             var requestedPrompt = reported is { Platform: null } ? reported.Value.Context : null;
             var localPath = ResolveLocalTerminalDirectory(requestedPrompt, out var localFailure);
-            ShowFilePane(localPath, localFailure is null
-                ? null
-                : $"Couldn't read the current folder ({localFailure}) — opened the profile folder instead.");
-            return;
+            return (localPath, localFailure);
         }
 
         string? path = null;
@@ -1292,7 +1316,43 @@ public sealed class TerminalTabView : Grid, IDisposable
         if (path is null)
             failure ??= "the shell did not report a current folder";
 
-        ShowFilePane(path, failure is null ? null : $"Couldn't read the current folder ({failure}) — opened home instead.");
+        return (path, failure);
+    }
+
+    public bool HasFileExplorer => _tab.Capabilities.FilePane &&
+        (Session.IsLocal || Interop.SshfsIntegration.IsInstalled);
+
+    /// <summary>Opens the file pane's displayed folder, or the terminal folder when
+    /// the pane is closed. Remote folders use the existing SSHFS mount.</summary>
+    public async Task OpenFileExplorerAsync()
+    {
+        if (!HasFileExplorer || _disposed || _tab.IsLocked || _tab.State != TabConnectionState.Connected)
+            return;
+        try
+        {
+            var path = IsFilePaneOpen
+                ? _filePane!.CurrentPath
+                : (await ResolveTerminalDirectoryAsync()).Path;
+            if (_disposed || _tab.IsLocked)
+                return;
+            path ??= Session.IsLocal
+                ? new LocalFileSystem(Session.Local?.StartingDirectory).HomeDirectory
+                : "/";
+            await OpenInExplorerAsync(path);
+        }
+        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception
+            or IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            if (_disposed)
+                return;
+            await new ContentDialog
+            {
+                Title = "File Explorer could not open",
+                Content = exception.Message,
+                CloseButtonText = "OK",
+                XamlRoot = XamlRoot,
+            }.ShowModalAsync();
+        }
     }
 
     private string? ResolveLocalTerminalDirectory(string? requestedPrompt, out string? failure)

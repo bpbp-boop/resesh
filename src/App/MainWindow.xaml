@@ -16,6 +16,10 @@
             <!-- A single container template keeps recycled folders and sessions consistent. -->
             <DataTemplate x:Key="TreeNodeTemplate" x:DataType="vm:TreeNodeViewModel">
                 <TreeViewItem
+                    AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
+                    AutomationProperties.AutomationId="{x:Bind AutomationId}"
+                    HorizontalContentAlignment="Stretch"
+                    ToolTipService.ToolTip="{x:Bind AutomationName, Mode=OneWay}"
                     ItemsSource="{x:Bind Children, Mode=OneWay}"
                     IsExpanded="{x:Bind IsExpanded, Mode=OneWay}"
                     Loaded="TreeViewItem_Loaded"
@@ -36,13 +40,14 @@
                                 FontWeight="Normal"
                                 Foreground="{x:Bind local:PresentationValues.TreeForeground(IsSelected), Mode=OneWay}" />
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="8" Visibility="{x:Bind local:PresentationValues.TreeSessionVisibility(IsFolder), Mode=OneWay}">
-                            <Rectangle Width="3" Height="16" RadiusX="1.5" RadiusY="1.5">
+                        <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8" Visibility="{x:Bind local:PresentationValues.TreeSessionVisibility(IsFolder), Mode=OneWay}">
+                            <Rectangle Width="3" Height="16" RadiusX="1.5" RadiusY="1.5" VerticalAlignment="Center">
                                 <Rectangle.Fill>
                                     <SolidColorBrush Color="{x:Bind local:PresentationValues.ColorTag(ColorTag), Mode=OneWay}" />
                                 </Rectangle.Fill>
                             </Rectangle>
                             <BitmapIcon
+                                Grid.Column="1"
                                 UriSource="{x:Bind local:PresentationValues.TreeIconUri(IconKey), Mode=OneWay}"
                                 Width="16"
                                 Height="16"
@@ -51,20 +56,25 @@
                                 ShowAsMonochrome="True"
                                 Visibility="{x:Bind local:PresentationValues.TreeIconVisibility(IconKey), Mode=OneWay}" />
                             <FontIcon
+                                Grid.Column="1"
                                 Glyph="&#xEDA2;"
                                 FontSize="14"
                                 Foreground="{x:Bind local:PresentationValues.TreeForeground(IsSelected), Mode=OneWay}"
                                 Visibility="{x:Bind local:PresentationValues.DefaultTreeIconVisibility(IconKey), Mode=OneWay}" />
-                            <TextBlock
-                                local:MatchHighlighter.Text="{x:Bind Name, Mode=OneWay}"
-                                local:MatchHighlighter.Query="{x:Bind HighlightQuery, Mode=OneWay}"
-                                Foreground="{x:Bind local:PresentationValues.TreeForeground(IsSelected), Mode=OneWay}" />
-                            <TextBlock
-                                Text="{x:Bind HostSummary, Mode=OneWay}"
-                                Foreground="{x:Bind local:PresentationValues.TreeMutedForeground(IsSelected), Mode=OneWay}"
-                                FontSize="12"
-                                VerticalAlignment="Center" />
-                        </StackPanel>
+                            <StackPanel Grid.Column="2" MinWidth="0">
+                                <TextBlock
+                                    local:MatchHighlighter.Text="{x:Bind Name, Mode=OneWay}"
+                                    local:MatchHighlighter.Query="{x:Bind local:PresentationValues.TreeHighlightQuery(HighlightQuery, IsSelected), Mode=OneWay}"
+                                    TextTrimming="CharacterEllipsis"
+                                    Foreground="{x:Bind local:PresentationValues.TreeForeground(IsSelected), Mode=OneWay}" />
+                                <TextBlock
+                                    Text="{x:Bind HostSummary, Mode=OneWay}"
+                                    Visibility="{x:Bind local:PresentationValues.Visible(IsSelected), Mode=OneWay}"
+                                    TextWrapping="Wrap"
+                                    Foreground="{x:Bind local:PresentationValues.TreeMutedForeground(IsSelected), Mode=OneWay}"
+                                    FontSize="12" />
+                            </StackPanel>
+                        </Grid>
                         <StackPanel Orientation="Horizontal" Spacing="8" Visibility="{x:Bind local:PresentationValues.Visible(IsLocalRoot), Mode=OneWay}">
                             <FontIcon
                                 Glyph="&#xE756;"
@@ -192,6 +202,8 @@
                 VerticalAlignment="Center">
                 <AutoSuggestBox
                     x:Name="QuickConnectBox"
+                    AutomationProperties.Name="Quick connect or search sessions"
+                    ToolTipService.ToolTip="Connect with ssh user@host, or search saved sessions (Ctrl+Shift+K)"
                     MaxSuggestionListHeight="480"
                     PlaceholderText="ssh user@host or search sessions…"
                     TextChanged="QuickConnect_TextChanged"
@@ -235,15 +247,15 @@
                 Spacing="4"
                 VerticalAlignment="Center"
                 Margin="0,0,8,0">
-                <!-- Split button: primary click opens the default local profile; the menu
-                     lists local profiles plus the two "new" entries (populated on opening). -->
+                <!-- Primary action creates a saved SSH session. Local profiles stay in the menu. -->
                 <SplitButton
                     x:Name="NewSessionButton"
                     Click="NewSessionButton_Click"
-                    ToolTipService.ToolTip="Open the default local terminal (Ctrl+Shift+T)">
+                    AutomationProperties.Name="New SSH session"
+                    ToolTipService.ToolTip="Create a new SSH session">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE710;" FontSize="14" />
-                        <TextBlock Text="Session" />
+                        <TextBlock Text="New SSH session" />
                     </StackPanel>
                     <SplitButton.Flyout>
                         <MenuFlyout x:Name="NewSessionFlyout" Opening="NewSessionFlyout_Opening" />
@@ -251,6 +263,7 @@
                 </SplitButton>
                 <ToggleButton
                     x:Name="PinButton"
+                    AutomationProperties.Name="Keep window on top"
                     Click="PinButton_Click"
                     Background="Transparent"
                     BorderThickness="0"
@@ -258,6 +271,8 @@
                     <FontIcon Glyph="&#xE718;" FontSize="14" />
                 </ToggleButton>
                 <Button
+                    x:Name="SettingsButton"
+                    AutomationProperties.Name="Settings"
                     Click="Settings_Click"
                     Background="Transparent"
                     BorderThickness="0"
@@ -299,6 +314,7 @@
                 BorderThickness="0,0,1,0">
                 <Grid RowDefinitions="Auto,Auto,*">
                     <Button
+                        x:Name="SessionsPaneToggleButton"
                         Width="44"
                         Height="44"
                         Padding="0"

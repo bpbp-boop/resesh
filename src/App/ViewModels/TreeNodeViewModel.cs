@@ -55,6 +55,10 @@ public sealed class TreeNodeViewModel : ObservableObject
         _ => Session.Port == 22 ? Session.Host : $"{Session.Host}:{Session.Port}",
     };
 
+    public string AutomationName => IsFolder ? $"{Name}, folder" : $"{Name}, {HostSummary}";
+    public string AutomationId => Session is { } session
+        ? $"SessionTree_{session.Id:N}" : $"SessionFolder_{(IsLocalScope ? "Local_" : "")}{FolderPath}";
+
     /// <summary>The active tree filter, used only to highlight matching session names.</summary>
     public string HighlightQuery { get; set; } = "";
 
@@ -89,6 +93,7 @@ public sealed class TreeNodeViewModel : ObservableObject
         OnPropertyChanged(nameof(Session));
         OnPropertyChanged(nameof(Name));
         OnPropertyChanged(nameof(HostSummary));
+        OnPropertyChanged(nameof(AutomationName));
         OnPropertyChanged(nameof(ColorTag));
         OnPropertyChanged(nameof(IconKey));
     }

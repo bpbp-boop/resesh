@@ -24,6 +24,49 @@ public sealed class HighlightsStoreTests : IDisposable
     // ---- defaults ----
 
     [Fact]
+    public void DraftEdits_DoNotChangeLiveStateOrDisk_WhenDiscarded()
+    {
+        var store = NewStore();
+        store.SetEnabled("number", true);
+        var saved = File.ReadAllText(StorePath);
+        var draft = store.CreateDraft();
+        draft.SetEnabled("state-negative", false);
+        draft.SaveCustom(new HighlightRule { Id = "draft-only", Name = "Draft", Pattern = "draft" });
+        draft.SaveBuiltinOverride(draft.AllRules.First(r => r.Id == "ipv4") with { Color = "#123456" });
+
+        Assert.False(draft.AllRules.First(r => r.Id == "state-negative").Enabled);
+        Assert.True(store.AllRules.First(r => r.Id == "state-negative").Enabled);
+        Assert.DoesNotContain(store.AllRules, r => r.Id == "draft-only");
+        Assert.False(store.IsOverridden("ipv4"));
+        Assert.Equal(saved, File.ReadAllText(StorePath));
+    }
+
+    [Fact]
+    public void CommitDraft_PersistsAddsDeletesResetsAndToggles_WithoutLosingOtherWindowEdits()
+    {
+        var store = NewStore();
+        store.SaveCustom(new HighlightRule { Id = "remove-me", Name = "Remove", Pattern = "old" });
+        store.SaveBuiltinOverride(store.AllRules.First(r => r.Id == "ipv4") with { Color = "#123456" });
+        var draft = store.CreateDraft();
+        draft.RemoveCustom("remove-me");
+        draft.ResetBuiltin("ipv4");
+        draft.SetEnabled("state-negative", false);
+        draft.SaveCustom(new HighlightRule { Id = "new-rule", Name = "New", Pattern = "new" });
+        // A second window changes a different toggle and adds a rule while Settings is open.
+        store.SetEnabled("number", true);
+        store.SaveCustom(new HighlightRule { Id = "other-window", Name = "Other", Pattern = "other" });
+
+        store.CommitDraft(draft);
+        var reloaded = NewStore();
+        Assert.False(reloaded.AllRules.First(r => r.Id == "state-negative").Enabled);
+        Assert.True(reloaded.AllRules.First(r => r.Id == "number").Enabled);
+        Assert.False(reloaded.IsOverridden("ipv4"));
+        Assert.DoesNotContain(reloaded.AllRules, r => r.Id == "remove-me");
+        Assert.Contains(reloaded.AllRules, r => r.Id == "new-rule");
+        Assert.Contains(reloaded.AllRules, r => r.Id == "other-window");
+    }
+
+    [Fact]
     public void FreshStore_ExposesBuiltinsWithDefaults()
     {
         var store = NewStore();

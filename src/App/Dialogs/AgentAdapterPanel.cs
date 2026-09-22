@@ -18,19 +18,11 @@ public static class AgentAdapterPanel
     public static UIElement Create()
     {
         var panel = new StackPanel { Spacing = 10 };
-        panel.Children.Add(new InfoBar
-        {
-            IsOpen = true,
-            IsClosable = false,
-            Severity = InfoBarSeverity.Informational,
-            Title = "Manual setup",
-            Message = "resesh does not install adapters or change any host. An adapter only reports status to its terminal; it cannot approve requests or send input.",
-        });
         panel.Children.Add(new TextBlock
         {
-            Text = "Choose an adapter",
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Margin = new Thickness(0, 4, 0, 0),
+            Text = "Manual setup: copy an adapter to the target shown below. resesh does not install adapters or change any host. An adapter only reports status; it cannot approve requests or send input.",
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.75,
         });
 
         var index = 0;
@@ -108,7 +100,7 @@ public static class AgentAdapterPanel
             copy.Content = "Copied";
         };
 
-        return RowCard(new Grid { Children = { expander, copy } });
+        return new Grid { Children = { expander, copy } };
     }
 
     private static UIElement ProtocolReference()
@@ -139,17 +131,8 @@ public static class AgentAdapterPanel
             Content = CodeBlock(AgentAdapters.SequenceReference, wrap: true),
         };
         AutomationProperties.SetAutomationId(expander, "SettingsAgentProtocolReference");
-        return RowCard(expander);
+        return expander;
     }
-
-    private static Border RowCard(UIElement child) => new()
-    {
-        CornerRadius = new CornerRadius(6),
-        BorderThickness = new Thickness(1),
-        BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(42, 128, 128, 128)),
-        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(12, 128, 128, 128)),
-        Child = child,
-    };
 
     /// <summary>Read-only code block: a selectable TextBlock, not a TextBox — a TextBox
     /// measures programmatically-set multi-line text as a single line here.</summary>
@@ -163,14 +146,7 @@ public static class AgentAdapterPanel
             FontFamily = new FontFamily("Cascadia Mono, Consolas"),
             FontSize = 12,
         };
-        return new Border
-        {
-            Padding = new Thickness(12, 8, 12, 8),
-            CornerRadius = new CornerRadius(4),
-            BorderThickness = new Thickness(1),
-            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(48, 128, 128, 128)),
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(18, 128, 128, 128)),
-            Child = wrap
+        return SettingsLayout.PreviewSurface(wrap
                 ? block
                 : new ScrollViewer
                 {
@@ -178,7 +154,6 @@ public static class AgentAdapterPanel
                     MaxHeight = 190,
                     HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
                     VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-                },
-        };
+                });
     }
 }

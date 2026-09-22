@@ -230,6 +230,8 @@
             <TabView.TabItemTemplate>
                 <DataTemplate x:DataType="vm:TabViewModel">
                     <TabViewItem
+                        AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
+                        AutomationProperties.AutomationId="{x:Bind TabAutomationId}"
                         Style="{StaticResource CodeTabStyle}"
                         IsClosable="False"
                         CanDrag="{x:Bind CanDrag}"
@@ -543,85 +545,35 @@
                     Margin="0,0,6,0"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">
-                    <ToggleButton
-                        x:Name="RecordButton"
-                        Width="30"
-                        Height="30"
-                        Padding="0"
-                        Click="RecordButton_Click"
-                        ToolTipService.ToolTip="Start recording">
-                        <Grid Width="10" Height="10">
-                            <Ellipse
-                                x:Name="RecordStartIcon"
-                                Width="10"
-                                Height="10"
-                                Fill="{Binding Foreground, ElementName=RecordButton}" />
-                            <Rectangle
-                                x:Name="RecordStopIcon"
-                                Width="10"
-                                Height="10"
-                                RadiusX="1"
-                                RadiusY="1"
-                                Fill="{Binding Foreground, ElementName=RecordButton}"
-                                Visibility="Collapsed" />
-                        </Grid>
+                    <ToggleButton x:Name="RecordButton" Width="32" Height="32" Padding="0"
+                                  Click="RecordButton_Click" ToolTipService.ToolTip="Start recording">
+                            <Grid Width="10" Height="10" VerticalAlignment="Center">
+                                <Ellipse x:Name="RecordStartIcon" Width="10" Height="10" Fill="{Binding Foreground, ElementName=RecordButton}" />
+                                <Rectangle x:Name="RecordStopIcon" Width="10" Height="10" RadiusX="1" RadiusY="1"
+                                           Fill="{Binding Foreground, ElementName=RecordButton}" Visibility="Collapsed" />
+                            </Grid>
                     </ToggleButton>
-                    <ToggleButton
-                        x:Name="RewindButton"
-                        Width="30"
-                        Height="30"
-                        Padding="0"
-                        Click="RewindButton_Click"
-                        ToolTipService.ToolTip="Instant rewind">
-                        <FontIcon Glyph="&#xE81C;" FontSize="14" />
+                    <ToggleButton x:Name="RewindButton" Width="32" Height="32" Padding="0"
+                                  Click="RewindButton_Click" ToolTipService.ToolTip="Instant rewind">
+                            <FontIcon Glyph="&#xE81C;" FontSize="14" />
                     </ToggleButton>
-                    <ToggleButton
-                        x:Name="ShowCommandsButton"
-                        Width="30"
-                        Height="30"
-                        Padding="0"
-                        Click="ShowCommandsButton_Click"
-                        ToolTipService.ToolTip="Show commands (Ctrl+Shift+O)">
-                        <!-- Segoe CommandPrompt glyph: the terminal page's typed-command
-                             overview panel (annotated-scrollbar command marks). Checked
-                             follows the page's reported panel state, not just clicks:
-                             Ctrl+Shift+O and the panel's ✕ change it page-side. -->
-                        <FontIcon Glyph="&#xE756;" FontSize="14" />
+                    <ToggleButton x:Name="ShowCommandsButton" Width="32" Height="32" Padding="0"
+                                  Click="ShowCommandsButton_Click" ToolTipService.ToolTip="Show commands (Ctrl+Shift+O)">
+                            <FontIcon Glyph="&#xE756;" FontSize="14" />
                     </ToggleButton>
-                    <Button
-                        x:Name="CurrentFolderButton"
-                        Width="30"
-                        Height="30"
-                        Padding="0"
-                        Click="CurrentFolderButton_Click"
-                        ToolTipService.ToolTip="Open file pane at terminal folder">
-                        <!-- Folder with a ">_" prompt inside: the terminal's folder. The badge
-                             sits in the glyph's empty interior so it works at 14–16px, and both
-                             icon elements inherit Foreground for hover/disabled states. -->
-                        <Grid Width="18" Height="18">
-                            <FontIcon
-                                Glyph="&#xE8B7;"
-                                FontSize="16"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center" />
-                            <PathIcon
-                                Width="8.4"
-                                Height="5.9"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Margin="0,3,0,0"
-                                Data="M0,1.1 L1.1,0 L3.9,2.8 L1.1,5.6 L0,4.5 L1.7,2.8 Z M4.9,4.5 L8.4,4.5 L8.4,5.9 L4.9,5.9 Z" />
-                        </Grid>
-                    </Button>
-                    <ToggleButton
-                        x:Name="FilePaneToggle"
-                        Width="30"
-                        Height="30"
-                        Padding="0"
-                        Click="FilePaneToggle_Click"
-                        ToolTipService.ToolTip="Show file pane (Ctrl+Shift+E)">
-                        <FontIcon Glyph="&#xE8B7;" FontSize="14" />
-                    </ToggleButton>
+                    <ToggleSplitButton x:Name="FilePaneToggle" MinWidth="100" Height="32" Padding="8,0"
+                                       ToolTipService.ToolTip="Show File Pane (Ctrl+Shift+E)">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE8B7;" FontSize="14" />
+                            <TextBlock Text="Files" />
+                        </StackPanel>
+                        <ToggleSplitButton.Flyout>
+                            <MenuFlyout>
+                                <MenuFlyoutItem x:Name="CurrentFolderMenuItem" Text="Open at Terminal Folder" Click="CurrentFolderButton_Click" />
+                                <MenuFlyoutItem x:Name="OpenInExplorerMenuItem" Text="Open in File Explorer" Click="OpenInExplorer_Click" />
+                            </MenuFlyout>
+                        </ToggleSplitButton.Flyout>
+                    </ToggleSplitButton>
                 </StackPanel>
                 <Button
                     x:Name="TabActionsOverflowButton"
@@ -652,11 +604,15 @@
                             <MenuFlyoutSeparator />
                             <MenuFlyoutItem
                                 x:Name="CurrentFolderOverflowItem"
-                                Text="Open file pane at terminal folder"
+                                Text="Open File Pane at Terminal Folder"
                                 Click="CurrentFolderButton_Click" />
+                            <MenuFlyoutItem
+                                x:Name="OpenInExplorerOverflowItem"
+                                Text="Open in File Explorer"
+                                Click="OpenInExplorer_Click" />
                             <ToggleMenuFlyoutItem
                                 x:Name="FilePaneOverflowItem"
-                                Text="Show file pane"
+                                Text="Show File Pane"
                                 Click="FilePaneToggle_Click" />
                         </MenuFlyout>
                     </Button.Flyout>

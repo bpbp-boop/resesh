@@ -15,13 +15,7 @@
         <x:Double x:Key="ContentDialogMaxWidth">660</x:Double>
     </ContentDialog.Resources>
 
-    <StackPanel Spacing="12" MinWidth="580" MaxWidth="600">
-        <TextBlock
-            x:Name="ValidationText"
-            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
-            TextWrapping="Wrap"
-            Visibility="Collapsed" />
-
+    <StackPanel x:Name="SessionForm" Spacing="12" Width="600">
         <InfoBar x:Name="NoticeBar" IsOpen="False" IsClosable="False" Severity="Informational" />
 
         <SelectorBar x:Name="SectionBar" SelectionChanged="SectionBar_SelectionChanged">
@@ -32,7 +26,7 @@
 
         <!-- A fixed height keeps the dialog from resizing as sections change. Each
              section scrolls inside it, so a tall one is reachable instead of clipped. -->
-        <Grid Height="480">
+        <Grid x:Name="SectionHost" Height="480">
             <ScrollViewer
                 x:Name="ConnectionPanel"
                 VerticalScrollBarVisibility="Auto"
@@ -44,10 +38,14 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
-                        <TextBox x:Name="NameBox" Grid.Column="0" Header="Name" PlaceholderText="prod-web-01" />
+                        <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBox x:Name="NameBox" Header="Name" PlaceholderText="prod-web-01" />
+                            <TextBlock x:Name="NameError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
                         <ComboBox
                             x:Name="FolderBox"
                             Grid.Column="1"
+                            VerticalAlignment="Top"
                             Header="Folder"
                             IsEditable="True"
                             PlaceholderText="(root)"
@@ -59,10 +57,14 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="120" />
                         </Grid.ColumnDefinitions>
-                        <TextBox x:Name="HostBox" Grid.Column="0" Header="Host" PlaceholderText="10.0.0.1 or host.example.com" />
+                        <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBox x:Name="HostBox" Header="Host" PlaceholderText="10.0.0.1 or host.example.com" />
+                            <TextBlock x:Name="HostError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
                         <NumberBox
                             x:Name="PortBox"
                             Grid.Column="1"
+                            VerticalAlignment="Top"
                             Header="Port"
                             Minimum="1"
                             Maximum="65535"
@@ -108,6 +110,8 @@
                             Click="AddKey_Click" />
                     </Grid>
 
+                    <TextBlock x:Name="KeyError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+
                     <StackPanel x:Name="PasswordPanel" Spacing="4">
                         <PasswordBox x:Name="PasswordBox" Header="Password" />
                         <TextBlock
@@ -126,23 +130,27 @@
                         TextWrapping="Wrap"
                         Visibility="Collapsed" />
 
-                    <ComboBox
-                        x:Name="ShellIntegrationBox"
-                        AutomationProperties.AutomationId="SshShellIntegrationBox"
-                        Header="Shell integration (experimental)"
-                        SelectedIndex="0"
-                        HorizontalAlignment="Stretch">
-                        <ComboBoxItem Content="Off" />
-                        <ComboBoxItem Content="Bash" />
-                        <ComboBoxItem Content="Zsh" />
-                        <ComboBoxItem Content="Fish" />
-                        <ComboBoxItem Content="PowerShell (Windows)" />
-                    </ComboBox>
-                    <TextBlock
-                        Style="{ThemeResource CaptionTextBlockStyle}"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Choose the account's actual shell. Use only for shell accounts, not network-device CLIs. Applies when a new terminal starts; stores a script cache remotely without editing shell profiles. PowerShell requires Persistent session to be off (Terminal section)."
-                        TextWrapping="Wrap" />
+                    <Expander x:Name="AdvancedSection" Header="Advanced · Shell integration: Off" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <StackPanel Spacing="8">
+                            <ComboBox
+                                x:Name="ShellIntegrationBox"
+                                AutomationProperties.AutomationId="SshShellIntegrationBox"
+                                Header="Shell integration (experimental)"
+                                SelectedIndex="0"
+                                HorizontalAlignment="Stretch">
+                                <ComboBoxItem Content="Off" />
+                                <ComboBoxItem Content="Bash" />
+                                <ComboBoxItem Content="Zsh" />
+                                <ComboBoxItem Content="Fish" />
+                                <ComboBoxItem Content="PowerShell (Windows)" />
+                            </ComboBox>
+                            <TextBlock
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="Choose the account's actual shell. Use only for shell accounts, not network-device CLIs. Applies when a new terminal starts; stores a script cache remotely without editing shell profiles. PowerShell requires Persistent session to be off (Terminal section)."
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Expander>
                 </StackPanel>
             </ScrollViewer>
 
@@ -219,6 +227,7 @@
 
                 <StackPanel Spacing="4">
                     <ToggleSwitch x:Name="PersistentToggle" Header="Persistent session" />
+                <TextBlock x:Name="PersistentError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
                     <TextBlock
                         Style="{ThemeResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"

@@ -29,7 +29,8 @@ test("terminal-folder selection has the required source priority", () => {
   assert.ok(method.indexOf("TmuxPersistence.CurrentPathCommand") < method.indexOf("_workingDirectory.Path"));
   assert.ok(method.indexOf("_workingDirectory.Path") < method.indexOf("RemoteWorkingDirectoryProbe.Command"));
   assert.ok(method.indexOf("RemoteWorkingDirectoryProbe.Command") < method.indexOf("_tab.PromptContext"));
-  assert.match(method, /ShowFilePane\(path,[\s\S]*?opened home instead/);
+  assert.match(method, /var fallback = Session\.IsLocal \? "the profile folder" : "home"/);
+  assert.match(method, /ShowFilePane\(path,[\s\S]*?opened \{fallback\} instead/);
 });
 
 test("the native probe never writes to the interactive terminal", () => {

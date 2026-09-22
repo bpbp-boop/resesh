@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Automation;
 using Resesh.Core.Models;
 using Resesh.Core.Storage;
 
@@ -53,7 +54,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             .Concat(ThemeCatalog.All).ToList();
         _existing = existing;
         _keyStore = keyStore;
-        Title = existing is null ? "New Session" : "Edit Session";
+        Title = existing is null ? "New SSH session" : "Edit SSH session";
         PasswordHint.Text = existing is null
             ? "Stored in Windows Credential Manager"
             : "Stored in Windows Credential Manager — leave blank to keep the current one";
@@ -117,10 +118,54 @@ public sealed partial class SessionEditDialog : ContentDialog
         }
 
         UpdateAuthFieldVisibility();
+        UpdateAdvancedHeader();
+        ShellIntegrationBox.SelectionChanged += (_, _) =>
+        {
+            UpdateAdvancedHeader();
+            ClearFieldError(PersistentToggle, PersistentError);
+        };
+        NameBox.TextChanged += (_, _) => ClearFieldError(NameBox, NameError);
+        HostBox.TextChanged += (_, _) => ClearFieldError(HostBox, HostError);
+        KeyBox.SelectionChanged += (_, _) => ClearFieldError(KeyBox, KeyError);
+        AuthBox.SelectionChanged += (_, _) => ClearFieldError(KeyBox, KeyError);
+        PersistentToggle.Toggled += (_, _) => ClearFieldError(PersistentToggle, PersistentError);
         if (initialTarget != SessionSettingsTarget.General)
             SectionBar.SelectedItem = TerminalSection;
-        Opened += (_, _) => DispatcherQueue.TryEnqueue(() =>
-            InitialFocus(initialTarget)?.Focus(FocusState.Programmatic));
+        Opened += (_, _) =>
+        {
+            UpdateDialogLayout();
+            XamlRoot.Changed += OnRootChanged;
+            DispatcherQueue.TryEnqueue(() => InitialFocus(initialTarget)?.Focus(FocusState.Programmatic));
+        };
+        Closed += (_, _) => XamlRoot.Changed -= OnRootChanged;
+    }
+
+    private void OnRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => UpdateDialogLayout();
+
+    private void UpdateDialogLayout()
+    {
+        SessionForm.Width = Math.Min(600, Math.Max(240, XamlRoot.Size.Width - 96));
+        SectionHost.Height = Math.Min(480, Math.Max(160, XamlRoot.Size.Height - 250));
+    }
+
+    private void UpdateAdvancedHeader()
+    {
+        var header = $"Advanced · Shell integration: {(ShellIntegrationBox.SelectedItem as ComboBoxItem)?.Content ?? "Off"}";
+        AdvancedSection.Header = header;
+        AutomationProperties.SetName(AdvancedSection, header);
+    }
+
+    private static void ClearFieldError(Control field, TextBlock error)
+    {
+        error.Visibility = Visibility.Collapsed;
+        AutomationProperties.SetItemStatus(field, "");
+    }
+
+    private static void SetFieldError(Control field, TextBlock error, string message)
+    {
+        error.Text = message;
+        error.Visibility = Visibility.Visible;
+        AutomationProperties.SetItemStatus(field, message);
     }
 
     private AuthMethod SelectedAuth => (AuthMethod)Math.Max(0, AuthBox.SelectedIndex);
@@ -134,7 +179,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         SessionSettingsTarget.FontSize => OverrideFontSizeBox,
         SessionSettingsTarget.Scrollback => OverrideScrollbackBox,
         SessionSettingsTarget.AlwaysRecord => OverrideRecordingBox,
-        _ => null,
+        _ => NameBox,
     };
 
     private void PopulateKeyChoices(Guid? selectedId)
@@ -239,20 +284,25 @@ public sealed partial class SessionEditDialog : ContentDialog
 
     private void OnPrimaryButtonClick(ContentDialog sender, ContentDialogButtonClickEventArgs args)
     {
-        var errors = new List<string>();
-        if (string.IsNullOrWhiteSpace(NameBox.Text))
-            errors.Add("Name is required.");
-        if (string.IsNullOrWhiteSpace(HostBox.Text))
-            errors.Add("Host is required.");
-        if (SelectedAuth == AuthMethod.PrivateKey && SelectedKeyId is null)
-            errors.Add("Select an SSH key for key authentication.");
-
-        if (errors.Count > 0)
+        Control? firstInvalid = null;
+        void Validate(Control field, TextBlock error, bool invalid, string message)
         {
-            ValidationText.Text = string.Join(" ", errors);
-            ValidationText.Visibility = Visibility.Visible;
+            ClearFieldError(field, error);
+            if (!invalid)
+                return;
+            SetFieldError(field, error, message);
+            firstInvalid ??= field;
+        }
+        Validate(NameBox, NameError, string.IsNullOrWhiteSpace(NameBox.Text), "Enter a session name.");
+        Validate(HostBox, HostError, string.IsNullOrWhiteSpace(HostBox.Text), "Enter a host name or IP address.");
+        Validate(KeyBox, KeyError, SelectedAuth == AuthMethod.PrivateKey && SelectedKeyId is null, "Select an SSH key.");
+
+        if (firstInvalid is not null)
+        {
             // Every required field lives on the Connection section.
             SectionBar.SelectedItem = ConnectionSection;
+            firstInvalid.Focus(FocusState.Programmatic);
+            firstInvalid.StartBringIntoView();
             args.Cancel = true;
             return;
         }
@@ -260,10 +310,11 @@ public sealed partial class SessionEditDialog : ContentDialog
         var port = double.IsNaN(PortBox.Value) ? 22 : (int)PortBox.Value;
         if (PersistentToggle.IsOn && ShellIntegrationBox.SelectedIndex == 4)
         {
-            ValidationText.Text = "PowerShell shell integration requires Persistent session to be off. Persistent sessions use tmux with a POSIX shell.";
-            ValidationText.Visibility = Visibility.Visible;
+            SetFieldError(PersistentToggle, PersistentError,
+                "Turn off Persistent session to use PowerShell shell integration.");
             SectionBar.SelectedItem = TerminalSection;
             PersistentToggle.Focus(FocusState.Programmatic);
+            PersistentToggle.StartBringIntoView();
             args.Cancel = true;
             return;
         }

@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const read = (...parts) => fs.readFileSync(path.join(__dirname, "..", ...parts), "utf8");
 const dialog = read("src", "App", "Dialogs", "GlobalSettingsDialog.cs");
+const layout = read("src", "App", "Dialogs", "SettingsLayout.cs");
 const highlightPanel = read("src", "App", "Dialogs", "HighlightEditorPanel.cs");
 const agentPanel = read("src", "App", "Dialogs", "AgentAdapterPanel.cs");
 const windowCode = read("src", "App", "MainWindow.xaml.cs");
@@ -23,25 +24,25 @@ test("settings is one targeted dialog with General / Recording / Highlighting / 
 test("the tab host keeps one responsive height so switching tabs doesn't resize the dialog", () => {
   assert.match(dialog, /PreferredTabContentHeight/);
   assert.match(dialog, /GetDialogContentSize\(xamlRoot\)/);
-  assert.match(dialog, /host\.Height = tabContentHeight/);
+  assert.match(dialog, /content\.Height = tabContentHeight/);
   assert.match(dialog, /ContentDialogMaxHeight/);
   assert.match(dialog, /new ScrollViewer/);
 });
 
-test("the general tab groups related settings and stacks cards on narrow windows", () => {
-  assert.match(dialog, /SectionCard\("Appearance"/);
-  assert.match(dialog, /SectionCard\("Terminal interaction"/);
-  assert.match(dialog, /SectionCard\(\s*"Interface"[\s\S]*?showStatusBar/);
-  assert.match(dialog, /ConfigureResponsiveColumns\(generalColumns, stackCards/);
-  assert.match(dialog, /StackedCardThreshold/);
+test("the general tab uses labelled rows that stack on narrow windows", () => {
+  assert.match(dialog, /SettingsGroup\("Appearance"/);
+  assert.match(dialog, /SettingsGroup\("Terminal"/);
+  assert.match(dialog, /SettingsGroup\("Startup and interface"/);
+  assert.match(dialog, /ConfigureSettingRow\(row, stackRows\)/);
+  assert.match(layout, /AutomationProperties\.SetLabeledBy\(control, label\)/);
+  assert.match(layout, /Grid\.SetRow\(field, stacked \? 1 : 0\)/);
   assert.match(dialog, /These settings apply throughout resesh/);
 });
 
-test("settings tracks window size and keeps cards clear of the scrollbar", () => {
+test("settings tracks window size and keeps fields clear of the scrollbar", () => {
   assert.match(dialog, /xamlRoot\.Changed \+= XamlRootChanged/);
   assert.match(dialog, /xamlRoot\.Changed -= XamlRootChanged/);
-  assert.match(dialog, /ConfigureResponsiveColumns\(numberGrid, stackFields/);
-  assert.match(dialog, /ConfigureResponsiveColumns\(rewindGrid, stackFields/);
+  assert.match(dialog, /foreach \(var row in settingRows\)/);
   assert.match(dialog, /Padding = new Thickness\(0, 0, 20, 0\)/);
   assert.match(dialog, /HorizontalScrollBarVisibility = ScrollBarVisibility\.Disabled/);
 });
@@ -50,7 +51,7 @@ test("the complete dialog follows the live application palette", () => {
   assert.match(dialog, /Background = \(Brush\)Application\.Current\.Resources\["SessionShellBrush"\]/);
   assert.match(dialog, /BorderBrush = \(Brush\)Application\.Current\.Resources\["SettingsCardBorderBrush"\]/);
   assert.match(dialog, /Foreground = \(Brush\)Application\.Current\.Resources\["SessionTreeForegroundBrush"\]/);
-  assert.match(dialog, /Background = \(Brush\)Application\.Current\.Resources\["SettingsCardBackgroundBrush"\]/);
+  assert.match(layout, /Background = \(Brush\)Application\.Current\.Resources\["SettingsCardBackgroundBrush"\]/);
 });
 
 test("settings uses the shared modal presenter without terminal visibility workarounds", () => {
@@ -119,8 +120,8 @@ test("inline Settings editors expose stable automation IDs", () => {
 });
 
 test("the highlight editor lives inline in the Highlighting tab", () => {
-  assert.match(dialog, /HighlightEditorPanel\.Create\(applyHighlightChanges\)/);
-  assert.match(dialog, /apply immediately/);
+  assert.match(dialog, /HighlightEditorPanel\.Create\(highlightDraft/);
+  assert.match(dialog, /Cancel restores the saved rules/);
   assert.match(highlightPanel, /class HighlightEditorPanel/);
   assert.match(highlightPanel, /Add custom rule/);
   assert.match(highlightPanel, /RefreshCombinedPreview/);
@@ -130,7 +131,7 @@ test("the highlight editor lives inline in the Highlighting tab", () => {
 });
 
 test("the rules list expands to fill the tab and the preview section pins to the bottom", () => {
-  assert.match(dialog, /var highlightingTab = new Grid \{ Height = PreferredTabContentHeight/);
+  assert.match(dialog, /var highlightingTab = new Grid \{ Height = tabContentHeight/);
   assert.match(highlightPanel, /new RowDefinition \{ Height = new GridLength\(1, GridUnitType\.Star\) \}/);
   assert.match(highlightPanel, /Grid\.SetRow\(combinedPanel, 2\);/);
   assert.doesNotMatch(highlightPanel, /MaxHeight = 260/);
@@ -160,11 +161,11 @@ test("built-in rules are editable with a reset back to the shipped defaults", ()
 });
 
 test("the Agents tab groups controls and keeps adapter details collapsed", () => {
-  assert.match(dialog, /SectionCard\(\s*"Tab display"/);
-  assert.match(dialog, /SectionCard\(\s*"Background alerts"/);
-  assert.match(dialog, /SectionCard\(\s*"Agent adapters"/);
+  assert.match(dialog, /SettingsGroup\("Tab display"/);
+  assert.match(dialog, /SettingsGroup\("Background alerts"/);
+  assert.match(dialog, /SettingsGroup\("Agent adapters"/);
   assert.match(dialog, /AgentAdapterPanel\.Create\(\)/);
-  assert.match(agentPanel, /new InfoBar/);
+  assert.match(agentPanel, /Manual setup:/);
   assert.match(agentPanel, /IsExpanded = false/);
   assert.match(agentPanel, /Content = "Copy"/);
   assert.match(agentPanel, /ProtocolReference\(\)/);

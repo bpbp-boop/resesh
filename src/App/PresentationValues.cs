@@ -32,6 +32,8 @@ public static class PresentationValues
     public static Brush? TreeSelectionBackground(bool isSelected) =>
         isSelected ? ResourceBrush("SessionTreeSelectionBrush") : null;
 
+    public static string TreeHighlightQuery(string query, bool isSelected) => isSelected ? "" : query;
+
     public static Brush TreeForeground(bool isSelected) =>
         ResourceBrush(isSelected ? "SessionTreeSelectionForegroundBrush" : "SessionTreeForegroundBrush");
 

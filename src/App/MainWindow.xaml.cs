@@ -559,8 +559,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             _ = OpenSessionEditorAsync(existing: null, defaultFolder: "");
     }
 
-    private void NewSessionButton_Click(SplitButton sender, SplitButtonClickEventArgs args) =>
-        OpenDefaultLocalProfile();
+    private async void NewSessionButton_Click(SplitButton sender, SplitButtonClickEventArgs args) =>
+        await OpenSessionEditorAsync(existing: null, defaultFolder: "");
 
     /// <summary>Rebuilds the + Session menu: visible local profiles, then the two creators.</summary>
     private void NewSessionFlyout_Opening(object sender, object e)
@@ -642,7 +642,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         // The center/right blocks move without AppTitleBar itself resizing (e.g. the
         // MenuBar collapsing items), so track them individually too.
         TitleBarMenus.SizeChanged += (_, _) => UpdateTitleBarRegions();
-        QuickConnectHost.SizeChanged += (_, _) => UpdateTitleBarRegions();
+        QuickConnectHost.SizeChanged += (_, _) =>
+        {
+            UpdateQuickConnectHint();
+            UpdateTitleBarRegions();
+        };
         TitleBarButtons.SizeChanged += (_, _) => UpdateTitleBarRegions();
     }
 
@@ -941,11 +945,16 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void QuickConnect_FocusChanged(object sender, RoutedEventArgs e) => UpdateQuickConnectHint();
 
-    private void UpdateQuickConnectHint() =>
+    private void UpdateQuickConnectHint()
+    {
+        QuickConnectBox.PlaceholderText = QuickConnectHost.ActualWidth < 360
+            ? "user@host" : "ssh user@host or search sessions…";
         QuickConnectHint.Visibility =
+            QuickConnectHost.ActualWidth >= 440 &&
             QuickConnectBox.Text.Length == 0 && QuickConnectBox.FocusState == FocusState.Unfocused
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+    }
 
     /// <summary>
     /// Parses "ssh user@host", "user@host:2222" etc. into an ad-hoc (unsaved) session.
@@ -1017,8 +1026,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var view = new OnboardingView(
             App.Settings.Current,
             ApplyThemeToApp,
-            ViewModel.RebuildTree);
+            ViewModel.RebuildTree,
+            Core.Local.LocalShellDiscovery.DefaultProfile(
+                App.Store, App.Settings.Current.DefaultLocalProfileId, App.AvailableLocalShells)?.Name);
         view.FinishRequested += () => FinishOnboarding(tab, view);
+        view.NewSessionRequested += () => _ = OpenSessionEditorAsync(existing: null, defaultFolder: "");
+        view.LocalShellRequested += OpenDefaultLocalProfile;
         tab.View = view;
         _groupViews[group].AddTerminal(view);
     }
@@ -1073,6 +1086,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         view.NewLocalTabRequested += () => App.WindowFor(tab)?.OpenDefaultLocalProfile();
         view.CommandPaletteRequested += () => App.WindowFor(tab)?.ShowCommandPalette(openedFromTerminal: true);
         view.QuickConnectRequested += () => App.WindowFor(tab)?.QuickConnectBox.Focus(FocusState.Programmatic);
+        view.FilePaneOpenChanged += () =>
+        {
+            if (view.IsFilePaneOpen && App.WindowFor(tab) is { } owner &&
+                owner.Root.ActualWidth < 1200 && owner._sessionsPaneOpen)
+                owner.SetSessionsPaneOpen(false);
+        };
         view.FocusRequested += () =>
         {
             if (App.WindowFor(tab) is { } owner) owner.FocusGroup(owner.ViewModel.GroupOf(tab));
@@ -1956,14 +1975,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private async void Settings_Click(object sender, RoutedEventArgs e) =>
         await ShowSettingsAsync(GlobalSettingsTarget.General);
 
-    /// <summary>Shows the tabbed Settings dialog. Highlighting edits persist immediately from
-    /// inside the dialog; everything else lands here on Save. Only the dialog's own fields are
+    /// <summary>Shows Settings with reversible theme and highlighting previews.
+    /// Only the dialog's own fields are
     /// rebased onto the live settings, so anything saved while the dialog sat open (pane
     /// widths, pinned tabs, window placement) survives.</summary>
     private async Task ShowSettingsAsync(GlobalSettingsTarget target)
     {
         var updated = await GlobalSettingsDialog.ShowAsync(
-            Root.XamlRoot, App.Settings.Current, ApplyThemeToApp, ApplySettingsToApp, target);
+            Root.XamlRoot, App.Settings.Current, ApplyThemeToApp, PreviewHighlights, target);
         if (updated is null)
             return;
         App.SaveSettings(App.Settings.Current with
@@ -1991,6 +2010,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
     private void ApplySettingsToApp() => ApplySettingsToApp(App.Settings.Current);
+
+    private void PreviewHighlights(HighlightsStore? draft)
+    {
+        foreach (var tab in ViewModel.AllTabs)
+            if (tab.View is TerminalTabView view)
+                view.PreviewHighlights(draft);
+    }
     private void ApplyStatusBarVisibility(bool visible)
     {
         StatusBar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
@@ -2101,6 +2127,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void ApplySessionsRailLayout()
     {
+        var paneAction = _sessionsPaneOpen ? "Hide sessions pane" : "Show sessions pane";
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SessionsPaneToggleButton, paneAction);
+        ToolTipService.SetToolTip(SessionsPaneToggleButton, paneAction);
         var visible = _sessionsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
         SessionsPane.Visibility = _selectedRailTab == "sessions" ? visible : Visibility.Collapsed;
         WorkspacesPane.Visibility = _selectedRailTab == "workspaces" ? visible : Visibility.Collapsed;

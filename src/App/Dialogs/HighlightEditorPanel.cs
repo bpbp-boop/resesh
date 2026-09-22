@@ -7,6 +7,8 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
 using Resesh.Core.Models;
+using Resesh.Core.Storage;
+using static Resesh.App.Dialogs.SettingsLayout;
 
 namespace Resesh.App.Dialogs;
 
@@ -14,9 +16,9 @@ namespace Resesh.App.Dialogs;
 /// Global keyword-highlighting editor, hosted inline in the Settings dialog's Highlighting
 /// tab: per-rule enable toggles, CRUD (with live regex preview) for custom rules, and the
 /// same editing for built-in rules — stored as overrides with a per-rule "Reset to default"
-/// path back to the shipped definition. Changes are persisted to the highlights store
-/// immediately and pushed live to open terminals via <c>onChanged</c>; there is no cancel —
-/// same model as the tab toggles. Add/Edit swaps the list for the rule form in place, and
+/// path back to the shipped definition. Changes stay in the supplied draft and preview
+/// in open terminals via <c>onChanged</c>. Settings owns Save and Cancel.
+/// Add/Edit swaps the list for the rule form in place, and
 /// the standing preview renders an editable sample against every enabled rule.
 /// </summary>
 public static class HighlightEditorPanel
@@ -24,7 +26,8 @@ public static class HighlightEditorPanel
     private const string DefaultSample =
         "GigabitEthernet0/0/1 is up, eth0 is down — 10.0.0.1/24 fe80::1 00:1a:2b:3c:4d:5e ospf uptime 1w2d";
 
-    public static UIElement Create(Action onChanged)
+    public static UIElement Create(HighlightsStore draft, Action onChanged,
+        Func<string, FrameworkElement, Grid> row, Action<bool> setEditing)
     {
         var list = new ListView
         {
@@ -56,33 +59,20 @@ public static class HighlightEditorPanel
             FontSize = 13,
             TextWrapping = TextWrapping.Wrap,
         };
-        var combinedPanel = new StackPanel
-        {
-            Spacing = 8,
-            Children =
-            {
-                listSample,
-                new Border
-                {
-                    Padding = new Thickness(12, 10, 12, 10),
-                    CornerRadius = new CornerRadius(4),
-                    BorderThickness = new Thickness(1),
-                    BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(48, 128, 128, 128)),
-                    Background = new SolidColorBrush(Windows.UI.Color.FromArgb(18, 128, 128, 128)),
-                    Child = combinedPreview,
-                },
-            },
-        };
+        var combinedPanel = SettingsGroup("Preview",
+            row("Sample text", listSample),
+            PreviewSurface(combinedPreview));
         // The list takes the star row so it expands to whatever height the host grants the
         // panel; the buttons and the preview section stay pinned below it.
-        var listPanel = new Grid { RowSpacing = 10 };
+        var listPanel = new Grid { RowSpacing = 16 };
         listPanel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         listPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         listPanel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        Grid.SetRow(list, 0);
+        var rulesSection = SettingsSection("Highlighting rules", list);
+        Grid.SetRow(rulesSection, 0);
         Grid.SetRow(listButtons, 1);
         Grid.SetRow(combinedPanel, 2);
-        listPanel.Children.Add(list);
+        listPanel.Children.Add(rulesSection);
         listPanel.Children.Add(listButtons);
         listPanel.Children.Add(combinedPanel);
 
@@ -95,18 +85,20 @@ public static class HighlightEditorPanel
             PlaceholderText = "\\bVRF-[A-Z]+\\b",
             FontFamily = new FontFamily("Cascadia Mono, Consolas"),
         };
-        var colorBox = new TextBox { Header = "Color (#RRGGBB)", Text = "#e5c07b", Width = 140, HorizontalAlignment = HorizontalAlignment.Left };
+        var colorBox = new TextBox { Header = "Color (#RRGGBB)", Text = "#e5c07b" };
         var swatch = new Border
         {
             Width = 20, Height = 20, CornerRadius = new CornerRadius(3),
-            VerticalAlignment = VerticalAlignment.Bottom,
-            Margin = new Thickness(8, 0, 0, 6),
+            VerticalAlignment = VerticalAlignment.Center,
         };
-        var colorRow = new StackPanel { Orientation = Orientation.Horizontal, Children = { colorBox, swatch } };
-        var boldCheck = new CheckBox { Content = "Bold (renders as a background tint)" };
-        var underlineCheck = new CheckBox { Content = "Underline" };
-        var matchCaseCheck = new CheckBox { Content = "Match case" };
-        var overviewCheck = new CheckBox { Content = "Mark hits in the scrollbar overview" };
+        var colorRow = new Grid { ColumnSpacing = 8, Children = { colorBox, swatch } };
+        colorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        colorRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(swatch, 1);
+        var boldToggle = new ToggleSwitch();
+        var underlineToggle = new ToggleSwitch();
+        var matchCaseToggle = new ToggleSwitch();
+        var overviewToggle = new ToggleSwitch();
         var sampleBox = new TextBox { Header = "Preview sample", Text = DefaultSample, AcceptsReturn = false };
         var preview = new TextBlock
         {
@@ -127,10 +119,10 @@ public static class HighlightEditorPanel
         SetAutomationId(nameBox, "SettingsHighlightName");
         SetAutomationId(patternBox, "SettingsHighlightPattern");
         SetAutomationId(colorBox, "SettingsHighlightColor");
-        SetAutomationId(boldCheck, "SettingsHighlightBold");
-        SetAutomationId(underlineCheck, "SettingsHighlightUnderline");
-        SetAutomationId(matchCaseCheck, "SettingsHighlightMatchCase");
-        SetAutomationId(overviewCheck, "SettingsHighlightOverview");
+        SetAutomationId(boldToggle, "SettingsHighlightBold");
+        SetAutomationId(underlineToggle, "SettingsHighlightUnderline");
+        SetAutomationId(matchCaseToggle, "SettingsHighlightMatchCase");
+        SetAutomationId(overviewToggle, "SettingsHighlightOverview");
         SetAutomationId(sampleBox, "SettingsHighlightFormSample");
         SetAutomationId(saveButton, "SettingsHighlightSave");
         SetAutomationId(cancelButton, "SettingsHighlightCancel");
@@ -143,16 +135,29 @@ public static class HighlightEditorPanel
         };
         var formPanel = new StackPanel
         {
-            Spacing = 10,
-            Children = { nameBox, patternBox, colorRow, boldCheck, underlineCheck, matchCaseCheck, overviewCheck, sampleBox, preview, formStatus, formButtons },
+            Spacing = 16,
+            Children =
+            {
+                SettingsGroup("Rule",
+                    row("Name", nameBox),
+                    row("Regular expression (applied per line)", patternBox),
+                    row("Match case", matchCaseToggle)),
+                SettingsGroup("Appearance",
+                    row("Color (#RRGGBB)", colorRow),
+                    row("Bold (renders as a background tint)", boldToggle),
+                    row("Underline", underlineToggle),
+                    row("Mark hits in the scrollbar overview", overviewToggle)),
+                SettingsGroup("Preview",
+                    row("Sample text", sampleBox),
+                    PreviewSurface(preview)),
+                formStatus,
+                formButtons,
+            },
         };
-        // The form keeps its natural height inside its own scroller, so a long wrapped
-        // preview or error text can never clip against the panel's fixed height.
-        var formHost = new ScrollViewer
+        // Settings lets the form take its natural height and scrolls it in the shared host.
+        var formHost = new Border
         {
-            Content = formPanel,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Child = formPanel,
             Visibility = Visibility.Collapsed,
         };
 
@@ -166,7 +171,7 @@ public static class HighlightEditorPanel
         {
             combinedPreview.Inlines.Clear();
             var sample = listSample.Text;
-            var rules = App.Highlights.AllRules.Where(r => r.Enabled).ToList();
+            var rules = draft.AllRules.Where(r => r.Enabled).ToList();
             var winner = new int[sample.Length];
             Array.Fill(winner, -1);
             for (var r = 0; r < rules.Count; r++)
@@ -214,7 +219,7 @@ public static class HighlightEditorPanel
         void RefreshList()
         {
             list.Items.Clear();
-            foreach (var rule in App.Highlights.AllRules)
+            foreach (var rule in draft.AllRules)
             {
                 var check = new CheckBox
                 {
@@ -224,12 +229,12 @@ public static class HighlightEditorPanel
                 };
                 var id = rule.Id;
                 SetAutomationId(check, $"SettingsHighlightRuleEnabled_{rule.Id}");
-                check.Checked += (_, _) => { App.Highlights.SetEnabled(id, true); Changed(); };
-                check.Unchecked += (_, _) => { App.Highlights.SetEnabled(id, false); Changed(); };
+                check.Checked += (_, _) => { draft.SetEnabled(id, true); Changed(); };
+                check.Unchecked += (_, _) => { draft.SetEnabled(id, false); Changed(); };
 
                 var color = TryParseColor(rule.Color) ?? Colors.White;
                 var packTag = rule.IsBuiltin
-                    ? App.Highlights.IsOverridden(rule.Id) ? rule.Pack + " · edited" : rule.Pack
+                    ? draft.IsOverridden(rule.Id) ? rule.Pack + " · edited" : rule.Pack
                     : "custom";
                 var row = new StackPanel
                 {
@@ -281,17 +286,18 @@ public static class HighlightEditorPanel
             nameBox.Text = existing?.Name ?? "";
             patternBox.Text = existing?.Pattern ?? "";
             colorBox.Text = existing?.Color ?? "#e5c07b";
-            boldCheck.IsChecked = existing?.Bold ?? false;
-            underlineCheck.IsChecked = existing?.Underline ?? false;
-            matchCaseCheck.IsChecked = existing?.MatchCase ?? false;
-            overviewCheck.IsChecked = existing?.ShowInOverview ?? false;
+            boldToggle.IsOn = existing?.Bold ?? false;
+            underlineToggle.IsOn = existing?.Underline ?? false;
+            matchCaseToggle.IsOn = existing?.MatchCase ?? false;
+            overviewToggle.IsOn = existing?.ShowInOverview ?? false;
             sampleBox.Text = listSample.Text;
             resetButton.Visibility = existing is { IsBuiltin: true } ? Visibility.Visible : Visibility.Collapsed;
-            resetButton.IsEnabled = existing is not null && App.Highlights.IsOverridden(existing.Id);
+            resetButton.IsEnabled = existing is not null && draft.IsOverridden(existing.Id);
             formStatus.Text = "";
             listPanel.Visibility = Visibility.Collapsed;
             formHost.Visibility = Visibility.Visible;
-            formHost.ChangeView(null, 0, null, disableAnimation: true);
+            setEditing(true);
+            nameBox.Focus(FocusState.Programmatic);
             UpdatePreview();
         }
 
@@ -299,6 +305,8 @@ public static class HighlightEditorPanel
         {
             formHost.Visibility = Visibility.Collapsed;
             listPanel.Visibility = Visibility.Visible;
+            setEditing(false);
+            addButton.Focus(FocusState.Programmatic);
         }
 
         void UpdatePreview()
@@ -318,7 +326,7 @@ public static class HighlightEditorPanel
 
             try
             {
-                var options = matchCaseCheck.IsChecked == true ? RegexOptions.None : RegexOptions.IgnoreCase;
+                var options = matchCaseToggle.IsOn ? RegexOptions.None : RegexOptions.IgnoreCase;
                 var regex = new Regex(pattern, options, TimeSpan.FromMilliseconds(200));
                 var index = 0;
                 var matched = 0;
@@ -332,9 +340,9 @@ public static class HighlightEditorPanel
                     {
                         Text = m.Value,
                         Foreground = new SolidColorBrush(color),
-                        FontWeight = boldCheck.IsChecked == true ? FontWeights.Bold : FontWeights.Normal,
+                        FontWeight = boldToggle.IsOn ? FontWeights.Bold : FontWeights.Normal,
                     };
-                    if (underlineCheck.IsChecked == true)
+                    if (underlineToggle.IsOn)
                         run.TextDecorations = Windows.UI.Text.TextDecorations.Underline;
                     preview.Inlines.Add(run);
                     index = m.Index + m.Length;
@@ -361,9 +369,9 @@ public static class HighlightEditorPanel
         sampleBox.TextChanged += (_, _) => { UpdatePreview(); listSample.Text = sampleBox.Text; };
         listSample.TextChanged += (_, _) => RefreshCombinedPreview();
         colorBox.TextChanged += (_, _) => UpdatePreview();
-        boldCheck.Click += (_, _) => UpdatePreview();
-        underlineCheck.Click += (_, _) => UpdatePreview();
-        matchCaseCheck.Click += (_, _) => UpdatePreview();
+        boldToggle.Toggled += (_, _) => UpdatePreview();
+        underlineToggle.Toggled += (_, _) => UpdatePreview();
+        matchCaseToggle.Toggled += (_, _) => UpdatePreview();
 
         addButton.Click += (_, _) => ShowForm(null);
         editButton.Click += (_, _) =>
@@ -375,7 +383,7 @@ public static class HighlightEditorPanel
         {
             if (SelectedRule() is { IsBuiltin: false } rule)
             {
-                App.Highlights.RemoveCustom(rule.Id);
+                draft.RemoveCustom(rule.Id);
                 RefreshList();
                 Changed();
             }
@@ -383,7 +391,7 @@ public static class HighlightEditorPanel
         cancelButton.Click += (_, _) => HideForm();
         resetButton.Click += (_, _) =>
         {
-            if (editing is { IsBuiltin: true } rule && App.Highlights.ResetBuiltin(rule.Id))
+            if (editing is { IsBuiltin: true } rule && draft.ResetBuiltin(rule.Id))
             {
                 HideForm();
                 RefreshList();
@@ -420,29 +428,29 @@ public static class HighlightEditorPanel
 
             if (editing is { IsBuiltin: true } builtin)
             {
-                App.Highlights.SaveBuiltinOverride(builtin with
+                draft.SaveBuiltinOverride(builtin with
                 {
                     Name = name,
                     Pattern = pattern,
                     Color = color.ToLowerInvariant(),
-                    Bold = boldCheck.IsChecked == true,
-                    Underline = underlineCheck.IsChecked == true,
-                    MatchCase = matchCaseCheck.IsChecked == true,
-                    ShowInOverview = overviewCheck.IsChecked == true,
+                    Bold = boldToggle.IsOn,
+                    Underline = underlineToggle.IsOn,
+                    MatchCase = matchCaseToggle.IsOn,
+                    ShowInOverview = overviewToggle.IsOn,
                 });
             }
             else
             {
-                App.Highlights.SaveCustom(new HighlightRule
+                draft.SaveCustom(new HighlightRule
                 {
                     Id = editing?.Id ?? $"custom-{Guid.NewGuid():N}"[..15],
                     Name = name,
                     Pattern = pattern,
                     Color = color.ToLowerInvariant(),
-                    Bold = boldCheck.IsChecked == true,
-                    Underline = underlineCheck.IsChecked == true,
-                    MatchCase = matchCaseCheck.IsChecked == true,
-                    ShowInOverview = overviewCheck.IsChecked == true,
+                    Bold = boldToggle.IsOn,
+                    Underline = underlineToggle.IsOn,
+                    MatchCase = matchCaseToggle.IsOn,
+                    ShowInOverview = overviewToggle.IsOn,
                     Enabled = true,
                 });
             }

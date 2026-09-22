@@ -90,6 +90,8 @@ public sealed class TabViewModel : ObservableObject
         {
             if (args.PropertyName == nameof(Subtitle))
                 OnPropertyChanged(nameof(CompletionSubtitleTooltip));
+            if (args.PropertyName is nameof(Header) or nameof(Subtitle) or nameof(StateText))
+                OnPropertyChanged(nameof(AutomationName));
         };
         IsOnboarding = isOnboarding;
     }
@@ -387,6 +389,8 @@ public sealed class TabViewModel : ObservableObject
     public bool CloseInteractive => !IsPinned && (IsActive || IsPointerOver);
 
     public string CloseAutomationName => $"Close {Header}";
+    public string AutomationName => $"{Header}, {Subtitle}, {StateText}";
+    public string TabAutomationId => $"Tab_{_tabInstanceId:N}";
 
     public string CloseAutomationId => $"TabClose_{_tabInstanceId:N}";
 

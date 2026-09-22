@@ -213,7 +213,7 @@ test("dialogs follow the live session palette and light-dark mode", () => {
 test("the session options form has room for its columns and scrolls every section", () => {
   // 500 of content inside the stock 548 cap left nothing for the dialog's own padding.
   assert.match(sessionEditXaml, /<x:Double x:Key="ContentDialogMaxWidth">660<\/x:Double>/);
-  assert.match(sessionEditXaml, /<StackPanel Spacing="12" MinWidth="580" MaxWidth="600">/);
+  assert.match(sessionEditXaml, /<StackPanel x:Name="SessionForm" Spacing="12" Width="600">/);
   // Both form sections scroll, and the scrollbar has its own gutter rather than
   // sitting on the fields.
   const connection = sessionEditXaml.match(/x:Name="ConnectionPanel"[\s\S]*?>/)?.[0] ?? "";
@@ -246,7 +246,7 @@ test("global theme selection previews immediately and cancel restores saved them
 });
 
 test("live theme previews avoid terminal layout and highlight work", () => {
-  assert.match(mainWindow, /GlobalSettingsDialog\.ShowAsync\([\s\S]*?ApplyThemeToApp, ApplySettingsToApp, target\)/);
+  assert.match(mainWindow, /GlobalSettingsDialog\.ShowAsync\([\s\S]*?ApplyThemeToApp, PreviewHighlights, target\)/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)[\s\S]*?view\.ApplyTheme\(theme\)/);
 
   const applyTheme = terminalTab.match(/public void ApplyTheme\(string theme\)\s*\{[\s\S]*?\n    \}/)?.[0];

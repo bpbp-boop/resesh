@@ -18,8 +18,9 @@ public sealed class HighlightsStore
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    private readonly string _path;
-    private readonly string _bakPath;
+    private readonly string? _path;
+    private readonly string? _bakPath;
+    private HighlightBackupData? _draftBaseline;
     private readonly object _gate = new();
 
     private HashSet<string> _enabled = new(StringComparer.Ordinal);
@@ -33,11 +34,80 @@ public sealed class HighlightsStore
         _bakPath = path + ".bak";
     }
 
+    private HighlightsStore() { }
+
+    /// <summary>An independent in-memory editor. Changes never write to the live store.</summary>
+    public HighlightsStore CreateDraft()
+    {
+        var state = ExportBackup();
+        var draft = new HighlightsStore { _draftBaseline = state };
+        draft.SetState(state);
+        return draft;
+    }
+
+    /// <summary>Save only fields changed in this draft, preserving unrelated edits made
+    /// by another window since the editor opened. Cancelling needs no store mutation.</summary>
+    public void CommitDraft(HighlightsStore draft)
+    {
+        var baseline = draft._draftBaseline
+            ?? throw new ArgumentException("The store is not an editing draft.", nameof(draft));
+        var edited = draft.ExportBackup();
+        lock (_gate)
+        {
+            var original = ExportBackup();
+            foreach (var id in baseline.EnabledRules.Concat(baseline.DisabledRules)
+                         .Concat(edited.EnabledRules).Concat(edited.DisabledRules).Distinct(StringComparer.Ordinal))
+            {
+                static int State(HighlightBackupData data, string id) =>
+                    data.DisabledRules.Contains(id) ? -1 : data.EnabledRules.Contains(id) ? 1 : 0;
+                if (State(baseline, id) == State(edited, id)) continue;
+                _enabled.Remove(id);
+                _disabled.Remove(id);
+                if (State(edited, id) == 1) _enabled.Add(id);
+                if (State(edited, id) == -1) _disabled.Add(id);
+            }
+            var custom = _custom.ToDictionary(r => r.Id, StringComparer.Ordinal);
+            MergeDraftRules(custom, baseline.CustomRules, edited.CustomRules);
+            _custom = custom.Values.ToList();
+            MergeDraftRules(_overrides, baseline.BuiltinOverrides, edited.BuiltinOverrides);
+            try { Save(); }
+            catch
+            {
+                SetState(original);
+                throw;
+            }
+        }
+    }
+
+    private static void MergeDraftRules(Dictionary<string, HighlightRule> target,
+        IReadOnlyList<HighlightRule> baseline, IReadOnlyList<HighlightRule> edited)
+    {
+        var before = baseline.ToDictionary(r => r.Id, StringComparer.Ordinal);
+        var after = edited.ToDictionary(r => r.Id, StringComparer.Ordinal);
+        foreach (var id in before.Keys.Concat(after.Keys).Distinct(StringComparer.Ordinal))
+        {
+            before.TryGetValue(id, out var oldRule);
+            after.TryGetValue(id, out var newRule);
+            if (oldRule == newRule) continue;
+            if (newRule is null) target.Remove(id);
+            else target[id] = newRule;
+        }
+    }
+
+    private void SetState(HighlightBackupData state)
+    {
+        _enabled = new HashSet<string>(state.EnabledRules, StringComparer.Ordinal);
+        _disabled = new HashSet<string>(state.DisabledRules, StringComparer.Ordinal);
+        _custom = state.CustomRules.ToList();
+        _overrides = state.BuiltinOverrides.ToDictionary(r => r.Id, StringComparer.Ordinal);
+    }
+
     public static string DefaultPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "highlights.json");
 
     public void Load()
     {
+        if (_path is null) return;
         lock (_gate)
         {
             var data = TryRead(_path) ?? TryRead(_bakPath) ?? new StoreData();
@@ -257,6 +327,7 @@ public sealed class HighlightsStore
 
     private void Save()
     {
+        if (_path is null) return;
         var data = new StoreData
         {
             EnabledRules = _enabled.OrderBy(s => s, StringComparer.Ordinal).ToList(),
@@ -276,7 +347,7 @@ public sealed class HighlightsStore
             File.Move(tmpPath, _path);
     }
 
-    private static StoreData? TryRead(string path)
+    private static StoreData? TryRead(string? path)
     {
         try
         {

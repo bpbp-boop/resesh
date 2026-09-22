@@ -1,9 +1,9 @@
-using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Resesh.Core.Storage;
+using static Resesh.App.Dialogs.SettingsLayout;
 
 namespace Resesh.App.Dialogs;
 
@@ -31,33 +31,30 @@ public enum GlobalSettingsTarget
 }
 
 /// <summary>
-/// Edits settings that apply to the whole app, as one tabbed dialog (General /
-/// Highlighting / Agents) — no child dialogs. The Highlighting tab hosts the rule editor
-/// inline and its changes persist immediately (same model as the tab toggles); everything
-/// else is a draft returned on Save, null on Cancel. The tab host has a fixed height so
+/// Edits settings that apply to the whole app, as one tabbed dialog (General / Recording /
+/// Highlighting / Agents). The Highlighting tab hosts the rule editor
+/// inline. Theme and highlighting edits are reversible previews until Save; Cancel
+/// discards the draft. The tab host has a fixed height so
 /// the dialog doesn't resize when switching tabs.
 /// </summary>
 public static class GlobalSettingsDialog
 {
     private const double PreferredDialogWidth = 920;
-    // Tall enough that the Highlighting tab's rule form (the tallest view) fits without
-    // scrolling; the host ScrollViewer only kicks in when the window itself is too short.
+    // One content budget across tabs. Long pages and rule forms scroll within it.
     private const double PreferredTabContentHeight = 660;
     private const double DialogHorizontalChrome = 72;
     private const double DialogVerticalChrome = 180;
-    private const double StackedCardThreshold = 620;
-    private const double StackedFieldThreshold = 460;
+    private const double StackedRowThreshold = 620;
 
     public static async Task<AppSettings?> ShowAsync(
         XamlRoot xamlRoot,
         AppSettings current,
         Action<string> applyThemePreview,
-        Action applyHighlightChanges,
+        Action<HighlightsStore?> applyHighlightPreview,
         GlobalSettingsTarget initialTarget = GlobalSettingsTarget.General)
     {
         var (dialogWidth, tabContentHeight) = GetDialogContentSize(xamlRoot);
-        var stackCards = dialogWidth < StackedCardThreshold;
-        var stackFields = dialogWidth < StackedFieldThreshold;
+        var stackRows = dialogWidth < StackedRowThreshold;
 
         var theme = new ComboBox
         {
@@ -172,38 +169,34 @@ public static class GlobalSettingsDialog
 
         // ---- General ----
 
-        var numberGrid = new Grid { ColumnSpacing = 12 };
-        ConfigureResponsiveColumns(numberGrid, stackFields, fontSize, scrollback);
-
-        var generalColumns = new Grid { ColumnSpacing = 16 };
-        var appearanceCard = SectionCard("Appearance", "Set the default look for every terminal.", theme, fontFamily, numberGrid);
-        var interactionCard = SectionCard("Terminal interaction", null, copyOnSelect, rightClickPaste);
-        appearanceCard.VerticalAlignment = VerticalAlignment.Top;
-        interactionCard.VerticalAlignment = VerticalAlignment.Top;
-        ConfigureResponsiveColumns(generalColumns, stackCards, appearanceCard, interactionCard);
-
+        var settingRows = new List<Grid>();
+        Grid Row(string label, FrameworkElement control)
+        {
+            var row = SettingRow(label, control, stackRows);
+            settingRows.Add(row);
+            return row;
+        }
         var generalTab = new StackPanel
         {
             Spacing = 16,
             Children =
             {
-                Description("These settings apply throughout resesh. A saved session can override supported terminal and highlighting defaults."),
-                generalColumns,
-                SectionCard(
-                    "Interface",
-                    "Choose which optional shell elements remain visible.",
-                    showStatusBar),
-                SectionCard(
-                    "Startup",
-                    "The current ordered tab groups are saved on clean exit. Reopening adopts each saved session into its previous group.",
-                    reopenLastLayout),
+                Description("These settings apply throughout resesh. Saved sessions can override terminal defaults."),
+                SettingsGroup("Appearance",
+                    Row("Theme", theme),
+                    Row("Terminal font family", fontFamily),
+                    Row("Font size", fontSize)),
+                SettingsGroup("Terminal",
+                    Row("Scrollback lines", scrollback),
+                    Row("Copy selected text", copyOnSelect),
+                    Row("Paste with right-click", rightClickPaste)),
+                SettingsGroup("Startup and interface",
+                    Row("Show status bar", showStatusBar),
+                    Row("Reopen last layout at startup", reopenLastLayout)),
             },
         };
 
         // ---- Recording ----
-
-        var rewindGrid = new Grid { ColumnSpacing = 12 };
-        ConfigureResponsiveColumns(rewindGrid, stackFields, rewindMinutes, rewindMegabytes);
 
         var recordingTab = new StackPanel
         {
@@ -211,29 +204,53 @@ public static class GlobalSettingsDialog
             Children =
             {
                 Description("Record terminal output to disk, or keep bounded in-memory history for instant rewind."),
-                SectionCard(
-                    "Disk recording",
-                    "Each recording writes an asciicast .cast file and a timestamped .log rendered from committed terminal lines. Both can include secrets that a server prints.",
-                    recordingDirectory,
-                    alwaysRecord),
-                SectionCard(
-                    "Instant rewind",
-                    "Rewind data stays in memory and is deleted when the tab closes.",
-                    rewindGrid),
+                SettingsGroup("Disk recording",
+                    Description("Each recording writes an asciicast .cast file and a timestamped .log rendered from committed terminal lines. Both can include secrets that a server prints."),
+                    Row("Recording directory", recordingDirectory),
+                    Row("Record new sessions automatically", alwaysRecord)),
+                SettingsGroup("Instant rewind",
+                    Description("Rewind data stays in memory and is deleted when the tab closes."),
+                    Row("Rewind history (minutes)", rewindMinutes),
+                    Row("Memory limit per tab (MiB)", rewindMegabytes)),
             },
+        };
+
+        var host = new ScrollViewer
+        {
+            Width = dialogWidth,
+            // Keep tab content clear of the vertical scrollbar. Without this gutter,
+            // full-width cards can render underneath the scrollbar and lose their right border.
+            Padding = new Thickness(0, 0, 20, 0),
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         };
 
         // ---- Highlighting ----
 
         // Fixed-height grid (not a stack): the editor's rules list takes the star row so it
         // expands to fill the tab, keeping the preview section pinned above the caption.
-        var highlightingTab = new Grid { Height = PreferredTabContentHeight, RowSpacing = 12 };
+        var highlightingTab = new Grid { Height = tabContentHeight, RowSpacing = 16 };
         highlightingTab.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         highlightingTab.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         highlightingTab.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var highlightingDesc = Description("Enable the built-in network rules, and create or edit custom regular-expression rules.");
-        var highlightingEditor = HighlightEditorPanel.Create(applyHighlightChanges);
-        var highlightingCaption = Caption("Highlighting changes apply immediately and push to open terminals. Save below applies to the other tabs.");
+        var highlightDraft = App.Highlights.CreateDraft();
+        var editingHighlight = false;
+        void UpdateHighlightingHeight() => highlightingTab.Height = editingHighlight
+            ? double.NaN
+            : Math.Max(400, host.ViewportHeight > 0 ? host.ViewportHeight : tabContentHeight);
+        // Use the measured viewport: ScrollViewer chrome can make it smaller than Height.
+        host.Loaded += (_, _) => UpdateHighlightingHeight();
+        host.SizeChanged += (_, _) => UpdateHighlightingHeight();
+        SetAutomationId(host, "SettingsTabContent");
+        var highlightingEditor = HighlightEditorPanel.Create(highlightDraft, () => applyHighlightPreview(highlightDraft), Row,
+            editing =>
+            {
+                editingHighlight = editing;
+                UpdateHighlightingHeight();
+                host.ChangeView(null, 0, null, disableAnimation: true);
+            });
+        var highlightingCaption = Caption("Changes preview in open terminals. Save keeps them; Cancel restores the saved rules.");
         Grid.SetRow(highlightingDesc, 0);
         Grid.SetRow((FrameworkElement)highlightingEditor, 1);
         Grid.SetRow(highlightingCaption, 2);
@@ -243,31 +260,21 @@ public static class GlobalSettingsDialog
 
         // ---- Agents ----
 
-        var agentColumns = new Grid { ColumnSpacing = 16 };
-
-        var tabStatusCard = SectionCard(
-            "Tab display",
-            "Replace a session icon while resesh recognizes a supported agent in that tab.",
-            agentIcons);
-        var alertCard = SectionCard(
-            "Background alerts",
-            "Get your attention when an agent waits for a response. Turn on agent icons to use alerts.",
-            agentFlash,
-            agentSound);
-        tabStatusCard.VerticalAlignment = VerticalAlignment.Stretch;
-        alertCard.VerticalAlignment = VerticalAlignment.Stretch;
-        ConfigureResponsiveColumns(agentColumns, stackCards, tabStatusCard, alertCard);
-
         var agentsTab = new StackPanel
         {
             Spacing = 16,
             Children =
             {
                 Description("Track supported coding agents in each terminal tab. resesh can notify you when an agent needs a response."),
-                agentColumns,
-                SectionCard(
-                    "Agent adapters",
-                    "resesh identifies supported agents automatically. Add an adapter only for exact working, waiting, and finished states.",
+                SettingsGroup("Tab display",
+                    Description("Replace a session icon while resesh recognizes a supported agent in that tab."),
+                    Row("Show agent icons", agentIcons)),
+                SettingsGroup("Background alerts",
+                    Description("Get your attention when an agent waits for a response. Turn on agent icons to use alerts."),
+                    Row("Flash the taskbar", agentFlash),
+                    Row("Play the notification sound", agentSound)),
+                SettingsGroup("Agent adapters",
+                    Description("resesh identifies supported agents automatically. Add an adapter only for exact working, waiting, and finished states."),
                     AgentAdapterPanel.Create()),
             },
         };
@@ -307,17 +314,6 @@ public static class GlobalSettingsDialog
         };
 
         var tabPanels = new UIElement[] { generalTab, recordingTab, highlightingTab, agentsTab };
-        var host = new ScrollViewer
-        {
-            Width = dialogWidth,
-            Height = tabContentHeight,
-            // Keep tab content clear of the vertical scrollbar. Without this gutter,
-            // full-width cards can render underneath the scrollbar and lose their right border.
-            Padding = new Thickness(0, 0, 20, 0),
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-        };
-
         var bar = new SelectorBar();
         var barItems = new[]
         {
@@ -334,7 +330,11 @@ public static class GlobalSettingsDialog
         foreach (var item in barItems)
             bar.Items.Add(item);
 
-        void ShowTab(int index) => host.Content = tabPanels[index];
+        void ShowTab(int index)
+        {
+            host.Content = tabPanels[index];
+            host.ChangeView(null, 0, null, disableAnimation: true);
+        }
 
         bar.SelectionChanged += (s, _) =>
         {
@@ -345,11 +345,20 @@ public static class GlobalSettingsDialog
         bar.SelectedItem = barItems[initialTab];
         ShowTab(initialTab);
 
-        var content = new StackPanel
+        var saveError = new InfoBar { IsOpen = false, IsClosable = false, Severity = InfoBarSeverity.Error };
+        // Let the tab viewport shrink within the content budget. A StackPanel measures
+        // its children at infinite height, so ContentDialog can clip the host and footer.
+        var content = new Grid
         {
-            Spacing = 12,
-            Children = { bar, host },
+            Height = tabContentHeight,
+            RowSpacing = 12,
+            Children = { saveError, bar, host },
         };
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        Grid.SetRow(bar, 1);
+        Grid.SetRow(host, 2);
 
         // DefaultButton stays None on purpose: Enter while typing in the highlighting rule
         // form must not save-and-close the whole dialog.
@@ -365,6 +374,17 @@ public static class GlobalSettingsDialog
             Foreground = (Brush)Application.Current.Resources["SessionTreeForegroundBrush"],
         };
         SetAutomationId(dialog, "GlobalSettingsDialog");
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            try { App.Highlights.CommitDraft(highlightDraft); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                saveError.Message = "Could not save highlighting rules. Try again or cancel.";
+                saveError.IsOpen = true;
+                args.Cancel = true;
+                App.ReportRecoverableError(exception);
+            }
+        };
         DialogTheme.Apply(dialog, PreviewTheme());
         theme.SelectionChanged += (_, _) =>
         {
@@ -377,22 +397,16 @@ public static class GlobalSettingsDialog
         void UpdateDialogLayout()
         {
             (dialogWidth, tabContentHeight) = GetDialogContentSize(xamlRoot);
-            var shouldStackCards = dialogWidth < StackedCardThreshold;
-            var shouldStackFields = dialogWidth < StackedFieldThreshold;
-            if (shouldStackCards != stackCards)
+            var shouldStackRows = dialogWidth < StackedRowThreshold;
+            if (shouldStackRows != stackRows)
             {
-                stackCards = shouldStackCards;
-                ConfigureResponsiveColumns(generalColumns, stackCards, appearanceCard, interactionCard);
-                ConfigureResponsiveColumns(agentColumns, stackCards, tabStatusCard, alertCard);
-            }
-            if (shouldStackFields != stackFields)
-            {
-                stackFields = shouldStackFields;
-                ConfigureResponsiveColumns(numberGrid, stackFields, fontSize, scrollback);
-                ConfigureResponsiveColumns(rewindGrid, stackFields, rewindMinutes, rewindMegabytes);
+                stackRows = shouldStackRows;
+                foreach (var row in settingRows)
+                    ConfigureSettingRow(row, stackRows);
             }
             host.Width = dialogWidth;
-            host.Height = tabContentHeight;
+            content.Height = tabContentHeight;
+            UpdateHighlightingHeight();
             dialog.Resources["ContentDialogMaxWidth"] = Math.Min(
                 PreferredDialogWidth + 48,
                 Math.Max(280, xamlRoot.Size.Width - 24));
@@ -405,7 +419,7 @@ public static class GlobalSettingsDialog
         UpdateDialogLayout();
         xamlRoot.Changed += XamlRootChanged;
 
-        ContentDialogResult result;
+        ContentDialogResult result = ContentDialogResult.None;
         try
         {
             result = await dialog.ShowModalAsync();
@@ -413,11 +427,13 @@ public static class GlobalSettingsDialog
         finally
         {
             xamlRoot.Changed -= XamlRootChanged;
+            applyHighlightPreview(null);
+            if (result != ContentDialogResult.Primary)
+                applyThemePreview(current.Theme);
         }
 
         if (result != ContentDialogResult.Primary)
         {
-            applyThemePreview(current.Theme);
             return null;
         }
 
@@ -472,68 +488,4 @@ public static class GlobalSettingsDialog
         (Math.Min(PreferredDialogWidth, Math.Max(240, xamlRoot.Size.Width - DialogHorizontalChrome)),
          Math.Min(PreferredTabContentHeight, Math.Max(180, xamlRoot.Size.Height - DialogVerticalChrome)));
 
-    private static void ConfigureResponsiveColumns(Grid grid, bool stacked, params FrameworkElement[] children)
-    {
-        var spacing = Math.Max(grid.ColumnSpacing, grid.RowSpacing);
-        grid.ColumnDefinitions.Clear();
-        grid.RowDefinitions.Clear();
-        grid.Children.Clear();
-
-        if (stacked)
-        {
-            grid.ColumnSpacing = 0;
-            grid.RowSpacing = spacing;
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            for (var index = 0; index < children.Length; index++)
-            {
-                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                Grid.SetRow(children[index], index);
-                Grid.SetColumn(children[index], 0);
-                grid.Children.Add(children[index]);
-            }
-            return;
-        }
-
-        grid.ColumnSpacing = spacing;
-        grid.RowSpacing = 0;
-        for (var index = 0; index < children.Length; index++)
-        {
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            Grid.SetRow(children[index], 0);
-            Grid.SetColumn(children[index], index);
-            grid.Children.Add(children[index]);
-        }
-    }
-
-    private static Border SectionCard(string title, string? description, params UIElement[] controls)
-    {
-        var panel = new StackPanel { Spacing = 12 };
-        panel.Children.Add(new TextBlock
-        {
-            Text = title,
-            FontSize = 18,
-            FontWeight = FontWeights.SemiBold,
-        });
-        if (description is not null)
-        {
-            panel.Children.Add(new TextBlock
-            {
-                Text = description,
-                TextWrapping = TextWrapping.Wrap,
-                Opacity = 0.72,
-            });
-        }
-        foreach (var control in controls)
-            panel.Children.Add(control);
-
-        return new Border
-        {
-            Padding = new Thickness(16),
-            CornerRadius = new CornerRadius(8),
-            BorderThickness = new Thickness(1),
-            BorderBrush = (Brush)Application.Current.Resources["SettingsCardBorderBrush"],
-            Background = (Brush)Application.Current.Resources["SettingsCardBackgroundBrush"],
-            Child = panel,
-        };
-    }
 }

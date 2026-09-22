@@ -69,24 +69,18 @@ test("each tab bar reserves the measured width of every action button", () => {
   assert.match(strip, /<ColumnDefinition Width="\*" \/>[\s\S]*?<ColumnDefinition Width="Auto" \/>/);
   assert.match(strip, /x:Name="Tabs"[\s\S]*?Grid\.Column="0"/);
   assert.match(strip, /Grid\.Column="1"[\s\S]*?x:Name="RecordButton"/);
-  assert.match(strip, /x:Name="RecordButton"[\s\S]*?Width="30"[\s\S]*?Height="30"/);
-  assert.match(strip, /x:Name="RewindButton"[\s\S]*?Width="30"[\s\S]*?Height="30"/);
-  assert.match(strip, /<StackPanel[\s\S]*?Margin="0,0,6,0"[\s\S]*?x:Name="RecordButton"/);
-  assert.match(xaml, /x:Name="RecordStartIcon"[\s\S]*?x:Name="RecordStopIcon"/);
+  for (const name of ["RecordButton", "RewindButton", "ShowCommandsButton"]) {
+    const button = strip.match(new RegExp(`x:Name="${name}"[\\s\\S]*?<\\/ToggleButton>`))?.[0] ?? "";
+    assert.match(button, /Width="32" Height="32"/);
+    assert.doesNotMatch(button, /<TextBlock/);
+  }
+  assert.match(strip, /<ToggleSplitButton x:Name="FilePaneToggle"/);
+  assert.match(strip, /Text="Files"/);
+  assert.match(strip, /x:Name="CurrentFolderMenuItem"[\s\S]*?Click="CurrentFolderButton_Click"/);
+  assert.match(code, /ExpandedTabActions\.ActualWidth \+ 6/);
+  assert.match(code, /recording \? "Stop recording" : "Start recording"/);
   assert.match(code, /RecordStartIcon\.Visibility = recording \? Visibility\.Collapsed : Visibility\.Visible/);
   assert.match(code, /RecordStopIcon\.Visibility = recording \? Visibility\.Visible : Visibility\.Collapsed/);
-  assert.match(strip, /Grid\.Column="1"[\s\S]*?x:Name="CurrentFolderButton"/);
-  assert.match(strip, /x:Name="CurrentFolderButton"[\s\S]*?Width="30"[\s\S]*?Height="30"[\s\S]*?Padding="0"/);
-  assert.doesNotMatch(strip, /x:Name="CurrentFolderButton"[\s\S]*?Background="Transparent"/);
-  assert.match(strip, /Click="CurrentFolderButton_Click"/);
-  const currentFolder = strip.match(/x:Name="CurrentFolderButton"[\s\S]*?<\/Button>/)?.[0] ?? "";
-  assert.match(currentFolder, /<Grid Width="18" Height="18">/);
-  assert.match(currentFolder, /Glyph="&#xE8B7;"[\s\S]*?FontSize="16"/);
-  assert.match(currentFolder, /<PathIcon[\s\S]*?Data="M0,1\.1/); // ">_" prompt badge
-  assert.match(strip, /Grid\.Column="1"[\s\S]*?x:Name="FilePaneToggle"/);
-  assert.match(strip, /x:Name="FilePaneToggle"[\s\S]*?Width="30"[\s\S]*?Height="30"[\s\S]*?Padding="0"/);
-  assert.doesNotMatch(strip, /x:Name="FilePaneToggle"[\s\S]*?Background="Transparent"/);
-  assert.match(strip, /Click="FilePaneToggle_Click"/);
 });
 
 test("a hidden tab close action is not focusable and has stable automation metadata", () => {
@@ -126,9 +120,21 @@ test("action buttons dim with their inactive tab group", () => {
   assert.match(code, /nameof\(TabViewModel\.IsGroupFocused\)[\s\S]{0,80}?UpdateTabActionButtons\(\)/);
 });
 
-test("the current-folder button is connected-only and uses the host action", () => {
-  assert.match(code, /CurrentFolderButton\.IsEnabled = tab\?\.Capabilities\.FilePane == true[\s\S]*?TabConnectionState\.Connected[\s\S]*?!tab\.IsLocked/);
+test("the current-folder menu item is connected-only and uses the host action", () => {
+  assert.match(code, /CurrentFolderMenuItem\.IsEnabled = tab\?\.Capabilities\.FilePane == true[\s\S]*?TabConnectionState\.Connected[\s\S]*?!tab\.IsLocked/);
   assert.match(code, /CurrentFolderButton_Click[\s\S]*?await _host\.OpenFilePaneAtCurrentFolderAsync\(tab\)/);
+});
+
+test("file options use consistent title casing", () => {
+  for (const label of [
+    "Open at Terminal Folder",
+    "Open File Pane at Terminal Folder",
+    "Open in File Explorer",
+    "Show File Pane",
+  ]) {
+    assert.match(xaml, new RegExp(`Text="${label}"`));
+  }
+  assert.match(code, /isOpen \? "Hide File Pane" : "Show File Pane"/);
 });
 
 test("local sessions use the direct filesystem pane and Explorer path", () => {
