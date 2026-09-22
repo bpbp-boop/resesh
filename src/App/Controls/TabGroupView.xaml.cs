@@ -390,6 +390,19 @@ public sealed partial class TabGroupView : UserControl
 
     private void NormalizeTabStripTemplate()
     {
+        // WinUI's entrance and content transitions can replay for every realized
+        // header when equal-width tabs are recalculated after a move or removal.
+        // Keep the local add/delete and reorder motion without making the whole
+        // strip look as though it loaded again.
+        if (FindDescendant(Tabs, "TabListView") is ListViewBase list)
+        {
+            list.ItemContainerTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection
+            {
+                new Microsoft.UI.Xaml.Media.Animation.AddDeleteThemeTransition(),
+                new Microsoft.UI.Xaml.Media.Animation.ReorderThemeTransition(),
+            };
+        }
+
         // TabView reserves a 2px minimum column for TabStripHeader even when it is null.
         if (FindDescendant(Tabs, "TabContainerGrid") is Grid tabContainerGrid &&
             tabContainerGrid.ColumnDefinitions.Count > 0)

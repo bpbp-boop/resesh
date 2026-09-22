@@ -38,6 +38,17 @@ test("custom tab chrome retains WinUI drag and reorder animations", () => {
   assert.match(style, /<DropTargetItemThemeAnimation TargetName="LayoutRoot"/);
 });
 
+test("tab collection changes animate locally without replaying every header", () => {
+  const normalization = code.slice(
+    code.indexOf("private void NormalizeTabStripTemplate()"),
+    code.indexOf("internal void ApplyTheme"));
+
+  assert.match(normalization, /new Microsoft\.UI\.Xaml\.Media\.Animation\.AddDeleteThemeTransition\(\)/);
+  assert.match(normalization, /new Microsoft\.UI\.Xaml\.Media\.Animation\.ReorderThemeTransition\(\)/);
+  assert.doesNotMatch(normalization, /ContentThemeTransition/);
+  assert.doesNotMatch(normalization, /EntranceThemeTransition/);
+});
+
 test("tab text trims inside the shared width without moving the close action", () => {
   assert.match(xaml, /<ColumnDefinition Width="\*" \/>/);
   assert.match(xaml, /Grid\.Column="5"[\s\S]*?TextTrimming="CharacterEllipsis"/);
