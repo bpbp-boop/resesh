@@ -42,7 +42,17 @@ public abstract class TerminalSurface : Grid, IDisposable
     /// Surfaces that draw synchronously never raise it; hosts must not wait indefinitely.</summary>
     public event Action? Painted;
 
-    protected void OnPainted() => Painted?.Invoke();
+    /// <summary>Whether the surface has presented its first frame. Surfaces that draw
+    /// synchronously report true from the start.</summary>
+    public virtual bool HasPainted => _hasPainted;
+
+    private bool _hasPainted;
+
+    protected void OnPainted()
+    {
+        _hasPainted = true;
+        Painted?.Invoke();
+    }
 
     public abstract bool SupportsRewindCapture { get; }
 

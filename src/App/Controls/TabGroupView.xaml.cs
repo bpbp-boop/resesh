@@ -177,6 +177,10 @@ public sealed partial class TabGroupView : UserControl
         // TabView can keep keyboard focus on an already-selected header after a click. In
         // that state xterm cannot see Enter, so retain its stopped-terminal shortcut here.
         Tabs.AddHandler(KeyDownEvent, new KeyEventHandler(Tabs_KeyDown), true);
+        // A clicked header takes focus after its pointer handling, which can land after
+        // the focus queued from PointerPressed/SelectionChanged. Hand pointer focus on a
+        // header straight back to the terminal; keyboard navigation between tabs keeps it.
+        Tabs.GotFocus += Tabs_GotFocus;
         ActualThemeChanged += (_, _) => QueueTabTemplateRefresh();
 
         // TabView consumes drag events over parts of its strip without raising TabStripDrop.
@@ -660,7 +664,10 @@ public sealed partial class TabGroupView : UserControl
             var outgoing = _shownTerminal;
             var returning = ReferenceEquals(selected, _heldTerminal);
             ReleaseHeldTerminal();
-            if (!returning && outgoing is not null && selected is Terminal.TerminalTabView incoming
+            // Only a terminal that has never painted shows WebView2's gray fill; switching to
+            // one that has already rendered is instant, so it needs no hold.
+            if (!returning && outgoing is not null
+                && selected is Terminal.TerminalTabView { HasPainted: false } incoming
                 && TerminalHost.Children.Contains(outgoing))
             {
                 HoldTerminal(outgoing, incoming);
@@ -996,6 +1003,12 @@ public sealed partial class TabGroupView : UserControl
                 return false;
         }
         return false;
+    }
+
+    private void Tabs_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is TabViewItem { FocusState: FocusState.Pointer })
+            FocusTerminal(Group.SelectedTab);
     }
 
     private void Tabs_KeyDown(object sender, KeyRoutedEventArgs e)

@@ -74,6 +74,9 @@ public sealed class TerminalTabView : Grid, IDisposable
     public event Action? CloseRequested;
 
     /// <summary>The terminal presented a frame after being created or shown again.</summary>
+    /// <summary>Whether the terminal has presented its first frame.</summary>
+    public bool HasPainted => _terminal.HasPainted;
+
     public event Action? TerminalPainted
     {
         add => _terminal.Painted += value;

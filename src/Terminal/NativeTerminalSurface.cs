@@ -189,6 +189,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
     public override event Action<bool>? CommandsPanelOpenChanged;
 
     public override bool SupportsRewindCapture => true;
+
+    public override bool HasPainted => true;
     internal bool IsAlternateBufferActive => _alternateBufferActive;
     internal bool IsBracketedPasteModeEnabled => _bracketedPasteModeEnabled;
 
