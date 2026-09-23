@@ -350,7 +350,8 @@ test("new split groups start with the live app palette", () => {
 });
 
 test("the tab-row divider spans both sides without crossing the active tab", () => {
-  assert.match(terminalControl, /SetInitialOptions[\s\S]*?_webView\.DefaultBackgroundColor = ThemeBackground\(theme\)/);
+  assert.match(terminalControl, /SetInitialOptions[\s\S]*?SetThemeBackground\(ThemeBackground\(theme\)\)/);
+  assert.match(terminalControl, /void SetThemeBackground[\s\S]*?_webView\.DefaultBackgroundColor = color;/);
   assert.match(terminalControl, /"solarized-light" => Windows\.UI\.Color\.FromArgb\(255, 0xFD, 0xF6, 0xE3\)/);
   assert.match(terminalControl, /"phthalo-green" => Windows\.UI\.Color\.FromArgb\(255, 0x12, 0x35, 0x24\)/);
   assert.match(tabGroupXaml, /x:Name="LeftTabStripDivider"[\s\S]*?x:Name="RightTabStripDivider"/);

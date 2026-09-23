@@ -1418,9 +1418,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var group = ViewModel.GroupOf(tab);
         if (tab.View is OnboardingView onboarding)
             onboarding.CancelPreview();
-        if (tab.View is UIElement view)
-            _groupViews[group].RemoveTerminal(view);
-        ViewModel.CloseTab(tab);
+        _groupViews[group].CloseTerminal(
+            tab.View as UIElement,
+            () => ViewModel.DetachTab(tab),
+            () => (tab.View as IDisposable)?.Dispose());
         Trace($"CloseTabCore: done; selected now '{group.SelectedTab?.Header ?? "(null)"}'");
         CollapseGroupIfEmpty(group);
     }
@@ -3081,6 +3082,18 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             ToggleSelection(node);
         else
             SelectOnly(node);
+    }
+
+    private void SessionRow_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (NodeOf(sender) is { } node)
+            node.IsPointerOver = true;
+    }
+
+    private void SessionRow_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (NodeOf(sender) is { } node)
+            node.IsPointerOver = false;
     }
 
     private void SessionNode_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)

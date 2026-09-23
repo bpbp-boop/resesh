@@ -40,7 +40,15 @@
                                 FontWeight="Normal"
                                 Foreground="{x:Bind local:PresentationValues.TreeForeground(IsSelected), Mode=OneWay}" />
                         </StackPanel>
-                        <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="8" Visibility="{x:Bind local:PresentationValues.TreeSessionVisibility(IsFolder), Mode=OneWay}">
+                        <Grid
+                            ColumnDefinitions="Auto,Auto,Auto,*"
+                            ColumnSpacing="8"
+                            Background="Transparent"
+                            PointerEntered="SessionRow_PointerEntered"
+                            PointerExited="SessionRow_PointerExited"
+                            PointerCanceled="SessionRow_PointerExited"
+                            PointerCaptureLost="SessionRow_PointerExited"
+                            Visibility="{x:Bind local:PresentationValues.TreeSessionVisibility(IsFolder), Mode=OneWay}">
                             <Rectangle Width="3" Height="16" RadiusX="1.5" RadiusY="1.5" VerticalAlignment="Center">
                                 <Rectangle.Fill>
                                     <SolidColorBrush Color="{x:Bind local:PresentationValues.ColorTag(ColorTag), Mode=OneWay}" />
@@ -61,19 +69,27 @@
                                 FontSize="14"
                                 Foreground="{x:Bind local:PresentationValues.TreeForeground(IsSelected), Mode=OneWay}"
                                 Visibility="{x:Bind local:PresentationValues.DefaultTreeIconVisibility(IconKey), Mode=OneWay}" />
-                            <StackPanel Grid.Column="2" MinWidth="0">
-                                <TextBlock
-                                    local:MatchHighlighter.Text="{x:Bind Name, Mode=OneWay}"
-                                    local:MatchHighlighter.Query="{x:Bind local:PresentationValues.TreeHighlightQuery(HighlightQuery, IsSelected), Mode=OneWay}"
-                                    TextTrimming="CharacterEllipsis"
-                                    Foreground="{x:Bind local:PresentationValues.TreeForeground(IsSelected), Mode=OneWay}" />
-                                <TextBlock
-                                    Text="{x:Bind HostSummary, Mode=OneWay}"
-                                    Visibility="{x:Bind local:PresentationValues.Visible(IsSelected), Mode=OneWay}"
-                                    TextWrapping="Wrap"
-                                    Foreground="{x:Bind local:PresentationValues.TreeMutedForeground(IsSelected), Mode=OneWay}"
-                                    FontSize="12" />
-                            </StackPanel>
+                            <TextBlock
+                                Grid.Column="2"
+                                MinWidth="0"
+                                VerticalAlignment="Center"
+                                local:MatchHighlighter.Text="{x:Bind Name, Mode=OneWay}"
+                                local:MatchHighlighter.Query="{x:Bind local:PresentationValues.TreeHighlightQuery(HighlightQuery, IsSelected), Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis"
+                                Foreground="{x:Bind local:PresentationValues.TreeForeground(IsSelected), Mode=OneWay}" />
+                            <!-- Host sits on the same line so selecting a row never changes its height,
+                                 which would shift the row out from under the second click of a double-click. -->
+                            <TextBlock
+                                Grid.Column="3"
+                                VerticalAlignment="Center"
+                                HorizontalAlignment="Left"
+                                Text="{x:Bind HostSummary, Mode=OneWay}"
+                                Visibility="{x:Bind local:PresentationValues.TreeHostVisibility(IsSelected, IsPointerOver), Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis"
+                                TextWrapping="NoWrap"
+                                FontWeight="Light"
+                                Foreground="{x:Bind local:PresentationValues.TreeMutedForeground(IsSelected), Mode=OneWay}"
+                                FontSize="12" />
                         </Grid>
                         <StackPanel Orientation="Horizontal" Spacing="8" Visibility="{x:Bind local:PresentationValues.Visible(IsLocalRoot), Mode=OneWay}">
                             <FontIcon

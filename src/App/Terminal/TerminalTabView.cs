@@ -73,6 +73,13 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// <summary>Ctrl+F4 inside the terminal; the window routes it to the confirmed-close pathway.</summary>
     public event Action? CloseRequested;
 
+    /// <summary>The terminal presented a frame after being created or shown again.</summary>
+    public event Action? TerminalPainted
+    {
+        add => _terminal.Painted += value;
+        remove => _terminal.Painted -= value;
+    }
+
     /// <summary>Raised when the user clicks the lock overlay wanting to unlock.</summary>
     public event Action? UnlockRequested;
 

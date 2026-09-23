@@ -9,6 +9,7 @@ public sealed class TreeNodeViewModel : ObservableObject
 {
     private bool _isExpanded;
     private bool _isSelected;
+    private bool _isPointerOver;
 
     public bool IsExpanded
     {
@@ -21,6 +22,13 @@ public sealed class TreeNodeViewModel : ObservableObject
     {
         get => _isSelected;
         set => SetProperty(ref _isSelected, value);
+    }
+
+    /// <summary>Tracked by the window so session rows can reveal their host on hover.</summary>
+    public bool IsPointerOver
+    {
+        get => _isPointerOver;
+        set => SetProperty(ref _isPointerOver, value);
     }
 
     /// <summary>Null for folders. Session leaves can replace their immutable model in place

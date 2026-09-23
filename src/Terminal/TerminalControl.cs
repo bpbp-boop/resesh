@@ -79,6 +79,7 @@ public sealed class TerminalControl : TerminalSurface
     }
 
     private readonly WebView2 _webView = new();
+    private Windows.UI.Color _backgroundColor;
     private object? _initialOptions;
     private bool _executionReadOnly;
     private bool _executionConnected;
@@ -176,9 +177,10 @@ public sealed class TerminalControl : TerminalSurface
 
     public TerminalControl()
     {
-        // WebView2 paints white until terminal.html renders; match its dark
-        // background so opening a tab doesn't flash.
-        _webView.DefaultBackgroundColor = Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0C, 0x0C);
+        SetThemeBackground(Windows.UI.Color.FromArgb(0xFF, 0x0C, 0x0C, 0x0C));
+        // Until the page first presents, WebView2 composes a system gray fill that no
+        // background setting controls. Keep it transparent over the themed host until then.
+        _webView.Opacity = 0;
         Children.Add(_webView);
     }
 
@@ -186,6 +188,8 @@ public sealed class TerminalControl : TerminalSurface
     {
         var environment = await SharedEnvironment.Value;
         await _webView.EnsureCoreWebView2Async(environment);
+        // A color assigned before the controller exists is not applied.
+        _webView.DefaultBackgroundColor = _backgroundColor;
 
         var core = _webView.CoreWebView2;
         core.Settings.AreDefaultContextMenusEnabled = false;
@@ -238,6 +242,10 @@ public sealed class TerminalControl : TerminalSurface
                     PostRulerPresentation();
                     PostPromptPlatform();
                     Ready?.Invoke(Columns, Rows);
+                    break;
+                case "painted":
+                    _webView.Opacity = 1;
+                    OnPainted();
                     break;
                 case "input":
                     if (root.TryGetProperty("data", out var data) && data.GetString() is { } b64)
@@ -373,6 +381,8 @@ public sealed class TerminalControl : TerminalSurface
                         CommandsPanelOpenChanged?.Invoke(panelOpen.ValueKind == JsonValueKind.True);
                     break;
                 case "pageError":
+                    // A page that fails before booting never reports "painted"; show whatever it has.
+                    _webView.Opacity = 1;
                     if (root.TryGetProperty("message", out var err))
                         TraceHook?.Invoke($"pageError: {err.GetString()}");
                     break;
@@ -615,7 +625,7 @@ public sealed class TerminalControl : TerminalSurface
         bool readOnly = false)
     {
         _executionReadOnly = readOnly;
-        _webView.DefaultBackgroundColor = ThemeBackground(theme);
+        SetThemeBackground(ThemeBackground(theme));
         _initialOptions = new
         {
             type = "initOptions", fontSize, fontFamily, theme, copyOnSelect, rightClickPaste, scrollback, highlights,
@@ -628,9 +638,18 @@ public sealed class TerminalControl : TerminalSurface
         bool? copyOnSelect = null, bool? rightClickPaste = null, int? scrollback = null)
     {
         if (theme is not null)
-            _webView.DefaultBackgroundColor = ThemeBackground(theme);
+            SetThemeBackground(ThemeBackground(theme));
         TraceHook?.Invoke($"ApplyOptions theme={theme} fontSize={fontSize} pageReady={_pageReady}");
         Post(new { type = "setOptions", fontSize, fontFamily, theme, copyOnSelect, rightClickPaste, scrollback });
+    }
+
+    /// <summary>Paints the terminal color everywhere the page can be missing: the host
+    /// grid (before WebView2 composes) and WebView2's own fill (before the page renders).</summary>
+    private void SetThemeBackground(Windows.UI.Color color)
+    {
+        _backgroundColor = color;
+        _webView.DefaultBackgroundColor = color;
+        Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
     }
 
     private static Windows.UI.Color ThemeBackground(string theme) => theme.ToLowerInvariant() switch

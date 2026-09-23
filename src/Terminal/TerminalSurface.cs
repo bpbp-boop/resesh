@@ -38,6 +38,12 @@ public abstract class TerminalSurface : Grid, IDisposable
 
     protected void RequestHostFocus() => HostFocusRequested?.Invoke();
 
+    /// <summary>The surface has presented a frame since it was created or last shown.
+    /// Surfaces that draw synchronously never raise it; hosts must not wait indefinitely.</summary>
+    public event Action? Painted;
+
+    protected void OnPainted() => Painted?.Invoke();
+
     public abstract bool SupportsRewindCapture { get; }
 
     public abstract int Columns { get; protected set; }

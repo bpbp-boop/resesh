@@ -23,6 +23,9 @@ public static class PresentationValues
 
     public static Visibility TreeSessionVisibility(bool isFolder) => Visible(!isFolder);
 
+    public static Visibility TreeHostVisibility(bool isSelected, bool isPointerOver) =>
+        Visible(isSelected || isPointerOver);
+
     public static Visibility FocusedAccentVisibility(bool isActive, bool isGroupFocused) =>
         Visible(isActive && isGroupFocused);
 

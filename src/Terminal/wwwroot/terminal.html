@@ -214,6 +214,23 @@
   });
   host.postMessage({ type: "init" });
 
+  // WebView2 fills with a system gray until a newly created or re-shown page presents a
+  // frame. Report once two animation frames have run so the host can keep the previous
+  // terminal on screen until then.
+  let terminalBooted = false;
+  function postPaintedWhenVisible() {
+    terminalBooted = true;
+    if (document.visibilityState !== "visible") return;
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        if (document.visibilityState === "visible") host.postMessage({ type: "painted" });
+      });
+    });
+  }
+  document.addEventListener("visibilitychange", function () {
+    if (terminalBooted) postPaintedWhenVisible();
+  });
+
   function boot(init) {
     const term = new Terminal({
       scrollback: typeof init.scrollback === "number" ? init.scrollback : 10000,
@@ -893,6 +910,7 @@
     fitPreservingTimestamps();
     term.focus();
     host.postMessage({ type: "ready", cols: term.cols, rows: term.rows });
+    postPaintedWhenVisible();
     if (!readOnly) setTimeout(captureKeyframe, 0);
   }
 })();

@@ -62,3 +62,39 @@ test("Y confirms session-close dialogs without becoming a global destructive sho
   assert.match(genericConfirm, /bool acceptY = false/);
   assert.match(genericConfirm, /acceptY\s*\?\s*await ShowCloseConfirmationAsync\(dialog\)/);
 });
+
+test("closing a tab hands off to its successor before removing the closing view", () => {
+  const closeCore = source.match(
+    /private void CloseTabCore[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+  assert.match(closeCore,
+    /_groupViews\[group\]\.CloseTerminal\(\s*tab\.View as UIElement,\s*\(\) => ViewModel\.DetachTab\(tab\),\s*\(\) => \(tab\.View as IDisposable\)\?\.Dispose\(\)\);/);
+  assert.doesNotMatch(closeCore, /RemoveTerminal|ViewModel\.CloseTab/);
+
+  const groupView = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"), "utf8");
+  const closeTerminal = groupView.match(
+    /public void CloseTerminal[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+  // Selection settles before any terminal changes visibility.
+  assert.match(closeTerminal,
+    /_terminalVisibilityDeferred = true;[\s\S]*?detachTab\(\);[\s\S]*?_terminalVisibilityDeferred = false;[\s\S]*?SyncTerminalVisibility\(\);/);
+  // A held closing view is removed only once its successor has painted.
+  assert.match(closeTerminal, /ReferenceEquals\(view, _heldTerminal\)\)\s*_heldTerminalReleased \+= Remove;/);
+  // The WebView goes transparent before it leaves the tree, then is disposed.
+  assert.match(closeTerminal, /view\.Opacity = 0;[\s\S]*?TerminalHost\.Children\.Remove\(view\);[\s\S]*?disposeTab\(\);/);
+
+  const hide = groupView.match(/private void HideTerminal[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+  assert.match(hide, /view\.Opacity = 0;[\s\S]*?_terminalCollapseTimer\.Start\(\);/);
+  assert.doesNotMatch(hide, /Visibility\.Collapsed;/);
+});
+
+test("the terminal page reports its first frame after boot and after every re-show", () => {
+  const page = fs.readFileSync(
+    path.join(__dirname, "..", "src", "Terminal", "wwwroot", "terminal.html"), "utf8");
+  assert.match(page, /document\.addEventListener\("visibilitychange"[\s\S]*?postPaintedWhenVisible\(\)/);
+  assert.match(page, /host\.postMessage\(\{ type: "ready"[^\n]*\n\s*postPaintedWhenVisible\(\);/);
+
+  const control = fs.readFileSync(
+    path.join(__dirname, "..", "src", "Terminal", "TerminalControl.cs"), "utf8");
+  assert.match(control, /_webView\.Opacity = 0;\s*Children\.Add\(_webView\);/);
+  assert.match(control, /case "painted":\s*_webView\.Opacity = 1;\s*OnPainted\(\);/);
+});
