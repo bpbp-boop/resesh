@@ -497,9 +497,12 @@
                             </Button>
                         </Grid>
                     </Border>
-                    <!-- Fluent UI System Icons (MIT): chevron_up_down / chevron_down_up, 16px
-                         regular variants used at their native 16-unit scale. The 24px assets
-                         would need downscaling, which thins their strokes below a pixel here. -->
+                    <!-- Stacked-boxes plus/minus glyphs, the tree-view convention (VS Code, Visual
+                         Studio) for expand/collapse all. Drawn as 14-unit filled outlines with ink
+                         starting at the origin (PathIcon sizes to the geometry's extent from 0,0)
+                         and all straight edges on whole units so the 1px strokes stay crisp at
+                         100% scale. The plus is one polygon rather than two overlapping bars,
+                         since the default even-odd fill would punch a hole where they cross. -->
                     <Button
                         x:Name="ExpandAllButton"
                         Grid.Column="1"
@@ -512,7 +515,7 @@
                         AutomationProperties.Name="Expand all">
                         <PathIcon
                             Foreground="{StaticResource SessionTreeForegroundBrush}"
-                            Data="M0.19527 4.40237C0.39053 4.59764 0.70711 4.59764 0.90237 4.40237L4.04882 1.25593L7.19522 4.40237C7.39052 4.59764 7.70712 4.59764 7.90242 4.40237C8.09762 4.20711 8.09762 3.89053 7.90242 3.69527L4.40237 0.19527C4.20711 0 3.89053 0 3.69527 0.19527L0.19527 3.69527C0 3.89053 0 4.20711 0.19527 4.40237ZM0.19527 7.69527C0.39053 7.5 0.70711 7.5 0.90237 7.69527L4.04882 10.84172L7.19522 7.69527C7.39052 7.5 7.70712 7.5 7.90242 7.69527C8.09762 7.89053 8.09762 8.20712 7.90242 8.40242L4.40237 11.90242C4.20711 12.09762 3.89053 12.09762 3.69527 11.90242L0.19527 8.40242C0 8.20712 0 7.89053 0.19527 7.69527Z" />
+                            Data="M3,2 A2,2 0 0 1 5,0 H12 A2,2 0 0 1 14,2 V9 A2,2 0 0 1 12,11 H11 V10 H12 A1,1 0 0 0 13,9 V2 A1,1 0 0 0 12,1 H5 A1,1 0 0 0 4,2 V3 H3 Z M2,3 H9 A2,2 0 0 1 11,5 V12 A2,2 0 0 1 9,14 H2 A2,2 0 0 1 0,12 V5 A2,2 0 0 1 2,3 Z M2,4 A1,1 0 0 0 1,5 V12 A1,1 0 0 0 2,13 H9 A1,1 0 0 0 10,12 V5 A1,1 0 0 0 9,4 Z M3,8 H5 V6 H6 V8 H8 V9 H6 V11 H5 V9 H3 Z" />
                     </Button>
                     <Button
                         x:Name="CollapseAllButton"
@@ -526,7 +529,7 @@
                         AutomationProperties.Name="Collapse all">
                         <PathIcon
                             Foreground="{StaticResource SessionTreeForegroundBrush}"
-                            Data="M7.90242 0.90237L4.40237 4.40237C4.20711 4.59764 3.89053 4.59764 3.69527 4.40237L0.19527 0.90237C0 0.70711 0 0.39053 0.19527 0.19527C0.39053 0 0.70711 0 0.90237 0.19527L4.04882 3.34171L7.19522 0.19527C7.39052 0 7.70712 0 7.90242 0.19527C8.09762 0.39053 8.09762 0.70711 7.90242 0.90237ZM7.90242 10.19522L4.40237 6.69527C4.20711 6.5 3.89053 6.5 3.69527 6.69527L0.19527 10.19522C0 10.39052 0 10.70712 0.19527 10.90242C0.39053 11.09762 0.70711 11.09762 0.90237 10.90242L4.04882 7.75592L7.19522 10.90242C7.39052 11.09762 7.70712 11.09762 7.90242 10.90242C8.09762 10.70712 8.09762 10.39052 7.90242 10.19522Z" />
+                            Data="M3,2 A2,2 0 0 1 5,0 H12 A2,2 0 0 1 14,2 V9 A2,2 0 0 1 12,11 H11 V10 H12 A1,1 0 0 0 13,9 V2 A1,1 0 0 0 12,1 H5 A1,1 0 0 0 4,2 V3 H3 Z M2,3 H9 A2,2 0 0 1 11,5 V12 A2,2 0 0 1 9,14 H2 A2,2 0 0 1 0,12 V5 A2,2 0 0 1 2,3 Z M2,4 A1,1 0 0 0 1,5 V12 A1,1 0 0 0 2,13 H9 A1,1 0 0 0 10,12 V5 A1,1 0 0 0 9,4 Z M3,8 H8 V9 H3 Z" />
                     </Button>
                 </Grid>
 
