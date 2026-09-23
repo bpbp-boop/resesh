@@ -63,6 +63,15 @@ test("Y confirms session-close dialogs without becoming a global destructive sho
   assert.match(genericConfirm, /acceptY\s*\?\s*await ShowCloseConfirmationAsync\(dialog\)/);
 });
 
+test("bulk close can end persistent sessions and keeps tabs whose session survived", () => {
+  const bulkTmux = source.match(
+    /private async Task RequestCloseManyWithTmuxAsync[\s\S]*?\n    }\r?\n\r?\n    private void CloseTabCore/)?.[0] ?? "";
+  assert.match(bulkTmux, /new CheckBox/);
+  assert.match(bulkTmux, /ShowCloseConfirmationAsync\(dialog\)/);
+  assert.match(bulkTmux, /endTmuxCheckBox\.IsChecked == true[\s\S]*?TryEndRemoteSessionAsync\(\)/);
+  assert.match(bulkTmux, /tabs\.Where\(tab => !failed\.Contains\(tab\)\)[\s\S]*?CloseTabCore\(tab\)/);
+});
+
 test("closing a tab hands off to its successor before removing the closing view", () => {
   const closeCore = source.match(
     /private void CloseTabCore[\s\S]*?\n    }\r?\n/)?.[0] ?? "";

@@ -79,9 +79,24 @@ GPU canvas-resize regression. It checks rendered pixels and reports PASS/FAIL.
 Right-click a persistent SSH tab and choose **Manage Remote Sessions…** to list the
 shells belonging to that saved connection, including when the tab is disconnected.
 The same action is available from the **Session** menu and the command palette for the active tab.
-The manager shows session age, foreground process, current folder, and attached-client
-count. Select a shell to **Resume**, or **End Session…** to terminate it after confirmation.
-**Refresh** updates the list. Closing a terminal tab still only detaches its persistent shell.
+The manager lists each shell by its current folder and foreground program, with its age and
+whether it is detached, open in a tab, or attached somewhere else. Select a shell to **Resume**
+(or double-click it), **End Session…** to terminate it after confirmation, or
+**End All Detached…** to clear out every shell that no tab or other client is using.
+
+Closing a terminal tab only detaches its persistent shell; the close dialog, including
+**Close Others** and **Close All**, offers to end the sessions instead. What a new tab does
+with shells that are still running is set per connection in **Session Settings › Terminal ›
+When earlier shells are running**:
+
+- **Resume it, or ask when there are several** (default) — a single detached shell resumes
+  directly; otherwise a picker offers each shell, a new session, and
+  an **End detached shells and start new** button.
+- **Start a new shell, keep the others.**
+- **End detached shells, then start a new one.**
+
+Shells open in another tab or attached from another client are never ended automatically
+and never resumed without asking.
 
 ## Optional shell integration (experimental)
 

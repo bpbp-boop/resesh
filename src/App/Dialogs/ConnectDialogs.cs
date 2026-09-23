@@ -5,6 +5,15 @@ using System.Runtime.CompilerServices;
 
 namespace Resesh.App.Dialogs;
 
+/// <summary>The user's answer to the persistent-session picker.</summary>
+public abstract record TmuxChoice
+{
+    private TmuxChoice() { }
+    public sealed record Resume(int Slot) : TmuxChoice;
+    public sealed record StartNew : TmuxChoice;
+    public sealed record EndDetachedAndStartNew : TmuxChoice;
+}
+
 /// <summary>Small code-built dialogs used during the connect workflow.</summary>
 public static class ConnectDialogs
 {
@@ -121,13 +130,18 @@ public static class ConnectDialogs
         return await ShowAsync(dialog) == ContentDialogResult.Primary;
     }
 
-    /// <summary>Lets the user choose an existing persistent shell or start a new one.</summary>
-    public static async Task<int?> SelectTmuxSessionAsync(
-        XamlRoot xamlRoot, IReadOnlyList<TmuxSessionInfo> sessions, int newSlot)
+    /// <summary>
+    /// Lets the user resume one of the connection's running shells, start another, or clear
+    /// out the detached ones and start fresh. Returns null on cancel. Double-click resumes
+    /// (or starts) the clicked row.
+    /// </summary>
+    public static async Task<TmuxChoice?> SelectTmuxSessionAsync(
+        XamlRoot xamlRoot, string profileName, IReadOnlyList<TmuxSessionInfo> sessions, int newSlot)
     {
+        var detached = sessions.Count(session => session.AttachedClients == 0);
         var picker = new ListView
         {
-            MaxHeight = 340,
+            MaxHeight = 360,
             SelectionMode = ListViewSelectionMode.Single,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
@@ -135,51 +149,82 @@ public static class ConnectDialogs
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(picker, "ConnectRemoteSessionsList");
         foreach (var session in sessions)
             picker.Items.Add(TmuxSessionRow.Create(session));
-        picker.Items.Add(new ListViewItem
-        {
-            Tag = newSlot,
-            Content = new TextBlock
-            {
-                Text = $"Start a new persistent session ({SlotLabel(newSlot)})",
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 8, 0, 8),
-            },
-        });
+        picker.Items.Add(TmuxSessionRow.CreateNew(newSlot, "Start a new session"));
         picker.SelectedIndex = 0;
+
+        var summary = detached == sessions.Count
+            ? $"{sessions.Count} earlier shells are still running on this host."
+            : detached == 0
+                ? $"{sessions.Count} shells are running and attached somewhere else."
+                : $"{sessions.Count} shells are running: {detached} detached, {sessions.Count - detached} attached somewhere else.";
         var content = new StackPanel
         {
             Spacing = 12,
-            MinWidth = 460,
             Children =
             {
                 new TextBlock
                 {
-                    Text = "More than one saved persistent session is available for this connection. Select the shell to resume, or start a new shell.",
+                    Text = summary + " Resume one, or start a new session.",
                     TextWrapping = TextWrapping.Wrap,
                 },
                 picker,
             },
         };
+        // ContentDialog footer buttons share equal widths, so the long bulk action lives in
+        // the content where it can size to its label. Attached shells are someone's live
+        // terminal, so it never touches them.
+        var endDetached = new Button
+        {
+            Content = detached == 1 ? "End the detached shell and start new" : $"End {detached} detached shells and start new",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            Visibility = detached == 0 ? Visibility.Collapsed : Visibility.Visible,
+        };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(endDetached, "EndDetachedAndStartNew");
+        content.Children.Add(endDetached);
+        content.Children.Add(new TextBlock
+        {
+            Text = "To skip this question, change “When earlier shells are running” in Session Settings › Terminal.",
+            TextWrapping = TextWrapping.Wrap,
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionTreeMutedForegroundBrush"],
+        });
         var dialog = new ContentDialog
         {
-            Title = "Select Persistent Session",
+            Title = $"Resume a Session — {profileName}",
             Content = content,
-            PrimaryButtonText = "Continue",
+            PrimaryButtonText = "Resume",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = xamlRoot,
         };
-        if (await ShowAsync(dialog) != ContentDialogResult.Primary)
+        TmuxSessionRow.SizeDialog(dialog, content, xamlRoot);
+        picker.SelectionChanged += (_, _) => dialog.PrimaryButtonText =
+            (picker.SelectedItem as ListViewItem)?.Tag is TmuxSessionInfo ? "Resume" : "Start New";
+        var doubleTapped = false;
+        picker.DoubleTapped += (_, _) =>
+        {
+            doubleTapped = true;
+            dialog.Hide();
+        };
+        var endRequested = false;
+        endDetached.Click += (_, _) =>
+        {
+            endRequested = true;
+            dialog.Hide();
+        };
+
+        var result = await ShowAsync(dialog);
+        if (endRequested)
+            return new TmuxChoice.EndDetachedAndStartNew();
+        if (result != ContentDialogResult.Primary && !doubleTapped)
             return null;
         return (picker.SelectedItem as ListViewItem)?.Tag switch
         {
-            TmuxSessionInfo session => session.Slot,
-            int slot => slot,
+            TmuxSessionInfo session => new TmuxChoice.Resume(session.Slot),
+            int => new TmuxChoice.StartNew(),
             _ => null,
         };
     }
-
-    private static string SlotLabel(int slot) => slot == 0 ? "Primary" : $"Session {slot + 1}";
 
     /// <summary>Host key confirmation: first connect, or a changed key (typed confirmation required).</summary>
     public static Task<bool> ConfirmHostKeyAsync(XamlRoot xamlRoot, HostKeyInfo info) =>

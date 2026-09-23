@@ -1,3 +1,4 @@
+using Resesh.Core.Models;
 using Resesh.Core.Ssh;
 
 namespace Resesh.Core.Tests;
@@ -52,6 +53,75 @@ public sealed class TmuxManagementTests
         Assert.Contains($"attach-session -t ={TmuxPersistence.SessionName(Id, 1)}", command);
         Assert.DoesNotContain("new-session", command);
         Assert.DoesNotContain("attach-session -d", command);
+    }
+
+    private static TmuxSessionInfo Shell(int slot, int attached = 0, int minutesAgo = 0) =>
+        new(slot, TmuxPersistence.SessionName(Id, slot), "/home/me", attached,
+            DateTimeOffset.UtcNow.AddMinutes(-minutesAgo), "bash");
+
+    private static readonly IReadOnlySet<int> NoTabs = new HashSet<int>();
+
+    [Fact]
+    public void Ask_StartsFreshWhenNothingIsRunning()
+    {
+        var plan = Assert.IsType<TmuxConnectPlan.StartNew>(
+            TmuxPersistence.PlanConnect([], NoTabs, DetachedSessionAction.Ask));
+        Assert.Equal(0, plan.Slot);
+        Assert.Empty(plan.EndFirst);
+    }
+
+    [Fact]
+    public void Ask_ResumesALoneDetachedShellWithoutAsking()
+    {
+        var plan = TmuxPersistence.PlanConnect([Shell(0), Shell(1)], new HashSet<int> { 0 }, DetachedSessionAction.Ask);
+        Assert.Equal(new TmuxConnectPlan.Resume(1), plan);
+    }
+
+    [Fact]
+    public void Ask_NeverSilentlyMirrorsAShellAttachedElsewhere()
+    {
+        var plan = Assert.IsType<TmuxConnectPlan.Choose>(
+            TmuxPersistence.PlanConnect([Shell(0, attached: 1)], NoTabs, DetachedSessionAction.Ask));
+        Assert.Equal(1, plan.NewSlot);
+    }
+
+    [Fact]
+    public void Ask_OffersDetachedShellsFirstNewestFirst()
+    {
+        var plan = Assert.IsType<TmuxConnectPlan.Choose>(TmuxPersistence.PlanConnect(
+            [Shell(0, attached: 1, minutesAgo: 1), Shell(1, minutesAgo: 90), Shell(2, minutesAgo: 5), Shell(3)],
+            new HashSet<int> { 3 }, DetachedSessionAction.Ask));
+        Assert.Equal([2, 1, 0], plan.Sessions.Select(session => session.Slot));
+        Assert.Equal(4, plan.NewSlot);
+    }
+
+    [Fact]
+    public void StartNew_KeepsEveryExistingShell()
+    {
+        var plan = Assert.IsType<TmuxConnectPlan.StartNew>(
+            TmuxPersistence.PlanConnect([Shell(0), Shell(1)], NoTabs, DetachedSessionAction.StartNew));
+        Assert.Equal(2, plan.Slot);
+        Assert.Empty(plan.EndFirst);
+    }
+
+    [Fact]
+    public void EndDetached_SparesTabOwnedAndAttachedShellsAndReusesFreedSlots()
+    {
+        var plan = Assert.IsType<TmuxConnectPlan.StartNew>(TmuxPersistence.PlanConnect(
+            [Shell(0), Shell(1, attached: 1), Shell(2), Shell(3)],
+            new HashSet<int> { 3 }, DetachedSessionAction.EndDetachedAndStartNew));
+        Assert.Equal([0, 2], plan.EndFirst);
+        Assert.Equal(0, plan.Slot);
+    }
+
+    [Fact]
+    public void KillCommand_EndsEachSessionIndependently()
+    {
+        var command = TmuxPersistence.KillCommand(Id, [2, 0, 2]);
+        Assert.Equal(
+            $"{TmuxPersistence.KillCommand(Id, 0)}; {TmuxPersistence.KillCommand(Id, 2)}",
+            command);
+        Assert.DoesNotContain("\\;", command);
     }
 
     [Theory]

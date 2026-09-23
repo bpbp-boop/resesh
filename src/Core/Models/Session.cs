@@ -31,6 +31,18 @@ public enum ShellIntegrationMode
     PowerShell = 5,
 }
 
+/// <summary>What connecting does when earlier persistent shells for the connection are
+/// still running on the host and no app tab owns them.</summary>
+public enum DetachedSessionAction
+{
+    /// <summary>Resume the only one; ask when there are several.</summary>
+    Ask = 0,
+    /// <summary>Always start a new shell and leave the others running.</summary>
+    StartNew = 1,
+    /// <summary>End the detached shells, then start a new one.</summary>
+    EndDetachedAndStartNew = 2,
+}
+
 /// <summary>
 /// A local shell target hosted with ConPTY. Executable and arguments are kept separate
 /// (never an opaque command string) so quoting stays unambiguous.
@@ -139,6 +151,10 @@ public sealed record Session
 
     /// <summary>Run the remote shell inside tmux so it survives disconnects (requires tmux on the host).</summary>
     public bool Persistent { get; init; }
+
+    /// <summary>Connect-time handling of persistent shells left running by closed tabs.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public DetachedSessionAction DetachedSessions { get; init; } = DetachedSessionAction.Ask;
 
     /// <summary>Shell integration for new terminals; disabled for new and legacy profiles.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]

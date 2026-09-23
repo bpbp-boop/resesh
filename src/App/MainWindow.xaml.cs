@@ -1416,10 +1416,76 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var message = connected > 0
             ? $"Close {tabs.Count} {description}? {connected} of them {(connected == 1 ? "is" : "are")} still connected."
             : $"Close {tabs.Count} {description}?";
+        var persistent = tabs.Where(t => t.Capabilities.RemoteSession && t.Session.Persistent
+            && t.State == TabConnectionState.Connected && t.View is TerminalTabView).ToList();
+        if (persistent.Count > 0)
+        {
+            await RequestCloseManyWithTmuxAsync(tabs, persistent, message);
+            return;
+        }
         if (!await ConfirmAsync("Close Tabs", message, "Close", acceptY: true))
             return;
         foreach (var tab in tabs)
             CloseTabCore(tab);
+    }
+
+    /// <summary>Bulk close that can also end the tabs' persistent shells — otherwise each
+    /// one is left detached on its host and turns up again at the next connect.</summary>
+    private async Task RequestCloseManyWithTmuxAsync(
+        IReadOnlyList<TabViewModel> tabs, IReadOnlyList<TabViewModel> persistent, string message)
+    {
+        var endTmuxCheckBox = new CheckBox
+        {
+            Content = persistent.Count == 1
+                ? "End the persistent session of the connected tab"
+                : $"End the persistent sessions of {persistent.Count} connected tabs",
+        };
+        var dialog = new ContentDialog
+        {
+            Title = "Close Tabs",
+            Content = new StackPanel
+            {
+                Spacing = 8,
+                Children =
+                {
+                    new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                    endTmuxCheckBox,
+                    new TextBlock
+                    {
+                        Text = "This ends everything running in those sessions. Leave the check box clear to keep them running.",
+                        TextWrapping = TextWrapping.Wrap,
+                        Opacity = 0.72,
+                    },
+                },
+            },
+            PrimaryButtonText = "Close",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Root.XamlRoot,
+        };
+        if (!await ShowCloseConfirmationAsync(dialog))
+            return;
+
+        var failed = new HashSet<TabViewModel>();
+        if (endTmuxCheckBox.IsChecked == true)
+        {
+            var results = await Task.WhenAll(persistent.Select(async tab =>
+                (tab, ended: await ((TerminalTabView)tab.View!).TryEndRemoteSessionAsync())));
+            failed.UnionWith(results.Where(result => !result.ended).Select(result => result.tab));
+        }
+        // A tab whose shell could not be ended stays open so the user can retry from it.
+        foreach (var tab in tabs.Where(tab => !failed.Contains(tab)))
+            CloseTabCore(tab);
+        if (failed.Count > 0)
+            await new ContentDialog
+            {
+                Title = "Could Not End Remote Sessions",
+                Content = failed.Count == 1
+                    ? $"The persistent session for \"{failed.First().Header}\" could not be ended, so its tab was left open. Check the connection and try again."
+                    : $"{failed.Count} persistent sessions could not be ended, so their tabs were left open. Check the connections and try again.",
+                CloseButtonText = "OK",
+                XamlRoot = Root.XamlRoot,
+            }.ShowModalAsync();
     }
 
     private void CloseTabCore(TabViewModel tab)
@@ -1872,8 +1938,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         {
             using var connection = await view.CreateRemoteManagementConnectionAsync();
             if (connection is null) return;
+            var openSlots = ViewModel.AllTabs
+                .Where(other => other.Session.Id == tab.Session.Id && !other.IsPlayback)
+                .Select(other => other.TmuxSlot)
+                .ToHashSet();
             slot = await RemoteSessionsDialog.ShowAsync(Root.XamlRoot, tab.Session.Name,
-                tab.Session.Id,
+                tab.Session.Id, openSlots,
                 () => Task.Run(() => connection.RunCommand(Resesh.Core.Ssh.TmuxPersistence.ManagementCommand())),
                 selected => Task.Run(() => connection.TryRunCommand(Resesh.Core.Ssh.TmuxPersistence.KillCommand(tab.Session.Id, selected))));
         }

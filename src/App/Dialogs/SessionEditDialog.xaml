@@ -233,6 +233,21 @@
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Text="Runs the shell inside tmux on the host, so it survives dropped connections and app restarts — reconnecting resumes right where you left off. Requires tmux on the host."
                         TextWrapping="Wrap" />
+                    <ComboBox
+                        x:Name="DetachedSessionsBox"
+                        Margin="0,8,0,0"
+                        MinWidth="320"
+                        Header="When earlier shells are running"
+                        AutomationProperties.AutomationId="DetachedSessionsBox">
+                        <x:String>Resume it, or ask when there are several</x:String>
+                        <x:String>Start a new shell, keep the others</x:String>
+                        <x:String>End detached shells, then start a new one</x:String>
+                    </ComboBox>
+                    <TextBlock
+                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Applies to new tabs. Closing a tab only detaches its shell. Shells open in another tab or attached from somewhere else are never ended automatically."
+                        TextWrapping="Wrap" />
                 </StackPanel>
 
                 <StackPanel Spacing="2" Margin="0,4,0,0">

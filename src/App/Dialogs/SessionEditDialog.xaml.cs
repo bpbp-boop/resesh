@@ -89,6 +89,7 @@ public sealed partial class SessionEditDialog : ContentDialog
                 // Editable ComboBox resets Text set before it loads; apply it after.
                 TerminalTypeBox.Loaded += (_, _) => TerminalTypeBox.Text = existing.TerminalType;
             PersistentToggle.IsOn = existing.Persistent;
+            DetachedSessionsBox.SelectedIndex = (int)existing.DetachedSessions;
             ShellIntegrationBox.SelectedIndex = existing.ShellIntegration switch
             {
                 ShellIntegrationMode.Bash => 1,
@@ -128,7 +129,14 @@ public sealed partial class SessionEditDialog : ContentDialog
         HostBox.TextChanged += (_, _) => ClearFieldError(HostBox, HostError);
         KeyBox.SelectionChanged += (_, _) => ClearFieldError(KeyBox, KeyError);
         AuthBox.SelectionChanged += (_, _) => ClearFieldError(KeyBox, KeyError);
-        PersistentToggle.Toggled += (_, _) => ClearFieldError(PersistentToggle, PersistentError);
+        if (DetachedSessionsBox.SelectedIndex < 0)
+            DetachedSessionsBox.SelectedIndex = 0;
+        DetachedSessionsBox.IsEnabled = PersistentToggle.IsOn;
+        PersistentToggle.Toggled += (_, _) =>
+        {
+            ClearFieldError(PersistentToggle, PersistentError);
+            DetachedSessionsBox.IsEnabled = PersistentToggle.IsOn;
+        };
         if (initialTarget != SessionSettingsTarget.General)
             SectionBar.SelectedItem = TerminalSection;
         Opened += (_, _) =>
@@ -349,6 +357,12 @@ public sealed partial class SessionEditDialog : ContentDialog
             PassphraseRequired = false,
             TerminalType = string.IsNullOrWhiteSpace(TerminalTypeBox.Text) ? "xterm-256color" : TerminalTypeBox.Text.Trim(),
             Persistent = PersistentToggle.IsOn,
+            DetachedSessions = DetachedSessionsBox.SelectedIndex switch
+            {
+                1 => DetachedSessionAction.StartNew,
+                2 => DetachedSessionAction.EndDetachedAndStartNew,
+                _ => DetachedSessionAction.Ask,
+            },
             ShellIntegration = ShellIntegrationBox.SelectedIndex switch
             {
                 1 => ShellIntegrationMode.Bash,

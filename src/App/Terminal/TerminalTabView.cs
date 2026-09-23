@@ -788,18 +788,42 @@ public sealed class TerminalTabView : Grid, IDisposable
         if (isReconnect)
             return BuildTmuxBootstrap(_tab.TmuxSlot);
 
-        var available = remoteSessions
-            .Where(remote => !_tmuxSlotsAlreadyOpen.Contains(remote.Slot))
-            .ToList();
-        var newSlot = TmuxPersistence.NextAvailableSlot(
-            remoteSessions.Select(remote => remote.Slot).Concat(_tmuxSlotsAlreadyOpen));
-
-        var selectedSlot = available.Count switch
+        var plan = TmuxPersistence.PlanConnect(remoteSessions, _tmuxSlotsAlreadyOpen, Session.DetachedSessions);
+        if (plan is TmuxConnectPlan.Choose choose)
         {
-            0 => newSlot,
-            1 => available[0].Slot,
-            _ => SelectTmuxSessionBlocking(available, newSlot, token),
-        };
+            plan = SelectTmuxSessionBlocking(choose, token) switch
+            {
+                TmuxChoice.Resume resume => new TmuxConnectPlan.Resume(resume.Slot),
+                TmuxChoice.EndDetachedAndStartNew => TmuxPersistence.PlanConnect(remoteSessions,
+                    _tmuxSlotsAlreadyOpen, DetachedSessionAction.EndDetachedAndStartNew),
+                _ => new TmuxConnectPlan.StartNew(choose.NewSlot, []),
+            };
+        }
+
+        if (plan is TmuxConnectPlan.Resume resumePlan)
+        {
+            _tab.TmuxSlot = resumePlan.Slot;
+            return TmuxPersistence.ResumeCommand(Session.Id, resumePlan.Slot);
+        }
+
+        var start = (TmuxConnectPlan.StartNew)plan;
+        var selectedSlot = start.Slot;
+        if (start.EndFirst.Count > 0)
+        {
+            connected.TryRunCommand(TmuxPersistence.KillCommand(Session.Id, start.EndFirst));
+            token.ThrowIfCancellationRequested();
+            // Trust the server, not the kill's exit status. When the listing fails for
+            // another reason, keep avoiding every earlier slot so the new shell can never
+            // attach to a survivor.
+            var after = connected.RunCommand(TmuxPersistence.ManagementCommand());
+            token.ThrowIfCancellationRequested();
+            if (after is { Success: true })
+                remoteSessions = TmuxPersistence.ParseManagedSessions(after.Output, Session.Id);
+            else if (after is not null && TmuxPersistence.IsServerAbsent(after))
+                remoteSessions = [];
+            selectedSlot = TmuxPersistence.NextAvailableSlot(
+                remoteSessions.Select(remote => remote.Slot).Concat(_tmuxSlotsAlreadyOpen));
+        }
         _tab.TmuxSlot = selectedSlot;
         return BuildTmuxBootstrap(selectedSlot);
 
@@ -812,15 +836,15 @@ public sealed class TerminalTabView : Grid, IDisposable
     }
 
     /// <summary>Marshals tmux selection onto the UI thread while the SSH worker waits.</summary>
-    private int SelectTmuxSessionBlocking(IReadOnlyList<TmuxSessionInfo> sessions, int newSlot, CancellationToken token)
+    private TmuxChoice SelectTmuxSessionBlocking(TmuxConnectPlan.Choose choose, CancellationToken token)
     {
-        var tcs = new TaskCompletionSource<int?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var tcs = new TaskCompletionSource<TmuxChoice?>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!DispatcherQueue.TryEnqueue(async () =>
         {
             try
             {
                 if (token.IsCancellationRequested) return;
-                tcs.TrySetResult(await ConnectDialogs.SelectTmuxSessionAsync(XamlRoot, sessions, newSlot));
+                tcs.TrySetResult(await ConnectDialogs.SelectTmuxSessionAsync(XamlRoot, Session.Name, choose.Sessions, choose.NewSlot));
             }
             catch (Exception ex)
             {

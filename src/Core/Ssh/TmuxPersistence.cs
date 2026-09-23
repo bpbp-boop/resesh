@@ -124,6 +124,50 @@ public static class TmuxPersistence
     public static string KillCommand(Guid id, int slot) =>
         $"tmux -L {Socket} kill-session -t ={SessionName(id, slot)}";
 
+    /// <summary>Ends several sessions in one exec. Each kill is its own tmux invocation
+    /// (not a tmux command list) so one vanished session cannot stop the rest; callers
+    /// re-list afterwards instead of trusting the combined exit status.</summary>
+    public static string KillCommand(Guid id, IEnumerable<int> slots) =>
+        string.Join("; ", slots.Distinct().Order().Select(slot => KillCommand(id, slot)));
+
+    /// <summary>
+    /// Decides what a new tab does with the connection's existing shells. Shells owned by
+    /// another app tab are never offered or ended. A shell attached from somewhere else
+    /// (another computer, another app process) is offered but never ended automatically,
+    /// and never resumed without asking — resuming mirrors a terminal someone is using.
+    /// </summary>
+    public static TmuxConnectPlan PlanConnect(IReadOnlyList<TmuxSessionInfo> remoteSessions,
+        IReadOnlySet<int> openSlots, Models.DetachedSessionAction action)
+    {
+        var available = remoteSessions.Where(remote => !openSlots.Contains(remote.Slot)).ToList();
+        var detached = available.Where(remote => remote.AttachedClients == 0).ToList();
+        var newSlot = NextAvailableSlot(remoteSessions.Select(remote => remote.Slot).Concat(openSlots));
+
+        switch (action)
+        {
+            case Models.DetachedSessionAction.StartNew:
+                return new TmuxConnectPlan.StartNew(newSlot, []);
+            case Models.DetachedSessionAction.EndDetachedAndStartNew:
+                var ending = detached.Select(remote => remote.Slot).ToList();
+                var kept = remoteSessions.Select(remote => remote.Slot).Except(ending);
+                return new TmuxConnectPlan.StartNew(NextAvailableSlot(kept.Concat(openSlots)), ending);
+        }
+
+        if (available.Count == 0)
+            return new TmuxConnectPlan.StartNew(newSlot, []);
+        if (available is [{ AttachedClients: 0 } only])
+            return new TmuxConnectPlan.Resume(only.Slot);
+        return new TmuxConnectPlan.Choose(OrderForChoice(available), newSlot);
+    }
+
+    /// <summary>Detached shells first (the likely targets), newest first within each group.</summary>
+    public static IReadOnlyList<TmuxSessionInfo> OrderForChoice(IEnumerable<TmuxSessionInfo> sessions) =>
+        sessions
+            .OrderBy(session => session.AttachedClients > 0)
+            .ThenByDescending(session => session.CreatedAt ?? DateTimeOffset.MinValue)
+            .ThenBy(session => session.Slot)
+            .ToList();
+
     /// <summary>Explicit resume never recreates a shell that ended after discovery.</summary>
     public static string ResumeCommand(Guid id, int slot)
     {
@@ -244,6 +288,22 @@ public static class TmuxPersistence
         }
         return null;
     }
+}
+
+/// <summary>The outcome of <see cref="TmuxPersistence.PlanConnect"/>.</summary>
+public abstract record TmuxConnectPlan
+{
+    private TmuxConnectPlan() { }
+
+    /// <summary>Attach to this existing shell.</summary>
+    public sealed record Resume(int Slot) : TmuxConnectPlan;
+
+    /// <summary>End <paramref name="EndFirst"/> (may be empty), then start a shell in
+    /// <paramref name="Slot"/>.</summary>
+    public sealed record StartNew(int Slot, IReadOnlyList<int> EndFirst) : TmuxConnectPlan;
+
+    /// <summary>Ask the user; <paramref name="Sessions"/> is already in display order.</summary>
+    public sealed record Choose(IReadOnlyList<TmuxSessionInfo> Sessions, int NewSlot) : TmuxConnectPlan;
 }
 
 /// <summary>One persistent shell found on the app's private tmux server.</summary>
