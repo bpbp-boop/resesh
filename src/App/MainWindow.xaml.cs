@@ -691,8 +691,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (AppTitleBar.XamlRoot is null || !AppWindow.TitleBar.ExtendsContentIntoTitleBar)
             return;
         var scale = AppTitleBar.XamlRoot.RasterizationScale;
-        TitleBarLeftPadding.Width = new GridLength(AppWindow.TitleBar.LeftInset / scale);
-        TitleBarRightPadding.Width = new GridLength(AppWindow.TitleBar.RightInset / scale);
+        if (!double.IsFinite(scale) || scale <= 0)
+            return;
+        TitleBarLeftPadding.Width = new GridLength(TitleBarInset(AppWindow.TitleBar.LeftInset, scale));
+        TitleBarRightPadding.Width = new GridLength(TitleBarInset(AppWindow.TitleBar.RightInset, scale));
 
         var rects = new List<Windows.Graphics.RectInt32>();
         foreach (var el in new FrameworkElement[] { TitleBarMenus, QuickConnectHost, TitleBarButtons })
@@ -715,6 +717,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 (int)Math.Round(AppTitleBar.ActualWidth * scale),
                 (int)Math.Round(AppTitleBar.ActualHeight * scale))]);
         source.SetRegionRects(Microsoft.UI.Input.NonClientRegionKind.Passthrough, [.. rects]);
+    }
+
+    /// <summary>Caption insets can be transiently negative mid-DPI change (moving between
+    /// monitors, docking/undocking); GridLength throws on those, so clamp to zero.</summary>
+    internal static double TitleBarInset(int physicalInset, double scale)
+    {
+        var inset = physicalInset / scale;
+        return double.IsFinite(inset) && inset > 0 ? inset : 0;
     }
 
     private void NewWindow_Click(object sender, RoutedEventArgs e) => App.OpenNewWindow();
