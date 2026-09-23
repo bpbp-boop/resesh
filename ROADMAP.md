@@ -27,6 +27,8 @@ and the git history.
   current-directory tracking (cmd/PowerShell prompts, tmux, OSC 7, `/proc` probe, and
   prompt fallback), direct Explorer access for local folders, and SSHFS-Win access for
   remote folders when installed.
+- **Session importers** — SecureCRT, PuTTY registry, and OpenSSH `~/.ssh/config`, offered
+  during onboarding and from the main window.
 - **Export / import & backup** — `*.reseshbackup` archives with merge-on-import,
   optional passphrase-encrypted secrets, and a versioned schema.
 - **SSH key registry** — private keys as shared named resources with fingerprint
@@ -149,8 +151,8 @@ export archive.
   alerts list to jump between waiting tabs, adapters beyond Codex / Claude Code / the
   generic shell wrapper, richer ACP-style status.
 - Ruler: next/prev **error** jump (failed-exit marks only).
-- Live verification loose ends: private-key auth has never been tested against a real
-  host; a real 2FA/Duo keyboard-interactive exchange likewise.
+- Live verification loose end: a real 2FA/Duo keyboard-interactive exchange is untested.
+  Password and private-key auth are in daily use against real hosts.
 
 ---
 
@@ -166,8 +168,8 @@ have `synchronize-panes` if they truly want it.
 
 - **Command snippets** — saved commands with placeholders, per-folder scoping, send on
   click; optional "startup command" per session.
-- **More importers** — PuTTY registry, mRemoteNG, OpenSSH `~/.ssh/config` (the config
-  parser also helps GSSAPI/jump-host defaults).
+- **More importers** — mRemoteNG. The shipped OpenSSH config parser can also supply
+  GSSAPI/jump-host defaults.
 - **Auto-reconnect UX** — backoff + toast on drop, auto-reattach when the session is
   tmux-persistent.
 - **Per-session color schemes** — extend the settings-override layer + the palettes in

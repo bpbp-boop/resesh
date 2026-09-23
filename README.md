@@ -2,7 +2,8 @@
 
 A tabbed SSH and local-terminal client for Windows, built to replace SecureCRT for daily use:
 a folder tree of saved sessions, fast search, tabbed xterm.js terminals, paired asciicast
-and timestamped plain-text recording with instant rewind, `.cast` playback, and SecureCRT import.
+and timestamped plain-text recording with instant rewind, `.cast` playback, and import from
+SecureCRT, PuTTY, and OpenSSH `~/.ssh/config`.
 
 See [ROADMAP.md](ROADMAP.md) for planned work and [DECISIONS.md](DECISIONS.md) for
 version-specific findings and design decisions.
@@ -39,7 +40,8 @@ credentials. Use `.\demo.ps1 -Platform ARM64` to override the detected architect
 
 ## Releases
 
-GitHub Actions builds and tests each push and pull request. Each build produces, for x64 and Arm64:
+GitHub Actions builds and tests each push to `master` and each pull request. Each build produces,
+for x64 and Arm64:
 
 - a `-setup.exe` bundle — the recommended download. The app is self-contained (.NET 10 and the
   Windows App Runtime ship inside it), and the bundle installs the two remaining prerequisites,
@@ -48,10 +50,12 @@ GitHub Actions builds and tests each push and pull request. Each build produces,
   already present.
 - a portable ZIP with the same assumption as the MSI.
 
-The installers are unsigned and install for all users, so Windows requests administrator approval
-and shows an unknown-publisher warning.
-To create a GitHub release with all six files and SHA-256 checksums, push a numeric
-semantic-version tag such as `v1.2.3`.
+The installers install for all users, so Windows requests administrator approval.
+
+To create a GitHub release, push a numeric semantic-version tag such as `v1.2.3`. Tagged builds
+sign the app binaries, the MSI, and the setup bundle with the Certum code-signing certificate
+(the `code-signing` environment), then publish all six files with SHA-256 checksums. Branch and
+pull-request builds are unsigned, so Windows shows an unknown-publisher warning for them.
 
 ## Tests
 
@@ -59,6 +63,7 @@ semantic-version tag such as `v1.2.3`.
 dotnet test tests/Core.Tests
 dotnet test tests/AppLogic.Tests
 dotnet test tests/Terminal.Tests -p:Platform=x64
+node --test tests/*.js
 ```
 
 The app-logic tests execute the production view models without a WinUI window. They cover
@@ -143,10 +148,18 @@ default. When included, the complete backup is encrypted with its passphrase.
 ## Project layout
 
 ```
-src/App        WinUI 3 app (views, viewmodels)
-src/Core       models, session store, importer, credential service — no UI dependencies
-src/Terminal   WebView2 host + xterm.js assets
-tests/Core.Tests
+src/App               WinUI 3 app (views, viewmodels, dialogs)
+src/Core              models, session store, importers, SSH/SFTP, shell integration,
+                      credential service — no UI dependencies
+src/Terminal          WebView2 host + xterm.js assets, native terminal surface (WIP)
+tests/Core.Tests      core unit tests
+tests/AppLogic.Tests  view-model tests without a WinUI window
+tests/Terminal.Tests  terminal buffer and native snapshot tests
+tests/*.js            JavaScript source checks (run with `node --test`)
+installer/            WiX MSI and setup bundle
+eng/                  build scripts, native terminal patches and baselines
+tools/                TestSshServer and KeepaliveProbe
+website/              project website
 ```
 
 ## Local test SSH server
