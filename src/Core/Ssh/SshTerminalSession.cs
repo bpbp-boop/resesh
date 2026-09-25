@@ -205,7 +205,11 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
                     bootstrapCommand = null;
                 }
             }
-            _shell ??= client.CreateShellStream(terminalType, (uint)columns, (uint)rows, 0, 0, 64 * 1024);
+            // The same channel setup as integration, minus exec, so a plain shell also gets
+            // the COLORTERM environment request. The public API is the fallback.
+            _shell ??= IntegratedShellStream.IsShellSupported
+                ? IntegratedShellStream.Create(client, terminalType, columns, rows, null, cancellationToken)
+                : client.CreateShellStream(terminalType, (uint)columns, (uint)rows, 0, 0, 64 * 1024);
             cancellationToken.ThrowIfCancellationRequested();
             if (bootstrapCommand is not null)
             {

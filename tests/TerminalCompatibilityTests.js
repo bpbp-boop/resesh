@@ -66,3 +66,26 @@ test("Shift+Enter sends ESC CR on the normal screen only", () => {
 test("Meta+Enter is not treated as submitting a command", () => {
   assert.match(page, /if \(data\.indexOf\("\\r"\) >= 0 && data !== "\\x1b\\r"\) ruler\.notifyEnter\(titlesSeen\);/);
 });
+
+test("XTVERSION names the terminal, so Claude Code goes on to ask for synchronized output", async () => {
+  const handler = page.match(/    if \(term\.parser && term\.parser\.registerCsiHandler\) {\s*term\.parser\.registerCsiHandler\({ prefix: ">", final: "q" }[\s\S]*?\r?\n    }\r?\n/);
+  assert.ok(handler, "the XTVERSION handler should exist");
+  const term = new Terminal({ allowProposedApi: true });
+  const replies = [];
+  term.onData(data => replies.push(data));
+  vm.runInContext(handler[0], vm.createContext({ term }));
+  const write = data => new Promise(resolve => term.write(data, resolve));
+  try {
+    await write("\x1b[>q");
+    await write("\x1b[>0q");
+    assert.deepEqual(replies, ["\x1bP>|Resesh\x1b\\", "\x1bP>|Resesh\x1b\\"]);
+    replies.length = 0;
+    await write("\x1b[>1q");
+    assert.deepEqual(replies, [], "other XTVERSION parameters are not ours to answer");
+    await write("\x1b[?2026$p");
+    assert.deepEqual(replies, ["\x1b[?2026;2$y"], "xterm.js reports synchronized output as supported");
+    assert.equal(term.buffer.active.getLine(0).translateToString(true), "", "nothing is printed");
+  } finally {
+    term.dispose();
+  }
+});

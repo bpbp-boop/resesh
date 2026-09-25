@@ -725,3 +725,24 @@ keyboard-interactive fallback.
 - Verified in headless Edge against the real page with CDP key and mouse events. The
   pre-change page failed the width, Shift+Enter and OSC 8 checks, and its link click
   blocked on the `confirm()` dialog.
+
+## 2026-09-25 - XTVERSION reply and truecolor advertising
+- The page answers XTVERSION (`CSI > q` / `CSI > 0 q`) with `DCS >|Resesh ST`. Over SSH,
+  `TERM_PROGRAM` rarely arrives, and Claude Code's startup probe only asks for
+  synchronized output (DECRQM 2026) once XTVERSION has replied; its environment fallback
+  is an allowlist of terminal names. xterm.js already supports mode 2026, so without the
+  reply Claude Code redrew without synchronized updates. The app binary carries no
+  release version (only the installer is stamped), so the reply is the name alone.
+- Remote shell integration exports `COLORTERM="${COLORTERM:-truecolor}"` in its launch
+  environment. SSH forwards `TERM` but rarely `COLORTERM`, so chalk-based tools (Claude
+  Code) chose 256 colours. The launch command doesn't depend on the server's `AcceptEnv`;
+  a server-provided value wins.
+- Every SSH session also sends `COLORTERM=truecolor` as an SSH `env` request, whatever its
+  terminal type and with or without shell integration. Plain shells now open through
+  the same pinned SSH.NET channel seam as integrated startup (env, pty, then shell
+  instead of exec); `CreateShellStream` remains the fallback. Servers apply it only when
+  `AcceptEnv` lists `COLORTERM`, and a refusal is ignored. Verified against user-mode
+  OpenSSH sshd with and without `AcceptEnv COLORTERM`, for both shell and exec.
+- The private tmux server adds `Tc` to its terminal overrides. Without it tmux quantizes
+  RGB to the 256-colour palette for `xterm-256color` clients even when `COLORTERM` is set.
+  Not yet checked against a live tmux.

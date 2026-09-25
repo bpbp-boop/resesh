@@ -373,6 +373,16 @@
         return true;
       });
     }
+    // XTVERSION (CSI > q or CSI > 0 q): name the terminal. Over SSH, TERM_PROGRAM
+    // rarely arrives, so programs identify the terminal by asking. Claude Code only
+    // asks for synchronized output (DECRQM 2026, which xterm.js supports) after a reply.
+    if (term.parser && term.parser.registerCsiHandler) {
+      term.parser.registerCsiHandler({ prefix: ">", final: "q" }, function (params) {
+        if (params.length > 1 || (params.length === 1 && params[0] !== 0)) return false;
+        term.input("\x1bP>|Resesh\x1b\\", false);
+        return true;
+      });
+    }
     if (term.onBell) term.onBell(function () { postAgent({ type: "agentBell" }); });
     ruler.onCommandMark(function (command) {
       postAgent({ type: "command", text: String(command || "").slice(0, 512) });
