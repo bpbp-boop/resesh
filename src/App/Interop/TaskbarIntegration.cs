@@ -17,23 +17,66 @@ internal static class TaskbarIntegration
         Marshal.ThrowExceptionForHR(SetCurrentProcessExplicitAppUserModelID(AppUserModelId));
     }
 
+    /// <summary>Diagnostic hook (DEBUG builds wire this to a trace log).</summary>
+    public static Action<string>? TraceHook { get; set; }
+
+    /// <summary>
+    /// Tags the window with the app's identity and, when they fit, the relaunch command,
+    /// name and icon used by taskbar pinning. Best effort: taskbar grouping is cosmetic,
+    /// so a rejected property is traced and skipped — it must never stop a window opening.
+    /// </summary>
     public static void ConfigureWindow(IntPtr hwnd, string command, string iconPath)
     {
         if (hwnd == IntPtr.Zero)
             return;
 
-        Marshal.ThrowExceptionForHR(SHGetPropertyStoreForWindow(hwnd, PropertyStoreId, out var store));
+        var iconResource = $"{iconPath},0";
+        var plan = TaskbarRelaunchPlan.For(command, iconResource);
+        if (!plan.SetRelaunchCommand)
+            TraceHook?.Invoke($"taskbar: relaunch command skipped ({command.Length} chars > {TaskbarRelaunchPlan.MaxPropertyLength})");
+        else if (!plan.SetRelaunchIcon)
+            TraceHook?.Invoke($"taskbar: relaunch icon skipped ({iconResource.Length} chars > {TaskbarRelaunchPlan.MaxPropertyLength})");
+
+        IPropertyStore store;
         try
         {
-            SetString(store, AppId, AppUserModelId);
-            SetString(store, RelaunchCommand, command);
-            SetString(store, RelaunchDisplayName, "resesh");
-            SetString(store, RelaunchIcon, $"{iconPath},0");
-            Marshal.ThrowExceptionForHR(store.Commit());
+            Marshal.ThrowExceptionForHR(SHGetPropertyStoreForWindow(hwnd, PropertyStoreId, out store));
+        }
+        catch (Exception ex) when (ex is COMException or ArgumentException)
+        {
+            TraceHook?.Invoke($"taskbar: no window property store: {ex.Message}");
+            return;
+        }
+        try
+        {
+            TrySetString(store, AppId, AppUserModelId, "app id");
+            // Name and command go together: the shell ignores one without the other.
+            if (plan.SetRelaunchCommand
+                && TrySetString(store, RelaunchCommand, command, "relaunch command")
+                && TrySetString(store, RelaunchDisplayName, "resesh", "relaunch name")
+                && plan.SetRelaunchIcon)
+                TrySetString(store, RelaunchIcon, iconResource, "relaunch icon");
+            var hr = store.Commit();
+            if (hr < 0)
+                TraceHook?.Invoke($"taskbar: commit failed 0x{hr:X8}");
         }
         finally
         {
             Marshal.ReleaseComObject(store);
+        }
+    }
+
+    private static bool TrySetString(IPropertyStore store, PropertyKey key, string value, string what)
+    {
+        try
+        {
+            SetString(store, key, value);
+            return true;
+        }
+        catch (Exception ex) when (ex is COMException or ArgumentException)
+        {
+            TraceHook?.Invoke($"taskbar: {what} rejected ({value.Length} chars): {ex.Message}");
+            return false;
         }
     }
 
