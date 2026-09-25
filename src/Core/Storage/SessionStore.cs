@@ -57,7 +57,7 @@ public sealed class SessionStore
         {
             var all = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var path in FolderListOf(kind)
-                .Concat(_sessions.Where(s => s.Kind == kind).Select(s => s.FolderPath)))
+                .Concat(_sessions.Where(s => s.FolderScope == kind).Select(s => s.FolderPath)))
             {
                 foreach (var ancestor in FolderPaths.SelfAndAncestors(path))
                     all.Add(ancestor);
@@ -213,7 +213,7 @@ public sealed class SessionStore
 
             for (var i = 0; i < _sessions.Count; i++)
             {
-                if (_sessions[i].Kind != kind)
+                if (_sessions[i].FolderScope != kind)
                     continue;
                 var reparented = FolderPaths.Reparent(_sessions[i].FolderPath, oldPath, newPath);
                 if (reparented is not null)
@@ -248,9 +248,9 @@ public sealed class SessionStore
                 return [];
 
             var removed = _sessions
-                .Where(s => s.Kind == kind && FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath))
+                .Where(s => s.FolderScope == kind && FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath))
                 .ToList();
-            _sessions.RemoveAll(s => s.Kind == kind && FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath));
+            _sessions.RemoveAll(s => s.FolderScope == kind && FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath));
             FolderListOf(kind).RemoveAll(f => FolderPaths.IsSelfOrDescendant(f, folderPath));
             Save();
             return removed;

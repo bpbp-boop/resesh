@@ -54,16 +54,29 @@
 
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="110" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="120" />
                         </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Spacing="4">
+                        <ComboBox
+                            x:Name="ProtocolBox"
+                            Grid.Column="0"
+                            VerticalAlignment="Top"
+                            Header="Protocol"
+                            SelectedIndex="0"
+                            AutomationProperties.AutomationId="SessionProtocolBox"
+                            SelectionChanged="ProtocolBox_SelectionChanged"
+                            HorizontalAlignment="Stretch">
+                            <ComboBoxItem Content="SSH" />
+                            <ComboBoxItem Content="Telnet" />
+                        </ComboBox>
+                        <StackPanel Grid.Column="1" Spacing="4">
                             <TextBox x:Name="HostBox" Header="Host" PlaceholderText="10.0.0.1 or host.example.com" />
                             <TextBlock x:Name="HostError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
                         </StackPanel>
                         <NumberBox
                             x:Name="PortBox"
-                            Grid.Column="1"
+                            Grid.Column="2"
                             VerticalAlignment="Top"
                             Header="Port"
                             Minimum="1"
@@ -72,6 +85,15 @@
                             Value="22" />
                     </Grid>
 
+                    <InfoBar
+                        x:Name="TelnetNotice"
+                        IsOpen="False"
+                        IsClosable="False"
+                        Severity="Warning"
+                        Title="Unencrypted"
+                        Message="Telnet sends everything in plain text, including passwords typed at the server's login prompt. Use it for console servers and lab or management networks, not general remote access." />
+
+                    <StackPanel x:Name="SshOptionsPanel" Spacing="12">
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -151,6 +173,7 @@
                                 TextWrapping="Wrap" />
                         </StackPanel>
                     </Expander>
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
 
@@ -225,7 +248,7 @@
                         VerticalAlignment="Bottom" />
                 </Grid>
 
-                <StackPanel Spacing="4">
+                <StackPanel x:Name="PersistentPanel" Spacing="4">
                     <ToggleSwitch x:Name="PersistentToggle" Header="Persistent session" />
                 <TextBlock x:Name="PersistentError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
                     <TextBlock

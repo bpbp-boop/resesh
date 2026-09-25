@@ -598,7 +598,7 @@ public sealed class TabViewModel : ObservableObject
                     ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
                     : directory;
             }
-            return string.IsNullOrEmpty(Session.Username)
+            return string.IsNullOrEmpty(Session.Username) || Session.IsTelnet
                 ? Session.Host
                 : $"{Session.Username}@{Session.Host}";
         }
@@ -608,7 +608,9 @@ public sealed class TabViewModel : ObservableObject
         ? ""
         : IsLocal
             ? Session.Local?.Executable ?? ""
-            : $"{Session.Username}@{Session.Host}:{Session.Port}";
+            : Session.IsTelnet
+                ? $"telnet {Session.Host}:{Session.Port}"
+                : $"{Session.Username}@{Session.Host}:{Session.Port}";
 
     public string StateText => IsOnboarding
         ? "setup"

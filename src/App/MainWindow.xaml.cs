@@ -246,12 +246,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         SplitDownMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SplitDown);
         FilePaneMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.FilePane);
         ReconnectMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.ReconnectTab);
+        SendBreakMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SendBreak);
         CloneMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.CloneTab);
         CloseTabMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.CloseTab);
         var quickConnect = AppShortcuts.Label(ShortcutIds.QuickConnect);
         QuickConnectHintText.Text = quickConnect;
         ToolTipService.SetToolTip(QuickConnectBox,
-            $"Connect with ssh user@host, or search saved sessions ({quickConnect})");
+            $"Connect with ssh user@host or telnet host port, or search saved sessions ({quickConnect})");
     }
 
     /// <summary>Runs one shortcut from the shared table. <paramref name="source"/> is the tab
@@ -324,6 +325,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                     return false;
                 ReconnectTab(tab);
                 return true;
+            case ShortcutIds.SendBreak:
+                return tab.View is TerminalTabView breakView && breakView.SendBreak();
             case ShortcutIds.MoveTabLeft or ShortcutIds.MoveTabRight:
                 MoveTab(tab, id == ShortcutIds.MoveTabRight ? 1 : -1);
                 return true;
@@ -562,7 +565,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             Sync(() => App.OpenNewWindow()), Keys(ShortcutIds.NewWindow));
         Add("Application", "Open Default Local Terminal", "new session shell tab",
             Sync(OpenDefaultLocalProfile), Keys(ShortcutIds.NewLocalTab));
-        Add("Application", "Quick Connect", "ssh search sessions connect",
+        Add("Application", "Quick Connect", "ssh telnet search sessions connect",
             Sync(() => QuickConnectBox.Focus(FocusState.Programmatic)), Keys(ShortcutIds.QuickConnect),
             keepActionFocus: true);
         Add("Application", "Keyboard Shortcuts", "keys hotkeys keybindings accelerators help reference",
@@ -678,6 +681,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (tab.State == TabConnectionState.Connected)
             Add("Tab", $"{tab.Capabilities.StopVerb} Tab", "current active session",
                 Sync(() => DisconnectTab(tab)));
+        if (tab.Capabilities.SendBreak && tab.State == TabConnectionState.Connected && !tab.IsLocked)
+            Add("Tab", "Send Break", "telnet console serial break boot interrupt rommon password recovery",
+                Sync(() => SendBreak(tab)), Keys(ShortcutIds.SendBreak));
         if (CanManageRemoteSessions(tab))
             Add("Tab", "Manage Remote Sessions", "tmux persistent shells resume end close command running age",
                 () => ManageRemoteSessionsAsync(tab));
@@ -768,6 +774,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (NewSessionFlyout.Items.Count > 0)
             NewSessionFlyout.Items.Add(new MenuFlyoutSeparator());
         AddItem(NewSessionFlyout, "New SSH Session…", () => _ = OpenSessionEditorAsync(existing: null, defaultFolder: ""));
+        AddItem(NewSessionFlyout, "New Telnet Session…", () => _ = OpenSessionEditorAsync(existing: null, defaultFolder: "", SessionKind.Telnet));
         AddItem(NewSessionFlyout, "New Local Profile…", () => _ = OpenLocalProfileEditorAsync(existing: null, defaultFolder: ""));
     }
 
@@ -1007,6 +1014,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var caps = ViewModel.ActiveTab?.Capabilities;
         ReconnectMenuItem.Text = caps?.StartAgainVerb ?? "Reconnect";
         DisconnectMenuItem.Text = caps?.StopVerb ?? "Disconnect";
+        var active = ViewModel.ActiveTab;
+        SendBreakMenuItem.Visibility = caps?.SendBreak == true && active?.IsPlayback == false
+            ? Visibility.Visible : Visibility.Collapsed;
+        SendBreakMenuItem.IsEnabled = active is { State: TabConnectionState.Connected, IsLocked: false };
         EndRemoteMenuItem.Visibility = caps is null || caps.RemoteSession
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -1108,12 +1119,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             return;
         var text = sender.Text.Trim();
         var items = new List<QuickConnectSuggestion>();
-        if (TryParseSshTarget(text, out var adhoc))
+        if (QuickConnectTarget.TryParse(text, Environment.UserName, out var adhoc))
         {
             items.Add(new QuickConnectSuggestion
             {
-                Display = $"Connect to {adhoc.Username}@{adhoc.Host}" + (adhoc.Port != 22 ? $":{adhoc.Port}" : ""),
-                Detail = "new connection",
+                Display = adhoc.IsTelnet
+                    ? $"Connect to {adhoc.Host}:{adhoc.Port} over telnet"
+                    : $"Connect to {adhoc.Username}@{adhoc.Host}" + (adhoc.Port != 22 ? $":{adhoc.Port}" : ""),
+                Detail = adhoc.IsTelnet ? "new connection · unencrypted" : "new connection",
                 Glyph = "\uE768",
                 Session = adhoc,
             });
@@ -1125,7 +1138,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 Display = s.Name,
                 Detail = s.IsLocal
                     ? s.Local?.Executable ?? "local shell"
-                    : $"{s.Username}@{s.Host}" + (s.Port != 22 ? $":{s.Port}" : ""),
+                    : s.IsTelnet
+                        ? $"telnet {s.Host}" + (s.Port != 23 ? $":{s.Port}" : "")
+                        : $"{s.Username}@{s.Host}" + (s.Port != 22 ? $":{s.Port}" : ""),
                 Glyph = s.IsLocal ? "\uE7F8" : "\uEDA2",
                 Session = s,
             }));
@@ -1141,7 +1156,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             var text = args.QueryText.Trim();
             if (text.Length == 0)
                 return;
-            target = TryParseSshTarget(text, out var adhoc)
+            target = QuickConnectTarget.TryParse(text, Environment.UserName, out var adhoc)
                 ? adhoc
                 : ViewModel.RankedMatches(text).FirstOrDefault();
         }
@@ -1167,57 +1182,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private void UpdateQuickConnectHint()
     {
         QuickConnectBox.PlaceholderText = QuickConnectHost.ActualWidth < 360
-            ? "user@host" : "ssh user@host or search sessions…";
+            ? "user@host" : "ssh user@host, telnet host, or search…";
         QuickConnectHint.Visibility =
             QuickConnectHost.ActualWidth >= 440 &&
             QuickConnectBox.Text.Length == 0 && QuickConnectBox.FocusState == FocusState.Unfocused
                 ? Visibility.Visible
                 : Visibility.Collapsed;
-    }
-
-    /// <summary>
-    /// Parses "ssh user@host", "user@host:2222" etc. into an ad-hoc (unsaved) session.
-    /// A bare hostname only counts with an explicit "ssh " prefix, so plain words keep
-    /// meaning "search my saved sessions".
-    /// </summary>
-    private static bool TryParseSshTarget(string input, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Session? session)
-    {
-        session = null;
-        var text = input.Trim();
-        var explicitSsh = text.StartsWith("ssh ", StringComparison.OrdinalIgnoreCase);
-        if (explicitSsh)
-            text = text[4..].Trim();
-        if (text.Length == 0 || text.Contains(' ') || (!explicitSsh && !text.Contains('@')))
-            return false;
-
-        var user = "";
-        var at = text.LastIndexOf('@');
-        if (at >= 0)
-        {
-            user = text[..at];
-            text = text[(at + 1)..];
-        }
-        var port = 22;
-        var colon = text.LastIndexOf(':');
-        if (colon >= 0)
-        {
-            if (!int.TryParse(text[(colon + 1)..], out port) || port is < 1 or > 65535)
-                return false;
-            text = text[..colon];
-        }
-        if (text.Length == 0 || at == 0)
-            return false;
-
-        var username = user.Length > 0 ? user : Environment.UserName;
-        session = new Session
-        {
-            Name = $"{username}@{text}",
-            Host = text,
-            Port = port,
-            Username = username,
-            AuthMethod = AuthMethod.Password,
-        };
-        return true;
     }
 
     /// <summary>Launch-time entry for App's --open argument (the automated test rig).</summary>
@@ -2117,6 +2087,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         if (tab.View is TerminalTabView view
             && tab.State is TabConnectionState.Disconnected or TabConnectionState.Exited)
             _ = view.ConnectAsync(isReconnect: true);
+    }
+
+    public void SendBreak(TabViewModel tab) => (tab.View as TerminalTabView)?.SendBreak();
+
+    private void SendBreakMenu_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTab is { } tab)
+            SendBreak(tab);
     }
 
     public void DisconnectTab(TabViewModel tab)
@@ -3208,7 +3186,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 await new ContentDialog
                 {
                     Title = $"Import from {sourceName}",
-                    Content = "No importable SSH sessions were found.",
+                    Content = "No importable SSH or telnet sessions were found.",
                     CloseButtonText = "OK",
                     XamlRoot = Root.XamlRoot,
                 }.ShowModalAsync();
@@ -3634,7 +3612,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             session.IsLocal
                 ? $"Delete the local profile \"{session.Name}\"?"
                     + (session.BuiltIn ? " (It returns with default settings after an app restart while its shell is installed.)" : "")
-                : $"Delete \"{session.Name}\" ({session.Host})? Its saved credential is removed too.");
+                : session.IsTelnet
+                    ? $"Delete \"{session.Name}\" ({session.Host})?"
+                    : $"Delete \"{session.Name}\" ({session.Host})? Its saved credential is removed too.");
         if (confirmed)
             ViewModel.DeleteSession(session);
     }
@@ -3770,9 +3750,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     // ---- Dialog helpers ----
 
-    private async Task OpenSessionEditorAsync(Session? existing, string defaultFolder)
+    private async Task OpenSessionEditorAsync(Session? existing, string defaultFolder,
+        SessionKind newKind = SessionKind.Ssh)
     {
-        var dialog = new SessionEditDialog(ViewModel.FolderPathsForPicker, existing, defaultFolder, App.SshKeys)
+        var dialog = new SessionEditDialog(ViewModel.FolderPathsForPicker, existing, defaultFolder, App.SshKeys,
+            newKind: newKind)
         {
             XamlRoot = Root.XamlRoot,
         };

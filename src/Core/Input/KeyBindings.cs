@@ -97,6 +97,7 @@ public static class ShortcutIds
     public const string CloseTab = "tab.close";
     public const string CloneTab = "tab.clone";
     public const string ReconnectTab = "tab.reconnect";
+    public const string SendBreak = "tab.sendBreak";
     public const string MoveTabLeft = "tab.moveLeft";
     public const string MoveTabRight = "tab.moveRight";
     public const string FilePane = "tab.filePane";
@@ -221,6 +222,8 @@ public static class KeyBindings
             "Opens the same session in a new tab");
         Add(ShortcutIds.ReconnectTab, Tabs, "Reconnect or Restart Tab", ShortcutScope.App, [Letter(CtrlShift, 'R')],
             "When the tab is disconnected or its shell has exited");
+        Add(ShortcutIds.SendBreak, Tabs, "Send Break", ShortcutScope.App, [Chord(Ctrl, VirtualKeys.Cancel, "Break")],
+            "Telnet tabs: console servers pass it to the device as a serial break (boot interrupt, password recovery)");
         Add(ShortcutIds.MoveTabLeft, Tabs, "Move Tab Left", ShortcutScope.App,
             [Chord(CtrlShift, VirtualKeys.PageUp, "PgUp")]);
         Add(ShortcutIds.MoveTabRight, Tabs, "Move Tab Right", ShortcutScope.App,
@@ -291,6 +294,7 @@ public static class KeyBindings
 public static class VirtualKeys
 {
     public const int Tab = 0x09;
+    public const int Cancel = 0x03; // Ctrl+Pause/Break reports VK_CANCEL
     public const int Enter = 0x0D;
     public const int PageUp = 0x21;
     public const int PageDown = 0x22;

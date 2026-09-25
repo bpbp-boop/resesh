@@ -52,14 +52,16 @@ public sealed class BackupConflictViewModel : ObservableObject
         {
             var reason = Conflict.Match == BackupConflictMatch.SessionId
                 ? "same session id"
-                : "same host, port, and username";
+                : Conflict.Imported.IsTelnet ? "same telnet host and port" : "same host, port, and username";
             return $"Backup: {Endpoint(Conflict.Imported)}. Existing: {Conflict.Existing.Name} ({Endpoint(Conflict.Existing)}). Match: {reason}.";
         }
     }
 
     private static string Endpoint(Core.Models.Session session) => session.IsLocal
         ? session.Local?.Executable ?? "local profile"
-        : $"{session.Username}@{session.Host}:{session.Port}";
+        : session.IsTelnet
+            ? $"telnet {session.Host}:{session.Port}"
+            : $"{session.Username}@{session.Host}:{session.Port}";
 }
 
 public sealed partial class ImportBackupDialog : ContentDialog

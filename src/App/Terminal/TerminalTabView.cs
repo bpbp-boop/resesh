@@ -13,14 +13,16 @@ using Resesh.Core.Recording;
 using Resesh.Core.Sftp;
 using Resesh.Core.Ssh;
 using Resesh.Core.Storage;
+using Resesh.Core.Telnet;
 using Resesh.Terminal;
 
 namespace Resesh.App.Terminal;
 
 /// <summary>
-/// The content of one tab: a TerminalControl plus the shell lifecycle for either target
-/// kind — SSH (credential prompt, host key confirmation, connect/reconnect, teardown) or
-/// a local ConPTY process (launch, exit code, restart). The live shell is an
+/// The content of one tab: a TerminalControl plus the shell lifecycle for each target
+/// kind — SSH (credential prompt, host key confirmation, connect/reconnect, teardown),
+/// telnet (plain TCP connect/reconnect), or a local ConPTY process (launch, exit code,
+/// restart). The live shell is an
 /// <see cref="ITerminalBackend"/>; SSH-only surfaces keep a typed reference beside it.
 /// </summary>
 public sealed class TerminalTabView : Grid, IDisposable
@@ -592,7 +594,8 @@ public sealed class TerminalTabView : Grid, IDisposable
     public async Task ConnectAsync(bool isReconnect)
     {
         if (_connecting || _disposed || _ssh?.IsConnected == true
-            || _backend is LocalTerminalSession { IsRunning: true })
+            || _backend is LocalTerminalSession { IsRunning: true }
+            || _backend is TelnetTerminalSession { IsConnected: true })
             return;
         _connecting = true;
         _spinner.IsActive = true;
@@ -612,6 +615,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             if (Session.IsLocal)
                 await LaunchLocalAsync(isReconnect);
+            else if (Session.IsTelnet)
+                await ConnectTelnetAsync(isReconnect);
             else
                 await ConnectSshAsync(isReconnect);
         }
@@ -690,6 +695,72 @@ public sealed class TerminalTabView : Grid, IDisposable
             if (connection.Token.IsCancellationRequested) return;
             _tab.State = TabConnectionState.Disconnected;
             _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}", action: "restart");
+        }
+    }
+
+    /// <summary>Telnet lifecycle: no credentials or host keys — the server's own login
+    /// prompt (if any) arrives as terminal output.</summary>
+    private async Task ConnectTelnetAsync(bool isReconnect)
+    {
+        var connection = _connection;
+        try
+        {
+            if (isReconnect)
+                _terminal.WriteDivider();
+            _terminal.WriteNotice($"Connecting to {Session.Host}:{Session.Port} over telnet (unencrypted) …");
+
+            var telnet = new TelnetTerminalSession();
+            telnet.OutputReceived += data =>
+            {
+                if (connection.Token.IsCancellationRequested) return;
+                _terminal.WriteOutput(data);
+                if (!_tab.IsActive && !_tab.HasUnseenOutput)
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
+                    });
+            };
+            telnet.Closed += ex => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (connection.Token.IsCancellationRequested) return;
+                _tab.State = TabConnectionState.Disconnected;
+                _tab.ConnectionSummary = "";
+                EndAgentTracking();
+                _terminal.NotifyDisconnected(ex is null ? "Connection closed by the remote host." : $"Connection lost: {ex.Message}");
+            });
+
+            var cols = _terminal.Columns;
+            var rows = _terminal.Rows;
+            _backendColumns = cols;
+            _backendRows = rows;
+            await connection.StartAsync(telnet, () => telnet.Connect(
+                Session.Host, Session.Port, Session.TerminalType, cols, rows, connection.Token));
+            connection.Token.ThrowIfCancellationRequested();
+
+            _backend = telnet;
+            ResizeBackend(_terminal.Columns, _terminal.Rows);
+            _tab.State = TabConnectionState.Connected;
+            _tab.ConnectionSummary = $"telnet • {telnet.RemoteEndPoint} • unencrypted";
+            _terminal.NotifyConnected();
+            _terminal.FocusTerminal();
+        }
+        catch (TelnetSessionException ex)
+        {
+            if (connection.Token.IsCancellationRequested) return;
+            _tab.State = TabConnectionState.Disconnected;
+            _terminal.NotifyDisconnected(ex.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            if (connection.Token.IsCancellationRequested) return;
+            _tab.State = TabConnectionState.Disconnected;
+            _terminal.NotifyDisconnected("Connection cancelled.");
+        }
+        catch (Exception ex)
+        {
+            if (connection.Token.IsCancellationRequested) return;
+            _tab.State = TabConnectionState.Disconnected;
+            _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}");
         }
     }
 
@@ -1148,6 +1219,17 @@ public sealed class TerminalTabView : Grid, IDisposable
             && session is not null
             && await Task.Run(() => session.TryRunCommand(
                 TmuxPersistence.KillCommand(Session.Id, _tab.TmuxSlot)));
+    }
+
+    /// <summary>Sends a break signal when the live backend has one (telnet). Returns false
+    /// when there is nothing to send it on, so a shortcut can fall through.</summary>
+    public bool SendBreak()
+    {
+        if (_disposed || _tab.IsLocked || _tab.State != TabConnectionState.Connected
+            || _backend is not IBreakSender sender)
+            return false;
+        sender.SendBreak();
+        return true;
     }
 
     /// <summary>User-initiated Disconnect (SSH) / Stop (local): tab stays open showing the

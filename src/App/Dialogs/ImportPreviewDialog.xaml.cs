@@ -23,6 +23,8 @@ public sealed class ImportCandidateVm : ObservableObject
     {
         get
         {
+            if (Candidate.IsTelnet)
+                return $"telnet {Candidate.Host}" + (Candidate.Port == 23 ? "" : $":{Candidate.Port}");
             var target = Candidate.Port == 22 ? Candidate.Host : $"{Candidate.Host}:{Candidate.Port}";
             var user = Candidate.Username.Length > 0 ? $"{Candidate.Username}@" : "";
             var key = Candidate.PrivateKeyPath is { Length: > 0 } path
@@ -51,8 +53,8 @@ public sealed partial class ImportPreviewDialog : ContentDialog
         InitializeComponent();
         Title = $"Import from {sourceName}";
 
-        SummaryText.Text = $"Found {scan.Importable.Count} SSH session(s)"
-            + (scan.Skipped.Count > 0 ? $" ({scan.Skipped.Count} non-SSH skipped)." : ".")
+        SummaryText.Text = $"Found {scan.Importable.Count} SSH or telnet session(s)"
+            + (scan.Skipped.Count > 0 ? $" ({scan.Skipped.Count} of other types skipped)." : ".")
             + " Sessions whose name, host, and port already exist will be skipped as duplicates.";
 
         if (scan.Skipped.Count > 0)

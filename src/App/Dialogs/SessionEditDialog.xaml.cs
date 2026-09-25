@@ -46,7 +46,8 @@ public sealed partial class SessionEditDialog : ContentDialog
 
     public SessionEditDialog(IEnumerable<string> folderPaths, Session? existing, string defaultFolder,
         SshKeyStore keyStore, string? notice = null,
-        SessionSettingsTarget initialTarget = SessionSettingsTarget.General)
+        SessionSettingsTarget initialTarget = SessionSettingsTarget.General,
+        SessionKind newKind = SessionKind.Ssh)
     {
         InitializeComponent();
         DialogTheme.Apply(this);
@@ -54,7 +55,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             .Concat(ThemeCatalog.All).ToList();
         _existing = existing;
         _keyStore = keyStore;
-        Title = existing is null ? "New SSH session" : "Edit SSH session";
+        Title = existing is null ? "New session" : "Edit session";
         PasswordHint.Text = existing is null
             ? "Stored in Windows Credential Manager"
             : "Stored in Windows Credential Manager — leave blank to keep the current one";
@@ -74,6 +75,11 @@ public sealed partial class SessionEditDialog : ContentDialog
 
         PopulateIconPicker(existing?.Icon);
         PopulateKeyChoices(existing?.PrivateKeyId);
+
+        _updatingProtocol = true;
+        ProtocolBox.SelectedIndex = (existing?.Kind ?? newKind) == SessionKind.Telnet ? 1 : 0;
+        PortBox.Value = IsTelnet ? TelnetDefaultPort : SshDefaultPort;
+        _updatingProtocol = false;
 
         if (existing is not null)
         {
@@ -119,6 +125,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         }
 
         UpdateAuthFieldVisibility();
+        UpdateProtocolVisibility();
         UpdateAdvancedHeader();
         ShellIntegrationBox.SelectionChanged += (_, _) =>
         {
@@ -176,7 +183,13 @@ public sealed partial class SessionEditDialog : ContentDialog
         AutomationProperties.SetItemStatus(field, message);
     }
 
-    private AuthMethod SelectedAuth => (AuthMethod)Math.Max(0, AuthBox.SelectedIndex);
+    private const int SshDefaultPort = 22;
+    private const int TelnetDefaultPort = 23;
+    private bool _updatingProtocol;
+
+    private bool IsTelnet => ProtocolBox.SelectedIndex == 1;
+
+    private AuthMethod SelectedAuth => IsTelnet ? AuthMethod.None : (AuthMethod)Math.Max(0, AuthBox.SelectedIndex);
 
     private Guid? SelectedKeyId => (KeyBox.SelectedItem as KeyChoice)?.Id;
 
@@ -254,6 +267,30 @@ public sealed partial class SessionEditDialog : ContentDialog
     private void AuthBox_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
         UpdateAuthFieldVisibility();
 
+    private void ProtocolBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // Fires during InitializeComponent, before PortBox exists.
+        if (PortBox is null || _updatingProtocol)
+            return;
+        // Follow the protocol's well-known port unless the user typed a custom one.
+        var port = double.IsNaN(PortBox.Value) ? 0 : (int)PortBox.Value;
+        if (port is 0 or SshDefaultPort or TelnetDefaultPort)
+            PortBox.Value = IsTelnet ? TelnetDefaultPort : SshDefaultPort;
+        UpdateProtocolVisibility();
+    }
+
+    /// <summary>Telnet has no username, authentication, keys, shell integration or tmux:
+    /// the server's own login prompt arrives in the terminal.</summary>
+    private void UpdateProtocolVisibility()
+    {
+        if (SshOptionsPanel is null || PersistentPanel is null || TelnetNotice is null)
+            return;
+        var telnet = IsTelnet;
+        SshOptionsPanel.Visibility = telnet ? Visibility.Collapsed : Visibility.Visible;
+        PersistentPanel.Visibility = telnet ? Visibility.Collapsed : Visibility.Visible;
+        TelnetNotice.IsOpen = telnet;
+    }
+
     private void UpdateAuthFieldVisibility()
     {
         // SelectionChanged fires mid-InitializeComponent, before later controls exist.
@@ -304,6 +341,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         Validate(NameBox, NameError, string.IsNullOrWhiteSpace(NameBox.Text), "Enter a session name.");
         Validate(HostBox, HostError, string.IsNullOrWhiteSpace(HostBox.Text), "Enter a host name or IP address.");
         Validate(KeyBox, KeyError, SelectedAuth == AuthMethod.PrivateKey && SelectedKeyId is null, "Select an SSH key.");
+        var telnet = IsTelnet;
 
         if (firstInvalid is not null)
         {
@@ -315,8 +353,8 @@ public sealed partial class SessionEditDialog : ContentDialog
             return;
         }
 
-        var port = double.IsNaN(PortBox.Value) ? 22 : (int)PortBox.Value;
-        if (PersistentToggle.IsOn && ShellIntegrationBox.SelectedIndex == 4)
+        var port = double.IsNaN(PortBox.Value) ? (telnet ? TelnetDefaultPort : SshDefaultPort) : (int)PortBox.Value;
+        if (!telnet && PersistentToggle.IsOn && ShellIntegrationBox.SelectedIndex == 4)
         {
             SetFieldError(PersistentToggle, PersistentError,
                 "Turn off Persistent session to use PowerShell shell integration.");
@@ -346,24 +384,25 @@ public sealed partial class SessionEditDialog : ContentDialog
         Result = new Session
         {
             Id = _existing?.Id ?? Guid.NewGuid(),
+            Kind = telnet ? SessionKind.Telnet : SessionKind.Ssh,
             Name = NameBox.Text.Trim(),
             FolderPath = FolderPaths.Normalize(FolderBox.Text),
             Host = HostBox.Text.Trim(),
             Port = Math.Clamp(port, 1, 65535),
-            Username = UsernameBox.Text.Trim(),
+            Username = telnet ? "" : UsernameBox.Text.Trim(),
             AuthMethod = SelectedAuth,
             PrivateKeyId = SelectedAuth == AuthMethod.PrivateKey ? SelectedKeyId : null,
             PrivateKeyPath = null,
             PassphraseRequired = false,
             TerminalType = string.IsNullOrWhiteSpace(TerminalTypeBox.Text) ? "xterm-256color" : TerminalTypeBox.Text.Trim(),
-            Persistent = PersistentToggle.IsOn,
+            Persistent = !telnet && PersistentToggle.IsOn,
             DetachedSessions = DetachedSessionsBox.SelectedIndex switch
             {
                 1 => DetachedSessionAction.StartNew,
                 2 => DetachedSessionAction.EndDetachedAndStartNew,
                 _ => DetachedSessionAction.Ask,
             },
-            ShellIntegration = ShellIntegrationBox.SelectedIndex switch
+            ShellIntegration = telnet ? ShellIntegrationMode.Disabled : ShellIntegrationBox.SelectedIndex switch
             {
                 1 => ShellIntegrationMode.Bash,
                 2 => ShellIntegrationMode.Zsh,
