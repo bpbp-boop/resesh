@@ -279,6 +279,31 @@ public sealed class TabViewModel : ObservableObject
             HasUnseenOutput = true;
     }
 
+    // ---- progress: OSC 9;4 from the terminal and file-pane transfers ----
+
+    private TerminalProgress _progress;
+
+    /// <summary>The tab's combined progress, drawn along the bottom edge of its header and
+    /// folded into the window's taskbar button.</summary>
+    public TerminalProgress Progress
+    {
+        get => _progress;
+        set
+        {
+            if (SetProperty(ref _progress, value))
+                OnPropertyChanged(nameof(ProgressTooltip));
+        }
+    }
+
+    public string ProgressTooltip => _progress.State switch
+    {
+        TerminalProgressState.Normal => $"{_progress.Value}% complete",
+        TerminalProgressState.Error => "Error",
+        TerminalProgressState.Paused => "Paused",
+        TerminalProgressState.Indeterminate => "Working",
+        _ => "",
+    };
+
     // ---- agent awareness (Phase 6.2): replace the session icon while an agent is active ----
 
     private AgentSnapshot _agent = AgentSnapshot.Empty;

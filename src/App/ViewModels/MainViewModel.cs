@@ -138,6 +138,9 @@ public sealed class MainViewModel : ObservableObject
 
     public IEnumerable<TabViewModel> AllTabs => Groups.SelectMany(g => g.Tabs);
 
+    /// <summary>This window's tabs as one indicator, for its taskbar button.</summary>
+    public TerminalProgress Progress => TerminalProgress.Combine(AllTabs.Select(tab => tab.Progress));
+
     public TabGroupViewModel GroupOf(TabViewModel tab) =>
         Groups.First(g => g.Tabs.Contains(tab));
 
@@ -175,6 +178,7 @@ public sealed class MainViewModel : ObservableObject
         group.SelectedTab = tab;
         tab.IsGroupFocused = group == _focusedGroup;
         OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(Progress));
     }
 
     /// <summary>Detaches a live tab without disposing its terminal session.</summary>
@@ -184,6 +188,7 @@ public sealed class MainViewModel : ObservableObject
         tab.PropertyChanged -= Tab_PropertyChanged;
         group.RemoveTab(tab);
         OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(Progress));
         return group;
     }
 
@@ -193,6 +198,10 @@ public sealed class MainViewModel : ObservableObject
             or nameof(TabViewModel.Header) or nameof(TabViewModel.IsLocked))
         {
             OnPropertyChanged(nameof(StatusText));
+        }
+        else if (e.PropertyName == nameof(TabViewModel.Progress))
+        {
+            OnPropertyChanged(nameof(Progress));
         }
     }
 
@@ -217,6 +226,7 @@ public sealed class MainViewModel : ObservableObject
             group.SelectedTab = null;
         }
         OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(Progress));
     }
 
     // ---- Session CRUD ----

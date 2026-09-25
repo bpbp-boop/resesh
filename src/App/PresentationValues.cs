@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Media;
 using Resesh.App.Icons;
 using Resesh.App.ViewModels;
 using Resesh.Core.Agents;
+using Resesh.Core.Models;
 using Resesh.Core.Storage;
 
 namespace Resesh.App;
@@ -17,6 +18,19 @@ namespace Resesh.App;
 public static class PresentationValues
 {
     public static Visibility Visible(bool value) => value ? Visibility.Visible : Visibility.Collapsed;
+
+    // Tab progress strip. WinUI's ProgressBar supplies the theme colours: accent, then
+    // critical red for ShowError and caution amber for ShowPaused.
+    public static Visibility ProgressVisibility(TerminalProgress progress) => Visible(progress.IsActive);
+
+    public static double ProgressValue(TerminalProgress progress) => progress.Value;
+
+    public static bool ProgressIndeterminate(TerminalProgress progress) =>
+        progress.State == TerminalProgressState.Indeterminate;
+
+    public static bool ProgressShowError(TerminalProgress progress) => progress.State == TerminalProgressState.Error;
+
+    public static bool ProgressShowPaused(TerminalProgress progress) => progress.State == TerminalProgressState.Paused;
 
     public static Visibility TreeFolderVisibility(bool isFolder, bool isLocalRoot) =>
         Visible(isFolder && !isLocalRoot);

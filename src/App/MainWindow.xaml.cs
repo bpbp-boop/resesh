@@ -106,6 +106,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 SyncSessionMenu();
                 App.RefreshWindowTitles();
             }
+            else if (e.PropertyName == nameof(MainViewModel.Progress))
+            {
+                ApplyTaskbarProgress();
+            }
         };
         ScheduleExpansionSync();
         SyncEmptyState();
@@ -730,6 +734,25 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private void NewWindow_Click(object sender, RoutedEventArgs e) => App.OpenNewWindow();
 
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
+
+    private TerminalProgress _taskbarProgress;
+
+    /// <summary>Mirrors this window's combined tab progress on its taskbar button.</summary>
+    private void ApplyTaskbarProgress()
+    {
+        var progress = ViewModel.Progress;
+        if (progress == _taskbarProgress)
+            return;
+        _taskbarProgress = progress;
+        try
+        {
+            Interop.TaskbarProgress.Apply(WinRT.Interop.WindowNative.GetWindowHandle(this), progress);
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidCastException)
+        {
+            App.ReportRecoverableError(ex);
+        }
+    }
 
     private void AppWindow_Closing(Microsoft.UI.Windowing.AppWindow sender,
         Microsoft.UI.Windowing.AppWindowClosingEventArgs args)

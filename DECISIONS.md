@@ -746,3 +746,25 @@ keyboard-interactive fallback.
 - The private tmux server adds `Tc` to its terminal overrides. Without it tmux quantizes
   RGB to the 256-colour palette for `xterm-256color` clients even when `COLORTERM` is set.
   Not yet checked against a live tmux.
+
+## 2026-09-25 - Tab and taskbar progress
+- Progress shows as a 3px WinUI `ProgressBar` along the bottom edge of the tab header,
+  and on the window's taskbar button through `ITaskbarList3`, as in Windows Terminal.
+  The icon slot already carries the connection dot and agent icon, so progress stays
+  off it. The bar's track is transparent, so an idle tab keeps its normal underline.
+- Sources: `OSC 9 ; 4 ; state ; percent` from the terminal (ConEmu's form, also read by
+  Windows Terminal), and file-pane transfers. States 0 clear, 1 set, 2 error,
+  3 indeterminate, 4 paused; error and paused without a percent keep the current value.
+  Malformed reports are ignored. The agent tracker still ignores `9;4`.
+- A multi-file transfer fills once across the batch instead of restarting per file.
+- `TerminalProgress.Combine` gives one indicator for a tab (terminal and transfer) and a
+  window (its tabs): error, then paused, then the least complete known percent, then
+  indeterminate. Each window drives only its own taskbar button.
+- A program that exits or disconnects without clearing would leave the bar stuck, so
+  terminal progress clears when the command ends, a new prompt appears, or the tab
+  leaves the connected state. A disposed tab clears its progress.
+- Claude Code does not emit `9;4` to Resesh; it only does so for ConEmu, Ghostty and
+  iTerm2. No agent-driven bar: the agent icon already shows that state.
+- Verified in the running app by injecting each state through the page's output path:
+  tab strip and taskbar button both show normal, error, paused, indeterminate and
+  cleared. SFTP-driven progress was not exercised against a live server.

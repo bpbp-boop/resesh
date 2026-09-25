@@ -56,6 +56,10 @@ public sealed class TerminalTabView : Grid, IDisposable
     private DispatcherQueueTimer? _agentPoll;
     private bool _agentPollBusy;
 
+    // Progress from OSC 9;4 in the terminal and from file-pane transfers, combined on the tab.
+    private TerminalProgress _terminalProgress;
+    private TerminalProgress _transferProgress;
+
     // File pane: local sessions use the Windows filesystem; SSH sessions keep the
     // resolved secret for a separate SFTP channel.
     private FilePaneView? _filePane;
@@ -236,6 +240,7 @@ public sealed class TerminalTabView : Grid, IDisposable
 
         _agent = new AgentTracker(Session.Agent);
         WireAgentSignals();
+        WireProgress();
 
         Loaded += async (_, _) =>
         {
@@ -444,6 +449,51 @@ public sealed class TerminalTabView : Grid, IDisposable
                 RefreshAgentDefault();
         };
         PushAgentState(); // a session default shows before anything has been observed
+    }
+
+    /// <summary>
+    /// OSC 9;4 arrives on the same channel as agent notifications (the tracker ignores it).
+    /// A program that exits or loses its connection without clearing its progress would
+    /// leave the bar stuck, so a finished command, a new prompt, or leaving the connected
+    /// state clears it.
+    /// </summary>
+    private void WireProgress()
+    {
+        _terminal.AgentOscReceived += (code, data) =>
+        {
+            if (code == 9 && TerminalProgress.ParseOsc9(data, _terminalProgress) is { } progress)
+                SetTerminalProgress(progress);
+        };
+        _terminal.CommandChanged += (command, _) =>
+        {
+            if (command.Length == 0)
+                DispatcherQueue.TryEnqueue(() => SetTerminalProgress(TerminalProgress.None));
+        };
+        _terminal.PromptContextChanged += (_, _) =>
+            DispatcherQueue.TryEnqueue(() => SetTerminalProgress(TerminalProgress.None));
+        _tab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TabViewModel.State) && _tab.State != TabConnectionState.Connected)
+                SetTerminalProgress(TerminalProgress.None);
+        };
+    }
+
+    private void SetTerminalProgress(TerminalProgress progress)
+    {
+        _terminalProgress = progress;
+        PushProgress();
+    }
+
+    private void SetTransferProgress(TerminalProgress progress)
+    {
+        _transferProgress = progress;
+        PushProgress();
+    }
+
+    private void PushProgress()
+    {
+        if (!_disposed)
+            _tab.Progress = TerminalProgress.Combine(_terminalProgress, _transferProgress);
     }
 
     private void ApplyAgent(Func<AgentTracker, bool> observe)
@@ -1177,6 +1227,7 @@ public sealed class TerminalTabView : Grid, IDisposable
                 ? new FilePaneView(() => Session, OpenInExplorerAsync)
                 : new FilePaneView(() => Session, CreateSftpSessionAsync, OpenInExplorerAsync);
             _filePane.CloseRequested += HideFilePane;
+            _filePane.TransferProgressChanged += SetTransferProgress;
             Grid.SetColumn(_filePane, 2);
             Children.Add(_filePane);
 
@@ -1552,6 +1603,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        _tab.Progress = TerminalProgress.None;
         _agentPoll?.Stop();
         _agentPoll = null;
         CleanupActions.Run(App.ReportRecoverableError,
