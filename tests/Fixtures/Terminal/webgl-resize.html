@@ -42,6 +42,16 @@ window.done = (async function () {
     return false;
   }
   if (!hasTextPixels()) throw new Error('Initial GPU text is not visible');
+  // Pixels in the top-left width x height region, rows ordered bottom-up by GL.
+  function topLeft(width, height) {
+    const pixels = new Uint8Array(width * height * 4);
+    gl.readPixels(0, canvas.height - height, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    return pixels;
+  }
+  const baseline = {
+    full: topLeft(original[0], original[1]),
+    cropped: topLeft(original[0] - 1, original[1] - 1),
+  };
   for (const [width, height] of [
     [Math.floor(original[0] * 0.75), Math.floor(original[1] * 0.5)],
     [original[0] + 1, original[1] + 1],
@@ -54,7 +64,22 @@ window.done = (async function () {
       throw new Error('Canvas correction changed terminal contents or grid');
     if (gl.isContextLost() || gl.getError() !== gl.NO_ERROR) throw new Error('GPU context failed');
   }
-  document.getElementById('result').textContent = 'PASS: GPU text survives canvas-only shrink, rounding correction and restore';
+  // At fractional display scaling some grid sizes get a one-pixel correction. It must
+  // not stretch the grid across the canvas: glyphs keep their device pixels, or text
+  // is resampled and looks blurry until the window is resized again.
+  for (const [width, height, expected] of [
+    [original[0] + 1, original[1] + 1, baseline.full],
+    [original[0] - 1, original[1] - 1, baseline.cropped],
+  ]) {
+    renderer._setCanvasDevicePixelDimensions(width, height);
+    await paint();
+    const actual = topLeft(Math.min(width, original[0]), Math.min(height, original[1]));
+    for (let i = 0; i < expected.length; i++) {
+      if (actual[i] !== expected[i])
+        throw new Error(`Glyphs shifted or resampled after correction to ${width}x${height}`);
+    }
+  }
+  document.getElementById('result').textContent = 'PASS: GPU text survives canvas-only shrink, rounding correction and restore without resampling';
   return { passed: true };
 })().catch(error => {
   document.getElementById('result').textContent = 'FAIL: ' + error.message;

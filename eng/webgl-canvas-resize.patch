@@ -13,3 +13,21 @@ diff --git a/addons/addon-webgl/src/WebglRenderer.ts b/addons/addon-webgl/src/We
      this._requestRedrawViewport();
    }
  
+diff --git a/addons/addon-webgl/src/GlyphRenderer.ts b/addons/addon-webgl/src/GlyphRenderer.ts
+--- a/addons/addon-webgl/src/GlyphRenderer.ts
++++ b/addons/addon-webgl/src/GlyphRenderer.ts
+@@ -301,7 +301,12 @@ export class GlyphRenderer extends Disposable {
+   public handleResize(): void {
+     const gl = this._gl;
++    // A device-pixel correction can leave the drawing buffer a pixel larger or
++    // smaller than the grid. Keep the grid at its own size, anchored top-left,
++    // instead of stretching it across the buffer and resampling every glyph.
++    const width = this._dimensions.device.canvas.width || gl.canvas.width;
++    const height = this._dimensions.device.canvas.height || gl.canvas.height;
+     gl.useProgram(this._program);
+-    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+-    gl.uniform2f(this._resolutionLocation, gl.canvas.width, gl.canvas.height);
++    gl.viewport(0, gl.canvas.height - height, width, height);
++    gl.uniform2f(this._resolutionLocation, width, height);
+     this.clear();
+   }

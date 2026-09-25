@@ -668,7 +668,7 @@ keyboard-interactive fallback.
   resize repair recorded in `eng/webgl-canvas-resize.patch`.
   Source package: https://registry.npmjs.org/@xterm/addon-webgl/-/addon-webgl-0.19.0.tgz
   Upstream bundle SHA-256: `b85f8d4b3e9756bebb757e3fe47134d70f03ea3d6b187624426d2e2b65dec06c`.
-  Patched bundle SHA-256: `9131d7c7f05c835726879c03c8c4c99ccfccc6a8b4d3ad91a47f80457b5eff35`.
+  Patched bundle SHA-256: `ad88e422fe82aaadeeae42c0447ba071f4077ecec90c9f81d3df97b631359a52`.
 - Activate after `term.open`, before the initial fit. WebGL caches glyphs in GPU
   textures rather than recreating DOM text rows during scrolling output.
 - Initialization failure retains DOM rendering. An unrecovered context loss disposes
@@ -689,6 +689,22 @@ keyboard-interactive fallback.
   shrink, rounding correction, and restoration. It fails with the upstream bundle
   and passes with the patch. Also verified visible startup, typed commands, and
   1000 highlighted output lines in an isolated application using actual WebView2.
+
+## 2026-09-25 - Crisp GPU text after device-pixel corrections
+
+- User report: GPU-rendered text was sometimes blurry until the window was resized a
+  little. At fractional display scaling, xterm rounds the canvas CSS size, so some grid
+  sizes produce a device-pixel box one pixel off the grid (125% with a 13px font:
+  81x25, 100x33 and 101x37 did; 80x24 and 97x31 did not). The ResizeObserver then
+  resizes the drawing buffer, and the glyph renderer stretched the whole grid across
+  it, resampling every glyph.
+- The glyph renderer now sets its viewport and resolution to the grid's device size,
+  anchored top-left. A larger buffer leaves a one-pixel strip; a smaller one clips the
+  last pixel row or column. Glyphs keep their native pixels. Recorded in
+  `eng/webgl-canvas-resize.patch`.
+- `tests/Fixtures/Terminal/webgl-resize.html` now compares GPU pixels before and after
+  a +1 and -1 correction. It fails with the previous bundle and passes with this one in
+  headless Edge at 100% and 125% scaling.
 
 ## 2026-09-25 - OSC 52 clipboard writes
 
