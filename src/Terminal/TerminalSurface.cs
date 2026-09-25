@@ -14,12 +14,10 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract event TerminalOutputObservedHandler? OutputObserved;
     public abstract event Action<ReadOnlyMemory<byte>, int, int, long>? KeyframeCaptured;
     public abstract event Action? ReconnectRequested;
-    public abstract event Action? CloseTabRequested;
-    public abstract event Action? SplitRequested;
-    public abstract event Action? FilePaneRequested;
-    public abstract event Action? NewLocalTabRequested;
-    public abstract event Action? CommandPaletteRequested;
-    public abstract event Action? QuickConnectRequested;
+
+    /// <summary>A window shortcut pressed while this terminal had focus: the binding id and
+    /// the index of the chord that matched. Raised on the UI thread.</summary>
+    public abstract event Action<string, int>? ShortcutRequested;
     public abstract event Action<int, int>? Ready;
     public abstract event Action<string>? TitleChanged;
     public abstract event Action<string, bool>? CommandChanged;
@@ -68,6 +66,37 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract void FocusTerminal();
     public abstract void SetInputEnabled(bool enabled);
     public abstract void ToggleCommandsPanel();
+
+    /// <summary>Runs a terminal-scope shortcut (copy, zoom, clear, ...) as if its key was
+    /// pressed. Returns false when this surface does not support it.</summary>
+    public abstract bool InvokeShortcut(string id);
+
+    private static IReadOnlyList<TerminalShortcut> _shortcuts = [];
+
+    /// <summary>The app's shortcut table, set once at startup before any terminal is created.
+    /// Terminals handle the <see cref="TerminalShortcut.Forward"/> = false entries themselves
+    /// and raise <see cref="ShortcutRequested"/> for the rest.</summary>
+    public static IReadOnlyList<TerminalShortcut> Shortcuts
+    {
+        get => _shortcuts;
+        set => _shortcuts = value ?? [];
+    }
+
+    /// <summary>The shortcut a key press in a terminal matches, if any.</summary>
+    internal static (TerminalShortcut Shortcut, int ChordIndex)? MatchShortcut(
+        int virtualKey, bool control, bool shift, bool alt)
+    {
+        foreach (var shortcut in _shortcuts)
+        {
+            for (var i = 0; i < shortcut.Chords.Count; i++)
+            {
+                var chord = shortcut.Chords[i];
+                if (chord.Key == virtualKey && chord.Ctrl == control && chord.Shift == shift && chord.Alt == alt)
+                    return (shortcut, i);
+            }
+        }
+        return null;
+    }
     public abstract void ScrollToCommand(long id);
     public abstract void SetRulerPresentation(bool isSplit, bool isGroupFocused);
     public abstract void SetPromptPlatform(string? platform);
@@ -94,6 +123,19 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract Task SeekPlaybackAsync(double time);
     public abstract void Dispose();
 }
+
+/// <summary>One key combination as the terminal surfaces match it: a Windows virtual-key code
+/// (KeyboardEvent.keyCode in the WebView2 page) plus exact modifier state.</summary>
+public sealed record TerminalKeyChord(int Key, bool Ctrl, bool Shift, bool Alt);
+
+/// <summary>A shortcut the terminal must recognize. <paramref name="Forward"/> shortcuts go to the
+/// window; the others are terminal actions the surface runs itself. <paramref name="WhenSplit"/>
+/// shortcuts only take the key while the window is split; otherwise the shell receives it.</summary>
+public sealed record TerminalShortcut(
+    string Id,
+    bool Forward,
+    bool WhenSplit,
+    IReadOnlyList<TerminalKeyChord> Chords);
 
 internal static class TerminalLinkPolicy
 {

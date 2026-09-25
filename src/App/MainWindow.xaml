@@ -143,7 +143,7 @@
 
             <MenuBar x:Name="TitleBarMenus" Grid.Column="2" VerticalAlignment="Center">
                 <MenuBarItem Title="File">
-                    <MenuFlyoutItem Text="New Window" Click="NewWindow_Click" />
+                    <MenuFlyoutItem x:Name="NewWindowMenuItem" Text="New Window" Click="NewWindow_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="New SSH Session…" Click="NewSession_Click" />
                     <MenuFlyoutItem Text="New Local Profile…" Click="NewLocalProfile_Click" />
@@ -155,7 +155,7 @@
                     <MenuFlyoutItem Text="Export backup…" Click="ExportBackup_Click" />
                     <MenuFlyoutItem Text="Import backup…" Click="ImportBackup_Click" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem Text="Settings…" Click="Settings_Click" />
+                    <MenuFlyoutItem x:Name="SettingsMenuItem" Text="Settings…" Click="Settings_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Exit" Click="Exit_Click" />
                 </MenuBarItem>
@@ -171,25 +171,27 @@
                         Text="Status bar"
                         IsChecked="True"
                         Click="StatusBarMenu_Click" />
+                    <ToggleMenuFlyoutItem
+                        x:Name="FullScreenMenuItem"
+                        Text="Full screen"
+                        Click="FullScreenMenu_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem
+                        x:Name="CommandPaletteMenuItem"
                         Text="Command Palette…"
-                        Click="CommandPaletteMenu_Click"
-                        KeyboardAcceleratorTextOverride="Ctrl+Shift+P" />
+                        Click="CommandPaletteMenu_Click" />
+                    <MenuFlyoutItem
+                        x:Name="KeyboardShortcutsMenuItem"
+                        Text="Keyboard Shortcuts…"
+                        Click="KeyboardShortcutsMenu_Click" />
                     <MenuFlyoutItem Text="Welcome" Click="WelcomeMenu_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Expand All" Click="ExpandAll_Click" />
                     <MenuFlyoutItem Text="Collapse All" Click="CollapseAll_Click" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem
-                        Text="Split Right"
-                        Click="SplitRightMenu_Click"
-                        KeyboardAcceleratorTextOverride="Ctrl+Shift+\" />
-                    <MenuFlyoutItem Text="Split Down" Click="SplitDownMenu_Click" />
-                    <MenuFlyoutItem
-                        Text="File Pane"
-                        Click="FilePaneMenu_Click"
-                        KeyboardAcceleratorTextOverride="Ctrl+Shift+E" />
+                    <MenuFlyoutItem x:Name="SplitRightMenuItem" Text="Split Right" Click="SplitRightMenu_Click" />
+                    <MenuFlyoutItem x:Name="SplitDownMenuItem" Text="Split Down" Click="SplitDownMenu_Click" />
+                    <MenuFlyoutItem x:Name="FilePaneMenuItem" Text="File Pane" Click="FilePaneMenu_Click" />
                 </MenuBarItem>
                 <MenuBarItem Title="Session">
                     <MenuFlyoutItem x:Name="ReconnectMenuItem" Text="Reconnect" Click="ReconnectMenu_Click" />
@@ -198,15 +200,12 @@
                         AutomationProperties.AutomationId="ManageRemoteSessionsMenu"
                         Visibility="Collapsed" IsEnabled="False" Click="ManageRemoteMenu_Click" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem Text="Clone" Click="CloneMenu_Click" />
+                    <MenuFlyoutItem x:Name="CloneMenuItem" Text="Clone" Click="CloneMenu_Click" />
                     <MenuFlyoutItem Text="Pin Tab" Click="PinTabMenu_Click" />
                     <MenuFlyoutItem Text="Session Options…" Click="SessionOptionsMenu_Click" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem x:Name="EndRemoteMenuItem" Text="End Remote Session…" Click="EndRemoteMenu_Click" />
-                    <MenuFlyoutItem
-                        Text="Close Tab"
-                        Click="CloseTabMenu_Click"
-                        KeyboardAcceleratorTextOverride="Ctrl+F4" />
+                    <MenuFlyoutItem x:Name="CloseTabMenuItem" Text="Close Tab" Click="CloseTabMenu_Click" />
                 </MenuBarItem>
             </MenuBar>
 
@@ -219,7 +218,6 @@
                 <AutoSuggestBox
                     x:Name="QuickConnectBox"
                     AutomationProperties.Name="Quick connect or search sessions"
-                    ToolTipService.ToolTip="Connect with ssh user@host, or search saved sessions (Ctrl+Shift+K)"
                     MaxSuggestionListHeight="480"
                     PlaceholderText="ssh user@host or search sessions…"
                     TextChanged="QuickConnect_TextChanged"
@@ -252,7 +250,7 @@
                     BorderThickness="1"
                     BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                     IsHitTestVisible="False">
-                    <TextBlock Text="Ctrl+Shift+K" FontSize="11" Opacity="0.6" />
+                    <TextBlock x:Name="QuickConnectHintText" FontSize="11" Opacity="0.6" />
                 </Border>
             </Grid>
 

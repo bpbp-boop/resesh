@@ -117,7 +117,11 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private bool _rightClickPaste = true;
     private bool _readOnly;
     private bool _reconnectOnEnter;
-    private bool _suppressNextCharacter;
+    // Characters produced by a key the surface consumed as a shortcut (Ctrl+Shift+F yields
+    // WM_CHAR 0x06, Ctrl+1 yields none) are dropped until that key is released.
+    private ushort _suppressCharactersForKey;
+    private bool _isSplit;
+    private int _zoomDelta;
     private bool _disposed;
     private int _dpi = 96;
     private int _lastX = int.MinValue;
@@ -125,6 +129,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
     private int _lastWidth = -1;
     private int _lastHeight = -1;
     private int _fontSize = 14;
+    private int EffectiveFontSize => Math.Clamp(_fontSize + _zoomDelta, 6, 72);
     private int _scrollback = 10000;
     private string _fontFamily = "Cascadia Mono";
     private string _theme = "dark";
@@ -169,12 +174,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
     public override event TerminalOutputObservedHandler? OutputObserved;
     public override event Action<ReadOnlyMemory<byte>, int, int, long>? KeyframeCaptured;
     public override event Action? ReconnectRequested;
-    public override event Action? CloseTabRequested;
-    public override event Action? SplitRequested;
-    public override event Action? FilePaneRequested;
-    public override event Action? NewLocalTabRequested;
-    public override event Action? CommandPaletteRequested;
-    public override event Action? QuickConnectRequested;
+    public override event Action<string, int>? ShortcutRequested;
     public override event Action<int, int>? Ready;
     public override event Action<string>? TitleChanged;
     public override event Action<string, bool>? CommandChanged;
@@ -258,7 +258,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 Rows,
                 _scrollback,
                 _fontFamily,
-                ToNativePointSize(_fontSize),
+                ToNativePointSize(EffectiveFontSize),
                 NativeTerminalThemeCatalog.Find(_theme),
                 _copyOnSelect,
                 _rightClickPaste,
@@ -367,6 +367,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
     }
     public override void ToggleCommandsPanel() => SetCommandsPanelOpen(!_commandsPanelOpen);
 
+    public override bool InvokeShortcut(string id) => RunTerminalShortcut(id);
+
     public override void ScrollToCommand(long id)
     {
         if (_disposed || _alternateBufferActive || !_executionMarks.TryGetValue(id, out var markId)) return;
@@ -374,8 +376,11 @@ public sealed class NativeTerminalSurface : TerminalSurface
         if (_marks.Any(mark => mark.Id == markId)) ScrollToMark(markId);
     }
 
-    public override void SetRulerPresentation(bool isSplit, bool isGroupFocused) =>
+    public override void SetRulerPresentation(bool isSplit, bool isGroupFocused)
+    {
+        _isSplit = isSplit;
         _ruler.SetPresentation(isSplit, isGroupFocused);
+    }
 
     public override void SetPromptPlatform(string? platform) =>
         _promptPlatform = platform;
@@ -934,7 +939,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
             playbackRows,
             _scrollback,
             _fontFamily,
-            ToNativePointSize(_fontSize),
+            ToNativePointSize(EffectiveFontSize),
             NativeTerminalThemeCatalog.Find(_theme),
             CopyOnSelect: true,
             RightClickPaste: false,
@@ -1382,6 +1387,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
     private void OnTerminalLostFocus(object sender, RoutedEventArgs args)
     {
+        _suppressCharactersForKey = 0;
         if (_terminal != IntPtr.Zero && _api is not null)
             _api.SetFocused(_terminal, false);
     }
@@ -1392,6 +1398,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
             return;
 
         var virtualKey = checked((ushort)args.Key);
+        if (_suppressCharactersForKey != 0 && _suppressCharactersForKey != virtualKey)
+            _suppressCharactersForKey = 0; // a missed key-up must not swallow later typing
         if (TryHandleAppShortcut(virtualKey))
         {
             args.Handled = true;
@@ -1409,6 +1417,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
 
     private void OnTerminalKeyUp(object sender, KeyRoutedEventArgs args)
     {
+        if (_suppressCharactersForKey == (ushort)args.Key)
+            _suppressCharactersForKey = 0;
         if (_disposed || !_inputEnabled || _terminal == IntPtr.Zero || _api is null)
             return;
         _ = _api.SendKeyEvent(
@@ -1424,9 +1434,8 @@ public sealed class NativeTerminalSurface : TerminalSurface
     {
         if (_disposed || !_inputEnabled || _terminal == IntPtr.Zero || _api is null)
             return;
-        if (_suppressNextCharacter)
+        if (_suppressCharactersForKey != 0)
         {
-            _suppressNextCharacter = false;
             args.Handled = true;
             return;
         }
@@ -1561,60 +1570,65 @@ public sealed class NativeTerminalSurface : TerminalSurface
     {
         var control = (GetKeyState(0x11) & 0x8000) != 0;
         var shift = (GetKeyState(0x10) & 0x8000) != 0;
-        if (!control)
+        var alt = (GetKeyState(0x12) & 0x8000) != 0;
+        if (MatchShortcut(virtualKey, control, shift, alt) is not var (shortcut, chord))
             return false;
-        if (shift && virtualKey == 0x46)
-        {
-            _suppressNextCharacter = true;
-            DispatcherQueue.TryEnqueue(OpenFind);
-            return true;
-        }
-        if (shift && virtualKey == 0x43
-            && _api?.CopySelection(_terminal, clearSelection: false) == true)
-        {
-            _suppressNextCharacter = true;
-            return true;
-        }
-        if (shift && virtualKey == 0x56)
-        {
-            _suppressNextCharacter = true;
-            _ = PasteFromClipboardAsync();
-            return true;
-        }
-        if (shift && virtualKey == 0x4F)
-        {
-            _suppressNextCharacter = true;
-            DispatcherQueue.TryEnqueue(ToggleCommandsPanel);
-            return true;
-        }
-        if (shift && virtualKey == 0x4D)
-        {
-            _suppressNextCharacter = true;
-            DispatcherQueue.TryEnqueue(ToggleBookmark);
-            return true;
-        }
-        if (shift && virtualKey is 0x26 or 0x28)
-        {
-            DispatcherQueue.TryEnqueue(() => _ruler.JumpCommand(previous: virtualKey == 0x26));
-            return true;
-        }
-
-        Action? action = virtualKey switch
-        {
-            0x73 => CloseTabRequested,
-            0xDC when shift => SplitRequested,
-            0x45 when shift => FilePaneRequested,
-            0x54 when shift => NewLocalTabRequested,
-            0x50 when shift => CommandPaletteRequested,
-            0x4B when shift => QuickConnectRequested,
-            _ => null,
-        };
-        if (action is null)
+        if (shortcut.WhenSplit && !_isSplit)
             return false;
-
-        _suppressNextCharacter = virtualKey != 0x73; // F4 does not produce WM_CHAR.
-        action.Invoke();
+        if (shortcut.Forward)
+            ShortcutRequested?.Invoke(shortcut.Id, chord);
+        else if (!RunTerminalShortcut(shortcut.Id))
+            return false;
+        _suppressCharactersForKey = virtualKey;
         return true;
+    }
+
+    /// <summary>The terminal actions this surface supports. Select All, Clear Scrollback and
+    /// the scrolling keys have no native API yet, so those keys still reach the shell.</summary>
+    private bool RunTerminalShortcut(string id)
+    {
+        switch (id)
+        {
+            case "terminal.find":
+                DispatcherQueue.TryEnqueue(OpenFind);
+                return true;
+            case "terminal.copy":
+                return _terminal != IntPtr.Zero && _api?.CopySelection(_terminal, clearSelection: false) == true;
+            case "terminal.paste":
+                _ = PasteFromClipboardAsync();
+                return true;
+            case "terminal.commandsPanel":
+                DispatcherQueue.TryEnqueue(ToggleCommandsPanel);
+                return true;
+            case "terminal.bookmark":
+                DispatcherQueue.TryEnqueue(ToggleBookmark);
+                return true;
+            case "terminal.previousCommand" or "terminal.nextCommand":
+                var previous = id == "terminal.previousCommand";
+                DispatcherQueue.TryEnqueue(() => _ruler.JumpCommand(previous));
+                return true;
+            case "terminal.zoomIn":
+                SetZoom(_zoomDelta + 1);
+                return true;
+            case "terminal.zoomOut":
+                SetZoom(_zoomDelta - 1);
+                return true;
+            case "terminal.zoomReset":
+                SetZoom(0);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void SetZoom(int delta)
+    {
+        var before = EffectiveFontSize;
+        _zoomDelta = Math.Clamp(_fontSize + delta, 6, 72) - _fontSize;
+        if (EffectiveFontSize == before)
+            return;
+        ApplyNativeTheme();
+        UpdateBounds(force: true);
     }
 
 
@@ -2372,7 +2386,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
             _terminal,
             theme,
             _fontFamily,
-            ToNativePointSize(_fontSize),
+            ToNativePointSize(EffectiveFontSize),
             _dpi);
     }
 

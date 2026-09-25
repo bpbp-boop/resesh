@@ -74,8 +74,9 @@ public sealed class TerminalTabView : Grid, IDisposable
 
     private Session Session => _tab.Session;
 
-    /// <summary>Ctrl+F4 inside the terminal; the window routes it to the confirmed-close pathway.</summary>
-    public event Action? CloseRequested;
+    /// <summary>A window shortcut pressed inside this tab's terminal or rewind player:
+    /// the binding id and matched chord index. The window runs it for this tab.</summary>
+    public event Action<string, int>? ShortcutRequested;
 
     /// <summary>The terminal presented a frame after being created or shown again.</summary>
     /// <summary>Whether the terminal has presented its first frame.</summary>
@@ -89,18 +90,6 @@ public sealed class TerminalTabView : Grid, IDisposable
 
     /// <summary>Raised when the user clicks the lock overlay wanting to unlock.</summary>
     public event Action? UnlockRequested;
-
-    /// <summary>Ctrl+Shift+\ inside the terminal (split right / move to other group).</summary>
-    public event Action? SplitRequested;
-
-    /// <summary>Ctrl+Shift+T inside the terminal (open the default local profile).</summary>
-    public event Action? NewLocalTabRequested;
-
-    /// <summary>Ctrl+Shift+P inside the terminal (open the app command palette).</summary>
-    public event Action? CommandPaletteRequested;
-
-    /// <summary>Ctrl+Shift+K inside the terminal (focus the app quick-connect box).</summary>
-    public event Action? QuickConnectRequested;
 
     /// <summary>Raised (UI thread) when a connect to a session with no icon set identified
     /// the OS/vendor from the server banner. The window decides whether to persist it.</summary>
@@ -224,19 +213,13 @@ public sealed class TerminalTabView : Grid, IDisposable
                     context.Hostname ?? "", context.WorkingDirectory));
             }
         });
-        _terminal.CloseTabRequested += () => DispatcherQueue.TryEnqueue(() => CloseRequested?.Invoke());
-        _terminal.SplitRequested += () => DispatcherQueue.TryEnqueue(() => SplitRequested?.Invoke());
-        _terminal.FilePaneRequested += () => DispatcherQueue.TryEnqueue(ToggleFilePane);
+        _terminal.ShortcutRequested += (id, chord) =>
+            DispatcherQueue.TryEnqueue(() => ShortcutRequested?.Invoke(id, chord));
         _terminal.CommandsPanelOpenChanged += open => DispatcherQueue.TryEnqueue(() =>
         {
             IsCommandsPanelOpen = open;
             CommandsPanelOpenChanged?.Invoke();
         });
-        _terminal.NewLocalTabRequested += () => DispatcherQueue.TryEnqueue(() => NewLocalTabRequested?.Invoke());
-        _terminal.CommandPaletteRequested += () =>
-            DispatcherQueue.TryEnqueue(() => CommandPaletteRequested?.Invoke());
-        _terminal.QuickConnectRequested += () =>
-            DispatcherQueue.TryEnqueue(() => QuickConnectRequested?.Invoke());
 
         _agent = new AgentTracker(Session.Agent);
         WireAgentSignals();
@@ -384,6 +367,7 @@ public sealed class TerminalTabView : Grid, IDisposable
 
         var player = new TerminalPlayerView(_capture);
         player.CloseRequested += ReturnToLive;
+        player.ShortcutRequested += (id, chord) => ShortcutRequested?.Invoke(id, chord);
         _rewindPlayer = player;
         Grid.SetColumnSpan(player, 3);
         Children.Add(player);
@@ -595,6 +579,13 @@ public sealed class TerminalTabView : Grid, IDisposable
     {
         if (!_disposed && !_tab.IsLocked)
             _terminal.ToggleCommandsPanel();
+    }
+
+    /// <summary>Runs a terminal-scope shortcut (zoom, clear, find, ...) from the command palette.</summary>
+    public void InvokeTerminalShortcut(string id)
+    {
+        if (!_disposed && !_tab.IsLocked)
+            _terminal.InvokeShortcut(id);
     }
 
     /// <summary>Kicks off a fresh connection/launch using the terminal's current size.</summary>

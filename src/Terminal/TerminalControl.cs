@@ -113,23 +113,9 @@ public sealed class TerminalControl : TerminalSurface
     public override event Action<ReadOnlyMemory<byte>, int, int, long>? KeyframeCaptured;
     public override event Action? ReconnectRequested;
 
-    /// <summary>Ctrl+F4 pressed inside the terminal page.</summary>
-    public override event Action? CloseTabRequested;
-
-    /// <summary>Ctrl+Shift+\ pressed inside the terminal page.</summary>
-    public override event Action? SplitRequested;
-
-    /// <summary>Ctrl+Shift+E pressed inside the terminal page (toggle file pane).</summary>
-    public override event Action? FilePaneRequested;
-
-    /// <summary>Ctrl+Shift+T pressed inside the terminal page (open default local profile).</summary>
-    public override event Action? NewLocalTabRequested;
-
-    /// <summary>Ctrl+Shift+P pressed inside the terminal page.</summary>
-    public override event Action? CommandPaletteRequested;
-
-    /// <summary>Ctrl+Shift+K pressed inside the terminal page.</summary>
-    public override event Action? QuickConnectRequested;
+    /// <summary>A window shortcut pressed inside the terminal page (WebView2 does not
+    /// forward the window's keyboard accelerators).</summary>
+    public override event Action<string, int>? ShortcutRequested;
 
     /// <summary>Fires once when the xterm page is loaded and measured (initial cols/rows).</summary>
     public override event Action<int, int>? Ready;
@@ -298,23 +284,14 @@ public sealed class TerminalControl : TerminalSurface
                 case "reconnect":
                     ReconnectRequested?.Invoke();
                     break;
-                case "closeTab":
-                    CloseTabRequested?.Invoke();
-                    break;
-                case "splitTab":
-                    SplitRequested?.Invoke();
-                    break;
-                case "filePane":
-                    FilePaneRequested?.Invoke();
-                    break;
-                case "newLocalTab":
-                    NewLocalTabRequested?.Invoke();
-                    break;
-                case "commandPalette":
-                    CommandPaletteRequested?.Invoke();
-                    break;
-                case "quickConnect":
-                    QuickConnectRequested?.Invoke();
+                case "shortcut":
+                    if (root.TryGetProperty("id", out var shortcutId) && shortcutId.GetString() is { Length: > 0 } id)
+                    {
+                        var chord = root.TryGetProperty("chord", out var chordIndex) && chordIndex.TryGetInt32(out var index)
+                            ? index
+                            : 0;
+                        ShortcutRequested?.Invoke(id, chord);
+                    }
                     break;
                 case "openLink":
                     if (root.TryGetProperty("uri", out var uriProperty))
@@ -546,6 +523,15 @@ public sealed class TerminalControl : TerminalSurface
     /// command-mark list). Same action as Ctrl+Shift+O inside the terminal.</summary>
     public override void ToggleCommandsPanel() => Post(new { type = "toggleCommands" });
 
+    /// <summary>Runs a terminal-scope shortcut in the page, the same code its key runs.</summary>
+    public override bool InvokeShortcut(string id)
+    {
+        if (!Shortcuts.Any(shortcut => !shortcut.Forward && shortcut.Id == id))
+            return false;
+        Post(new { type = "invokeShortcut", id });
+        return true;
+    }
+
     public override void ScrollToCommand(long id)
     {
         if (id > 0 && id <= 9007199254740991 && !_disposed)
@@ -631,6 +617,19 @@ public sealed class TerminalControl : TerminalSurface
         {
             type = "initOptions", fontSize, fontFamily, theme, copyOnSelect, rightClickPaste, scrollback, highlights,
             readOnly,
+            shortcuts = Shortcuts.Select(shortcut => new
+            {
+                id = shortcut.Id,
+                forward = shortcut.Forward,
+                whenSplit = shortcut.WhenSplit,
+                chords = shortcut.Chords.Select(chord => new
+                {
+                    key = chord.Key,
+                    ctrl = chord.Ctrl,
+                    shift = chord.Shift,
+                    alt = chord.Alt,
+                }).ToArray(),
+            }).ToArray(),
         };
     }
 

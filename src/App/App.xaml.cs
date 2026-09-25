@@ -165,6 +165,7 @@ public partial class App : Application
         Resesh.Terminal.TerminalControl.TraceHook = message => MainWindow.Trace(message);
         Resesh.Terminal.NativeTerminalSurface.TraceHook = message => MainWindow.Trace(message);
 #endif
+        Resesh.Terminal.TerminalSurface.Shortcuts = AppShortcuts.ForTerminals();
         var window = CreateWindowCore();
         if (Settings.Current.ReopenLastLayoutAtStartup)
             window.RestoreLastLayout();

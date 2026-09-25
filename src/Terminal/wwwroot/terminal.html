@@ -614,20 +614,105 @@
     document.getElementById("find-next").addEventListener("click", function () { runFind("next", false); findInput.focus(); });
     document.getElementById("find-close").addEventListener("click", closeFind);
 
-    // Capture at the page boundary so app shortcuts also work while either xterm or
-    // its find field has focus. WebView2 does not forward the window accelerators.
+    // ---- keyboard shortcuts ----
+    // The host sends the app's shortcut table (src/Core/Input/KeyBindings.cs). Chords match
+    // on keyCode, which WebView2 reports as the Windows virtual-key code, so the page, the
+    // window accelerators and the native surface agree on every keyboard layout.
+    // Forwarded entries go to the window: WebView2 does not deliver its accelerators.
+    // The rest are terminal actions this page runs itself.
+    const shortcuts = Array.isArray(init.shortcuts) ? init.shortcuts : [];
+    let isSplit = false;
+
+    function matchShortcut(e) {
+      if (e.metaKey) return null;
+      for (let i = 0; i < shortcuts.length; i++) {
+        const chords = Array.isArray(shortcuts[i].chords) ? shortcuts[i].chords : [];
+        for (let c = 0; c < chords.length; c++) {
+          const chord = chords[c];
+          if (chord.key === e.keyCode && chord.ctrl === e.ctrlKey &&
+              chord.shift === e.shiftKey && chord.alt === e.altKey) {
+            return { shortcut: shortcuts[i], chord: c };
+          }
+        }
+      }
+      return null;
+    }
+
+    // Font zoom is per tab and on top of the configured size, like Windows Terminal.
+    let baseFontSize = term.options.fontSize;
+    let zoomDelta = 0;
+    function setZoom(delta) {
+      const size = Math.max(6, Math.min(72, baseFontSize + delta));
+      zoomDelta = size - baseFontSize;
+      if (term.options.fontSize === size) return;
+      try {
+        term.options.fontSize = size;
+        fitPreservingTimestamps();
+        reportSize();
+      } catch (err) {
+        pageTrace("zoom: " + (err && err.message));
+      }
+    }
+
+    // Each returns false when it did nothing, so the key reaches the shell instead.
+    const terminalActions = {
+      "terminal.copy": function () {
+        if (!term.hasSelection()) return false;
+        host.postMessage({ type: "copy", text: term.getSelection() });
+        return true;
+      },
+      "terminal.paste": function () { host.postMessage({ type: "paste" }); return true; },
+      "terminal.selectAll": function () { term.selectAll(); return true; },
+      "terminal.find": function () { openFind(); return true; },
+      "terminal.clearScrollback": function () { term.clearSelection(); term.clear(); return true; },
+      "terminal.scrollPageUp": function () { term.scrollPages(-1); return true; },
+      "terminal.scrollPageDown": function () { term.scrollPages(1); return true; },
+      "terminal.scrollToTop": function () { term.scrollToTop(); return true; },
+      "terminal.scrollToBottom": function () { term.scrollToBottom(); return true; },
+      "terminal.previousCommand": function () { ruler.jumpCommand(-1); return true; },
+      "terminal.nextCommand": function () { ruler.jumpCommand(1); return true; },
+      "terminal.commandsPanel": function () { ruler.toggleCommandsPanel(); return true; },
+      "terminal.bookmark": function () { ruler.toggleBookmark(); return true; },
+      "terminal.zoomIn": function () { setZoom(zoomDelta + 1); return true; },
+      "terminal.zoomOut": function () { setZoom(zoomDelta - 1); return true; },
+      "terminal.zoomReset": function () { setZoom(0); return true; }
+    };
+
+    function runTerminalAction(id) {
+      const action = terminalActions[id];
+      return action ? action() === true : false;
+    }
+
+    // Capture at the page boundary so shortcuts work while either xterm or the find field
+    // has focus. In the find field, terminal actions other than Find keep their text-box
+    // meaning (Ctrl+Shift+Home selects text there); window shortcuts still apply.
     window.addEventListener("keydown", function (e) {
-      if (!e.ctrlKey || !e.shiftKey || e.altKey) return;
-      let type = null;
-      if (e.code === "KeyP") type = "commandPalette";
-      else if (e.code === "KeyK") type = "quickConnect";
-      if (type === null) return;
-      host.postMessage({ type: type });
+      const match = matchShortcut(e);
+      if (!match) return;
+      const shortcut = match.shortcut;
+      if (shortcut.whenSplit && !isSplit) return;
+      let handled;
+      if (shortcut.forward) {
+        host.postMessage({ type: "shortcut", id: shortcut.id, chord: match.chord });
+        handled = true;
+      } else {
+        const target = e.target;
+        const inTextField = target && target.tagName === "INPUT";
+        if (inTextField && shortcut.id !== "terminal.find") return;
+        handled = runTerminalAction(shortcut.id);
+      }
+      if (!handled) return;
       e.preventDefault();
       e.stopPropagation();
     }, true);
 
-    // Ctrl+Shift+C / Ctrl+Shift+V, Ctrl+F4 (close tab — handled by the app shell)
+    container.addEventListener("wheel", function (e) {
+      if (!e.ctrlKey || e.deltaY === 0) return;
+      setZoom(zoomDelta + (e.deltaY < 0 ? 1 : -1));
+      e.preventDefault();
+      e.stopPropagation();
+    }, { capture: true, passive: false });
+
     // Shift+Enter sends ESC CR (Meta+Enter), the newline chord Claude Code and similar
     // prompts read; xterm.js otherwise sends a bare CR that submits. This matches the
     // binding Claude Code's /terminal-setup installs for VS Code's xterm.js terminal.
@@ -645,49 +730,6 @@
           term.input("\x1b\r", true);
         }
         return false;
-      }
-      if (e.type === "keydown" && e.ctrlKey && !e.shiftKey && e.code === "F4") {
-        host.postMessage({ type: "closeTab" });
-        return false;
-      }
-      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyF") {
-        openFind();
-        return false;
-      }
-      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "Backslash") {
-        host.postMessage({ type: "splitTab" });
-        return false;
-      }
-      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyE") {
-        host.postMessage({ type: "filePane" });
-        return false;
-      }
-      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyT") {
-        host.postMessage({ type: "newLocalTab" });
-        return false;
-      }
-      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyM") {
-        ruler.toggleBookmark();
-        return false;
-      }
-      if (e.type === "keydown" && e.ctrlKey && e.shiftKey && e.code === "KeyO") {
-        ruler.toggleCommandsPanel();
-        return false;
-      }
-      if (e.type === "keydown" && e.ctrlKey && e.shiftKey &&
-          (e.code === "ArrowUp" || e.code === "ArrowDown")) {
-        ruler.jumpCommand(e.code === "ArrowDown" ? 1 : -1);
-        return false;
-      }
-      if (e.type === "keydown" && e.ctrlKey && e.shiftKey) {
-        if (e.code === "KeyC" && term.hasSelection()) {
-          host.postMessage({ type: "copy", text: term.getSelection() });
-          return false;
-        }
-        if (e.code === "KeyV") {
-          host.postMessage({ type: "paste" });
-          return false;
-        }
       }
       return true;
     });
@@ -924,9 +966,13 @@
             if (typeof msg.scrollback === "number" && msg.scrollback !== term.options.scrollback)
               term.options.scrollback = msg.scrollback;
             let layoutChanged = false;
-            if (msg.fontSize && msg.fontSize !== term.options.fontSize) {
-              term.options.fontSize = msg.fontSize;
-              layoutChanged = true;
+            if (msg.fontSize) {
+              baseFontSize = msg.fontSize;
+              const zoomed = Math.max(6, Math.min(72, baseFontSize + zoomDelta));
+              if (zoomed !== term.options.fontSize) {
+                term.options.fontSize = zoomed;
+                layoutChanged = true;
+              }
             }
             if (msg.fontFamily && msg.fontFamily !== term.options.fontFamily) {
               term.options.fontFamily = msg.fontFamily;
@@ -945,10 +991,14 @@
           ruler.setHighlightRules(Array.isArray(msg.rules) ? msg.rules : []);
           break;
         case "setRulerPresentation":
-          ruler.setPresentation(msg.isSplit === true, msg.isGroupFocused !== false);
+          isSplit = msg.isSplit === true;
+          ruler.setPresentation(isSplit, msg.isGroupFocused !== false);
           break;
         case "setPromptPlatform":
           ruler.setPromptPlatform(msg.platform);
+          break;
+        case "invokeShortcut":
+          if (typeof msg.id === "string") runTerminalAction(msg.id);
           break;
         case "toggleCommands":
           // The native tab-strip button; Ctrl+Shift+O inside the page does the same.

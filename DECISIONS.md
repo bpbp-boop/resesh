@@ -784,3 +784,27 @@ keyboard-interactive fallback.
 - Verified in the running app by injecting each state through the page's output path:
   tab strip and taskbar button both show normal, error, paused, indeterminate and
   cleared. SFTP-driven progress was not exercised against a live server.
+
+## 2026-09-25 - Shared keyboard shortcut table
+- `src/Core/Input/KeyBindings.cs` is the one list of shortcuts. Window accelerators, the
+  WebView2 page, the native surface, menus, the command palette and the new Keyboard
+  Shortcuts screen (View menu, Ctrl+Shift+/) all read it. Nothing else hardcodes a chord.
+- Chords are Windows virtual-key codes. The page matches `KeyboardEvent.keyCode`, which
+  WebView2 reports as the same code, so every surface agrees on every layout. Labels for
+  punctuation keys come from the current layout (`MapVirtualKey`).
+- Scopes: App (anywhere; a focused terminal forwards it as one `shortcut` message),
+  Window (outside the terminal only: Ctrl+F), Terminal (the surface runs it), SessionTree.
+- Rules, enforced by tests: no Ctrl+letter or Alt+letter in the terminal (shell and tmux
+  keys), no Ctrl+Alt (AltGr), no duplicate chord where both are active. Alt+Arrow group
+  focus only takes the key while the window is split; otherwise the shell gets it.
+- Zoom (Ctrl+= / Ctrl+- / Ctrl+0, Ctrl+wheel) is per tab, on top of the configured size.
+- The native surface drops characters from a consumed chord until that key's key-up (or
+  any other key-down or focus loss), replacing the old "skip next character" flag that
+  could eat a real keystroke after Ctrl+digit. It has no API yet for Select All, Clear
+  Scrollback or the scroll keys, so those keys still reach the shell there.
+- Dialog shortcuts do nothing while another ContentDialog is open (WinUI allows one).
+- Verified live through CDP and UIA: forwarding, tab cycling and numbering, move, split,
+  Alt+Arrow (and pass-through unsplit), clone, restart, close with confirmation, zoom,
+  find, clear, full screen, sessions pane, and the shortcuts screen with search. Not
+  exercised: Window-scope and tree keys with a real keyboard (synthetic OS input is
+  blocked in the test rig), copy/paste (to leave the clipboard alone), native surface.

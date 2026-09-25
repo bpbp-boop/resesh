@@ -351,7 +351,7 @@ test("the addon ships the themed panel chrome and no page-side toggle button", (
 });
 
 test("the page wires Ctrl+Shift+O, the host toggle message, and the find bar dodge", () => {
-  assert.match(pageSource, /e\.code === "KeyO"/);
+  assert.match(pageSource, /"terminal\.commandsPanel": function \(\) \{ ruler\.toggleCommandsPanel\(\); return true; \}/);
   assert.match(pageSource, /case "toggleCommands":[\s\S]*?ruler\.toggleCommandsPanel\(\)/);
   assert.match(pageSource, /onCommandsPanelChanged[\s\S]*?type: "commandsPanel"/);
   assert.match(pageSource, /onCopyText[\s\S]*?type: "copy"/);
