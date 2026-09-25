@@ -45,6 +45,7 @@
 </style>
 <script src="xterm.js"></script>
 <script src="addon-webgl.js"></script>
+<script src="addon-unicode11.js"></script>
 <script src="addon-fit.js"></script>
 <script src="addon-web-links.js"></script>
 <script src="addon-search.js"></script>
@@ -237,8 +238,22 @@
       fontFamily: init.fontFamily || "Cascadia Mono, Consolas, monospace",
       fontSize: init.fontSize || 14,
       allowProposedApi: true,
-      theme: getTheme(init.theme)
+      theme: getTheme(init.theme),
+      // OSC 8 hyperlinks (ls --hyperlink, gh, delta, Claude Code). The upstream default
+      // is a confirm() dialog and window.open, which opens a WebView popup instead of the
+      // browser. Use the same HTTP(S)-only native path as plain URLs. The visible text
+      // need not match the target, so hovering shows the real URI.
+      linkHandler: {
+        activate: function (_event, uri) { host.postMessage({ type: "openLink", uri: uri }); },
+        hover: function (_event, uri) { container.title = uri; },
+        leave: function () { container.title = ""; }
+      }
     });
+    // Unicode 11 widths match what remote hosts (glibc wcwidth) assume for emoji and
+    // wide symbols. xterm.js defaults to Unicode 6, which draws them one cell wide and
+    // leaves the cursor out of step with full-screen programs.
+    term.loadAddon(new Unicode11Addon.Unicode11Addon());
+    term.unicode.activeVersion = "11";
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon.WebLinksAddon(function (_event, uri) {
@@ -395,8 +410,9 @@
         // Enter on a prompt-shaped line becomes a discovered command mark (Phase 9.4).
         // Checked before the input round-trips: the typed command is already echoed on
         // the cursor line, the resulting newline is not. A multi-line paste only marks
-        // the first command — the rest echo asynchronously.
-        if (data.indexOf("\r") >= 0) ruler.notifyEnter(titlesSeen);
+        // the first command — the rest echo asynchronously. Meta+Enter (Shift+Enter or
+        // Alt+Enter) inserts a newline rather than submitting.
+        if (data.indexOf("\r") >= 0 && data !== "\x1b\r") ruler.notifyEnter(titlesSeen);
         host.postMessage({ type: "input", data: strToB64(data) });
       } else if (data === "\r") {
         host.postMessage({ type: "reconnect" });
@@ -602,7 +618,24 @@
     }, true);
 
     // Ctrl+Shift+C / Ctrl+Shift+V, Ctrl+F4 (close tab — handled by the app shell)
+    // Shift+Enter sends ESC CR (Meta+Enter), the newline chord Claude Code and similar
+    // prompts read; xterm.js otherwise sends a bare CR that submits. This matches the
+    // binding Claude Code's /terminal-setup installs for VS Code's xterm.js terminal.
+    // Full-screen programs keep plain Enter: in vim's insert mode ESC CR would leave it.
+    function isShiftEnter(e) {
+      return (e.key === "Enter" || e.code === "Enter" || e.code === "NumpadEnter") &&
+        e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey &&
+        term.buffer.active.type === "normal";
+    }
+
     term.attachCustomKeyEventHandler(function (e) {
+      if (isShiftEnter(e)) {
+        if (e.type === "keydown") {
+          e.preventDefault();
+          term.input("\x1b\r", true);
+        }
+        return false;
+      }
       if (e.type === "keydown" && e.ctrlKey && !e.shiftKey && e.code === "F4") {
         host.postMessage({ type: "closeTab" });
         return false;

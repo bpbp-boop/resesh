@@ -42,6 +42,7 @@ public sealed class TerminalControl : TerminalSurface
             ("<link rel=\"stylesheet\" href=\"xterm.css\">", "xterm.css", "<style>", "</style>"),
             ("<script src=\"xterm.js\"></script>", "xterm.js", "<script>", "</script>"),
             ("<script src=\"addon-webgl.js\"></script>", "addon-webgl.js", "<script>", "</script>"),
+            ("<script src=\"addon-unicode11.js\"></script>", "addon-unicode11.js", "<script>", "</script>"),
             ("<script src=\"addon-fit.js\"></script>", "addon-fit.js", "<script>", "</script>"),
             ("<script src=\"addon-web-links.js\"></script>", "addon-web-links.js", "<script>", "</script>"),
             ("<script src=\"addon-search.js\"></script>", "addon-search.js", "<script>", "</script>"),

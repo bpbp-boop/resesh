@@ -703,3 +703,25 @@ keyboard-interactive fallback.
 - Read-only surfaces (recording playback and rewind) drop it, so replaying a recording
   never overwrites the clipboard. The native surface enables its upstream OSC clipboard
   policy under the same rule.
+
+## 2026-09-25 - Unicode 11 widths, OSC 8 links and Shift+Enter
+- Bundle upstream `@xterm/addon-unicode11` 0.9.0, from the same upstream commit
+  (`f447274f430fd22513f6adbf9862d19524471c04`) and MIT license as xterm 6.0.0.
+  Source package: https://registry.npmjs.org/@xterm/addon-unicode11/-/addon-unicode11-0.9.0.tgz
+  Bundle SHA-256: `72353b5178e1a7382716df1cfedf8ab070eea655d38995bb9f4f284fe56e2f2b` (unmodified).
+  xterm.js defaults to Unicode 6, which measures emoji such as 👍 as one cell. Remote
+  `wcwidth` says two, so full-screen programs drifted out of step with the cursor.
+- OSC 8 hyperlinks use a `linkHandler` that posts the existing `openLink` message, so
+  they get the same HTTP(S)-only default-browser path as detected URLs. The upstream
+  default was a `confirm()` dialog followed by `window.open`, which opens a WebView popup.
+  Link text need not match its target, so hovering shows the real URI as a tooltip.
+- Shift+Enter sends `ESC CR` (Meta+Enter), the newline chord Claude Code reads. It's the
+  same binding Claude Code's `/terminal-setup` installs for VS Code's xterm.js terminal.
+  It applies only on the normal screen: in the alternate screen (vim, less), `ESC CR`
+  would leave vim's insert mode, so full-screen programs keep a plain CR. Bash
+  leaves `ESC CR` unbound, so there Shift+Enter no longer submits the line; zsh and fish
+  insert a newline. Enter-gated command discovery ignores `ESC CR`, which also fixes
+  Alt+Enter being marked as a submitted command.
+- Verified in headless Edge against the real page with CDP key and mouse events. The
+  pre-change page failed the width, Shift+Enter and OSC 8 checks, and its link click
+  blocked on the `confirm()` dialog.
