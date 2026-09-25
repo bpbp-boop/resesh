@@ -339,6 +339,25 @@
         return true;
       });
     });
+    // OSC 52 ; Pc ; Pd — a remote program (tmux, Neovim, Claude Code) setting the local
+    // clipboard. Write-only: a "?" read query is dropped so the host can never read it.
+    // Playback is read-only, so replaying a recording never touches the clipboard.
+    if (term.parser && term.parser.registerOscHandler) {
+      term.parser.registerOscHandler(52, function (data) {
+        if (readOnly) return true;
+        const payload = String(data == null ? "" : data);
+        const separator = payload.indexOf(";");
+        const encoded = separator < 0 ? "" : payload.slice(separator + 1);
+        if (!encoded || encoded === "?") return true;
+        try {
+          const text = new TextDecoder().decode(b64ToBytes(encoded));
+          if (text) host.postMessage({ type: "copy", text: text });
+        } catch (err) {
+          pageTrace("osc52: " + (err && err.message));
+        }
+        return true;
+      });
+    }
     if (term.onBell) term.onBell(function () { postAgent({ type: "agentBell" }); });
     ruler.onCommandMark(function (command) {
       postAgent({ type: "command", text: String(command || "").slice(0, 512) });

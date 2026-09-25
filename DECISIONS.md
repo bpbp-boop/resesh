@@ -689,3 +689,17 @@ keyboard-interactive fallback.
   shrink, rounding correction, and restoration. It fails with the upstream bundle
   and passes with the patch. Also verified visible startup, typed commands, and
   1000 highlighted output lines in an isolated application using actual WebView2.
+
+## 2026-09-25 - OSC 52 clipboard writes
+
+- Remote programs such as Claude Code, tmux and Neovim copy with `OSC 52`. The WebView
+  terminal ignored it because the stock xterm.js bundle has no clipboard handler, so
+  copying from a remote Claude Code session did nothing.
+- `terminal.html` decodes `OSC 52 ; Pc ; <base64>` as UTF-8 and sends it through the
+  existing `copy` message. The selection target is ignored; everything goes to the
+  Windows clipboard.
+- Write-only. `?` read queries are dropped without a reply, so a remote host can never
+  read the local clipboard. Empty payloads (clear requests) and bad base64 are ignored.
+- Read-only surfaces (recording playback and rewind) drop it, so replaying a recording
+  never overwrites the clipboard. The native surface enables its upstream OSC clipboard
+  policy under the same rule.

@@ -262,7 +262,7 @@ public sealed class NativeTerminalSurface : TerminalSurface
                 NativeTerminalThemeCatalog.Find(_theme),
                 _copyOnSelect,
                 _rightClickPaste,
-                AllowOscClipboard: false,
+                AllowOscClipboard: !_readOnly,
                 AllowOscNotifications: false,
                 _readOnly);
             _terminal = _api.CreateTerminal(_hostHwnd, creationSettings);
