@@ -1,0 +1,770 @@
+<UserControl
+    x:Class="Resesh.App.Controls.HistoryView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Resesh.App.Controls"
+    Visibility="Collapsed"
+    AutomationProperties.Name="Command history">
+
+    <UserControl.Resources>
+        <!-- Rows are the session tree's material: shell surface, tree selection color. -->
+        <DataTemplate x:Key="HistoryHeaderTemplate" x:DataType="controls:HistoryListItem">
+            <TextBlock
+                Margin="0,14,0,4"
+                Text="{x:Bind HeaderText}"
+                FontSize="12"
+                FontWeight="SemiBold"
+                Foreground="{StaticResource SessionTreeMutedForegroundBrush}"
+                AutomationProperties.HeadingLevel="Level2" />
+        </DataTemplate>
+
+        <DataTemplate x:Key="HistoryHitTemplate" x:DataType="controls:HistoryListItem">
+            <Grid ColumnDefinitions="14,*,Auto" ColumnSpacing="10" Padding="0,7">
+                <Ellipse
+                    Width="8"
+                    Height="8"
+                    Margin="0,6,0,0"
+                    VerticalAlignment="Top"
+                    Fill="{x:Bind StatusBrush}" />
+                <StackPanel Grid.Column="1" Spacing="3">
+                    <TextBlock
+                        controls:HistoryHighlight.Source="{x:Bind Command}"
+                        FontFamily="{x:Bind MonoFont}"
+                        FontSize="13"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap" />
+                    <TextBlock
+                        Text="{x:Bind Meta}"
+                        FontSize="12"
+                        Foreground="{StaticResource SessionTreeMutedForegroundBrush}"
+                        TextTrimming="CharacterEllipsis" />
+                    <Grid
+                        ColumnDefinitions="*,Auto"
+                        ColumnSpacing="8"
+                        Visibility="{x:Bind SnippetVisibility}">
+                        <TextBlock
+                            controls:HistoryHighlight.Source="{x:Bind Snippet}"
+                            FontFamily="{x:Bind MonoFont}"
+                            FontSize="12"
+                            Foreground="{StaticResource SessionTreeMutedForegroundBrush}"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="NoWrap" />
+                        <TextBlock
+                            Grid.Column="1"
+                            Text="{x:Bind OutputMatchText}"
+                            FontSize="11"
+                            Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                    </Grid>
+                </StackPanel>
+                <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="2">
+                    <TextBlock
+                        Text="{x:Bind Time}"
+                        FontSize="12"
+                        HorizontalAlignment="Right"
+                        Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                    <TextBlock
+                        Text="{x:Bind DurationText}"
+                        FontSize="11"
+                        HorizontalAlignment="Right"
+                        Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <controls:HistoryItemTemplateSelector
+            x:Key="HistoryItemTemplateSelector"
+            HeaderTemplate="{StaticResource HistoryHeaderTemplate}"
+            HitTemplate="{StaticResource HistoryHitTemplate}" />
+
+        <DataTemplate x:Key="DiffGapTemplate" x:DataType="controls:DiffRowItem">
+            <Border Padding="12,4" Background="{StaticResource SessionChromeBrush}">
+                <TextBlock
+                    Text="{x:Bind GapText}"
+                    FontSize="12"
+                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="DiffUnifiedTemplate" x:DataType="controls:DiffRowItem">
+            <Grid ColumnDefinitions="44,44,18,*" Background="{x:Bind Background}" ToolTipService.ToolTip="{x:Bind Note}">
+                <TextBlock Text="{x:Bind OldNumber}" Margin="0,1,8,1" HorizontalAlignment="Right"
+                           FontFamily="{x:Bind MonoFont}" FontSize="12"
+                           Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                <TextBlock Grid.Column="1" Text="{x:Bind NewNumber}" Margin="0,1,8,1" HorizontalAlignment="Right"
+                           FontFamily="{x:Bind MonoFont}" FontSize="12"
+                           Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                <TextBlock Grid.Column="2" Text="{x:Bind Marker}" Margin="0,1"
+                           FontFamily="{x:Bind MonoFont}" FontSize="13"
+                           Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                <TextBlock Grid.Column="3" controls:HistoryHighlight.Source="{x:Bind Text}" Margin="0,1,8,1"
+                           FontFamily="{x:Bind MonoFont}" FontSize="13" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                           Foreground="{StaticResource SessionTreeForegroundBrush}" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="DiffSideBySideTemplate" x:DataType="controls:DiffRowItem">
+            <Grid ColumnDefinitions="*,1,*" ToolTipService.ToolTip="{x:Bind Note}">
+                <Grid ColumnDefinitions="44,*" Background="{x:Bind LeftBackground}">
+                    <TextBlock Text="{x:Bind OldNumber}" Margin="0,1,8,1" HorizontalAlignment="Right"
+                               FontFamily="{x:Bind MonoFont}" FontSize="12"
+                               Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                    <TextBlock Grid.Column="1" controls:HistoryHighlight.Source="{x:Bind LeftText}" Margin="0,1,8,1"
+                               FontFamily="{x:Bind MonoFont}" FontSize="13" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                               Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                </Grid>
+                <Rectangle Grid.Column="1" Fill="{StaticResource SessionChromeFrameBrush}" />
+                <Grid Grid.Column="2" ColumnDefinitions="44,*" Background="{x:Bind RightBackground}">
+                    <TextBlock Text="{x:Bind NewNumber}" Margin="0,1,8,1" HorizontalAlignment="Right"
+                               FontFamily="{x:Bind MonoFont}" FontSize="12"
+                               Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                    <TextBlock Grid.Column="1" controls:HistoryHighlight.Source="{x:Bind RightText}" Margin="0,1,8,1"
+                               FontFamily="{x:Bind MonoFont}" FontSize="13" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                               Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                </Grid>
+            </Grid>
+        </DataTemplate>
+
+        <controls:DiffRowTemplateSelector
+            x:Key="DiffRowTemplateSelector"
+            GapTemplate="{StaticResource DiffGapTemplate}"
+            UnifiedTemplate="{StaticResource DiffUnifiedTemplate}"
+            SideBySideTemplate="{StaticResource DiffSideBySideTemplate}" />
+
+        <Style x:Key="HistoryFilterComboStyle" TargetType="ComboBox" BasedOn="{StaticResource DefaultComboBoxStyle}">
+            <Setter Property="MinWidth" Value="140" />
+            <Setter Property="Foreground" Value="{StaticResource SessionTreeForegroundBrush}" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Button
+            x:Name="Backdrop"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch"
+            Background="#66000000"
+            BorderThickness="0"
+            IsTabStop="False"
+            Click="Backdrop_Click"
+            AutomationProperties.Name="Close command history" />
+
+        <Border
+            x:Name="Card"
+            MaxWidth="1240"
+            Margin="24,56,24,24"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch"
+            Background="{StaticResource SessionShellBrush}"
+            BorderBrush="{StaticResource SessionChromeFrameBrush}"
+            BorderThickness="1"
+            CornerRadius="8">
+            <Border.Shadow>
+                <ThemeShadow />
+            </Border.Shadow>
+            <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+                <!-- Search -->
+                <Grid Margin="16,14,12,0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBox
+                        x:Name="SearchBox"
+                        PlaceholderText="Search commands and output"
+                        FontSize="15"
+                        Foreground="{StaticResource SessionTreeForegroundBrush}"
+                        PlaceholderForeground="{StaticResource SessionTreeMutedForegroundBrush}"
+                        SelectionHighlightColor="{StaticResource SessionAccentBrush}"
+                        TextChanged="SearchBox_TextChanged"
+                        AutomationProperties.Name="Search command history"
+                        AutomationProperties.AutomationId="HistorySearchBox">
+                        <TextBox.Resources>
+                            <StaticResource x:Key="TextControlBackground" ResourceKey="SessionInputBrush" />
+                            <StaticResource x:Key="TextControlBackgroundPointerOver" ResourceKey="SessionInputBrush" />
+                            <StaticResource x:Key="TextControlBackgroundFocused" ResourceKey="SessionInputBrush" />
+                            <StaticResource x:Key="TextControlBorderBrush" ResourceKey="SessionChromeFrameBrush" />
+                            <StaticResource x:Key="TextControlBorderBrushPointerOver" ResourceKey="SessionChromeFrameBrush" />
+                            <StaticResource x:Key="TextControlBorderBrushFocused" ResourceKey="SessionAccentBrush" />
+                            <StaticResource x:Key="TextControlForeground" ResourceKey="SessionTreeForegroundBrush" />
+                            <StaticResource x:Key="TextControlForegroundPointerOver" ResourceKey="SessionTreeForegroundBrush" />
+                            <StaticResource x:Key="TextControlForegroundFocused" ResourceKey="SessionTreeForegroundBrush" />
+                            <StaticResource x:Key="TextControlPlaceholderForeground" ResourceKey="SessionTreeMutedForegroundBrush" />
+                            <StaticResource x:Key="TextControlPlaceholderForegroundPointerOver" ResourceKey="SessionTreeMutedForegroundBrush" />
+                            <StaticResource x:Key="TextControlPlaceholderForegroundFocused" ResourceKey="SessionTreeMutedForegroundBrush" />
+                        </TextBox.Resources>
+                    </TextBox>
+                    <Button
+                        x:Name="CloseButton"
+                        Grid.Column="1"
+                        Width="36"
+                        Height="36"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Click="CloseButton_Click"
+                        ToolTipService.ToolTip="Close (Esc)"
+                        AutomationProperties.Name="Close command history">
+                        <FontIcon Glyph="&#xE711;" FontSize="12" />
+                    </Button>
+                </Grid>
+
+                <!-- Filters -->
+                <Grid
+                    x:Name="FilterBar"
+                    Grid.Row="1"
+                    Margin="16,10,16,10"
+                    ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*"
+                    ColumnSpacing="8">
+                    <ComboBox
+                        x:Name="SessionFilter"
+                        Style="{StaticResource HistoryFilterComboStyle}"
+                        MaxWidth="260"
+                        SelectionChanged="Filter_Changed"
+                        DisplayMemberPath="Label"
+                        AutomationProperties.Name="Session"
+                        AutomationProperties.AutomationId="HistorySessionFilter" />
+                    <ComboBox
+                        x:Name="StatusFilter"
+                        Grid.Column="1"
+                        Style="{StaticResource HistoryFilterComboStyle}"
+                        SelectedIndex="0"
+                        SelectionChanged="Filter_Changed"
+                        AutomationProperties.Name="Result"
+                        AutomationProperties.AutomationId="HistoryStatusFilter">
+                        <x:String>Any result</x:String>
+                        <x:String>Failed</x:String>
+                        <x:String>Succeeded</x:String>
+                    </ComboBox>
+                    <ComboBox
+                        x:Name="TimeFilter"
+                        Grid.Column="2"
+                        Style="{StaticResource HistoryFilterComboStyle}"
+                        SelectedIndex="0"
+                        SelectionChanged="Filter_Changed"
+                        AutomationProperties.Name="Time"
+                        AutomationProperties.AutomationId="HistoryTimeFilter">
+                        <x:String>Any time</x:String>
+                        <x:String>Last hour</x:String>
+                        <x:String>Today</x:String>
+                        <x:String>Last 7 days</x:String>
+                        <x:String>Last 30 days</x:String>
+                    </ComboBox>
+                    <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2">
+                        <CalendarDatePicker
+                            x:Name="DateFilter"
+                            MinWidth="150"
+                            PlaceholderText="Pick a day"
+                            DateFormat="{}{dayofweek.abbreviated} {day.integer} {month.abbreviated} {year.full}"
+                            Foreground="{StaticResource SessionTreeForegroundBrush}"
+                            DateChanged="DateFilter_DateChanged"
+                            CalendarViewDayItemChanging="DateFilter_DayItemChanging"
+                            ToolTipService.ToolTip="Show one day. Days without history are unavailable."
+                            AutomationProperties.Name="Day"
+                            AutomationProperties.AutomationId="HistoryDateFilter" />
+                        <Button
+                            x:Name="ClearDateButton"
+                            Width="30"
+                            Height="30"
+                            Padding="0"
+                            VerticalAlignment="Center"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            Visibility="Collapsed"
+                            Click="ClearDate_Click"
+                            ToolTipService.ToolTip="Clear the day"
+                            AutomationProperties.Name="Clear the day"
+                            AutomationProperties.AutomationId="HistoryClearDate">
+                            <FontIcon Glyph="&#xE711;" FontSize="10" />
+                        </Button>
+                    </StackPanel>
+                    <CheckBox
+                        x:Name="SearchOutputBox"
+                        Grid.Column="4"
+                        Margin="6,0,0,0"
+                        MinWidth="0"
+                        Content="Search output"
+                        IsChecked="True"
+                        Foreground="{StaticResource SessionTreeForegroundBrush}"
+                        Click="Filter_Changed"
+                        AutomationProperties.AutomationId="HistorySearchOutput" />
+                    <TextBlock
+                        x:Name="CountText"
+                        Grid.Column="5"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        FontSize="12"
+                        Foreground="{StaticResource SessionTreeMutedForegroundBrush}"
+                        AutomationProperties.LiveSetting="Polite"
+                        AutomationProperties.AutomationId="HistoryCount" />
+                </Grid>
+
+                <InfoBar
+                    x:Name="OffNotice"
+                    Grid.Row="2"
+                    Margin="16,0,16,10"
+                    IsClosable="False"
+                    Severity="Informational"
+                    Title="History is off."
+                    Message="New commands are not being saved. What was saved earlier stays searchable.">
+                    <InfoBar.ActionButton>
+                        <Button Content="Turn On" Click="TurnOn_Click" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
+
+                <Grid
+                    Grid.Row="3"
+                    BorderBrush="{StaticResource SessionChromeFrameBrush}"
+                    BorderThickness="0,1,0,1">
+                    <Grid x:Name="Body" ColumnDefinitions="5*,1,6*">
+                        <ListView
+                            x:Name="ResultList"
+                            Padding="8,0,8,8"
+                            SelectionMode="Single"
+                            IsItemClickEnabled="True"
+                            ItemClick="ResultList_ItemClick"
+                            SelectionChanged="ResultList_SelectionChanged"
+                            ContainerContentChanging="ResultList_ContainerContentChanging"
+                            ItemTemplateSelector="{StaticResource HistoryItemTemplateSelector}"
+                            Foreground="{StaticResource SessionTreeForegroundBrush}"
+                            AutomationProperties.Name="Matching commands"
+                            AutomationProperties.AutomationId="HistoryResults">
+                            <ListView.Resources>
+                                <StaticResource x:Key="ListViewItemBackgroundSelected" ResourceKey="SessionTreeSelectionBrush" />
+                                <StaticResource x:Key="ListViewItemBackgroundSelectedPointerOver" ResourceKey="SessionTreeSelectionBrush" />
+                                <StaticResource x:Key="ListViewItemBackgroundSelectedPressed" ResourceKey="SessionTreeSelectionBrush" />
+                                <StaticResource x:Key="ListViewItemForeground" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="ListViewItemForegroundPointerOver" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="ListViewItemForegroundSelected" ResourceKey="SessionTreeSelectionForegroundBrush" />
+                            </ListView.Resources>
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                    <Setter Property="MinHeight" Value="0" />
+                                    <Setter Property="Padding" Value="10,0" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                        </ListView>
+
+                        <Rectangle Grid.Column="1" Fill="{StaticResource SessionChromeFrameBrush}" />
+
+                        <!-- Detail -->
+                        <Grid
+                            x:Name="DetailPane"
+                            Grid.Column="2"
+                            Padding="20,16,16,12"
+                            RowDefinitions="Auto,Auto,Auto,Auto,*"
+                            RowSpacing="12"
+                            Background="{StaticResource SessionShellBrush}">
+                            <Border
+                                Padding="12,10"
+                                CornerRadius="6"
+                                Background="{StaticResource SessionInputBrush}"
+                                BorderBrush="{StaticResource SessionChromeFrameBrush}"
+                                BorderThickness="1">
+                                <ScrollViewer MaxHeight="120" VerticalScrollBarVisibility="Auto">
+                                    <TextBlock
+                                        x:Name="DetailCommand"
+                                        FontSize="14"
+                                        IsTextSelectionEnabled="True"
+                                        TextWrapping="Wrap"
+                                        Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                        AutomationProperties.Name="Command"
+                                        AutomationProperties.AutomationId="HistoryDetailCommand" />
+                                </ScrollViewer>
+                            </Border>
+
+                            <!-- Result chips and facts -->
+                            <StackPanel Grid.Row="1" Spacing="8">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Border
+                                            x:Name="StatusChip"
+                                            Padding="8,2"
+                                            CornerRadius="10"
+                                            BorderThickness="1">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <Ellipse x:Name="StatusChipDot" Width="7" Height="7" VerticalAlignment="Center" />
+                                                <TextBlock x:Name="StatusChipText" FontSize="12" />
+                                            </StackPanel>
+                                        </Border>
+                                        <TextBlock
+                                            x:Name="DurationChip"
+                                            VerticalAlignment="Center"
+                                            FontSize="12"
+                                            Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                                        <TextBlock
+                                            x:Name="SourceChip"
+                                            VerticalAlignment="Center"
+                                            FontSize="12"
+                                            Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <Button
+                                    x:Name="CopyCommandButton"
+                                    Width="34"
+                                    Height="30"
+                                    Padding="0"
+                                    Click="CopyCommandButton_Click"
+                                    ToolTipService.ToolTip="Copy command"
+                                    AutomationProperties.Name="Copy command">
+                                    <FontIcon x:Name="CopyCommandIcon" Glyph="&#xE8C8;" FontSize="14" />
+                                </Button>
+                                <Button
+                                    x:Name="DeleteButton"
+                                    Width="34"
+                                    Height="30"
+                                    Padding="0"
+                                    AutomationProperties.AutomationId="HistoryDelete"
+                                    ToolTipService.ToolTip="Delete from history"
+                                    AutomationProperties.Name="Delete from history">
+                                    <FontIcon Glyph="&#xE74D;" FontSize="14" />
+                                    <Button.Flyout>
+                                        <Flyout x:Name="DeleteFlyout">
+                                            <StackPanel MaxWidth="280" Spacing="12">
+                                                <TextBlock
+                                                    Text="Delete this command and its output from history?"
+                                                    TextWrapping="Wrap" />
+                                                <Button Content="Delete" Click="ConfirmDelete_Click" AutomationProperties.AutomationId="HistoryConfirmDelete" />
+                                            </StackPanel>
+                                        </Flyout>
+                                    </Button.Flyout>
+                                </Button>
+                                    </StackPanel>
+                                </Grid>
+                                <Grid x:Name="FactsGrid" ColumnDefinitions="Auto,*" ColumnSpacing="16" RowSpacing="4" />
+                            </StackPanel>
+
+                            <!-- Actions -->
+                            <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+                                <Button
+                                    x:Name="InsertButton"
+                                    Style="{StaticResource AccentButtonStyle}"
+                                    Click="InsertButton_Click"
+                                    AutomationProperties.AutomationId="HistoryInsert">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE756;" FontSize="14" />
+                                        <TextBlock Text="Insert in Terminal" />
+                                    </StackPanel>
+                                </Button>
+                                <Button x:Name="OpenSessionButton" Click="OpenSessionButton_Click" AutomationProperties.AutomationId="HistoryOpenSession">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE8A7;" FontSize="14" />
+                                        <TextBlock x:Name="OpenSessionText" Text="Open Session" />
+                                    </StackPanel>
+                                </Button>
+                                <SplitButton
+                                    x:Name="CompareButton"
+                                    Visibility="Collapsed"
+                                    Click="CompareButton_Click"
+                                    AutomationProperties.Name="Compare runs"
+                                    AutomationProperties.AutomationId="HistoryCompare">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <FontIcon Glyph="&#xE8AB;" FontSize="14" />
+                                        <TextBlock x:Name="CompareText" Text="Compare" />
+                                    </StackPanel>
+                                    <SplitButton.Flyout>
+                                        <MenuFlyout x:Name="CompareFlyout" Placement="BottomEdgeAlignedLeft" />
+                                    </SplitButton.Flyout>
+                                </SplitButton>
+                            </StackPanel>
+
+                            <!-- Output header -->
+                            <Grid Grid.Row="3" ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="4">
+                                <TextBlock
+                                    Text="Output"
+                                    VerticalAlignment="Center"
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                                <TextBlock
+                                    x:Name="MatchPosition"
+                                    Grid.Column="1"
+                                    Margin="0,0,4,0"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}"
+                                    AutomationProperties.LiveSetting="Polite" />
+                                <Button
+                                    x:Name="PreviousMatchButton"
+                                    Grid.Column="2"
+                                    Width="30"
+                                    Height="28"
+                                    Padding="0"
+                                    Click="PreviousMatch_Click"
+                                    ToolTipService.ToolTip="Previous match (Shift+F3)"
+                                    AutomationProperties.Name="Previous match">
+                                    <FontIcon Glyph="&#xE70E;" FontSize="11" />
+                                </Button>
+                                <Button
+                                    x:Name="NextMatchButton"
+                                    Grid.Column="3"
+                                    Width="30"
+                                    Height="28"
+                                    Padding="0"
+                                    Click="NextMatch_Click"
+                                    ToolTipService.ToolTip="Next match (F3)"
+                                    AutomationProperties.Name="Next match">
+                                    <FontIcon Glyph="&#xE70D;" FontSize="11" />
+                                </Button>
+                                <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" Margin="8,0,0,0">
+                                    <ToggleButton
+                                        x:Name="WrapToggle"
+                                        Height="28"
+                                        Padding="8,0"
+                                        Content="Wrap"
+                                        Click="WrapToggle_Click"
+                                        ToolTipService.ToolTip="Wrap long lines"
+                                        AutomationProperties.Name="Wrap long lines" />
+                                    <Button
+                                        x:Name="CopyOutputButton"
+                                        Height="28"
+                                        Padding="8,0"
+                                        Click="CopyOutputButton_Click"
+                                        ToolTipService.ToolTip="Copy output"
+                                        AutomationProperties.Name="Copy output">
+                                        <TextBlock x:Name="CopyOutputText" Text="Copy Output" />
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Output -->
+                            <Grid Grid.Row="4" RowDefinitions="Auto,*" RowSpacing="8">
+                                <TextBlock
+                                    x:Name="OutputNote"
+                                    FontSize="12"
+                                    TextWrapping="Wrap"
+                                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}"
+                                    Visibility="Collapsed" />
+                                <Border
+                                    Grid.Row="1"
+                                    CornerRadius="6"
+                                    Background="{StaticResource SessionInputBrush}"
+                                    BorderBrush="{StaticResource SessionChromeFrameBrush}"
+                                    BorderThickness="1">
+                                    <Grid>
+                                        <ScrollViewer
+                                            x:Name="OutputScroller"
+                                            Padding="12,10"
+                                            HorizontalScrollBarVisibility="Auto"
+                                            HorizontalScrollMode="Enabled"
+                                            VerticalScrollBarVisibility="Auto">
+                                            <RichTextBlock
+                                                x:Name="OutputText"
+                                                FontSize="13"
+                                                IsTextSelectionEnabled="True"
+                                                TextWrapping="NoWrap"
+                                                Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                                AutomationProperties.Name="Command output"
+                                                AutomationProperties.AutomationId="HistoryOutput" />
+                                        </ScrollViewer>
+                                        <TextBlock
+                                            x:Name="NoOutputText"
+                                            Margin="12,10"
+                                            Text="No output"
+                                            FontStyle="Italic"
+                                            Foreground="{StaticResource SessionTreeMutedForegroundBrush}"
+                                            Visibility="Collapsed" />
+                                    </Grid>
+                                </Border>
+                            </Grid>
+                        </Grid>
+                    </Grid>
+
+                    <!-- Empty states replace the body -->
+                    <StackPanel
+                        x:Name="EmptyState"
+                        MaxWidth="440"
+                        Margin="24"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Spacing="10"
+                        Visibility="Collapsed">
+                        <FontIcon
+                            x:Name="EmptyIcon"
+                            Glyph="&#xE81C;"
+                            FontSize="40"
+                            Margin="0,0,0,6"
+                            Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                        <TextBlock
+                            x:Name="EmptyTitle"
+                            HorizontalAlignment="Center"
+                            FontSize="18"
+                            FontWeight="SemiBold"
+                            TextAlignment="Center"
+                            Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                        <TextBlock
+                            x:Name="EmptyMessage"
+                            HorizontalAlignment="Center"
+                            TextAlignment="Center"
+                            TextWrapping="Wrap"
+                            Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                        <Button
+                            x:Name="EmptyAction"
+                            Margin="0,8,0,0"
+                            HorizontalAlignment="Center"
+                            Style="{StaticResource AccentButtonStyle}"
+                            Click="TurnOn_Click"
+                            Content="Turn On Command History"
+                            AutomationProperties.AutomationId="HistoryTurnOn" />
+                    </StackPanel>
+
+                    <!-- Compare mode replaces the results and detail pane -->
+                    <Grid
+                        x:Name="ComparePane"
+                        Padding="16,12,16,0"
+                        RowDefinitions="Auto,Auto,Auto,Auto,*"
+                        RowSpacing="10"
+                        Visibility="Collapsed"
+                        AutomationProperties.Name="Compare runs">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <Button
+                                x:Name="CompareBackButton"
+                                Click="CompareBack_Click"
+                                ToolTipService.ToolTip="Back to results (Esc)"
+                                AutomationProperties.AutomationId="HistoryCompareBack">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE72B;" FontSize="12" />
+                                    <TextBlock Text="Results" />
+                                </StackPanel>
+                            </Button>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock
+                                    x:Name="CompareTitle"
+                                    FontSize="14"
+                                    TextTrimming="CharacterEllipsis"
+                                    Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                    AutomationProperties.AutomationId="HistoryCompareTitle" />
+                                <TextBlock
+                                    x:Name="CompareSubtitle"
+                                    FontSize="12"
+                                    TextTrimming="CharacterEllipsis"
+                                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto" ColumnSpacing="8">
+                            <ComboBox
+                                x:Name="OlderRunBox"
+                                MinWidth="240"
+                                DisplayMemberPath="Label"
+                                SelectionChanged="CompareRun_Changed"
+                                AutomationProperties.Name="Earlier run"
+                                AutomationProperties.AutomationId="HistoryCompareOlder" />
+                            <FontIcon Grid.Column="1" Glyph="&#xE72A;" FontSize="12"
+                                      Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                            <ComboBox
+                                x:Name="NewerRunBox"
+                                Grid.Column="2"
+                                MinWidth="240"
+                                DisplayMemberPath="Label"
+                                SelectionChanged="CompareRun_Changed"
+                                AutomationProperties.Name="Later run"
+                                AutomationProperties.AutomationId="HistoryCompareNewer" />
+                            <TextBlock
+                                x:Name="CompareSummary"
+                                Grid.Column="3"
+                                Margin="8,0,0,0"
+                                VerticalAlignment="Center"
+                                TextTrimming="CharacterEllipsis"
+                                Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                AutomationProperties.LiveSetting="Polite"
+                                AutomationProperties.AutomationId="HistoryCompareSummary" />
+                            <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4">
+                                <TextBlock
+                                    x:Name="ChangePosition"
+                                    Margin="0,0,4,0"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                                <Button
+                                    x:Name="PreviousChangeButton"
+                                    Width="30"
+                                    Height="28"
+                                    Padding="0"
+                                    Click="PreviousChange_Click"
+                                    ToolTipService.ToolTip="Previous change (Shift+F7)"
+                                    AutomationProperties.Name="Previous change">
+                                    <FontIcon Glyph="&#xE70E;" FontSize="11" />
+                                </Button>
+                                <Button
+                                    x:Name="NextChangeButton"
+                                    Width="30"
+                                    Height="28"
+                                    Padding="0"
+                                    Click="NextChange_Click"
+                                    ToolTipService.ToolTip="Next change (F7)"
+                                    AutomationProperties.Name="Next change">
+                                    <FontIcon Glyph="&#xE70D;" FontSize="11" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="16">
+                            <SelectorBar x:Name="CompareLayoutBar" SelectionChanged="CompareLayout_Changed"
+                                         AutomationProperties.Name="Layout">
+                                <SelectorBarItem x:Name="UnifiedLayoutItem" Text="Unified" IsSelected="True" />
+                                <SelectorBarItem x:Name="SideBySideLayoutItem" Text="Side by side" />
+                            </SelectorBar>
+                            <CheckBox
+                                x:Name="IgnoreTimestampsBox"
+                                Content="Ignore timestamps"
+                                IsChecked="True"
+                                Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                Click="CompareOption_Changed"
+                                ToolTipService.ToolTip="Dates, clock times, and uptimes count as equal"
+                                AutomationProperties.AutomationId="HistoryIgnoreTimestamps" />
+                            <CheckBox
+                                x:Name="IgnoreNumbersBox"
+                                Content="Ignore numbers"
+                                Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                Click="CompareOption_Changed"
+                                ToolTipService.ToolTip="Every number counts as equal: counters and sizes, but also metrics and addresses"
+                                AutomationProperties.AutomationId="HistoryIgnoreNumbers" />
+                            <CheckBox
+                                x:Name="ShowAllLinesBox"
+                                Content="Show unchanged lines"
+                                Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                Click="CompareOption_Changed"
+                                AutomationProperties.AutomationId="HistoryShowAllLines" />
+                        </StackPanel>
+
+                        <InfoBar
+                            x:Name="CompareWarning"
+                            Grid.Row="3"
+                            IsClosable="False"
+                            Severity="Warning"
+                            AutomationProperties.AutomationId="HistoryCompareWarning" />
+
+                        <Border
+                            Grid.Row="4"
+                            Margin="0,0,0,12"
+                            CornerRadius="6"
+                            Background="{StaticResource SessionInputBrush}"
+                            BorderBrush="{StaticResource SessionChromeFrameBrush}"
+                            BorderThickness="1">
+                            <ListView
+                                x:Name="DiffList"
+                                SelectionMode="None"
+                                IsItemClickEnabled="True"
+                                ItemClick="DiffList_ItemClick"
+                                ItemTemplateSelector="{StaticResource DiffRowTemplateSelector}"
+                                AutomationProperties.Name="Differences"
+                                AutomationProperties.AutomationId="HistoryDiff">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="Margin" Value="0" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                            </ListView>
+                        </Border>
+                    </Grid>
+                </Grid>
+
+                <!-- Key hints -->
+                <StackPanel
+                    x:Name="KeyHints"
+                    Grid.Row="4"
+                    Margin="16,8,16,10"
+                    Orientation="Horizontal"
+                    Spacing="18" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

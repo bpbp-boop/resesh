@@ -53,10 +53,10 @@ public sealed partial class ImportSessionsDialog : ContentDialog
         if (scan.Importable.Count == 0)
             return scan.Skipped.Count == 0
                 ? emptyMessage
-                : $"No SSH sessions found; {scan.Skipped.Count} unsupported session(s) ignored.";
+                : $"No SSH or telnet sessions found; {scan.Skipped.Count} unsupported session(s) ignored.";
 
         return scan.Skipped.Count == 0
-            ? $"{scan.Importable.Count} SSH session(s) found."
-            : $"{scan.Importable.Count} SSH session(s) found; {scan.Skipped.Count} unsupported session(s) ignored.";
+            ? $"{scan.Importable.Count} SSH or telnet session(s) found."
+            : $"{scan.Importable.Count} SSH or telnet session(s) found; {scan.Skipped.Count} unsupported session(s) ignored.";
     }
 }

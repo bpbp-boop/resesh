@@ -22,3 +22,10 @@ public interface ITerminalBackend : IDisposable
     /// a user-initiated stop is reported by the caller, not the backend.</summary>
     void Stop();
 }
+
+/// <summary>A backend whose transport has a break signal (telnet BREAK; later a serial
+/// line break). Kept off <see cref="ITerminalBackend"/> because SSH and ConPTY have none.</summary>
+public interface IBreakSender
+{
+    void SendBreak();
+}

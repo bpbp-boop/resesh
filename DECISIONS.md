@@ -668,7 +668,7 @@ keyboard-interactive fallback.
   resize repair recorded in `eng/webgl-canvas-resize.patch`.
   Source package: https://registry.npmjs.org/@xterm/addon-webgl/-/addon-webgl-0.19.0.tgz
   Upstream bundle SHA-256: `b85f8d4b3e9756bebb757e3fe47134d70f03ea3d6b187624426d2e2b65dec06c`.
-  Patched bundle SHA-256: `9131d7c7f05c835726879c03c8c4c99ccfccc6a8b4d3ad91a47f80457b5eff35`.
+  Patched bundle SHA-256: `ad88e422fe82aaadeeae42c0447ba071f4077ecec90c9f81d3df97b631359a52`.
 - Activate after `term.open`, before the initial fit. WebGL caches glyphs in GPU
   textures rather than recreating DOM text rows during scrolling output.
 - Initialization failure retains DOM rendering. An unrecovered context loss disposes
@@ -689,3 +689,122 @@ keyboard-interactive fallback.
   shrink, rounding correction, and restoration. It fails with the upstream bundle
   and passes with the patch. Also verified visible startup, typed commands, and
   1000 highlighted output lines in an isolated application using actual WebView2.
+
+## 2026-09-25 - Crisp GPU text after device-pixel corrections
+
+- User report: GPU-rendered text was sometimes blurry until the window was resized a
+  little. At fractional display scaling, xterm rounds the canvas CSS size, so some grid
+  sizes produce a device-pixel box one pixel off the grid (125% with a 13px font:
+  81x25, 100x33 and 101x37 did; 80x24 and 97x31 did not). The ResizeObserver then
+  resizes the drawing buffer, and the glyph renderer stretched the whole grid across
+  it, resampling every glyph.
+- The glyph renderer now sets its viewport and resolution to the grid's device size,
+  anchored top-left. A larger buffer leaves a one-pixel strip; a smaller one clips the
+  last pixel row or column. Glyphs keep their native pixels. Recorded in
+  `eng/webgl-canvas-resize.patch`.
+- `tests/Fixtures/Terminal/webgl-resize.html` now compares GPU pixels before and after
+  a +1 and -1 correction. It fails with the previous bundle and passes with this one in
+  headless Edge at 100% and 125% scaling.
+
+## 2026-09-25 - OSC 52 clipboard writes
+
+- Remote programs such as Claude Code, tmux and Neovim copy with `OSC 52`. The WebView
+  terminal ignored it because the stock xterm.js bundle has no clipboard handler, so
+  copying from a remote Claude Code session did nothing.
+- `terminal.html` decodes `OSC 52 ; Pc ; <base64>` as UTF-8 and sends it through the
+  existing `copy` message. The selection target is ignored; everything goes to the
+  Windows clipboard.
+- Write-only. `?` read queries are dropped without a reply, so a remote host can never
+  read the local clipboard. Empty payloads (clear requests) and bad base64 are ignored.
+- Read-only surfaces (recording playback and rewind) drop it, so replaying a recording
+  never overwrites the clipboard. The native surface enables its upstream OSC clipboard
+  policy under the same rule.
+
+## 2026-09-25 - Unicode 11 widths, OSC 8 links and Shift+Enter
+- Bundle upstream `@xterm/addon-unicode11` 0.9.0, from the same upstream commit
+  (`f447274f430fd22513f6adbf9862d19524471c04`) and MIT license as xterm 6.0.0.
+  Source package: https://registry.npmjs.org/@xterm/addon-unicode11/-/addon-unicode11-0.9.0.tgz
+  Bundle SHA-256: `72353b5178e1a7382716df1cfedf8ab070eea655d38995bb9f4f284fe56e2f2b` (unmodified).
+  xterm.js defaults to Unicode 6, which measures emoji such as 👍 as one cell. Remote
+  `wcwidth` says two, so full-screen programs drifted out of step with the cursor.
+- OSC 8 hyperlinks use a `linkHandler` that posts the existing `openLink` message, so
+  they get the same HTTP(S)-only default-browser path as detected URLs. The upstream
+  default was a `confirm()` dialog followed by `window.open`, which opens a WebView popup.
+  Link text need not match its target, so hovering shows the real URI as a tooltip.
+- Shift+Enter sends `ESC CR` (Meta+Enter), the newline chord Claude Code reads. It's the
+  same binding Claude Code's `/terminal-setup` installs for VS Code's xterm.js terminal.
+  It applies only on the normal screen: in the alternate screen (vim, less), `ESC CR`
+  would leave vim's insert mode, so full-screen programs keep a plain CR. Bash
+  leaves `ESC CR` unbound, so there Shift+Enter no longer submits the line; zsh and fish
+  insert a newline. Enter-gated command discovery ignores `ESC CR`, which also fixes
+  Alt+Enter being marked as a submitted command.
+- Verified in headless Edge against the real page with CDP key and mouse events. The
+  pre-change page failed the width, Shift+Enter and OSC 8 checks, and its link click
+  blocked on the `confirm()` dialog.
+
+## 2026-09-25 - XTVERSION reply and truecolor advertising
+- The page answers XTVERSION (`CSI > q` / `CSI > 0 q`) with `DCS >|Resesh ST`. Over SSH,
+  `TERM_PROGRAM` rarely arrives, and Claude Code's startup probe only asks for
+  synchronized output (DECRQM 2026) once XTVERSION has replied; its environment fallback
+  is an allowlist of terminal names. xterm.js already supports mode 2026, so without the
+  reply Claude Code redrew without synchronized updates. The app binary carries no
+  release version (only the installer is stamped), so the reply is the name alone.
+- Remote shell integration exports `COLORTERM="${COLORTERM:-truecolor}"` in its launch
+  environment. SSH forwards `TERM` but rarely `COLORTERM`, so chalk-based tools (Claude
+  Code) chose 256 colours. The launch command doesn't depend on the server's `AcceptEnv`;
+  a server-provided value wins.
+- Every SSH session also sends `COLORTERM=truecolor` as an SSH `env` request, whatever its
+  terminal type and with or without shell integration. Plain shells now open through
+  the same pinned SSH.NET channel seam as integrated startup (env, pty, then shell
+  instead of exec); `CreateShellStream` remains the fallback. Servers apply it only when
+  `AcceptEnv` lists `COLORTERM`, and a refusal is ignored. Verified against user-mode
+  OpenSSH sshd with and without `AcceptEnv COLORTERM`, for both shell and exec.
+- The private tmux server adds `Tc` to its terminal overrides. Without it tmux quantizes
+  RGB to the 256-colour palette for `xterm-256color` clients even when `COLORTERM` is set.
+  Not yet checked against a live tmux.
+
+## 2026-09-25 - Tab and taskbar progress
+- Progress shows as a 3px WinUI `ProgressBar` along the bottom edge of the tab header,
+  and on the window's taskbar button through `ITaskbarList3`, as in Windows Terminal.
+  The icon slot already carries the connection dot and agent icon, so progress stays
+  off it. The bar's track is transparent, so an idle tab keeps its normal underline.
+- Sources: `OSC 9 ; 4 ; state ; percent` from the terminal (ConEmu's form, also read by
+  Windows Terminal), and file-pane transfers. States 0 clear, 1 set, 2 error,
+  3 indeterminate, 4 paused; error and paused without a percent keep the current value.
+  Malformed reports are ignored. The agent tracker still ignores `9;4`.
+- A multi-file transfer fills once across the batch instead of restarting per file.
+- `TerminalProgress.Combine` gives one indicator for a tab (terminal and transfer) and a
+  window (its tabs): error, then paused, then the least complete known percent, then
+  indeterminate. Each window drives only its own taskbar button.
+- A program that exits or disconnects without clearing would leave the bar stuck, so
+  terminal progress clears when the command ends, a new prompt appears, or the tab
+  leaves the connected state. A disposed tab clears its progress.
+- Claude Code does not emit `9;4` to Resesh; it only does so for ConEmu, Ghostty and
+  iTerm2. No agent-driven bar: the agent icon already shows that state.
+- Verified in the running app by injecting each state through the page's output path:
+  tab strip and taskbar button both show normal, error, paused, indeterminate and
+  cleared. SFTP-driven progress was not exercised against a live server.
+
+## 2026-09-25 - Shared keyboard shortcut table
+- `src/Core/Input/KeyBindings.cs` is the one list of shortcuts. Window accelerators, the
+  WebView2 page, the native surface, menus, the command palette and the new Keyboard
+  Shortcuts screen (View menu, Ctrl+Shift+/) all read it. Nothing else hardcodes a chord.
+- Chords are Windows virtual-key codes. The page matches `KeyboardEvent.keyCode`, which
+  WebView2 reports as the same code, so every surface agrees on every layout. Labels for
+  punctuation keys come from the current layout (`MapVirtualKey`).
+- Scopes: App (anywhere; a focused terminal forwards it as one `shortcut` message),
+  Window (outside the terminal only: Ctrl+F), Terminal (the surface runs it), SessionTree.
+- Rules, enforced by tests: no Ctrl+letter or Alt+letter in the terminal (shell and tmux
+  keys), no Ctrl+Alt (AltGr), no duplicate chord where both are active. Alt+Arrow group
+  focus only takes the key while the window is split; otherwise the shell gets it.
+- Zoom (Ctrl+= / Ctrl+- / Ctrl+0, Ctrl+wheel) is per tab, on top of the configured size.
+- The native surface drops characters from a consumed chord until that key's key-up (or
+  any other key-down or focus loss), replacing the old "skip next character" flag that
+  could eat a real keystroke after Ctrl+digit. It has no API yet for Select All, Clear
+  Scrollback or the scroll keys, so those keys still reach the shell there.
+- Dialog shortcuts do nothing while another ContentDialog is open (WinUI allows one).
+- Verified live through CDP and UIA: forwarding, tab cycling and numbering, move, split,
+  Alt+Arrow (and pass-through unsplit), clone, restart, close with confirmation, zoom,
+  find, clear, full screen, sessions pane, and the shortcuts screen with search. Not
+  exercised: Window-scope and tree keys with a real keyboard (synthetic OS input is
+  blocked in the test rig), copy/paste (to leave the clipboard alone), native surface.

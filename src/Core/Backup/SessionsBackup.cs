@@ -322,9 +322,9 @@ public static class SessionsBackup
                 continue;
             }
 
-            if (imported.Kind == SessionKind.Ssh)
+            if (imported.Kind is SessionKind.Ssh or SessionKind.Telnet)
             {
-                match = existing.FirstOrDefault(s => s.Kind == SessionKind.Ssh
+                match = existing.FirstOrDefault(s => s.Kind == imported.Kind
                     && s.Port == imported.Port
                     && s.Host.Equals(imported.Host, StringComparison.OrdinalIgnoreCase)
                     && s.Username.Equals(imported.Username, StringComparison.OrdinalIgnoreCase));
@@ -462,7 +462,7 @@ public static class SessionsBackup
     private static IEnumerable<Session> SelectSessions(IEnumerable<Session> sessions, BackupScope? scope) =>
         scope is null
             ? sessions
-            : sessions.Where(s => s.Kind == scope.Kind
+            : sessions.Where(s => s.FolderScope == scope.Kind
                 && FolderPaths.IsSelfOrDescendant(s.FolderPath, scope.FolderPath));
 
     private static IReadOnlyList<string> SelectFolders(

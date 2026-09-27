@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Resesh.App.ViewModels;
+using Resesh.Core.Input;
 using Resesh.Core.Layout;
 using Resesh.Core.Models;
 
@@ -34,6 +35,7 @@ public interface ITabGroupHost
     void ReconnectTab(TabViewModel tab);
     Task ManageRemoteSessionsAsync(TabViewModel tab);
     void DisconnectTab(TabViewModel tab);
+    void SendBreak(TabViewModel tab);
     Task EndRemoteSessionAsync(TabViewModel tab);
     void ToggleFilePane(TabViewModel tab);
     Task OpenFilePaneAtCurrentFolderAsync(TabViewModel tab);
@@ -1061,7 +1063,7 @@ public sealed partial class TabGroupView : UserControl
         e.Handled = true;
     }
 
-    private MenuFlyoutItem _rename = null!, _resetName = null!, _reconnect = null!, _disconnect = null!, _endRemote = null!,
+    private MenuFlyoutItem _rename = null!, _resetName = null!, _reconnect = null!, _disconnect = null!, _sendBreak = null!, _endRemote = null!,
         _close = null!, _closeDisconnected = null!, _closeOthers = null!, _closeRight = null!,
         _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _splitDown = null!,
         _options = null!, _manageRemote = null!,
@@ -1084,16 +1086,19 @@ public sealed partial class TabGroupView : UserControl
         _rename = Item("Rename", tab => _ = RenameTabAsync(tab));
         _resetName = Item("Reset Name", tab => tab.TitleOverride = null);
         _reconnect = Item("Reconnect", tab => _host.ReconnectTab(tab));
+        _reconnect.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.ReconnectTab);
         _disconnect = Item("Disconnect", tab => _host.DisconnectTab(tab));
+        _sendBreak = Item("Send Break", tab => _host.SendBreak(tab));
+        _sendBreak.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SendBreak);
         _manageRemote = Item("Manage Remote Sessions…", tab => _ = _host.ManageRemoteSessionsAsync(tab));
         _endRemote = Item("End Remote Session…", tab => _ = _host.EndRemoteSessionAsync(tab));
         _filePane = Item("File Pane", tab => _host.ToggleFilePane(tab));
-        _filePane.KeyboardAcceleratorTextOverride = "Ctrl+Shift+E";
+        _filePane.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.FilePane);
         _filePaneCwd = Item("Open File Pane at Terminal Folder", tab => _ = _host.OpenFilePaneAtCurrentFolderAsync(tab));
         _workingFolder = Item("Open Working Folder", tab => _host.OpenWorkingFolder(tab));
         _recordingsLocation = Item("Open Recordings Location", tab => _ = _host.OpenRecordingsLocationAsync());
         _close = Item("Close", tab => _ = _host.RequestCloseTabAsync(tab));
-        _close.KeyboardAcceleratorTextOverride = "Ctrl+F4";
+        _close.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.CloseTab);
         _closeDisconnected = Item("Close Disconnected Tabs", tab =>
             _ = _host.RequestCloseManyAsync(
                 Group.Tabs.Where(t => t.State == TabConnectionState.Disconnected).ToList(),
@@ -1109,9 +1114,11 @@ public sealed partial class TabGroupView : UserControl
         _pin = Item("Pin Tab", tab => _host.TogglePin(tab));
         _lock = Item("Lock Session…", tab => _ = _host.LockSessionAsync(tab));
         _clone = Item("Clone Session", tab => _host.CloneSession(tab));
+        _clone.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.CloneTab);
         _split = Item("Split Right", tab => _host.SplitRight(tab));
-        _split.KeyboardAcceleratorTextOverride = "Ctrl+Shift+\\";
+        _split.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SplitRight);
         _splitDown = Item("Split Down", tab => _host.SplitDown(tab));
+        _splitDown.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SplitDown);
         _options = Item("Session Options…", tab => _ = _host.OpenSessionOptionsAsync(tab));
         _highlight = new MenuFlyoutSubItem { Text = "Highlighting" };
         _agent = new MenuFlyoutSubItem { Text = "Agent" };
@@ -1121,6 +1128,7 @@ public sealed partial class TabGroupView : UserControl
         menu.Items.Add(_resetName);
         menu.Items.Add(_reconnect);
         menu.Items.Add(_disconnect);
+        menu.Items.Add(_sendBreak);
         menu.Items.Add(_endRemote);
         menu.Items.Add(_manageRemote);
         menu.Items.Add(new MenuFlyoutSeparator());
@@ -1163,6 +1171,8 @@ public sealed partial class TabGroupView : UserControl
         _reconnect.IsEnabled = !isOnboarding && IsStopped(tab);
         _disconnect.Text = caps.StopVerb;
         _disconnect.IsEnabled = !isOnboarding && tab.State == TabConnectionState.Connected;
+        _sendBreak.Visibility = caps.SendBreak && !tab.IsPlayback ? Visibility.Visible : Visibility.Collapsed;
+        _sendBreak.IsEnabled = caps.SendBreak && !tab.IsLocked && tab.State == TabConnectionState.Connected;
         // Only persistent sessions have a remote session to end; close/disconnect only detach them.
         var endRemote = caps.RemoteSession && tab.Session.Persistent;
         _endRemote.Visibility = endRemote ? Visibility.Visible : Visibility.Collapsed;

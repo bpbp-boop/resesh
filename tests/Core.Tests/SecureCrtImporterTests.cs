@@ -1,3 +1,4 @@
+using Resesh.Core.Models;
 using Resesh.Core.Import;
 using Resesh.Core.Storage;
 
@@ -97,7 +98,7 @@ public sealed class SecureCrtImporterTests
     {
         var result = SecureCrtImporter.Scan(FixtureDir);
 
-        Assert.Equal(4, result.Importable.Count); // 3× SSH2 + 1× SSH1
+        Assert.Equal(5, result.Importable.Count); // 3× SSH2 + 1× SSH1 + 1× Telnet
 
         var coreSw = result.Importable.Single(c => c.Name == "core-sw-3");
         Assert.Equal("Datacenter/Rack 4", coreSw.FolderPath);
@@ -129,12 +130,50 @@ public sealed class SecureCrtImporterTests
     }
 
     [Fact]
-    public void Scan_ListsTelnetAndSerialAsSkipped()
+    public void Scan_ImportsTelnet_AndListsSerialAsSkipped()
     {
         var result = SecureCrtImporter.Scan(FixtureDir);
-        Assert.Equal(2, result.Skipped.Count);
-        Assert.Contains(result.Skipped, c => c.Protocol == "TELNET");
-        Assert.Contains(result.Skipped, c => c.Protocol == "SERIAL");
+        var telnet = result.Importable.Single(c => c.IsTelnet);
+        Assert.Equal("ancient-telnet", telnet.Name);
+        Assert.Equal("Legacy", telnet.FolderPath);
+        Assert.Equal("172.16.0.20", telnet.Host);
+        Assert.Equal(23, telnet.Port); // D:"Port"=0x17
+        Assert.Equal("SERIAL", Assert.Single(result.Skipped).Protocol);
+    }
+
+    [Fact]
+    public void Parse_TelnetSessionWithLeftoverSshPort_UsesTheTelnetPort()
+    {
+        // Real SecureCRT files keep "[SSH2] Port" after a session is switched to telnet,
+        // and it can come first.
+        var candidate = SecureCrtImporter.Parse(
+            "D:\"[SSH2] Port\"=00000016\nD:\"Port\"=00000017\nS:\"Protocol Name\"=Telnet\nS:\"Hostname\"=mgmt1",
+            "mgmt1", "", "mgmt1.ini");
+        Assert.True(candidate.IsTelnet);
+        Assert.Equal(23, candidate.Port);
+    }
+
+    [Fact]
+    public void Parse_SshSessionWithLeftoverTelnetPort_UsesTheSshPort()
+    {
+        var candidate = SecureCrtImporter.Parse(
+            "D:\"Port\"=00000017\nS:\"Protocol Name\"=SSH2\nD:\"[SSH2] Port\"=000008AE",
+            "x", "", "x.ini");
+        Assert.Equal(2222, candidate.Port);
+    }
+
+    [Theory]
+    [InlineData("Telnet", true, 23)]
+    [InlineData("Telnet/SSL", false, 22)] // TLS-wrapped telnet is not something we speak
+    [InlineData("RLogin", false, 22)]
+    public void Parse_TelnetWithoutAPortKey_DefaultsTo23(string protocolName, bool supported, int port)
+    {
+        var candidate = SecureCrtImporter.Parse(
+            $"S:\"Hostname\"=ts1\nS:\"Username\"=ignored\nS:\"Protocol Name\"={protocolName}", "ts1", "", "ts1.ini");
+        Assert.Equal(supported, candidate.IsSupported);
+        Assert.Equal(port, candidate.Port);
+        if (supported)
+            Assert.Equal("", candidate.Username);
     }
 
     [Fact]
@@ -168,14 +207,22 @@ public sealed class SecureCrtImporterTests
             var scan = SecureCrtImporter.Scan(FixtureDir);
 
             var (imported, duplicates) = SecureCrtImporter.Commit(store, scan.Importable);
-            Assert.Equal(4, imported);
+            Assert.Equal(5, imported);
             Assert.Equal(0, duplicates);
-            Assert.All(store.Sessions, s => Assert.True(s.CredentialNeeded));
+            Assert.All(store.Sessions.Where(s => !s.IsTelnet), s => Assert.True(s.CredentialNeeded));
+
+            // Telnet has no credential to capture: the server prompts in the terminal.
+            var telnet = store.Sessions.Single(s => s.IsTelnet);
+            Assert.Equal(SessionKind.Telnet, telnet.Kind);
+            Assert.Equal(("172.16.0.20", 23, "Legacy"), (telnet.Host, telnet.Port, telnet.FolderPath));
+            Assert.Equal(AuthMethod.None, telnet.AuthMethod);
+            Assert.False(telnet.CredentialNeeded);
+            Assert.Equal("", telnet.Username);
 
             var (reimported, reDuplicates) = SecureCrtImporter.Commit(store, scan.Importable);
             Assert.Equal(0, reimported);
-            Assert.Equal(4, reDuplicates);
-            Assert.Equal(4, store.Sessions.Count);
+            Assert.Equal(5, reDuplicates);
+            Assert.Equal(5, store.Sessions.Count);
         }
         finally
         {

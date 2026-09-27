@@ -71,6 +71,10 @@ public sealed class FilePaneView : UserControl, IDisposable
 
     public event Action? CloseRequested;
 
+    /// <summary>Transfer progress for the owning tab's header and the taskbar. Raised at the
+    /// strip's sampling rate, and with <see cref="TerminalProgress.None"/> when it ends.</summary>
+    public event Action<TerminalProgress>? TransferProgressChanged;
+
     public string CurrentPath => _currentPath;
 
     public FilePaneView(
@@ -569,6 +573,7 @@ public sealed class FilePaneView : UserControl, IDisposable
             _opCts.Dispose();
             _opCts = null;
             _transferStrip.Visibility = Visibility.Collapsed;
+            TransferProgressChanged?.Invoke(TerminalProgress.None);
         }
         if (refreshAfter && !_disposed)
             await NavigateAsync(_currentPath);
@@ -590,6 +595,7 @@ public sealed class FilePaneView : UserControl, IDisposable
             return;
         var (verb, name, index, count, done, total) = progress;
         _transferStrip.Visibility = Visibility.Visible;
+        TransferProgressChanged?.Invoke(TerminalProgress.FromTransfer(done, total, index, count));
         var position = count > 1 ? $" ({index}/{count})" : "";
         if (total > 0)
         {

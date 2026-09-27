@@ -9,7 +9,7 @@
 
     <StackPanel MinWidth="440" Spacing="14">
         <TextBlock
-            Text="Choose where to import SSH sessions from."
+            Text="Choose where to import SSH and telnet sessions from."
             TextWrapping="Wrap" />
 
         <RadioButtons x:Name="SourceOptions">

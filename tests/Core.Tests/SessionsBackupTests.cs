@@ -77,6 +77,44 @@ public sealed class SessionsBackupTests : IDisposable
     }
 
     [Fact]
+    public void ExportImport_TelnetSessionsRoundTripInTheSshScope_AndMatchByHostAndPort()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "telnet-source"));
+        var console = new Session
+        {
+            Name = "ts1 line 3",
+            Kind = SessionKind.Telnet,
+            FolderPath = "Lab/Consoles",
+            Host = "ts1.lab",
+            Port = 2003,
+            AuthMethod = AuthMethod.None,
+        };
+        source.Sessions.Add(console);
+        source.Sessions.Add(Ssh("Outside", "outside.example", "Personal"));
+
+        var path = Path.Combine(_dir.FullName, "telnet.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
+            new BackupExportOptions { Scope = new BackupScope(SessionKind.Ssh, "Lab") });
+        var package = SessionsBackup.Read(path);
+        var exported = Assert.Single(package.Sessions);
+        Assert.Equal((SessionKind.Telnet, "ts1.lab", 2003), (exported.Kind, exported.Host, exported.Port));
+
+        var target = CreateStores(Path.Combine(_dir.FullName, "telnet-target"));
+        target.Sessions.Add(new Session { Name = "same port", Kind = SessionKind.Telnet, Host = "TS1.lab", Port = 2003 });
+        target.Sessions.Add(new Session { Name = "other port", Kind = SessionKind.Telnet, Host = "ts1.lab", Port = 2004 });
+        var conflict = Assert.Single(SessionsBackup.FindConflicts(target.Sessions, package));
+        Assert.Equal(BackupConflictMatch.Endpoint, conflict.Match);
+        Assert.Equal("same port", conflict.Existing.Name);
+
+        SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution> { [console.Id] = BackupConflictResolution.Duplicate });
+        var imported = Assert.Single(target.Sessions.Sessions, s => s.Name == "ts1 line 3");
+        Assert.Equal((SessionKind.Telnet, "Lab/Consoles", 2003), (imported.Kind, imported.FolderPath, imported.Port));
+    }
+
+    [Fact]
     public void Import_ResolvesIdAndEndpointConflictsAndMapsSecretsAndPinnedIds()
     {
         var source = CreateStores(Path.Combine(_dir.FullName, "merge-source"));

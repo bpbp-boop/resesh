@@ -11,6 +11,24 @@ public sealed class IntegratedShellStreamTests
             "SSH.NET private API changed: integrated startup must be reviewed before upgrading.");
 
     [Fact]
+    public void PinnedSshNetVersion_ExposesShellAndEnvironmentSeam() =>
+        Assert.True(IntegratedShellStream.IsShellSupported,
+            "SSH.NET private API changed: plain shells would silently stop offering COLORTERM.");
+
+    [Fact]
+    public void EverySessionOffersTruecolor() =>
+        Assert.Contains(new KeyValuePair<string, string>("COLORTERM", "truecolor"), IntegratedShellStream.SessionEnvironment);
+
+    [Fact]
+    public void PlainShell_DisconnectedClient_ReportsConnectionRequirement()
+    {
+        using var client = new SshClient("localhost", "test", "test");
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            IntegratedShellStream.Create(client, "xterm-256color", 80, 24, null, CancellationToken.None));
+        Assert.Equal("SSH is not connected.", error.Message);
+    }
+
+    [Fact]
     public void CancelledStartup_DoesNotTryToOpenChannel()
     {
         using var client = new SshClient("localhost", "test", "test");

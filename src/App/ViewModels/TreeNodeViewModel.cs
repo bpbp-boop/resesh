@@ -60,6 +60,7 @@ public sealed class TreeNodeViewModel : ObservableObject
     {
         null => "",
         { IsLocal: true } => Path.GetFileNameWithoutExtension(Session.Local?.Executable ?? ""),
+        { IsTelnet: true } => Session.Port == 23 ? $"telnet {Session.Host}" : $"telnet {Session.Host}:{Session.Port}",
         _ => Session.Port == 22 ? Session.Host : $"{Session.Host}:{Session.Port}",
     };
 

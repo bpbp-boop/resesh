@@ -81,9 +81,29 @@ public sealed class RemoteShellIntegrationTests
         const string directory = "/home/a\\\\b'quote/cache";
         var source = "source '/home/a\\\\\\\\b\\'quote/cache/fish/vendor_conf.d/integration.fish'";
         var wrapper = "export RESESH_SHELL_INTEGRATION=1 RESESH_SHELL_RESOURCES=" + RemoteShellIntegration.QuotePosix(directory)
-            + "; exec fish -l -i --init-command " + RemoteShellIntegration.QuotePosix(source);
+            + " COLORTERM=\"${COLORTERM:-truecolor}\"; exec fish -l -i --init-command " + RemoteShellIntegration.QuotePosix(source);
         Assert.Equal("sh -c " + RemoteShellIntegration.QuotePosix(wrapper),
             RemoteShellIntegration.LaunchCommand(ShellIntegrationMode.Fish, directory));
+    }
+
+    [Theory]
+    [InlineData(ShellIntegrationMode.Bash)]
+    [InlineData(ShellIntegrationMode.Zsh)]
+    [InlineData(ShellIntegrationMode.Fish)]
+    public void Launch_AdvertisesTruecolorWithoutOverridingTheServer(ShellIntegrationMode mode)
+    {
+        foreach (var tmux in new[] { false, true })
+            Assert.Contains(" COLORTERM=\"${COLORTERM:-truecolor}\"; ", RemoteShellIntegration.LaunchCommand(mode, "/cache", tmux));
+    }
+
+    [Fact]
+    public void PersistentSessions_PassTruecolorThroughTmux()
+    {
+        var bootstrap = TmuxPersistence.BootstrapCommand(Guid.Empty, 0);
+        var attach = bootstrap[..bootstrap.IndexOf("else ", StringComparison.Ordinal)];
+        Assert.Contains("terminal-overrides '*:smcup@:rmcup@:indn@:Tc'", attach);
+        Assert.Contains("terminal-overrides '*:smcup@:rmcup@:indn@:Tc'", bootstrap[attach.Length..]);
+        Assert.Contains("terminal-overrides '*:smcup@:rmcup@:indn@:Tc'", TmuxPersistence.ResumeCommand(Guid.Empty, 0));
     }
 
     [Fact]

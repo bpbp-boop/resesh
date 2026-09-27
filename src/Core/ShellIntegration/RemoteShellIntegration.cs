@@ -116,7 +116,10 @@ internal static class RemoteShellIntegration
             return "powershell.exe -NoLogo -NoExit -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(command));
         }
         var root = QuotePosix(directory);
-        var environment = $"export RESESH_SHELL_INTEGRATION=1 RESESH_SHELL_RESOURCES={root}; ";
+        // SSH forwards TERM but rarely COLORTERM, so tools that check it (chalk, used by
+        // Claude Code) fall back to 256 colours. The terminal renders 24-bit colour; keep
+        // any value the server already provided.
+        var environment = $"export RESESH_SHELL_INTEGRATION=1 RESESH_SHELL_RESOURCES={root} COLORTERM=\"${{COLORTERM:-truecolor}}\"; ";
         if (tmux) environment += "export RESESH_SHELL_TMUX=1; ";
         var launch = mode switch
         {

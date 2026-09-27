@@ -70,7 +70,7 @@ test("Welcome buttons and theme toggles follow the palette through their states"
 test("Welcome uses platform typography, one aligned section grid, and responsive cards", () => {
   assert.doesNotMatch(xaml, /FontSize="(?:[0-9]|1[01])"/);
   assert.match(xaml, /Style="\{ThemeResource TitleTextBlockStyle\}"/);
-  assert.equal((xaml.match(/Style="\{ThemeResource SubtitleTextBlockStyle\}"/g) || []).length, 3);
+  assert.equal((xaml.match(/Style="\{ThemeResource SubtitleTextBlockStyle\}"/g) || []).length, 4);
   assert.match(xaml, /<Grid ColumnDefinitions="24,\*" ColumnSpacing="8">/);
   assert.match(xaml, /<AdaptiveTrigger MinWindowWidth="1280" \/>/);
   assert.match(xaml, /<AdaptiveTrigger MinWindowWidth="900" \/>/);

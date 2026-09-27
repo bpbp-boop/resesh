@@ -8,6 +8,14 @@ and the git history.
 
 ## Shipped
 
+- **Command history** — opt-in, local, searchable record of every finished command with
+  its output, folder, session, and exit result. Ctrl+Shift+H opens a search view with
+  `host:`/`in:`/`exit:` filters, day-grouped results, highlighted output with match
+  navigation, and insert-at-prompt. Per-session opt-out, retention in days, clear all.
+  Compare runs of the same command on the same host (unified or side by side, word-level
+  marks, ignore timestamps or numbers). Next: a "changed since last run" badge on command
+  marks, host-to-host comparison, Cisco abbreviation matching, per-command ignore rules.
+
 - **Command completion bell** — explicitly arm one running command from its tab subtitle
   or the command palette. Shell integration supplies the execution identity and exit result.
   Foreground completion stays quiet with a result tooltip; background completion sends a
@@ -112,7 +120,13 @@ highlighting, the overview ruler, Enter-gated command discovery, recording — w
 New target kinds alongside `SshTarget`/`LocalTarget` (same tagged-profile model, same
 atomic store, no migration impact): `TelnetTarget` and `SerialTarget`.
 
-### Telnet
+### Telnet — shipped
+Built as `SessionKind.Telnet` on the existing Host/Port fields (no separate `TelnetTarget`),
+sharing the SSH folder tree; `Core/Telnet` holds the I/O-free `TelnetProtocol` and the socket
+backend. Verified against telehack.com and JPL Horizons (NAWS, TTYPE, remote echo, live resize).
+Send Break (Session menu, tab menu, palette, Ctrl+Break; `IBreakSender` + `SendBreak` capability,
+ready for serial) and PuTTY/SecureCRT telnet import (port chosen by the session's protocol key) shipped.
+
 - **Target:** host, port (default 23). Quick connect accepts `telnet host[:port]` — terminal
   servers map console lines to high ports (`200x`-style), so port entry must be frictionless.
 - **Backend:** raw TCP plus minimal IAC option negotiation — BINARY, SGA, ECHO (remote echo

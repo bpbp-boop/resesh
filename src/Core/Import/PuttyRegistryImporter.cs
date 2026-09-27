@@ -94,9 +94,10 @@ public static class PuttyRegistryImporter
         var decodedName = DecodeSessionName(encodedName);
 
         var rawHost = GetString(values, "HostName") ?? "";
-        var port = GetInt(values, "PortNumber") ?? 22;
         var rawUser = GetString(values, "UserName") ?? "";
         var protocol = (GetString(values, "Protocol") ?? "ssh").ToUpperInvariant();
+        var port = GetInt(values, "PortNumber") ?? ImportCandidate.DefaultPort(protocol);
+        var telnet = protocol == ImportCandidate.TelnetProtocol;
 
         // PuTTY allows HostName to be "user@host"
         var username = rawUser;
@@ -109,7 +110,9 @@ public static class PuttyRegistryImporter
             host = rawHost[(atIndex + 1)..];
         }
 
-        if (string.IsNullOrWhiteSpace(username))
+        if (telnet)
+            username = ""; // the server prompts; a saved name has nowhere to go
+        else if (string.IsNullOrWhiteSpace(username))
             username = Environment.UserName;
 
         return new ImportCandidate
@@ -121,7 +124,7 @@ public static class PuttyRegistryImporter
             Port = port,
             Username = username.Trim(),
             Protocol = protocol == "SSH" ? "SSH2" : protocol,
-            PrivateKeyPath = ImportKeyPath.Resolve(GetString(values, "PublicKeyFile")),
+            PrivateKeyPath = telnet ? null : ImportKeyPath.Resolve(GetString(values, "PublicKeyFile")),
         };
     }
 

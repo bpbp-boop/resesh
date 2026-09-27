@@ -51,7 +51,7 @@
 
         <Expander
             x:Name="SkippedExpander"
-            Header="Skipped (not SSH)"
+            Header="Skipped (not SSH or telnet)"
             HorizontalAlignment="Stretch"
             Visibility="Collapsed">
             <ItemsControl x:Name="SkippedList">

@@ -21,6 +21,10 @@ public sealed record SessionCapabilities
     /// <summary>"Open Working Folder" (local starting directory in Explorer) applies.</summary>
     public bool LocalWorkingFolder { get; init; }
 
+    /// <summary>"Send Break" applies: the transport can carry a break signal (telnet BREAK,
+    /// which console servers turn into a serial break on the device's console port).</summary>
+    public bool SendBreak { get; init; }
+
     /// <summary>Verb for ending the live connection/process: "Disconnect" or "Stop".</summary>
     public string StopVerb { get; init; } = "Disconnect";
 
@@ -45,6 +49,18 @@ public sealed record SessionCapabilities
         StartAgainVerb = "Restart",
     };
 
-    public static SessionCapabilities For(Session session) =>
-        session.Kind == SessionKind.Local ? Local : Ssh;
+    // Telnet is a bare byte stream: no side channel for files, no host identity, no tmux.
+    private static readonly SessionCapabilities Telnet = new()
+    {
+        SendBreak = true,
+        StopVerb = "Disconnect",
+        StartAgainVerb = "Reconnect",
+    };
+
+    public static SessionCapabilities For(Session session) => session.Kind switch
+    {
+        SessionKind.Local => Local,
+        SessionKind.Telnet => Telnet,
+        _ => Ssh,
+    };
 }

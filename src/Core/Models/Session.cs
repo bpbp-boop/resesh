@@ -18,6 +18,9 @@ public enum SessionKind
 {
     Ssh,
     Local,
+    /// <summary>Plain telnet to <see cref="Session.Host"/>:<see cref="Session.Port"/>.
+    /// Shares the remote-host tree (folder namespace) with SSH.</summary>
+    Telnet,
 }
 
 /// <summary>Opt-in shell hooks. Automatic detection is supported only for local profiles.</summary>
@@ -79,6 +82,9 @@ public sealed record TerminalOverrides
     /// <summary>Null inherits the app setting; true or false overrides it for this session.</summary>
     public bool? AlwaysRecord { get; init; }
 
+    /// <summary>Null inherits the app setting; false keeps this session's commands out of history.</summary>
+    public bool? KeepCommandHistory { get; init; }
+
     /// <summary>Highlight rules force-enabled for this session (delta against the global
     /// state, by rule id — never a copy of the rule).</summary>
     public IReadOnlyList<string>? EnabledRules { get; init; }
@@ -90,14 +96,15 @@ public sealed record TerminalOverrides
     public bool IsEmpty =>
         Theme is null && FontFamily is null && FontSize is null && Scrollback is null
         && AlwaysRecord is null
+        && KeepCommandHistory is null
         && (EnabledRules is null || EnabledRules.Count == 0)
         && (DisabledRules is null || DisabledRules.Count == 0);
 }
 
 /// <summary>
 /// A saved profile: common identity plus exactly one target — SSH (host/port/username/auth,
-/// the fields below, present since v1) or local (<see cref="Local"/>), tagged by
-/// <see cref="Kind"/>. Secrets (password / key passphrase) are never stored here;
+/// the fields below, present since v1), telnet (host/port only), or local
+/// (<see cref="Local"/>), tagged by <see cref="Kind"/>. Secrets (password / key passphrase) are never stored here;
 /// they live in Windows Credential Manager keyed by <see cref="Id"/>.
 /// </summary>
 public sealed record Session
@@ -121,6 +128,14 @@ public sealed record Session
 
     [JsonIgnore]
     public bool IsLocal => Kind == SessionKind.Local;
+
+    [JsonIgnore]
+    public bool IsTelnet => Kind == SessionKind.Telnet;
+
+    /// <summary>The folder namespace this profile lives in: local profiles under the
+    /// virtual Local root, every remote kind (SSH, telnet) in the main host tree.</summary>
+    [JsonIgnore]
+    public SessionKind FolderScope => Kind == SessionKind.Local ? SessionKind.Local : SessionKind.Ssh;
 
     /// <summary>Forward-slash separated folder path, e.g. "Datacenter/Rack 4". Empty = root.
     /// Local profiles are rooted under the virtual Local node, in their own namespace.</summary>
@@ -148,6 +163,14 @@ public sealed record Session
     public bool PassphraseRequired { get; init; }
 
     public string TerminalType { get; init; } = "xterm-256color";
+
+    /// <summary>Telnet text encoding. Auto accepts UTF-8 and falls back to CP437 for BBS art.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public TelnetTextEncoding TelnetEncoding { get; init; } = TelnetTextEncoding.Auto;
+
+    /// <summary>Report 80 columns and 25 rows to Telnet BBS servers without resizing the display.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool TelnetReport80x25 { get; init; }
 
     /// <summary>Run the remote shell inside tmux so it survives disconnects (requires tmux on the host).</summary>
     public bool Persistent { get; init; }

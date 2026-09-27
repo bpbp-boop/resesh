@@ -97,6 +97,11 @@
 
   var CMD_ECHO_SETTLE_MS = 300; // Enter -> probe evaluation: wait for the echo round trip
   var CMD_ECHO_RETRY_MS = 900;  // one retry for laggy links before the probe gives up
+  var HISTORY_MAX_OUTPUT = 65536; // characters of output kept per history record
+  var HISTORY_MAX_COMMAND = 4096; // characters of command line kept per history record
+  var HISTORY_IDLE_MS = 600;    // quiet time at an idle prompt that ends a discovered command
+  // Debian's default "user@host:~/dir$" prompt: the folder follows the colon.
+  var HISTORY_COMPACT_PROMPT_RE = /^[^@\s:]{1,100}@[^\s:]{1,100}:([^\s$#%>]{1,512})[$#%]$/;
 
   var TIME_REANCHOR_GAP = 4096;
 
@@ -219,6 +224,10 @@
     this._executionReportingEnabled = true;
     this.onCommandExecution = null;
     this._cmdObserver = null; // page hook: commands as they are marked (agent detection)
+    this._historyEnabled = false; // host opt-in: finished commands go to onCommandRecord
+    this._historyOpen = null;     // newest mark whose command may still be printing
+    this._historyIdleTimer = null;
+    this.onCommandRecord = null;  // page hook: ({ command, exit, exact, startedMs, endedMs, output, truncated, lost })
     this._cmdPanel = null;    // commands panel: every command mark as a clickable list
     this._cmdPanelList = null;
     this._cmdPanelCount = null;
@@ -387,6 +396,7 @@
       self._queuePaint();
       if (self._search) self._scheduleRescan();
       self._reportPromptContext();
+      self._historyScheduleIdle();
     }));
     this._disposables.push(term.onLineFeed(function () {
       self._timeStampCurrent();
@@ -469,6 +479,8 @@
   };
 
   RulerAddon.prototype.dispose = function () {
+    this.flushHistory();
+    if (this._historyIdleTimer) { clearTimeout(this._historyIdleTimer); this._historyIdleTimer = null; }
     this._cancelDrag();
     if (this._windowBlurHandler) {
       window.removeEventListener("blur", this._windowBlurHandler);
@@ -848,6 +860,8 @@
         var text = this._cmdText(buf, this._cmdPromptLine, this._cmdPromptCol);
         if (text) this._fireCommand(text, undefined, true);
         this._cmdPending = this._cmdCommit(this._cmdPromptLine, null, "osc", undefined, text);
+        if (this._cmdPending) this._cmdPending.fullText =
+          this._cmdText(buf, this._cmdPromptLine, this._cmdPromptCol, HISTORY_MAX_COMMAND);
         if (this._executionReportingEnabled && text && !/[\x00-\x1f\x7f-\x9f]/.test(text) &&
             this._executionNextId < Number.MAX_SAFE_INTEGER) {
           this._finishExecution(null);
@@ -865,15 +879,21 @@
       if (exit !== null && isNaN(exit)) exit = null;
       this._finishExecution(exit !== null && exit >= -2147483648 && exit <= 2147483647 ? exit : null);
       if (this._cmdPending) {
-        this._cmdPending.exit = exit;
+        var finished = this._cmdPending;
+        finished.exit = exit;
         this._cmdPending = null;
         this._queuePaint();
         this._queuePanelRefresh();
+        this._historyFlush(finished, false);
       } else if (this._cmdPromptLine >= 0) {
         // Shell emits A/D but never C: this D still belongs to whatever was typed
         // at the last prompt (empty Enters get a mark too — indistinguishable).
-        this._cmdCommit(this._cmdPromptLine, exit, "osc", undefined,
+        var late = this._cmdCommit(this._cmdPromptLine, exit, "osc", undefined,
           this._cmdText(buf, this._cmdPromptLine, this._cmdPromptCol));
+        if (late) {
+          late.fullText = this._cmdText(buf, this._cmdPromptLine, this._cmdPromptCol, HISTORY_MAX_COMMAND);
+          this._historyFlush(late, false);
+        }
         this._cmdPromptLine = -1;
       }
       this._fireCommand("", undefined, true); // the command is over, whatever it was
@@ -939,6 +959,7 @@
       this._osc3008Commands.delete(parsed.id);
       this._queuePaint();
       this._queuePanelRefresh();
+      this._historyFlush(current.entry, false);
     } else if (!current.probe || current.probe.isDisposed) {
       this._osc3008Commands.delete(parsed.id);
     }
@@ -986,13 +1007,15 @@
   /** First logical line of the buffer starting at (row, col), following soft wraps —
    * the command text for the running-command title. col -1 means "unknown" (no 133;B):
    * fall back to the prompt regex. Capped: a title needs a name, not the whole paste. */
-  RulerAddon.prototype._cmdText = function (buf, row, col) {
+  RulerAddon.prototype._cmdText = function (buf, row, col, maxLength) {
+    var limit = maxLength > 0 ? maxLength : 256;
     var line = buf.getLine(row);
     if (!line) return "";
     var full = line.translateToString(true);
     // Recover a wrapped prompt before separating it from the command. Leave room
-    // for the bounded prompt patterns plus the 256-character command label.
-    for (var r = row + 1; full.length < Math.max(col, 0) + 768; r++) {
+    // for the bounded prompt patterns plus the command label (256 characters unless
+    // the caller asks for more, as command history does).
+    for (var r = row + 1; full.length < Math.max(col, 0) + 512 + limit; r++) {
       var next = buf.getLine(r);
       if (!next || !next.isWrapped) break;
       full += next.translateToString(true);
@@ -1009,7 +1032,7 @@
       if (prompt && (/^[^\s@]+@[^\s:]+(?:\s|:)/.test(prompt[1]) || prompt[1].indexOf("PS ") === 0))
         col = full.length - prompt[2].length;
     }
-    return full.slice(col).trim().slice(0, 256);
+    return full.slice(col).trim().slice(0, limit);
   };
 
   /** Hands a command start (or "" = end) to the page without letting a host-side
@@ -1169,9 +1192,11 @@
       // where the command starts, so the title slices at the column the mark used.
       var match = CMD_PROMPT_RE.test(lineText) ? CMD_SPLIT_RE.exec(lineText) : null;
       if (!match) return null;
+      var col = lineText.length - match[2].length;
       return {
         row: row,
-        text: self._cmdText(norm, row, lineText.length - match[2].length)
+        text: self._cmdText(norm, row, col),
+        fullText: self._cmdText(norm, row, col, HISTORY_MAX_COMMAND)
       };
     }
 
@@ -1202,7 +1227,8 @@
           self._fireCommand(command.text, epoch);
         }
         if (self._term.buffer.active.type !== "alternate") {
-          self._cmdCommit(command.row, null, "guess", marker._osc3008Id, command.text);
+          var guessed = self._cmdCommit(command.row, null, "guess", marker._osc3008Id, command.text);
+          if (guessed && !guessed.fullText) guessed.fullText = command.fullText;
           marker.dispose();
           self._finishCommandProbe(marker);
           return;
@@ -1251,6 +1277,9 @@
     var self = this;
     var entry = { marker: marker, exit: exit, src: src, text: text || "" };
     marker.onDispose(function () {
+      // Trimmed out of scrollback (or cleared) before it finished: keep the command,
+      // say its output is gone.
+      if (entry.history && !entry.historyDone) self._historyFlush(entry, true);
       var idx = self._cmdMarks.indexOf(entry);
       if (idx >= 0) self._cmdMarks.splice(idx, 1);
       if (self._cmdPending === entry) self._cmdPending = null;
@@ -1259,6 +1288,7 @@
     });
     this._cmdMarks.push(entry);
     this._associateOsc3008(contextId, entry);
+    this._historyBegin(entry);
     this._notifyCommand(line);
     this._queuePaint();
     this._queuePanelRefresh();
@@ -1274,6 +1304,159 @@
     if (!record.ended) return;
     if (record.exit !== null) entry.exit = record.exit;
     this._osc3008Commands.delete(contextId);
+  };
+
+  // ---- command history ----
+
+  /** Host opt-in for command history. Off by default; playback never turns it on.
+   * Turning it off drops the open command without recording it. */
+  RulerAddon.prototype.setHistoryCapture = function (enabled) {
+    this._historyEnabled = enabled === true;
+    if (!this._historyEnabled) {
+      if (this._historyOpen) this._historyOpen.historyDone = true;
+      this._historyOpen = null;
+    }
+  };
+
+  /** Record the open command now with the output it has so far (disconnect, close). */
+  RulerAddon.prototype.flushHistory = function () {
+    if (this._historyOpen) this._historyFlush(this._historyOpen, false);
+  };
+
+  /** A new mark starts a command. The previous command ended where this one begins,
+   * so its output is complete now; record it before tracking the new one. */
+  RulerAddon.prototype._historyBegin = function (entry) {
+    if (!this._historyEnabled) return;
+    var previous = this._historyOpen;
+    if (previous && previous !== entry && !previous.historyDone) this._historyFlush(previous, false);
+    entry.history = true;
+    entry.historyCommitMs = Date.now();
+    this._historyOpen = entry;
+    this._historyScheduleIdle();
+  };
+
+  /** Discovered commands have no end signal. When output goes quiet at a prompt-shaped
+   * cursor line below the command, the next prompt has arrived and the command is over. */
+  RulerAddon.prototype._historyScheduleIdle = function () {
+    var open = this._historyOpen;
+    if (!open || open.historyDone || open.src === "osc") return;
+    if (this._historyIdleTimer) clearTimeout(this._historyIdleTimer);
+    var self = this;
+    this._historyIdleTimer = setTimeout(function () {
+      self._historyIdleTimer = null;
+      if (self._historyOpen === open && !open.historyDone && self._historyAtIdlePrompt(open)) {
+        self._historyFlush(open, false);
+      }
+    }, HISTORY_IDLE_MS);
+  };
+
+  RulerAddon.prototype._historyAtIdlePrompt = function (entry) {
+    if (!this._term || entry.marker.isDisposed) return false;
+    var buf = this._term.buffer.active;
+    if (buf.type === "alternate") return false;
+    var row = buf.baseY + buf.cursorY;
+    var line = buf.getLine(row);
+    while (line && line.isWrapped && row > 0) {
+      row--;
+      line = buf.getLine(row);
+    }
+    if (!line || row <= entry.marker.line) return false;
+    var text = line.translateToString(true).replace(/\s+$/, "");
+    if (!text) return false;
+    var split = CMD_SPLIT_RE.exec(text);
+    return (split && !split[2]) ||
+      WINDOWS_IDLE_PROMPT_RE.test(text) || UNIX_SPACED_IDLE_PROMPT_RE.test(text) ||
+      UNIX_BRACKETED_IDLE_PROMPT_RE.test(text) || CISCO_IOS_PROMPT_RE.test(text) ||
+      CISCO_XR_PROMPT_RE.test(text) || JUNOS_PROMPT_RE.test(text) || NOKIA_MD_CLI_PROMPT_RE.test(text);
+  };
+
+  /** Hands one finished command to the host, once. lost = its lines already left the
+   * buffer, so only the command itself is known. */
+  RulerAddon.prototype._historyFlush = function (entry, lost) {
+    if (!entry || entry.historyDone) return;
+    entry.historyDone = true;
+    if (this._historyOpen === entry) {
+      this._historyOpen = null;
+      if (this._historyIdleTimer) { clearTimeout(this._historyIdleTimer); this._historyIdleTimer = null; }
+    }
+    if (!this._historyEnabled || !entry.history || !this.onCommandRecord || !this._term) return;
+
+    var command = entry.fullText || entry.text;
+    var line = lost ? -1 : entry.marker.line;
+    if (!command && line >= 0) command = this._commandInfo(entry).text;
+    command = String(command || "").trim().slice(0, HISTORY_MAX_COMMAND);
+    if (!command) return;
+
+    var output = "";
+    var truncated = false;
+    var startedMs = entry.historyCommitMs;
+    var endedMs = null;
+    if (line >= 0) {
+      var full = this.getCommandOutput(line);
+      var newline = full.indexOf("\n");
+      output = newline >= 0 ? full.slice(newline + 1) : "";
+      if (output.length > HISTORY_MAX_OUTPUT) {
+        output = output.slice(0, HISTORY_MAX_OUTPUT);
+        truncated = true;
+      }
+      // The prompt line was last written by the command's own echo: close to Enter.
+      var echoed = this._timeForLine(line);
+      if (typeof echoed === "number" && echoed <= startedMs) startedMs = echoed;
+      if (entry.src === "osc" || entry.exit !== null) {
+        endedMs = Date.now();
+      } else {
+        endedMs = this._historyLastOutputTime(line);
+      }
+      if (endedMs !== null && endedMs < startedMs) endedMs = startedMs;
+    }
+
+    var record = {
+      command: command,
+      directory: line >= 0 ? this._historyPromptDirectory(line) : null,
+      exit: typeof entry.exit === "number" ? entry.exit : null,
+      exact: entry.src === "osc",
+      startedMs: startedMs,
+      endedMs: endedMs,
+      output: output,
+      truncated: truncated,
+      lost: lost === true
+    };
+    try {
+      this.onCommandRecord(record);
+    } catch (err) {
+      if (window.__pageTrace) window.__pageTrace("ruler onCommandRecord: " + (err && err.message));
+    }
+  };
+
+  /** The folder a command ran in, read from its own prompt line. Asking the host for
+   * the current folder is too late for a discovered command: by the time it is marked,
+   * the next prompt (after a cd) may already be on screen. */
+  RulerAddon.prototype._historyPromptDirectory = function (line) {
+    var buf = this._term.buffer.normal || this._term.buffer.active;
+    var bufLine = buf.getLine(line);
+    if (!bufLine) return null;
+    var split = CMD_SPLIT_RE.exec(bufLine.translateToString(true));
+    if (!split) return null;
+    var prompt = split[1];
+    var match = WINDOWS_IDLE_PROMPT_RE.exec(prompt) || UNIX_SPACED_IDLE_PROMPT_RE.exec(prompt) ||
+      UNIX_BRACKETED_IDLE_PROMPT_RE.exec(prompt) || HISTORY_COMPACT_PROMPT_RE.exec(prompt);
+    return match ? match[1].trim().slice(0, 1024) : null;
+  };
+
+  /** Time of the last line a discovered command printed: the row above the next mark,
+   * or above the idle prompt the cursor sits on. */
+  RulerAddon.prototype._historyLastOutputTime = function (line) {
+    var buf = this._term.buffer.normal || this._term.buffer.active;
+    var end = buf.baseY + buf.cursorY;
+    for (var i = 0; i < this._cmdMarks.length; i++) {
+      var markLine = this._cmdMarks[i].marker.line;
+      if (markLine > line && markLine < end) end = markLine;
+    }
+    for (var row = end - 1; row > line; row--) {
+      var time = this._timeForLine(row);
+      if (typeof time === "number") return time;
+    }
+    return null;
   };
 
   /** Register a listener for commands as they are marked (Phase 6.2 agent detection).

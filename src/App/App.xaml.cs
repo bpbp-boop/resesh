@@ -20,6 +20,8 @@ public partial class App : Application
     public static SettingsStore Settings { get; } = new(StorePath("settings.json", SettingsStore.DefaultPath));
     public static HighlightsStore Highlights { get; } = new(StorePath("highlights.json", HighlightsStore.DefaultPath));
     public static WorkspaceStore Workspaces { get; } = new(StorePath("workspaces.json", WorkspaceStore.DefaultPath));
+    public static Resesh.Core.History.CommandHistoryStore History { get; } =
+        new(StorePath("history", Resesh.Core.History.CommandHistoryStore.DefaultDirectory));
     private static AccessibilitySettings Accessibility { get; } = new();
     public static bool IsHighContrast => Accessibility.HighContrast;
 
@@ -162,9 +164,13 @@ public partial class App : Application
 #if DEBUG
         Resesh.Core.Ssh.SshTerminalSession.TraceHook = message => MainWindow.Trace(message);
         Resesh.Core.Local.LocalTerminalSession.TraceHook = message => MainWindow.Trace(message);
+        Resesh.Core.Telnet.TelnetTerminalSession.TraceHook = message => MainWindow.Trace(message);
         Resesh.Terminal.TerminalControl.TraceHook = message => MainWindow.Trace(message);
+        TaskbarIntegration.TraceHook = message => MainWindow.Trace(message);
         Resesh.Terminal.NativeTerminalSurface.TraceHook = message => MainWindow.Trace(message);
 #endif
+        Resesh.Terminal.TerminalSurface.Shortcuts = AppShortcuts.ForTerminals();
+        PruneCommandHistory();
         var window = CreateWindowCore();
         if (Settings.Current.ReopenLastLayoutAtStartup)
             window.RestoreLastLayout();
@@ -181,6 +187,21 @@ public partial class App : Application
         Program.SetActivationTarget(this);
     }
 
+
+    /// <summary>Deletes history past the retention period, off the UI thread. History is
+    /// pruned even while it is turned off, so the retention promise still holds.</summary>
+    internal static void PruneCommandHistory()
+    {
+        var days = Math.Clamp(Settings.Current.CommandHistoryDays, 1, 3650);
+        _ = Task.Run(() =>
+        {
+            try { History.Prune(days); }
+            catch (Exception exception) when (Resesh.Core.History.CommandHistoryStore.IsStorageFailure(exception))
+            {
+                LogCrash(exception);
+            }
+        });
+    }
 
     internal void HandleRedirectedActivation()
     {

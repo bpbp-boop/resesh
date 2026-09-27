@@ -38,10 +38,12 @@ public static class TmuxPersistence
     /// smcup@/rmcup@ keep tmux off the alternate screen; indn@ stops multi-line scrolls via
     /// CSI S, which xterm.js discards instead of pushing to scrollback (verified against the
     /// app's bundle) — without it chunks of output would vanish from native scrollback even
-    /// with the alternate screen disabled. Plain `set -g` (not -ga): the private server has
+    /// with the alternate screen disabled. Tc passes 24-bit colour through to the terminal,
+    /// which renders it; without it tmux quantizes every RGB colour to the 256-colour
+    /// palette for xterm-256color clients. Plain `set -g` (not -ga): the private server has
     /// no user config to preserve, and overwrite is idempotent across re-asserts.
     /// </summary>
-    private const string TerminalOverrides = "set -g terminal-overrides '*:smcup@:rmcup@:indn@'";
+    private const string TerminalOverrides = "set -g terminal-overrides '*:smcup@:rmcup@:indn@:Tc'";
 
     /// <summary>
     /// tmux keeps OSC 0/2 from programs inside the pane to itself and emits a title to the

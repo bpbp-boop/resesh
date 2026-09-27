@@ -7,20 +7,23 @@ using Resesh.App.ViewModels;
 using Resesh.Core.Agents;
 using Resesh.Core.Backend;
 using Resesh.Core.Credentials;
+using Resesh.Core.History;
 using Resesh.Core.Local;
 using Resesh.Core.Models;
 using Resesh.Core.Recording;
 using Resesh.Core.Sftp;
 using Resesh.Core.Ssh;
 using Resesh.Core.Storage;
+using Resesh.Core.Telnet;
 using Resesh.Terminal;
 
 namespace Resesh.App.Terminal;
 
 /// <summary>
-/// The content of one tab: a TerminalControl plus the shell lifecycle for either target
-/// kind — SSH (credential prompt, host key confirmation, connect/reconnect, teardown) or
-/// a local ConPTY process (launch, exit code, restart). The live shell is an
+/// The content of one tab: a TerminalControl plus the shell lifecycle for each target
+/// kind — SSH (credential prompt, host key confirmation, connect/reconnect, teardown),
+/// telnet (plain TCP connect/reconnect), or a local ConPTY process (launch, exit code,
+/// restart). The live shell is an
 /// <see cref="ITerminalBackend"/>; SSH-only surfaces keep a typed reference beside it.
 /// </summary>
 public sealed class TerminalTabView : Grid, IDisposable
@@ -56,6 +59,10 @@ public sealed class TerminalTabView : Grid, IDisposable
     private DispatcherQueueTimer? _agentPoll;
     private bool _agentPollBusy;
 
+    // Progress from OSC 9;4 in the terminal and from file-pane transfers, combined on the tab.
+    private TerminalProgress _terminalProgress;
+    private TerminalProgress _transferProgress;
+
     // File pane: local sessions use the Windows filesystem; SSH sessions keep the
     // resolved secret for a separate SFTP channel.
     private FilePaneView? _filePane;
@@ -67,11 +74,14 @@ public sealed class TerminalTabView : Grid, IDisposable
     private Session? _resolvedSshSession;
     private const double DefaultFilePaneWidth = 340;
     private HighlightsStore? _highlightPreview;
+    private string? _historyDirectory;
+    private bool _historyWriteFailed;
 
     private Session Session => _tab.Session;
 
-    /// <summary>Ctrl+F4 inside the terminal; the window routes it to the confirmed-close pathway.</summary>
-    public event Action? CloseRequested;
+    /// <summary>A window shortcut pressed inside this tab's terminal or rewind player:
+    /// the binding id and matched chord index. The window runs it for this tab.</summary>
+    public event Action<string, int>? ShortcutRequested;
 
     /// <summary>The terminal presented a frame after being created or shown again.</summary>
     /// <summary>Whether the terminal has presented its first frame.</summary>
@@ -85,18 +95,6 @@ public sealed class TerminalTabView : Grid, IDisposable
 
     /// <summary>Raised when the user clicks the lock overlay wanting to unlock.</summary>
     public event Action? UnlockRequested;
-
-    /// <summary>Ctrl+Shift+\ inside the terminal (split right / move to other group).</summary>
-    public event Action? SplitRequested;
-
-    /// <summary>Ctrl+Shift+T inside the terminal (open the default local profile).</summary>
-    public event Action? NewLocalTabRequested;
-
-    /// <summary>Ctrl+Shift+P inside the terminal (open the app command palette).</summary>
-    public event Action? CommandPaletteRequested;
-
-    /// <summary>Ctrl+Shift+K inside the terminal (focus the app quick-connect box).</summary>
-    public event Action? QuickConnectRequested;
 
     /// <summary>Raised (UI thread) when a connect to a session with no icon set identified
     /// the OS/vendor from the server banner. The window decides whether to persist it.</summary>
@@ -178,6 +176,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             initial.CopyOnSelect, initial.RightClickPaste, initial.Scrollback,
             BuildHighlightPayload());
         _terminal.SetPromptPlatform(Session.Icon);
+        _terminal.SetHistoryCapture(initial.KeepCommandHistory);
 
         _terminal.Ready += (cols, rows) => DispatcherQueue.TryEnqueue(() =>
         {
@@ -220,22 +219,22 @@ public sealed class TerminalTabView : Grid, IDisposable
                     context.Hostname ?? "", context.WorkingDirectory));
             }
         });
-        _terminal.CloseTabRequested += () => DispatcherQueue.TryEnqueue(() => CloseRequested?.Invoke());
-        _terminal.SplitRequested += () => DispatcherQueue.TryEnqueue(() => SplitRequested?.Invoke());
-        _terminal.FilePaneRequested += () => DispatcherQueue.TryEnqueue(ToggleFilePane);
+        _terminal.ShortcutRequested += (id, chord) =>
+            DispatcherQueue.TryEnqueue(() => ShortcutRequested?.Invoke(id, chord));
         _terminal.CommandsPanelOpenChanged += open => DispatcherQueue.TryEnqueue(() =>
         {
             IsCommandsPanelOpen = open;
             CommandsPanelOpenChanged?.Invoke();
         });
-        _terminal.NewLocalTabRequested += () => DispatcherQueue.TryEnqueue(() => NewLocalTabRequested?.Invoke());
-        _terminal.CommandPaletteRequested += () =>
-            DispatcherQueue.TryEnqueue(() => CommandPaletteRequested?.Invoke());
-        _terminal.QuickConnectRequested += () =>
-            DispatcherQueue.TryEnqueue(() => QuickConnectRequested?.Invoke());
+        // A command's folder is read when it starts: by the time its record arrives, a cd
+        // may already have moved the shell. The page sends a finished command's record
+        // before it announces the next command, so this still holds the right folder.
+        _terminal.CommandObserved += _ => DispatcherQueue.TryEnqueue(() => _historyDirectory = CurrentHistoryDirectory());
+        _terminal.CommandRecorded += record => DispatcherQueue.TryEnqueue(() => RecordHistory(record));
 
         _agent = new AgentTracker(Session.Agent);
         WireAgentSignals();
+        WireProgress();
 
         Loaded += async (_, _) =>
         {
@@ -379,6 +378,7 @@ public sealed class TerminalTabView : Grid, IDisposable
 
         var player = new TerminalPlayerView(_capture);
         player.CloseRequested += ReturnToLive;
+        player.ShortcutRequested += (id, chord) => ShortcutRequested?.Invoke(id, chord);
         _rewindPlayer = player;
         Grid.SetColumnSpan(player, 3);
         Children.Add(player);
@@ -444,6 +444,51 @@ public sealed class TerminalTabView : Grid, IDisposable
                 RefreshAgentDefault();
         };
         PushAgentState(); // a session default shows before anything has been observed
+    }
+
+    /// <summary>
+    /// OSC 9;4 arrives on the same channel as agent notifications (the tracker ignores it).
+    /// A program that exits or loses its connection without clearing its progress would
+    /// leave the bar stuck, so a finished command, a new prompt, or leaving the connected
+    /// state clears it.
+    /// </summary>
+    private void WireProgress()
+    {
+        _terminal.AgentOscReceived += (code, data) =>
+        {
+            if (code == 9 && TerminalProgress.ParseOsc9(data, _terminalProgress) is { } progress)
+                SetTerminalProgress(progress);
+        };
+        _terminal.CommandChanged += (command, _) =>
+        {
+            if (command.Length == 0)
+                DispatcherQueue.TryEnqueue(() => SetTerminalProgress(TerminalProgress.None));
+        };
+        _terminal.PromptContextChanged += (_, _) =>
+            DispatcherQueue.TryEnqueue(() => SetTerminalProgress(TerminalProgress.None));
+        _tab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TabViewModel.State) && _tab.State != TabConnectionState.Connected)
+                SetTerminalProgress(TerminalProgress.None);
+        };
+    }
+
+    private void SetTerminalProgress(TerminalProgress progress)
+    {
+        _terminalProgress = progress;
+        PushProgress();
+    }
+
+    private void SetTransferProgress(TerminalProgress progress)
+    {
+        _transferProgress = progress;
+        PushProgress();
+    }
+
+    private void PushProgress()
+    {
+        if (!_disposed)
+            _tab.Progress = TerminalProgress.Combine(_terminalProgress, _transferProgress);
     }
 
     private void ApplyAgent(Func<AgentTracker, bool> observe)
@@ -526,6 +571,17 @@ public sealed class TerminalTabView : Grid, IDisposable
             _terminal.FocusTerminal();
     }
 
+    /// <summary>Types text at the prompt as a paste, without pressing Enter, so the user
+    /// reviews a command from history before it runs.</summary>
+    public bool InsertText(string text)
+    {
+        if (_disposed || _tab.IsLocked || _tab.State != TabConnectionState.Connected)
+            return false;
+        _terminal.PasteText(text);
+        _terminal.FocusTerminal();
+        return true;
+    }
+
     /// <summary>Notification activation returns to the tracked command without sending input.</summary>
     public void ScrollToCommand(long id)
     {
@@ -547,11 +603,19 @@ public sealed class TerminalTabView : Grid, IDisposable
             _terminal.ToggleCommandsPanel();
     }
 
+    /// <summary>Runs a terminal-scope shortcut (zoom, clear, find, ...) from the command palette.</summary>
+    public void InvokeTerminalShortcut(string id)
+    {
+        if (!_disposed && !_tab.IsLocked)
+            _terminal.InvokeShortcut(id);
+    }
+
     /// <summary>Kicks off a fresh connection/launch using the terminal's current size.</summary>
     public async Task ConnectAsync(bool isReconnect)
     {
         if (_connecting || _disposed || _ssh?.IsConnected == true
-            || _backend is LocalTerminalSession { IsRunning: true })
+            || _backend is LocalTerminalSession { IsRunning: true }
+            || _backend is TelnetTerminalSession { IsConnected: true })
             return;
         _connecting = true;
         _spinner.IsActive = true;
@@ -571,6 +635,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             if (Session.IsLocal)
                 await LaunchLocalAsync(isReconnect);
+            else if (Session.IsTelnet)
+                await ConnectTelnetAsync(isReconnect);
             else
                 await ConnectSshAsync(isReconnect);
         }
@@ -649,6 +715,73 @@ public sealed class TerminalTabView : Grid, IDisposable
             if (connection.Token.IsCancellationRequested) return;
             _tab.State = TabConnectionState.Disconnected;
             _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}", action: "restart");
+        }
+    }
+
+    /// <summary>Telnet lifecycle: no credentials or host keys — the server's own login
+    /// prompt (if any) arrives as terminal output.</summary>
+    private async Task ConnectTelnetAsync(bool isReconnect)
+    {
+        var connection = _connection;
+        try
+        {
+            if (isReconnect)
+                _terminal.WriteDivider();
+            _terminal.WriteNotice($"Connecting to {Session.Host}:{Session.Port} over telnet (unencrypted) …");
+
+            var telnet = new TelnetTerminalSession();
+            telnet.OutputReceived += data =>
+            {
+                if (connection.Token.IsCancellationRequested) return;
+                _terminal.WriteOutput(data);
+                if (!_tab.IsActive && !_tab.HasUnseenOutput)
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
+                    });
+            };
+            telnet.Closed += ex => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (connection.Token.IsCancellationRequested) return;
+                _tab.State = TabConnectionState.Disconnected;
+                _tab.ConnectionSummary = "";
+                EndAgentTracking();
+                _terminal.NotifyDisconnected(ex is null ? "Connection closed by the remote host." : $"Connection lost: {ex.Message}");
+            });
+
+            var cols = _terminal.Columns;
+            var rows = _terminal.Rows;
+            _backendColumns = cols;
+            _backendRows = rows;
+            await connection.StartAsync(telnet, () => telnet.Connect(
+                Session.Host, Session.Port, Session.TerminalType, cols, rows, connection.Token, Session.TelnetEncoding,
+                Session.TelnetReport80x25));
+            connection.Token.ThrowIfCancellationRequested();
+
+            _backend = telnet;
+            ResizeBackend(_terminal.Columns, _terminal.Rows);
+            _tab.State = TabConnectionState.Connected;
+            _tab.ConnectionSummary = $"telnet • {telnet.RemoteEndPoint} • unencrypted";
+            _terminal.NotifyConnected();
+            _terminal.FocusTerminal();
+        }
+        catch (TelnetSessionException ex)
+        {
+            if (connection.Token.IsCancellationRequested) return;
+            _tab.State = TabConnectionState.Disconnected;
+            _terminal.NotifyDisconnected(ex.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            if (connection.Token.IsCancellationRequested) return;
+            _tab.State = TabConnectionState.Disconnected;
+            _terminal.NotifyDisconnected("Connection cancelled.");
+        }
+        catch (Exception ex)
+        {
+            if (connection.Token.IsCancellationRequested) return;
+            _tab.State = TabConnectionState.Disconnected;
+            _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}");
         }
     }
 
@@ -1040,6 +1173,60 @@ public sealed class TerminalTabView : Grid, IDisposable
             rightClickPaste: effective.RightClickPaste,
             scrollback: effective.Scrollback);
         _terminal.ApplyHighlights(BuildHighlightPayload());
+        _terminal.SetHistoryCapture(effective.KeepCommandHistory);
+    }
+
+    // ---- command history ----
+
+    private string? CurrentHistoryDirectory()
+    {
+        if (Session.IsLocal && _windowsWorkingDirectory is not null)
+            return _windowsWorkingDirectory;
+        if (!_workingDirectory.HostMismatch && _workingDirectory.Path is { } reported)
+            return reported;
+        // Network-device prompts report a CLI mode, not a folder.
+        return string.IsNullOrEmpty(_tab.PromptContextPlatform) ? _tab.PromptContext : null;
+    }
+
+    private void RecordHistory(TerminalCommandRecord record)
+    {
+        if (_disposed || !App.Settings.Current.WithOverrides(Session.Overrides).KeepCommandHistory)
+            return;
+        var entry = new CommandHistoryEntry
+        {
+            SessionId = Session.Id,
+            SessionName = Session.Name,
+            Kind = Session.Kind,
+            Target = CommandHistoryEntry.TargetOf(Session),
+            // The command's own prompt beats the tab's folder, which may have moved on.
+            WorkingDirectory = record.Directory ?? _historyDirectory ?? CurrentHistoryDirectory(),
+            Command = record.CommandLine,
+            ExitCode = record.ExitCode,
+            Exact = record.Exact,
+            StartedAt = DateTimeOffset.FromUnixTimeMilliseconds(record.StartedUnixMs).ToLocalTime(),
+            EndedAt = record.EndedUnixMs is { } ended
+                ? DateTimeOffset.FromUnixTimeMilliseconds(ended).ToLocalTime()
+                : null,
+            Output = record.Output,
+            OutputTruncated = record.OutputTruncated,
+            OutputLost = record.OutputLost,
+        };
+        var dispatcher = DispatcherQueue;
+        _ = Task.Run(() =>
+        {
+            try { App.History.Append(entry); }
+            catch (Exception exception) when (CommandHistoryStore.IsStorageFailure(exception))
+            {
+                // Report once per tab; a full disk would otherwise raise a notice per command.
+                dispatcher.TryEnqueue(() =>
+                {
+                    if (_historyWriteFailed)
+                        return;
+                    _historyWriteFailed = true;
+                    App.ReportRecoverableError(exception);
+                });
+            }
+        });
     }
 
     /// <summary>Enabled highlight rules for this session (global state + session deltas),
@@ -1107,6 +1294,17 @@ public sealed class TerminalTabView : Grid, IDisposable
             && session is not null
             && await Task.Run(() => session.TryRunCommand(
                 TmuxPersistence.KillCommand(Session.Id, _tab.TmuxSlot)));
+    }
+
+    /// <summary>Sends a break signal when the live backend has one (telnet). Returns false
+    /// when there is nothing to send it on, so a shortcut can fall through.</summary>
+    public bool SendBreak()
+    {
+        if (_disposed || _tab.IsLocked || _tab.State != TabConnectionState.Connected
+            || _backend is not IBreakSender sender)
+            return false;
+        sender.SendBreak();
+        return true;
     }
 
     /// <summary>User-initiated Disconnect (SSH) / Stop (local): tab stays open showing the
@@ -1177,6 +1375,7 @@ public sealed class TerminalTabView : Grid, IDisposable
                 ? new FilePaneView(() => Session, OpenInExplorerAsync)
                 : new FilePaneView(() => Session, CreateSftpSessionAsync, OpenInExplorerAsync);
             _filePane.CloseRequested += HideFilePane;
+            _filePane.TransferProgressChanged += SetTransferProgress;
             Grid.SetColumn(_filePane, 2);
             Children.Add(_filePane);
 
@@ -1552,6 +1751,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        _tab.Progress = TerminalProgress.None;
         _agentPoll?.Stop();
         _agentPoll = null;
         CleanupActions.Run(App.ReportRecoverableError,

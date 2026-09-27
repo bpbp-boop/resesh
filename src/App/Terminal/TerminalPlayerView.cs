@@ -47,6 +47,9 @@ public sealed class TerminalPlayerView : Grid, IDisposable
 
     public event Action? CloseRequested;
 
+    /// <summary>A window shortcut pressed while the player's terminal had focus.</summary>
+    public event Action<string, int>? ShortcutRequested;
+
     private void Build(string closeLabel)
     {
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
@@ -62,6 +65,8 @@ public sealed class TerminalPlayerView : Grid, IDisposable
             rightClickPaste: false,
             scrollback: settings.Scrollback,
             readOnly: true);
+        _terminal.ShortcutRequested += (id, chord) =>
+            DispatcherQueue.TryEnqueue(() => ShortcutRequested?.Invoke(id, chord));
         _terminal.Ready += (_, _) =>
         {
             _ready = true;

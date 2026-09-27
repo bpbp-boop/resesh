@@ -18,8 +18,17 @@ public sealed record ImportCandidate
     public string Protocol { get; init; } = "";
     public string? PrivateKeyPath { get; init; }
 
-    /// <summary>Only SSH sessions are importable; Telnet/serial/etc. are listed as skipped.</summary>
-    public bool IsSupported => Protocol is "SSH2" or "SSH1";
+    /// <summary>Plain telnet (not SecureCRT's Telnet/SSL, which needs TLS we don't speak).</summary>
+    public bool IsTelnet => Protocol == TelnetProtocol;
+
+    /// <summary>SSH and plain telnet are importable; serial, rlogin, raw etc. are listed as skipped.</summary>
+    public bool IsSupported => Protocol is "SSH2" or "SSH1" || IsTelnet;
+
+    /// <summary>The normalized protocol name both importers use for telnet.</summary>
+    public const string TelnetProtocol = "TELNET";
+
+    /// <summary>The port to assume when the source stores none.</summary>
+    public static int DefaultPort(string protocol) => protocol == TelnetProtocol ? 23 : 22;
 }
 
 public sealed record ImportScanResult
@@ -166,12 +175,15 @@ public static class SecureCrtImporter
 
     /// <summary>
     /// Parses one .ini. Lines look like S:"Hostname"=10.0.0.1 and D:"[SSH2] Port"=00000016
-    /// (D: values are 8-digit hex). Unknown keys are ignored; missing port falls back to 22.
+    /// (D: values are 8-digit hex). Unknown keys are ignored. A session file keeps settings
+    /// for every protocol it was ever switched to, so the port is read from the key of its
+    /// current protocol ("[SSH2] Port", "[SSH1] Port", or plain "Port" for telnet), never
+    /// just the first port key in the file; a missing port falls back to the protocol default.
     /// </summary>
     public static ImportCandidate Parse(string iniContent, string name, string folderPath, string relativePath)
     {
         string host = "", username = "", protocol = "";
-        int? port = null;
+        var ports = new Dictionary<string, int>();
 
         foreach (var rawLine in iniContent.Split('\n'))
         {
@@ -188,15 +200,23 @@ public static class SecureCrtImporter
                     case "Protocol Name": protocol = value.Trim().ToUpperInvariant(); break;
                 }
             }
-            else if (kind == 'D' && port is null && key is "[SSH2] Port" or "[SSH1] Port" or "Port")
+            else if (kind == 'D' && key is "[SSH2] Port" or "[SSH1] Port" or "Port" && !ports.ContainsKey(key))
             {
                 if (int.TryParse(value.Trim(), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var parsed)
                     && parsed is > 0 and <= 65535)
                 {
-                    port = parsed;
+                    ports[key] = parsed;
                 }
             }
         }
+
+        // SSH sessions fall back to the plain key, which older SecureCRT versions wrote.
+        var port = protocol switch
+        {
+            "SSH2" => ports.GetValueOrDefault("[SSH2] Port", ports.GetValueOrDefault("Port")),
+            "SSH1" => ports.GetValueOrDefault("[SSH1] Port", ports.GetValueOrDefault("Port")),
+            _ => ports.GetValueOrDefault("Port"),
+        };
 
         return new ImportCandidate
         {
@@ -204,8 +224,8 @@ public static class SecureCrtImporter
             FolderPath = folderPath,
             RelativePath = relativePath,
             Host = host.Trim(),
-            Port = port ?? 22,
-            Username = username.Trim(),
+            Port = port > 0 ? port : ImportCandidate.DefaultPort(protocol),
+            Username = protocol == ImportCandidate.TelnetProtocol ? "" : username.Trim(),
             Protocol = protocol,
             PrivateKeyPath = GetIdentity(iniContent),
         };
@@ -263,7 +283,8 @@ public static class SecureCrtImporter
     }
 
     /// <summary>
-    /// Adds the selected candidates to the store. A candidate whose name+host+port already
+    /// Adds the selected candidates (SSH or telnet, from any importer) to the store. A
+    /// candidate whose name+host+port already
     /// exists is skipped. Returns (imported, duplicatesSkipped).
     /// </summary>
     public static (int Imported, int Duplicates) Commit(SessionStore store, IEnumerable<ImportCandidate> selected,
@@ -281,6 +302,22 @@ public static class SecureCrtImporter
             if (isDuplicate)
             {
                 duplicates++;
+                continue;
+            }
+
+            if (candidate.IsTelnet)
+            {
+                // Telnet carries no credentials: the server prompts in the terminal.
+                store.Add(new Session
+                {
+                    Kind = SessionKind.Telnet,
+                    Name = candidate.Name,
+                    FolderPath = candidate.FolderPath,
+                    Host = candidate.Host,
+                    Port = candidate.Port,
+                    AuthMethod = AuthMethod.None,
+                });
+                imported++;
                 continue;
             }
 

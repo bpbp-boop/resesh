@@ -271,6 +271,23 @@
                                         <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBorderColor(AppTheme), Mode=OneWay}" />
                                     </Rectangle.Fill>
                                 </Rectangle>
+                                <!-- OSC 9;4 and file-transfer progress along the bottom edge. The
+                                     track is transparent so an idle tab keeps its underline. -->
+                                <ProgressBar
+                                    Height="3"
+                                    MinHeight="3"
+                                    Padding="0"
+                                    VerticalAlignment="Bottom"
+                                    HorizontalAlignment="Stretch"
+                                    Background="Transparent"
+                                    IsHitTestVisible="False"
+                                    Maximum="100"
+                                    Value="{x:Bind local:PresentationValues.ProgressValue(Progress), Mode=OneWay}"
+                                    IsIndeterminate="{x:Bind local:PresentationValues.ProgressIndeterminate(Progress), Mode=OneWay}"
+                                    ShowError="{x:Bind local:PresentationValues.ProgressShowError(Progress), Mode=OneWay}"
+                                    ShowPaused="{x:Bind local:PresentationValues.ProgressShowPaused(Progress), Mode=OneWay}"
+                                    Visibility="{x:Bind local:PresentationValues.ProgressVisibility(Progress), Mode=OneWay}"
+                                    AutomationProperties.Name="{x:Bind ProgressTooltip, Mode=OneWay}" />
                                 <Grid
                                     Margin="10,0,6,0"
                                     VerticalAlignment="Center">

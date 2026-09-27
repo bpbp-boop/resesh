@@ -18,7 +18,7 @@ public static class SessionDropPlanner
 
         targetFolder = FolderPaths.Normalize(targetFolder);
         var sessionIds = draggedSessions
-            .Where(session => session.Kind == targetKind
+            .Where(session => session.FolderScope == targetKind
                 && !FolderPaths.Normalize(session.FolderPath).Equals(
                     targetFolder,
                     StringComparison.OrdinalIgnoreCase))
