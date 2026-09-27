@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>features — resesh</title>
 <link rel="canonical" href="https://resesh.net/features.html">
-<meta name="description" content="Current and planned resesh features: saved sessions, telnet consoles, keyboard shortcuts, persistent tmux sessions, coding agents over SSH, GPU rendering, highlighting, recordings, workspaces, file transfers and backups.">
+<meta name="description" content="Current and planned resesh features: saved sessions, searchable command history, comparing command runs, telnet consoles, keyboard shortcuts, persistent tmux sessions, coding agents over SSH, GPU rendering, highlighting, recordings, workspaces, file transfers and backups.">
 <link rel="icon" href="assets/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,6 +21,7 @@
   })();
 </script>
 <script src="theme.js" defer></script>
+<script src="videos.js" defer></script>
 </head>
 <body>
 
@@ -48,6 +49,7 @@
     <span class="chip">ssh.net transport</span>
     <span class="chip">webview2 + xterm.js</span>
     <span class="chip">webgl rendering</span>
+    <span class="chip">sqlite fts5</span>
     <span class="chip">gpl-2.0</span>
   </div>
 </section>
@@ -58,7 +60,7 @@
 
     <div class="rows">
 
-      <div class="row">
+      <div class="row" id="sessions">
         <div class="row__head">
           <div class="row__label">
             <span class="row__index">01</span>
@@ -76,19 +78,105 @@
         </div>
         <div class="row__media">
           <button class="screenshot-trigger" type="button" popovertarget="sessions-screenshot" aria-label="Enlarge the sessions screenshot">
-            <img src="assets/sessions.png" alt="Sessions folder tree with custom icons and color tags" width="398" height="729" loading="lazy">
+            <img class="session-tree-image" src="assets/sessions.png" alt="Sessions folder tree with custom icons and color tags" width="306" height="760" loading="lazy">
           </button>
           <div class="screenshot-popover" id="sessions-screenshot" popover aria-label="Enlarged sessions screenshot">
             <button class="screenshot-popover__close" type="button" popovertarget="sessions-screenshot" popovertargetaction="hide">close</button>
-            <img src="assets/sessions.png" alt="Sessions folder tree with custom icons and color tags" width="398" height="729">
+            <img src="assets/sessions.png" alt="Sessions folder tree with custom icons and color tags" width="306" height="760">
           </div>
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="history">
         <div class="row__head">
           <div class="row__label">
             <span class="row__index">02</span>
+            <span class="row__title">command history</span>
+          </div>
+          <span class="badge badge--new row__badge">new</span>
+        </div>
+        <div class="row__body">
+          <p class="row__text">keep every finished command with its output, folder, session, time and exit result, then search it across all sessions with <span class="key">ctrl shift h</span>. insert a command at the prompt or reopen the session it ran in.</p>
+          <ul class="row__bullets">
+            <li>all words must match the command, session, folder or output; quote a phrase with "…"</li>
+            <li>filters: <span class="key">host:web01</span> <span class="key">in:/etc</span> <span class="key">exit:fail</span> <span class="key">exit:127</span>, plus session, result, time and a calendar day picker</li>
+            <li>off by default because output can contain secrets; each session can opt out</li>
+            <li>local only, left out of backups, 90-day retention by default, deletes overwritten on disk</li>
+            <li>a sqlite full-text index, so history never has to fit in memory</li>
+          </ul>
+        </div>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="history-screenshot" aria-label="Enlarge the command history screenshot">
+            <img src="assets/history.png" alt="Command history search for bgp with the selected run and its output" width="1368" height="1404" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="history-screenshot" popover aria-label="Enlarged command history screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="history-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/history.png" alt="Command history search for bgp with the selected run and its output" width="1368" height="1404">
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="compare">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">03</span>
+            <span class="row__title">compare runs</span>
+          </div>
+          <span class="badge badge--new row__badge">new</span>
+        </div>
+        <div class="row__body">
+          <p class="row__text">when a command has run more than once on the same host, compare with previous shows what changed: added and removed lines, with the changed words marked, unified or side by side.</p>
+          <ul class="row__bullets">
+            <li>timestamps are ignored by default; ignore numbers hides counters and uptimes</li>
+            <li>unchanged stretches fold away; <span class="key">f7</span> and <span class="key">shift f7</span> step between changes</li>
+            <li>pick any two runs from the list of every run, each with how it differs</li>
+            <li>paged (--More--), truncated and lost output is flagged, so a gap is never read as a change</li>
+          </ul>
+        </div>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="compare-screenshot" aria-label="Enlarge the compare runs screenshot">
+            <img src="assets/compare.png" alt="Compare with Previous for show bgp summary with numbers ignored, showing one BGP peer that changed from Established to Active" width="1368" height="478" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="compare-screenshot" popover aria-label="Enlarged compare runs screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="compare-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/compare.png" alt="Compare with Previous for show bgp summary with numbers ignored, showing one BGP peer that changed from Established to Active" width="1368" height="478">
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="telnet">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">04</span>
+            <span class="row__title">telnet consoles</span>
+          </div>
+        </div>
+        <div class="row__body">
+          <p class="row__text">connect to console servers and lab or management devices over telnet. telnet sessions share the session list, folders, tabs, splits, highlighting and recordings with ssh.</p>
+          <ul class="row__bullets">
+            <li>type telnet host 2003 in quick connect to reach a console line on a high port</li>
+            <li>the window size follows the tab as it resizes, so htop, btop and vim fit the window</li>
+            <li>send break (ctrl break) for boot interrupts and password recovery through a console server</li>
+            <li>text encoding per session: automatic (utf-8, falling back to cp437 for bbs and ansi art), utf-8 or cp437; typed input is encoded to match</li>
+            <li>report 80 × 25 to bbs servers: naws and screen-size probes get 80 × 25 while the tab keeps its real size</li>
+            <li>telnet is not encrypted; the session editor says so, and no password is stored for it</li>
+          </ul>
+        </div>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="telnet-screenshot" aria-label="Enlarge the telnet screenshot">
+            <img src="assets/telnet.png" alt="Telnet session to a Synchronet BBS showing CP437 art and an 80x25 terminal report" width="1240" height="700" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="telnet-screenshot" popover aria-label="Enlarged telnet screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="telnet-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/telnet.png" alt="Telnet session to a Synchronet BBS showing CP437 art and an 80x25 terminal report" width="1240" height="700">
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="highlighting">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">05</span>
             <span class="row__title">keyword highlighting</span>
           </div>
         </div>
@@ -110,10 +198,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="scrollbar">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">03</span>
+            <span class="row__index">06</span>
             <span class="row__title">annotated scrollbar</span>
           </div>
         </div>
@@ -136,10 +224,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="commands">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">04</span>
+            <span class="row__index">07</span>
             <span class="row__title">command list</span>
           </div>
         </div>
@@ -175,10 +263,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="rewind">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">05</span>
+            <span class="row__index">08</span>
             <span class="row__title">recording and rewind</span>
           </div>
         </div>
@@ -190,14 +278,14 @@
           </ul>
         </div>
         <div class="row__media">
-          <video src="assets/rewind.mp4" width="1166" height="956" autoplay loop muted playsinline aria-label="Rewind scrubber over a live terminal"></video>
+          <video src="assets/rewind.mp4" poster="assets/rewind-poster.jpg" width="1440" height="756" autoplay loop muted playsinline preload="metadata" data-demo aria-label="Scrubbing rewind back to when a BGP peer was Active, then returning to the live terminal"></video>
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="shortcuts">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">06</span>
+            <span class="row__index">09</span>
             <span class="row__title">keyboard shortcuts and command palette</span>
           </div>
         </div>
@@ -224,7 +312,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">07</span>
+            <span class="row__index">10</span>
             <span class="row__title">persistent remote sessions</span>
           </div>
         </div>
@@ -250,7 +338,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">08</span>
+            <span class="row__index">11</span>
             <span class="row__title">shell integration and command alerts</span>
           </div>
         </div>
@@ -274,7 +362,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">09</span>
+            <span class="row__index">12</span>
             <span class="row__title">coding agents over ssh</span>
           </div>
         </div>
@@ -304,7 +392,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">10</span>
+            <span class="row__index">13</span>
             <span class="row__title">progress on tabs and the taskbar</span>
           </div>
         </div>
@@ -328,7 +416,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">11</span>
+            <span class="row__index">14</span>
             <span class="row__title">workspaces and layout restore</span>
           </div>
         </div>
@@ -350,10 +438,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="files">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">12</span>
+            <span class="row__index">15</span>
             <span class="row__title">file transfer and browsing</span>
           </div>
         </div>
@@ -375,10 +463,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="keys">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">13</span>
+            <span class="row__index">16</span>
             <span class="row__title">keys, secrets and host keys</span>
           </div>
         </div>
@@ -400,10 +488,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="backup">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">14</span>
+            <span class="row__index">17</span>
             <span class="row__title">backup, export, import</span>
           </div>
         </div>
@@ -425,10 +513,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="themes">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">15</span>
+            <span class="row__index">18</span>
             <span class="row__title">themes</span>
           </div>
         </div>
@@ -440,41 +528,14 @@
           </ul>
         </div>
         <div class="row__media">
-          <video src="assets/themes.mp4" autoplay loop muted playsinline aria-label="Theme demonstration in resesh"></video>
-        </div>
-      </div>
-
-      <div class="row">
-        <div class="row__head">
-          <div class="row__label">
-            <span class="row__index">16</span>
-            <span class="row__title">telnet consoles</span>
-          </div>
-        </div>
-        <div class="row__body">
-          <p class="row__text">connect to console servers and lab or management devices over telnet. telnet sessions share the session list, folders, tabs, splits, highlighting and recordings with ssh.</p>
-          <ul class="row__bullets">
-            <li>type telnet host 2003 in quick connect to reach a console line on a high port</li>
-            <li>the window size follows the tab as it resizes, so htop, btop and vim fit the window</li>
-            <li>send break (ctrl break) for boot interrupts and password recovery through a console server</li>
-            <li>telnet is not encrypted; the session editor says so, and no password is stored for it</li>
-          </ul>
-        </div>
-        <div class="row__media row__media--text">
-          <div class="termblock">
-            <span><span class="termblock__prompt">quick connect</span> — telnet telehack.com</span>
-            <span class="termblock__out">connecting to telehack.com:23 over telnet (unencrypted) …</span>
-            <span><span class="termblock__prompt">.</span>stty</span>
-            <span class="termblock__out">rows: 36&nbsp;&nbsp;cols: 101&nbsp;&nbsp;term: xterm-256color</span>
-            <span class="termblock__out"><span class="termblock__ok">→ the server sees the tab's real size</span></span>
-          </div>
+          <video src="assets/themes.mp4" poster="assets/themes-poster.jpg" autoplay loop muted playsinline preload="metadata" data-demo aria-label="Theme demonstration in resesh"></video>
         </div>
       </div>
 
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">17</span>
+            <span class="row__index">19</span>
             <span class="row__title">gssapi / kerberos auth</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -492,7 +553,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">18</span>
+            <span class="row__index">20</span>
             <span class="row__title">tunnels, agent, jump hosts</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -510,7 +571,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">19</span>
+            <span class="row__index">21</span>
             <span class="row__title">serial consoles</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -528,7 +589,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">20</span>
+            <span class="row__index">22</span>
             <span class="row__title">other planned work</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -574,6 +635,16 @@
         <span class="card__tag">output</span>
         <span class="card__name">batched, timestamped output</span>
         <span class="card__note">ssh output is batched every 16 ms or 32 kb before reaching the terminal, and each read keeps its arrival time, so line timestamps and recordings stay accurate under heavy output.</span>
+      </div>
+      <div class="card">
+        <span class="card__tag">history</span>
+        <span class="card__name">full-text search that forgets properly</span>
+        <span class="card__note">history lives in one sqlite database with an fts5 trigram index kept in step by triggers, so any substring search stays fast at tens of thousands of commands. deletes run with secure_delete, then merge the index and truncate the write-ahead log, so removed text does not linger on disk.</span>
+      </div>
+      <div class="card">
+        <span class="card__tag">compare</span>
+        <span class="card__name">a diff built for device output</span>
+        <span class="card__note">a myers line diff with a bounded edit budget, then word-level marks where addresses and paths count as one word. timestamps and numbers can be masked before comparing, so counters that always move don't bury the real change.</span>
       </div>
       <div class="card">
         <span class="card__tag">storage</span>
@@ -627,8 +698,12 @@
         <span class="path__label">accepted host keys</span>
         <span class="path__value">%APPDATA%\Resesh\known_hosts.json</span>
       </div>
+      <div class="path">
+        <span class="path__label">command history (when on)</span>
+        <span class="path__value">%LOCALAPPDATA%\Resesh\history\history.db</span>
+      </div>
     </div>
-    <p class="note">secrets are never written to the normal json store, and they're left out of backups unless you ask for them.</p>
+    <p class="note">secrets are never written to the normal json store, and they're left out of backups unless you ask for them. command history is never included in backups.</p>
   </div>
 </section>
 
