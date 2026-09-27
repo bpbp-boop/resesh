@@ -89,6 +89,13 @@ public sealed partial class SessionEditDialog : ContentDialog
             PortBox.Value = existing.Port;
             UsernameBox.Text = existing.Username;
             AuthBox.SelectedIndex = (int)existing.AuthMethod;
+            TelnetEncodingBox.SelectedIndex = existing.TelnetEncoding switch
+            {
+                TelnetTextEncoding.Utf8 => 1,
+                TelnetTextEncoding.Cp437 => 2,
+                _ => 0,
+            };
+            TelnetReport80x25Toggle.IsOn = existing.TelnetReport80x25;
             var terminalIndex = TerminalTypeBox.Items.IndexOf(existing.TerminalType);
             if (terminalIndex >= 0)
                 TerminalTypeBox.SelectedIndex = terminalIndex;
@@ -296,6 +303,8 @@ public sealed partial class SessionEditDialog : ContentDialog
         var telnet = IsTelnet;
         SshOptionsPanel.Visibility = telnet ? Visibility.Collapsed : Visibility.Visible;
         PersistentPanel.Visibility = telnet ? Visibility.Collapsed : Visibility.Visible;
+        TelnetEncodingBox.Visibility = telnet ? Visibility.Visible : Visibility.Collapsed;
+        TelnetSizePanel.Visibility = telnet ? Visibility.Visible : Visibility.Collapsed;
         TelnetNotice.IsOpen = telnet;
     }
 
@@ -409,6 +418,13 @@ public sealed partial class SessionEditDialog : ContentDialog
             PrivateKeyPath = null,
             PassphraseRequired = false,
             TerminalType = string.IsNullOrWhiteSpace(TerminalTypeBox.Text) ? "xterm-256color" : TerminalTypeBox.Text.Trim(),
+            TelnetEncoding = TelnetEncodingBox.SelectedIndex switch
+            {
+                1 => TelnetTextEncoding.Utf8,
+                2 => TelnetTextEncoding.Cp437,
+                _ => TelnetTextEncoding.Auto,
+            },
+            TelnetReport80x25 = telnet && TelnetReport80x25Toggle.IsOn,
             Persistent = !telnet && PersistentToggle.IsOn,
             DetachedSessions = DetachedSessionsBox.SelectedIndex switch
             {

@@ -205,6 +205,26 @@
                     <ComboBox x:Name="ColorBox" Grid.Column="1" Header="Color tag" SelectedIndex="0" HorizontalAlignment="Stretch" />
                 </Grid>
 
+                <ComboBox
+                    x:Name="TelnetEncodingBox"
+                    Header="Telnet Text Encoding"
+                    SelectedIndex="0"
+                    Visibility="Collapsed"
+                    HorizontalAlignment="Stretch">
+                    <x:String>Automatic (UTF-8 / CP437)</x:String>
+                    <x:String>UTF-8</x:String>
+                    <x:String>CP437 (BBS / ANSI Art)</x:String>
+                </ComboBox>
+
+                <StackPanel x:Name="TelnetSizePanel" Spacing="4" Visibility="Collapsed">
+                    <ToggleSwitch x:Name="TelnetReport80x25Toggle"
+                                  AutomationProperties.AutomationId="TelnetReport80x25Toggle"
+                                  Header="Report 80 × 25 to BBS Servers" />
+                    <TextBlock Text="Reports 80 columns and 25 rows for BBS size checks. The visible terminal size stays the same. Reconnect to apply."
+                               TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+
                 <Grid ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />

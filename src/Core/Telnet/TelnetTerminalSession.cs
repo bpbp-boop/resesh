@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using Resesh.Core.Backend;
+using Resesh.Core.Models;
 
 namespace Resesh.Core.Telnet;
 
@@ -25,6 +26,8 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
     private readonly System.Collections.Concurrent.BlockingCollection<byte[]> _outgoing = new();
     private Socket? _socket;
     private TelnetProtocol? _protocol;
+    private TelnetTextCodec? _textCodec;
+    private TelnetBbsSizeFilter? _bbsSizeFilter;
     private Thread? _reader;
     private Thread? _sender;
     private volatile bool _stopped;
@@ -46,7 +49,8 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
 
     /// <summary>Opens the connection and starts negotiation. Blocks; run off the UI thread.</summary>
     public void Connect(string host, int port, string terminalType, int columns, int rows,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, TelnetTextEncoding textEncoding = TelnetTextEncoding.Auto,
+        bool report80x25 = false)
     {
         if (string.IsNullOrWhiteSpace(host))
             throw new TelnetSessionException("No host set for this session.");
@@ -85,7 +89,7 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
             }
         }
 
-        var protocol = new TelnetProtocol(terminalType, columns, rows);
+        var protocol = new TelnetProtocol(terminalType, report80x25 ? 80 : columns, report80x25 ? 25 : rows);
         lock (_gate)
         {
             if (_stopped)
@@ -95,6 +99,8 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
             }
             _socket = socket;
             _protocol = protocol;
+            _textCodec = new TelnetTextCodec(textEncoding);
+            _bbsSizeFilter = report80x25 ? new TelnetBbsSizeFilter() : null;
             RemoteEndPoint = socket.RemoteEndPoint?.ToString() ?? endpoint;
             EnqueueLocked(protocol.InitialNegotiation());
         }
@@ -112,7 +118,7 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
         {
             if (_protocol is null || _stopped)
                 return;
-            EnqueueLocked(_protocol.EncodeInput(data));
+            EnqueueLocked(_protocol.EncodeInput(_textCodec!.EncodeInput(data)));
         }
     }
 
@@ -122,7 +128,7 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
         {
             if (_protocol is null || _stopped)
                 return;
-            EnqueueLocked(_protocol.Resize(columns, rows));
+            EnqueueLocked(_protocol.Resize(_bbsSizeFilter is null ? columns : 80, _bbsSizeFilter is null ? rows : 25));
         }
     }
 
@@ -173,16 +179,25 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
 
                 data.Clear();
                 replies.Clear();
+                byte[] output;
                 lock (_gate)
                 {
                     _protocol!.Receive(buffer.AsSpan(0, read), data, replies);
                     if (replies.Count > 0)
                         EnqueueLocked([.. replies]);
+                    output = _textCodec!.DecodeOutput(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(data));
+                    if (_bbsSizeFilter is not null)
+                    {
+                        replies.Clear();
+                        output = _bbsSizeFilter.Process(output, replies);
+                        if (replies.Count > 0)
+                            EnqueueLocked(_protocol.EncodeInput([.. replies]));
+                    }
                 }
                 if (replies.Count > 0)
                     TraceHook?.Invoke($"telnet negotiation reply: {replies.Count} bytes");
-                if (data.Count > 0)
-                    OutputReceived?.Invoke(System.Runtime.InteropServices.CollectionsMarshal.AsSpan(data));
+                if (output.Length > 0)
+                    OutputReceived?.Invoke(output);
             }
         }
         catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
@@ -195,8 +210,16 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
             failure = ex;
         }
 
+        byte[] tail;
         lock (_gate)
+        {
+            tail = _textCodec!.DecodeOutput([], flush: true);
+            if (_bbsSizeFilter is not null)
+                tail = _bbsSizeFilter.Process(tail, [], flush: true);
             _outgoing.CompleteAdding(); // releases the sender thread
+        }
+        if (!_stopped && tail.Length > 0)
+            OutputReceived?.Invoke(tail);
         if (_stopped || Interlocked.Exchange(ref _closedRaised, 1) != 0)
             return;
         TraceHook?.Invoke($"telnet closed: {failure?.Message ?? "by server"}");

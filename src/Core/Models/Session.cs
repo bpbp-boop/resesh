@@ -164,6 +164,14 @@ public sealed record Session
 
     public string TerminalType { get; init; } = "xterm-256color";
 
+    /// <summary>Telnet text encoding. Auto accepts UTF-8 and falls back to CP437 for BBS art.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public TelnetTextEncoding TelnetEncoding { get; init; } = TelnetTextEncoding.Auto;
+
+    /// <summary>Report 80 columns and 25 rows to Telnet BBS servers without resizing the display.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool TelnetReport80x25 { get; init; }
+
     /// <summary>Run the remote shell inside tmux so it survives disconnects (requires tmux on the host).</summary>
     public bool Persistent { get; init; }
 

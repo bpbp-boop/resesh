@@ -754,7 +754,8 @@ public sealed class TerminalTabView : Grid, IDisposable
             _backendColumns = cols;
             _backendRows = rows;
             await connection.StartAsync(telnet, () => telnet.Connect(
-                Session.Host, Session.Port, Session.TerminalType, cols, rows, connection.Token));
+                Session.Host, Session.Port, Session.TerminalType, cols, rows, connection.Token, Session.TelnetEncoding,
+                Session.TelnetReport80x25));
             connection.Token.ThrowIfCancellationRequested();
 
             _backend = telnet;
