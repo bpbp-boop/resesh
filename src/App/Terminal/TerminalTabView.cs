@@ -7,6 +7,7 @@ using Resesh.App.ViewModels;
 using Resesh.Core.Agents;
 using Resesh.Core.Backend;
 using Resesh.Core.Credentials;
+using Resesh.Core.History;
 using Resesh.Core.Local;
 using Resesh.Core.Models;
 using Resesh.Core.Recording;
@@ -73,6 +74,8 @@ public sealed class TerminalTabView : Grid, IDisposable
     private Session? _resolvedSshSession;
     private const double DefaultFilePaneWidth = 340;
     private HighlightsStore? _highlightPreview;
+    private string? _historyDirectory;
+    private bool _historyWriteFailed;
 
     private Session Session => _tab.Session;
 
@@ -173,6 +176,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             initial.CopyOnSelect, initial.RightClickPaste, initial.Scrollback,
             BuildHighlightPayload());
         _terminal.SetPromptPlatform(Session.Icon);
+        _terminal.SetHistoryCapture(initial.KeepCommandHistory);
 
         _terminal.Ready += (cols, rows) => DispatcherQueue.TryEnqueue(() =>
         {
@@ -222,6 +226,11 @@ public sealed class TerminalTabView : Grid, IDisposable
             IsCommandsPanelOpen = open;
             CommandsPanelOpenChanged?.Invoke();
         });
+        // A command's folder is read when it starts: by the time its record arrives, a cd
+        // may already have moved the shell. The page sends a finished command's record
+        // before it announces the next command, so this still holds the right folder.
+        _terminal.CommandObserved += _ => DispatcherQueue.TryEnqueue(() => _historyDirectory = CurrentHistoryDirectory());
+        _terminal.CommandRecorded += record => DispatcherQueue.TryEnqueue(() => RecordHistory(record));
 
         _agent = new AgentTracker(Session.Agent);
         WireAgentSignals();
@@ -560,6 +569,17 @@ public sealed class TerminalTabView : Grid, IDisposable
     {
         if (!_disposed && !_tab.IsLocked)
             _terminal.FocusTerminal();
+    }
+
+    /// <summary>Types text at the prompt as a paste, without pressing Enter, so the user
+    /// reviews a command from history before it runs.</summary>
+    public bool InsertText(string text)
+    {
+        if (_disposed || _tab.IsLocked || _tab.State != TabConnectionState.Connected)
+            return false;
+        _terminal.PasteText(text);
+        _terminal.FocusTerminal();
+        return true;
     }
 
     /// <summary>Notification activation returns to the tracked command without sending input.</summary>
@@ -1152,6 +1172,60 @@ public sealed class TerminalTabView : Grid, IDisposable
             rightClickPaste: effective.RightClickPaste,
             scrollback: effective.Scrollback);
         _terminal.ApplyHighlights(BuildHighlightPayload());
+        _terminal.SetHistoryCapture(effective.KeepCommandHistory);
+    }
+
+    // ---- command history ----
+
+    private string? CurrentHistoryDirectory()
+    {
+        if (Session.IsLocal && _windowsWorkingDirectory is not null)
+            return _windowsWorkingDirectory;
+        if (!_workingDirectory.HostMismatch && _workingDirectory.Path is { } reported)
+            return reported;
+        // Network-device prompts report a CLI mode, not a folder.
+        return string.IsNullOrEmpty(_tab.PromptContextPlatform) ? _tab.PromptContext : null;
+    }
+
+    private void RecordHistory(TerminalCommandRecord record)
+    {
+        if (_disposed || !App.Settings.Current.WithOverrides(Session.Overrides).KeepCommandHistory)
+            return;
+        var entry = new CommandHistoryEntry
+        {
+            SessionId = Session.Id,
+            SessionName = Session.Name,
+            Kind = Session.Kind,
+            Target = CommandHistoryEntry.TargetOf(Session),
+            // The command's own prompt beats the tab's folder, which may have moved on.
+            WorkingDirectory = record.Directory ?? _historyDirectory ?? CurrentHistoryDirectory(),
+            Command = record.CommandLine,
+            ExitCode = record.ExitCode,
+            Exact = record.Exact,
+            StartedAt = DateTimeOffset.FromUnixTimeMilliseconds(record.StartedUnixMs).ToLocalTime(),
+            EndedAt = record.EndedUnixMs is { } ended
+                ? DateTimeOffset.FromUnixTimeMilliseconds(ended).ToLocalTime()
+                : null,
+            Output = record.Output,
+            OutputTruncated = record.OutputTruncated,
+            OutputLost = record.OutputLost,
+        };
+        var dispatcher = DispatcherQueue;
+        _ = Task.Run(() =>
+        {
+            try { App.History.Append(entry); }
+            catch (Exception exception) when (CommandHistoryStore.IsStorageFailure(exception))
+            {
+                // Report once per tab; a full disk would otherwise raise a notice per command.
+                dispatcher.TryEnqueue(() =>
+                {
+                    if (_historyWriteFailed)
+                        return;
+                    _historyWriteFailed = true;
+                    App.ReportRecoverableError(exception);
+                });
+            }
+        });
     }
 
     /// <summary>Enabled highlight rules for this session (global state + session deltas),

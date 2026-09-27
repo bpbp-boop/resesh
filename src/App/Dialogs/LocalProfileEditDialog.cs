@@ -81,6 +81,13 @@ public sealed class LocalProfileEditDialog : ContentDialog
         SelectedIndex = 0,
         HorizontalAlignment = HorizontalAlignment.Stretch,
     };
+    private readonly ComboBox _overrideHistory = new()
+    {
+        Header = "Command history",
+        ItemsSource = new[] { "Use app setting", "Keep history", "Don't keep history" },
+        SelectedIndex = 0,
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+    };
     private readonly CheckBox _makeDefault = new() { Content = "Make this the default local profile (+ Session, Ctrl+Shift+T)" };
     private readonly TextBlock _validation = new()
     {
@@ -151,6 +158,12 @@ public sealed class LocalProfileEditDialog : ContentDialog
                     false => 2,
                     null => 0,
                 };
+                _overrideHistory.SelectedIndex = overrides.KeepCommandHistory switch
+                {
+                    true => 1,
+                    false => 2,
+                    null => 0,
+                };
             }
         }
 
@@ -178,6 +191,7 @@ public sealed class LocalProfileEditDialog : ContentDialog
         panel.Children.Add(_overrideFontSize);
         panel.Children.Add(_overrideScrollback);
         panel.Children.Add(_overrideRecording);
+        panel.Children.Add(_overrideHistory);
         panel.Children.Add(_makeDefault);
 
         if (existing is { BuiltIn: true })
@@ -217,6 +231,7 @@ public sealed class LocalProfileEditDialog : ContentDialog
         SessionSettingsTarget.FontSize => _overrideFontSize,
         SessionSettingsTarget.Scrollback => _overrideScrollback,
         SessionSettingsTarget.AlwaysRecord => _overrideRecording,
+        SessionSettingsTarget.CommandHistory => _overrideHistory,
         _ => null,
     };
 
@@ -253,6 +268,12 @@ public sealed class LocalProfileEditDialog : ContentDialog
             FontSize = double.IsNaN(_overrideFontSize.Value) ? null : (int)_overrideFontSize.Value,
             Scrollback = double.IsNaN(_overrideScrollback.Value) ? null : (int)_overrideScrollback.Value,
             AlwaysRecord = _overrideRecording.SelectedIndex switch
+            {
+                1 => true,
+                2 => false,
+                _ => null,
+            },
+            KeepCommandHistory = _overrideHistory.SelectedIndex switch
             {
                 1 => true,
                 2 => false,

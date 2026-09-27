@@ -157,6 +157,8 @@ public sealed class TerminalControl : TerminalSurface
     /// toggle button can mirror the true state.</summary>
     public override event Action<bool>? CommandsPanelOpenChanged;
 
+    public override event Action<TerminalCommandRecord>? CommandRecorded;
+
     public override bool SupportsRewindCapture => true;
 
     public override int Columns { get; protected set; } = 80;
@@ -332,6 +334,10 @@ public sealed class TerminalControl : TerminalSurface
                     break;
                 case "commandExecution":
                     ReceiveCommandExecution(root);
+                    break;
+                case "commandRecord":
+                    if (TryReadCommandRecord(root) is { } record)
+                        CommandRecorded?.Invoke(record);
                     break;
                 case "promptContext":
                     if (root.TryGetProperty("text", out var promptContext))
@@ -522,6 +528,61 @@ public sealed class TerminalControl : TerminalSurface
     /// <summary>Opens or closes the page's commands panel (the annotated scrollbar's
     /// command-mark list). Same action as Ctrl+Shift+O inside the terminal.</summary>
     public override void ToggleCommandsPanel() => Post(new { type = "toggleCommands" });
+
+    public override void PasteText(string text)
+    {
+        if (!string.IsNullOrEmpty(text))
+            Post(new { type = "paste", text });
+    }
+
+    public override void SetHistoryCapture(bool enabled) => Post(new { type = "setHistoryCapture", enabled });
+
+    public override void FlushHistory() => Post(new { type = "flushHistory" });
+
+    /// <summary>Validates a page history record. The page is trusted less than the host:
+    /// field types and sizes are checked here, not assumed.</summary>
+    internal static TerminalCommandRecord? TryReadCommandRecord(JsonElement root)
+    {
+        if (!root.TryGetProperty("command", out var commandValue) || commandValue.ValueKind != JsonValueKind.String)
+            return null;
+        var command = commandValue.GetString()!.Trim();
+        if (command.Length == 0 || command.Length > 4096)
+            return null;
+        int? exit = null;
+        if (root.TryGetProperty("exit", out var exitValue) && exitValue.ValueKind == JsonValueKind.Number
+            && exitValue.TryGetInt32(out var parsedExit))
+            exit = parsedExit;
+        if (!root.TryGetProperty("startedMs", out var startedValue) || !startedValue.TryGetDouble(out var started)
+            || !double.IsFinite(started))
+            return null;
+        long? ended = root.TryGetProperty("endedMs", out var endedValue) && endedValue.ValueKind == JsonValueKind.Number
+            && endedValue.TryGetDouble(out var endedMs) && double.IsFinite(endedMs)
+            ? (long)endedMs
+            : null;
+        var output = root.TryGetProperty("output", out var outputValue) && outputValue.ValueKind == JsonValueKind.String
+            ? outputValue.GetString()!
+            : "";
+        var truncated = root.TryGetProperty("truncated", out var truncatedValue) && truncatedValue.ValueKind == JsonValueKind.True;
+        if (output.Length > 65536)
+        {
+            output = output[..65536];
+            truncated = true;
+        }
+        return new TerminalCommandRecord(
+            command,
+            exit,
+            root.TryGetProperty("exact", out var exactValue) && exactValue.ValueKind == JsonValueKind.True,
+            (long)started,
+            ended,
+            output,
+            truncated,
+            root.TryGetProperty("lost", out var lostValue) && lostValue.ValueKind == JsonValueKind.True,
+            root.TryGetProperty("directory", out var directoryValue) && directoryValue.ValueKind == JsonValueKind.String
+                && directoryValue.GetString() is { Length: > 0 and <= 1024 } directory
+                && !directory.Any(char.IsControl)
+                ? directory
+                : null);
+    }
 
     /// <summary>Runs a terminal-scope shortcut in the page, the same code its key runs.</summary>
     public override bool InvokeShortcut(string id)

@@ -86,6 +86,7 @@ public static class ShortcutIds
     public const string NewWindow = "app.newWindow";
     public const string Settings = "app.settings";
     public const string KeyboardShortcuts = "app.keyboardShortcuts";
+    public const string CommandHistory = "app.commandHistory";
     public const string FilterSessions = "view.filterSessions";
     public const string ToggleSessionsPane = "view.toggleSessionsPane";
     public const string FullScreen = "view.fullScreen";
@@ -203,6 +204,8 @@ public static class KeyBindings
         Add(ShortcutIds.Settings, App, "Settings", ShortcutScope.App, [Chord(Ctrl, VirtualKeys.Comma, ",")]);
         Add(ShortcutIds.KeyboardShortcuts, App, "Keyboard Shortcuts", ShortcutScope.App,
             [Chord(CtrlShift, VirtualKeys.Slash, "/")]);
+        Add(ShortcutIds.CommandHistory, App, "Search Command History", ShortcutScope.App, [Letter(CtrlShift, 'H')],
+            "Commands and output from every session, when history is on");
         Add(ShortcutIds.ToggleSessionsPane, App, "Show or Hide Sessions Pane", ShortcutScope.App,
             [Letter(CtrlShift, 'B')]);
         Add(ShortcutIds.FilterSessions, App, "Filter Sessions", ShortcutScope.Window, [Letter(Ctrl, 'F')],

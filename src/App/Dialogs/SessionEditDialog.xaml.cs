@@ -14,6 +14,7 @@ public enum SessionSettingsTarget
     FontSize,
     Scrollback,
     AlwaysRecord,
+    CommandHistory,
 }
 
 public sealed partial class SessionEditDialog : ContentDialog
@@ -121,6 +122,12 @@ public sealed partial class SessionEditDialog : ContentDialog
                     false => 2,
                     null => 0,
                 };
+                OverrideHistoryBox.SelectedIndex = overrides.KeepCommandHistory switch
+                {
+                    true => 1,
+                    false => 2,
+                    null => 0,
+                };
             }
         }
 
@@ -200,6 +207,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         SessionSettingsTarget.FontSize => OverrideFontSizeBox,
         SessionSettingsTarget.Scrollback => OverrideScrollbackBox,
         SessionSettingsTarget.AlwaysRecord => OverrideRecordingBox,
+        SessionSettingsTarget.CommandHistory => OverrideHistoryBox,
         _ => NameBox,
     };
 
@@ -372,6 +380,12 @@ public sealed partial class SessionEditDialog : ContentDialog
             FontSize = double.IsNaN(OverrideFontSizeBox.Value) ? null : (int)OverrideFontSizeBox.Value,
             Scrollback = double.IsNaN(OverrideScrollbackBox.Value) ? null : (int)OverrideScrollbackBox.Value,
             AlwaysRecord = OverrideRecordingBox.SelectedIndex switch
+            {
+                1 => true,
+                2 => false,
+                _ => null,
+            },
+            KeepCommandHistory = OverrideHistoryBox.SelectedIndex switch
             {
                 1 => true,
                 2 => false,

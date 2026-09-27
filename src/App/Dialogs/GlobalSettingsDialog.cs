@@ -23,6 +23,8 @@ public enum GlobalSettingsTarget
     AlwaysRecord,
     RewindMinutes,
     RewindMegabytes,
+    CommandHistory,
+    CommandHistoryDays,
     Highlighting,
     Agents,
     ShowAgentIcons,
@@ -127,6 +129,69 @@ public static class GlobalSettingsDialog
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
 
+        var keepHistory = new ToggleSwitch
+        {
+            Header = WrappingHeader("Keep a searchable command history"),
+            IsOn = current.KeepCommandHistory,
+        };
+        var historyDays = new NumberBox
+        {
+            Header = "Keep history for (days)",
+            Value = current.CommandHistoryDays,
+            Minimum = 1,
+            Maximum = 3650,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        var historyUsage = Caption("");
+        var clearHistory = new Button { Content = "Clear History…" };
+        void RefreshHistoryUsage()
+        {
+            long bytes;
+            try { bytes = App.History.SizeOnDisk(); }
+            catch (Exception exception) when (Resesh.Core.History.CommandHistoryStore.IsStorageFailure(exception)) { bytes = 0; }
+            historyUsage.Text = bytes == 0
+                ? "No history is stored."
+                : $"History uses {FormatSize(bytes)} in {App.History.Directory}.";
+            clearHistory.IsEnabled = bytes > 0;
+        }
+        var confirmClear = new Button { Content = "Delete All History" };
+        var clearFlyout = new Flyout
+        {
+            Content = new StackPanel
+            {
+                Spacing = 12,
+                MaxWidth = 300,
+                Children =
+                {
+                    new TextBlock
+                    {
+                        Text = "Delete every saved command and its output? This cannot be undone.",
+                        TextWrapping = TextWrapping.Wrap,
+                    },
+                    confirmClear,
+                },
+            },
+        };
+        clearHistory.Flyout = clearFlyout;
+        confirmClear.Click += (_, _) =>
+        {
+            clearFlyout.Hide();
+            try { App.History.Clear(); }
+            catch (Exception exception) when (Resesh.Core.History.CommandHistoryStore.IsStorageFailure(exception))
+            {
+                App.ReportRecoverableError(exception);
+            }
+            RefreshHistoryUsage();
+        };
+        RefreshHistoryUsage();
+        var historyActions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 12,
+            Children = { clearHistory },
+        };
+
         var agentIcons = new ToggleSwitch
         {
             Header = WrappingHeader("Show agent icons"),
@@ -155,6 +220,9 @@ public static class GlobalSettingsDialog
         SetAutomationId(alwaysRecord, "SettingsAlwaysRecord");
         SetAutomationId(rewindMinutes, "SettingsRewindMinutes");
         SetAutomationId(rewindMegabytes, "SettingsRewindMegabytes");
+        SetAutomationId(keepHistory, "SettingsKeepCommandHistory");
+        SetAutomationId(historyDays, "SettingsCommandHistoryDays");
+        SetAutomationId(clearHistory, "SettingsClearCommandHistory");
         SetAutomationId(agentIcons, "SettingsShowAgentIcons");
         SetAutomationId(agentFlash, "SettingsAgentAlertFlash");
         SetAutomationId(agentSound, "SettingsAgentAlertSound");
@@ -203,7 +271,13 @@ public static class GlobalSettingsDialog
             Spacing = 16,
             Children =
             {
-                Description("Record terminal output to disk, or keep bounded in-memory history for instant rewind."),
+                Description("Keep a searchable history of commands, record terminal output to disk, or keep bounded in-memory history for instant rewind."),
+                SettingsGroup("Command history",
+                    Description($"Save each finished command with its output, folder, and result on this computer, and search it with {AppShortcuts.Label(Resesh.Core.Input.ShortcutIds.CommandHistory)}. Output can include secrets that a server prints. A saved session can turn history off in its options."),
+                    Row("Keep a searchable command history", keepHistory),
+                    Row("Keep history for (days)", historyDays),
+                    Row("Saved history", historyActions),
+                    historyUsage),
                 SettingsGroup("Disk recording",
                     Description("Each recording writes an asciicast .cast file and a timestamped .log rendered from committed terminal lines. Both can include secrets that a server prints."),
                     Row("Recording directory", recordingDirectory),
@@ -287,7 +361,8 @@ public static class GlobalSettingsDialog
         {
             GlobalSettingsTarget.Recording or GlobalSettingsTarget.RecordingDirectory
                 or GlobalSettingsTarget.AlwaysRecord or GlobalSettingsTarget.RewindMinutes
-                or GlobalSettingsTarget.RewindMegabytes => 1,
+                or GlobalSettingsTarget.RewindMegabytes or GlobalSettingsTarget.CommandHistory
+                or GlobalSettingsTarget.CommandHistoryDays => 1,
             GlobalSettingsTarget.Highlighting => 2,
             GlobalSettingsTarget.Agents or GlobalSettingsTarget.ShowAgentIcons
                 or GlobalSettingsTarget.AgentAlertFlash or GlobalSettingsTarget.AgentAlertSound => 3,
@@ -307,6 +382,8 @@ public static class GlobalSettingsDialog
             GlobalSettingsTarget.AlwaysRecord => alwaysRecord,
             GlobalSettingsTarget.RewindMinutes => rewindMinutes,
             GlobalSettingsTarget.RewindMegabytes => rewindMegabytes,
+            GlobalSettingsTarget.CommandHistory => keepHistory,
+            GlobalSettingsTarget.CommandHistoryDays => historyDays,
             GlobalSettingsTarget.ShowAgentIcons => agentIcons,
             GlobalSettingsTarget.AgentAlertFlash => agentFlash,
             GlobalSettingsTarget.AgentAlertSound => agentSound,
@@ -453,11 +530,20 @@ public static class GlobalSettingsDialog
                 : recordingDirectory.Text.Trim(),
             RewindMinutes = double.IsNaN(rewindMinutes.Value) ? current.RewindMinutes : (int)rewindMinutes.Value,
             RewindMegabytes = double.IsNaN(rewindMegabytes.Value) ? current.RewindMegabytes : (int)rewindMegabytes.Value,
+            KeepCommandHistory = keepHistory.IsOn,
+            CommandHistoryDays = double.IsNaN(historyDays.Value) ? current.CommandHistoryDays : (int)historyDays.Value,
             ShowAgentIcons = agentIcons.IsOn,
             AgentAlertFlash = agentFlash.IsOn,
             AgentAlertSound = agentSound.IsOn,
         };
     }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} bytes",
+        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
+        _ => $"{bytes / (1024.0 * 1024):0.#} MB",
+    };
 
     private static TextBlock Description(string text) => new()
     {

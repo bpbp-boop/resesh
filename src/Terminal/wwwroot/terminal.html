@@ -462,6 +462,22 @@
       host.postMessage({ type: "commandExecution", generation: commandExecutionGeneration, id: execution.id, commandLine: execution.commandLine,
         completed: execution.completed, exitCode: execution.exitCode });
     };
+    // Command history (opt-in): the host turns capture on for live tabs only.
+    ruler.onCommandRecord = function (record) {
+      if (readOnly || !record || typeof record.command !== "string") return;
+      host.postMessage({
+        type: "commandRecord",
+        command: record.command.slice(0, 4096),
+        directory: typeof record.directory === "string" ? record.directory.slice(0, 1024) : null,
+        exit: Number.isInteger(record.exit) ? record.exit : null,
+        exact: record.exact === true,
+        startedMs: Number.isFinite(record.startedMs) ? record.startedMs : Date.now(),
+        endedMs: Number.isFinite(record.endedMs) ? record.endedMs : null,
+        output: typeof record.output === "string" ? record.output : "",
+        truncated: record.truncated === true,
+        lost: record.lost === true,
+      });
+    };
     ruler.onPromptContext = function (context, platform) {
       host.postMessage({
         type: "promptContext",
@@ -935,6 +951,7 @@
           break;
         case "disconnected":
           connected = false;
+          ruler.flushHistory(); // before the divider: it is not the command's output
           ruler.setExecutionReporting(false);
           ruler.writeOutput("\r\n\x1b[90m" + "─".repeat(Math.max(term.cols - 1, 10)) + "\x1b[0m\r\n", null);
           // Clean local exits arrive as severity "info" (dim, not warning-yellow); the
@@ -1006,6 +1023,12 @@
           break;
         case "scrollToCommand":
           if (Number.isSafeInteger(msg.id) && msg.id > 0) ruler.jumpToExecution(msg.id);
+          break;
+        case "setHistoryCapture":
+          ruler.setHistoryCapture(msg.enabled === true && !readOnly);
+          break;
+        case "flushHistory":
+          ruler.flushHistory();
           break;
         case "requestPromptContext":
           ruler._reportPromptContext(true);

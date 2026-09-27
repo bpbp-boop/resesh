@@ -146,6 +146,29 @@ Notification clicks target the live originating app; they never reopen a closed 
 Clicks may not route when separate app processes with different `--data-dir` values run
 concurrently. Multiple windows within one app process are supported.
 
+## Command history
+
+Turn on **Settings → Recording → Command history** (or the button in the history view) to
+keep every finished command with its output, folder, session, time, and exit result.
+Press Ctrl+Shift+H, or use View → Command History, to search it across all sessions.
+
+- Words must all match the command, session, folder, or output. Quote a phrase with
+  `"…"`. Narrow with `host:web01`, `in:/etc`, `exit:fail`, `exit:ok`, or `exit:127`, or
+  use the session, result, and time filters.
+- Enter types the selected command at the active tab's prompt without running it.
+  Ctrl+Enter opens its session in a new tab. F3 and Shift+F3 step through matches in the
+  output.
+- Commands are found from shell integration (with exit codes) or from shell prompts
+  (without). Output keeps its first 64 KB; output that leaves the scrollback before the
+  command ends is not kept.
+- History is off by default because output can contain secrets. A saved session can turn
+  it off in its options. Entries older than the retention period (90 days by default)
+  are deleted at startup; Settings can clear all history, and the view deletes single
+  entries. Deleted history is overwritten on disk, not just unlinked. History is local
+  only and is not included in backups.
+- Search uses a SQLite full-text index, so history does not have to fit in memory. Words
+  of three or more characters use the index; shorter words are matched by a scan.
+
 ## Data locations
 
 | What | Where |
@@ -155,6 +178,7 @@ concurrently. Multiple windows within one app process are supported.
 | Secrets (passwords, key passphrases) | Windows Credential Manager, `Resesh:{session-guid}` |
 | Accepted host keys | `%APPDATA%\Resesh\known_hosts.json` |
 | Exported backups | User-selected `*.reseshbackup` file |
+| Command history (when on) | `%LOCALAPPDATA%\Resesh\history\history.db` (SQLite with a full-text index; deletes overwrite the removed data) |
 | Crash log | `%LOCALAPPDATA%\Resesh\crash.log` |
 
 Secrets are **never** written to the normal JSON store. They are excluded from backups by

@@ -81,6 +81,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             handledEventsToo: true);
         CommandPalette.CloseRequested += CloseCommandPalette;
         CommandPalette.CommandInvoked += command => _ = ExecuteCommandPaletteEntryAsync(command);
+        InitializeHistoryOverlay();
         RestoreWindowPlacement();
         AppWindow.Changed += AppWindow_Changed;
         ConfigureSplitter(TreeSplitter, TreeSplitterLine);
@@ -241,6 +242,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         SessionsPaneMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.ToggleSessionsPane);
         FullScreenMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.FullScreen);
         CommandPaletteMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.CommandPalette);
+        CommandHistoryMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.CommandHistory);
         KeyboardShortcutsMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.KeyboardShortcuts);
         SplitRightMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SplitRight);
         SplitDownMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SplitDown);
@@ -275,6 +277,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 return true;
             case ShortcutIds.QuickConnect:
                 QuickConnectBox.Focus(FocusState.Programmatic);
+                return true;
+            case ShortcutIds.CommandHistory:
+                if (HistoryOverlay.IsOpen)
+                    CloseHistory();
+                else
+                    ShowHistory(openedFromTerminal: fromTerminal);
                 return true;
             case ShortcutIds.NewLocalTab:
                 OpenDefaultLocalProfile();
@@ -467,6 +475,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     {
         if (CommandPalette.IsOpen)
             return;
+        if (HistoryOverlay.IsOpen)
+            HistoryOverlay.Close();
 
         _paletteOpenedFromTerminal = openedFromTerminal;
         _palettePreviousFocus = openedFromTerminal
@@ -570,6 +580,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             keepActionFocus: true);
         Add("Application", "Keyboard Shortcuts", "keys hotkeys keybindings accelerators help reference",
             ShowKeyboardShortcutsAsync, Keys(ShortcutIds.KeyboardShortcuts));
+        Add("Application", "Search Command History", "history commands output past previous find grep ran",
+            Sync(() => ShowHistory()), Keys(ShortcutIds.CommandHistory), keepActionFocus: true);
         commands.AddRange(BuildOpenTabCommands());
         Add("View", "Filter Sessions", "search tree",
             Sync(FocusSessionFilter), Keys(ShortcutIds.FilterSessions), keepActionFocus: true);
@@ -620,6 +632,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             () => ShowSettingsAsync(GlobalSettingsTarget.RightClickPaste));
         Add("Global Settings", "Reopen Last Layout at Startup", "workspace launch restore groups",
             () => ShowSettingsAsync(GlobalSettingsTarget.ReopenLastLayout));
+        Add("Global Settings", "Command History", "keep save commands output search retention",
+            () => ShowSettingsAsync(GlobalSettingsTarget.CommandHistory));
         Add("Global Settings", "Automatic Recording", "record sessions disk",
             () => ShowSettingsAsync(GlobalSettingsTarget.AlwaysRecord));
         Add("Global Settings", "Recording Directory", "record sessions path folder",
@@ -672,6 +686,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.Scrollback));
             Add("Session Settings", "Automatic Recording Override", "current active tab inherit",
                 () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.AlwaysRecord));
+            Add("Session Settings", "Command History Override", "current active tab inherit keep",
+                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.CommandHistory));
         }
 
         var group = ViewModel.GroupOf(tab);
@@ -701,6 +717,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             Add("Tab", "Split Down", "current active move group",
                 Sync(() => SplitDown(tab)), Keys(ShortcutIds.SplitDown));
         }
+        if (!tab.IsPlayback && tab.View is TerminalTabView)
+            Add("Tab", "Search This Session's History", "command history output past previous current active",
+                Sync(() => ShowHistory(sessionId: tab.Session.Id)), keepActionFocus: true);
         if (tab.View is TerminalTabView terminalView && !tab.IsLocked)
         {
             if (tab.CanNotifyCommandCompletion)
@@ -1033,6 +1052,75 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
 
     private void CommandPaletteMenu_Click(object sender, RoutedEventArgs e) => ShowCommandPalette();
+
+    private void CommandHistoryMenu_Click(object sender, RoutedEventArgs e) => ShowHistory();
+
+    // ---- Command history overlay ----
+
+    private DependencyObject? _historyPreviousFocus;
+    private bool _historyOpenedFromTerminal;
+
+    private void InitializeHistoryOverlay()
+    {
+        HistoryOverlay.CloseRequested += CloseHistory;
+        HistoryOverlay.CanInsert = () =>
+            ViewModel.ActiveTab is { View: TerminalTabView, State: TabConnectionState.Connected, IsLocked: false };
+        HistoryOverlay.InsertCommand = entry =>
+        {
+            if (ViewModel.ActiveTab?.View is not TerminalTabView view || !view.InsertText(entry.Command))
+                return false;
+            // Focus belongs to the terminal now; closing must not send it back.
+            _historyPreviousFocus = null;
+            _historyOpenedFromTerminal = true;
+            return true;
+        };
+        HistoryOverlay.SessionNameFor = entry =>
+            entry.SessionId is { } id && App.Store.Find(id) is { } session ? session.Name : null;
+        HistoryOverlay.OpenSession = entry =>
+        {
+            if (entry.SessionId is { } id && App.Store.Find(id) is { } session)
+                ConnectSession(session);
+        };
+        HistoryOverlay.TurnOnRequested = () =>
+        {
+            if (!App.SaveSettings(App.Settings.Current with { KeepCommandHistory = true }))
+                return;
+            ApplySettingsToApp();
+            HistoryOverlay.SetHistoryEnabled(true);
+        };
+    }
+
+    private void ShowHistory(Guid? sessionId = null, bool openedFromTerminal = false)
+    {
+        if (CommandPalette.IsOpen)
+            CommandPalette.Close();
+        if (HistoryOverlay.IsOpen)
+        {
+            HistoryOverlay.Close();
+        }
+        else
+        {
+            _historyOpenedFromTerminal = openedFromTerminal;
+            _historyPreviousFocus = openedFromTerminal
+                ? null
+                : FocusManager.GetFocusedElement(Root.XamlRoot) as DependencyObject;
+        }
+        var settings = App.Settings.Current;
+        HistoryOverlay.Open(settings.KeepCommandHistory, sessionId, settings.FontFamily);
+    }
+
+    private void CloseHistory()
+    {
+        if (!HistoryOverlay.IsOpen)
+            return;
+        HistoryOverlay.Close();
+        if (_historyOpenedFromTerminal || _historyPreviousFocus is null)
+            FocusActiveTerminal();
+        else
+            _ = FocusManager.TryFocusAsync(_historyPreviousFocus, FocusState.Programmatic);
+        _historyPreviousFocus = null;
+        _historyOpenedFromTerminal = false;
+    }
 
     private void KeyboardShortcutsMenu_Click(object sender, RoutedEventArgs e) =>
         _ = ShowThenRefocusAsync(ShowKeyboardShortcutsAsync, refocusTerminal: false);
@@ -2260,11 +2348,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             RecordingDirectory = updated.RecordingDirectory,
             RewindMinutes = updated.RewindMinutes,
             RewindMegabytes = updated.RewindMegabytes,
+            KeepCommandHistory = updated.KeepCommandHistory,
+            CommandHistoryDays = updated.CommandHistoryDays,
             ShowAgentIcons = updated.ShowAgentIcons,
             AgentAlertFlash = updated.AgentAlertFlash,
             AgentAlertSound = updated.AgentAlertSound,
         });
         ApplySettingsToApp();
+        App.PruneCommandHistory();
         if (_sessionsPaneOpen && _selectedRailTab == "recordings")
             _ = RefreshRecordingsAsync();
     }

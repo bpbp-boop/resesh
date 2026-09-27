@@ -325,6 +325,15 @@
                     <x:String>Always record</x:String>
                     <x:String>Never record</x:String>
                 </ComboBox>
+                <ComboBox
+                    x:Name="OverrideHistoryBox"
+                    Header="Command history"
+                    SelectedIndex="0"
+                    HorizontalAlignment="Stretch">
+                    <x:String>Use app setting</x:String>
+                    <x:String>Keep history</x:String>
+                    <x:String>Don't keep history</x:String>
+                </ComboBox>
                 </StackPanel>
             </ScrollViewer>
 

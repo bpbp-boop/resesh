@@ -8,6 +8,11 @@ and the git history.
 
 ## Shipped
 
+- **Command history** — opt-in, local, searchable record of every finished command with
+  its output, folder, session, and exit result. Ctrl+Shift+H opens a search view with
+  `host:`/`in:`/`exit:` filters, day-grouped results, highlighted output with match
+  navigation, and insert-at-prompt. Per-session opt-out, retention in days, clear all.
+
 - **Command completion bell** — explicitly arm one running command from its tab subtitle
   or the command palette. Shell integration supplies the execution identity and exit result.
   Foreground completion stays quiet with a result tooltip; background completion sends a

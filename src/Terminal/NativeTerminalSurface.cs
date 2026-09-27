@@ -188,6 +188,11 @@ public sealed class NativeTerminalSurface : TerminalSurface
     public override event Action<string>? CommandObserved;
     public override event Action<bool>? CommandsPanelOpenChanged;
 
+    // Command history is captured by the WebView2 surface's ruler; the native surface does not record yet.
+#pragma warning disable CS0067
+    public override event Action<TerminalCommandRecord>? CommandRecorded;
+#pragma warning restore CS0067
+
     public override bool SupportsRewindCapture => true;
 
     public override bool HasPainted => true;
@@ -366,6 +371,16 @@ public sealed class NativeTerminalSurface : TerminalSurface
         _inputPanel.IsHitTestVisible = enabled;
     }
     public override void ToggleCommandsPanel() => SetCommandsPanelOpen(!_commandsPanelOpen);
+
+    public override void PasteText(string text)
+    {
+        if (!_disposed && !_readOnly && !string.IsNullOrEmpty(text) && _terminal != IntPtr.Zero && _api is not null)
+            _api.PasteText(_terminal, text);
+    }
+
+    public override void SetHistoryCapture(bool enabled) { }
+
+    public override void FlushHistory() { }
 
     public override bool InvokeShortcut(string id) => RunTerminalShortcut(id);
 
