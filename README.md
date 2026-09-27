@@ -158,6 +158,12 @@ Press Ctrl+Shift+H, or use View → Command History, to search it across all ses
 - Enter types the selected command at the active tab's prompt without running it.
   Ctrl+Enter opens its session in a new tab. F3 and Shift+F3 step through matches in the
   output.
+- **Compare runs:** when a command has run more than once on the same host, the detail
+  pane offers "Compare with Previous" and a list of every run with how it differs. The
+  comparison shows added and removed lines with changed words marked, unified or side by
+  side. Timestamps are ignored by default; numbers can be ignored too. F7 and Shift+F7 step
+  between changes. Runs that went through a pager (`--More--`) or were cut at 64 KB are
+  flagged, because their output is incomplete.
 - Commands are found from shell integration (with exit codes) or from shell prompts
   (without). Output keeps its first 64 KB; output that leaves the scrollback before the
   command ends is not kept.

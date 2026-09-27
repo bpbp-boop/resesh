@@ -17,7 +17,7 @@ using Windows.UI;
 namespace Resesh.App.Controls;
 
 /// <summary>Text plus the character ranges to emphasize in it.</summary>
-public sealed record HighlightedText(string Text, IReadOnlyList<TextSpan> Spans)
+public sealed record HighlightedText(string Text, IReadOnlyList<TextSpan> Spans, Brush? Background = null)
 {
     public static readonly HighlightedText Empty = new("", []);
 }
@@ -46,7 +46,7 @@ public static class HistoryHighlight
         block.Text = source.Text;
         if (source.Spans.Count == 0)
             return;
-        var highlighter = new TextHighlighter { Background = MatchBackground };
+        var highlighter = new TextHighlighter { Background = source.Background ?? MatchBackground };
         foreach (var span in source.Spans)
         {
             if (span.End > source.Text.Length)
@@ -104,6 +104,7 @@ public sealed partial class HistoryView : UserControl
     private static readonly Brush UnknownBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0x9E, 0x9E, 0x9E));
 
     private int _historyCount;
+    private bool _hasHits;
     private IReadOnlyList<string> _terms = [];
     private CancellationTokenSource? _searchCancellation;
     private DispatcherQueueTimer? _searchDebounce;
@@ -180,6 +181,7 @@ public sealed partial class HistoryView : UserControl
         _searchCancellation?.Cancel();
         _searchDebounce?.Stop();
         Visibility = Visibility.Collapsed;
+        ExitCompare();
         ResultList.ItemsSource = null;
         _historyCount = 0;
         _selected = null;
@@ -342,14 +344,11 @@ public sealed partial class HistoryView : UserControl
             var total => $"{total:N0} commands",
         };
 
-        OffNotice.IsOpen = !_historyEnabled && _historyCount > 0;
-        // Filters and key hints mean nothing before the first command is saved.
-        var hasHistory = _historyCount > 0 ? Visibility.Visible : Visibility.Collapsed;
-        FilterBar.Visibility = hasHistory;
-        KeyHints.Visibility = hasHistory;
         var hasHits = items.Count > 0;
-        Body.Visibility = hasHits ? Visibility.Visible : Visibility.Collapsed;
-        EmptyState.Visibility = hasHits ? Visibility.Collapsed : Visibility.Visible;
+        _hasHits = hasHits;
+        // Filters and key hints mean nothing before the first command is saved; compare
+        // mode keeps its pane when history changes underneath it.
+        ApplyModeVisibility();
         if (!hasHits)
         {
             ShowEmptyState(query);
@@ -514,6 +513,7 @@ public sealed partial class HistoryView : UserControl
         if (entry is null)
         {
             SetOutput(null);
+            LoadRuns(null);
             return;
         }
 
@@ -556,6 +556,7 @@ public sealed partial class HistoryView : UserControl
         ToolTipService.SetToolTip(OpenSessionButton, "Connect in a new tab (Ctrl+Enter)");
 
         SetOutput(entry);
+        LoadRuns(entry);
     }
 
     private void AddFact(string label, string value)
@@ -720,7 +721,10 @@ public sealed partial class HistoryView : UserControl
     private void CopyCommandButton_Click(object sender, RoutedEventArgs e)
     {
         if (_selected is { } entry && CopyText(entry.Command))
-            ShowCopied(CopyCommandText);
+        {
+            CopyCommandIcon.Glyph = "\uE73E"; // checkmark until the feedback timer resets it
+            ShowCopied(null);
+        }
     }
 
     private void CopyOutputButton_Click(object sender, RoutedEventArgs e)
@@ -744,16 +748,17 @@ public sealed partial class HistoryView : UserControl
         }
     }
 
-    private void ShowCopied(TextBlock label)
+    private void ShowCopied(TextBlock? label)
     {
-        label.Text = "Copied";
+        if (label is not null)
+            label.Text = "Copied";
         _feedbackTimer?.Stop();
         _feedbackTimer = DispatcherQueue.CreateTimer();
         _feedbackTimer.Interval = TimeSpan.FromMilliseconds(1200);
         _feedbackTimer.IsRepeating = false;
         _feedbackTimer.Tick += (_, _) =>
         {
-            CopyCommandText.Text = "Copy";
+            CopyCommandIcon.Glyph = "\uE8C8";
             CopyOutputText.Text = "Copy Output";
         };
         _feedbackTimer.Start();
@@ -790,7 +795,12 @@ public sealed partial class HistoryView : UserControl
         _ = RunSearchAsync(keepSelection: true);
     }
 
-    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) => ScheduleSearch();
+    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        // Typing a new search leaves compare mode for the results.
+        ExitCompare();
+        ScheduleSearch();
+    }
 
     // ---- day picker ----
 
@@ -859,6 +869,21 @@ public sealed partial class HistoryView : UserControl
         var shift = AppShortcuts.CurrentModifiers().HasFlag(Resesh.Core.Input.KeyModifiers.Shift);
         var focus = FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
         var inNavigator = ReferenceEquals(focus, SearchBox) || IsWithin(focus, ResultList);
+        if (_compareMode)
+        {
+            switch (e.Key)
+            {
+                case VirtualKey.Escape when !e.Handled:
+                    e.Handled = true;
+                    ExitCompare();
+                    break;
+                case VirtualKey.F7:
+                    e.Handled = true;
+                    GoToChange(shift ? _changeCursor - 1 : _changeCursor + 1);
+                    break;
+            }
+            return;
+        }
         switch (e.Key)
         {
             case VirtualKey.Escape:
@@ -932,6 +957,7 @@ public sealed partial class HistoryView : UserControl
 
     private void BuildKeyHints()
     {
+        KeyHints.Children.Clear();
         void Hint(string keys, string action)
         {
             var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
@@ -957,6 +983,13 @@ public sealed partial class HistoryView : UserControl
             KeyHints.Children.Add(panel);
         }
 
+        if (_compareMode)
+        {
+            Hint("F7", "Next change");
+            Hint("Shift+F7", "Previous change");
+            Hint("Esc", "Back to results");
+            return;
+        }
         Hint("↑ ↓", "Select");
         Hint("Enter", "Insert in terminal");
         Hint("Ctrl+Enter", "Open session");

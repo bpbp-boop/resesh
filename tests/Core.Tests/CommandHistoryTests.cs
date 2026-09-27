@@ -272,6 +272,83 @@ public sealed class CommandHistoryTests : IDisposable
     }
 
     [Fact]
+    public void RunsFindTheSameCommandOnTheSameHostOnly()
+    {
+        var store = NewStore();
+        var core = Guid.NewGuid();
+        var edge = Guid.NewGuid();
+        var first = Entry("show ip route", _now, "r1", sessionId: core);
+        var other = Entry("show ip route", _now.AddMinutes(1), "e1", sessionId: edge);
+        var second = Entry("show  ip   route ", _now.AddMinutes(2), "r2", sessionId: core);
+        var unrelated = Entry("show version", _now.AddMinutes(3), sessionId: core);
+        foreach (var entry in new[] { first, other, second, unrelated })
+            store.Append(entry);
+
+        Assert.Equal([second.Id, first.Id], store.Runs(second).Select(e => e.Id));
+        Assert.Equal(first.Id, store.PreviousRun(second)!.Id);
+        Assert.Null(store.PreviousRun(first));
+        Assert.Equal([other.Id], store.Runs(other).Select(e => e.Id));
+    }
+
+    [Fact]
+    public void RunsOfUnsavedConnectionsMatchByTarget()
+    {
+        var store = NewStore();
+        var a = Entry("uptime", _now, target: "root@10.0.0.5");
+        var b = Entry("uptime", _now.AddMinutes(1), target: "root@10.0.0.6");
+        var c = Entry("uptime", _now.AddMinutes(2), target: "root@10.0.0.5");
+        foreach (var entry in new[] { a, b, c })
+            store.Append(entry);
+
+        Assert.Equal(a.Id, store.PreviousRun(c)!.Id);
+    }
+
+    [Fact]
+    public void AVersionOneDatabaseIsUpgradedInPlace()
+    {
+        Directory.CreateDirectory(_directory);
+        var path = Path.Combine(_directory, "history.db");
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={path};Pooling=False"))
+        {
+            connection.Open();
+            using var create = connection.CreateCommand();
+            create.CommandText = """
+                CREATE TABLE entry (id INTEGER PRIMARY KEY, uid TEXT NOT NULL UNIQUE, session_id TEXT, session_name TEXT NOT NULL,
+                    kind TEXT NOT NULL, target TEXT NOT NULL, directory TEXT, command TEXT NOT NULL, exit_code INTEGER,
+                    started_at INTEGER NOT NULL, offset_minutes INTEGER NOT NULL, ended_at INTEGER, output TEXT NOT NULL,
+                    output_truncated INTEGER NOT NULL, output_lost INTEGER NOT NULL, exact INTEGER NOT NULL);
+                CREATE VIRTUAL TABLE entry_fts USING fts5(command, output, session_name, target, directory,
+                    content='entry', content_rowid='id', tokenize='trigram');
+                CREATE TRIGGER entry_ai AFTER INSERT ON entry BEGIN
+                    INSERT INTO entry_fts(rowid, command, output, session_name, target, directory)
+                    VALUES (new.id, new.command, new.output, new.session_name, new.target, new.directory);
+                END;
+                CREATE TRIGGER entry_ad AFTER DELETE ON entry BEGIN
+                    INSERT INTO entry_fts(entry_fts, rowid, command, output, session_name, target, directory)
+                    VALUES ('delete', old.id, old.command, old.output, old.session_name, old.target, old.directory);
+                END;
+                CREATE TRIGGER entry_au AFTER UPDATE ON entry BEGIN
+                    INSERT INTO entry_fts(entry_fts, rowid, command, output, session_name, target, directory)
+                    VALUES ('delete', old.id, old.command, old.output, old.session_name, old.target, old.directory);
+                    INSERT INTO entry_fts(rowid, command, output, session_name, target, directory)
+                    VALUES (new.id, new.command, new.output, new.session_name, new.target, new.directory);
+                END;
+                INSERT INTO entry VALUES (1, 'old-1', NULL, 'web01', 'ssh', 'deploy@web01', NULL, 'df  -h', 0, 1790000000000, 600, NULL, 'sda1 40G', 0, 0, 1);
+                PRAGMA user_version = 1;
+                """;
+            create.ExecuteNonQuery();
+        }
+
+        var store = NewStore();
+        var next = Entry("df -h", _now, "sda1 41G", session: "web01", target: "deploy@web01");
+        store.Append(next);
+
+        Assert.Equal("old-1", store.PreviousRun(next)!.Id);
+        Assert.Single(store.Search(new CommandHistoryQuery { Text = "sda1 40G" }).Hits);
+        Assert.Equal(2, store.Search(new CommandHistoryQuery { Text = "sda1" }).TotalMatches);
+    }
+
+    [Fact]
     public void ParseSeparatesFiltersFromTerms()
     {
         var parsed = CommandHistorySearch.Parse("nginx host:web01 in:/etc exit:fail \"connection refused\" http://x");

@@ -24,7 +24,7 @@ public sealed record CommandHistorySummary(
 /// </summary>
 public sealed class CommandHistoryStore
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
 
     /// <summary>The trigram tokenizer needs at least three characters. Shorter terms are
     /// matched with a scan instead.</summary>
@@ -229,6 +229,55 @@ public sealed class CommandHistoryStore
         return new CommandHistoryResults(hits, total, parsed.Terms);
     }
 
+    /// <summary>Every recorded run of this entry's command on its host, most recent first,
+    /// including the entry itself.</summary>
+    public IReadOnlyList<CommandHistoryEntry> Runs(CommandHistoryEntry entry, int limit = 50)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        using var connection = OpenExisting();
+        if (connection is null)
+            return [];
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {EntryColumns("e")} FROM entry e
+            WHERE e.host_key = $host AND e.command_key = $command
+            ORDER BY e.id DESC LIMIT $limit
+            """;
+        command.Parameters.AddWithValue("$host", entry.HostKey);
+        command.Parameters.AddWithValue("$command", entry.CommandKey);
+        command.Parameters.AddWithValue("$limit", limit);
+        return ReadAll(command);
+    }
+
+    /// <summary>The run of the same command on the same host recorded just before this one.</summary>
+    public CommandHistoryEntry? PreviousRun(CommandHistoryEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        using var connection = OpenExisting();
+        if (connection is null)
+            return null;
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT {EntryColumns("e")} FROM entry e
+            WHERE e.host_key = $host AND e.command_key = $command
+              AND e.id < (SELECT id FROM entry WHERE uid = $uid)
+            ORDER BY e.id DESC LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$host", entry.HostKey);
+        command.Parameters.AddWithValue("$command", entry.CommandKey);
+        command.Parameters.AddWithValue("$uid", entry.Id);
+        return ReadAll(command).FirstOrDefault();
+    }
+
+    private static List<CommandHistoryEntry> ReadAll(SqliteCommand command)
+    {
+        var entries = new List<CommandHistoryEntry>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            entries.Add(ReadEntry(reader));
+        return entries;
+    }
+
     /// <summary>Removes entries by id. Returns how many were removed.</summary>
     public int Delete(IEnumerable<string> ids)
     {
@@ -381,6 +430,15 @@ public sealed class CommandHistoryStore
             throw new InvalidDataException("Command history was written by a newer version of resesh.");
 
         using var transaction = connection.BeginTransaction();
+        if (current == 0)
+            CreateVersion1(connection, transaction);
+        if (current <= 1)
+            MigrateToVersion2(connection, transaction);
+        transaction.Commit();
+    }
+
+    private static void CreateVersion1(SqliteConnection connection, SqliteTransaction transaction)
+    {
         using var create = connection.CreateCommand();
         create.Transaction = transaction;
         create.CommandText = """
@@ -424,7 +482,69 @@ public sealed class CommandHistoryStore
             PRAGMA user_version = 1;
             """;
         create.ExecuteNonQuery();
-        transaction.Commit();
+    }
+
+    /// <summary>Version 2 adds the keys that find earlier runs of a command on a host.
+    /// The update trigger is narrowed to indexed columns so filling the keys does not
+    /// rebuild the full-text index.</summary>
+    private static void MigrateToVersion2(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        using (var alter = connection.CreateCommand())
+        {
+            alter.Transaction = transaction;
+            alter.CommandText = """
+                ALTER TABLE entry ADD COLUMN host_key TEXT NOT NULL DEFAULT '';
+                ALTER TABLE entry ADD COLUMN command_key TEXT NOT NULL DEFAULT '';
+                DROP TRIGGER entry_au;
+                CREATE TRIGGER entry_au AFTER UPDATE OF command, output, session_name, target, directory ON entry BEGIN
+                    INSERT INTO entry_fts(entry_fts, rowid, command, output, session_name, target, directory)
+                    VALUES ('delete', old.id, old.command, old.output, old.session_name, old.target, old.directory);
+                    INSERT INTO entry_fts(rowid, command, output, session_name, target, directory)
+                    VALUES (new.id, new.command, new.output, new.session_name, new.target, new.directory);
+                END;
+                """;
+            alter.ExecuteNonQuery();
+        }
+
+        var keys = new List<(long Id, string Host, string Command)>();
+        using (var read = connection.CreateCommand())
+        {
+            read.Transaction = transaction;
+            read.CommandText = "SELECT id, session_id, target, command FROM entry";
+            using var reader = read.ExecuteReader();
+            while (reader.Read())
+            {
+                var entry = new CommandHistoryEntry
+                {
+                    SessionId = reader.IsDBNull(1) ? null : Guid.Parse(reader.GetString(1)),
+                    Target = reader.GetString(2),
+                    Command = reader.GetString(3),
+                };
+                keys.Add((reader.GetInt64(0), entry.HostKey, entry.CommandKey));
+            }
+        }
+        using (var update = connection.CreateCommand())
+        {
+            update.Transaction = transaction;
+            update.CommandText = "UPDATE entry SET host_key = $host, command_key = $command WHERE id = $id";
+            var host = update.Parameters.Add("$host", SqliteType.Text);
+            var command = update.Parameters.Add("$command", SqliteType.Text);
+            var id = update.Parameters.Add("$id", SqliteType.Integer);
+            foreach (var key in keys)
+            {
+                host.Value = key.Host;
+                command.Value = key.Command;
+                id.Value = key.Id;
+                update.ExecuteNonQuery();
+            }
+        }
+        using var finish = connection.CreateCommand();
+        finish.Transaction = transaction;
+        finish.CommandText = """
+            CREATE INDEX entry_runs ON entry(host_key, command_key, id);
+            PRAGMA user_version = 2;
+            """;
+        finish.ExecuteNonQuery();
     }
 
     /// <summary>After deletes: merge the index so removed text leaves old segments, and
@@ -449,9 +569,9 @@ public sealed class CommandHistoryStore
     {
         command.CommandText = """
             INSERT OR IGNORE INTO entry (uid, session_id, session_name, kind, target, directory, command, exit_code,
-                started_at, offset_minutes, ended_at, output, output_truncated, output_lost, exact)
+                started_at, offset_minutes, ended_at, output, output_truncated, output_lost, exact, host_key, command_key)
             VALUES ($uid, $session_id, $session_name, $kind, $target, $directory, $command, $exit_code,
-                $started_at, $offset_minutes, $ended_at, $output, $output_truncated, $output_lost, $exact)
+                $started_at, $offset_minutes, $ended_at, $output, $output_truncated, $output_lost, $exact, $host_key, $command_key)
             """;
         command.Parameters.Clear();
         command.Parameters.AddWithValue("$uid", entry.Id);
@@ -469,6 +589,8 @@ public sealed class CommandHistoryStore
         command.Parameters.AddWithValue("$output_truncated", entry.OutputTruncated);
         command.Parameters.AddWithValue("$output_lost", entry.OutputLost);
         command.Parameters.AddWithValue("$exact", entry.Exact);
+        command.Parameters.AddWithValue("$host_key", entry.HostKey);
+        command.Parameters.AddWithValue("$command_key", entry.CommandKey);
         command.ExecuteNonQuery();
     }
 

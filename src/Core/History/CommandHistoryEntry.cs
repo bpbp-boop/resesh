@@ -64,6 +64,27 @@ public sealed record CommandHistoryEntry
     [JsonIgnore]
     public TimeSpan? Duration => EndedAt is { } ended && ended >= StartedAt ? ended - StartedAt : null;
 
+    /// <summary>Which host a run belongs to when comparing runs: the saved session, or the
+    /// target for an unsaved connection.</summary>
+    [JsonIgnore]
+    public string HostKey => SessionId is { } id ? id.ToString("D") : "target:" + Target;
+
+    /// <summary>The command as runs are matched: trimmed, whitespace runs collapsed to one space.</summary>
+    [JsonIgnore]
+    public string CommandKey => NormalizeCommand(Command);
+
+    public static string NormalizeCommand(string command) =>
+        string.Join(' ', (command ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    /// <summary>The output shows a pager prompt, so it holds only the pages that were shown.</summary>
+    [JsonIgnore]
+    public bool LooksPaged => PagerPrompt.IsMatch(Output);
+
+    private static readonly System.Text.RegularExpressions.Regex PagerPrompt = new(
+        @"--\s?More\s?--|---\(more( \d+%)?\)---|<--- More --->|^\(END\)$|Press any key to continue",
+        System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.IgnoreCase
+        | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
     /// <summary>How history names where a session runs: "user@host" (with a non-default
     /// port), "host:port" for telnet, or the shell executable's file name for local profiles.</summary>
     public static string TargetOf(Session session)

@@ -76,6 +76,60 @@
             HeaderTemplate="{StaticResource HistoryHeaderTemplate}"
             HitTemplate="{StaticResource HistoryHitTemplate}" />
 
+        <DataTemplate x:Key="DiffGapTemplate" x:DataType="controls:DiffRowItem">
+            <Border Padding="12,4" Background="{StaticResource SessionChromeBrush}">
+                <TextBlock
+                    Text="{x:Bind GapText}"
+                    FontSize="12"
+                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="DiffUnifiedTemplate" x:DataType="controls:DiffRowItem">
+            <Grid ColumnDefinitions="44,44,18,*" Background="{x:Bind Background}" ToolTipService.ToolTip="{x:Bind Note}">
+                <TextBlock Text="{x:Bind OldNumber}" Margin="0,1,8,1" HorizontalAlignment="Right"
+                           FontFamily="{x:Bind MonoFont}" FontSize="12"
+                           Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                <TextBlock Grid.Column="1" Text="{x:Bind NewNumber}" Margin="0,1,8,1" HorizontalAlignment="Right"
+                           FontFamily="{x:Bind MonoFont}" FontSize="12"
+                           Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                <TextBlock Grid.Column="2" Text="{x:Bind Marker}" Margin="0,1"
+                           FontFamily="{x:Bind MonoFont}" FontSize="13"
+                           Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                <TextBlock Grid.Column="3" controls:HistoryHighlight.Source="{x:Bind Text}" Margin="0,1,8,1"
+                           FontFamily="{x:Bind MonoFont}" FontSize="13" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                           Foreground="{StaticResource SessionTreeForegroundBrush}" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="DiffSideBySideTemplate" x:DataType="controls:DiffRowItem">
+            <Grid ColumnDefinitions="*,1,*" ToolTipService.ToolTip="{x:Bind Note}">
+                <Grid ColumnDefinitions="44,*" Background="{x:Bind LeftBackground}">
+                    <TextBlock Text="{x:Bind OldNumber}" Margin="0,1,8,1" HorizontalAlignment="Right"
+                               FontFamily="{x:Bind MonoFont}" FontSize="12"
+                               Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                    <TextBlock Grid.Column="1" controls:HistoryHighlight.Source="{x:Bind LeftText}" Margin="0,1,8,1"
+                               FontFamily="{x:Bind MonoFont}" FontSize="13" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                               Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                </Grid>
+                <Rectangle Grid.Column="1" Fill="{StaticResource SessionChromeFrameBrush}" />
+                <Grid Grid.Column="2" ColumnDefinitions="44,*" Background="{x:Bind RightBackground}">
+                    <TextBlock Text="{x:Bind NewNumber}" Margin="0,1,8,1" HorizontalAlignment="Right"
+                               FontFamily="{x:Bind MonoFont}" FontSize="12"
+                               Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                    <TextBlock Grid.Column="1" controls:HistoryHighlight.Source="{x:Bind RightText}" Margin="0,1,8,1"
+                               FontFamily="{x:Bind MonoFont}" FontSize="13" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                               Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                </Grid>
+            </Grid>
+        </DataTemplate>
+
+        <controls:DiffRowTemplateSelector
+            x:Key="DiffRowTemplateSelector"
+            GapTemplate="{StaticResource DiffGapTemplate}"
+            UnifiedTemplate="{StaticResource DiffUnifiedTemplate}"
+            SideBySideTemplate="{StaticResource DiffSideBySideTemplate}" />
+
         <Style x:Key="HistoryFilterComboStyle" TargetType="ComboBox" BasedOn="{StaticResource DefaultComboBoxStyle}">
             <Setter Property="MinWidth" Value="140" />
             <Setter Property="Foreground" Value="{StaticResource SessionTreeForegroundBrush}" />
@@ -316,28 +370,62 @@
 
                             <!-- Result chips and facts -->
                             <StackPanel Grid.Row="1" Spacing="8">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <Border
-                                        x:Name="StatusChip"
-                                        Padding="8,2"
-                                        CornerRadius="10"
-                                        BorderThickness="1">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <Ellipse x:Name="StatusChipDot" Width="7" Height="7" VerticalAlignment="Center" />
-                                            <TextBlock x:Name="StatusChipText" FontSize="12" />
-                                        </StackPanel>
-                                    </Border>
-                                    <TextBlock
-                                        x:Name="DurationChip"
-                                        VerticalAlignment="Center"
-                                        FontSize="12"
-                                        Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
-                                    <TextBlock
-                                        x:Name="SourceChip"
-                                        VerticalAlignment="Center"
-                                        FontSize="12"
-                                        Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
-                                </StackPanel>
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <Border
+                                            x:Name="StatusChip"
+                                            Padding="8,2"
+                                            CornerRadius="10"
+                                            BorderThickness="1">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <Ellipse x:Name="StatusChipDot" Width="7" Height="7" VerticalAlignment="Center" />
+                                                <TextBlock x:Name="StatusChipText" FontSize="12" />
+                                            </StackPanel>
+                                        </Border>
+                                        <TextBlock
+                                            x:Name="DurationChip"
+                                            VerticalAlignment="Center"
+                                            FontSize="12"
+                                            Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                                        <TextBlock
+                                            x:Name="SourceChip"
+                                            VerticalAlignment="Center"
+                                            FontSize="12"
+                                            Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <Button
+                                    x:Name="CopyCommandButton"
+                                    Width="34"
+                                    Height="30"
+                                    Padding="0"
+                                    Click="CopyCommandButton_Click"
+                                    ToolTipService.ToolTip="Copy command"
+                                    AutomationProperties.Name="Copy command">
+                                    <FontIcon x:Name="CopyCommandIcon" Glyph="&#xE8C8;" FontSize="14" />
+                                </Button>
+                                <Button
+                                    x:Name="DeleteButton"
+                                    Width="34"
+                                    Height="30"
+                                    Padding="0"
+                                    AutomationProperties.AutomationId="HistoryDelete"
+                                    ToolTipService.ToolTip="Delete from history"
+                                    AutomationProperties.Name="Delete from history">
+                                    <FontIcon Glyph="&#xE74D;" FontSize="14" />
+                                    <Button.Flyout>
+                                        <Flyout x:Name="DeleteFlyout">
+                                            <StackPanel MaxWidth="280" Spacing="12">
+                                                <TextBlock
+                                                    Text="Delete this command and its output from history?"
+                                                    TextWrapping="Wrap" />
+                                                <Button Content="Delete" Click="ConfirmDelete_Click" AutomationProperties.AutomationId="HistoryConfirmDelete" />
+                                            </StackPanel>
+                                        </Flyout>
+                                    </Button.Flyout>
+                                </Button>
+                                    </StackPanel>
+                                </Grid>
                                 <Grid x:Name="FactsGrid" ColumnDefinitions="Auto,*" ColumnSpacing="16" RowSpacing="4" />
                             </StackPanel>
 
@@ -359,33 +447,20 @@
                                         <TextBlock x:Name="OpenSessionText" Text="Open Session" />
                                     </StackPanel>
                                 </Button>
-                                <Button
-                                    x:Name="CopyCommandButton"
-                                    Click="CopyCommandButton_Click"
-                                    ToolTipService.ToolTip="Copy command"
-                                    AutomationProperties.Name="Copy command">
+                                <SplitButton
+                                    x:Name="CompareButton"
+                                    Visibility="Collapsed"
+                                    Click="CompareButton_Click"
+                                    AutomationProperties.Name="Compare runs"
+                                    AutomationProperties.AutomationId="HistoryCompare">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon Glyph="&#xE8C8;" FontSize="14" />
-                                        <TextBlock x:Name="CopyCommandText" Text="Copy" />
+                                        <FontIcon Glyph="&#xE8AB;" FontSize="14" />
+                                        <TextBlock x:Name="CompareText" Text="Compare" />
                                     </StackPanel>
-                                </Button>
-                                <Button
-                                    x:Name="DeleteButton"
-                                    AutomationProperties.AutomationId="HistoryDelete"
-                                    ToolTipService.ToolTip="Delete from history"
-                                    AutomationProperties.Name="Delete from history">
-                                    <FontIcon Glyph="&#xE74D;" FontSize="14" />
-                                    <Button.Flyout>
-                                        <Flyout x:Name="DeleteFlyout">
-                                            <StackPanel MaxWidth="280" Spacing="12">
-                                                <TextBlock
-                                                    Text="Delete this command and its output from history?"
-                                                    TextWrapping="Wrap" />
-                                                <Button Content="Delete" Click="ConfirmDelete_Click" AutomationProperties.AutomationId="HistoryConfirmDelete" />
-                                            </StackPanel>
-                                        </Flyout>
-                                    </Button.Flyout>
-                                </Button>
+                                    <SplitButton.Flyout>
+                                        <MenuFlyout x:Name="CompareFlyout" Placement="BottomEdgeAlignedLeft" />
+                                    </SplitButton.Flyout>
+                                </SplitButton>
                             </StackPanel>
 
                             <!-- Output header -->
@@ -526,6 +601,160 @@
                             Content="Turn On Command History"
                             AutomationProperties.AutomationId="HistoryTurnOn" />
                     </StackPanel>
+
+                    <!-- Compare mode replaces the results and detail pane -->
+                    <Grid
+                        x:Name="ComparePane"
+                        Padding="16,12,16,0"
+                        RowDefinitions="Auto,Auto,Auto,Auto,*"
+                        RowSpacing="10"
+                        Visibility="Collapsed"
+                        AutomationProperties.Name="Compare runs">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <Button
+                                x:Name="CompareBackButton"
+                                Click="CompareBack_Click"
+                                ToolTipService.ToolTip="Back to results (Esc)"
+                                AutomationProperties.AutomationId="HistoryCompareBack">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <FontIcon Glyph="&#xE72B;" FontSize="12" />
+                                    <TextBlock Text="Results" />
+                                </StackPanel>
+                            </Button>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock
+                                    x:Name="CompareTitle"
+                                    FontSize="14"
+                                    TextTrimming="CharacterEllipsis"
+                                    Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                    AutomationProperties.AutomationId="HistoryCompareTitle" />
+                                <TextBlock
+                                    x:Name="CompareSubtitle"
+                                    FontSize="12"
+                                    TextTrimming="CharacterEllipsis"
+                                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Grid.Row="1" ColumnDefinitions="Auto,Auto,Auto,*,Auto" ColumnSpacing="8">
+                            <ComboBox
+                                x:Name="OlderRunBox"
+                                MinWidth="240"
+                                DisplayMemberPath="Label"
+                                SelectionChanged="CompareRun_Changed"
+                                AutomationProperties.Name="Earlier run"
+                                AutomationProperties.AutomationId="HistoryCompareOlder" />
+                            <FontIcon Grid.Column="1" Glyph="&#xE72A;" FontSize="12"
+                                      Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                            <ComboBox
+                                x:Name="NewerRunBox"
+                                Grid.Column="2"
+                                MinWidth="240"
+                                DisplayMemberPath="Label"
+                                SelectionChanged="CompareRun_Changed"
+                                AutomationProperties.Name="Later run"
+                                AutomationProperties.AutomationId="HistoryCompareNewer" />
+                            <TextBlock
+                                x:Name="CompareSummary"
+                                Grid.Column="3"
+                                Margin="8,0,0,0"
+                                VerticalAlignment="Center"
+                                TextTrimming="CharacterEllipsis"
+                                Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                AutomationProperties.LiveSetting="Polite"
+                                AutomationProperties.AutomationId="HistoryCompareSummary" />
+                            <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4">
+                                <TextBlock
+                                    x:Name="ChangePosition"
+                                    Margin="0,0,4,0"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                                <Button
+                                    x:Name="PreviousChangeButton"
+                                    Width="30"
+                                    Height="28"
+                                    Padding="0"
+                                    Click="PreviousChange_Click"
+                                    ToolTipService.ToolTip="Previous change (Shift+F7)"
+                                    AutomationProperties.Name="Previous change">
+                                    <FontIcon Glyph="&#xE70E;" FontSize="11" />
+                                </Button>
+                                <Button
+                                    x:Name="NextChangeButton"
+                                    Width="30"
+                                    Height="28"
+                                    Padding="0"
+                                    Click="NextChange_Click"
+                                    ToolTipService.ToolTip="Next change (F7)"
+                                    AutomationProperties.Name="Next change">
+                                    <FontIcon Glyph="&#xE70D;" FontSize="11" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="16">
+                            <SelectorBar x:Name="CompareLayoutBar" SelectionChanged="CompareLayout_Changed"
+                                         AutomationProperties.Name="Layout">
+                                <SelectorBarItem x:Name="UnifiedLayoutItem" Text="Unified" IsSelected="True" />
+                                <SelectorBarItem x:Name="SideBySideLayoutItem" Text="Side by side" />
+                            </SelectorBar>
+                            <CheckBox
+                                x:Name="IgnoreTimestampsBox"
+                                Content="Ignore timestamps"
+                                IsChecked="True"
+                                Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                Click="CompareOption_Changed"
+                                ToolTipService.ToolTip="Dates, clock times, and uptimes count as equal"
+                                AutomationProperties.AutomationId="HistoryIgnoreTimestamps" />
+                            <CheckBox
+                                x:Name="IgnoreNumbersBox"
+                                Content="Ignore numbers"
+                                Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                Click="CompareOption_Changed"
+                                ToolTipService.ToolTip="Every number counts as equal: counters and sizes, but also metrics and addresses"
+                                AutomationProperties.AutomationId="HistoryIgnoreNumbers" />
+                            <CheckBox
+                                x:Name="ShowAllLinesBox"
+                                Content="Show unchanged lines"
+                                Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                Click="CompareOption_Changed"
+                                AutomationProperties.AutomationId="HistoryShowAllLines" />
+                        </StackPanel>
+
+                        <InfoBar
+                            x:Name="CompareWarning"
+                            Grid.Row="3"
+                            IsClosable="False"
+                            Severity="Warning"
+                            AutomationProperties.AutomationId="HistoryCompareWarning" />
+
+                        <Border
+                            Grid.Row="4"
+                            Margin="0,0,0,12"
+                            CornerRadius="6"
+                            Background="{StaticResource SessionInputBrush}"
+                            BorderBrush="{StaticResource SessionChromeFrameBrush}"
+                            BorderThickness="1">
+                            <ListView
+                                x:Name="DiffList"
+                                SelectionMode="None"
+                                IsItemClickEnabled="True"
+                                ItemClick="DiffList_ItemClick"
+                                ItemTemplateSelector="{StaticResource DiffRowTemplateSelector}"
+                                AutomationProperties.Name="Differences"
+                                AutomationProperties.AutomationId="HistoryDiff">
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="Margin" Value="0" />
+                                    </Style>
+                                </ListView.ItemContainerStyle>
+                            </ListView>
+                        </Border>
+                    </Grid>
                 </Grid>
 
                 <!-- Key hints -->
