@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>resesh — SSH and local terminals for Windows</title>
+<title>resesh — SSH, telnet and local terminals for Windows</title>
 <link rel="canonical" href="https://resesh.net/">
-<meta name="description" content="Manage SSH sessions and local terminals on Windows with folders, split panes, saved workspaces and terminal recordings.">
+<meta name="description" content="Manage SSH and telnet sessions and local terminals on Windows with folders, split panes, saved workspaces and terminal recordings.">
 <link rel="icon" href="assets/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -48,7 +48,7 @@
       <span><span data-release-version>latest</span> beta &nbsp;·&nbsp; windows 10 21h2+ &nbsp;·&nbsp; x64 + arm64</span>
     </div>
 
-    <h1 class="hero__title">ssh and local terminals for windows</h1>
+    <h1 class="hero__title">ssh, telnet and local terminals for windows</h1>
 
     <p class="hero__lede">keep your hosts in folders, open terminals side by side, and save the layout for next time.</p>
 
@@ -61,6 +61,7 @@
       <span>free &amp; open source</span>
       <span>no cloud, no account</span>
       <span>imports sessions from securecrt, putty and openssh</span>
+      <span>gpu-rendered terminal</span>
     </div>
   </div>
 
@@ -116,7 +117,7 @@
         <h2 class="beat__title">organise your hosts</h2>
         <p class="beat__body">group related sessions in folders and give each one a name, icon and colour.</p>
         <ul class="bullets">
-          <li><span class="bullets__mark">·</span> ssh sessions and local shells in one list</li>
+          <li><span class="bullets__mark">·</span> ssh and telnet sessions and local shells in one list</li>
           <li><span class="bullets__mark">·</span> passwords and passphrases in windows credential manager</li>
           <li><span class="bullets__mark">·</span> terminal settings saved per session</li>
         </ul>
@@ -139,8 +140,8 @@
         <div class="keycaps">
           <span class="keycap">ctrl</span>
           <span class="keycap">shift</span>
-          <span class="keycap">w</span>
-          <span class="keycaps__note">reopen last workspace</span>
+          <span class="keycap">p</span>
+          <span class="keycaps__note">open a workspace from the command palette</span>
         </div>
       </div>
     </div>
@@ -162,6 +163,51 @@
       </div>
     </div>
 
+    <div class="beat">
+      <div class="frame">
+        <div class="frame__bar">keyboard shortcuts — every chord in one searchable list</div>
+        <img src="assets/shortcuts.png" alt="Keyboard Shortcuts screen listing application and tab shortcuts as keycaps" width="761" height="849" loading="lazy">
+      </div>
+      <div class="beat__copy">
+        <span class="eyebrow">04 / keyboard</span>
+        <h2 class="beat__title">keep your hands on the keys</h2>
+        <p class="beat__body">switch tabs, split panes, zoom, search and reconnect without the mouse. the keys match windows terminal, vs code and your browser, and they work from inside the terminal.</p>
+        <ul class="bullets">
+          <li><span class="bullets__mark">·</span> ctrl with a single letter always reaches the shell, so ctrl w, ctrl r and the tmux prefix keep working</li>
+          <li><span class="bullets__mark">·</span> alt and an arrow key moves between split panes, and goes to the shell when there is only one</li>
+          <li><span class="bullets__mark">·</span> most actions are also in the command palette</li>
+        </ul>
+        <div class="keycaps">
+          <span class="keycap">ctrl</span>
+          <span class="keycap">shift</span>
+          <span class="keycap">/</span>
+          <span class="keycaps__note">show every shortcut</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="beat">
+      <div class="beat__copy">
+        <span class="eyebrow">05 / coding agents</span>
+        <h2 class="beat__title">run claude code over ssh</h2>
+        <p class="beat__body">coding agents on a remote host behave the way they do in a local terminal. tabs show when an agent is working or waiting for you.</p>
+        <ul class="bullets">
+          <li><span class="bullets__mark">·</span> copy from a remote program straight to the windows clipboard</li>
+          <li><span class="bullets__mark">·</span> shift enter adds a new line instead of submitting</li>
+          <li><span class="bullets__mark">·</span> full colour, emoji at the right width and clickable links</li>
+          <li><span class="bullets__mark">·</span> progress on the tab and taskbar, and an opt-in notification when a command finishes</li>
+        </ul>
+      </div>
+      <div class="termblock">
+        <span><span class="termblock__prompt">$</span> ssh build-01 &amp;&amp; claude</span>
+        <span class="termblock__out">osc 52 copy&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ windows clipboard (write-only)</span>
+        <span class="termblock__out">shift+enter&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ esc cr, a new line in the prompt</span>
+        <span class="termblock__out">xtversion&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ "resesh", so synchronized output turns on</span>
+        <span class="termblock__out">colorterm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ truecolor, sent with the ssh session</span>
+        <span class="termblock__out">osc 9;4&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ progress on the tab and taskbar</span>
+      </div>
+    </div>
+
     <div class="tour__more">
       <a href="features.html"><span class="btn-prompt">$</span> see all features →</a>
     </div>
@@ -171,18 +217,18 @@
 <section class="section section--alt" id="switch">
   <div class="container stack">
     <div class="head-block">
-      <span class="eyebrow">04 / migration</span>
+      <span class="eyebrow">06 / migration</span>
       <h2 class="h2-md">import existing sessions</h2>
-      <p class="lede">import saved SSH sessions from securecrt, putty or openssh. review the list and choose which sessions to add. passwords are not imported.</p>
+      <p class="lede">import saved SSH and telnet sessions from securecrt, putty or openssh. review the list and choose which sessions to add. passwords are not imported.</p>
     </div>
     <div class="cards">
       <div class="card">
         <span class="card__name">securecrt</span>
-        <span class="card__note">SSH hosts and session folders</span>
+        <span class="card__note">SSH and telnet hosts and session folders</span>
       </div>
       <div class="card">
         <span class="card__name">putty</span>
-        <span class="card__note">saved SSH sessions from the registry</span>
+        <span class="card__note">saved SSH and telnet sessions from the registry</span>
       </div>
       <div class="card">
         <span class="card__name">openssh</span>
@@ -254,7 +300,15 @@
       </div>
       <div class="faq__item">
         <span class="faq__q">which protocols are supported?</span>
-        <span class="faq__a">ssh and local shells. telnet and serial support are planned.</span>
+        <span class="faq__a">ssh, telnet and local shells. serial support is planned.</span>
+      </div>
+      <div class="faq__item">
+        <span class="faq__q">does it work with claude code, codex or gemini cli?</span>
+        <span class="faq__a">yes, locally and over ssh. tabs show when an agent is working or needs you, remote copies reach the windows clipboard, and shift enter inserts a new line.</span>
+      </div>
+      <div class="faq__item">
+        <span class="faq__q">what are the keyboard shortcuts?</span>
+        <span class="faq__a">press ctrl shift / in the app for the full list, or open the command palette with ctrl shift p. shortcuts never take plain ctrl and letter keys from the shell.</span>
       </div>
       <div class="faq__item">
         <span class="faq__q">mac or linux?</span>
