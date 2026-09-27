@@ -57,7 +57,9 @@ test("tab text trims inside the shared width without moving the close action", (
 
 test("tabs recalculate their equal width after a close or strip resize", () => {
   assert.match(code, /Group\.Tabs\.CollectionChanged \+= \(_, _\)/);
-  assert.match(code, /Tabs\.TabItemsChanged \+= \(_, e\) =>[\s\S]{0,160}?CollectionChange\.ItemRemoved[\s\S]{0,80}?QueueFullTabWidthRefresh\(\)/);
+  assert.match(code, /Tabs\.TabItemsChanged \+= \(_, e\) =>[\s\S]{0,400}?CollectionChange\.ItemRemoved[\s\S]{0,80}?HasShrunkTabs\(\)[\s\S]{0,40}?QueueFullTabWidthRefresh\(\)/);
+  // Full-width tabs skip the refresh: its SizeToContent pass would flash content widths.
+  assert.match(code, /private bool HasShrunkTabs\(\)[\s\S]{0,120}?"TabViewItemMaxWidth"/);
   const resizeHandler = code.slice(
     code.indexOf("Tabs.SizeChanged += (_, _) =>"),
     code.indexOf("TabStripHost.SizeChanged += (_, _) =>"));

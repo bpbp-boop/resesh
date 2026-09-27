@@ -131,7 +131,10 @@ public sealed partial class TabGroupView : UserControl
         };
         Tabs.TabItemsChanged += (_, e) =>
         {
-            if (e.CollectionChange == Windows.Foundation.Collections.CollectionChange.ItemRemoved)
+            // The full refresh briefly lays tabs out at content width, so skip it when the
+            // remaining tabs already have their maximum width and nothing needs to grow.
+            if (e.CollectionChange == Windows.Foundation.Collections.CollectionChange.ItemRemoved
+                && HasShrunkTabs())
                 QueueFullTabWidthRefresh();
         };
         Tabs.SizeChanged += (_, _) =>
@@ -503,6 +506,14 @@ public sealed partial class TabGroupView : UserControl
             Tabs.InvalidateMeasure();
             QueueTabDividerRefreshAfterLayout();
         });
+    }
+
+    private bool HasShrunkTabs()
+    {
+        var maxWidth = (double)Resources["TabViewItemMaxWidth"];
+        return Group.Tabs.Any(tab =>
+            Tabs.ContainerFromItem(tab) is FrameworkElement { ActualWidth: > 0 } container
+            && container.ActualWidth < maxWidth - 0.5);
     }
 
     private void QueueFullTabWidthRefresh()
