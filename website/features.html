@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>features — resesh</title>
 <link rel="canonical" href="https://resesh.net/features.html">
-<meta name="description" content="Current and planned resesh features: saved sessions, themes, highlighting, recordings, workspaces, file transfers and backups.">
+<meta name="description" content="Current and planned resesh features: saved sessions, searchable command history, comparing command runs, telnet consoles, keyboard shortcuts, persistent tmux sessions, coding agents over SSH, GPU rendering, highlighting, recordings, workspaces, file transfers and backups.">
 <link rel="icon" href="assets/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,6 +21,7 @@
   })();
 </script>
 <script src="theme.js" defer></script>
+<script src="videos.js" defer></script>
 </head>
 <body>
 
@@ -31,6 +32,7 @@
   </a>
   <nav class="nav">
     <a class="nav__link nav__link--current" href="#list">features</a>
+    <a class="nav__link" href="#under-the-hood">under the hood</a>
     <a class="nav__link" href="#non-goals">non-goals</a>
     <a class="nav__link" href="https://github.com/bpbp-boop/resesh">github</a>
     <button class="theme-toggle" type="button" data-theme-toggle>light</button>
@@ -41,11 +43,13 @@
 <section class="container page-head">
   <div class="breadcrumb"><a href="index.html">./resesh</a> <span class="breadcrumb__sep">/</span> features</div>
   <h1 class="h1-features">features and planned work</h1>
-  <p class="page-head__lede">manage SSH sessions and local terminals on windows.</p>
+  <p class="page-head__lede">manage SSH and telnet sessions and local terminals on windows.</p>
   <div class="chips">
     <span class="chip">winui 3 · .net 10</span>
     <span class="chip">ssh.net transport</span>
     <span class="chip">webview2 + xterm.js</span>
+    <span class="chip">webgl rendering</span>
+    <span class="chip">sqlite fts5</span>
     <span class="chip">gpl-2.0</span>
   </div>
 </section>
@@ -56,7 +60,7 @@
 
     <div class="rows">
 
-      <div class="row">
+      <div class="row" id="sessions">
         <div class="row__head">
           <div class="row__label">
             <span class="row__index">01</span>
@@ -69,23 +73,110 @@
             <li>local profiles for powershell, cmd, wsl and git bash</li>
             <li>tab badges for claude code, codex and gemini cli</li>
             <li>color tags carried onto the tab accent</li>
+            <li>nokia, juniper, cisco, arista and vyos icons, suggested from the login banner</li>
           </ul>
         </div>
         <div class="row__media">
           <button class="screenshot-trigger" type="button" popovertarget="sessions-screenshot" aria-label="Enlarge the sessions screenshot">
-            <img src="assets/sessions.png" alt="Sessions folder tree with custom icons and color tags" width="398" height="729" loading="lazy">
+            <img class="session-tree-image" src="assets/sessions.png" alt="Sessions folder tree with custom icons and color tags" width="306" height="760" loading="lazy">
           </button>
           <div class="screenshot-popover" id="sessions-screenshot" popover aria-label="Enlarged sessions screenshot">
             <button class="screenshot-popover__close" type="button" popovertarget="sessions-screenshot" popovertargetaction="hide">close</button>
-            <img src="assets/sessions.png" alt="Sessions folder tree with custom icons and color tags" width="398" height="729">
+            <img src="assets/sessions.png" alt="Sessions folder tree with custom icons and color tags" width="306" height="760">
           </div>
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="history">
         <div class="row__head">
           <div class="row__label">
             <span class="row__index">02</span>
+            <span class="row__title">command history</span>
+          </div>
+          <span class="badge badge--new row__badge">new</span>
+        </div>
+        <div class="row__body">
+          <p class="row__text">keep every finished command with its output, folder, session, time and exit result, then search it across all sessions with <span class="key">ctrl shift h</span>. insert a command at the prompt or reopen the session it ran in.</p>
+          <ul class="row__bullets">
+            <li>all words must match the command, session, folder or output; quote a phrase with "…"</li>
+            <li>filters: <span class="key">host:web01</span> <span class="key">in:/etc</span> <span class="key">exit:fail</span> <span class="key">exit:127</span>, plus session, result, time and a calendar day picker</li>
+            <li>off by default because output can contain secrets; each session can opt out</li>
+            <li>local only, left out of backups, 90-day retention by default, deletes overwritten on disk</li>
+            <li>a sqlite full-text index, so history never has to fit in memory</li>
+          </ul>
+        </div>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="history-screenshot" aria-label="Enlarge the command history screenshot">
+            <img src="assets/history.png" alt="Command history search for bgp with the selected run and its output" width="1368" height="1404" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="history-screenshot" popover aria-label="Enlarged command history screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="history-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/history.png" alt="Command history search for bgp with the selected run and its output" width="1368" height="1404">
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="compare">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">03</span>
+            <span class="row__title">compare runs</span>
+          </div>
+          <span class="badge badge--new row__badge">new</span>
+        </div>
+        <div class="row__body">
+          <p class="row__text">when a command has run more than once on the same host, compare with previous shows what changed: added and removed lines, with the changed words marked, unified or side by side.</p>
+          <ul class="row__bullets">
+            <li>timestamps are ignored by default; ignore numbers hides counters and uptimes</li>
+            <li>unchanged stretches fold away; <span class="key">f7</span> and <span class="key">shift f7</span> step between changes</li>
+            <li>pick any two runs from the list of every run, each with how it differs</li>
+            <li>paged (--More--), truncated and lost output is flagged, so a gap is never read as a change</li>
+          </ul>
+        </div>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="compare-screenshot" aria-label="Enlarge the compare runs screenshot">
+            <img src="assets/compare.png" alt="Compare with Previous for show bgp summary with numbers ignored, showing one BGP peer that changed from Established to Active" width="1368" height="478" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="compare-screenshot" popover aria-label="Enlarged compare runs screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="compare-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/compare.png" alt="Compare with Previous for show bgp summary with numbers ignored, showing one BGP peer that changed from Established to Active" width="1368" height="478">
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="telnet">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">04</span>
+            <span class="row__title">telnet consoles</span>
+          </div>
+        </div>
+        <div class="row__body">
+          <p class="row__text">connect to console servers and lab or management devices over telnet. telnet sessions share the session list, folders, tabs, splits, highlighting and recordings with ssh.</p>
+          <ul class="row__bullets">
+            <li>type telnet host 2003 in quick connect to reach a console line on a high port</li>
+            <li>the window size follows the tab as it resizes, so htop, btop and vim fit the window</li>
+            <li>send break (ctrl break) for boot interrupts and password recovery through a console server</li>
+            <li>text encoding per session: automatic (utf-8, falling back to cp437 for bbs and ansi art), utf-8 or cp437; typed input is encoded to match</li>
+            <li>report 80 × 25 to bbs servers: naws and screen-size probes get 80 × 25 while the tab keeps its real size</li>
+            <li>telnet is not encrypted; the session editor says so, and no password is stored for it</li>
+          </ul>
+        </div>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="telnet-screenshot" aria-label="Enlarge the telnet screenshot">
+            <img src="assets/telnet.png" alt="Telnet session to a Synchronet BBS showing CP437 art and an 80x25 terminal report" width="1240" height="700" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="telnet-screenshot" popover aria-label="Enlarged telnet screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="telnet-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/telnet.png" alt="Telnet session to a Synchronet BBS showing CP437 art and an 80x25 terminal report" width="1240" height="700">
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="highlighting">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">05</span>
             <span class="row__title">keyword highlighting</span>
           </div>
         </div>
@@ -107,10 +198,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="scrollbar">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">03</span>
+            <span class="row__index">06</span>
             <span class="row__title">annotated scrollbar</span>
           </div>
         </div>
@@ -119,6 +210,7 @@
           <ul class="row__bullets">
             <li>command detection from shell signals and terminal input</li>
             <li>terminal search on <span class="key">ctrl shift f</span></li>
+            <li>jump between commands with <span class="key">ctrl shift ↑</span> <span class="key">ctrl shift ↓</span>, bookmark a line with <span class="key">ctrl shift m</span></li>
           </ul>
         </div>
         <div class="row__media">
@@ -132,10 +224,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="commands">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">04</span>
+            <span class="row__index">07</span>
             <span class="row__title">command list</span>
           </div>
         </div>
@@ -171,10 +263,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="rewind">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">05</span>
+            <span class="row__index">08</span>
             <span class="row__title">recording and rewind</span>
           </div>
         </div>
@@ -186,14 +278,145 @@
           </ul>
         </div>
         <div class="row__media">
-          <video src="assets/rewind.mp4" width="1166" height="956" autoplay loop muted playsinline aria-label="Rewind scrubber over a live terminal"></video>
+          <video src="assets/rewind.mp4" poster="assets/rewind-poster.jpg" width="1440" height="756" autoplay loop muted playsinline preload="metadata" data-demo aria-label="Scrubbing rewind back to when a BGP peer was Active, then returning to the live terminal"></video>
+        </div>
+      </div>
+
+      <div class="row" id="shortcuts">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">09</span>
+            <span class="row__title">keyboard shortcuts and command palette</span>
+          </div>
+        </div>
+        <div class="row__body">
+          <p class="row__text">run any action from the command palette on <span class="key">ctrl shift p</span>, or use a shortcut. press <span class="key">ctrl shift /</span> to see and search every shortcut.</p>
+          <ul class="row__bullets">
+            <li>tabs: <span class="key">ctrl tab</span>, <span class="key">ctrl 1</span>…<span class="key">ctrl 9</span>, close, clone, reconnect and move</li>
+            <li>panes: split right or down, and <span class="key">alt ←</span> <span class="key">→</span> <span class="key">↑</span> <span class="key">↓</span> between split groups</li>
+            <li>terminal: per-tab zoom, select all, clear scrollback, <span class="key">ctrl insert</span> and <span class="key">shift insert</span></li>
+            <li>plain ctrl and letter keys always reach the shell, including the tmux prefix</li>
+          </ul>
+        </div>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="shortcuts-screenshot" aria-label="Enlarge the keyboard shortcuts screenshot">
+            <img src="assets/shortcuts.png" alt="Keyboard Shortcuts screen listing application and tab shortcuts as keycaps" width="761" height="849" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="shortcuts-screenshot" popover aria-label="Enlarged keyboard shortcuts screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="shortcuts-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/shortcuts.png" alt="Keyboard Shortcuts screen listing application and tab shortcuts as keycaps" width="761" height="849">
+          </div>
         </div>
       </div>
 
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">06</span>
+            <span class="row__index">10</span>
+            <span class="row__title">persistent remote sessions</span>
+          </div>
+        </div>
+        <div class="row__body">
+          <p class="row__text">remote shells run inside a private tmux server, so closing a tab or losing the connection detaches the shell instead of ending it. reconnect and you're back where you were.</p>
+          <ul class="row__bullets">
+            <li>choose per connection: resume or ask, always start new, or end detached shells first</li>
+            <li>the session manager lists each shell by folder and program, with end all detached</li>
+            <li>shells open in another tab or client are never ended or resumed without asking</li>
+          </ul>
+        </div>
+        <div class="row__media row__media--text">
+          <div class="termblock">
+            <span><span class="termblock__prompt">manage remote sessions</span> — core-sw-01</span>
+            <span class="termblock__out"><span class="termblock__ok">detached</span>&nbsp;&nbsp;~/configs&nbsp;&nbsp;&nbsp;&nbsp;vim&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2h</span>
+            <span class="termblock__out"><span class="termblock__ok">detached</span>&nbsp;&nbsp;/var/log&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;journalctl&nbsp;18m</span>
+            <span class="termblock__out">in a tab&nbsp;&nbsp;~&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;bash&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4m</span>
+            <span class="termblock__out">[resume]&nbsp;&nbsp;[end session]&nbsp;&nbsp;[end all detached]</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">11</span>
+            <span class="row__title">shell integration and command alerts</span>
+          </div>
+        </div>
+        <div class="row__body">
+          <p class="row__text">turn on shell integration for a session to get exact command boundaries, exit codes and the current folder. click the bell on a running command to get a windows notification when it finishes.</p>
+          <ul class="row__bullets">
+            <li>bash, zsh, fish and powershell, locally and over ssh</li>
+            <li>off by default; network cli sessions keep ordinary startup</li>
+            <li>the notification opens the tab at that command's output</li>
+          </ul>
+        </div>
+        <div class="row__media row__media--text">
+          <div class="termblock">
+            <span><span class="termblock__prompt">$</span> make release &nbsp;<span class="termblock__out">🔔 notify when finished</span></span>
+            <span class="termblock__out">…</span>
+            <span class="termblock__out"><span class="termblock__ok">✓ make</span> finished on build-01 · exit 0 · 14m 02s</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">12</span>
+            <span class="row__title">coding agents over ssh</span>
+          </div>
+        </div>
+        <div class="row__body">
+          <p class="row__text">claude code, codex and gemini cli work over ssh as they do in a local terminal. tab badges show when an agent is working or waiting for you.</p>
+          <ul class="row__bullets">
+            <li>osc 52: remote programs copy to the windows clipboard. it is write-only, so a host can never read your clipboard, and playback never touches it</li>
+            <li>shift enter sends esc cr, the new-line key claude code reads; full-screen programs such as vim still get a plain enter</li>
+            <li>unicode 11 widths match the remote wcwidth, so emoji no longer push the cursor out of step</li>
+            <li>xtversion replies "resesh", so claude code turns on synchronized output</li>
+            <li>colorterm=truecolor is sent with every ssh session, and the private tmux server is set up to pass rgb colour through</li>
+            <li>osc 8 links open in your browser and show their real target on hover</li>
+          </ul>
+        </div>
+        <div class="row__media row__media--text">
+          <div class="termblock">
+            <span><span class="termblock__prompt">$</span> printf '\e[&gt;q'</span>
+            <span class="termblock__out">reply: \eP&gt;|Resesh\e\\</span>
+            <span><span class="termblock__prompt">$</span> echo $COLORTERM</span>
+            <span class="termblock__out">truecolor</span>
+            <span><span class="termblock__prompt">$</span> printf '\e]52;c;%s\a' "$(printf hi | base64)"</span>
+            <span class="termblock__out"><span class="termblock__ok">→ "hi" is on the windows clipboard</span></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">13</span>
+            <span class="row__title">progress on tabs and the taskbar</span>
+          </div>
+        </div>
+        <div class="row__body">
+          <p class="row__text">programs that report progress with osc 9;4, the same sequence windows terminal reads, show a thin bar under the tab and on the taskbar button. file-pane transfers use the same bar.</p>
+          <ul class="row__bullets">
+            <li>normal, error, paused and indeterminate states</li>
+            <li>clears itself when the command ends, even if the program forgets</li>
+          </ul>
+        </div>
+        <div class="row__media row__media--text">
+          <div class="termblock">
+            <span><span class="termblock__prompt">$</span> printf '\e]9;4;1;60\a'</span>
+            <span class="termblock__out">tab and taskbar at 60%</span>
+            <span><span class="termblock__prompt">$</span> printf '\e]9;4;2\a'</span>
+            <span class="termblock__out">the bar switches to its error state</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">14</span>
             <span class="row__title">workspaces and layout restore</span>
           </div>
         </div>
@@ -215,10 +438,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="files">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">07</span>
+            <span class="row__index">15</span>
             <span class="row__title">file transfer and browsing</span>
           </div>
         </div>
@@ -240,10 +463,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="keys">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">08</span>
+            <span class="row__index">16</span>
             <span class="row__title">keys, secrets and host keys</span>
           </div>
         </div>
@@ -265,10 +488,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="backup">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">09</span>
+            <span class="row__index">17</span>
             <span class="row__title">backup, export, import</span>
           </div>
         </div>
@@ -290,10 +513,10 @@
         </div>
       </div>
 
-      <div class="row">
+      <div class="row" id="themes">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">10</span>
+            <span class="row__index">18</span>
             <span class="row__title">themes</span>
           </div>
         </div>
@@ -305,14 +528,14 @@
           </ul>
         </div>
         <div class="row__media">
-          <video src="assets/themes.mp4" autoplay loop muted playsinline aria-label="Theme demonstration in resesh"></video>
+          <video src="assets/themes.mp4" poster="assets/themes-poster.jpg" autoplay loop muted playsinline preload="metadata" data-demo aria-label="Theme demonstration in resesh"></video>
         </div>
       </div>
 
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">11</span>
+            <span class="row__index">19</span>
             <span class="row__title">gssapi / kerberos auth</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -330,7 +553,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">12</span>
+            <span class="row__index">20</span>
             <span class="row__title">tunnels, agent, jump hosts</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -348,13 +571,13 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">13</span>
-            <span class="row__title">telnet and serial consoles</span>
+            <span class="row__index">21</span>
+            <span class="row__title">serial consoles</span>
           </div>
           <span class="badge row__badge">planned</span>
         </div>
         <div class="row__body">
-          <p class="row__text">planned telnet and serial connections for console access. serial settings will include baud rate, parity and flow control.</p>
+          <p class="row__text">planned serial connections for console cables. settings will include baud rate, parity and flow control, and send break will work over serial too.</p>
         </div>
         <div class="row__media row__media--empty">
           <div class="placeholder placeholder--empty">
@@ -366,7 +589,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">14</span>
+            <span class="row__index">22</span>
             <span class="row__title">other planned work</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -381,6 +604,53 @@
         </div>
       </div>
 
+    </div>
+  </div>
+</section>
+
+<section class="section section--alt" id="under-the-hood">
+  <div class="container stack">
+    <div class="head-block">
+      <span class="eyebrow">./under-the-hood</span>
+      <h2 class="h2-md">how it works</h2>
+      <p class="lede">some of the engineering behind the features above.</p>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <span class="card__tag">rendering</span>
+        <span class="card__name">gpu glyphs, fixed to the pixel grid</span>
+        <span class="card__note">xterm.js draws through webgl, with a dom fallback if the gpu context is lost. at fractional display scaling the canvas can end up one device pixel off the character grid; resesh pins the glyph viewport to the grid so text stays sharp instead of being resampled.</span>
+      </div>
+      <div class="card">
+        <span class="card__tag">rewind</span>
+        <span class="card__name">seekable terminal history</span>
+        <span class="card__note">every 10 seconds or 1 mib of output, the terminal serializes its full state as a keyframe. rewind jumps to the nearest keyframe and replays only what followed, so scrubbing is exact without replaying the whole session.</span>
+      </div>
+      <div class="card">
+        <span class="card__tag">highlighting</span>
+        <span class="card__name">decorations that follow scrollback</span>
+        <span class="card__note">highlight rules run incrementally during output. matches stay attached to their rows as old lines are trimmed, so follow-mode logs such as journalctl -f don't redraw unchanged decorations.</span>
+      </div>
+      <div class="card">
+        <span class="card__tag">output</span>
+        <span class="card__name">batched, timestamped output</span>
+        <span class="card__note">ssh output is batched every 16 ms or 32 kb before reaching the terminal, and each read keeps its arrival time, so line timestamps and recordings stay accurate under heavy output.</span>
+      </div>
+      <div class="card">
+        <span class="card__tag">history</span>
+        <span class="card__name">full-text search that forgets properly</span>
+        <span class="card__note">history lives in one sqlite database with an fts5 trigram index kept in step by triggers, so any substring search stays fast at tens of thousands of commands. deletes run with secure_delete, then merge the index and truncate the write-ahead log, so removed text does not linger on disk.</span>
+      </div>
+      <div class="card">
+        <span class="card__tag">compare</span>
+        <span class="card__name">a diff built for device output</span>
+        <span class="card__note">a myers line diff with a bounded edit budget, then word-level marks where addresses and paths count as one word. timestamps and numbers can be masked before comparing, so counters that always move don't bury the real change.</span>
+      </div>
+      <div class="card">
+        <span class="card__tag">storage</span>
+        <span class="card__name">atomic json, secrets elsewhere</span>
+        <span class="card__note">sessions and workspaces are written atomically with a backup copy. passwords and passphrases live in windows credential manager and are never written to disk by resesh.</span>
+      </div>
     </div>
   </div>
 </section>
@@ -402,7 +672,7 @@
       </div>
       <div class="nongoal nongoal--soft">
         <span class="nongoal__title">no automatic shell-integration injection</span>
-        <span class="nongoal__body">resesh reads shell integration signals when available. it does not send setup commands to remote shells.</span>
+        <span class="nongoal__body">shell integration is off unless you turn it on for a session. when it is on, its scripts are installed over a separate ssh channel and never typed into your shell.</span>
       </div>
     </div>
   </div>
@@ -428,8 +698,12 @@
         <span class="path__label">accepted host keys</span>
         <span class="path__value">%APPDATA%\Resesh\known_hosts.json</span>
       </div>
+      <div class="path">
+        <span class="path__label">command history (when on)</span>
+        <span class="path__value">%LOCALAPPDATA%\Resesh\history\history.db</span>
+      </div>
     </div>
-    <p class="note">secrets are never written to the normal json store, and they're left out of backups unless you ask for them.</p>
+    <p class="note">secrets are never written to the normal json store, and they're left out of backups unless you ask for them. command history is never included in backups.</p>
   </div>
 </section>
 

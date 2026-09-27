@@ -31,6 +31,9 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract event Action<string>? CommandObserved;
     public abstract event Action<bool>? CommandsPanelOpenChanged;
 
+    /// <summary>A finished command while history capture is on. Never raised by playback.</summary>
+    public abstract event Action<TerminalCommandRecord>? CommandRecorded;
+
     /// <summary>Requests host-level pane focus when a native child window receives pointer input.</summary>
     public event Action? HostFocusRequested;
 
@@ -66,6 +69,15 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract void FocusTerminal();
     public abstract void SetInputEnabled(bool enabled);
     public abstract void ToggleCommandsPanel();
+
+    /// <summary>Pastes text as the user's input, honoring the shell's bracketed-paste mode.</summary>
+    public abstract void PasteText(string text);
+
+    /// <summary>Turns command-history capture on or off for this live terminal.</summary>
+    public abstract void SetHistoryCapture(bool enabled);
+
+    /// <summary>Records the command still running now, with the output it has so far.</summary>
+    public abstract void FlushHistory();
 
     /// <summary>Runs a terminal-scope shortcut (copy, zoom, clear, ...) as if its key was
     /// pressed. Returns false when this surface does not support it.</summary>

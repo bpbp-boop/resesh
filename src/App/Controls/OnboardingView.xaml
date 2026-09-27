@@ -349,6 +349,34 @@
                     <Rectangle Height="1" Fill="{ThemeResource SessionChromeFrameBrush}" />
 
                     <Grid ColumnDefinitions="24,*" ColumnSpacing="8">
+                        <FontIcon Glyph="&#xE81C;" FontSize="20" Foreground="{ThemeResource OnboardingAccentTextBrush}"
+                                  VerticalAlignment="Top" Margin="0,2,0,0" />
+                        <StackPanel Grid.Column="1" Spacing="16">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="Command history" Style="{ThemeResource SubtitleTextBlockStyle}" />
+                                <TextBlock x:Name="HistoryDescription"
+                                           Text="Keep every command you run with its output, folder, and result, and search it across all sessions."
+                                           TextWrapping="Wrap"
+                                           Style="{ThemeResource BodyTextBlockStyle}"
+                                           Foreground="{ThemeResource OnboardingSecondaryTextBrush}" />
+                            </StackPanel>
+                            <Border CornerRadius="{ThemeResource ControlCornerRadius}" Background="{ThemeResource SessionInputBrush}"
+                                    BorderBrush="{ThemeResource SessionChromeFrameBrush}" BorderThickness="1" Padding="16">
+                                <StackPanel Spacing="8">
+                                    <ToggleSwitch x:Name="CommandHistoryToggle" Header="Keep a searchable command history"
+                                                  Toggled="PreferenceToggle_Toggled"
+                                                  AutomationProperties.AutomationId="CommandHistoryToggle" />
+                                    <TextBlock x:Name="CommandHistoryNote" TextWrapping="Wrap"
+                                               Style="{ThemeResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource OnboardingSecondaryTextBrush}" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+
+                    <Rectangle Height="1" Fill="{ThemeResource SessionChromeFrameBrush}" />
+
+                    <Grid ColumnDefinitions="24,*" ColumnSpacing="8">
                         <FontIcon Glyph="&#xE713;" FontSize="20" Foreground="{ThemeResource OnboardingAccentTextBrush}"
                                   VerticalAlignment="Top" Margin="0,2,0,0" />
                         <StackPanel Grid.Column="1" Spacing="16">

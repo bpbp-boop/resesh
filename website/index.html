@@ -3,9 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>resesh — SSH and local terminals for Windows</title>
+<title>resesh — SSH, telnet and local terminals for Windows</title>
 <link rel="canonical" href="https://resesh.net/">
-<meta name="description" content="Manage SSH sessions and local terminals on Windows with folders, split panes, saved workspaces and terminal recordings.">
+<meta name="description" content="A Windows terminal for people who look after hosts: SSH, telnet and local shells in folders, split panes and saved workspaces, plus a searchable history of every command and its output.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://resesh.net/">
+<meta property="og:title" content="resesh — SSH, telnet and local terminals for Windows">
+<meta property="og:description" content="Keep hosts in folders, open terminals side by side, and find any command you ran, with its output, weeks later.">
+<meta property="og:image" content="https://resesh.net/assets/hero.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#08150f">
 <link rel="icon" href="assets/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -21,6 +28,7 @@
   })();
 </script>
 <script src="theme.js" defer></script>
+<script src="videos.js" defer></script>
 <script src="downloads.js" defer></script>
 </head>
 <body>
@@ -33,6 +41,7 @@
     <span class="logo__word">resesh</span>
   </a>
   <nav class="nav">
+    <a class="nav__link" href="#tour">tour</a>
     <a class="nav__link" href="features.html">features</a>
     <a class="nav__link" href="#faq">faq</a>
     <a class="nav__link" href="https://github.com/bpbp-boop/resesh">github</a>
@@ -41,67 +50,72 @@
   </nav>
 </header>
 
-<section class="hero" id="top">
-  <div class="hero__copy">
-    <div class="pill">
-      <span class="dot"></span>
-      <span><span data-release-version>latest</span> beta &nbsp;·&nbsp; windows 10 21h2+ &nbsp;·&nbsp; x64 + arm64</span>
+<section class="hero hero--stacked" id="top">
+  <div class="hero__copy hero__copy--split">
+    <div class="hero__lead">
+      <div class="pill">
+        <span class="dot"></span>
+        <span><span data-release-version>latest</span> beta &nbsp;·&nbsp; windows 10 21h2+ &nbsp;·&nbsp; x64 + arm64</span>
+      </div>
+      <h1 class="hero__title">ssh, telnet and local terminals for windows</h1>
     </div>
-
-    <h1 class="hero__title">ssh and local terminals for windows</h1>
-
-    <p class="hero__lede">keep your hosts in folders, open terminals side by side, and save the layout for next time.</p>
-
-    <div class="btn-row">
-      <a class="btn-fill" href="#downloads"><span class="btn-prompt">$</span> download resesh</a>
-      <a class="btn-outline" href="#features">see the features →</a>
-    </div>
-
-    <div class="trust-row">
-      <span>free &amp; open source</span>
-      <span>no cloud, no account</span>
-      <span>imports sessions from securecrt, putty and openssh</span>
+    <div class="hero__side">
+      <p class="hero__lede">keep your hosts in folders and open terminals side by side. resesh can also keep every command you run, with its output, so you can find it and compare it weeks later.</p>
+      <div class="btn-row">
+        <a class="btn-fill" href="#downloads"><span class="btn-prompt">$</span> download resesh</a>
+        <a class="btn-outline" href="#tour">take the tour →</a>
+      </div>
+      <div class="trust-row">
+        <span>free &amp; open source</span>
+        <span>no cloud, no account</span>
+        <span>imports securecrt, putty, openssh</span>
+      </div>
     </div>
   </div>
 
-  <div class="hero__media">
-    <div class="frame frame--shadow">
+  <div class="hero__media hero__media--wide">
+    <div class="frame frame--shadow frame--glow">
       <div class="frame__bar">
         <span class="frame__lights">
           <span></span>
           <span></span>
           <span></span>
         </span>
-        <span>resesh — splits · 2 groups, 2 tabs</span>
+        <span>resesh — split view · syd-pe-01 · syd-bastion-01</span>
       </div>
-      <img src="assets/hero.png" alt="ISP site tree with Sydney and Melbourne sample reports in Phthalo Green" width="1916" height="865" fetchpriority="high">
+      <img src="assets/hero.png" alt="Resesh in the Phthalo Green theme: an ISP session tree beside two split terminals, a router's BGP summary on the left and an Ansible run on a bastion host on the right" width="1920" height="1008" fetchpriority="high">
     </div>
-    <div class="frame__caption">split view with fictional ISP data</div>
+    <div class="frame__caption">split view with fictional isp hosts and documentation addresses</div>
   </div>
 </section>
 
 <section class="section section--alt" id="features">
   <div class="container container--gutter">
-    <div class="summary">
+    <div class="summary summary--four">
       <div class="summary__cell">
         <span class="summary__index">01</span>
         <h3 class="summary__title">saved sessions</h3>
-        <p class="summary__body">organise hosts by site or role. filter the list and press <span class="key">enter</span> to connect.</p>
+        <p class="summary__body">hosts in folders, with icons and colour tags. filter the list and press <span class="key">enter</span> to connect.</p>
       </div>
       <div class="summary__cell">
-        <span class="summary__index">02</span>
-        <h3 class="summary__title">tabs, splits, and state</h3>
-        <p class="summary__body">open sessions in tabs or split panes. status dots show connections and unread output.</p>
+        <span class="summary__index">02 <span class="badge badge--new">new</span></span>
+        <h3 class="summary__title">command history</h3>
+        <p class="summary__body">search every command and its output across all hosts. compare two runs of the same command.</p>
       </div>
       <div class="summary__cell">
         <span class="summary__index">03</span>
-        <h3 class="summary__title">terminal recordings</h3>
-        <p class="summary__body">save terminal output as an asciicast recording and a timestamped text log.</p>
+        <h3 class="summary__title">splits and workspaces</h3>
+        <p class="summary__body">tabs and split panes with live status. save a layout and reopen it for the next job.</p>
+      </div>
+      <div class="summary__cell">
+        <span class="summary__index">04</span>
+        <h3 class="summary__title">ssh, telnet, local</h3>
+        <p class="summary__body">remote hosts, console servers, powershell, cmd, wsl and git bash in one list.</p>
       </div>
     </div>
     <div class="scrollcue">
       <span class="scrollcue__prompt">$</span>
-      <span>scroll for the full feature tour</span>
+      <span>scroll for the tour</span>
       <span class="cursor"></span>
     </div>
   </div>
@@ -112,44 +126,130 @@
 
     <div class="beat">
       <div class="beat__copy">
-        <span class="eyebrow">01 / sessions</span>
-        <h2 class="beat__title">organise your hosts</h2>
-        <p class="beat__body">group related sessions in folders and give each one a name, icon and colour.</p>
+        <span class="eyebrow">01 / command history <span class="badge badge--new">new</span></span>
+        <h2 class="beat__title">find the command you ran last tuesday</h2>
+        <p class="beat__body">turn on command history and resesh keeps each finished command with its output, host, folder, time and exit result. search all of it from one place, then put the command back at a prompt or reopen the session it ran in.</p>
         <ul class="bullets">
-          <li><span class="bullets__mark">·</span> ssh sessions and local shells in one list</li>
-          <li><span class="bullets__mark">·</span> passwords and passphrases in windows credential manager</li>
-          <li><span class="bullets__mark">·</span> terminal settings saved per session</li>
+          <li><span class="bullets__mark">·</span> every word must match the command, host, folder or output</li>
+          <li><span class="bullets__mark">·</span> narrow with <span class="key">host:syd-pe</span> <span class="key">in:/etc</span> <span class="key">exit:fail</span>, or pick a day on the calendar</li>
+          <li><span class="bullets__mark">·</span> off by default, local only, and left out of backups</li>
         </ul>
+        <div class="keycaps">
+          <span class="keycap">ctrl</span>
+          <span class="keycap">shift</span>
+          <span class="keycap">h</span>
+          <span class="keycaps__note">open command history</span>
+        </div>
       </div>
       <div class="frame">
-        <div class="frame__bar">sessions — devices grouped by site</div>
-        <img class="session-tree-image" src="assets/sessions.png" alt="ISP sessions grouped by data centre and point of presence" width="398" height="729" loading="lazy">
+        <div class="frame__bar">command history — "bgp" across every host</div>
+        <img src="assets/history.png" alt="Command history search for bgp, grouped by day, with the selected show bgp summary run and its output" width="1368" height="1404" loading="lazy">
+      </div>
+    </div>
+
+    <div class="spotlight">
+      <div class="spotlight__head">
+        <div class="beat__copy">
+          <span class="eyebrow">02 / compare runs <span class="badge badge--new">new</span></span>
+          <h2 class="beat__title">see what changed since yesterday</h2>
+        </div>
+        <p class="beat__body">run the same check twice and resesh can put the two outputs side by side. counters and timestamps that always move can be ignored, so the change that matters is the only thing left: here, one bgp peer that dropped to active.</p>
+      </div>
+      <div class="frame frame--shadow">
+        <div class="frame__bar">
+          <span class="frame__lights">
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
+          <span>compare with previous — show bgp summary on syd-pe-01</span>
+        </div>
+        <video src="assets/history.mp4" poster="assets/history-poster.jpg" width="1026" height="704" autoplay loop muted playsinline preload="metadata" data-demo aria-label="Searching command history for bgp, opening Compare with Previous, and turning on Ignore numbers so only the changed BGP peer remains"></video>
+      </div>
+      <div class="facts">
+        <div class="fact">
+          <span class="fact__k">word-level marks</span>
+          <span class="fact__v">added and removed lines, with the changed words marked. addresses and paths count as one word.</span>
+        </div>
+        <div class="fact">
+          <span class="fact__k">ignore the noise</span>
+          <span class="fact__v">timestamps are ignored by default. turn on ignore numbers to hide packet and uptime counters.</span>
+        </div>
+        <div class="fact">
+          <span class="fact__k">honest about gaps</span>
+          <span class="fact__v">runs that went through a pager, were cut at 64 kb, or scrolled away are flagged. <span class="key">f7</span> steps between changes.</span>
+        </div>
       </div>
     </div>
 
     <div class="beat">
-      <div class="frame">
-        <div class="frame__bar">workspace — two panes, one maintenance window</div>
-        <img src="assets/workspace.png" alt="Saved maintenance workspace with two terminal panes" width="1916" height="1011" loading="lazy">
+      <div class="frame frame--narrow">
+        <div class="frame__bar">sessions — devices grouped by site</div>
+        <img class="session-tree-image" src="assets/sessions.png" alt="ISP session tree grouped by site and role, with vendor icons and colour tags" width="306" height="760" loading="lazy">
       </div>
       <div class="beat__copy">
-        <span class="eyebrow">02 / workspaces</span>
-        <h2 class="beat__title">save your workspaces</h2>
-        <p class="beat__body">save your tabs, pane sizes and positions as a named workspace. reopen it when you return to the job.</p>
+        <span class="eyebrow">03 / sessions and workspaces</span>
+        <h2 class="beat__title">organise hosts, then keep the layout</h2>
+        <p class="beat__body">group sessions in folders and give each one a name, icon and colour. open them in tabs or split panes, then save the tabs, pane sizes and positions as a named workspace for the next maintenance window.</p>
+        <ul class="bullets">
+          <li><span class="bullets__mark">·</span> passwords and passphrases stay in windows credential manager</li>
+          <li><span class="bullets__mark">·</span> terminal theme, highlighting and history settings per session</li>
+          <li><span class="bullets__mark">·</span> remote shells survive a dropped connection inside a private tmux server</li>
+        </ul>
         <div class="keycaps">
           <span class="keycap">ctrl</span>
           <span class="keycap">shift</span>
-          <span class="keycap">w</span>
-          <span class="keycaps__note">reopen last workspace</span>
+          <span class="keycap">p</span>
+          <span class="keycaps__note">open a workspace from the command palette</span>
         </div>
       </div>
     </div>
 
     <div class="beat">
       <div class="beat__copy">
-        <span class="eyebrow">03 / recordings</span>
-        <h2 class="beat__title">review terminal output</h2>
-        <p class="beat__body">use the timeline to review earlier output. enable recording to keep an asciicast file for playback and a text log you can search.</p>
+        <span class="eyebrow">04 / coding agents</span>
+        <h2 class="beat__title">run claude code over ssh</h2>
+        <p class="beat__body">coding agents on a remote host behave the way they do in a local terminal. tabs show when an agent is working or waiting for you.</p>
+        <ul class="bullets">
+          <li><span class="bullets__mark">·</span> copy from a remote program straight to the windows clipboard</li>
+          <li><span class="bullets__mark">·</span> shift enter adds a new line instead of submitting</li>
+          <li><span class="bullets__mark">·</span> full colour, emoji at the right width and clickable links</li>
+          <li><span class="bullets__mark">·</span> progress on the tab and taskbar, and an opt-in notification when a command finishes</li>
+        </ul>
+      </div>
+      <div class="termblock termblock--lg">
+        <span><span class="termblock__prompt">$</span> ssh build-01 &amp;&amp; claude</span>
+        <span class="termblock__out">osc 52 copy&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ windows clipboard (write-only)</span>
+        <span class="termblock__out">shift+enter&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ esc cr, a new line in the prompt</span>
+        <span class="termblock__out">xtversion&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ "resesh", so synchronized output turns on</span>
+        <span class="termblock__out">colorterm&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ truecolor, sent with the ssh session</span>
+        <span class="termblock__out">osc 9;4&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;→ progress on the tab and taskbar</span>
+        <span class="termblock__out"><span class="termblock__ok">● agent waiting</span>&nbsp;→ amber badge on the tab</span>
+      </div>
+    </div>
+
+    <div class="beat">
+      <div class="frame">
+        <div class="frame__bar">telnet — a live synchronet bbs, cp437 art at 80 × 25</div>
+        <img src="assets/telnet.png" alt="Telnet session to the Vertrauen Synchronet BBS showing CP437 block art and a TERM line that reads 80x25" width="1240" height="700" loading="lazy">
+      </div>
+      <div class="beat__copy">
+        <span class="eyebrow">05 / telnet</span>
+        <h2 class="beat__title">console servers, lab gear, and the odd bbs</h2>
+        <p class="beat__body">telnet sessions share the session list, tabs, splits, highlighting, history and recordings with ssh. the window size follows the tab, and send break works through a console server.</p>
+        <ul class="bullets">
+          <li><span class="bullets__mark">·</span> text encoding per session: automatic, utf-8 or cp437 for ansi art</li>
+          <li><span class="bullets__mark">·</span> report 80 × 25 to bbs servers while the tab keeps its real size</li>
+          <li><span class="bullets__mark">·</span> type <span class="key">telnet host 2003</span> in quick connect to reach a console line</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="beat">
+      <div class="beat__copy">
+        <span class="eyebrow">06 / rewind</span>
+        <h2 class="beat__title">scroll back in time, not just up</h2>
+        <p class="beat__body">rewind shows the terminal as it was minutes ago while the session keeps running, then returns to live. turn on recording to keep an asciicast file for playback and a text log you can search.</p>
         <div class="termblock">
           <span><span class="termblock__prompt">$</span> ls ~/resesh/recordings/</span>
           <span class="termblock__out">core-sw-01_2026-08-27_0914.cast&nbsp;&nbsp;&nbsp;core-sw-01_2026-08-27_0914.log</span>
@@ -157,13 +257,96 @@
         </div>
       </div>
       <div class="frame">
-        <div class="frame__bar">rewind — review output on the timeline</div>
-        <img src="assets/rewind.png" alt="Terminal rewind with a timeline and return-to-live control" width="1916" height="1011" loading="lazy">
+        <div class="frame__bar">rewind — back to when the peer was still active</div>
+        <video src="assets/rewind.mp4" poster="assets/rewind-poster.jpg" width="1440" height="756" autoplay loop muted playsinline preload="metadata" data-demo aria-label="Scrubbing rewind back through a BGP peer's recovery, from Active to Established, then returning to the live terminal"></video>
       </div>
     </div>
 
-    <div class="tour__more">
-      <a href="features.html"><span class="btn-prompt">$</span> see all features →</a>
+  </div>
+</section>
+
+<section class="section section--alt" id="more">
+  <div class="container stack">
+    <div class="head-block head-block--row">
+      <div class="head-block">
+        <span class="eyebrow">07 / and the rest</span>
+        <h2 class="h2-md">the small things you'd miss</h2>
+      </div>
+      <a class="link-arrow" href="features.html"><span class="btn-prompt">$</span> every feature, with screenshots →</a>
+    </div>
+    <div class="bento">
+      <a class="tile" href="features.html#highlighting">
+        <span class="tile__tag">output</span>
+        <span class="tile__name">keyword highlighting</span>
+        <span class="tile__note">interfaces, addresses, link states and routing protocols, or your own regular expressions.</span>
+      </a>
+      <a class="tile" href="features.html#scrollbar">
+        <span class="tile__tag">navigation</span>
+        <span class="tile__name">annotated scrollbar</span>
+        <span class="tile__note">search matches, highlights, bookmarks and commands with their exit status.</span>
+      </a>
+      <a class="tile" href="features.html#commands">
+        <span class="tile__tag">navigation</span>
+        <span class="tile__name">command list</span>
+        <span class="tile__note">every command in the tab, in order. jump to one or copy its output.</span>
+      </a>
+      <a class="tile" href="features.html#shortcuts">
+        <span class="tile__tag">keyboard</span>
+        <span class="tile__name">shortcuts and palette</span>
+        <span class="tile__note">plain ctrl and a letter always reach the shell, so ctrl r and the tmux prefix keep working.</span>
+      </a>
+      <a class="tile" href="features.html#files">
+        <span class="tile__tag">files</span>
+        <span class="tile__name">sftp file pane</span>
+        <span class="tile__note">a remote file browser beside the terminal that follows its current folder.</span>
+      </a>
+      <a class="tile" href="features.html#keys">
+        <span class="tile__tag">security</span>
+        <span class="tile__name">keys and host keys</span>
+        <span class="tile__note">named key references, fingerprints, and a review step before a changed host key is accepted.</span>
+      </a>
+      <a class="tile" href="features.html#themes">
+        <span class="tile__tag">looks</span>
+        <span class="tile__name">themes</span>
+        <span class="tile__note">phthalo green, tokyo night, dracula, nord, solarized, catppuccin and more, with light variants.</span>
+      </a>
+      <a class="tile" href="features.html#backup">
+        <span class="tile__tag">data</span>
+        <span class="tile__name">backup and import</span>
+        <span class="tile__note">move everything to another pc in one file. secrets only travel encrypted.</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="engineering">
+  <div class="container stack">
+    <div class="head-block">
+      <span class="eyebrow">08 / under the hood</span>
+      <h2 class="h2-md">native windows, measured</h2>
+      <p class="lede">winui 3 and .net 10 for the app, xterm.js on webgl for the terminal, ssh.net for the transport. the numbers below were measured while building it.</p>
+    </div>
+    <div class="stats">
+      <div class="stat">
+        <span class="stat__n">~700</span>
+        <span class="stat__k">automated tests</span>
+        <span class="stat__v">xunit for the core and the app logic, node for the terminal page.</span>
+      </div>
+      <div class="stat">
+        <span class="stat__n">&lt;90<small>ms</small></span>
+        <span class="stat__k">history search</span>
+        <span class="stat__v">a common word across 30,000 commands with output, from a sqlite fts5 trigram index.</span>
+      </div>
+      <div class="stat">
+        <span class="stat__n">16<small>ms</small></span>
+        <span class="stat__k">output batching</span>
+        <span class="stat__v">ssh output reaches the terminal in 16 ms or 32 kb batches, each with its arrival time.</span>
+      </div>
+      <div class="stat">
+        <span class="stat__n">0</span>
+        <span class="stat__k">cloud services</span>
+        <span class="stat__v">no account and no sync. secrets live in windows credential manager, never in resesh's files.</span>
+      </div>
     </div>
   </div>
 </section>
@@ -171,18 +354,18 @@
 <section class="section section--alt" id="switch">
   <div class="container stack">
     <div class="head-block">
-      <span class="eyebrow">04 / migration</span>
-      <h2 class="h2-md">import existing sessions</h2>
-      <p class="lede">import saved SSH sessions from securecrt, putty or openssh. review the list and choose which sessions to add. passwords are not imported.</p>
+      <span class="eyebrow">09 / migration</span>
+      <h2 class="h2-md">bring your sessions with you</h2>
+      <p class="lede">import saved ssh and telnet sessions from securecrt, putty or openssh. review the list and choose which sessions to add. passwords are not imported.</p>
     </div>
     <div class="cards">
       <div class="card">
         <span class="card__name">securecrt</span>
-        <span class="card__note">SSH hosts and session folders</span>
+        <span class="card__note">ssh and telnet hosts and session folders</span>
       </div>
       <div class="card">
         <span class="card__name">putty</span>
-        <span class="card__note">saved SSH sessions from the registry</span>
+        <span class="card__note">saved ssh and telnet sessions from the registry</span>
       </div>
       <div class="card">
         <span class="card__name">openssh</span>
@@ -249,20 +432,28 @@
         <span class="faq__a">saved sessions and recordings are stored locally. resesh does not require a cloud account.</span>
       </div>
       <div class="faq__item">
+        <span class="faq__q">does command history keep passwords i type?</span>
+        <span class="faq__a">output can contain secrets, so history is off until you turn it on, and each session can opt out. it stays on this pc, is left out of backups, and deleted entries are overwritten on disk. entries older than 90 days are removed by default.</span>
+      </div>
+      <div class="faq__item">
         <span class="faq__q">where are credentials kept?</span>
         <span class="faq__a">in the windows credential store, encrypted per user. resesh never writes a password to its own config files.</span>
       </div>
       <div class="faq__item">
         <span class="faq__q">which protocols are supported?</span>
-        <span class="faq__a">ssh and local shells. telnet and serial support are planned.</span>
+        <span class="faq__a">ssh, telnet and local shells. serial support is planned.</span>
+      </div>
+      <div class="faq__item">
+        <span class="faq__q">does it work with claude code, codex or gemini cli?</span>
+        <span class="faq__a">yes, locally and over ssh. tabs show when an agent is working or needs you, remote copies reach the windows clipboard, and shift enter inserts a new line.</span>
+      </div>
+      <div class="faq__item">
+        <span class="faq__q">what are the keyboard shortcuts?</span>
+        <span class="faq__a">press ctrl shift / in the app for the full list, or open the command palette with ctrl shift p. shortcuts never take plain ctrl and letter keys from the shell.</span>
       </div>
       <div class="faq__item">
         <span class="faq__q">mac or linux?</span>
         <span class="faq__a">resesh currently runs on windows only.</span>
-      </div>
-      <div class="faq__item">
-        <span class="faq__q">can i script it?</span>
-        <span class="faq__a">sessions and workspaces are stored as JSON files. there is no scripting interface in the app.</span>
       </div>
     </div>
   </div>
@@ -274,6 +465,7 @@
     <span>resesh · beta · windows</span>
   </div>
   <div class="site-footer__links">
+    <a href="features.html">features</a>
     <a href="https://github.com/bpbp-boop/resesh">github</a>
     <a href="https://github.com/bpbp-boop/resesh/issues">issues</a>
     <a href="https://github.com/bpbp-boop/resesh/releases">changelog</a>

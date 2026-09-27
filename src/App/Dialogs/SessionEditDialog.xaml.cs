@@ -14,6 +14,7 @@ public enum SessionSettingsTarget
     FontSize,
     Scrollback,
     AlwaysRecord,
+    CommandHistory,
 }
 
 public sealed partial class SessionEditDialog : ContentDialog
@@ -88,6 +89,13 @@ public sealed partial class SessionEditDialog : ContentDialog
             PortBox.Value = existing.Port;
             UsernameBox.Text = existing.Username;
             AuthBox.SelectedIndex = (int)existing.AuthMethod;
+            TelnetEncodingBox.SelectedIndex = existing.TelnetEncoding switch
+            {
+                TelnetTextEncoding.Utf8 => 1,
+                TelnetTextEncoding.Cp437 => 2,
+                _ => 0,
+            };
+            TelnetReport80x25Toggle.IsOn = existing.TelnetReport80x25;
             var terminalIndex = TerminalTypeBox.Items.IndexOf(existing.TerminalType);
             if (terminalIndex >= 0)
                 TerminalTypeBox.SelectedIndex = terminalIndex;
@@ -116,6 +124,12 @@ public sealed partial class SessionEditDialog : ContentDialog
                 if (overrides.Scrollback is { } scrollback)
                     OverrideScrollbackBox.Value = scrollback;
                 OverrideRecordingBox.SelectedIndex = overrides.AlwaysRecord switch
+                {
+                    true => 1,
+                    false => 2,
+                    null => 0,
+                };
+                OverrideHistoryBox.SelectedIndex = overrides.KeepCommandHistory switch
                 {
                     true => 1,
                     false => 2,
@@ -200,6 +214,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         SessionSettingsTarget.FontSize => OverrideFontSizeBox,
         SessionSettingsTarget.Scrollback => OverrideScrollbackBox,
         SessionSettingsTarget.AlwaysRecord => OverrideRecordingBox,
+        SessionSettingsTarget.CommandHistory => OverrideHistoryBox,
         _ => NameBox,
     };
 
@@ -288,6 +303,8 @@ public sealed partial class SessionEditDialog : ContentDialog
         var telnet = IsTelnet;
         SshOptionsPanel.Visibility = telnet ? Visibility.Collapsed : Visibility.Visible;
         PersistentPanel.Visibility = telnet ? Visibility.Collapsed : Visibility.Visible;
+        TelnetEncodingBox.Visibility = telnet ? Visibility.Visible : Visibility.Collapsed;
+        TelnetSizePanel.Visibility = telnet ? Visibility.Visible : Visibility.Collapsed;
         TelnetNotice.IsOpen = telnet;
     }
 
@@ -377,6 +394,12 @@ public sealed partial class SessionEditDialog : ContentDialog
                 2 => false,
                 _ => null,
             },
+            KeepCommandHistory = OverrideHistoryBox.SelectedIndex switch
+            {
+                1 => true,
+                2 => false,
+                _ => null,
+            },
             // Highlight deltas are edited from the tab's Highlighting menu, not here — carry them through.
             EnabledRules = _existing?.Overrides?.EnabledRules,
             DisabledRules = _existing?.Overrides?.DisabledRules,
@@ -395,6 +418,13 @@ public sealed partial class SessionEditDialog : ContentDialog
             PrivateKeyPath = null,
             PassphraseRequired = false,
             TerminalType = string.IsNullOrWhiteSpace(TerminalTypeBox.Text) ? "xterm-256color" : TerminalTypeBox.Text.Trim(),
+            TelnetEncoding = TelnetEncodingBox.SelectedIndex switch
+            {
+                1 => TelnetTextEncoding.Utf8,
+                2 => TelnetTextEncoding.Cp437,
+                _ => TelnetTextEncoding.Auto,
+            },
+            TelnetReport80x25 = telnet && TelnetReport80x25Toggle.IsOn,
             Persistent = !telnet && PersistentToggle.IsOn,
             DetachedSessions = DetachedSessionsBox.SelectedIndex switch
             {

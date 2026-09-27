@@ -62,6 +62,13 @@ public sealed record AppSettings
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Resesh Recordings");
 
 
+    /// <summary>Keep a searchable local history of finished commands and their output.
+    /// Off until the user turns it on: output can include secrets a server prints.</summary>
+    public bool KeepCommandHistory { get; init; }
+
+    /// <summary>Days command history is kept before it is deleted.</summary>
+    public int CommandHistoryDays { get; init; } = 90;
+
     /// <summary>Age and memory caps for each tab's always-on in-memory rewind stream.</summary>
     public int RewindMinutes { get; init; } = 30;
     public int RewindMegabytes { get; init; } = 32;
@@ -86,6 +93,7 @@ public sealed record AppSettings
                 FontSize = overrides.FontSize ?? FontSize,
                 Scrollback = overrides.Scrollback ?? Scrollback,
                 AlwaysRecord = overrides.AlwaysRecord ?? AlwaysRecord,
+                KeepCommandHistory = overrides.KeepCommandHistory ?? KeepCommandHistory,
             };
 }
 

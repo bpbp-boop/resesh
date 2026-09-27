@@ -82,6 +82,9 @@ public sealed record TerminalOverrides
     /// <summary>Null inherits the app setting; true or false overrides it for this session.</summary>
     public bool? AlwaysRecord { get; init; }
 
+    /// <summary>Null inherits the app setting; false keeps this session's commands out of history.</summary>
+    public bool? KeepCommandHistory { get; init; }
+
     /// <summary>Highlight rules force-enabled for this session (delta against the global
     /// state, by rule id — never a copy of the rule).</summary>
     public IReadOnlyList<string>? EnabledRules { get; init; }
@@ -93,6 +96,7 @@ public sealed record TerminalOverrides
     public bool IsEmpty =>
         Theme is null && FontFamily is null && FontSize is null && Scrollback is null
         && AlwaysRecord is null
+        && KeepCommandHistory is null
         && (EnabledRules is null || EnabledRules.Count == 0)
         && (DisabledRules is null || DisabledRules.Count == 0);
 }
@@ -159,6 +163,14 @@ public sealed record Session
     public bool PassphraseRequired { get; init; }
 
     public string TerminalType { get; init; } = "xterm-256color";
+
+    /// <summary>Telnet text encoding. Auto accepts UTF-8 and falls back to CP437 for BBS art.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public TelnetTextEncoding TelnetEncoding { get; init; } = TelnetTextEncoding.Auto;
+
+    /// <summary>Report 80 columns and 25 rows to Telnet BBS servers without resizing the display.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool TelnetReport80x25 { get; init; }
 
     /// <summary>Run the remote shell inside tmux so it survives disconnects (requires tmux on the host).</summary>
     public bool Persistent { get; init; }

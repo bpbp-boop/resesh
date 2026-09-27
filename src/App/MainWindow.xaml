@@ -181,6 +181,10 @@
                         Text="Command Palette…"
                         Click="CommandPaletteMenu_Click" />
                     <MenuFlyoutItem
+                        x:Name="CommandHistoryMenuItem"
+                        Text="Command History…"
+                        Click="CommandHistoryMenu_Click" />
+                    <MenuFlyoutItem
                         x:Name="KeyboardShortcutsMenuItem"
                         Text="Keyboard Shortcuts…"
                         Click="KeyboardShortcutsMenu_Click" />
@@ -918,6 +922,11 @@
             BorderThickness="0,1,0,0">
             <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" FontSize="12" Opacity="0.8" />
         </Border>
+
+        <controls:HistoryView
+            x:Name="HistoryOverlay"
+            Grid.RowSpan="3"
+            Canvas.ZIndex="999" />
 
         <controls:CommandPaletteView
             x:Name="CommandPalette"
