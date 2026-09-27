@@ -47,6 +47,11 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         CopyOnSelectToggle.IsOn = settings.CopyOnSelect;
         RightClickPasteToggle.IsOn = settings.RightClickPaste;
         CrashReportsToggle.IsOn = settings.WriteCrashReports;
+        CommandHistoryToggle.IsOn = settings.KeepCommandHistory;
+        CommandHistoryNote.Text =
+            $"Search it with {AppShortcuts.Label(Resesh.Core.Input.ShortcutIds.CommandHistory)}. History stays on this computer " +
+            $"and is deleted after {settings.CommandHistoryDays} days. Output can include secrets a server prints, " +
+            "so history is off until you turn it on. Change it later in Settings > Recording.";
         UpdateThemeSelection();
         _updatingThemeUi = false;
         UpdateSaveButtonState();
@@ -63,6 +68,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
             CopyOnSelect = CopyOnSelectToggle.IsOn,
             RightClickPaste = RightClickPasteToggle.IsOn,
             WriteCrashReports = CrashReportsToggle.IsOn,
+            KeepCommandHistory = CommandHistoryToggle.IsOn,
             OnboardingCompleted = true,
         };
     }
@@ -288,7 +294,8 @@ public sealed partial class OnboardingView : UserControl, IDisposable
             || ConfirmCloseToggle.IsOn != _savedSettings.ConfirmCloseActiveSessions
             || CopyOnSelectToggle.IsOn != _savedSettings.CopyOnSelect
             || RightClickPasteToggle.IsOn != _savedSettings.RightClickPaste
-            || CrashReportsToggle.IsOn != _savedSettings.WriteCrashReports;
+            || CrashReportsToggle.IsOn != _savedSettings.WriteCrashReports
+            || CommandHistoryToggle.IsOn != _savedSettings.KeepCommandHistory;
     }
 
     private void ApplyPagePalette(ThemeVisualPalette palette)
