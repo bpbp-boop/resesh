@@ -10,6 +10,7 @@ public sealed class TreeNodeViewModel : ObservableObject
     private bool _isExpanded;
     private bool _isSelected;
     private bool _isPointerOver;
+    private string _highlightQuery = "";
 
     public bool IsExpanded
     {
@@ -69,7 +70,11 @@ public sealed class TreeNodeViewModel : ObservableObject
         ? $"SessionTree_{session.Id:N}" : $"SessionFolder_{(IsLocalScope ? "Local_" : "")}{FolderPath}";
 
     /// <summary>The active tree filter, used only to highlight matching session names.</summary>
-    public string HighlightQuery { get; set; } = "";
+    public string HighlightQuery
+    {
+        get => _highlightQuery;
+        set => SetProperty(ref _highlightQuery, value);
+    }
 
     public string? ColorTag => Session?.ColorTag;
 

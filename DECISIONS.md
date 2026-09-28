@@ -808,3 +808,14 @@ keyboard-interactive fallback.
   find, clear, full screen, sessions pane, and the shortcuts screen with search. Not
   exercised: Window-scope and tree keys with a real keyboard (synthetic OS input is
   blocked in the test rig), copy/paste (to leave the clipboard alone), native surface.
+
+## 2026-09-28 - Session tree rebuilds reconcile in place
+`RebuildTree` used to clear `RootNodes` and repopulate it, which recreated every
+container and scrolled the tree back to the top after any add, delete, move, rename
+or drop. It now reuses the previous generation's nodes (folders by expansion key,
+sessions by id when their folder and scope are unchanged) and patches the bound
+collections in two passes: detach nodes that no longer belong in a collection
+(including ones the TreeView moved during a drag), then insert and reorder to match
+the model. The model is still the source of truth for order. Selection survives a
+rebuild; only nodes that left the tree are deselected. A leaf whose session changed
+folder is recreated because `FolderPath` is fixed per node.

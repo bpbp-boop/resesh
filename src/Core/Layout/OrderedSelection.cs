@@ -26,6 +26,21 @@ public sealed class OrderedSelection<T> where T : class
         _anchor = null;
     }
 
+    /// <summary>Drops items that match (e.g. ones no longer displayed), keeping the rest.</summary>
+    public void RemoveWhere(Func<T, bool> predicate)
+    {
+        for (var index = _items.Count - 1; index >= 0; index--)
+        {
+            if (predicate(_items[index]))
+            {
+                _setSelected(_items[index], false);
+                _items.RemoveAt(index);
+            }
+        }
+        if (_anchor is not null && predicate(_anchor))
+            _anchor = null;
+    }
+
     public void SelectOnly(T item)
     {
         Clear();

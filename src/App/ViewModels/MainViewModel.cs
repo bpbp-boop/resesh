@@ -18,6 +18,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly Dictionary<string, bool> _expansion = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, bool> _filterExpansion = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, TreeNodeViewModel> _sessionNodes = [];
+    private readonly Dictionary<string, TreeNodeViewModel> _folderNodes = new(StringComparer.Ordinal);
 
     private static string ExpansionKeyFor(string folderPath, SessionKind kind) =>
         kind == SessionKind.Local ? "\u0000local\u0000" + folderPath : folderPath;
@@ -298,12 +299,7 @@ public sealed class MainViewModel : ObservableObject
             return;
 
         _store.CreateFolder(path, kind);
-
-        // Creating an empty folder does not invalidate any existing node. Preserve the
-        // realized containers (and their expansion state) instead of clearing the whole tree.
-        // A filtered tree only projects folders whose path matches the active query.
-        if (!IsSearching || path.Contains(_searchText.Trim(), StringComparison.OrdinalIgnoreCase))
-            InsertFolderPath(path, kind);
+        RebuildTree();
     }
 
     public void RenameFolder(string oldPath, string newPath, SessionKind kind = SessionKind.Ssh)
@@ -331,6 +327,9 @@ public sealed class MainViewModel : ObservableObject
     // for nodes being removed during a rebuild — sometimes after the rebuild returns —
     // so expansion changes are only recorded for nodes of the current generation.
     private readonly HashSet<TreeNodeViewModel> _currentNodes = [];
+
+    /// <summary>True while the node is part of the displayed tree (rebuilds reuse nodes).</summary>
+    public bool IsInTree(TreeNodeViewModel node) => _currentNodes.Contains(node);
 
     public void NoteExpansion(TreeNodeViewModel node, bool expanded)
     {
@@ -393,26 +392,84 @@ public sealed class MainViewModel : ObservableObject
                 .Distinct(StringComparer.OrdinalIgnoreCase)
             : _store.FoldersOf(kind);
 
+        // Reuse the previous generation's nodes wherever they still describe the same
+        // folder or session, then patch the bound collections in place. Clearing and
+        // repopulating RootNodes would recreate every container and reset the scroll position.
+        var previousFolders = new Dictionary<string, TreeNodeViewModel>(_folderNodes, StringComparer.Ordinal);
+        var previousSessions = new Dictionary<Guid, TreeNodeViewModel>(_sessionNodes);
         _currentNodes.Clear();
+        _folderNodes.Clear();
         _sessionNodes.Clear();
-        RootNodes.Clear();
+        var desired = new Dictionary<TreeNodeViewModel, List<TreeNodeViewModel>>();
+        var highlight = IsSearching ? query : "";
+
+        TreeNodeViewModel FolderNodeFor(string path, bool isLocalScope, bool isLocalRoot = false)
+        {
+            var key = ExpansionKeyFor(path, isLocalScope ? SessionKind.Local : SessionKind.Ssh);
+            var node = previousFolders.GetValueOrDefault(key)
+                ?? (isLocalRoot
+                    ? TreeNodeViewModel.ForLocalRoot(false)
+                    : TreeNodeViewModel.ForFolder(path, false, isLocalScope));
+            node.IsExpanded = ExpansionFor(key);
+            _folderNodes[key] = node;
+            _currentNodes.Add(node);
+            return node;
+        }
+
+        TreeNodeViewModel SessionNodeFor(Session session)
+        {
+            // FolderPath and scope are fixed per node, so a session that moved gets a new leaf.
+            if (previousSessions.GetValueOrDefault(session.Id) is { } node
+                && node.IsLocalScope == session.IsLocal
+                && node.FolderPath.Equals(session.FolderPath, StringComparison.Ordinal))
+            {
+                if (!ReferenceEquals(node.Session, session))
+                    node.UpdateSession(session);
+                node.HighlightQuery = highlight;
+            }
+            else
+            {
+                node = TreeNodeViewModel.ForSession(session, highlight);
+            }
+            _sessionNodes[session.Id] = node;
+            _currentNodes.Add(node);
+            desired[node] = [];
+            return node;
+        }
+
+        List<TreeNodeViewModel> ChildrenOf(FolderNode folder, bool isLocalScope)
+        {
+            var children = new List<TreeNodeViewModel>();
+            foreach (var sub in folder.Folders)
+            {
+                var node = FolderNodeFor(sub.FullPath, isLocalScope);
+                desired[node] = ChildrenOf(sub, isLocalScope);
+                children.Add(node);
+            }
+            foreach (var session in folder.Sessions)
+                children.Add(SessionNodeFor(session));
+            return children;
+        }
+
+        var roots = new List<TreeNodeViewModel>();
 
         // The permanent virtual Local root sits first while browsing. While filtering it
         // follows normal match rules: no matching local profile, no Local node.
         if (!IsSearching || localSessions.Count > 0 || matchingLocalFolders.Count > 0 || localRootMatches)
         {
-            var localRoot = TreeNodeViewModel.ForLocalRoot(
-                ExpansionFor(ExpansionKeyFor("", SessionKind.Local)));
-            _currentNodes.Add(localRoot);
+            var localRoot = FolderNodeFor("", isLocalScope: true, isLocalRoot: true);
             var localTree = SessionTreeBuilder.Build(localSessions, FoldersFor(SessionKind.Local, localSessions));
-            foreach (var child in BuildChildren(localTree, isLocalScope: true))
-                localRoot.Children.Add(child);
-            RootNodes.Add(localRoot);
+            desired[localRoot] = ChildrenOf(localTree, isLocalScope: true);
+            roots.Add(localRoot);
         }
 
         var root = SessionTreeBuilder.Build(sshSessions, FoldersFor(SessionKind.Ssh, sshSessions));
-        foreach (var child in BuildChildren(root, isLocalScope: false))
-            RootNodes.Add(child);
+        roots.AddRange(ChildrenOf(root, isLocalScope: false));
+
+        // Detach everything first (including nodes WinUI moved during a drag) so no node is
+        // ever parented twice, then insert and reorder to match the desired tree.
+        Detach(RootNodes, roots, desired);
+        Place(RootNodes, roots, desired);
 
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(IsSearching));
@@ -432,83 +489,39 @@ public sealed class MainViewModel : ObservableObject
         ? _filterExpansion.GetValueOrDefault(key, true)
         : _expansion.GetValueOrDefault(key, true);
 
-    private void InsertFolderPath(string path, SessionKind kind)
+    /// <summary>Removes nodes from collections they no longer belong in, recursively.</summary>
+    private static void Detach(
+        ObservableCollection<TreeNodeViewModel> collection,
+        List<TreeNodeViewModel>? wanted,
+        Dictionary<TreeNodeViewModel, List<TreeNodeViewModel>> desired)
     {
-        var isLocal = kind == SessionKind.Local;
-        ObservableCollection<TreeNodeViewModel> siblings;
-        if (isLocal)
+        for (var index = collection.Count - 1; index >= 0; index--)
         {
-            var localRoot = RootNodes.FirstOrDefault(node => node.IsLocalRoot);
-            if (localRoot is null)
-            {
-                localRoot = TreeNodeViewModel.ForLocalRoot(
-                    ExpansionFor(ExpansionKeyFor("", SessionKind.Local)));
-                _currentNodes.Add(localRoot);
-                RootNodes.Insert(0, localRoot);
-            }
-            siblings = localRoot.Children;
-        }
-        else
-        {
-            siblings = RootNodes;
-        }
-
-        var currentPath = "";
-        foreach (var part in path.Split('/'))
-        {
-            currentPath = FolderPaths.Combine(currentPath, part);
-            var node = siblings.FirstOrDefault(candidate =>
-                candidate.IsFolder
-                && !candidate.IsLocalRoot
-                && candidate.IsLocalScope == isLocal
-                && candidate.FolderPath.Equals(currentPath, StringComparison.OrdinalIgnoreCase));
-            if (node is null)
-            {
-                node = TreeNodeViewModel.ForFolder(
-                    currentPath,
-                    ExpansionFor(ExpansionKeyFor(currentPath, kind)),
-                    isLocal);
-                _currentNodes.Add(node);
-                InsertFolderSorted(siblings, node);
-            }
-            siblings = node.Children;
+            var node = collection[index];
+            Detach(node.Children, desired.GetValueOrDefault(node), desired);
+            if (wanted is null || !wanted.Contains(node))
+                collection.RemoveAt(index);
         }
     }
 
-    private static void InsertFolderSorted(
-        ObservableCollection<TreeNodeViewModel> siblings,
-        TreeNodeViewModel folder)
+    /// <summary>Inserts and reorders so the collection matches the wanted order. Assumes
+    /// <see cref="Detach"/> already removed everything not wanted here.</summary>
+    private static void Place(
+        ObservableCollection<TreeNodeViewModel> collection,
+        List<TreeNodeViewModel> wanted,
+        Dictionary<TreeNodeViewModel, List<TreeNodeViewModel>> desired)
     {
-        var index = 0;
-        while (index < siblings.Count && siblings[index].IsLocalRoot)
-            index++;
-        while (index < siblings.Count
-            && siblings[index].IsFolder
-            && StringComparer.OrdinalIgnoreCase.Compare(siblings[index].Name, folder.Name) < 0)
+        for (var index = 0; index < wanted.Count; index++)
         {
-            index++;
-        }
-        siblings.Insert(index, folder);
-    }
-
-    private IEnumerable<TreeNodeViewModel> BuildChildren(FolderNode folder, bool isLocalScope)
-    {
-        foreach (var sub in folder.Folders)
-        {
-            var kind = isLocalScope ? SessionKind.Local : SessionKind.Ssh;
-            var expanded = ExpansionFor(ExpansionKeyFor(sub.FullPath, kind));
-            var node = TreeNodeViewModel.ForFolder(sub.FullPath, expanded, isLocalScope);
-            _currentNodes.Add(node);
-            foreach (var child in BuildChildren(sub, isLocalScope))
-                node.Children.Add(child);
-            yield return node;
-        }
-
-        foreach (var session in folder.Sessions)
-        {
-            var node = TreeNodeViewModel.ForSession(session, IsSearching ? _searchText.Trim() : "");
-            _sessionNodes[session.Id] = node;
-            yield return node;
+            var node = wanted[index];
+            if (index >= collection.Count || !ReferenceEquals(collection[index], node))
+            {
+                var existing = collection.IndexOf(node);
+                if (existing >= 0)
+                    collection.RemoveAt(existing);
+                collection.Insert(index, node);
+            }
+            Place(node.Children, desired[node], desired);
         }
     }
 }

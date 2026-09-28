@@ -94,7 +94,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         RebuildGroupLayout();
         ViewModel.TreeRebuilt += () =>
         {
-            ClearSelection(); // rebuild recreates every node; stale references would leak
+            // Rebuilds reuse surviving nodes; only drop selections that left the tree.
+            _treeSelection.RemoveWhere(node => !ViewModel.IsInTree(node));
             ScheduleExpansionSync();
             SyncEmptyState();
             RefreshRecentSessions();

@@ -123,6 +123,24 @@ public sealed class SessionTreeInteractionTests
         Assert.Empty(plan.SessionIds);
     }
 
+    [Fact]
+    public void RemoveWhere_DeselectsOnlyMatchingItemsAndClearsStaleAnchor()
+    {
+        var selected = new HashSet<string>();
+        var selection = NewSelection(selected);
+        selection.SelectOnly("a");
+        selection.Toggle("b");
+        selection.Toggle("c");
+
+        selection.RemoveWhere(item => item == "c");
+
+        Assert.Equal(["a", "b"], selection.Items);
+        Assert.Equal(["a", "b"], selected.Order());
+        // The anchor ("c") left the selection, so a range select starts fresh.
+        selection.SelectRangeTo("b", ["a", "b"]);
+        Assert.Equal(["b"], selection.Items);
+    }
+
     private static OrderedSelection<string> NewSelection(HashSet<string> selected) =>
         new((item, isSelected) =>
         {
