@@ -1,0 +1,15 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.MessageDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    CloseButtonText="OK"
+    DefaultButton="Close">
+
+    <!-- Selectable so an error message can be copied into a report. -->
+    <TextBlock
+        x:Name="MessageText"
+        MaxWidth="480"
+        Text="{x:Bind Message}"
+        TextWrapping="Wrap"
+        IsTextSelectionEnabled="True" />
+</ContentDialog>

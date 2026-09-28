@@ -27,22 +27,26 @@ test("the shared close dialog confirms exit unless no sessions remain", () => {
     /private async Task ConfirmWindowCloseAsync[\s\S]*?\n    }\r?\n\r?\n    private void PinButton_Click/)?.[0] ?? "";
 
   assert.match(method, /if \(count == 0\)[\s\S]*?_closeConfirmed = true;[\s\S]*?Close\(\);[\s\S]*?return;/);
-  assert.match(method, /Title = "Exit resesh\?"/);
-  assert.match(method, /Content = \$"Are you sure you want to exit\?/);
-  assert.match(method, /PrimaryButtonText = "Exit"/);
-  assert.match(method, /DefaultButton = ContentDialogButton\.Close/);
+  assert.match(method, /"Exit resesh\?"/);
+  assert.match(method, /\$"Are you sure you want to exit\?/);
+  assert.match(method, /"Exit",\s*acceptY: true/);
   assert.match(method, /_closeConfirmed = true/);
 });
 
-test("Y confirms session-close dialogs without becoming a global destructive shortcut", () => {
-  const yHelper = source.match(
-    /private static async Task<bool> ShowCloseConfirmationAsync[\s\S]*?\n    }\r?\n\r?\n    private async Task<bool> ConfirmAsync/)?.[0] ?? "";
+const confirmDialog = fs.readFileSync(
+  path.join(__dirname, "..", "src", "App", "Dialogs", "ConfirmDialog.xaml.cs"), "utf8");
+const confirmXaml = fs.readFileSync(
+  path.join(__dirname, "..", "src", "App", "Dialogs", "ConfirmDialog.xaml"), "utf8");
 
-  assert.match(yHelper, /dialog\.AddHandler\([\s\S]*?PreviewKeyDownEvent[\s\S]*?new KeyEventHandler[\s\S]*?handledEventsToo: true\)/);
-  assert.match(yHelper, /args\.Key != VirtualKey\.Y/);
-  assert.match(yHelper, /confirmedByKeyboard = true/);
-  assert.match(yHelper, /dialog\.Hide\(\)/);
-  assert.match(yHelper, /confirmedByKeyboard \|\| result == ContentDialogResult\.Primary/);
+test("Y confirms session-close dialogs without becoming a global destructive shortcut", () => {
+  // Cancel is the default button, and only the open dialog hears Y.
+  assert.match(confirmXaml, /DefaultButton="Close"/);
+  const confirm = confirmDialog.match(/public async Task<bool> ConfirmAsync\(\)[\s\S]*?\n    }/)?.[0] ?? "";
+  assert.match(confirm, /if \(AcceptsY\)[\s\S]*?AddHandler\([\s\S]*?PreviewKeyDownEvent[\s\S]*?new KeyEventHandler[\s\S]*?handledEventsToo: true\)/);
+  assert.match(confirm, /args\.Key != VirtualKey\.Y/);
+  assert.match(confirm, /confirmedByKeyboard = true/);
+  assert.match(confirm, /Hide\(\)/);
+  assert.match(confirm, /confirmedByKeyboard \|\| result == ContentDialogResult\.Primary/);
 
   const singleClose = source.match(
     /public async Task RequestCloseTabAsync[\s\S]*?\n    }\r?\n\r?\n    private async Task RequestCloseTmuxTabAsync/)?.[0] ?? "";
@@ -50,7 +54,7 @@ test("Y confirms session-close dialogs without becoming a global destructive sho
 
   const tmuxClose = source.match(
     /private async Task RequestCloseTmuxTabAsync[\s\S]*?\n    }\r?\n\r?\n    public async Task RequestCloseManyAsync/)?.[0] ?? "";
-  assert.match(tmuxClose, /ShowCloseConfirmationAsync\(dialog\)/);
+  assert.match(tmuxClose, /AcceptsY = true/);
 
   const bulkClose = source.match(
     /public async Task RequestCloseManyAsync[\s\S]*?\n    }\r?\n\r?\n    private void CloseTabCore/)?.[0] ?? "";
@@ -58,20 +62,19 @@ test("Y confirms session-close dialogs without becoming a global destructive sho
 
   const windowClose = source.match(
     /private async Task ConfirmWindowCloseAsync[\s\S]*?\n    }\r?\n\r?\n    private void PinButton_Click/)?.[0] ?? "";
-  assert.match(windowClose, /ShowCloseConfirmationAsync\(dialog\)/);
+  assert.match(windowClose, /acceptY: true/);
 
-  const genericConfirm = source.match(
-    /private async Task<bool> ConfirmAsync[\s\S]*?\n    }\r?\n}/)?.[0] ?? "";
+  const genericConfirm = source.match(/private Task<bool> ConfirmAsync\([\s\S]*?;\r?\n/)?.[0] ?? "";
   assert.match(genericConfirm, /bool acceptY = false/);
-  assert.match(genericConfirm, /acceptY\s*\?\s*await ShowCloseConfirmationAsync\(dialog\)/);
+  assert.match(genericConfirm, /ConfirmDialog\.ConfirmAsync\(Root\.XamlRoot, title, message, primaryText, acceptY\)/);
 });
 
 test("bulk close can end persistent sessions and keeps tabs whose session survived", () => {
   const bulkTmux = source.match(
     /private async Task RequestCloseManyWithTmuxAsync[\s\S]*?\n    }\r?\n\r?\n    private void CloseTabCore/)?.[0] ?? "";
-  assert.match(bulkTmux, /new CheckBox/);
-  assert.match(bulkTmux, /ShowCloseConfirmationAsync\(dialog\)/);
-  assert.match(bulkTmux, /endTmuxCheckBox\.IsChecked == true[\s\S]*?TryEndRemoteSessionAsync\(\)/);
+  assert.match(bulkTmux, /OptionText = persistent\.Count == 1/);
+  assert.match(bulkTmux, /AcceptsY = true/);
+  assert.match(bulkTmux, /dialog\.IsOptionChecked[\s\S]*?TryEndRemoteSessionAsync\(\)/);
   assert.match(bulkTmux, /tabs\.Where\(tab => !failed\.Contains\(tab\)\)[\s\S]*?CloseTabCore\(tab\)/);
 });
 

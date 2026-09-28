@@ -462,13 +462,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         }
         catch (Exception exception)
         {
-            await new ContentDialog
-            {
-                Title = "Command could not run",
-                Content = exception.Message,
-                CloseButtonText = "OK",
-                XamlRoot = Root.XamlRoot,
-            }.ShowModalAsync();
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Command could not run", exception.Message);
         }
         finally
         {
@@ -810,16 +804,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
             var sessionText = count == 1 ? "session" : "sessions";
             var pronoun = count == 1 ? "it" : "them";
-            var dialog = new ContentDialog
-            {
-                Title = "Exit resesh?",
-                Content = $"Are you sure you want to exit? You have {count} open {sessionText}. Exiting will close {pronoun}.",
-                PrimaryButtonText = "Exit",
-                CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Close,
-                XamlRoot = Root.XamlRoot,
-            };
-            if (await ShowCloseConfirmationAsync(dialog))
+            if (await ConfirmDialog.ConfirmAsync(
+                    Root.XamlRoot,
+                    "Exit resesh?",
+                    $"Are you sure you want to exit? You have {count} open {sessionText}. Exiting will close {pronoun}.",
+                    "Exit",
+                    acceptY: true))
             {
                 _closeConfirmed = true;
                 Close();
@@ -1108,13 +1098,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         }
         catch (Exception exception)
         {
-            await new ContentDialog
-            {
-                Title = "Recording could not open",
-                Content = exception.Message,
-                CloseButtonText = "OK",
-                XamlRoot = Root.XamlRoot,
-            }.ShowModalAsync();
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Recording could not open", exception.Message);
             return null;
         }
     }
@@ -1129,13 +1113,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         }
         catch (Exception exception)
         {
-            await new ContentDialog
-            {
-                Title = "Recording could not open",
-                Content = exception.Message,
-                CloseButtonText = "OK",
-                XamlRoot = Root.XamlRoot,
-            }.ShowModalAsync();
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Recording could not open", exception.Message);
         }
     }
 
@@ -1321,39 +1299,22 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private async Task RequestCloseTmuxTabAsync(TabViewModel tab, TerminalTabView view)
     {
-        var endTmuxCheckBox = new CheckBox
-        {
-            Content = "End persistent session",
-        };
-        var content = new StackPanel { Spacing = 8 };
-        content.Children.Add(new TextBlock
-        {
-            Text = tab.IsPinned
+        var dialog = new ConfirmDialog(
+            tab.IsPinned ? "Tab Is Pinned" : "Close Tab",
+            tab.IsPinned
                 ? $"\"{tab.Header}\" is pinned. Closing the tab also unpins it."
                 : $"Close \"{tab.Header}\"?",
-            TextWrapping = TextWrapping.Wrap,
-        });
-        content.Children.Add(endTmuxCheckBox);
-        content.Children.Add(new TextBlock
+            tab.IsPinned ? "Unpin and Close" : "Close Tab")
         {
-            Text = "This ends everything running in the persistent session. Leave the check box clear to keep it running.",
-            TextWrapping = TextWrapping.Wrap,
-            Opacity = 0.72,
-        });
-
-        var dialog = new ContentDialog
-        {
-            Title = tab.IsPinned ? "Tab Is Pinned" : "Close Tab",
-            Content = content,
-            PrimaryButtonText = tab.IsPinned ? "Unpin and Close" : "Close Tab",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
             XamlRoot = Root.XamlRoot,
+            AcceptsY = true,
+            OptionText = "End persistent session",
+            Note = "This ends everything running in the persistent session. Leave the check box clear to keep it running.",
         };
 
-        if (!await ShowCloseConfirmationAsync(dialog))
+        if (!await dialog.ConfirmAsync())
             return;
-        if (endTmuxCheckBox.IsChecked == true && !await view.TryEndRemoteSessionAsync())
+        if (dialog.IsOptionChecked && !await view.TryEndRemoteSessionAsync())
         {
             await ShowEndRemoteSessionFailureAsync(tab);
             return;
@@ -1397,40 +1358,20 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     private async Task RequestCloseManyWithTmuxAsync(
         IReadOnlyList<TabViewModel> tabs, IReadOnlyList<TabViewModel> persistent, string message)
     {
-        var endTmuxCheckBox = new CheckBox
+        var dialog = new ConfirmDialog("Close Tabs", message, "Close")
         {
-            Content = persistent.Count == 1
+            XamlRoot = Root.XamlRoot,
+            AcceptsY = true,
+            OptionText = persistent.Count == 1
                 ? "End the persistent session of the connected tab"
                 : $"End the persistent sessions of {persistent.Count} connected tabs",
+            Note = "This ends everything running in those sessions. Leave the check box clear to keep them running.",
         };
-        var dialog = new ContentDialog
-        {
-            Title = "Close Tabs",
-            Content = new StackPanel
-            {
-                Spacing = 8,
-                Children =
-                {
-                    new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
-                    endTmuxCheckBox,
-                    new TextBlock
-                    {
-                        Text = "This ends everything running in those sessions. Leave the check box clear to keep them running.",
-                        TextWrapping = TextWrapping.Wrap,
-                        Opacity = 0.72,
-                    },
-                },
-            },
-            PrimaryButtonText = "Close",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-            XamlRoot = Root.XamlRoot,
-        };
-        if (!await ShowCloseConfirmationAsync(dialog))
+        if (!await dialog.ConfirmAsync())
             return;
 
         var failed = new HashSet<TabViewModel>();
-        if (endTmuxCheckBox.IsChecked == true)
+        if (dialog.IsOptionChecked)
         {
             var results = await Task.WhenAll(persistent.Select(async tab =>
                 (tab, ended: await ((TerminalTabView)tab.View!).TryEndRemoteSessionAsync())));
@@ -1440,15 +1381,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         foreach (var tab in tabs.Where(tab => !failed.Contains(tab)))
             CloseTabCore(tab);
         if (failed.Count > 0)
-            await new ContentDialog
-            {
-                Title = "Could Not End Remote Sessions",
-                Content = failed.Count == 1
-                    ? $"The persistent session for \"{failed.First().Header}\" could not be ended, so its tab was left open. Check the connection and try again."
-                    : $"{failed.Count} persistent sessions could not be ended, so their tabs were left open. Check the connections and try again.",
-                CloseButtonText = "OK",
-                XamlRoot = Root.XamlRoot,
-            }.ShowModalAsync();
+        {
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Could Not End Remote Sessions", failed.Count == 1
+                ? $"The persistent session for \"{failed.First().Header}\" could not be ended, so its tab was left open. Check the connection and try again."
+                : $"{failed.Count} persistent sessions could not be ended, so their tabs were left open. Check the connections and try again.");
+        }
     }
 
     private void CloseTabCore(TabViewModel tab)
@@ -1810,19 +1747,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     public async Task LockSessionAsync(TabViewModel tab)
     {
-        var box = new PasswordBox { Header = "Lock password (kept in memory only — not stored anywhere)" };
-        var dialog = new ContentDialog
-        {
-            Title = "Lock Session",
-            Content = box,
-            PrimaryButtonText = "Lock",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = Root.XamlRoot,
-        };
-        if (await dialog.ShowModalAsync() != ContentDialogResult.Primary || box.Password.Length == 0)
+        if (await TextPromptDialog.PromptPasswordAsync(Root.XamlRoot, "Lock Session",
+                "Lock password (kept in memory only — not stored anywhere)", "Lock") is not { } password)
             return;
-        tab.Lock(box.Password);
+        tab.Lock(password);
         (tab.View as TerminalTabView)?.ShowLockOverlay();
     }
 
@@ -1831,45 +1759,30 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         var wait = tab.LockoutUntil - DateTimeOffset.Now;
         if (wait > TimeSpan.Zero)
         {
-            await new ContentDialog
-            {
-                Title = "Session Locked",
-                Content = $"Too many failed attempts. Try again in {Math.Ceiling(wait.TotalSeconds)} seconds.",
-                CloseButtonText = "OK",
-                XamlRoot = Root.XamlRoot,
-            }.ShowModalAsync();
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Session Locked",
+                $"Too many failed attempts. Try again in {Math.Ceiling(wait.TotalSeconds)} seconds.");
             return;
         }
 
-        var box = new PasswordBox { Header = "Unlock password" };
-        var dialog = new ContentDialog
+        // An empty entry still counts as an attempt, so it goes through TryUnlock.
+        var password = await new TextPromptDialog("Unlock Session", "Unlock", isPassword: true)
         {
-            Title = "Unlock Session",
-            Content = box,
-            PrimaryButtonText = "Unlock",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
             XamlRoot = Root.XamlRoot,
-        };
-        if (await dialog.ShowModalAsync() != ContentDialogResult.Primary)
+            FieldHeader = "Unlock password",
+        }.PromptAsync();
+        if (password is null)
             return;
 
-        if (tab.TryUnlock(box.Password))
+        if (tab.TryUnlock(password))
         {
             view.HideLockOverlay();
         }
         else
         {
             var lockedOut = tab.LockoutUntil > DateTimeOffset.Now;
-            await new ContentDialog
-            {
-                Title = "Wrong Password",
-                Content = lockedOut
-                    ? "Wrong password. Unlocking is now delayed for 30 seconds."
-                    : "Wrong password.",
-                CloseButtonText = "OK",
-                XamlRoot = Root.XamlRoot,
-            }.ShowModalAsync();
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Wrong Password", lockedOut
+                ? "Wrong password. Unlocking is now delayed for 30 seconds."
+                : "Wrong password.");
         }
     }
 
@@ -1914,11 +1827,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         }
         catch (Exception exception)
         {
-            await new ContentDialog
-            {
-                Title = "Could Not Manage Remote Sessions", Content = exception.Message,
-                CloseButtonText = "Close", XamlRoot = Root.XamlRoot,
-            }.ShowModalAsync();
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Could Not Manage Remote Sessions",
+                exception.Message, closeText: "Close");
             return;
         }
         finally { _managingRemoteSessions = false; }
@@ -1956,17 +1866,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             await ShowEndRemoteSessionFailureAsync(tab);
     }
 
-    private async Task ShowEndRemoteSessionFailureAsync(TabViewModel tab)
-    {
-        await new ContentDialog
-        {
-            Title = "Could Not End Remote Session",
-            Content = $"The persistent session for \"{tab.Header}\" could not be ended. "
-                + "Check the connection and try again.",
-            CloseButtonText = "OK",
-            XamlRoot = Root.XamlRoot,
-        }.ShowModalAsync();
-    }
+    private Task ShowEndRemoteSessionFailureAsync(TabViewModel tab) =>
+        MessageDialog.ShowMessageAsync(Root.XamlRoot, "Could Not End Remote Session",
+            $"The persistent session for \"{tab.Header}\" could not be ended. Check the connection and try again.");
 
     public void ToggleFilePane(TabViewModel tab)
     {
@@ -2003,13 +1905,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         }
         catch (Exception exception)
         {
-            await new ContentDialog
-            {
-                Title = "Recordings location could not open",
-                Content = exception.Message,
-                CloseButtonText = "OK",
-                XamlRoot = Root.XamlRoot,
-            }.ShowModalAsync();
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Recordings location could not open", exception.Message);
         }
     }
 
@@ -2718,15 +2614,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
                 App.Credentials,
                 options));
 
-            await new ContentDialog
-            {
-                Title = "Backup complete",
-                Content = options.IncludeSecrets
-                    ? "The encrypted backup was saved. Keep its passphrase in a safe place."
-                    : "The backup was saved. It does not contain passwords or key passphrases.",
-                CloseButtonText = "OK",
-                XamlRoot = Root.XamlRoot,
-            }.ShowModalAsync();
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Backup complete", options.IncludeSecrets
+                ? "The encrypted backup was saved. Keep its passphrase in a safe place."
+                : "The backup was saved. It does not contain passwords or key passphrases.");
         }
         catch (Exception ex)
         {
@@ -2754,7 +2644,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             string? passphrase = null;
             if (await Task.Run(() => SessionsBackup.IsEncrypted(file.Path)))
             {
-                passphrase = await PromptBackupPassphraseAsync();
+                passphrase = await TextPromptDialog.PromptPasswordAsync(
+                    Root.XamlRoot, "Encrypted backup", "Backup passphrase", "Continue");
                 if (passphrase is null)
                     return;
             }
@@ -2783,17 +2674,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             ViewModel.RebuildTree();
             ApplySettingsToApp();
 
-            await new ContentDialog
-            {
-                Title = "Import complete",
-                Content = $"Added {result.Imported}, replaced {result.Replaced}, kept both for "
-                    + $"{result.Duplicated}, and kept {result.Kept} existing session(s)."
-                    + (result.SecretsImported > 0
-                        ? $" Imported {result.SecretsImported} saved secret(s)."
-                        : ""),
-                CloseButtonText = "OK",
-                XamlRoot = Root.XamlRoot,
-            }.ShowModalAsync();
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Import complete",
+                $"Added {result.Imported}, replaced {result.Replaced}, kept both for "
+                + $"{result.Duplicated}, and kept {result.Kept} existing session(s)."
+                + (result.SecretsImported > 0
+                    ? $" Imported {result.SecretsImported} saved secret(s)."
+                    : ""));
         }
         catch (Exception ex)
         {
@@ -2801,38 +2687,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         }
     }
 
-    private async Task<string?> PromptBackupPassphraseAsync()
-    {
-        var box = new PasswordBox
-        {
-            Header = "Backup passphrase",
-            PasswordRevealMode = PasswordRevealMode.Peek,
-            MinWidth = 360,
-        };
-        var dialog = new ContentDialog
-        {
-            Title = "Encrypted backup",
-            Content = box,
-            PrimaryButtonText = "Continue",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = Root.XamlRoot,
-        };
-        return await dialog.ShowModalAsync() == ContentDialogResult.Primary && box.Password.Length > 0
-            ? box.Password
-            : null;
-    }
-
-    private async Task ShowBackupErrorAsync(string title, Exception exception)
-    {
-        await new ContentDialog
-        {
-            Title = title,
-            Content = exception.Message,
-            CloseButtonText = "OK",
-            XamlRoot = Root.XamlRoot,
-        }.ShowModalAsync();
-    }
+    private Task ShowBackupErrorAsync(string title, Exception exception) =>
+        MessageDialog.ShowMessageAsync(Root.XamlRoot, title, exception.Message);
 
     // ---- Session import ----
 
@@ -2872,13 +2728,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
             if (scan.Importable.Count == 0 && scan.Skipped.Count == 0)
             {
-                await new ContentDialog
-                {
-                    Title = $"Import from {sourceName}",
-                    Content = "No importable SSH or telnet sessions were found.",
-                    CloseButtonText = "OK",
-                    XamlRoot = Root.XamlRoot,
-                }.ShowModalAsync();
+                await MessageDialog.ShowMessageAsync(Root.XamlRoot, $"Import from {sourceName}",
+                    "No importable SSH or telnet sessions were found.");
                 return;
             }
 
@@ -2889,25 +2740,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
             var (imported, duplicates) = Core.Import.SecureCrtImporter.Commit(App.Store, confirmed, App.SshKeys);
             ViewModel.RebuildTree();
-            await new ContentDialog
-            {
-                Title = "Import complete",
-                Content = duplicates == 0
-                    ? $"Imported {imported} session(s)."
-                    : $"Imported {imported} session(s); skipped {duplicates} duplicate(s).",
-                CloseButtonText = "OK",
-                XamlRoot = Root.XamlRoot,
-            }.ShowModalAsync();
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Import complete", duplicates == 0
+                ? $"Imported {imported} session(s)."
+                : $"Imported {imported} session(s); skipped {duplicates} duplicate(s).");
         }
         catch (Exception ex)
         {
-            await new ContentDialog
-            {
-                Title = "Import failed",
-                Content = ex.Message,
-                CloseButtonText = "OK",
-                XamlRoot = Root.XamlRoot,
-            }.ShowModalAsync();
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Import failed", ex.Message);
         }
     }
 
@@ -3206,60 +3045,15 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             ViewModel.UpdateSession(result, dialog.Password);
     }
 
-    private async Task<string?> PromptAsync(string title, string placeholder, string initial)
-    {
-        var box = new TextBox { PlaceholderText = placeholder, Text = initial };
-        var dialog = new ContentDialog
-        {
-            Title = title,
-            Content = box,
-            PrimaryButtonText = "OK",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = Root.XamlRoot,
-        };
-        return await dialog.ShowModalAsync() == ContentDialogResult.Primary ? box.Text : null;
-    }
+    private Task<string?> PromptAsync(string title, string placeholder, string initial) =>
+        TextPromptDialog.PromptAsync(Root.XamlRoot, title, placeholder, initial);
 
-    private static async Task<bool> ShowCloseConfirmationAsync(ContentDialog dialog)
-    {
-        var confirmedByKeyboard = false;
-        dialog.AddHandler(
-            UIElement.PreviewKeyDownEvent,
-            new KeyEventHandler((_, args) =>
-            {
-                if (args.Key != VirtualKey.Y)
-                    return;
-
-                args.Handled = true;
-                confirmedByKeyboard = true;
-                dialog.Hide();
-            }),
-            handledEventsToo: true);
-
-        var result = await dialog.ShowModalAsync();
-        return confirmedByKeyboard || result == ContentDialogResult.Primary;
-    }
-
-    private async Task<bool> ConfirmAsync(
+    private Task<bool> ConfirmAsync(
         string title,
         string message,
         string primaryText = "Delete",
-        bool acceptY = false)
-    {
-        var dialog = new ContentDialog
-        {
-            Title = title,
-            Content = message,
-            PrimaryButtonText = primaryText,
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-            XamlRoot = Root.XamlRoot,
-        };
-        return acceptY
-            ? await ShowCloseConfirmationAsync(dialog)
-            : await dialog.ShowModalAsync() == ContentDialogResult.Primary;
-    }
+        bool acceptY = false) =>
+        ConfirmDialog.ConfirmAsync(Root.XamlRoot, title, message, primaryText, acceptY);
 }
 
 /// <summary>One row in the quick connect dropdown: a saved session match or an ad-hoc target.</summary>

@@ -1318,18 +1318,9 @@ public sealed partial class TabGroupView : UserControl
 
     private async Task RenameTabAsync(TabViewModel tab)
     {
-        var box = new TextBox { Text = tab.Header, PlaceholderText = "Tab title" };
-        var dialog = new ContentDialog
-        {
-            Title = "Rename Tab",
-            Content = box,
-            PrimaryButtonText = "Rename",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = XamlRoot,
-        };
-        if (await dialog.ShowModalAsync() == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(box.Text))
-            tab.TitleOverride = box.Text.Trim();
+        var title = await Dialogs.TextPromptDialog.PromptAsync(XamlRoot, "Rename Tab", "Tab title", tab.Header, "Rename");
+        if (!string.IsNullOrWhiteSpace(title))
+            tab.TitleOverride = title.Trim();
     }
 
     // ---- drag between groups ----

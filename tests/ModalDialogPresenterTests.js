@@ -50,11 +50,11 @@ test("workspace replacement confirmation reaches the shared modal presenter", ()
   const openWorkspace = windowCode.match(
     /private async Task OpenWorkspaceAsync[\s\S]*?\n    }\r?\n\r?\n    private static void OpenWorkspaceInNewWindow/,
   )?.[0] ?? "";
-  const confirm = windowCode.match(
-    /private async Task<bool> ConfirmAsync[\s\S]*?\n    }\r?\n}/,
-  )?.[0] ?? "";
+  const confirm = windowCode.match(/private Task<bool> ConfirmAsync\([\s\S]*?;\r?\n/)?.[0] ?? "";
+  const sharedConfirm = read("Dialogs", "ConfirmDialog.xaml.cs");
 
   assert.match(openWorkspace, /"Replace Current Layout\?"/);
   assert.match(openWorkspace, /ConfirmAsync\(/);
-  assert.match(confirm, /dialog\.ShowModalAsync\(\)/);
+  assert.match(confirm, /ConfirmDialog\.ConfirmAsync\(/);
+  assert.match(sharedConfirm, /await this\.ShowModalAsync\(\)/);
 });

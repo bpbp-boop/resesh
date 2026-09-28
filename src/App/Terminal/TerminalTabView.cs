@@ -339,16 +339,12 @@ public sealed class TerminalTabView : Grid, IDisposable
             return;
         }
 
-        var dialog = new ContentDialog
-        {
-            Title = "Start recording?",
-            Content = "The recording captures all output echoed to this terminal. It can include secrets that a server prints.",
-            PrimaryButtonText = "Start recording",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = XamlRoot,
-        };
-        if (await dialog.ShowModalAsync() != ContentDialogResult.Primary)
+        if (!await Dialogs.ConfirmDialog.ConfirmAsync(
+                XamlRoot,
+                "Start recording?",
+                "The recording captures all output echoed to this terminal. It can include secrets that a server prints.",
+                "Start recording",
+                defaultToPrimary: true))
             return;
         try
         {
@@ -356,13 +352,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         }
         catch (Exception exception)
         {
-            await new ContentDialog
-            {
-                Title = "Recording could not start",
-                Content = exception.Message,
-                CloseButtonText = "OK",
-                XamlRoot = XamlRoot,
-            }.ShowModalAsync();
+            await Dialogs.MessageDialog.ShowMessageAsync(XamlRoot, "Recording could not start", exception.Message);
         }
     }
 
@@ -1578,13 +1568,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             if (_disposed)
                 return;
-            await new ContentDialog
-            {
-                Title = "File Explorer could not open",
-                Content = exception.Message,
-                CloseButtonText = "OK",
-                XamlRoot = XamlRoot,
-            }.ShowModalAsync();
+            await Dialogs.MessageDialog.ShowMessageAsync(XamlRoot, "File Explorer could not open", exception.Message);
         }
     }
 
