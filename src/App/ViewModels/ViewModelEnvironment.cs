@@ -11,4 +11,10 @@ public sealed class ViewModelEnvironment
     public required Func<Session, bool> IsSessionVisible { get; init; }
     public required Action<TabViewModel> ApplySessionSettings { get; init; }
     public required Action<Exception> ReportError { get; init; }
+
+    public Func<IReadOnlyList<Guid>> RecentSessionIds { get; init; } = () => [];
+    public Action<IReadOnlyList<Guid>> SaveRecentSessionIds { get; init; } = _ => { };
+    public Func<string> RecordingDirectory { get; init; } = () => "";
+    public Func<Guid?> DefaultLocalProfileId { get; init; } = () => null;
+    public Action<Guid> SetDefaultLocalProfile { get; init; } = _ => { };
 }

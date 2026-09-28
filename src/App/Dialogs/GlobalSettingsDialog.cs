@@ -2,35 +2,11 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Resesh.App.ViewModels;
 using Resesh.Core.Storage;
 using static Resesh.App.Dialogs.SettingsLayout;
 
 namespace Resesh.App.Dialogs;
-
-public enum GlobalSettingsTarget
-{
-    General,
-    Theme,
-    FontFamily,
-    FontSize,
-    Scrollback,
-    CopyOnSelect,
-    RightClickPaste,
-    ShowStatusBar,
-    ReopenLastLayout,
-    Recording,
-    RecordingDirectory,
-    AlwaysRecord,
-    RewindMinutes,
-    RewindMegabytes,
-    CommandHistory,
-    CommandHistoryDays,
-    Highlighting,
-    Agents,
-    ShowAgentIcons,
-    AgentAlertFlash,
-    AgentAlertSound,
-}
 
 /// <summary>
 /// Edits settings that apply to the whole app, as one tabbed dialog (General / Recording /

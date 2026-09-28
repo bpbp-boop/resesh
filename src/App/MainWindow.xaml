@@ -142,22 +142,24 @@
                 VerticalAlignment="Center" />
 
             <MenuBar x:Name="TitleBarMenus" Grid.Column="2" VerticalAlignment="Center">
+                <!-- Menu items run the view model's commands; each one is enabled only
+                     when its command can run for the active tab. -->
                 <MenuBarItem Title="File">
-                    <MenuFlyoutItem x:Name="NewWindowMenuItem" Text="New Window" Click="NewWindow_Click" />
+                    <MenuFlyoutItem x:Name="NewWindowMenuItem" Text="New Window" Command="{x:Bind ViewModel.NewWindowCommand}" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem Text="New SSH Session…" Click="NewSession_Click" />
-                    <MenuFlyoutItem Text="New Local Profile…" Click="NewLocalProfile_Click" />
-                    <MenuFlyoutItem Text="New Folder…" Click="NewFolder_Click" />
-                    <MenuFlyoutItem Text="Open Recording…" Click="OpenRecording_Click" />
+                    <MenuFlyoutItem Text="New SSH Session…" Command="{x:Bind ViewModel.NewSshSessionCommand}" />
+                    <MenuFlyoutItem Text="New Local Profile…" Command="{x:Bind ViewModel.NewLocalProfileCommand}" />
+                    <MenuFlyoutItem Text="New Folder…" Command="{x:Bind ViewModel.NewFolderCommand}" />
+                    <MenuFlyoutItem Text="Open Recording…" Command="{x:Bind ViewModel.OpenRecordingCommand}" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem Text="Import sessions…" Click="Import_Click" />
-                    <MenuFlyoutItem Text="SSH Keys…" Click="SshKeys_Click" />
-                    <MenuFlyoutItem Text="Export backup…" Click="ExportBackup_Click" />
-                    <MenuFlyoutItem Text="Import backup…" Click="ImportBackup_Click" />
+                    <MenuFlyoutItem Text="Import sessions…" Command="{x:Bind ViewModel.ImportSessionsCommand}" />
+                    <MenuFlyoutItem Text="SSH Keys…" Command="{x:Bind ViewModel.ShowSshKeysCommand}" />
+                    <MenuFlyoutItem Text="Export backup…" Command="{x:Bind ViewModel.ExportBackupCommand}" />
+                    <MenuFlyoutItem Text="Import backup…" Command="{x:Bind ViewModel.ImportBackupCommand}" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem x:Name="SettingsMenuItem" Text="Settings…" Click="Settings_Click" />
+                    <MenuFlyoutItem x:Name="SettingsMenuItem" Text="Settings…" Command="{x:Bind ViewModel.OpenSettingsCommand}" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem Text="Exit" Click="Exit_Click" />
+                    <MenuFlyoutItem Text="Exit" Command="{x:Bind ViewModel.ExitCommand}" />
                 </MenuBarItem>
                 <MenuBarItem x:Name="WorkspacesMenu" Title="Workspaces" />
                 <MenuBarItem Title="View">
@@ -165,53 +167,77 @@
                         x:Name="SessionsPaneMenuItem"
                         Text="Sessions pane"
                         IsChecked="True"
-                        Click="SessionsPaneMenu_Click" />
+                        Command="{x:Bind ViewModel.ToggleSessionsPaneCommand}" />
                     <ToggleMenuFlyoutItem
                         x:Name="StatusBarMenuItem"
                         Text="Status bar"
                         IsChecked="True"
-                        Click="StatusBarMenu_Click" />
+                        Command="{x:Bind ViewModel.ToggleStatusBarCommand}" />
                     <ToggleMenuFlyoutItem
                         x:Name="FullScreenMenuItem"
                         Text="Full screen"
-                        Click="FullScreenMenu_Click" />
+                        Command="{x:Bind ViewModel.ToggleFullScreenCommand}" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem
                         x:Name="CommandPaletteMenuItem"
                         Text="Command Palette…"
-                        Click="CommandPaletteMenu_Click" />
+                        Command="{x:Bind ViewModel.ShowCommandPaletteCommand}" />
                     <MenuFlyoutItem
                         x:Name="CommandHistoryMenuItem"
                         Text="Command History…"
-                        Click="CommandHistoryMenu_Click" />
+                        Command="{x:Bind ViewModel.ShowCommandHistoryCommand}" />
                     <MenuFlyoutItem
                         x:Name="KeyboardShortcutsMenuItem"
                         Text="Keyboard Shortcuts…"
-                        Click="KeyboardShortcutsMenu_Click" />
-                    <MenuFlyoutItem Text="Welcome" Click="WelcomeMenu_Click" />
+                        Command="{x:Bind ViewModel.ShowKeyboardShortcutsCommand}" />
+                    <MenuFlyoutItem Text="Welcome" Command="{x:Bind ViewModel.OpenWelcomeCommand}" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem Text="Expand All" Click="ExpandAll_Click" />
-                    <MenuFlyoutItem Text="Collapse All" Click="CollapseAll_Click" />
+                    <MenuFlyoutItem Text="Expand All" Command="{x:Bind ViewModel.ExpandAllCommand}" />
+                    <MenuFlyoutItem Text="Collapse All" Command="{x:Bind ViewModel.CollapseAllCommand}" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem x:Name="SplitRightMenuItem" Text="Split Right" Click="SplitRightMenu_Click" />
-                    <MenuFlyoutItem x:Name="SplitDownMenuItem" Text="Split Down" Click="SplitDownMenu_Click" />
-                    <MenuFlyoutItem x:Name="FilePaneMenuItem" Text="File Pane" Click="FilePaneMenu_Click" />
+                    <MenuFlyoutItem x:Name="SplitRightMenuItem" Text="Split Right" Command="{x:Bind ViewModel.SplitRightCommand}" />
+                    <MenuFlyoutItem x:Name="SplitDownMenuItem" Text="Split Down" Command="{x:Bind ViewModel.SplitDownCommand}" />
+                    <MenuFlyoutItem x:Name="FilePaneMenuItem" Text="File Pane" Command="{x:Bind ViewModel.ToggleFilePaneCommand}" />
                 </MenuBarItem>
+                <!-- Verbs and remote-only entries follow the active tab's kind
+                     (Disconnect/Stop, Reconnect/Restart). -->
                 <MenuBarItem Title="Session">
-                    <MenuFlyoutItem x:Name="ReconnectMenuItem" Text="Reconnect" Click="ReconnectMenu_Click" />
-                    <MenuFlyoutItem x:Name="DisconnectMenuItem" Text="Disconnect" Click="DisconnectMenu_Click" />
-                    <MenuFlyoutItem x:Name="SendBreakMenuItem" Text="Send Break" Visibility="Collapsed"
-                        AutomationProperties.AutomationId="SendBreakMenu" Click="SendBreakMenu_Click" />
-                    <MenuFlyoutItem x:Name="ManageRemoteMenuItem" Text="Manage Remote Sessions…"
+                    <MenuFlyoutItem
+                        x:Name="ReconnectMenuItem"
+                        Text="{x:Bind ViewModel.ActiveStartAgainVerb, Mode=OneWay}"
+                        Command="{x:Bind ViewModel.ReconnectCommand}" />
+                    <MenuFlyoutItem
+                        x:Name="DisconnectMenuItem"
+                        Text="{x:Bind ViewModel.ActiveStopVerb, Mode=OneWay}"
+                        Command="{x:Bind ViewModel.DisconnectCommand}" />
+                    <MenuFlyoutItem
+                        x:Name="SendBreakMenuItem"
+                        Text="Send Break"
+                        AutomationProperties.AutomationId="SendBreakMenu"
+                        Visibility="{x:Bind ViewModel.ShowSendBreak, Mode=OneWay}"
+                        Command="{x:Bind ViewModel.SendBreakCommand}" />
+                    <MenuFlyoutItem
+                        x:Name="ManageRemoteMenuItem"
+                        Text="Manage Remote Sessions…"
                         AutomationProperties.AutomationId="ManageRemoteSessionsMenu"
-                        Visibility="Collapsed" IsEnabled="False" Click="ManageRemoteMenu_Click" />
+                        Visibility="{x:Bind ViewModel.ShowManageRemoteSessions, Mode=OneWay}"
+                        Command="{x:Bind ViewModel.ManageRemoteSessionsCommand}" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem x:Name="CloneMenuItem" Text="Clone" Click="CloneMenu_Click" />
-                    <MenuFlyoutItem Text="Pin Tab" Click="PinTabMenu_Click" />
-                    <MenuFlyoutItem Text="Session Options…" Click="SessionOptionsMenu_Click" />
+                    <MenuFlyoutItem x:Name="CloneMenuItem" Text="Clone" Command="{x:Bind ViewModel.CloneTabCommand}" />
+                    <MenuFlyoutItem
+                        Text="{x:Bind ViewModel.PinTabTitle, Mode=OneWay}"
+                        Command="{x:Bind ViewModel.TogglePinCommand}" />
+                    <MenuFlyoutItem Text="Session Options…" Command="{x:Bind ViewModel.EditSessionSettingsCommand}" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem x:Name="EndRemoteMenuItem" Text="End Remote Session…" Click="EndRemoteMenu_Click" />
-                    <MenuFlyoutItem x:Name="CloseTabMenuItem" Text="Close Tab" Click="CloseTabMenu_Click" />
+                    <MenuFlyoutItem
+                        x:Name="EndRemoteMenuItem"
+                        Text="End Remote Session…"
+                        Visibility="{x:Bind ViewModel.ShowEndRemoteSession, Mode=OneWay}"
+                        Command="{x:Bind ViewModel.EndRemoteSessionCommand}" />
+                    <MenuFlyoutItem
+                        x:Name="CloseTabMenuItem"
+                        Text="{x:Bind ViewModel.CloseTabTitle, Mode=OneWay}"
+                        Command="{x:Bind ViewModel.CloseTabCommand}" />
                 </MenuBarItem>
             </MenuBar>
 
@@ -270,7 +296,7 @@
                 <!-- Primary action creates a saved SSH session. Local profiles stay in the menu. -->
                 <SplitButton
                     x:Name="NewSessionButton"
-                    Click="NewSessionButton_Click"
+                    Command="{x:Bind ViewModel.NewSshSessionCommand}"
                     AutomationProperties.Name="New SSH session"
                     ToolTipService.ToolTip="Create a new SSH session">
                     <StackPanel Orientation="Horizontal" Spacing="6">
@@ -293,7 +319,7 @@
                 <Button
                     x:Name="SettingsButton"
                     AutomationProperties.Name="Settings"
-                    Click="Settings_Click"
+                    Command="{x:Bind ViewModel.OpenSettingsCommand}"
                     Background="Transparent"
                     BorderThickness="0"
                     ToolTipService.ToolTip="Settings">
@@ -340,7 +366,7 @@
                         Padding="0"
                         Background="Transparent"
                         BorderThickness="0"
-                        Click="SessionsPaneToggle_Click"
+                        Command="{x:Bind ViewModel.ToggleSessionsPaneCommand}"
                         ToolTipService.ToolTip="Show or hide the sessions pane"
                         AutomationProperties.Name="Show or hide the sessions pane">
                         <FontIcon Glyph="&#xE700;" FontSize="16" />
@@ -514,7 +540,7 @@
                         Height="30"
                         Padding="0"
                         Background="{StaticResource SessionInputBrush}"
-                        Click="ExpandAll_Click"
+                        Command="{x:Bind ViewModel.ExpandAllCommand}"
                         ToolTipService.ToolTip="Expand all"
                         AutomationProperties.Name="Expand all">
                         <PathIcon
@@ -528,7 +554,7 @@
                         Height="30"
                         Padding="0"
                         Background="{StaticResource SessionInputBrush}"
-                        Click="CollapseAll_Click"
+                        Command="{x:Bind ViewModel.CollapseAllCommand}"
                         ToolTipService.ToolTip="Collapse all"
                         AutomationProperties.Name="Collapse all">
                         <PathIcon
@@ -567,12 +593,12 @@
                     </TreeView.Resources>
                     <TreeView.ContextFlyout>
                         <MenuFlyout>
-                            <MenuFlyoutItem Text="New SSH Session…" Click="NewSession_Click" />
-                            <MenuFlyoutItem Text="New Local Profile…" Click="NewLocalProfile_Click" />
-                            <MenuFlyoutItem Text="New Folder…" Click="NewFolder_Click" />
+                            <MenuFlyoutItem Text="New SSH Session…" Command="{x:Bind ViewModel.NewSshSessionCommand}" />
+                            <MenuFlyoutItem Text="New Local Profile…" Command="{x:Bind ViewModel.NewLocalProfileCommand}" />
+                            <MenuFlyoutItem Text="New Folder…" Command="{x:Bind ViewModel.NewFolderCommand}" />
                             <MenuFlyoutSeparator />
-                            <MenuFlyoutItem Text="Expand All" Click="ExpandAll_Click" />
-                            <MenuFlyoutItem Text="Collapse All" Click="CollapseAll_Click" />
+                            <MenuFlyoutItem Text="Expand All" Command="{x:Bind ViewModel.ExpandAllCommand}" />
+                            <MenuFlyoutItem Text="Collapse All" Command="{x:Bind ViewModel.CollapseAllCommand}" />
                         </MenuFlyout>
                     </TreeView.ContextFlyout>
                 </TreeView>
@@ -612,7 +638,7 @@
                         Opacity="0.7"
                         Foreground="{StaticResource SessionTreeMutedForegroundBrush}"
                         TextAlignment="Center" />
-                    <Button Content="Import sessions…" Click="Import_Click" HorizontalAlignment="Center" />
+                    <Button Content="Import sessions…" Command="{x:Bind ViewModel.ImportSessionsCommand}" HorizontalAlignment="Center" />
                 </StackPanel>
             </Grid>
 
@@ -639,7 +665,7 @@
                         Padding="0"
                         Background="Transparent"
                         BorderThickness="0"
-                        Click="SaveWorkspace_Click"
+                        Command="{x:Bind ViewModel.SaveWorkspaceAsCommand}"
                         ToolTipService.ToolTip="Save current layout as a workspace"
                         AutomationProperties.Name="Save current layout as a workspace">
                         <FontIcon Glyph="&#xE710;" FontSize="13" />
@@ -687,29 +713,35 @@
                                         <MenuFlyout>
                                             <MenuFlyoutItem
                                                 Text="Open"
+                                                Tag="open"
                                                 CommandParameter="{x:Bind}"
-                                                Click="OpenWorkspaceMenu_Click" />
+                                                Click="WorkspaceRowMenu_Click" />
                                             <MenuFlyoutItem
                                                 Text="Open in new window"
+                                                Tag="newWindow"
                                                 CommandParameter="{x:Bind}"
-                                                Click="OpenWorkspaceInNewWindowMenu_Click" />
+                                                Click="WorkspaceRowMenu_Click" />
                                             <MenuFlyoutItem
                                                 Text="Open additively"
+                                                Tag="additive"
                                                 CommandParameter="{x:Bind}"
-                                                Click="OpenWorkspaceAdditivelyMenu_Click" />
+                                                Click="WorkspaceRowMenu_Click" />
                                             <MenuFlyoutSeparator />
                                             <MenuFlyoutItem
                                                 Text="Update from current layout…"
+                                                Tag="update"
                                                 CommandParameter="{x:Bind}"
-                                                Click="UpdateWorkspaceMenu_Click" />
+                                                Click="WorkspaceRowMenu_Click" />
                                             <MenuFlyoutItem
                                                 Text="Rename…"
+                                                Tag="rename"
                                                 CommandParameter="{x:Bind}"
-                                                Click="RenameWorkspaceMenu_Click" />
+                                                Click="WorkspaceRowMenu_Click" />
                                             <MenuFlyoutItem
                                                 Text="Delete…"
+                                                Tag="delete"
                                                 CommandParameter="{x:Bind}"
-                                                Click="DeleteWorkspaceMenu_Click" />
+                                                Click="WorkspaceRowMenu_Click" />
                                         </MenuFlyout>
                                     </Button.Flyout>
                                 </Button>
@@ -748,7 +780,7 @@
                 <ListView
                     x:Name="RecentSessionList"
                     Grid.Row="1"
-                    ItemsSource="{x:Bind RecentSessions, Mode=OneWay}"
+                    ItemsSource="{x:Bind ViewModel.RecentSessions, Mode=OneWay}"
                     SelectionMode="None"
                     IsItemClickEnabled="True"
                     ItemClick="RecentSessionList_ItemClick">
@@ -794,6 +826,7 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
                     Text="Open a saved session to add it here."
+                    Visibility="{x:Bind ViewModel.HasNoRecentSessions, Mode=OneWay}"
                     TextWrapping="Wrap"
                     TextAlignment="Center"
                     Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
@@ -822,7 +855,7 @@
                         Padding="0"
                         Background="Transparent"
                         BorderThickness="0"
-                        Click="RefreshRecordings_Click"
+                        Command="{x:Bind ViewModel.RefreshRecordingsCommand}"
                         ToolTipService.ToolTip="Refresh recordings"
                         AutomationProperties.Name="Refresh recordings">
                         <FontIcon Glyph="&#xE72C;" FontSize="13" />
@@ -834,7 +867,7 @@
                         Padding="0"
                         Background="Transparent"
                         BorderThickness="0"
-                        Click="OpenRecordingsFolder_Click"
+                        Command="{x:Bind ViewModel.OpenRecordingsFolderCommand}"
                         ToolTipService.ToolTip="Open recordings folder"
                         AutomationProperties.Name="Open recordings folder">
                         <FontIcon Glyph="&#xE8B7;" FontSize="14" />
@@ -843,7 +876,7 @@
                 <ListView
                     x:Name="RecordingList"
                     Grid.Row="1"
-                    ItemsSource="{x:Bind Recordings, Mode=OneWay}"
+                    ItemsSource="{x:Bind ViewModel.Recordings, Mode=OneWay}"
                     SelectionMode="None"
                     IsItemClickEnabled="True"
                     ItemClick="RecordingList_ItemClick">
@@ -875,7 +908,8 @@
                     Margin="20"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Text="No recordings found in the configured folder."
+                    Text="{x:Bind ViewModel.RecordingsStatusText, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.ShowRecordingsStatus, Mode=OneWay}"
                     TextWrapping="Wrap"
                     TextAlignment="Center"
                     Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
@@ -884,7 +918,7 @@
                     Margin="8"
                     HorizontalAlignment="Stretch"
                     Content="Open recording…"
-                    Click="OpenRecording_Click" />
+                    Command="{x:Bind ViewModel.OpenRecordingCommand}" />
             </Grid>
 
             <Border

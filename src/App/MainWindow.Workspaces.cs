@@ -119,11 +119,11 @@ public sealed partial class MainWindow
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        var menuItems = new List<MenuFlyoutItemBase>();
-        var saveAs = new MenuFlyoutItem { Text = "Save current layout as workspace…" };
-        saveAs.Click += async (_, _) => await SaveCurrentWorkspaceAsAsync();
-        menuItems.Add(saveAs);
-        menuItems.Add(new MenuFlyoutSeparator());
+        var menuItems = new List<MenuFlyoutItemBase>
+        {
+            new MenuFlyoutItem { Text = "Save current layout as workspace…", Command = ViewModel.SaveWorkspaceAsCommand },
+            new MenuFlyoutSeparator(),
+        };
 
         if (App.Workspaces.Workspaces.Count == 0)
         {
@@ -137,28 +137,22 @@ public sealed partial class MainWindow
         {
             foreach (var workspace in App.Workspaces.Workspaces)
             {
-                var workspaceMenu = new MenuFlyoutSubItem { Text = workspace.Name };
-                var open = new MenuFlyoutItem { Text = "Open" };
-                open.Click += async (_, _) => await OpenWorkspaceAsync(workspace, additive: false);
-                var newWindow = new MenuFlyoutItem { Text = "Open in new window" };
-                newWindow.Click += (_, _) => OpenWorkspaceInNewWindow(workspace);
-                var additive = new MenuFlyoutItem { Text = "Open additively" };
-                additive.Click += async (_, _) => await OpenWorkspaceAsync(workspace, additive: true);
-                var update = new MenuFlyoutItem { Text = "Update from current layout…" };
-                update.Click += async (_, _) => await UpdateWorkspaceAsync(workspace);
-                var rename = new MenuFlyoutItem { Text = "Rename…" };
-                rename.Click += async (_, _) => await RenameWorkspaceAsync(workspace);
-                var delete = new MenuFlyoutItem { Text = "Delete…" };
-                delete.Click += async (_, _) => await DeleteWorkspaceAsync(workspace);
-
-                workspaceMenu.Items.Add(open);
-                workspaceMenu.Items.Add(newWindow);
-                workspaceMenu.Items.Add(additive);
-                workspaceMenu.Items.Add(new MenuFlyoutSeparator());
-                workspaceMenu.Items.Add(update);
-                workspaceMenu.Items.Add(rename);
-                workspaceMenu.Items.Add(delete);
-                menuItems.Add(workspaceMenu);
+                MenuFlyoutItem Item(string text, System.Windows.Input.ICommand command) =>
+                    new() { Text = text, Command = command, CommandParameter = workspace };
+                menuItems.Add(new MenuFlyoutSubItem
+                {
+                    Text = workspace.Name,
+                    Items =
+                    {
+                        Item("Open", ViewModel.OpenWorkspaceCommand),
+                        Item("Open in new window", ViewModel.OpenWorkspaceInNewWindowCommand),
+                        Item("Open additively", ViewModel.OpenWorkspaceAdditivelyCommand),
+                        new MenuFlyoutSeparator(),
+                        Item("Update from current layout…", ViewModel.UpdateWorkspaceCommand),
+                        Item("Rename…", ViewModel.RenameWorkspaceCommand),
+                        Item("Delete…", ViewModel.DeleteWorkspaceCommand),
+                    },
+                });
             }
         }
 
@@ -167,13 +161,10 @@ public sealed partial class MainWindow
         foreach (var menuItem in menuItems)
             WorkspacesMenu.Items.Add(menuItem);
     }
-    private async void SaveWorkspace_Click(object sender, RoutedEventArgs e) =>
-        await SaveCurrentWorkspaceAsAsync();
-
-    private async void WorkspaceList_ItemClick(object sender, ItemClickEventArgs e)
+    private void WorkspaceList_ItemClick(object sender, ItemClickEventArgs e)
     {
         if (e.ClickedItem is WorkspaceItemViewModel item)
-            await OpenWorkspaceAsync(item.Workspace, additive: false);
+            ViewModel.OpenWorkspaceCommand.Execute(item.Workspace);
     }
 
     private void WorkspaceList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
@@ -181,40 +172,23 @@ public sealed partial class MainWindow
         WorkspaceOperations.Reorder(Workspaces.Select(item => item.Workspace.Id).ToList());
     }
 
-    private async void OpenWorkspaceMenu_Click(object sender, RoutedEventArgs e)
+    /// <summary>Runs a workspace row's menu command. The row template cannot bind to the
+    /// window's view model, so each item names its command in Tag.</summary>
+    private void WorkspaceRowMenu_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
-            await OpenWorkspaceAsync(item.Workspace, additive: false);
-    }
-
-    private void OpenWorkspaceInNewWindowMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
-            OpenWorkspaceInNewWindow(item.Workspace);
-    }
-
-    private async void OpenWorkspaceAdditivelyMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
-            await OpenWorkspaceAsync(item.Workspace, additive: true);
-    }
-
-    private async void UpdateWorkspaceMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
-            await UpdateWorkspaceAsync(item.Workspace);
-    }
-
-    private async void RenameWorkspaceMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
-            await RenameWorkspaceAsync(item.Workspace);
-    }
-
-    private async void DeleteWorkspaceMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item })
-            await DeleteWorkspaceAsync(item.Workspace);
+        if (sender is not MenuFlyoutItem { CommandParameter: WorkspaceItemViewModel item, Tag: string action })
+            return;
+        System.Windows.Input.ICommand command = action switch
+        {
+            "open" => ViewModel.OpenWorkspaceCommand,
+            "newWindow" => ViewModel.OpenWorkspaceInNewWindowCommand,
+            "additive" => ViewModel.OpenWorkspaceAdditivelyCommand,
+            "update" => ViewModel.UpdateWorkspaceCommand,
+            "rename" => ViewModel.RenameWorkspaceCommand,
+            "delete" => ViewModel.DeleteWorkspaceCommand,
+            _ => throw new ArgumentOutOfRangeException(nameof(sender), action, "Unknown workspace action."),
+        };
+        command.Execute(item.Workspace);
     }
 
 

@@ -9,7 +9,10 @@ const source = fs.readFileSync(
 
 test("all window-close actions use the shared open-session confirmation guard", () => {
   assert.match(source, /AppWindow\.Closing \+= AppWindow_Closing/);
-  assert.match(source, /private void Exit_Click\([^)]*\) => Close\(\)/);
+  // File > Exit closes the window like the title-bar button, so AppWindow_Closing guards it.
+  const services = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "MainWindow.Services.cs"), "utf8");
+  assert.match(services, /void IMainWindowServices\.CloseWindow\(\) => Close\(\);/);
 
   const handler = source.match(
     /private void AppWindow_Closing[\s\S]*?\n    }\r?\n\r?\n    private async Task ConfirmWindowCloseAsync/)?.[0] ?? "";

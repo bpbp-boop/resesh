@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -21,13 +22,11 @@ using Windows.UI.ViewManagement;
 
 namespace Resesh.App;
 
-public sealed partial class MainWindow : Window, ITabGroupHost
+public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServices
 {
     public MainViewModel ViewModel { get; }
 
-    public ObservableCollection<TreeNodeViewModel> RecentSessions { get; } = [];
     public ObservableCollection<WorkspaceItemViewModel> Workspaces { get; } = [];
-    public ObservableCollection<RecordingItemViewModel> Recordings { get; } = [];
 
     private readonly Dictionary<TabGroupViewModel, TabGroupView> _groupViews = [];
     private SplitLayout<TabGroupViewModel> _groupLayout;
@@ -44,7 +43,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
     private string _selectedRailTab = "sessions";
     private bool _sessionsPaneOpen;
     private double _sessionsPaneWidth = 280;
-    private int _recordingsLoadVersion;
     private Storyboard? _sessionsPaneStoryboard;
     private FrameworkElement? _animatedSessionsPane;
     private int _sessionsPaneAnimationVersion;
@@ -66,11 +64,16 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             }
         },
         ReportError = App.ReportRecoverableError,
+        RecentSessionIds = () => App.Settings.Current.RecentSessionIds,
+        SaveRecentSessionIds = ids => App.SaveSettings(App.Settings.Current with { RecentSessionIds = ids }),
+        RecordingDirectory = () => App.Settings.Current.RecordingDirectory,
+        DefaultLocalProfileId = () => App.Settings.Current.DefaultLocalProfileId,
+        SetDefaultLocalProfile = id => App.SaveSettings(App.Settings.Current with { DefaultLocalProfileId = id }),
     };
 
     public MainWindow()
     {
-        ViewModel = new MainViewModel(App.Store, App.Credentials, _viewModelEnvironment);
+        ViewModel = new MainViewModel(App.Store, App.Credentials, _viewModelEnvironment, this);
         _groupLayout = new SplitLayout<TabGroupViewModel>(ViewModel.Groups[0]);
         InitializeComponent();
         // TreeViewItem consumes Enter before the TreeView's normal KeyDown event. Listen to
@@ -95,18 +98,15 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ViewModel.TreeRebuilt += () =>
         {
             // Rebuilds reuse surviving nodes; only drop selections that left the tree.
-            _treeSelection.RemoveWhere(node => !ViewModel.IsInTree(node));
+            ViewModel.PruneTreeSelection();
             ScheduleExpansionSync();
             SyncEmptyState();
-            RefreshRecentSessions();
+            ViewModel.RefreshRecentSessions();
         };
-        // The Session menubar renames its verbs per the active tab's capabilities
-        // (Disconnect/Stop, Reconnect/Restart) and hides remote-only entries.
         ViewModel.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(MainViewModel.StatusText))
             {
-                SyncSessionMenu();
                 App.RefreshWindowTitles();
             }
             else if (e.PropertyName == nameof(MainViewModel.Progress))
@@ -271,40 +271,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         var tab = source ?? ViewModel.ActiveTab;
         var group = tab is null ? ViewModel.FocusedGroup : ViewModel.GroupOf(tab);
 
+        // Focus and navigation keys act on the window's layout directly.
         switch (id)
         {
-            case ShortcutIds.CommandPalette:
-                ShowCommandPalette(openedFromTerminal: fromTerminal);
-                return true;
-            case ShortcutIds.QuickConnect:
-                QuickConnectBox.Focus(FocusState.Programmatic);
-                return true;
-            case ShortcutIds.CommandHistory:
-                if (HistoryOverlay.IsOpen)
-                    CloseHistory();
-                else
-                    ShowHistory(openedFromTerminal: fromTerminal);
-                return true;
-            case ShortcutIds.NewLocalTab:
-                OpenDefaultLocalProfile();
-                return true;
-            case ShortcutIds.NewWindow:
-                App.OpenNewWindow();
-                return true;
-            case ShortcutIds.Settings:
-                _ = ShowThenRefocusAsync(() => ShowSettingsAsync(GlobalSettingsTarget.General), fromTerminal);
-                return true;
-            case ShortcutIds.KeyboardShortcuts:
-                _ = ShowThenRefocusAsync(ShowKeyboardShortcutsAsync, fromTerminal);
-                return true;
-            case ShortcutIds.ToggleSessionsPane:
-                SetSessionsPaneOpen(!_sessionsPaneOpen);
-                return true;
-            case ShortcutIds.FilterSessions:
-                FocusSessionFilter();
-                return true;
-            case ShortcutIds.FullScreen:
-                ToggleFullScreen();
+            case ShortcutIds.CommandHistory when HistoryOverlay.IsOpen:
+                CloseHistory();
                 return true;
             case ShortcutIds.NextTab or ShortcutIds.PreviousTab:
                 return SelectTab(group, TabNavigation.Cycle(
@@ -315,52 +286,38 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 return SelectTab(group, TabNavigation.GoTo(chord + 1, group.Tabs.Count));
             case ShortcutIds.LastTab:
                 return SelectTab(group, TabNavigation.GoTo(9, group.Tabs.Count));
+            case ShortcutIds.FocusGroupLeft:
+                return tab is not null && FocusNeighborGroup(group, NavigationDirection.Left);
+            case ShortcutIds.FocusGroupRight:
+                return tab is not null && FocusNeighborGroup(group, NavigationDirection.Right);
+            case ShortcutIds.FocusGroupUp:
+                return tab is not null && FocusNeighborGroup(group, NavigationDirection.Up);
+            case ShortcutIds.FocusGroupDown:
+                return tab is not null && FocusNeighborGroup(group, NavigationDirection.Down);
         }
 
-        if (tab is null)
+        // Everything else runs the command the menus and palette run. It runs only where
+        // its CanExecute allows, so a key that does not apply keeps its normal meaning.
+        if (ViewModel.Commands.ForShortcut(id) is not { } descriptor)
             return false;
-        switch (id)
+        var parameter = descriptor.CurrentParameter ?? source;
+        if (!descriptor.Command.CanExecute(parameter))
+            return false;
+        _invokedFromTerminal = fromTerminal;
+        try
         {
-            case ShortcutIds.CloseTab:
-                _ = RequestCloseTabAsync(tab);
-                return true;
-            case ShortcutIds.CloneTab:
-                if (tab.IsPlayback || tab.IsOnboarding)
-                    return false;
-                CloneSession(tab);
-                return true;
-            case ShortcutIds.ReconnectTab:
-                if (tab.State is not (TabConnectionState.Disconnected or TabConnectionState.Exited))
-                    return false;
-                ReconnectTab(tab);
-                return true;
-            case ShortcutIds.SendBreak:
-                return tab.View is TerminalTabView breakView && breakView.SendBreak();
-            case ShortcutIds.MoveTabLeft or ShortcutIds.MoveTabRight:
-                MoveTab(tab, id == ShortcutIds.MoveTabRight ? 1 : -1);
-                return true;
-            case ShortcutIds.FilePane:
-                ToggleFilePane(tab);
-                return true;
-            case ShortcutIds.SplitRight or ShortcutIds.SplitDown:
-                if (group.Tabs.Count <= 1)
-                    return false;
-                if (id == ShortcutIds.SplitRight)
-                    SplitRight(tab);
-                else
-                    SplitDown(tab);
-                return true;
-            case ShortcutIds.FocusGroupLeft:
-                return FocusNeighborGroup(group, NavigationDirection.Left);
-            case ShortcutIds.FocusGroupRight:
-                return FocusNeighborGroup(group, NavigationDirection.Right);
-            case ShortcutIds.FocusGroupUp:
-                return FocusNeighborGroup(group, NavigationDirection.Up);
-            case ShortcutIds.FocusGroupDown:
-                return FocusNeighborGroup(group, NavigationDirection.Down);
+            descriptor.Command.Execute(parameter);
         }
-        return false;
+        finally
+        {
+            _invokedFromTerminal = false;
+        }
+        return true;
     }
+
+    /// <summary>True while a terminal-forwarded shortcut runs its command, so overlays and
+    /// dialogs it opens return focus to the terminal.</summary>
+    private bool _invokedFromTerminal;
 
     /// <summary>Opens a dialog from a shortcut. WinUI allows one ContentDialog at a time, so
     /// the key does nothing while another dialog is showing.</summary>
@@ -543,216 +500,78 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             DispatcherQueue.TryEnqueue(view.FocusTerminal);
     }
 
+    /// <summary>The palette lists the view model's available commands, plus two things only
+    /// the window knows: its open tabs (after the application commands) and the active
+    /// terminal page's own actions (before Close Tab).</summary>
     private IReadOnlyList<CommandPaletteEntry> BuildCommandPalette()
     {
         var commands = new List<CommandPaletteEntry>();
+        var openTabsAdded = false;
+        foreach (var descriptor in ViewModel.Commands.PaletteCommands())
+        {
+            if (!openTabsAdded && descriptor.Category != "Application")
+            {
+                commands.AddRange(BuildOpenTabCommands());
+                openTabsAdded = true;
+            }
+            if (ReferenceEquals(descriptor.Command, ViewModel.CloseTabCommand))
+                commands.AddRange(BuildTerminalPageCommands());
+            commands.Add(ToPaletteEntry(descriptor));
+        }
+        if (!openTabsAdded)
+            commands.AddRange(BuildOpenTabCommands());
+        return commands;
+    }
 
-        void Add(
-            string category,
-            string title,
-            string keywords,
-            Func<Task> execute,
-            string shortcut = "",
-            bool keepActionFocus = false) =>
+    private static CommandPaletteEntry ToPaletteEntry(CommandDescriptor descriptor)
+    {
+        var parameter = descriptor.CurrentParameter;
+        return new CommandPaletteEntry
+        {
+            Category = descriptor.Category,
+            Title = descriptor.Title(),
+            Keywords = descriptor.Keywords,
+            Shortcut = descriptor.ShortcutId is { } id ? AppShortcuts.Label(id) : "",
+            KeepActionFocus = descriptor.KeepActionFocus,
+            ExecuteAsync = () =>
+            {
+                if (descriptor.Command is IAsyncRelayCommand asyncCommand)
+                    return asyncCommand.ExecuteAsync(parameter);
+                descriptor.Command.Execute(parameter);
+                return Task.CompletedTask;
+            },
+        };
+    }
+
+    /// <summary>Terminal actions run in the page, as their keys do; Find keeps focus in its field.</summary>
+    private IReadOnlyList<CommandPaletteEntry> BuildTerminalPageCommands()
+    {
+        if (ViewModel.ActiveTab is not { View: TerminalTabView terminal, IsLocked: false })
+            return [];
+
+        var commands = new List<CommandPaletteEntry>();
+        void AddTerminal(string title, string keywords, string id, bool keepFocus = false) =>
             commands.Add(new CommandPaletteEntry
             {
-                Category = category,
+                Category = "Terminal",
                 Title = title,
                 Keywords = keywords,
-                Shortcut = shortcut,
-                ExecuteAsync = execute,
-                KeepActionFocus = keepActionFocus,
-            });
-
-        static Func<Task> Sync(Action action) => () =>
-        {
-            action();
-            return Task.CompletedTask;
-        };
-
-        static string Keys(string id) => AppShortcuts.Label(id);
-
-        Add("Application", "New Window", "open separate window",
-            Sync(() => App.OpenNewWindow()), Keys(ShortcutIds.NewWindow));
-        Add("Application", "Open Default Local Terminal", "new session shell tab",
-            Sync(OpenDefaultLocalProfile), Keys(ShortcutIds.NewLocalTab));
-        Add("Application", "Quick Connect", "ssh telnet search sessions connect",
-            Sync(() => QuickConnectBox.Focus(FocusState.Programmatic)), Keys(ShortcutIds.QuickConnect),
-            keepActionFocus: true);
-        Add("Application", "Keyboard Shortcuts", "keys hotkeys keybindings accelerators help reference",
-            ShowKeyboardShortcutsAsync, Keys(ShortcutIds.KeyboardShortcuts));
-        Add("Application", "Search Command History", "history commands output past previous find grep ran",
-            Sync(() => ShowHistory()), Keys(ShortcutIds.CommandHistory), keepActionFocus: true);
-        commands.AddRange(BuildOpenTabCommands());
-        Add("View", "Filter Sessions", "search tree",
-            Sync(FocusSessionFilter), Keys(ShortcutIds.FilterSessions), keepActionFocus: true);
-        Add("View", AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen ? "Exit Full Screen" : "Full Screen",
-            "fullscreen maximize window", Sync(ToggleFullScreen), Keys(ShortcutIds.FullScreen));
-        Add("View", "Expand All Session Folders", "tree folders",
-            Sync(() =>
-            {
-                ViewModel.SetExpansionAll(true);
-                ScheduleExpansionSync();
-            }));
-        Add("View", "Collapse All Session Folders", "tree folders",
-            Sync(() =>
-            {
-                ViewModel.SetExpansionAll(false);
-                ScheduleExpansionSync();
-            }));
-        Add("View", _sessionsPaneOpen ? "Hide Sessions Pane" : "Show Sessions Pane",
-            "sidebar rail sessions recent recordings",
-            Sync(() => SetSessionsPaneOpen(!_sessionsPaneOpen)), Keys(ShortcutIds.ToggleSessionsPane));
-        Add("View", App.Settings.Current.ShowStatusBar ? "Hide Status Bar" : "Show Status Bar",
-            "bottom bar interface chrome",
-            Sync(() => SetStatusBarVisible(!App.Settings.Current.ShowStatusBar)));
-        Add("View", "Show Workspaces", "sidebar rail layouts",
-            Sync(() => SelectSessionsRailTab("workspaces")));
-        Add("View", "Show Recent Sessions", "sidebar rail history",
-            Sync(() => SelectSessionsRailTab("recent")));
-        Add("View", "Show Recordings", "sidebar rail playback asciicast",
-            Sync(() => SelectSessionsRailTab("recordings")));
-        Add("View", "Open Welcome", "onboarding setup getting started import theme",
-            Sync(OpenWelcome), keepActionFocus: true);
-
-        Add("Global Settings", "Open Settings", "preferences options",
-            () => ShowSettingsAsync(GlobalSettingsTarget.General), Keys(ShortcutIds.Settings));
-        Add("Global Settings", "Theme", "appearance color scheme",
-            () => ShowSettingsAsync(GlobalSettingsTarget.Theme));
-        Add("Global Settings", "Terminal Font Family", "appearance typeface",
-            () => ShowSettingsAsync(GlobalSettingsTarget.FontFamily));
-        Add("Global Settings", "Status Bar", "appearance interface bottom chrome",
-            () => ShowSettingsAsync(GlobalSettingsTarget.ShowStatusBar));
-        Add("Global Settings", "Font Size", "appearance terminal text",
-            () => ShowSettingsAsync(GlobalSettingsTarget.FontSize));
-        Add("Global Settings", "Scrollback Lines", "terminal history buffer",
-            () => ShowSettingsAsync(GlobalSettingsTarget.Scrollback));
-        Add("Global Settings", "Copy Selected Text", "clipboard copy on select",
-            () => ShowSettingsAsync(GlobalSettingsTarget.CopyOnSelect));
-        Add("Global Settings", "Paste With Right-Click", "clipboard mouse",
-            () => ShowSettingsAsync(GlobalSettingsTarget.RightClickPaste));
-        Add("Global Settings", "Reopen Last Layout at Startup", "workspace launch restore groups",
-            () => ShowSettingsAsync(GlobalSettingsTarget.ReopenLastLayout));
-        Add("Global Settings", "Command History", "keep save commands output search retention",
-            () => ShowSettingsAsync(GlobalSettingsTarget.CommandHistory));
-        Add("Global Settings", "Automatic Recording", "record sessions disk",
-            () => ShowSettingsAsync(GlobalSettingsTarget.AlwaysRecord));
-        Add("Global Settings", "Recording Directory", "record sessions path folder",
-            () => ShowSettingsAsync(GlobalSettingsTarget.RecordingDirectory));
-        Add("Global Settings", "Rewind History", "minutes terminal capture",
-            () => ShowSettingsAsync(GlobalSettingsTarget.RewindMinutes));
-        Add("Global Settings", "Rewind Memory Limit", "megabytes terminal capture",
-            () => ShowSettingsAsync(GlobalSettingsTarget.RewindMegabytes));
-        Add("Global Settings", "Highlighting", "rules regex colors",
-            () => ShowSettingsAsync(GlobalSettingsTarget.Highlighting));
-        Add("Global Settings", "Agent Display", "icons tab coding agents",
-            () => ShowSettingsAsync(GlobalSettingsTarget.ShowAgentIcons));
-        Add("Global Settings", "Agent Taskbar Alerts", "flash notification",
-            () => ShowSettingsAsync(GlobalSettingsTarget.AgentAlertFlash));
-        Add("Global Settings", "Agent Notification Sound", "alert audio",
-            () => ShowSettingsAsync(GlobalSettingsTarget.AgentAlertSound));
-
-        Add("Workspaces", "Save Current Layout as Workspace", "tabs groups layout save as",
-            SaveCurrentWorkspaceAsAsync);
-        foreach (var workspace in App.Workspaces.Workspaces)
-        {
-            Add("Workspaces", $"Open {workspace.Name}", "tabs groups layout replace",
-                () => OpenWorkspaceAsync(workspace, additive: false));
-            Add("Workspaces", $"Open {workspace.Name} in New Window", "tabs groups layout separate",
-                Sync(() => OpenWorkspaceInNewWindow(workspace)));
-            Add("Workspaces", $"Open {workspace.Name} Additively", "tabs groups layout add",
-                () => OpenWorkspaceAsync(workspace, additive: true));
-        }
-
-        if (ViewModel.ActiveTab is not { } tab)
-            return commands;
-
-        if (tab.IsOnboarding)
-        {
-            Add("Tab", "Close Welcome", "current active tab", () => RequestCloseTabAsync(tab), Keys(ShortcutIds.CloseTab));
-            return commands;
-        }
-
-        if (!tab.IsPlayback && App.Store.Find(tab.Session.Id) is not null)
-        {
-            Add("Session Settings", "Open Session Options", "current active tab profile",
-                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.General));
-            Add("Session Settings", "Theme Override", "current active tab appearance inherit",
-                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.Theme));
-            Add("Session Settings", "Terminal Font Family Override", "current active tab appearance inherit",
-                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.FontFamily));
-            Add("Session Settings", "Font Size Override", "current active tab appearance inherit",
-                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.FontSize));
-            Add("Session Settings", "Scrollback Lines Override", "current active tab history inherit",
-                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.Scrollback));
-            Add("Session Settings", "Automatic Recording Override", "current active tab inherit",
-                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.AlwaysRecord));
-            Add("Session Settings", "Command History Override", "current active tab inherit keep",
-                () => OpenSessionSettingsAsync(tab, SessionSettingsTarget.CommandHistory));
-        }
-
-        var group = ViewModel.GroupOf(tab);
-        if (tab.State is TabConnectionState.Disconnected or TabConnectionState.Exited)
-            Add("Tab", $"{tab.Capabilities.StartAgainVerb} Tab", "current active session",
-                Sync(() => ReconnectTab(tab)), Keys(ShortcutIds.ReconnectTab));
-        if (tab.State == TabConnectionState.Connected)
-            Add("Tab", $"{tab.Capabilities.StopVerb} Tab", "current active session",
-                Sync(() => DisconnectTab(tab)));
-        if (tab.Capabilities.SendBreak && tab.State == TabConnectionState.Connected && !tab.IsLocked)
-            Add("Tab", "Send Break", "telnet console serial break boot interrupt rommon password recovery",
-                Sync(() => SendBreak(tab)), Keys(ShortcutIds.SendBreak));
-        if (CanManageRemoteSessions(tab))
-            Add("Tab", "Manage Remote Sessions", "tmux persistent shells resume end close command running age",
-                () => ManageRemoteSessionsAsync(tab));
-        if (!tab.IsPlayback)
-        {
-            Add("Tab", "Clone Tab", "duplicate copy current active session next adjacent",
-                Sync(() => CloneSession(tab)), Keys(ShortcutIds.CloneTab));
-            Add("Tab", tab.IsPinned ? "Unpin Tab" : "Pin Tab", "current active keep",
-                Sync(() => TogglePin(tab)));
-        }
-        if (group.Tabs.Count > 1)
-        {
-            Add("Tab", "Split Right", "current active move group",
-                Sync(() => SplitRight(tab)), Keys(ShortcutIds.SplitRight));
-            Add("Tab", "Split Down", "current active move group",
-                Sync(() => SplitDown(tab)), Keys(ShortcutIds.SplitDown));
-        }
-        if (!tab.IsPlayback && tab.View is TerminalTabView)
-            Add("Tab", "Search This Session's History", "command history output past previous current active",
-                Sync(() => ShowHistory(sessionId: tab.Session.Id)), keepActionFocus: true);
-        if (tab.View is TerminalTabView terminalView && !tab.IsLocked)
-        {
-            if (tab.CanNotifyCommandCompletion)
-                Add("Tab", tab.IsCompletionNotificationArmed ? "Cancel Completion Notification" : "Notify When Command Finishes",
-                    "current command completion alert bell", Sync(() => tab.ToggleCompletionNotificationCommand.Execute(null)));
-            Add("Tab", terminalView.IsCommandsPanelOpen ? "Hide Commands Panel" : "Show Commands Panel",
-                "current active terminal history", Sync(terminalView.ToggleCommandsPanel), Keys(ShortcutIds.CommandsPanel));
-            if (tab.Capabilities.FilePane)
-            {
-                Add("Tab", terminalView.IsFilePaneOpen ? "Hide File Pane" : "Show File Pane",
-                    "current active files browser", Sync(() => ToggleFilePane(tab)), Keys(ShortcutIds.FilePane));
-            }
-        }
-        if (tab.View is TerminalTabView terminal && !tab.IsLocked)
-        {
-            // Terminal actions run in the page, as their keys do; Find keeps focus in its field.
-            void AddTerminal(string title, string keywords, string id, bool keepFocus = false) =>
-                Add("Terminal", title, keywords, Sync(() =>
+                Shortcut = AppShortcuts.Label(id),
+                KeepActionFocus = keepFocus,
+                ExecuteAsync = () =>
                 {
                     if (keepFocus)
                         terminal.FocusTerminal();
                     terminal.InvokeTerminalShortcut(id);
-                }), Keys(id), keepActionFocus: keepFocus);
-            AddTerminal("Find", "search text scrollback", ShortcutIds.Find, keepFocus: true);
-            AddTerminal("Select All", "selection copy", ShortcutIds.SelectAll);
-            AddTerminal("Clear Scrollback", "history buffer reset clean", ShortcutIds.ClearScrollback);
-            AddTerminal("Zoom In", "font size bigger larger", ShortcutIds.ZoomIn);
-            AddTerminal("Zoom Out", "font size smaller", ShortcutIds.ZoomOut);
-            AddTerminal("Reset Zoom", "font size default", ShortcutIds.ZoomReset);
-        }
-        Add("Tab", "Close Tab", "current active session", () => RequestCloseTabAsync(tab), Keys(ShortcutIds.CloseTab));
-
+                    return Task.CompletedTask;
+                },
+            });
+        AddTerminal("Find", "search text scrollback", ShortcutIds.Find, keepFocus: true);
+        AddTerminal("Select All", "selection copy", ShortcutIds.SelectAll);
+        AddTerminal("Clear Scrollback", "history buffer reset clean", ShortcutIds.ClearScrollback);
+        AddTerminal("Zoom In", "font size bigger larger", ShortcutIds.ZoomIn);
+        AddTerminal("Zoom Out", "font size smaller", ShortcutIds.ZoomOut);
+        AddTerminal("Reset Zoom", "font size default", ShortcutIds.ZoomReset);
         return commands;
     }
 
@@ -770,10 +589,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             _ = OpenSessionEditorAsync(existing: null, defaultFolder: "");
     }
 
-    private async void NewSessionButton_Click(SplitButton sender, SplitButtonClickEventArgs args) =>
-        await OpenSessionEditorAsync(existing: null, defaultFolder: "");
-
-    /// <summary>Rebuilds the + Session menu: visible local profiles, then the two creators.</summary>
+    /// <summary>Rebuilds the + Session menu: visible local profiles, then the creators.</summary>
     private void NewSessionFlyout_Opening(object sender, object e)
     {
         NewSessionFlyout.Items.Clear();
@@ -793,13 +609,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
         if (NewSessionFlyout.Items.Count > 0)
             NewSessionFlyout.Items.Add(new MenuFlyoutSeparator());
-        AddItem(NewSessionFlyout, "New SSH Session…", () => _ = OpenSessionEditorAsync(existing: null, defaultFolder: ""));
-        AddItem(NewSessionFlyout, "New Telnet Session…", () => _ = OpenSessionEditorAsync(existing: null, defaultFolder: "", SessionKind.Telnet));
-        AddItem(NewSessionFlyout, "New Local Profile…", () => _ = OpenLocalProfileEditorAsync(existing: null, defaultFolder: ""));
+        NewSessionFlyout.Items.Add(new MenuFlyoutItem { Text = "New SSH Session…", Command = ViewModel.NewSshSessionCommand });
+        NewSessionFlyout.Items.Add(new MenuFlyoutItem { Text = "New Telnet Session…", Command = ViewModel.NewTelnetSessionCommand });
+        NewSessionFlyout.Items.Add(new MenuFlyoutItem { Text = "New Local Profile…", Command = ViewModel.NewLocalProfileCommand });
     }
-
-    private async void NewLocalProfile_Click(object sender, RoutedEventArgs e) =>
-        await OpenLocalProfileEditorAsync(existing: null, defaultFolder: "");
 
     private async Task OpenLocalProfileEditorAsync(
         Session? existing,
@@ -939,10 +752,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         return double.IsFinite(inset) && inset > 0 ? inset : 0;
     }
 
-    private void NewWindow_Click(object sender, RoutedEventArgs e) => App.OpenNewWindow();
-
-    private void Exit_Click(object sender, RoutedEventArgs e) => Close();
-
     private TerminalProgress _taskbarProgress;
 
     /// <summary>Mirrors this window's combined tab progress on its taskbar button.</summary>
@@ -1028,34 +837,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             presenter.IsAlwaysOnTop = PinButton.IsChecked == true;
     }
 
-    /// <summary>Adapts the Session menubar to the active tab's target kind.</summary>
-    private void SyncSessionMenu()
-    {
-        var caps = ViewModel.ActiveTab?.Capabilities;
-        ReconnectMenuItem.Text = caps?.StartAgainVerb ?? "Reconnect";
-        DisconnectMenuItem.Text = caps?.StopVerb ?? "Disconnect";
-        var active = ViewModel.ActiveTab;
-        SendBreakMenuItem.Visibility = caps?.SendBreak == true && active?.IsPlayback == false
-            ? Visibility.Visible : Visibility.Collapsed;
-        SendBreakMenuItem.IsEnabled = active is { State: TabConnectionState.Connected, IsLocked: false };
-        EndRemoteMenuItem.Visibility = caps is null || caps.RemoteSession
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        var tab = ViewModel.ActiveTab;
-        ManageRemoteMenuItem.Visibility = tab is { IsPlayback: false, IsOnboarding: false }
-            && tab.Capabilities.RemoteSession && tab.Session.Persistent
-                ? Visibility.Visible : Visibility.Collapsed;
-        ManageRemoteMenuItem.IsEnabled = CanManageRemoteSessions(tab);
-    }
-
-    private void StatusBarMenu_Click(object sender, RoutedEventArgs e) =>
-        SetStatusBarVisible(StatusBarMenuItem.IsChecked);
-
-
-    private void CommandPaletteMenu_Click(object sender, RoutedEventArgs e) => ShowCommandPalette();
-
-    private void CommandHistoryMenu_Click(object sender, RoutedEventArgs e) => ShowHistory();
-
     // ---- Command history overlay ----
 
     private DependencyObject? _historyPreviousFocus;
@@ -1121,82 +902,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             _ = FocusManager.TryFocusAsync(_historyPreviousFocus, FocusState.Programmatic);
         _historyPreviousFocus = null;
         _historyOpenedFromTerminal = false;
-    }
-
-    private void KeyboardShortcutsMenu_Click(object sender, RoutedEventArgs e) =>
-        _ = ShowThenRefocusAsync(ShowKeyboardShortcutsAsync, refocusTerminal: false);
-
-    private void FullScreenMenu_Click(object sender, RoutedEventArgs e) => ToggleFullScreen();
-
-    private void WelcomeMenu_Click(object sender, RoutedEventArgs e) => OpenWelcome();
-
-    // Menu items act on the focused group's selected tab; they no-op when idle.
-    private void SplitRightMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.ActiveTab is not { } tab)
-            return;
-        if (ViewModel.GroupOf(tab).Tabs.Count > 1)
-            SplitRight(tab);
-    }
-
-    private void SplitDownMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.ActiveTab is { } tab && ViewModel.GroupOf(tab).Tabs.Count > 1)
-            SplitDown(tab);
-    }
-
-    private void FilePaneMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.ActiveTab is { } tab)
-            ToggleFilePane(tab);
-    }
-
-    private void ReconnectMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.ActiveTab is { } tab)
-            ReconnectTab(tab);
-    }
-
-    private void DisconnectMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.ActiveTab is { } tab)
-            DisconnectTab(tab);
-    }
-
-    private void ManageRemoteMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.ActiveTab is { } tab)
-            _ = ManageRemoteSessionsAsync(tab);
-    }
-
-    private void CloneMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.ActiveTab is { IsPlayback: false } tab)
-            CloneSession(tab);
-    }
-
-    private void PinTabMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.ActiveTab is { IsPlayback: false } tab)
-            TogglePin(tab);
-    }
-
-    private void SessionOptionsMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.ActiveTab is { IsPlayback: false } tab)
-            _ = OpenSessionOptionsAsync(tab);
-    }
-
-    private void EndRemoteMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.ActiveTab is { } tab)
-            _ = EndRemoteSessionAsync(tab);
-    }
-
-    private void CloseTabMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.ActiveTab is { } tab)
-            _ = RequestCloseTabAsync(tab);
     }
 
     // ---- Quick connect ----
@@ -1353,7 +1058,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             {
                 App.ReportRecoverableError(exception);
             }
-            RefreshRecentSessions();
+            ViewModel.RefreshRecentSessions();
         }
         return tab;
     }
@@ -1387,7 +1092,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         tab.CompletionRequested += completion => App.WindowFor(tab)?.OnCommandCompletion(tab, completion);
     }
 
-    private async void OpenRecording_Click(object sender, RoutedEventArgs e)
+    private async Task<string?> PickRecordingFileAsync()
     {
         try
         {
@@ -1399,11 +1104,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             picker.FileTypeFilter.Add(".cast");
             WinRT.Interop.InitializeWithWindow.Initialize(
                 picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-            var file = await picker.PickSingleFileAsync();
-            if (file is null)
-                return;
-
-            await OpenRecordingPathAsync(file.Path);
+            return (await picker.PickSingleFileAsync())?.Path;
         }
         catch (Exception exception)
         {
@@ -1414,6 +1115,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
                 CloseButtonText = "OK",
                 XamlRoot = Root.XamlRoot,
             }.ShowModalAsync();
+            return null;
         }
     }
 
@@ -2180,12 +1882,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     public void SendBreak(TabViewModel tab) => (tab.View as TerminalTabView)?.SendBreak();
 
-    private void SendBreakMenu_Click(object sender, RoutedEventArgs e)
-    {
-        if (ViewModel.ActiveTab is { } tab)
-            SendBreak(tab);
-    }
-
     public void DisconnectTab(TabViewModel tab)
     {
         if (tab.View is TerminalTabView view && tab.State == TabConnectionState.Connected)
@@ -2319,12 +2015,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     // ---- settings ----
 
-    private async void SshKeys_Click(object sender, RoutedEventArgs e) =>
-        await Dialogs.SshKeyManagerDialog.ShowAsync(Root.XamlRoot, App.SshKeys, App.Store, App.Credentials);
-
-    private async void Settings_Click(object sender, RoutedEventArgs e) =>
-        await ShowSettingsAsync(GlobalSettingsTarget.General);
-
     /// <summary>Shows Settings with reversible theme and highlighting previews.
     /// Only the dialog's own fields are
     /// rebased onto the live settings, so anything saved while the dialog sat open (pane
@@ -2358,7 +2048,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         ApplySettingsToApp();
         App.PruneCommandHistory();
         if (_sessionsPaneOpen && _selectedRailTab == "recordings")
-            _ = RefreshRecordingsAsync();
+            _ = ViewModel.RefreshRecordingsAsync();
     }
 
     /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
@@ -2465,9 +2155,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         _selectedRailTab = NormalizeRailTab(settings.SessionsRailTab);
         _sessionsPaneOpen = settings.SessionsPaneOpen;
         ApplySessionsRailLayout();
-        RefreshRecentSessions();
+        ViewModel.RefreshRecentSessions();
         if (_sessionsPaneOpen && _selectedRailTab == "recordings")
-            _ = RefreshRecordingsAsync();
+            _ = ViewModel.RefreshRecordingsAsync();
     }
 
     private static string NormalizeRailTab(string? tab) => tab switch
@@ -2524,9 +2214,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             StartSessionsPaneAnimation(opening: true, distance: 24, animateChrome: false);
 
         if (_selectedRailTab == "recent")
-            RefreshRecentSessions();
+            ViewModel.RefreshRecentSessions();
         else if (_selectedRailTab == "recordings")
-            _ = RefreshRecordingsAsync();
+            _ = ViewModel.RefreshRecordingsAsync();
     }
 
     private void SetSessionsPaneOpen(bool open)
@@ -2547,7 +2237,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             ApplySessionsRailLayout();
             StartSessionsPaneAnimation(opening: true);
             if (_selectedRailTab == "recordings")
-                _ = RefreshRecordingsAsync();
+                _ = ViewModel.RefreshRecordingsAsync();
         }
         else
         {
@@ -2685,12 +2375,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             SessionsRailTab = _selectedRailTab,
         });
 
-    private void SessionsPaneToggle_Click(object sender, RoutedEventArgs e) =>
-        SetSessionsPaneOpen(!_sessionsPaneOpen);
-
-    private void SessionsPaneMenu_Click(object sender, RoutedEventArgs e) =>
-        SetSessionsPaneOpen(SessionsPaneMenuItem.IsChecked);
-
     private void SessionsRail_SelectionChanged(
         NavigationView sender,
         NavigationViewSelectionChangedEventArgs e)
@@ -2699,88 +2383,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             SelectSessionsRailTab(tab);
     }
 
-    private void RefreshRecentSessions()
-    {
-        var persisted = App.Settings.Current.RecentSessionIds
-            .Where(id => App.Store.Find(id) is not null)
-            .Distinct()
-            .Take(12)
-            .ToList();
-        var visible = ViewModel.VisibleSessions.ToDictionary(session => session.Id);
+    // ListView has no item-click command; each rail list forwards its click to one.
 
-        RecentSessions.Clear();
-        foreach (var id in persisted)
-        {
-            if (visible.TryGetValue(id, out var session))
-                RecentSessions.Add(TreeNodeViewModel.ForSession(session));
-        }
-        NoRecentSessionsState.Visibility = RecentSessions.Count == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+    private void RecentSessionList_ItemClick(object sender, ItemClickEventArgs e) =>
+        ViewModel.ConnectRecentCommand.Execute(e.ClickedItem);
 
-        if (!persisted.SequenceEqual(App.Settings.Current.RecentSessionIds))
-            App.SaveSettings(App.Settings.Current with { RecentSessionIds = persisted });
-    }
-
-    private void RecentSessionList_ItemClick(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is TreeNodeViewModel { Session: { } session })
-            ConnectSession(session);
-    }
-
-    private async Task RefreshRecordingsAsync()
-    {
-        var loadVersion = ++_recordingsLoadVersion;
-        NoRecordingsState.Text = "Loading recordings…";
-        NoRecordingsState.Visibility = Recordings.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
-        try
-        {
-            var directory = Path.GetFullPath(
-                Environment.ExpandEnvironmentVariables(App.Settings.Current.RecordingDirectory));
-            var items = await Task.Run(() =>
-            {
-                var folder = new DirectoryInfo(directory);
-                if (!folder.Exists)
-                    return new List<RecordingItemViewModel>();
-                return folder.EnumerateFiles("*.cast", SearchOption.TopDirectoryOnly)
-                    .OrderByDescending(file => file.LastWriteTimeUtc)
-                    .Take(200)
-                    .Select(RecordingItemViewModel.FromFile)
-                    .ToList();
-            });
-            if (loadVersion != _recordingsLoadVersion)
-                return;
-
-            Recordings.Clear();
-            foreach (var item in items)
-                Recordings.Add(item);
-            NoRecordingsState.Text = "No recordings found in the configured folder.";
-            NoRecordingsState.Visibility = Recordings.Count == 0
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-        }
-        catch (Exception exception)
-        {
-            if (loadVersion != _recordingsLoadVersion)
-                return;
-            Recordings.Clear();
-            NoRecordingsState.Text = $"Recordings could not be listed.\n{exception.Message}";
-            NoRecordingsState.Visibility = Visibility.Visible;
-        }
-    }
-
-    private async void RefreshRecordings_Click(object sender, RoutedEventArgs e) =>
-        await RefreshRecordingsAsync();
-
-    private async void OpenRecordingsFolder_Click(object sender, RoutedEventArgs e) =>
-        await OpenRecordingsLocationAsync();
-
-    private async void RecordingList_ItemClick(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is RecordingItemViewModel item)
-            await OpenRecordingPathAsync(item.FilePath);
-    }
+    private void RecordingList_ItemClick(object sender, ItemClickEventArgs e) =>
+        ViewModel.OpenRecordingCommand.Execute(e.ClickedItem);
 
     // ---- tree pane persistence ----
 
@@ -3069,23 +2678,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             SessionTree.Focus(FocusState.Keyboard);
     }
 
-    // ---- Toolbar / root context menu ----
-
-    private async void NewSession_Click(object sender, RoutedEventArgs e) =>
-        await OpenSessionEditorAsync(existing: null, defaultFolder: "");
-
-    private async void NewFolder_Click(object sender, RoutedEventArgs e)
-    {
-        var name = await PromptAsync("New Folder", "Folder name", "");
-        if (!string.IsNullOrWhiteSpace(name))
-            ViewModel.CreateFolder(name);
-    }
-
     // ---- Backup export / import ----
 
     private static string BackupDataDirectory => Path.GetDirectoryName(SessionStore.DefaultPath)!;
 
-    private async void ExportBackup_Click(object sender, RoutedEventArgs e)
+    private async Task ExportBackupAsync()
     {
         try
         {
@@ -3137,7 +2734,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
     }
 
-    private async void ImportBackup_Click(object sender, RoutedEventArgs e)
+    private async Task ImportBackupAsync()
     {
         try
         {
@@ -3239,7 +2836,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     // ---- Session import ----
 
-    private async void Import_Click(object sender, RoutedEventArgs e)
+    private async Task ImportSessionsAsync()
     {
         try
         {
@@ -3354,40 +2951,22 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     // ---- Tree selection (Explorer-style: click, Ctrl+click toggle, Shift+click range) ----
 
-    private readonly OrderedSelection<TreeNodeViewModel> _treeSelection =
-        new((node, selected) => node.IsSelected = selected);
-    private IReadOnlyList<TreeNodeViewModel> _selection => _treeSelection.Items;
+    private OrderedSelection<TreeNodeViewModel> TreeSelection => ViewModel.TreeSelection;
     private IReadOnlyList<Session> _dragSessions = [];
 
     private static bool IsKeyDown(VirtualKey key) =>
         Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(key)
             .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
 
-    private void ClearSelection() => _treeSelection.Clear();
+    private void ClearSelection() => TreeSelection.Clear();
 
-    private void SelectOnly(TreeNodeViewModel node) => _treeSelection.SelectOnly(node);
+    private void SelectOnly(TreeNodeViewModel node) => TreeSelection.SelectOnly(node);
 
-    private void ToggleSelection(TreeNodeViewModel node) => _treeSelection.Toggle(node);
+    private void ToggleSelection(TreeNodeViewModel node) => TreeSelection.Toggle(node);
 
     /// <summary>Range select over the flattened visible tree, from the anchor to the clicked node.</summary>
     private void SelectRangeTo(TreeNodeViewModel node) =>
-        _treeSelection.SelectRangeTo(node, VisibleNodes().ToList());
-
-    /// <summary>Nodes in display order, skipping children of collapsed folders.</summary>
-    private IEnumerable<TreeNodeViewModel> VisibleNodes()
-    {
-        static IEnumerable<TreeNodeViewModel> Walk(IEnumerable<TreeNodeViewModel> nodes)
-        {
-            foreach (var node in nodes)
-            {
-                yield return node;
-                if (node.IsFolder && node.IsExpanded)
-                    foreach (var child in Walk(node.Children))
-                        yield return child;
-            }
-        }
-        return Walk(ViewModel.RootNodes);
-    }
+        TreeSelection.SelectRangeTo(node, ViewModel.VisibleNodes().ToList());
 
     /// <summary>True when the tap landed on the expand/collapse chevron rather than the row content.</summary>
     private static bool IsChevronHit(object originalSource)
@@ -3412,9 +2991,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost
         }
 
         var extendRange = IsKeyDown(VirtualKey.Shift);
-        _treeSelection.SelectForKeyboardFocus(
+        TreeSelection.SelectForKeyboardFocus(
             node,
-            VisibleNodes().ToList(),
+            ViewModel.VisibleNodes().ToList(),
             extendRange,
             preserveSelection: IsKeyDown(VirtualKey.Control) && !extendRange);
     }
@@ -3459,69 +3038,25 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private void SessionTree_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (_selection.Count == 0
+        if (TreeSelection.Items.Count == 0
             || KeyBindings.Find((int)e.Key, AppShortcuts.CurrentModifiers(), ShortcutScope.SessionTree)
                 is not var (binding, _))
         {
             return;
         }
 
-        var selection = _selection.ToList();
-        switch (binding.Id)
+        IRelayCommand? command = binding.Id switch
         {
-            case ShortcutIds.OpenSelection:
-                var sessions = SessionsOf(selection).ToList();
-                foreach (var session in sessions)
-                    ConnectSession(session);
-                e.Handled = sessions.Count > 0;
-                break;
-            case ShortcutIds.EditSelection:
-                e.Handled = EditTreeSelection(selection);
-                break;
-            case ShortcutIds.DeleteSelection:
-                e.Handled = DeleteTreeSelection(selection);
-                break;
-        }
-    }
-
-    /// <summary>F2: rename a folder or open a session's editor, as the context menu does.</summary>
-    private bool EditTreeSelection(IReadOnlyList<TreeNodeViewModel> selection)
-    {
-        switch (selection)
-        {
-            case [{ Session: { IsLocal: true } profile }]:
-                _ = OpenLocalProfileEditorAsync(profile, profile.FolderPath);
-                return true;
-            case [{ Session: { } session }]:
-                _ = OpenSessionEditorAsync(session, session.FolderPath);
-                return true;
-            case [{ IsFolder: true, IsLocalRoot: false } folder]:
-                _ = RenameFolderAsync(folder);
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    /// <summary>Delete: the context menu's delete for the selection. Each path confirms first.</summary>
-    private bool DeleteTreeSelection(IReadOnlyList<TreeNodeViewModel> selection)
-    {
-        switch (selection)
-        {
-            case [{ Session: { } session }]:
-                _ = DeleteSessionAsync(session);
-                return true;
-            case [{ IsLocalRoot: true }]:
-                return false;
-            case [{ IsFolder: true } folder]:
-                _ = DeleteFolderAsync(folder);
-                return true;
-            default:
-                if (selection.All(node => node.IsLocalRoot))
-                    return false;
-                _ = DeleteSelectionAsync(selection);
-                return true;
-        }
+            ShortcutIds.OpenSelection => ViewModel.OpenSelectionCommand,
+            ShortcutIds.EditSelection => ViewModel.EditSelectionCommand,   // F2: rename a folder or edit a session
+            ShortcutIds.DeleteSelection => ViewModel.DeleteSelectionCommand, // each path confirms first
+            _ => null,
+        };
+        var selection = TreeSelection.Items.ToList();
+        if (command?.CanExecute(selection) != true)
+            return;
+        command.Execute(selection);
+        e.Handled = true;
     }
 
     // ---- Tree context menu (built per selection: session, folder, or multi) ----
@@ -3543,115 +3078,17 @@ public sealed partial class MainWindow : Window, ITabGroupHost
 
     private MenuFlyout? BuildSelectionMenu()
     {
-        if (_selection.Count == 0)
+        var entries = ViewModel.BuildSelectionMenu();
+        if (entries.Count == 0)
             return null;
         var menu = new MenuFlyout();
-
-        // Single local profile: process verbs, local editor, default-profile toggle.
-        if (_selection is [{ Session: { IsLocal: true } localProfile }])
+        foreach (var entry in entries)
         {
-            AddItem(menu, "Open", () => ConnectSession(localProfile));
-            AddItem(menu, "Open in new window", () => ConnectInNewWindow([localProfile]));
-            menu.Items.Add(new MenuFlyoutSeparator());
-            AddItem(menu, "Edit…", async () => await OpenLocalProfileEditorAsync(localProfile, localProfile.FolderPath));
-            if (App.Settings.Current.DefaultLocalProfileId != localProfile.Id)
-                AddItem(menu, "Set as Default", () =>
-                    App.SaveSettings(App.Settings.Current with { DefaultLocalProfileId = localProfile.Id }));
-            AddItem(menu, "Delete", async () => await DeleteSessionAsync(localProfile));
-            return menu;
-        }
-
-        // Single SSH session: the original per-session menu.
-        if (_selection is [{ Session: { } single }])
-        {
-            AddItem(menu, "Connect", () => ConnectSession(single));
-            AddItem(menu, "Connect in new window", () => ConnectInNewWindow([single]));
-            menu.Items.Add(new MenuFlyoutSeparator());
-            AddItem(menu, "Edit…", async () => await OpenSessionEditorAsync(single, single.FolderPath));
-            AddItem(menu, "Delete", async () => await DeleteSessionAsync(single));
-            return menu;
-        }
-
-        // The permanent Local root: creators and expansion only — never rename/delete/move.
-        if (_selection is [{ IsLocalRoot: true } localRoot])
-        {
-            AddItem(menu, "New Local Profile…", async () => await OpenLocalProfileEditorAsync(existing: null, defaultFolder: ""));
-            AddItem(menu, "New Folder…", async () => await NewSubfolderAsync(localRoot));
-            menu.Items.Add(new MenuFlyoutSeparator());
-            AddItem(menu, "Expand All", () => SetFolderExpansion(localRoot, expanded: true));
-            AddItem(menu, "Collapse All", () => SetFolderExpansion(localRoot, expanded: false));
-            return menu;
-        }
-
-        var selection = _selection.ToList(); // snapshot: the live list mutates before Click fires
-        AddItem(menu, "Connect in Tabs", () =>
-        {
-            foreach (var session in SessionsOf(selection))
-                ConnectSession(session);
-        });
-        AddItem(menu, "Open in new window", () => ConnectInNewWindow(SessionsOf(selection).ToList()));
-        menu.Items.Add(new MenuFlyoutSeparator());
-
-        // Single folder keeps its create/rename items; mixed selections get the shared subset.
-        if (_selection is [{ IsFolder: true } folder])
-        {
-            AddItem(menu, "Expand All", () => SetFolderExpansion(folder, expanded: true));
-            AddItem(menu, "Collapse All", () => SetFolderExpansion(folder, expanded: false));
-            menu.Items.Add(new MenuFlyoutSeparator());
-            if (folder.IsLocalScope)
-                AddItem(menu, "New Local Profile…", async () => await OpenLocalProfileEditorAsync(existing: null, defaultFolder: folder.FolderPath));
-            else
-                AddItem(menu, "New Session…", async () => await OpenSessionEditorAsync(existing: null, defaultFolder: folder.FolderPath));
-            AddItem(menu, "New Folder…", async () => await NewSubfolderAsync(folder));
-            menu.Items.Add(new MenuFlyoutSeparator());
-            AddItem(menu, "Rename…", async () => await RenameFolderAsync(folder));
-            AddItem(menu, "Delete", async () => await DeleteFolderAsync(folder));
-        }
-        else
-        {
-            AddItem(menu, "Delete", async () => await DeleteSelectionAsync(selection));
+            menu.Items.Add(entry.IsSeparator
+                ? new MenuFlyoutSeparator()
+                : new MenuFlyoutItem { Text = entry.Text, Command = entry.Command, CommandParameter = entry.Parameter });
         }
         return menu;
-    }
-
-    private static void AddItem(MenuFlyout menu, string text, Action action)
-    {
-        var item = new MenuFlyoutItem { Text = text };
-        item.Click += (_, _) => action();
-        menu.Items.Add(item);
-    }
-
-    /// <summary>All sessions under a folder node, in display order (subfolders first, recursively).</summary>
-    private static IEnumerable<Session> SessionsUnder(TreeNodeViewModel node)
-    {
-        foreach (var child in node.Children)
-        {
-            if (child.Session is { } session)
-                yield return session;
-            else
-                foreach (var nested in SessionsUnder(child))
-                    yield return nested;
-        }
-    }
-
-    /// <summary>Sessions of the selection: selected sessions plus everything under selected folders, deduplicated.</summary>
-    private static IEnumerable<Session> SessionsOf(IEnumerable<TreeNodeViewModel> nodes)
-    {
-        var seen = new HashSet<Guid>();
-        foreach (var node in nodes)
-        {
-            if (node.Session is { } session)
-            {
-                if (seen.Add(session.Id))
-                    yield return session;
-            }
-            else
-            {
-                foreach (var nested in SessionsUnder(node))
-                    if (seen.Add(nested.Id))
-                        yield return nested;
-            }
-        }
     }
 
     private void ConnectInNewWindow(IReadOnlyList<Session> sessions)
@@ -3663,98 +3100,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             window.ConnectSession(session);
     }
 
-    private static SessionKind KindOf(TreeNodeViewModel node) =>
-        node.IsLocalScope ? SessionKind.Local : SessionKind.Ssh;
-
-    private async Task NewSubfolderAsync(TreeNodeViewModel folder)
-    {
-        var location = folder.IsLocalRoot ? "under Local" : $"inside {folder.FolderPath}";
-        var name = await PromptAsync("New Folder", $"Folder name ({location})", "");
-        if (!string.IsNullOrWhiteSpace(name))
-            ViewModel.CreateFolder(FolderPaths.Combine(folder.FolderPath, name), KindOf(folder));
-    }
-
-    private async Task RenameFolderAsync(TreeNodeViewModel folder)
-    {
-        var name = await PromptAsync("Rename Folder", "New name", folder.Name);
-        if (string.IsNullOrWhiteSpace(name) || name == folder.Name)
-            return;
-        var newPath = FolderPaths.Combine(FolderPaths.Parent(folder.FolderPath), name);
-        ViewModel.RenameFolder(folder.FolderPath, newPath, KindOf(folder));
-    }
-
-    private async Task DeleteFolderAsync(TreeNodeViewModel folder)
-    {
-        var count = ViewModel.CountSessionsUnder(folder.FolderPath, KindOf(folder));
-        var what = folder.IsLocalScope ? "profile(s)" : "session(s)";
-        var confirmed = await ConfirmAsync(
-            "Delete Folder",
-            count == 0
-                ? $"Delete the folder \"{folder.Name}\"?"
-                : $"Delete the folder \"{folder.Name}\" and the {count} {what} inside it?"
-                    + (folder.IsLocalScope ? "" : " Their saved credentials are removed too."));
-        if (confirmed)
-            ViewModel.DeleteFolder(folder.FolderPath, KindOf(folder));
-    }
-
-    private async Task DeleteSessionAsync(Session session)
-    {
-        var confirmed = await ConfirmAsync(
-            "Delete Session",
-            session.IsLocal
-                ? $"Delete the local profile \"{session.Name}\"?"
-                    + (session.BuiltIn ? " (It returns with default settings after an app restart while its shell is installed.)" : "")
-                : session.IsTelnet
-                    ? $"Delete \"{session.Name}\" ({session.Host})?"
-                    : $"Delete \"{session.Name}\" ({session.Host})? Its saved credential is removed too.");
-        if (confirmed)
-            ViewModel.DeleteSession(session);
-    }
-
-    private async Task DeleteSelectionAsync(IReadOnlyList<TreeNodeViewModel> items)
-    {
-        // The virtual Local root is never deletable, even inside a multi-selection.
-        items = items.Where(n => !n.IsLocalRoot).ToList();
-        var folders = items.Where(n => n.IsFolder).ToList();
-        var sessions = items.Where(n => !n.IsFolder).ToList();
-        var affected = SessionsOf(items).Count();
-
-        var parts = new List<string>();
-        if (folders.Count > 0)
-            parts.Add($"{folders.Count} folder(s)");
-        if (sessions.Count > 0)
-            parts.Add($"{sessions.Count} session(s)");
-        var message = $"Delete {string.Join(" and ", parts)}?"
-            + (affected > 0 ? $" {affected} session(s) will be removed; their saved credentials are removed too." : "");
-        if (!await ConfirmAsync("Delete Selection", message))
-            return;
-
-        // Folders first; sessions already removed with a folder become harmless no-ops.
-        foreach (var folder in folders)
-            ViewModel.DeleteFolder(folder.FolderPath, KindOf(folder));
-        foreach (var node in sessions)
-            ViewModel.DeleteSession(node.Session!);
-    }
-
     // ---- Tree expansion bookkeeping ----
-
-    private void SetFolderExpansion(TreeNodeViewModel folder, bool expanded)
-    {
-        ViewModel.SetExpansionUnder(folder, expanded);
-        ScheduleExpansionSync(); // nested containers realize lazily; push state as they appear
-    }
-
-    private void ExpandAll_Click(object sender, RoutedEventArgs e)
-    {
-        ViewModel.SetExpansionAll(true);
-        ScheduleExpansionSync();
-    }
-
-    private void CollapseAll_Click(object sender, RoutedEventArgs e)
-    {
-        ViewModel.SetExpansionAll(false);
-        ScheduleExpansionSync();
-    }
 
     private void SessionTree_Expanding(TreeView sender, TreeViewExpandingEventArgs args)
     {
@@ -3785,7 +3131,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost
             return;
         }
 
-        var draggedSelection = _treeSelection.BeginDrag(draggedNode);
+        var draggedSelection = TreeSelection.BeginDrag(draggedNode);
         // Folders are deliberately immovable. A mixed custom selection is one drag unit,
         // so do not silently move only its session leaves.
         if (draggedSelection.Any(node => node.IsFolder))

@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Resesh.App.ViewModels;
 using Resesh.Core.Local;
 using Resesh.Core.Models;
 using Resesh.Core.Storage;

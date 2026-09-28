@@ -17,7 +17,8 @@ test("settings is one targeted dialog with General / Recording / Highlighting / 
   assert.match(dialog, /SelectorBarItem \{ Text = "Recording" \}/);
   assert.match(dialog, /SelectorBarItem \{ Text = "Highlighting" \}/);
   assert.match(dialog, /SelectorBarItem \{ Text = "Agents" \}/);
-  assert.match(dialog, /enum GlobalSettingsTarget/);
+  // The targets live with the view models, whose commands open Settings at a field.
+  assert.match(read("src", "App", "ViewModels", "SettingsTargets.cs"), /enum GlobalSettingsTarget/);
   assert.match(dialog, /GlobalSettingsTarget initialTarget/);
 });
 
