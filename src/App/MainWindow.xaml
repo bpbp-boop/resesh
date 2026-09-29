@@ -361,10 +361,11 @@
             </Grid.ColumnDefinitions>
 
             <!-- Compact tool rail. Its tabs select the adjacent pane; the top button
-                 collapses that pane without removing access to the three tools. -->
+                 collapses that pane without removing access to the three tools. It stays
+                 above the floating pane (z 4) so that pane slides out from behind it. -->
             <Border
                 Grid.Column="0"
-                Canvas.ZIndex="2"
+                Canvas.ZIndex="5"
                 Background="{StaticResource SessionShellBrush}"
                 BorderBrush="{StaticResource SessionChromeFrameBrush}"
                 BorderThickness="0,0,1,0">
