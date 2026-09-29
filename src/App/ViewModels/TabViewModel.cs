@@ -632,7 +632,7 @@ public sealed class TabViewModel : ObservableObject
     public string StateText => Page switch
     {
         AppPage.Welcome => "setup",
-        AppPage.Settings => "settings",
+        AppPage.Settings => "changes apply immediately",
         _ => State switch
         {
             TabConnectionState.Connecting => IsLocal ? "starting…" : "connecting…",

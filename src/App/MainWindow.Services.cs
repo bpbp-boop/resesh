@@ -84,10 +84,10 @@ public sealed partial class MainWindow
 
     void IMainWindowServices.CloseWindow() => Close();
 
-    // Dialogs opened by a terminal-forwarded key hand focus back to that terminal.
+    // Settings is a tab, so it keeps focus. Dialogs opened by a terminal-forwarded key hand
+    // focus back to that terminal.
 
-    Task IMainWindowServices.ShowSettingsAsync(GlobalSettingsTarget target) =>
-        ShowThenRefocusAsync(() => ShowSettingsAsync(target), _invokedFromTerminal);
+    Task IMainWindowServices.ShowSettingsAsync(GlobalSettingsTarget target) => ShowSettingsAsync(target);
 
     Task IMainWindowServices.ShowSshKeysAsync() =>
         Dialogs.SshKeyManagerDialog.ManageAsync(Root.XamlRoot, App.SshKeys, App.Store, App.Credentials);

@@ -1920,39 +1920,37 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     // ---- settings ----
 
-    /// <summary>Shows Settings with reversible theme and highlighting previews.
-    /// Only the dialog's own fields are
-    /// rebased onto the live settings, so anything saved while the dialog sat open (pane
-    /// widths, pinned tabs, window placement) survives.</summary>
-    private async Task ShowSettingsAsync(GlobalSettingsTarget target)
+    /// <summary>Opens Settings in this window's Settings tab (or reuses the one already
+    /// open) at the given field.</summary>
+    private Task ShowSettingsAsync(GlobalSettingsTarget target)
     {
-        var updated = await GlobalSettingsDialog.ShowAsync(
-            Root.XamlRoot, App.Settings.Current, ApplyThemeToApp, PreviewHighlights, target);
-        if (updated is null)
-            return;
-        App.SaveSettings(App.Settings.Current with
+        var tab = OpenAppPage(AppPage.Settings, _ => CreateSettingsPage());
+        if (tab.View is SettingsPage page)
+            page.Navigate(target);
+        return Task.CompletedTask;
+    }
+
+    private SettingsPage CreateSettingsPage()
+    {
+        var settings = new SettingsViewModel(new SettingsEnvironment
         {
-            Theme = updated.Theme,
-            FontFamily = updated.FontFamily,
-            ShowStatusBar = updated.ShowStatusBar,
-            FontSize = updated.FontSize,
-            Scrollback = updated.Scrollback,
-            CopyOnSelect = updated.CopyOnSelect,
-            RightClickPaste = updated.RightClickPaste,
-            ReopenLastLayoutAtStartup = updated.ReopenLastLayoutAtStartup,
-            AlwaysRecord = updated.AlwaysRecord,
-            RecordingDirectory = updated.RecordingDirectory,
-            RewindMinutes = updated.RewindMinutes,
-            RewindMegabytes = updated.RewindMegabytes,
-            KeepCommandHistory = updated.KeepCommandHistory,
-            CommandHistoryDays = updated.CommandHistoryDays,
-            ShowAgentIcons = updated.ShowAgentIcons,
-            AgentAlertFlash = updated.AgentAlertFlash,
-            AgentAlertSound = updated.AgentAlertSound,
+            Current = () => App.Settings.Current,
+            Save = App.SaveSettings,
+            HistorySize = () => App.History.SizeOnDisk(),
+            HistoryDirectory = App.History.Directory,
+            ClearHistory = () => App.History.Clear(),
+            IsStorageFailure = Resesh.Core.History.CommandHistoryStore.IsStorageFailure,
+            ReportError = App.ReportRecoverableError,
         });
-        App.ApplySettingsToAllWindows();
-        App.RefreshHighlightsInAllWindows();
-        App.PruneCommandHistory();
+        settings.SettingChanged += property => App.ApplySettingChange(property, source: settings);
+        return new SettingsPage(settings);
+    }
+
+    /// <summary>Re-reads this window's Settings page after another window or command changed settings.</summary>
+    private void RefreshSettingsPage(SettingsViewModel? source)
+    {
+        if (ViewModel.FindAppPage(AppPage.Settings)?.View is SettingsPage page && !ReferenceEquals(page.ViewModel, source))
+            page.ViewModel.Refresh();
     }
 
     /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
@@ -1961,11 +1959,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         ApplySettingsToApp(App.Settings.Current);
         if (_sessionsPaneOpen && _selectedRailTab == "recordings")
             _ = ViewModel.RefreshRecordingsAsync();
+        RefreshSettingsPage(source: null);
     }
 
-    /// <summary>Applies one saved setting to this window after Settings, in any window, changed it.</summary>
-    internal void ApplySettingChange(string property)
+    /// <summary>Applies one saved setting to this window after Settings, in any window, changed it.
+    /// <paramref name="source"/> is the Settings page that made the change; it is already current.</summary>
+    internal void ApplySettingChange(string property, SettingsViewModel? source)
     {
+        RefreshSettingsPage(source);
         var settings = App.Settings.Current;
         switch (property)
         {

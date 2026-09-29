@@ -48,14 +48,19 @@ public sealed partial class SettingsViewModel : ObservableObject
         OnPropertyChanged(string.Empty);
     }
 
-    private void Save(Func<AppSettings, AppSettings> change, [CallerMemberName] string property = "")
+    /// <summary>Saves a value a control sent. The control already shows it, so the page is
+    /// told only when the stored value differs: clamped, trimmed, rejected, or unsaved.
+    /// Echoing an accepted value back is not harmless: a ComboBox whose SelectedItem is
+    /// set from inside its own change callback raises that callback again, forever.</summary>
+    private void Save<T>(T sent, Func<AppSettings, AppSettings> change, Func<T> stored,
+        [CallerMemberName] string property = "")
     {
         var current = Current;
         var updated = change(current);
         if (updated != current && _environment.Save(updated))
             SettingChanged?.Invoke(property);
-        // Raised either way: a rejected or unsaved value snaps the control back.
-        OnPropertyChanged(property);
+        if (!EqualityComparer<T>.Default.Equals(stored(), sent))
+            OnPropertyChanged(property);
     }
 
     /// <summary>Whole numbers from a number box, kept in range; NaN (an emptied box) is rejected.</summary>
@@ -71,61 +76,61 @@ public sealed partial class SettingsViewModel : ObservableObject
     public ThemeChoice Theme
     {
         get => ThemeCatalog.Find(Current.Theme);
-        set { if (value is not null) Save(s => s with { Theme = value.Id }); }
+        set { if (value is not null) Save(value, s => s with { Theme = value.Id }, () => Theme); }
     }
 
     public string FontFamily
     {
         get => Current.FontFamily;
-        set => Save(s => s with { FontFamily = NonBlank(value) ?? s.FontFamily });
+        set => Save(value, s => s with { FontFamily = NonBlank(value) ?? s.FontFamily }, () => FontFamily);
     }
 
     public double FontSize
     {
         get => Current.FontSize;
-        set => Save(s => s with { FontSize = Whole(value, 8, 32) ?? s.FontSize });
+        set => Save(value, s => s with { FontSize = Whole(value, 8, 32) ?? s.FontSize }, () => FontSize);
     }
 
     public double Scrollback
     {
         get => Current.Scrollback;
-        set => Save(s => s with { Scrollback = Whole(value, 1000, 100000) ?? s.Scrollback });
+        set => Save(value, s => s with { Scrollback = Whole(value, 1000, 100000) ?? s.Scrollback }, () => Scrollback);
     }
 
     public bool CopyOnSelect
     {
         get => Current.CopyOnSelect;
-        set => Save(s => s with { CopyOnSelect = value });
+        set => Save(value, s => s with { CopyOnSelect = value }, () => CopyOnSelect);
     }
 
     public bool RightClickPaste
     {
         get => Current.RightClickPaste;
-        set => Save(s => s with { RightClickPaste = value });
+        set => Save(value, s => s with { RightClickPaste = value }, () => RightClickPaste);
     }
 
     public bool ShowStatusBar
     {
         get => Current.ShowStatusBar;
-        set => Save(s => s with { ShowStatusBar = value });
+        set => Save(value, s => s with { ShowStatusBar = value }, () => ShowStatusBar);
     }
 
     public bool ReopenLastLayoutAtStartup
     {
         get => Current.ReopenLastLayoutAtStartup;
-        set => Save(s => s with { ReopenLastLayoutAtStartup = value });
+        set => Save(value, s => s with { ReopenLastLayoutAtStartup = value }, () => ReopenLastLayoutAtStartup);
     }
 
     public bool ConfirmCloseActiveSessions
     {
         get => Current.ConfirmCloseActiveSessions;
-        set => Save(s => s with { ConfirmCloseActiveSessions = value });
+        set => Save(value, s => s with { ConfirmCloseActiveSessions = value }, () => ConfirmCloseActiveSessions);
     }
 
     public bool WriteCrashReports
     {
         get => Current.WriteCrashReports;
-        set => Save(s => s with { WriteCrashReports = value });
+        set => Save(value, s => s with { WriteCrashReports = value }, () => WriteCrashReports);
     }
 
     // ---- Recording ----
@@ -133,37 +138,37 @@ public sealed partial class SettingsViewModel : ObservableObject
     public bool KeepCommandHistory
     {
         get => Current.KeepCommandHistory;
-        set => Save(s => s with { KeepCommandHistory = value });
+        set => Save(value, s => s with { KeepCommandHistory = value }, () => KeepCommandHistory);
     }
 
     public double CommandHistoryDays
     {
         get => Current.CommandHistoryDays;
-        set => Save(s => s with { CommandHistoryDays = Whole(value, 1, 3650) ?? s.CommandHistoryDays });
+        set => Save(value, s => s with { CommandHistoryDays = Whole(value, 1, 3650) ?? s.CommandHistoryDays }, () => CommandHistoryDays);
     }
 
     public string RecordingDirectory
     {
         get => Current.RecordingDirectory;
-        set => Save(s => s with { RecordingDirectory = NonBlank(value) ?? s.RecordingDirectory });
+        set => Save(value, s => s with { RecordingDirectory = NonBlank(value) ?? s.RecordingDirectory }, () => RecordingDirectory);
     }
 
     public bool AlwaysRecord
     {
         get => Current.AlwaysRecord;
-        set => Save(s => s with { AlwaysRecord = value });
+        set => Save(value, s => s with { AlwaysRecord = value }, () => AlwaysRecord);
     }
 
     public double RewindMinutes
     {
         get => Current.RewindMinutes;
-        set => Save(s => s with { RewindMinutes = Whole(value, 1, 1440) ?? s.RewindMinutes });
+        set => Save(value, s => s with { RewindMinutes = Whole(value, 1, 1440) ?? s.RewindMinutes }, () => RewindMinutes);
     }
 
     public double RewindMegabytes
     {
         get => Current.RewindMegabytes;
-        set => Save(s => s with { RewindMegabytes = Whole(value, 1, 1024) ?? s.RewindMegabytes });
+        set => Save(value, s => s with { RewindMegabytes = Whole(value, 1, 1024) ?? s.RewindMegabytes }, () => RewindMegabytes);
     }
 
     private string _historyUsageText = "";
@@ -217,7 +222,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         get => Current.ShowAgentIcons;
         set
         {
-            Save(s => s with { ShowAgentIcons = value });
+            Save(value, s => s with { ShowAgentIcons = value }, () => ShowAgentIcons);
             OnPropertyChanged(nameof(AgentAlertsEnabled));
         }
     }
@@ -228,12 +233,12 @@ public sealed partial class SettingsViewModel : ObservableObject
     public bool AgentAlertFlash
     {
         get => Current.AgentAlertFlash;
-        set => Save(s => s with { AgentAlertFlash = value });
+        set => Save(value, s => s with { AgentAlertFlash = value }, () => AgentAlertFlash);
     }
 
     public bool AgentAlertSound
     {
         get => Current.AgentAlertSound;
-        set => Save(s => s with { AgentAlertSound = value });
+        set => Save(value, s => s with { AgentAlertSound = value }, () => AgentAlertSound);
     }
 }

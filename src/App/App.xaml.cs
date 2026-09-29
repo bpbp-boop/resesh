@@ -233,13 +233,14 @@ public partial class App : Application
             window.ApplySettingsToApp();
     }
 
-    /// <summary>Applies one setting the Settings page just saved, in every window.</summary>
-    internal static void ApplySettingChange(string property)
+    /// <summary>Applies one saved setting in every window. <paramref name="source"/> is the
+    /// Settings page that changed it, if any; other windows' Settings pages re-read.</summary>
+    internal static void ApplySettingChange(string property, ViewModels.SettingsViewModel? source = null)
     {
         if (Current is not App app)
             return;
         foreach (var window in app._windows.ToList())
-            window.ApplySettingChange(property);
+            window.ApplySettingChange(property, source);
         if (property is nameof(ViewModels.SettingsViewModel.KeepCommandHistory)
             or nameof(ViewModels.SettingsViewModel.CommandHistoryDays))
             PruneCommandHistory();

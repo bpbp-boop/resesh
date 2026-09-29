@@ -70,6 +70,34 @@ public sealed class SettingsViewModelTests
     }
 
     [Fact]
+    public void AcceptedValueIsNotEchoedBackToTheControl()
+    {
+        // A ComboBox re-raises its SelectedItem callback when set from inside it; echoing
+        // the value it just sent looped until the stack overflowed.
+        var settings = Settings();
+        var raised = new List<string?>();
+        settings.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        settings.Theme = settings.Themes.First(theme => theme.IsLight);
+        settings.CopyOnSelect = false;
+        settings.FontSize = 16;
+
+        Assert.Empty(raised);
+    }
+
+    [Fact]
+    public void ClampedValueIsPushedBackToTheControl()
+    {
+        var settings = Settings();
+        var raised = new List<string?>();
+        settings.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        settings.FontSize = 99;
+
+        Assert.Equal([nameof(SettingsViewModel.FontSize)], raised);
+    }
+
+    [Fact]
     public void NumbersAreWholeAndInRange()
     {
         var settings = Settings();
