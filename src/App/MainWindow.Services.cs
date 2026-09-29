@@ -90,7 +90,7 @@ public sealed partial class MainWindow
         ShowThenRefocusAsync(() => ShowSettingsAsync(target), _invokedFromTerminal);
 
     Task IMainWindowServices.ShowSshKeysAsync() =>
-        Dialogs.SshKeyManagerDialog.ShowAsync(Root.XamlRoot, App.SshKeys, App.Store, App.Credentials);
+        Dialogs.SshKeyManagerDialog.ManageAsync(Root.XamlRoot, App.SshKeys, App.Store, App.Credentials);
 
     Task IMainWindowServices.ShowKeyboardShortcutsAsync() =>
         ShowThenRefocusAsync(ShowKeyboardShortcutsAsync, _invokedFromTerminal);

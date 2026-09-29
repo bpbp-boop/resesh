@@ -9,7 +9,8 @@ const nativeThemes = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal
 const nativeSurface = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "NativeTerminalSurface.cs"), "utf8");
 const globalDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "GlobalSettingsDialog.cs"), "utf8");
 const sessionDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "SessionEditDialog.xaml.cs"), "utf8");
-const localDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "LocalProfileEditDialog.cs"), "utf8");
+const localDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "LocalProfileEditDialog.xaml.cs"), "utf8");
+const localDialogXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "LocalProfileEditDialog.xaml"), "utf8");
 const mainWindow = fs.readFileSync(path.join(__dirname, "..", "src", "App", "MainWindow.xaml.cs"), "utf8");
 const mainWindowXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "MainWindow.xaml"), "utf8");
 const appXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "App.xaml"), "utf8");
@@ -225,7 +226,7 @@ test("the session options form has room for its columns and scrolls every sectio
     assert.match(section, /VerticalScrollBarVisibility="Auto"/);
     assert.match(section, /Padding="0,0,12,0"/);
   }
-  assert.match(localDialog, /MaxHeight = 560,\s*Padding = new Thickness\(0, 0, 12, 0\)/);
+  assert.match(localDialogXaml, /<ScrollViewer MaxHeight="560" Padding="0,0,12,0"/);
   // No negative margins faking the gap between a heading and its caption.
   assert.doesNotMatch(sessionEditXaml, /Margin="0,-\d/);
 });

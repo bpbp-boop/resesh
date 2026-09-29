@@ -427,7 +427,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         FullScreenMenuItem.IsChecked = AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen;
     }
 
-    private Task ShowKeyboardShortcutsAsync() => KeyboardShortcutsDialog.ShowAsync(Root.XamlRoot);
+    private Task ShowKeyboardShortcutsAsync() => KeyboardShortcutsDialog.OpenAsync(Root.XamlRoot);
 
     private void ShowCommandPalette(bool openedFromTerminal = false)
     {

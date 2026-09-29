@@ -1,0 +1,48 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.SshKeyManagerDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Resesh.App.Dialogs"
+    Title="SSH Keys"
+    CloseButtonText="Close"
+    DefaultButton="Close">
+
+    <StackPanel Spacing="10">
+        <TextBlock
+            Text="resesh records where each key is stored. It does not copy or move private-key files."
+            TextWrapping="Wrap" />
+
+        <InfoBar x:Name="Status" IsOpen="False" IsClosable="True" />
+
+        <ListView
+            x:Name="KeyList"
+            MinWidth="520"
+            MaxHeight="260"
+            SelectionMode="Single"
+            ItemsSource="{x:Bind Keys}"
+            AutomationProperties.Name="SSH keys"
+            SelectionChanged="KeyList_SelectionChanged">
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="local:SshKeyItem">
+                    <TextBlock Text="{x:Bind Label}" />
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+
+        <TextBox x:Name="NameBox" Header="Name" IsEnabled="False" />
+        <TextBox x:Name="PathBox" Header="Private-key file" IsReadOnly="True" IsEnabled="False" />
+        <TextBlock
+            x:Name="FingerprintText"
+            FontFamily="Consolas"
+            TextWrapping="Wrap"
+            IsTextSelectionEnabled="True" />
+
+        <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Content="Add…" Click="Add_Click" />
+            <Button x:Name="RenameButton" Content="Rename" IsEnabled="False" Click="Rename_Click" />
+            <Button x:Name="LocateButton" Content="Locate…" IsEnabled="False" Click="Locate_Click" />
+            <Button x:Name="CopyPublicButton" Content="Copy public key" IsEnabled="False" Click="CopyPublic_Click" />
+            <Button x:Name="RemoveButton" Content="Remove" IsEnabled="False" Click="Remove_Click" />
+        </StackPanel>
+    </StackPanel>
+</ContentDialog>
