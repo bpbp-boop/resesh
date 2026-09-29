@@ -109,6 +109,21 @@ public sealed partial class SettingsPage : UserControl
             Show(section);
     }
 
+    // Measured on the page, not the window: Settings can sit in a narrow split.
+    private void Sections_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var mode = e.NewSize.Width switch
+        {
+            >= 760 => NavigationViewPaneDisplayMode.Left,
+            >= 520 => NavigationViewPaneDisplayMode.LeftCompact,
+            _ => NavigationViewPaneDisplayMode.Top,
+        };
+        if (Sections.PaneDisplayMode != mode)
+            Sections.PaneDisplayMode = mode;
+        // Switching to the compact rail keeps an already-open pane open; close it with the change.
+        Sections.IsPaneOpen = mode == NavigationViewPaneDisplayMode.Left;
+    }
+
     private void CommitHighlights()
     {
         try
