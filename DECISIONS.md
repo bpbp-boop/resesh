@@ -819,3 +819,22 @@ collections in two passes: detach nodes that no longer belong in a collection
 the model. The model is still the source of truth for order. Selection survives a
 rebuild; only nodes that left the tree are deselected. A leaf whose session changed
 folder is recreated because `FolderPath` is fixed per node.
+
+## 2026-09-29 - Store files are never saved over when unreadable
+Every JSON store (sessions, SSH keys, highlight rules, settings, workspaces) loads
+through `AtomicFile.Load`. A file that exists but will not parse is copied to
+`<name>.unreadable-<timestamp>` before anything can be written, and the startup notice
+names the copy. When the data came from `.bak`, the next save discards the unreadable
+primary instead of rotating it over the only good backup. Before this, sessions,
+keys and highlights silently loaded empty, and startup's built-in shell sync saved
+twice, which pushed the user's original file out of `.bak`. Known hosts keep their
+own stricter path: an unreadable trust file blocks SSH rather than loading empty.
+
+## 2026-09-29 - Native terminal parked off master
+The Microsoft Terminal surface (parity phases 0-9, about 5,100 lines of C# plus tests,
+build scripts and upstream patches) never shipped: it compiled only with
+`EnableNativeTerminalWip`, and every terminal feature had to be written twice, once
+in xterm.js page code and once in C#. The two cannot share that logic because the
+xterm path runs it inside the page. The work is kept on the `native-terminal` branch
+(tag `native-terminal-parked`) and removed from master. `TerminalSurface` stays as
+the abstraction between the tab and its renderer.

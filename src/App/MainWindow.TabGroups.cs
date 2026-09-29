@@ -129,10 +129,6 @@ public sealed partial class MainWindow
                 owner.Root.ActualWidth < 1200 && owner._sessionsPaneOpen && !owner._paneOverlay)
                 owner.SetSessionsPaneOpen(false);
         };
-        view.FocusRequested += () =>
-        {
-            if (App.WindowFor(tab) is { } owner) owner.FocusGroup(owner.ViewModel.GroupOf(tab));
-        };
         view.UnlockRequested += () => { if (App.WindowFor(tab) is { } owner) _ = owner.HandleUnlockAsync(tab, view); };
         view.IconSuggested += key =>
         {

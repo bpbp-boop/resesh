@@ -168,7 +168,6 @@ public partial class App : Application
         Resesh.Core.Telnet.TelnetTerminalSession.TraceHook = message => MainWindow.Trace(message);
         Resesh.Terminal.TerminalControl.TraceHook = message => MainWindow.Trace(message);
         TaskbarIntegration.TraceHook = message => MainWindow.Trace(message);
-        Resesh.Terminal.NativeTerminalSurface.TraceHook = message => MainWindow.Trace(message);
 #endif
         Resesh.Terminal.TerminalSurface.Shortcuts = AppShortcuts.ForTerminals();
         PruneCommandHistory();

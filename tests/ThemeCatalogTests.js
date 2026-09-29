@@ -5,8 +5,6 @@ const test = require("node:test");
 
 const catalog = fs.readFileSync(path.join(__dirname, "..", "src", "Core", "Storage", "ThemeCatalog.cs"), "utf8");
 const terminal = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "wwwroot", "terminal.html"), "utf8");
-const nativeThemes = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "NativeTerminalThemeCatalog.cs"), "utf8");
-const nativeSurface = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "NativeTerminalSurface.cs"), "utf8");
 const settingsPage = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "SettingsPage.xaml"), "utf8");
 const settingsViewModel = fs.readFileSync(path.join(__dirname, "..", "src", "App", "ViewModels", "SettingsViewModel.cs"), "utf8");
 const appCode = fs.readFileSync(path.join(__dirname, "..", "src", "App", "App.xaml.cs"), "utf8");
@@ -56,26 +54,14 @@ function webPalette(id) {
   });
 }
 
-function nativePalette(id) {
-  const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const body = nativeThemes.match(new RegExp(`\\["${escapedId}"\\]\\s*=\\s*New\\(([\\s\\S]*?)\\),`))?.[1];
-  assert.ok(body, `native palette ${id}`);
-  const colors = [...body.matchAll(/0x([0-9A-F]{6})/g)].map(match => match[1]);
-  assert.equal(colors.length, paletteProperties.length, `${id} native color count`);
-  return colors;
-}
-
+test("every terminal palette defines all twenty colors", () => {
+  for (const id of ids) webPalette(id);
+});
 
 test("each catalog theme has a terminal palette", () => {
   for (const id of ids) {
     if (id === "dark" || id === "light") continue;
     assert.match(terminal, new RegExp(`(?:"${id}"|${id})\\s*:`), id);
-  }
-});
-
-test("native palettes exactly match the WebView palettes", () => {
-  for (const id of ids) {
-    assert.deepEqual(nativePalette(id), webPalette(id), id);
   }
 });
 
@@ -120,15 +106,6 @@ test("partial settings updates preserve the terminal, scrollbar, and light UI th
       assert.equal(context.document.body.style.background, activeTheme.background, id);
     }
   }
-});
-
-test("native font size preserves the WebView CSS-pixel scale", () => {
-  assert.equal([...nativeSurface.matchAll(/ToNativePointSize\(EffectiveFontSize\)/g)].length, 3);
-  assert.match(nativeSurface, /EffectiveFontSize => Math\.Clamp\(_fontSize \+ _zoomDelta, 6, 72\)/);
-  assert.match(
-    nativeSurface,
-    /ToNativePointSize\(int cssPixels\)[\s\S]*?\(cssPixels \* 3 \+ 2\) \/ 4/,
-  );
 });
 
 test("Phthalo Green uses its green shell and terminal palette", () => {

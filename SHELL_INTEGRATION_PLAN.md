@@ -123,7 +123,7 @@ and [README](https://github.com/confetty-sh/terminal-shell-integration/blob/8e0c
 
 - `src/Terminal/wwwroot/addon-ruler.js` consumes OSC 133 for command text, marks,
   completion status, and the command panel. Once OSC 133 is seen, prompt discovery defers.
-- `TerminalControl` and `NativeTerminalSurface` expose directory/context reports;
+- `TerminalControl` exposes directory/context reports;
   `TerminalTabView` validates OSC 7 and OSC 3008 before updating directory tracking.
 - `LocalTerminalSession.Start` controls the exact executable, arguments, and child
   environment immediately before `CreateProcessW`.
