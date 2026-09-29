@@ -516,11 +516,11 @@ public sealed class TerminalTabView : Grid, IDisposable
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromSeconds(2);
         timer.IsRepeating = true;
-        timer.Tick += (_, _) => PollLocalAgentProcesses();
+        timer.Tick += (_, _) => _ = PollLocalAgentProcessesAsync();
         return timer;
     }
 
-    private async void PollLocalAgentProcesses()
+    private async Task PollLocalAgentProcessesAsync()
     {
         if (_disposed || _agentPollBusy)
             return;

@@ -513,7 +513,7 @@ public sealed partial class HistoryView : UserControl
         if (entry is null)
         {
             SetOutput(null);
-            LoadRuns(null);
+            _ = LoadRunsAsync(null);
             return;
         }
 
@@ -556,7 +556,7 @@ public sealed partial class HistoryView : UserControl
         ToolTipService.SetToolTip(OpenSessionButton, "Connect in a new tab (Ctrl+Enter)");
 
         SetOutput(entry);
-        LoadRuns(entry);
+        _ = LoadRunsAsync(entry);
     }
 
     private void AddFact(string label, string value)
