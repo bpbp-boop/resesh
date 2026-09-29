@@ -9,7 +9,7 @@ const pageCode = read("src", "App", "Controls", "SettingsPage.xaml.cs");
 const settings = read("src", "App", "ViewModels", "SettingsViewModel.cs");
 const highlightPanel = read("src", "App", "Controls", "HighlightRulesEditor.xaml") + read("src", "App", "Controls", "HighlightRulesEditor.xaml.cs");
 const agentPanel = read("src", "App", "Controls", "AgentAdaptersView.xaml") + read("src", "App", "Controls", "AgentAdaptersView.xaml.cs");
-const windowCode = read("src", "App", "MainWindow.xaml.cs");
+const windowCode = require("./support/mainWindowSource");
 const windowXaml = read("src", "App", "MainWindow.xaml");
 
 test("settings is an app page tab, not a dialog", () => {

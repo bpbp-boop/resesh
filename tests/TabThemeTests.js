@@ -6,9 +6,7 @@ const test = require("node:test");
 const viewModel = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "ViewModels", "TabViewModel.cs"),
   "utf8");
-const mainWindow = fs.readFileSync(
-  path.join(__dirname, "..", "src", "App", "MainWindow.xaml.cs"),
-  "utf8");
+const mainWindow = require("./support/mainWindowSource");
 const presentation = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "PresentationValues.cs"),
   "utf8");

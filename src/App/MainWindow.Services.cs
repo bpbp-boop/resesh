@@ -1,5 +1,4 @@
 using Microsoft.UI.Windowing;
-using Microsoft.UI.Xaml;
 using Resesh.App.Terminal;
 using Resesh.App.ViewModels;
 using Resesh.Core.Models;

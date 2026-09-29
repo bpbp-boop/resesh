@@ -9,7 +9,7 @@ const treeViewModel = read("src", "App", "ViewModels", "TreeNodeViewModel.cs");
 const presentation = read("src", "App", "PresentationValues.cs");
 const tabXaml = read("src", "App", "Controls", "TabGroupView.xaml");
 const mainXaml = read("src", "App", "MainWindow.xaml");
-const mainCode = read("src", "App", "MainWindow.xaml.cs");
+const mainCode = require("./support/mainWindowSource");
 
 test("tab and tree view models expose data instead of WinUI presentation objects", () => {
   for (const [name, source] of [["tab", tabViewModel], ["tree", treeViewModel]]) {

@@ -10,7 +10,7 @@ const table = read("src", "Core", "Input", "KeyBindings.cs");
 const page = read("src", "Terminal", "wwwroot", "terminal.html");
 const control = read("src", "Terminal", "TerminalControl.cs");
 const native = read("src", "Terminal", "NativeTerminalSurface.cs");
-const mainWindow = read("src", "App", "MainWindow.xaml.cs");
+const mainWindow = require("./support/mainWindowSource");
 
 const idValues = Object.fromEntries(
   [...table.matchAll(/public const string (\w+) = "([^"]+)";/g)].map(m => [m[1], m[2]]));
