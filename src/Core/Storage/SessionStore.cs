@@ -35,7 +35,7 @@ public sealed class SessionStore
     }
 
     public static string DefaultPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "sessions.json");
+        AppDataPaths.Roaming("sessions.json");
 
     /// <summary>Set by <see cref="Load"/> when the file was recovered or unreadable.</summary>
     public string? LoadWarning { get; private set; }

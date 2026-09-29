@@ -2761,7 +2761,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         try
         {
-            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Resesh");
+            var dir = AppDataPaths.Local();
             Directory.CreateDirectory(dir);
             // TraceHook producers (SSH/ConPTY read loops) call this off the UI thread, and a
             // second app instance or a log tail may hold the file — so serialize in-process,

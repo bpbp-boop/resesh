@@ -34,7 +34,7 @@ public sealed class KnownHostsStore
     }
 
     public static string DefaultPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "known_hosts.json");
+        AppDataPaths.Roaming("known_hosts.json");
 
     public void Load()
     {

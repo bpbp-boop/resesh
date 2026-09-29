@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Data.Sqlite;
 using Resesh.Core.Models;
+using Resesh.Core.Storage;
 
 namespace Resesh.Core.History;
 
@@ -62,7 +63,7 @@ public sealed class CommandHistoryStore
     }
 
     public static string DefaultDirectory =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Resesh", "history");
+        AppDataPaths.Local("history");
 
     public string Directory => _directory;
 

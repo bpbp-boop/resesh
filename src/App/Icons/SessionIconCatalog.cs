@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Resesh.Core.Models;
+using Resesh.Core.Storage;
 
 namespace Resesh.App.Icons;
 
@@ -72,8 +73,8 @@ public sealed class SessionIconCatalog
         return (int)Math.Ceiling(logicalSize * scale);
     }
 
-    public static string CustomIconsDirectory =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "icons");
+    public static string CustomIconsDirectory { get; } =
+        Program.StorePath("icons", AppDataPaths.Roaming("icons"));
 
     private static string BuiltInDirectory => Path.Combine(AppContext.BaseDirectory, "Assets", "SessionIcons");
     private static string TreeIconDirectory => Path.Combine(AppContext.BaseDirectory, "Assets", "SessionTreeIcons");

@@ -107,7 +107,7 @@ public sealed class HighlightsStore
     }
 
     public static string DefaultPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "highlights.json");
+        AppDataPaths.Roaming("highlights.json");
 
     public void Load()
     {

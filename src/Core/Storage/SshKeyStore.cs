@@ -26,8 +26,7 @@ public sealed class SshKeyStore
         _path = path;
     }
 
-    public static string DefaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "ssh-keys.json");
+    public static string DefaultPath => AppDataPaths.Roaming("ssh-keys.json");
 
     /// <summary>Set by <see cref="Load"/> when the file was recovered or unreadable.</summary>
     public string? LoadWarning { get; private set; }

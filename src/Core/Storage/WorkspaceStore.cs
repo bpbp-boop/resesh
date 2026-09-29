@@ -67,10 +67,7 @@ public sealed class WorkspaceStore
         _path = path;
     }
 
-    public static string DefaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "Resesh",
-        "workspaces.json");
+    public static string DefaultPath => AppDataPaths.Roaming("workspaces.json");
 
     public IReadOnlyList<Workspace> Workspaces
     {

@@ -138,7 +138,7 @@ public sealed class SettingsStore
     }
 
     public static string DefaultPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "settings.json");
+        AppDataPaths.Roaming("settings.json");
 
     public void Load()
     {

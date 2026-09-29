@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Resesh.Core.Storage;
 
 namespace Resesh.Core.ShellIntegration;
 
@@ -21,7 +22,7 @@ public static class ShellIntegrationScripts
     {
         var contents = Files.ToDictionary(p => p, Read);
         var version = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Concat(contents.Values))))[..16];
-        var root = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Resesh", "shell-integration", version);
+        var root = AppDataPaths.Local("shell-integration", version);
         foreach (var (path, content) in contents)
         {
             var file = Path.Combine(root, path);

@@ -289,7 +289,7 @@ public sealed partial class HistoryView
     {
         if (row.Line is not { } line)
             return Gap(row.Skipped, font);
-        var (lineBrush, wordBrush, marker) = Style(line.Kind);
+        var (lineBrush, wordBrush, marker) = DiffStyle(line.Kind);
         return new DiffRowItem
         {
             IsChange = line.Kind != DiffKind.Same,
@@ -309,8 +309,8 @@ public sealed partial class HistoryView
             return Gap(row.Skipped, font);
         var left = row.Left;
         var right = row.Right;
-        var (leftLine, leftWords, _) = Style(left?.Kind ?? DiffKind.Same);
-        var (rightLine, rightWords, _) = Style(right?.Kind ?? DiffKind.Same);
+        var (leftLine, leftWords, _) = DiffStyle(left?.Kind ?? DiffKind.Same);
+        var (rightLine, rightWords, _) = DiffStyle(right?.Kind ?? DiffKind.Same);
         var ignored = left?.Kind == DiffKind.Same && left.DiffersOnlyInIgnoredValues;
         return new DiffRowItem
         {
@@ -334,7 +334,7 @@ public sealed partial class HistoryView
         MonoFont = font,
     };
 
-    private static (Brush Line, Brush? Words, string Marker) Style(DiffKind kind) => kind switch
+    private static (Brush Line, Brush? Words, string Marker) DiffStyle(DiffKind kind) => kind switch
     {
         DiffKind.Removed => (RemovedLine, RemovedWords, "−"),
         DiffKind.Added => (AddedLine, AddedWords, "+"),
