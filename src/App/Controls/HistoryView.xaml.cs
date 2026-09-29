@@ -520,15 +520,18 @@ public sealed partial class HistoryView : UserControl
         HistoryHighlight.SetSource(DetailCommand,
             new HighlightedText(entry.Command, CommandHistorySearch.FindAll(entry.Command, _terms)));
 
-        var status = StatusOf(entry);
-        StatusChipDot.Fill = status.Brush;
+        StatusBadge.Style = (Style)Application.Current.Resources[entry.ExitCode switch
+        {
+            0 => "SuccessIconInfoBadgeStyle",
+            null => "InformationalIconInfoBadgeStyle",
+            _ => "CriticalIconInfoBadgeStyle",
+        }];
         StatusChipText.Text = entry.ExitCode switch
         {
             0 => "Succeeded",
             { } code => $"Failed · exit {code}",
             null => "Result unknown",
         };
-        StatusChip.BorderBrush = status.Brush;
         ToolTipService.SetToolTip(StatusChip, entry.ExitCode is null
             ? "The shell did not report an exit status. Turn on shell integration for this session to get one."
             : null);
