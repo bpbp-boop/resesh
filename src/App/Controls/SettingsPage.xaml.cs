@@ -1,6 +1,5 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Resesh.App.Dialogs;
 using Resesh.App.ViewModels;
 using Resesh.Core.Input;
 using Resesh.Core.Storage;
@@ -27,12 +26,9 @@ public sealed partial class SettingsPage : UserControl
             "Save each finished command with its output, folder, and result on this computer, and search it with "
             + $"{AppShortcuts.Label(ShortcutIds.CommandHistory)}. Output can include secrets that a server prints. "
             + "A saved session can turn history off in its options.";
-        HighlightEditorHost.Content = HighlightEditorPanel.Create(
-            _highlightDraft,
-            CommitHighlights,
-            (label, field) => SettingsLayout.SettingRow(label, field, stacked: false),
-            _ => HighlightingSection.ChangeView(null, 0, null, disableAnimation: true));
-        AgentAdaptersHost.Content = AgentAdapterPanel.Create();
+        var highlightEditor = new HighlightRulesEditor(_highlightDraft);
+        highlightEditor.Changed += CommitHighlights;
+        HighlightEditorHost.Content = highlightEditor;
         Show(Section.General);
     }
 

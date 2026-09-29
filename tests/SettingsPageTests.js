@@ -7,8 +7,8 @@ const read = (...parts) => fs.readFileSync(path.join(__dirname, "..", ...parts),
 const page = read("src", "App", "Controls", "SettingsPage.xaml");
 const pageCode = read("src", "App", "Controls", "SettingsPage.xaml.cs");
 const settings = read("src", "App", "ViewModels", "SettingsViewModel.cs");
-const highlightPanel = read("src", "App", "Dialogs", "HighlightEditorPanel.cs");
-const agentPanel = read("src", "App", "Dialogs", "AgentAdapterPanel.cs");
+const highlightPanel = read("src", "App", "Controls", "HighlightRulesEditor.xaml") + read("src", "App", "Controls", "HighlightRulesEditor.xaml.cs");
+const agentPanel = read("src", "App", "Controls", "AgentAdaptersView.xaml") + read("src", "App", "Controls", "AgentAdaptersView.xaml.cs");
 const windowCode = read("src", "App", "MainWindow.xaml.cs");
 const windowXaml = read("src", "App", "MainWindow.xaml");
 
@@ -102,7 +102,7 @@ test("inline Settings editors expose stable automation IDs", () => {
   ]) {
     assert.ok(highlightPanel.includes(`"${automationId}"`), `missing ${automationId}`);
   }
-  assert.match(highlightPanel, /\$"SettingsHighlightRuleEnabled_\{rule\.Id\}"/);
+  assert.match(highlightPanel, /\$"SettingsHighlightRuleEnabled_\{Rule\.Id\}"/);
 
   assert.match(agentPanel, /\$"SettingsAgentAdapter_\{index\}"/);
   assert.match(agentPanel, /\$"SettingsAgentAdapterCopy_\{index\}"/);
@@ -110,27 +110,26 @@ test("inline Settings editors expose stable automation IDs", () => {
 });
 
 test("highlighting rules commit after each change and reach every window", () => {
-  assert.match(pageCode, /HighlightEditorPanel\.Create\(\s*_highlightDraft,\s*CommitHighlights/);
+  assert.match(pageCode, /new HighlightRulesEditor\(_highlightDraft\)[\s\S]*?highlightEditor\.Changed \+= CommitHighlights/);
   assert.match(pageCode, /App\.Highlights\.CommitDraft\(_highlightDraft\)[\s\S]*?App\.RefreshHighlightsInAllWindows\(\)/);
-  assert.match(highlightPanel, /class HighlightEditorPanel/);
+  assert.match(highlightPanel, /class HighlightRulesEditor/);
   assert.match(highlightPanel, /Add custom rule/);
   assert.match(highlightPanel, /RefreshCombinedPreview/);
-  assert.ok(
-    !fs.existsSync(path.join(__dirname, "..", "src", "App", "Dialogs", "HighlightEditorDialog.cs")),
-    "the standalone highlight editor dialog should be gone");
+  for (const gone of ["HighlightEditorDialog.cs", "HighlightEditorPanel.cs", "AgentAdapterPanel.cs", "SettingsLayout.cs"])
+    assert.ok(!fs.existsSync(path.join(__dirname, "..", "src", "App", "Dialogs", gone)), `${gone} should be gone`);
 });
 
 test("the standing preview sample is user-editable and shared with the rule form", () => {
-  assert.match(highlightPanel, /var listSample = new TextBox/);
-  assert.match(highlightPanel, /var sample = listSample\.Text;/);
-  assert.match(highlightPanel, /listSample\.TextChanged \+= \(_, _\) => RefreshCombinedPreview\(\);/);
-  assert.match(highlightPanel, /sampleBox\.Text = listSample\.Text;/);
-  assert.match(highlightPanel, /listSample\.Text = sampleBox\.Text;/);
+  assert.match(highlightPanel, /x:Name="ListSampleBox"/);
+  assert.match(highlightPanel, /var sample = ListSampleBox\.Text;/);
+  assert.match(highlightPanel, /ListSample_TextChanged\(object sender, TextChangedEventArgs e\) => RefreshCombinedPreview\(\);/);
+  assert.match(highlightPanel, /FormSampleBox\.Text = ListSampleBox\.Text;/);
+  assert.match(highlightPanel, /ListSampleBox\.Text = FormSampleBox\.Text;/);
 });
 
 test("built-in rules are editable with a reset back to the shipped defaults", () => {
-  assert.match(highlightPanel, /editButton\.IsEnabled = SelectedRule\(\) is not null;/);
-  assert.match(highlightPanel, /deleteButton\.IsEnabled = SelectedRule\(\) is \{ IsBuiltin: false \};/);
+  assert.match(highlightPanel, /EditButton\.IsEnabled = SelectedRule is not null;/);
+  assert.match(highlightPanel, /DeleteButton\.IsEnabled = SelectedRule is \{ IsBuiltin: false \};/);
   assert.match(highlightPanel, /SaveBuiltinOverride/);
   assert.match(highlightPanel, /Reset to default/);
   assert.match(highlightPanel, /ResetBuiltin/);
@@ -147,11 +146,11 @@ test("the Agents section groups controls and keeps adapter details collapsed", (
   assert.match(page, /Text="Tab display"/);
   assert.match(page, /Text="Background alerts"/);
   assert.match(page, /Text="Agent adapters"/);
-  assert.match(pageCode, /AgentAdapterPanel\.Create\(\)/);
+  assert.match(page, /<controls:AgentAdaptersView \/>/);
   assert.match(agentPanel, /Manual setup:/);
-  assert.match(agentPanel, /IsExpanded = false/);
-  assert.match(agentPanel, /Content = "Copy"/);
-  assert.match(agentPanel, /ProtocolReference\(\)/);
+  assert.match(agentPanel, /IsExpanded="False"/);
+  assert.match(agentPanel, /Content="Copy"/);
+  assert.match(agentPanel, /Header="Protocol reference"/);
   assert.ok(
     !fs.existsSync(path.join(__dirname, "..", "src", "App", "Dialogs", "AgentAdapterDialog.cs")),
     "the standalone agent adapter dialog should be gone");

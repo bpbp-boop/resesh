@@ -351,7 +351,7 @@
                     <TextBlock
                         Style="{StaticResource GroupDescription}"
                         Text="resesh identifies supported agents automatically. Add an adapter only for exact working, waiting, and finished states." />
-                    <ContentPresenter x:Name="AgentAdaptersHost" />
+                    <controls:AgentAdaptersView />
                 </StackPanel>
                 </Grid>
             </ScrollViewer>

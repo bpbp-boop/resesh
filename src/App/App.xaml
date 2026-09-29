@@ -20,6 +20,14 @@
             <SolidColorBrush x:Key="SessionTreeSelectionForegroundBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="SettingsCardBorderBrush" Color="#2B2B2B" />
             <SolidColorBrush x:Key="SettingsCardBackgroundBrush" Color="#121212" />
+            <!-- A recessed surface for sample output and code on the Settings page. -->
+            <Style x:Key="PreviewSurfaceStyle" TargetType="Border">
+                <Setter Property="Padding" Value="12,10" />
+                <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="BorderBrush" Value="{StaticResource SettingsCardBorderBrush}" />
+                <Setter Property="Background" Value="{StaticResource SettingsCardBackgroundBrush}" />
+            </Style>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Dark">
                     <SolidColorBrush x:Key="SessionSurfaceBrush" Color="#181818" />
