@@ -90,6 +90,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         ConfigureSplitter(TreeSplitter, TreeSplitterLine);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
         InitializeTitleBar();
+        InitializeNarrowLayout();
         // Lets the icon catalog rasterize at true device pixels (XamlRoot is null until
         // the content loads; the catalog falls back to scale 1 and re-renders on demand).
         App.Icons.ScaleProvider = () => Root.XamlRoot?.RasterizationScale ?? 1.0;
@@ -257,6 +258,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         QuickConnectHintText.Text = quickConnect;
         ToolTipService.SetToolTip(QuickConnectBox,
             $"Connect with ssh user@host or telnet host port, or search saved sessions ({quickConnect})");
+        ToolTipService.SetToolTip(QuickConnectButton, $"Quick connect or search sessions ({quickConnect})");
     }
 
     /// <summary>Runs one shortcut from the shared table. <paramref name="source"/> is the tab
@@ -670,6 +672,124 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         TitleBarButtons.SizeChanged += (_, _) => UpdateTitleBarRegions();
     }
 
+    // ---- narrow windows ----
+
+    // Title bar widths, in DIPs, below which parts of it compact. Measured at 100%:
+    // menus 314, caption buttons 144, New SSH session 203 (about 80 as an icon).
+    private const double TitleBarFullWidth = 1000;
+    private const double TitleBarSearchWidth = 860;
+    // Keeps the compact title bar and a usable tab area (rail + minimum tree + tabs).
+    private const double MinimumWindowWidth = 740;
+    private const double MinimumWindowHeight = 480;
+    private const double MinimumTabAreaWidth = 320;
+
+    private bool _quickConnectExpanded;
+
+    private void InitializeNarrowLayout()
+    {
+        AppTitleBar.SizeChanged += (_, _) => ApplyTitleBarWidth();
+        Root.Loaded += (_, _) =>
+        {
+            ApplyMinimumWindowSize();
+            LimitTreeWidth();
+            Root.XamlRoot.Changed += (_, _) =>
+            {
+                ApplyMinimumWindowSize();
+                LimitTreeWidth();
+            };
+        };
+    }
+
+    /// <summary>AppWindow sizes are physical pixels, so the minimum follows the display scale.</summary>
+    private void ApplyMinimumWindowSize()
+    {
+        var scale = Root.XamlRoot?.RasterizationScale ?? 1.0;
+        if (!double.IsFinite(scale) || scale <= 0 || AppWindow.Presenter is not OverlappedPresenter presenter)
+            return;
+        presenter.PreferredMinimumWidth = (int)Math.Ceiling(MinimumWindowWidth * scale);
+        presenter.PreferredMinimumHeight = (int)Math.Ceiling(MinimumWindowHeight * scale);
+    }
+
+    /// <summary>Drops the New SSH session label first, then folds quick connect into a
+    /// search button that expands over the menus while it is in use.</summary>
+    private void ApplyTitleBarWidth()
+    {
+        var width = AppTitleBar.ActualWidth;
+        NewSessionLabel.Visibility = width >= TitleBarFullWidth ? Visibility.Visible : Visibility.Collapsed;
+        var compact = width < TitleBarSearchWidth;
+        if (!compact)
+            _quickConnectExpanded = false;
+        var showBox = !compact || _quickConnectExpanded;
+        QuickConnectHost.Visibility = showBox ? Visibility.Visible : Visibility.Collapsed;
+        QuickConnectButton.Visibility = showBox ? Visibility.Collapsed : Visibility.Visible;
+        TitleBarMenus.Visibility = compact && _quickConnectExpanded ? Visibility.Collapsed : Visibility.Visible;
+        UpdateTitleBarRegions();
+    }
+
+    private void QuickConnectButton_Click(object sender, RoutedEventArgs e) => FocusQuickConnectBox();
+
+    /// <summary>Focuses quick connect, expanding it first when the title bar shows only its button.</summary>
+    private void FocusQuickConnectBox()
+    {
+        if (QuickConnectHost.Visibility == Visibility.Visible)
+        {
+            QuickConnectBox.Focus(FocusState.Programmatic);
+            return;
+        }
+        // Focus the box before the search button hides. Hiding a focused button moves
+        // focus on to the next control, which would collapse the box again at once.
+        _quickConnectExpanded = true;
+        TitleBarMenus.Visibility = Visibility.Collapsed;
+        QuickConnectHost.Visibility = Visibility.Visible;
+        AppTitleBar.UpdateLayout();
+        QuickConnectBox.Focus(FocusState.Programmatic);
+        ApplyTitleBarWidth();
+    }
+
+    private void CollapseQuickConnectIfIdle()
+    {
+        if (!_quickConnectExpanded)
+            return;
+        // Focus can pass through the suggestion list; decide once it has settled.
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (!_quickConnectExpanded || QuickConnectHasFocus() || QuickConnectBox.IsSuggestionListOpen)
+                return;
+            _quickConnectExpanded = false;
+            ApplyTitleBarWidth();
+        });
+    }
+
+    /// <summary>Focus sits on the box's inner TextBox; the AutoSuggestBox's own FocusState stays Unfocused.</summary>
+    private bool QuickConnectHasFocus()
+    {
+        for (var element = FocusManager.GetFocusedElement(Root.XamlRoot) as DependencyObject; element is not null;
+             element = VisualTreeHelper.GetParent(element))
+        {
+            if (ReferenceEquals(element, QuickConnectBox))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>A wide saved tree pane gives way to the tabs on a narrow window. The saved
+    /// width is kept and returns when the window widens.</summary>
+    private void MainArea_SizeChanged(object sender, SizeChangedEventArgs e) => LimitTreeWidth();
+
+    private void LimitTreeWidth()
+    {
+        // The window's width, not MainArea's: a grid whose columns overflow is arranged at
+        // its overflowing width and clipped, so MainArea never reports less.
+        if (Root.XamlRoot is not { } root)
+            return;
+        var fixedColumns = MainArea.ColumnDefinitions[0].ActualWidth + TreeSplitterColumn.ActualWidth;
+        TreeColumn.MaxWidth = Math.Max(180, root.Size.Width - fixedColumns - MinimumTabAreaWidth);
+    }
+
+    /// <summary>The tree's current width, unless the window is narrowing it below the saved width.</summary>
+    private bool TreeWidthIsUserChosen =>
+        TreeColumn.ActualWidth >= 180 && TreeColumn.ActualWidth < TreeColumn.MaxWidth - 0.5;
+
     /// <summary>Caption buttons live outside XAML theming; keep them in sync with the app theme.</summary>
     private void ApplyTitleBarButtonColors(string theme)
     {
@@ -962,7 +1082,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         }
     }
 
-    private void QuickConnect_FocusChanged(object sender, RoutedEventArgs e) => UpdateQuickConnectHint();
+    private void QuickConnect_FocusChanged(object sender, RoutedEventArgs e)
+    {
+        UpdateQuickConnectHint();
+        CollapseQuickConnectIfIdle();
+    }
 
     private void UpdateQuickConnectHint()
     {
@@ -2166,7 +2290,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         var normalized = NormalizeRailTab(tab);
         var tabChanged = normalized != _selectedRailTab;
         var wasOpen = _sessionsPaneOpen;
-        if (wasOpen && TreeColumn.ActualWidth >= 180)
+        if (wasOpen && TreeWidthIsUserChosen)
             _sessionsPaneWidth = TreeColumn.ActualWidth;
 
         _selectedRailTab = normalized;
@@ -2193,7 +2317,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             return;
         }
 
-        if (_sessionsPaneOpen && !open && TreeColumn.ActualWidth >= 180)
+        if (_sessionsPaneOpen && !open && TreeWidthIsUserChosen)
             _sessionsPaneWidth = TreeColumn.ActualWidth;
         _sessionsPaneOpen = open;
         PersistSessionsRailState();

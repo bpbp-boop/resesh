@@ -293,6 +293,16 @@
                 Spacing="4"
                 VerticalAlignment="Center"
                 Margin="0,0,8,0">
+                <!-- Stands in for the quick connect box when the title bar is too narrow to show it. -->
+                <Button
+                    x:Name="QuickConnectButton"
+                    Visibility="Collapsed"
+                    AutomationProperties.Name="Quick connect or search sessions"
+                    Click="QuickConnectButton_Click"
+                    Background="Transparent"
+                    BorderThickness="0">
+                    <FontIcon Glyph="&#xE721;" FontSize="14" />
+                </Button>
                 <!-- Primary action creates a saved SSH session. Local profiles stay in the menu. -->
                 <SplitButton
                     x:Name="NewSessionButton"
@@ -301,7 +311,7 @@
                     ToolTipService.ToolTip="Create a new SSH session">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE710;" FontSize="14" />
-                        <TextBlock Text="New SSH session" />
+                        <TextBlock x:Name="NewSessionLabel" Text="New SSH session" />
                     </StackPanel>
                     <SplitButton.Flyout>
                         <MenuFlyout x:Name="NewSessionFlyout" Opening="NewSessionFlyout_Opening" />
@@ -342,7 +352,7 @@
             Title="Workspace note" />
 
         <!-- Main area: tree | splitter | tabs -->
-        <Grid Grid.Row="1">
+        <Grid x:Name="MainArea" Grid.Row="1" SizeChanged="MainArea_SizeChanged">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="44" />
                 <ColumnDefinition x:Name="TreeColumn" Width="280" MinWidth="180" />

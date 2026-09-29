@@ -102,7 +102,7 @@ public sealed partial class MainWindow
 
     void IMainWindowServices.OpenWelcome() => OpenWelcome();
 
-    void IMainWindowServices.FocusQuickConnect() => QuickConnectBox.Focus(FocusState.Programmatic);
+    void IMainWindowServices.FocusQuickConnect() => FocusQuickConnectBox();
 
     void IMainWindowServices.FocusSessionFilter() => FocusSessionFilter();
 
