@@ -18,14 +18,14 @@ public sealed partial class MainViewModel
 
     public bool ShowSendBreak => ActiveTab is { IsPlayback: false } tab && tab.Capabilities.SendBreak;
 
-    public bool ShowManageRemoteSessions => ActiveTab is { IsPlayback: false, IsOnboarding: false } tab
+    public bool ShowManageRemoteSessions => ActiveTab is { IsPlayback: false, IsAppPage: false } tab
         && tab.Capabilities.RemoteSession && tab.Session.Persistent;
 
     public bool ShowEndRemoteSession => ActiveTab is not { } tab || tab.Capabilities.RemoteSession;
 
     public string PinTabTitle => ActiveTab?.IsPinned == true ? "Unpin Tab" : "Pin Tab";
 
-    public string CloseTabTitle => ActiveTab?.IsOnboarding == true ? "Close Welcome" : "Close Tab";
+    public string CloseTabTitle => ActiveTab is { IsAppPage: true } page ? $"Close {page.Header}" : "Close Tab";
 
     private IEnumerable<IRelayCommand> TabCommands =>
     [
@@ -84,7 +84,7 @@ public sealed partial class MainViewModel
     private Task ManageRemoteSessionsAsync(TabViewModel? tab) => Services.ManageRemoteSessionsAsync(Target(tab)!);
 
     private bool CanManageRemoteSessions(TabViewModel? tab) =>
-        Target(tab) is { IsLocked: false, IsPlayback: false, IsOnboarding: false } target
+        Target(tab) is { IsLocked: false, IsPlayback: false, IsAppPage: false } target
         && target.Capabilities.RemoteSession && target.Session.Persistent
         && target.State != TabConnectionState.Connecting && HasTerminal(target);
 
@@ -103,7 +103,7 @@ public sealed partial class MainViewModel
     private void TogglePin(TabViewModel? tab) => Services.TogglePin(Target(tab)!);
 
     /// <summary>A tab backed by a session: not a recording playback and not Welcome.</summary>
-    private bool IsSessionTab(TabViewModel? tab) => Target(tab) is { IsPlayback: false, IsOnboarding: false };
+    private bool IsSessionTab(TabViewModel? tab) => Target(tab) is { IsPlayback: false, IsAppPage: false };
 
     /// <summary>Opens the active tab's saved session in its editor at the given field.</summary>
     [RelayCommand(CanExecute = nameof(CanEditSessionSettings),

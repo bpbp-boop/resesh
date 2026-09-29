@@ -140,8 +140,8 @@ public sealed partial class MainViewModel : ObservableObject
             var tab = ActiveTab;
             if (tab is null)
                 return baseText;
-            if (tab.IsOnboarding)
-                return $"{baseText}  •  Welcome — setup";
+            if (tab.IsAppPage)
+                return $"{baseText}  •  {tab.Header} — {tab.StateText}";
             var status = $"{baseText}  •  {tab.Header} — {tab.Endpoint} • {tab.StateText}";
             return tab.ConnectionSummary.Length > 0 ? $"{status} • {tab.ConnectionSummary}" : status;
         }
@@ -165,6 +165,9 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>This window's tabs as one indicator, for its taskbar button.</summary>
     public TerminalProgress Progress => TerminalProgress.Combine(AllTabs.Select(tab => tab.Progress));
+
+    /// <summary>The tab already hosting this app page, so opening it again reuses the tab.</summary>
+    public TabViewModel? FindAppPage(AppPage page) => AllTabs.FirstOrDefault(tab => tab.Page == page);
 
     public TabGroupViewModel GroupOf(TabViewModel tab) =>
         Groups.First(g => g.Tabs.Contains(tab));

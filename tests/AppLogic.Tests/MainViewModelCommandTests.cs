@@ -102,6 +102,40 @@ public sealed class MainViewModelCommandTests : IDisposable
     }
 
     [Fact]
+    public void SettingsPageTabHasNoSessionActions()
+    {
+        var window = Window();
+        var settings = TabViewModel.CreateAppPage(AppPage.Settings, Environment());
+        window.AttachTab(settings, window.FocusedGroup, 0);
+
+        Assert.True(settings.IsAppPage);
+        Assert.False(settings.IsOnboarding);
+        Assert.False(settings.CanDrag);
+        Assert.Equal("Settings", settings.Header);
+        Assert.Equal("Close Settings", window.CloseTabTitle);
+        Assert.False(window.CloneTabCommand.CanExecute(null));
+        Assert.False(window.TogglePinCommand.CanExecute(null));
+        Assert.False(window.ReconnectCommand.CanExecute(null));
+        Assert.False(window.EditSessionSettingsCommand.CanExecute(null));
+        Assert.False(window.ShowManageRemoteSessions);
+        Assert.True(window.CloseTabCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void FindAppPageReturnsTheOpenPageOnly()
+    {
+        var window = Window();
+        Open(window, Ssh(), TabConnectionState.Connected);
+        Assert.Null(window.FindAppPage(AppPage.Settings));
+
+        var settings = TabViewModel.CreateAppPage(AppPage.Settings, Environment());
+        window.AttachTab(settings, window.FocusedGroup, 0);
+
+        Assert.Same(settings, window.FindAppPage(AppPage.Settings));
+        Assert.Null(window.FindAppPage(AppPage.Welcome));
+    }
+
+    [Fact]
     public void SendBreakNeedsAnUnlockedConnectedTelnetTab()
     {
         var window = Window();

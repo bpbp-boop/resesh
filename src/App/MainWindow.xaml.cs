@@ -779,7 +779,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         if (_closeConfirmed || !ViewModel.AllTabs.Any())
             return;
         if (!App.Settings.Current.ConfirmCloseActiveSessions
-            || !ViewModel.AllTabs.Any(tab => !tab.IsOnboarding))
+            || !ViewModel.AllTabs.Any(tab => !tab.IsAppPage))
             return;
 
         args.Cancel = true;
@@ -794,7 +794,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         try
         {
-            var count = ViewModel.AllTabs.Count(tab => !tab.IsOnboarding);
+            var count = ViewModel.AllTabs.Count(tab => !tab.IsAppPage);
             if (count == 0)
             {
                 _closeConfirmed = true;
@@ -983,19 +983,29 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             OpenWelcome();
     }
 
-    private void OpenWelcome()
+    /// <summary>Shows an app page in the tab strip: selects the tab already hosting it,
+    /// or opens one in the focused group with the view <paramref name="createView"/> builds.</summary>
+    private TabViewModel OpenAppPage(AppPage page, Func<TabViewModel, UIElement> createView)
     {
-        if (ViewModel.AllTabs.FirstOrDefault(tab => tab.IsOnboarding) is { } existing)
+        if (ViewModel.FindAppPage(page) is { } existing)
         {
             var existingGroup = ViewModel.GroupOf(existing);
             existingGroup.SelectedTab = existing;
             FocusGroup(existingGroup);
-            return;
+            return existing;
         }
 
         var group = ViewModel.FocusedGroup;
-        var tab = TabViewModel.CreateOnboarding(_viewModelEnvironment);
+        var tab = TabViewModel.CreateAppPage(page, _viewModelEnvironment);
         ViewModel.AttachTab(tab, group, group.Tabs.Count);
+        var view = createView(tab);
+        tab.View = view;
+        _groupViews[group].AddTerminal(view);
+        return tab;
+    }
+
+    private void OpenWelcome() => OpenAppPage(AppPage.Welcome, tab =>
+    {
         var view = new OnboardingView(
             App.Settings.Current,
             ApplyThemeToApp,
@@ -1005,9 +1015,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         view.FinishRequested += () => FinishOnboarding(tab, view);
         view.NewSessionRequested += () => _ = OpenSessionEditorAsync(existing: null, defaultFolder: "");
         view.LocalShellRequested += OpenDefaultLocalProfile;
-        tab.View = view;
-        _groupViews[group].AddTerminal(view);
-    }
+        return view;
+    });
 
     private void FinishOnboarding(TabViewModel tab, OnboardingView view)
     {
@@ -1261,7 +1270,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     /// <summary>THE close pathway: X button, Ctrl+F4, context menu, and middle-click all land here.</summary>
     public async Task RequestCloseTabAsync(TabViewModel tab)
     {
-        if (tab.IsOnboarding
+        if (tab.IsAppPage
             || (!tab.IsPinned && !App.Settings.Current.ConfirmCloseActiveSessions))
         {
             CloseTabCore(tab);
@@ -1802,7 +1811,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     }
 
     private static bool CanManageRemoteSessions(TabViewModel? tab) =>
-        tab is { IsLocked: false, IsPlayback: false, IsOnboarding: false, View: TerminalTabView }
+        tab is { IsLocked: false, IsPlayback: false, IsAppPage: false, View: TerminalTabView }
         && tab.Capabilities.RemoteSession && tab.Session.Persistent
         && tab.State != TabConnectionState.Connecting;
 
