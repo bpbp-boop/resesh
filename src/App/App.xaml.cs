@@ -224,6 +224,36 @@ public partial class App : Application
             window.RefreshWindowTitle(showContext);
     }
 
+    /// <summary>Settings are app-wide: every window applies them, not only the one that saved.</summary>
+    internal static void ApplySettingsToAllWindows()
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.ApplySettingsToApp();
+    }
+
+    /// <summary>Applies one setting the Settings page just saved, in every window.</summary>
+    internal static void ApplySettingChange(string property)
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.ApplySettingChange(property);
+        if (property is nameof(ViewModels.SettingsViewModel.KeepCommandHistory)
+            or nameof(ViewModels.SettingsViewModel.CommandHistoryDays))
+            PruneCommandHistory();
+    }
+
+    /// <summary>Open terminals in every window re-read the saved highlighting rules.</summary>
+    internal static void RefreshHighlightsInAllWindows()
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.RefreshHighlights();
+    }
+
     internal static void RefreshWorkspaceMenus()
     {
         if (Current is not App app)

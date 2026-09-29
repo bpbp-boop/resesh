@@ -857,7 +857,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             if (!App.SaveSettings(App.Settings.Current with { KeepCommandHistory = true }))
                 return;
-            ApplySettingsToApp();
+            App.ApplySettingsToAllWindows();
             HistoryOverlay.SetHistoryEnabled(true);
         };
     }
@@ -1024,7 +1024,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             return;
 
         App.SaveSettings(view.Complete());
-        ApplySettingsToApp();
+        App.ApplySettingsToAllWindows();
         CloseTabCore(tab);
     }
 
@@ -1950,14 +1950,43 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             AgentAlertFlash = updated.AgentAlertFlash,
             AgentAlertSound = updated.AgentAlertSound,
         });
-        ApplySettingsToApp();
+        App.ApplySettingsToAllWindows();
+        App.RefreshHighlightsInAllWindows();
         App.PruneCommandHistory();
+    }
+
+    /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
+    internal void ApplySettingsToApp()
+    {
+        ApplySettingsToApp(App.Settings.Current);
         if (_sessionsPaneOpen && _selectedRailTab == "recordings")
             _ = ViewModel.RefreshRecordingsAsync();
     }
 
-    /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
-    private void ApplySettingsToApp() => ApplySettingsToApp(App.Settings.Current);
+    /// <summary>Applies one saved setting to this window after Settings, in any window, changed it.</summary>
+    internal void ApplySettingChange(string property)
+    {
+        var settings = App.Settings.Current;
+        switch (property)
+        {
+            case nameof(SettingsViewModel.Theme):
+                ApplyThemeToApp(settings.Theme);
+                break;
+            case nameof(SettingsViewModel.ShowStatusBar):
+                ApplyStatusBarVisibility(settings.ShowStatusBar);
+                break;
+            case nameof(SettingsViewModel.RecordingDirectory):
+                if (_sessionsPaneOpen && _selectedRailTab == "recordings")
+                    _ = ViewModel.RefreshRecordingsAsync();
+                break;
+            default:
+                ApplyTerminalSettings(settings);
+                break;
+        }
+    }
+
+    /// <summary>Terminals re-read the saved highlighting rules.</summary>
+    internal void RefreshHighlights() => PreviewHighlights(null);
 
     private void PreviewHighlights(HighlightsStore? draft)
     {
@@ -1973,14 +2002,19 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private void SetStatusBarVisible(bool visible)
     {
-        App.SaveSettings(App.Settings.Current with { ShowStatusBar = visible });
-        ApplyStatusBarVisibility(visible);
+        if (App.SaveSettings(App.Settings.Current with { ShowStatusBar = visible }))
+            App.ApplySettingChange(nameof(SettingsViewModel.ShowStatusBar));
     }
 
     private void ApplySettingsToApp(AppSettings settings)
     {
         ApplyThemeToApp(settings.Theme);
         ApplyStatusBarVisibility(settings.ShowStatusBar);
+        ApplyTerminalSettings(settings);
+    }
+
+    private void ApplyTerminalSettings(AppSettings settings)
+    {
         foreach (var tab in ViewModel.AllTabs)
         {
             if (tab.View is TerminalTabView view)
@@ -2681,7 +2715,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             App.Workspaces.Load();
             App.RefreshWorkspaceMenus();
             ViewModel.RebuildTree();
-            ApplySettingsToApp();
+            App.ApplySettingsToAllWindows();
 
             await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Import complete",
                 $"Added {result.Imported}, replaced {result.Replaced}, kept both for "

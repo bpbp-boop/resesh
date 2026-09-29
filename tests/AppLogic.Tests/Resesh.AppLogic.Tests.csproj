@@ -24,6 +24,7 @@
     <Compile Include="../../src/App/ViewModels/IMainWindowServices.cs" Link="ViewModels/IMainWindowServices.cs" />
     <Compile Include="../../src/App/ViewModels/RecordingItemViewModel.cs" Link="ViewModels/RecordingItemViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/SettingsTargets.cs" Link="ViewModels/SettingsTargets.cs" />
+    <Compile Include="../../src/App/ViewModels/SettingsViewModel.cs" Link="ViewModels/SettingsViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/TabViewModel.cs" Link="ViewModels/TabViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/TabGroupViewModel.cs" Link="ViewModels/TabGroupViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/TreeNodeViewModel.cs" Link="ViewModels/TreeNodeViewModel.cs" />
