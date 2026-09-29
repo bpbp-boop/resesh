@@ -408,6 +408,8 @@ public sealed partial class MainWindow
         AttachGroupView(newGroup);
         ViewModel.OnGroupsChanged();
 
+        // The tab jumps to its new pane and the layout is rebuilt; nothing slides or fades.
+        _groupViews[sourceGroup].SuppressTabMotion();
         MoveTabBetweenGroups(tab, newGroup, 0);
         RebuildGroupLayout();
     }
@@ -513,6 +515,7 @@ public sealed partial class MainWindow
         // Detach every leaf before the recursive layout is rebuilt around the same views.
         foreach (var groupView in _groupViews.Values)
         {
+            groupView.SuppressTabMotion();
             if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(groupView) is Panel parent)
                 parent.Children.Remove(groupView);
         }

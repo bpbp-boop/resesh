@@ -172,7 +172,10 @@
                                             </Storyboard>
                                         </VisualState>
                                         <VisualStateGroup.Transitions>
-                                            <VisualTransition To="NotDragging" GeneratedDuration="0:0:0.2" />
+                                            <!-- The strip draws its own drag preview and slides the dropped tab
+                                                 into place; fading LayoutRoot back in on top of that slide would
+                                                 leave the tab see-through while it settles. -->
+                                            <VisualTransition To="NotDragging" GeneratedDuration="0" />
                                         </VisualStateGroup.Transitions>
                                     </VisualStateGroup>
                                 </VisualStateManager.VisualStateGroups>

@@ -56,6 +56,14 @@ public sealed partial class TabGroupView : UserControl
     private static TabGroupView? _dragSource;
     private static TabGroupView? _stripDropTarget;
     private readonly Image _tabDragPreview = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+    // Inactive headers paint no background of their own, so the dragged header's image
+    // would show the tabs it passes over through it. The backdrop is the strip colour.
+    private readonly Microsoft.UI.Xaml.Shapes.Rectangle _tabDragBackdrop = new()
+    {
+        IsHitTestVisible = false,
+        Visibility = Visibility.Collapsed,
+        RenderTransform = new TranslateTransform(),
+    };
     private readonly TranslateTransform _tabDragPosition = new();
     private double _tabDragPointerOffset;
     private TabViewModel? _previewTab;
@@ -123,8 +131,9 @@ public sealed partial class TabGroupView : UserControl
         // event runs when it has received the new collection state; use that event to
         // recover full equal widths after a removal. Size changes cover a group that gains
         // space when a neighboring split is removed or resized.
-        Group.Tabs.CollectionChanged += (_, _) =>
+        Group.Tabs.CollectionChanged += (_, e) =>
         {
+            CaptureTabMotion();
             if (_dragSource == this)
                 EndTabDrag();
             QueueTabWidthRefresh();
@@ -135,8 +144,15 @@ public sealed partial class TabGroupView : UserControl
         {
             // The full refresh briefly lays tabs out at content width, so skip it when the
             // remaining tabs already have their maximum width and nothing needs to grow.
-            if (e.CollectionChange == Windows.Foundation.Collections.CollectionChange.ItemRemoved
-                && HasShrunkTabs())
+            if (e.CollectionChange != Windows.Foundation.Collections.CollectionChange.ItemRemoved
+                || !HasShrunkTabs())
+                return;
+            // Like a browser, a close under the pointer keeps the current widths so the
+            // next tab's close button lands where the pointer already is. WinUI holds
+            // them too; the tabs grow once the pointer leaves the strip.
+            if (_pointerInTabStrip && e.Index < Group.Tabs.Count)
+                _tabWidthHoldPending = true;
+            else
                 QueueFullTabWidthRefresh();
         };
         Tabs.SizeChanged += (_, _) =>
@@ -197,6 +213,8 @@ public sealed partial class TabGroupView : UserControl
         _tabDragPreview.RenderTransform = _tabDragPosition;
         _tabDragPreview.HorizontalAlignment = HorizontalAlignment.Left;
         _tabDragPreview.VerticalAlignment = VerticalAlignment.Top;
+        _tabDragBackdrop.Fill = _tabBackgroundBrush;
+        _tabDragLayer.Children.Add(_tabDragBackdrop);
         _tabDragLayer.Children.Add(_tabDragPreview);
         TabStripHost.Children.Add(_tabDragLayer);
         AddHandler(DragOverEvent, new DragEventHandler(UpdateTabDragPreview), true);
@@ -251,6 +269,7 @@ public sealed partial class TabGroupView : UserControl
             if (i != _dragSourceIndex)
                 _tabDragLayer.Children.Insert(0, preview);
             _dragItems.Add((container, container.Opacity, preview));
+            _dragItemOffsets.Add(0);
             _dragSlots.Add(new(bounds.X, bounds.Width));
         }
         try
@@ -277,17 +296,25 @@ public sealed partial class TabGroupView : UserControl
     private void ResetTabDragPreview()
     {
         StopDragScroll();
+        // Drop, cancel, or a drag out to another group: the tabs slide on from where
+        // their previews were drawn instead of snapping back to their old slots.
+        if (_tabDragPreview.Visibility == Visibility.Visible)
+            CaptureTabMotion();
         ++_previewVersion;
         _tabDragPreview.Visibility = Visibility.Collapsed;
+        _tabDragBackdrop.Visibility = Visibility.Collapsed;
         _tabDragPreview.Source = null;
         _previewTab = null;
         foreach (var entry in _dragItems)
         {
             entry.Item.Opacity = entry.Opacity;
+            _tabSlides.Remove(entry.Preview);
             if (entry.Preview != _tabDragPreview)
                 _tabDragLayer.Children.Remove(entry.Preview);
         }
+        SetTranslation(_tabDragPreview, 0);
         _dragItems.Clear();
+        _dragItemOffsets.Clear();
         _dragSlots.Clear();
         QueueTabDividerRefresh();
     }
@@ -301,7 +328,18 @@ public sealed partial class TabGroupView : UserControl
             entry.Item.Opacity = 0;
             entry.Preview.Visibility = Visibility.Visible;
         }
+        _tabDragBackdrop.Width = _tabDragPreview.Width;
+        _tabDragBackdrop.Height = _tabDragPreview.Height;
+        _tabDragBackdrop.Visibility = Visibility.Visible;
+        SyncTabDragBackdrop();
         UpdateTabStripDivider();
+    }
+
+    private void SyncTabDragBackdrop()
+    {
+        var backdrop = (TranslateTransform)_tabDragBackdrop.RenderTransform;
+        backdrop.X = _tabDragPosition.X;
+        backdrop.Y = _tabDragPosition.Y;
     }
 
     private void UpdateTabDragPreview(object sender, DragEventArgs e)
@@ -336,6 +374,7 @@ public sealed partial class TabGroupView : UserControl
         var placement = TabDragLayout.Resolve(_dragSlots, _dragSourceIndex,
             Group.Tabs.Count(t => t.IsPinned), left + scrollDelta);
         _tabDragPosition.X = placement.Left - scrollDelta;
+        SyncTabDragBackdrop();
         _dragTargetIndex = placement.Index;
         _tabDragLayer.Clip = new RectangleGeometry
         {
@@ -343,9 +382,11 @@ public sealed partial class TabGroupView : UserControl
         };
         for (var i = 0; i < _dragItems.Count; i++)
         {
-            if (i != _dragSourceIndex)
-                ((TranslateTransform)_dragItems[i].Preview.RenderTransform).X = _dragSlots[i].Left
-                    + TabDragLayout.Offset(i, _dragSourceIndex, _dragTargetIndex, _tabDragPreview.Width) - scrollDelta;
+            if (i == _dragSourceIndex)
+                continue;
+            var offset = TabDragLayout.Offset(i, _dragSourceIndex, _dragTargetIndex, _tabDragPreview.Width);
+            ShiftDragPreview(i, offset);
+            ((TranslateTransform)_dragItems[i].Preview.RenderTransform).X = _dragSlots[i].Left + offset - scrollDelta;
         }
     }
 
@@ -419,18 +460,8 @@ public sealed partial class TabGroupView : UserControl
 
     private void NormalizeTabStripTemplate()
     {
-        // WinUI's entrance and content transitions can replay for every realized
-        // header when equal-width tabs are recalculated after a move or removal.
-        // Keep the local add/delete and reorder motion without making the whole
-        // strip look as though it loaded again.
-        if (FindDescendant(Tabs, "TabListView") is ListViewBase list)
-        {
-            list.ItemContainerTransitions = new Microsoft.UI.Xaml.Media.Animation.TransitionCollection
-            {
-                new Microsoft.UI.Xaml.Media.Animation.AddDeleteThemeTransition(),
-                new Microsoft.UI.Xaml.Media.Animation.ReorderThemeTransition(),
-            };
-        }
+        DisableTabContainerTransitions();
+        TrackTabStripPointer();
 
         // TabView reserves a 2px minimum column for TabStripHeader even when it is null.
         if (FindDescendant(Tabs, "TabContainerGrid") is Grid tabContainerGrid &&
@@ -565,6 +596,8 @@ public sealed partial class TabGroupView : UserControl
 
     private void UpdateTabStripDivider()
     {
+        if (TabMotionOwnsDivider())
+            return;
         var stripWidth = TabStripHost.ActualWidth;
         if (Tabs.SelectedItem is null)
         {

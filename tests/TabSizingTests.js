@@ -9,6 +9,9 @@ const xaml = fs.readFileSync(
 const code = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"),
   "utf8");
+const motion = fs.readFileSync(
+  path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.Motion.cs"),
+  "utf8");
 const terminalView = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"),
   "utf8");
@@ -38,15 +41,58 @@ test("custom tab chrome retains WinUI drag and reorder animations", () => {
   assert.match(style, /<DropTargetItemThemeAnimation TargetName="LayoutRoot"/);
 });
 
-test("tab collection changes animate locally without replaying every header", () => {
-  const normalization = code.slice(
-    code.indexOf("private void NormalizeTabStripTemplate()"),
-    code.indexOf("internal void ApplyTheme"));
+test("the tab strip owns its motion instead of WinUI's sequenced container transitions", () => {
+  // WinUI runs add, delete and reorder one after another and replays them when a group
+  // view is re-parented; the strip keeps them off and animates changes itself.
+  assert.match(code, /private void NormalizeTabStripTemplate\(\)\s*\{\s*DisableTabContainerTransitions\(\);/);
+  assert.match(motion, /list\.ItemContainerTransitions = new Microsoft\.UI\.Xaml\.Media\.Animation\.TransitionCollection\(\);/);
+  for (const transition of ["AddDeleteThemeTransition", "ReorderThemeTransition", "EntranceThemeTransition", "ContentThemeTransition"]) {
+    assert.doesNotMatch(code, new RegExp(transition));
+    assert.doesNotMatch(motion, new RegExp(transition));
+  }
+});
 
-  assert.match(normalization, /new Microsoft\.UI\.Xaml\.Media\.Animation\.AddDeleteThemeTransition\(\)/);
-  assert.match(normalization, /new Microsoft\.UI\.Xaml\.Media\.Animation\.ReorderThemeTransition\(\)/);
-  assert.doesNotMatch(normalization, /ContentThemeTransition/);
-  assert.doesNotMatch(normalization, /EntranceThemeTransition/);
+test("tab changes slide every tab from where it was drawn once layout settles", () => {
+  assert.match(code, /Group\.Tabs\.CollectionChanged \+= \(_, e\) =>\s*\{\s*CaptureTabMotion\(\);/);
+  // Snapshot what is on screen (layout slot plus any slide still in flight), hold it
+  // through intermediate width passes, then move everything at once.
+  assert.match(motion, /return LayoutLeft\(container\) \+ InFlightOffset\(container\);/);
+  assert.match(motion, /_tabWidthRefreshQueued \|\| _fullTabWidthRefreshQueued\)\s*\{\s*HoldTabsAtOrigins\(\);/);
+  assert.match(motion, /SlideElement\(container, offset\)/);
+  assert.match(motion, /visual\.StartAnimation\("Translation", slide\)/);
+  // New tabs fade in alongside the slide rather than after it.
+  assert.match(motion, /SetTranslation\(container, 0\);\s*FadeInTab\(container\);/);
+  // The system "Animation effects" setting turns all of it off.
+  assert.match(motion, /MotionSettings\.AnimationsEnabled/);
+});
+
+test("the divider gap and the active tab move together", () => {
+  assert.match(code, /private void UpdateTabStripDivider\(\)\s*\{\s*if \(TabMotionOwnsDivider\(\)\)\s*return;/);
+  assert.match(motion, /private void SlideDividerWithActiveTab\(\)[\s\S]*?_motionOrigins\.TryGetValue\(active, out var origin\)/);
+  assert.match(motion, /ScaleDivider\(LeftTabStripDivider, fromLeft, toLeft, anchorRight: false\);/);
+  assert.match(motion, /ScaleDivider\(RightTabStripDivider, fromRight, toRight, anchorRight: true\);/);
+});
+
+test("drag previews slide aside and the drop settles from the preview", () => {
+  assert.match(code, /ShiftDragPreview\(i, offset\);/);
+  assert.match(code, /if \(_tabDragPreview\.Visibility == Visibility\.Visible\)\s*CaptureTabMotion\(\);/);
+  assert.match(motion, /DragPreviewFor\(container\) is \{ \} preview\)\s*return \(\(TranslateTransform\)preview\.RenderTransform\)\.X \+ InFlightOffset\(preview\);/);
+  // Inactive headers are transparent; the dragged one needs the strip colour behind it.
+  assert.match(code, /_tabDragBackdrop\.Fill = _tabBackgroundBrush;/);
+  // The strip's own slide replaces WinUI's fade back from the dragging state.
+  assert.match(xaml, /<VisualTransition To="NotDragging" GeneratedDuration="0" \/>/);
+});
+
+test("layout rebuilds snap tab motion instead of animating re-parented strips", () => {
+  const window = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "MainWindow.TabGroups.cs"),
+    "utf8");
+  const workspaces = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "MainWindow.Workspaces.cs"),
+    "utf8");
+  assert.match(window, /foreach \(var groupView in _groupViews\.Values\)\s*\{\s*groupView\.SuppressTabMotion\(\);/);
+  assert.match(window, /_groupViews\[sourceGroup\]\.SuppressTabMotion\(\);\s*MoveTabBetweenGroups\(tab, newGroup, 0\);/);
+  assert.match(workspaces, /private void ApplyWorkspaceLayout\([^)]*\)\s*\{[\s\S]{0,200}?groupView\.SuppressTabMotion\(\);/);
 });
 
 test("tab text trims inside the shared width without moving the close action", () => {
@@ -56,8 +102,11 @@ test("tab text trims inside the shared width without moving the close action", (
 });
 
 test("tabs recalculate their equal width after a close or strip resize", () => {
-  assert.match(code, /Group\.Tabs\.CollectionChanged \+= \(_, _\)/);
-  assert.match(code, /Tabs\.TabItemsChanged \+= \(_, e\) =>[\s\S]{0,400}?CollectionChange\.ItemRemoved[\s\S]{0,80}?HasShrunkTabs\(\)[\s\S]{0,40}?QueueFullTabWidthRefresh\(\)/);
+  assert.match(code, /Group\.Tabs\.CollectionChanged \+= \(_, e\)/);
+  assert.match(code, /Tabs\.TabItemsChanged \+= \(_, e\) =>[\s\S]{0,400}?CollectionChange\.ItemRemoved[\s\S]{0,80}?HasShrunkTabs\(\)[\s\S]{0,700}?QueueFullTabWidthRefresh\(\)/);
+  // A close under the pointer keeps widths until the pointer leaves the strip, like a browser.
+  assert.match(code, /_pointerInTabStrip && e\.Index < Group\.Tabs\.Count\)\s*_tabWidthHoldPending = true;/);
+  assert.match(motion, /TabContainerGrid_PointerExited[\s\S]{0,200}?_tabWidthHoldPending = false;\s*CaptureTabMotion\(\);\s*QueueFullTabWidthRefresh\(\);/);
   // Full-width tabs skip the refresh: its SizeToContent pass would flash content widths.
   assert.match(code, /private bool HasShrunkTabs\(\)[\s\S]{0,120}?"TabViewItemMaxWidth"/);
   const resizeHandler = code.slice(

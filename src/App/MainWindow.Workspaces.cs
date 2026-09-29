@@ -271,6 +271,9 @@ public sealed partial class MainWindow
 
     private void ApplyWorkspaceLayout(WorkspaceLayout layout, bool additive)
     {
+        // Tabs are placed, moved and closed wholesale; the strips snap to the result.
+        foreach (var groupView in _groupViews.Values)
+            groupView.SuppressTabMotion();
         WorkspaceNotice.IsOpen = false;
         var sourceGroups = layout.Groups.Count == 0
             ? [new WorkspaceGroup()]
