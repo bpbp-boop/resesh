@@ -11,6 +11,7 @@ namespace Resesh.App;
 public partial class App : Application
 {
     private readonly List<MainWindow> _windows = [];
+    private MainWindow? _lastActiveWindow;
     private DispatcherQueue? _dispatcherQueue;
 
     public static SessionStore Store { get; } = new(StorePath("sessions.json", SessionStore.DefaultPath));
@@ -178,7 +179,8 @@ public partial class App : Application
             window.RestorePinnedSessions();
         window.OpenWelcomeIfNeeded();
 
-        ApplyLaunchArguments(window, Environment.GetCommandLineArgs());
+        ApplyLaunchRequest(window, LaunchRequest.Parse(Environment.GetCommandLineArgs()));
+        RefreshJumpList();
 
         var loadMessages = new[] { Settings.LoadWarning, Workspaces.LoadWarning, KnownHosts.LoadWarning, KnownHosts.LoadError }
             .Where(message => message is not null).ToList();
@@ -203,9 +205,18 @@ public partial class App : Application
         });
     }
 
-    internal void HandleRedirectedActivation()
+    /// <summary>Another launch was redirected here. A plain launch opens a new window; one that
+    /// names sessions or recordings (a jump list item) opens them in the window used last.</summary>
+    internal void HandleRedirectedActivation(IReadOnlyList<string> commandLine)
     {
-        _dispatcherQueue?.TryEnqueue(() => CreateWindowCore());
+        _dispatcherQueue?.TryEnqueue(() =>
+        {
+            var request = LaunchRequest.Parse(commandLine);
+            if (!request.OpensSomething || _lastActiveWindow is not { } window || !_windows.Contains(window))
+                window = CreateWindowCore();
+            ApplyLaunchRequest(window, request);
+            window.BringToFront();
+        });
     }
 
     /// <summary>Creates a blank, app-owned window. Keeping every window rooted here is
@@ -280,6 +291,11 @@ public partial class App : Application
             Program.RelaunchCommand(),
             Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
         _windows.Add(window);
+        window.Activated += (_, e) =>
+        {
+            if (e.WindowActivationState != WindowActivationState.Deactivated)
+                _lastActiveWindow = window;
+        };
         window.Closed += (_, _) =>
         {
             _windows.Remove(window);
@@ -290,29 +306,75 @@ public partial class App : Application
         return window;
     }
 
-    private static void ApplyLaunchArguments(MainWindow window, IReadOnlyList<string> args)
+    /// <summary>Opens what a command line names: `--session <id>` (the jump list), `--open <name>`
+    /// (the automated UI test rig) and `--open-recording <path>`, each repeatable.</summary>
+    private static void ApplyLaunchRequest(MainWindow window, LaunchRequest request)
     {
-        // `--open <session name>` (repeatable): open saved sessions at launch. Used by
-        // the automated UI test rig; harmless for normal launches.
-        for (var i = 1; i < args.Count - 1; i++)
+        foreach (var id in request.SessionIds)
         {
-            if (args[i] == "--open"
-                && Store.Sessions.FirstOrDefault(s =>
-                    s.Name.Equals(args[i + 1], StringComparison.OrdinalIgnoreCase)) is { } session)
-            {
+            if (Store.Find(id) is { } session)
                 window.OpenSessionFromLaunch(session);
-            }
-            else if (args[i] == "--open-recording")
+        }
+        foreach (var name in request.SessionNames)
+        {
+            if (Store.Sessions.FirstOrDefault(s => s.Name.Equals(name, StringComparison.OrdinalIgnoreCase)) is { } session)
+                window.OpenSessionFromLaunch(session);
+        }
+        foreach (var path in request.RecordingPaths)
+        {
+            try
             {
-                try
-                {
-                    window.OpenRecordingFromLaunch(args[i + 1]);
-                }
-                catch (Exception ex)
-                {
-                    LogCrash(ex);
-                }
+                window.OpenRecordingFromLaunch(path);
+            }
+            catch (Exception ex)
+            {
+                LogCrash(ex);
             }
         }
     }
+
+    private JumpListPlan? _jumpList;
+    private bool _jumpListQueued;
+    private readonly HashSet<string> _removedJumpListItems = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Rebuilds the taskbar jump list from pinned and recent sessions, once per burst of
+    /// changes. Skipped in demo mode and with --data-dir: its items launch the default data.</summary>
+    internal static void RefreshJumpList()
+    {
+        if (Current is not App app || app._jumpListQueued || !Program.UsesDefaultDataDirectory)
+            return;
+        app._jumpListQueued = app._dispatcherQueue?.TryEnqueue(DispatcherQueuePriority.Low, app.UpdateJumpList) == true;
+    }
+
+    private void UpdateJumpList()
+    {
+        _jumpListQueued = false;
+        var settings = Settings.Current;
+        var plan = JumpListPlan.For(settings.PinnedSessionIds, settings.RecentSessionIds, Store.Find)
+            .Without(_removedJumpListItems);
+        if (plan.SameAs(_jumpList))
+            return;
+        _jumpList = plan;
+        var removed = TaskbarIntegration.UpdateJumpList(plan, Environment.ProcessPath!);
+        if (removed.Count == 0)
+            return;
+
+        // The user removed items from the jump list; they leave Recent too, and a pinned
+        // tab's item stays off the list until resesh restarts.
+        _removedJumpListItems.UnionWith(removed);
+        var removedIds = LaunchRequest.Parse(removed.SelectMany(SplitArguments).ToList()).SessionIds.ToHashSet();
+        var recent = settings.RecentSessionIds.Where(id => !removedIds.Contains(id)).ToList();
+        if (recent.Count != settings.RecentSessionIds.Count
+            && SaveSettings(Settings.Current with { RecentSessionIds = recent }))
+        {
+            foreach (var window in _windows.ToList())
+                window.ViewModel.RefreshRecentSessions();
+        }
+        // The committed list already left them out; the next change rebuilds it from Recent.
+        _jumpList = null;
+    }
+
+    // Jump list arguments are written by JumpListPlan: an option and a GUID, no quoting.
+    private static string[] SplitArguments(string arguments) =>
+        arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 }

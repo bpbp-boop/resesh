@@ -182,4 +182,62 @@ public sealed class SettingsViewModelTests
         Assert.Equal("No history is stored.", settings.HistoryUsageText);
         Assert.False(settings.CanClearHistory);
     }
+
+    [Fact]
+    public void LaunchAtSignInGoesToWindowsNotSettings()
+    {
+        var registered = false;
+        var windowsAccepts = true;
+        var settings = new SettingsViewModel(new SettingsEnvironment
+        {
+            Current = () => _settings,
+            Save = updated => { _settings = updated; return true; },
+            CanLaunchAtSignIn = true,
+            LaunchAtSignIn = () => registered,
+            SetLaunchAtSignIn = enabled =>
+            {
+                if (windowsAccepts)
+                    registered = enabled;
+                return windowsAccepts;
+            },
+        });
+        settings.SettingChanged += _changes.Add;
+        var raised = new List<string?>();
+        settings.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        var before = _settings;
+
+        settings.LaunchAtSignIn = true;
+
+        Assert.True(registered);
+        Assert.Same(before, _settings);
+        Assert.Equal([nameof(SettingsViewModel.LaunchAtSignIn)], _changes);
+        Assert.Empty(raised);
+
+        // Refused by Windows: the switch goes back to what is registered.
+        windowsAccepts = false;
+        settings.LaunchAtSignIn = false;
+
+        Assert.True(settings.LaunchAtSignIn);
+        Assert.Equal([nameof(SettingsViewModel.LaunchAtSignIn)], raised);
+    }
+
+    [Fact]
+    public void LaunchAtSignInIsOffAndLockedWithoutTheDefaultData()
+    {
+        var calls = 0;
+        var settings = new SettingsViewModel(new SettingsEnvironment
+        {
+            Current = () => _settings,
+            Save = _ => true,
+            CanLaunchAtSignIn = false,
+            LaunchAtSignIn = () => true,
+            SetLaunchAtSignIn = _ => { calls++; return true; },
+        });
+
+        settings.LaunchAtSignIn = true;
+
+        Assert.False(settings.CanLaunchAtSignIn);
+        Assert.False(settings.LaunchAtSignIn);
+        Assert.Equal(0, calls);
+    }
 }

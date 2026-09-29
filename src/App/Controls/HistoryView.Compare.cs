@@ -75,7 +75,7 @@ public sealed partial class HistoryView
     };
 
     /// <summary>Finds the other runs of the selected command on its host and offers them.</summary>
-    private async void LoadRuns(CommandHistoryEntry? entry)
+    private async Task LoadRunsAsync(CommandHistoryEntry? entry)
     {
         var version = ++_runsVersion;
         CompareButton.Visibility = Visibility.Collapsed;

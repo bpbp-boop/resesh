@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.UI.Dispatching;
@@ -12,7 +13,7 @@ internal static class Program
 {
     private static readonly object ActivationGate = new();
     private static App? _activationTarget;
-    private static int _pendingActivations;
+    private static readonly List<IReadOnlyList<string>> PendingActivations = [];
 
     [STAThread]
     private static int Main(string[] args)
@@ -42,6 +43,8 @@ internal static class Program
                 var registered = AppInstance.FindOrRegisterForKey(key);
                 if (!registered.IsCurrent)
                 {
+                    // Let the running instance bring its window forward for this launch.
+                    AllowSetForegroundWindow(registered.ProcessId);
                     Task.Run(async () => await registered.RedirectActivationToAsync(activationArgs))
                         .GetAwaiter()
                         .GetResult();
@@ -74,6 +77,11 @@ internal static class Program
         }
         return defaultPath;
     }
+
+    /// <summary>False in demo mode or with --data-dir: a jump list item or a sign-in launch
+    /// starts without those options, so it would open a different data folder.</summary>
+    internal static bool UsesDefaultDataDirectory =>
+        !DemoMode.IsEnabled && !Environment.GetCommandLineArgs().Contains("--data-dir");
 
     internal static string RelaunchCommand()
     {
@@ -130,31 +138,65 @@ internal static class Program
     private static void OnActivated(object? sender, AppActivationArguments args)
     {
         if (CommandCompletionNotifications.HandleActivation(args)) return;
+        var commandLine = args.Kind == ExtendedActivationKind.Launch
+            && args.Data is Windows.ApplicationModel.Activation.ILaunchActivatedEventArgs launch
+                ? SplitCommandLine(launch.Arguments)
+                : [];
         App? target;
         lock (ActivationGate)
         {
             target = _activationTarget;
             if (target is null)
             {
-                _pendingActivations++;
+                PendingActivations.Add(commandLine);
                 return;
             }
         }
 
-        target.HandleRedirectedActivation();
+        target.HandleRedirectedActivation(commandLine);
     }
 
     internal static void SetActivationTarget(App app)
     {
-        int pending;
+        List<IReadOnlyList<string>> pending;
         lock (ActivationGate)
         {
             _activationTarget = app;
-            pending = _pendingActivations;
-            _pendingActivations = 0;
+            pending = [.. PendingActivations];
+            PendingActivations.Clear();
         }
 
-        for (var i = 0; i < pending; i++)
-            app.HandleRedirectedActivation();
+        foreach (var commandLine in pending)
+            app.HandleRedirectedActivation(commandLine);
     }
+
+    /// <summary>Splits a command line the way the C runtime does for Main's args.</summary>
+    private static string[] SplitCommandLine(string? commandLine)
+    {
+        if (string.IsNullOrWhiteSpace(commandLine))
+            return [];
+        var argv = CommandLineToArgvW(commandLine, out var count);
+        if (argv == IntPtr.Zero)
+            return [];
+        try
+        {
+            var result = new string[count];
+            for (var i = 0; i < count; i++)
+                result[i] = Marshal.PtrToStringUni(Marshal.ReadIntPtr(argv, i * IntPtr.Size))!;
+            return result;
+        }
+        finally
+        {
+            LocalFree(argv);
+        }
+    }
+
+    [DllImport("shell32.dll", SetLastError = true)]
+    private static extern IntPtr CommandLineToArgvW([MarshalAs(UnmanagedType.LPWStr)] string commandLine, out int count);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr memory);
+
+    [DllImport("user32.dll")]
+    private static extern bool AllowSetForegroundWindow(uint processId);
 }

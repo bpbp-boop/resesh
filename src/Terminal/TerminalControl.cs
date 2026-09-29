@@ -258,7 +258,7 @@ public sealed class TerminalControl : TerminalSurface
                     }
                     break;
                 case "paste":
-                    PasteFromClipboard();
+                    _ = PasteFromClipboardAsync();
                     break;
                 case "resize":
                     Columns = root.GetProperty("cols").GetInt32();
@@ -374,7 +374,7 @@ public sealed class TerminalControl : TerminalSurface
         }
     }
 
-    private async void PasteFromClipboard()
+    private async Task PasteFromClipboardAsync()
     {
         try
         {

@@ -102,6 +102,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             ScheduleExpansionSync();
             SyncEmptyState();
             ViewModel.RefreshRecentSessions();
+            App.RefreshJumpList(); // sessions were renamed, added or deleted
         };
         ViewModel.PropertyChanged += (_, e) =>
         {
@@ -977,6 +978,15 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     /// <summary>Launch-time entry for App's --open argument (the automated test rig).</summary>
     public void OpenSessionFromLaunch(Session session) => ConnectSession(session);
 
+    /// <summary>Shows this window in front, restoring it if minimized, for a launch redirected here.</summary>
+    public void BringToFront()
+    {
+        if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
+            presenter.Restore();
+        Activate();
+        Interop.WindowAlerts.BringToForeground(WinRT.Interop.WindowNative.GetWindowHandle(this));
+    }
+
     public void OpenWelcomeIfNeeded()
     {
         if (App.Settings.Current.OnboardingCompleted == false)
@@ -1058,6 +1068,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
                 App.ReportRecoverableError(exception);
             }
             ViewModel.RefreshRecentSessions();
+            App.RefreshJumpList();
         }
         return tab;
     }
@@ -1702,11 +1713,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         SavePinnedSessions();
     }
 
-    private void SavePinnedSessions() =>
+    private void SavePinnedSessions()
+    {
         App.SaveSettings(App.Settings.Current with
         {
             PinnedSessionIds = ViewModel.AllTabs.Where(t => t.IsPinned).Select(t => t.Session.Id).Distinct().ToList(),
         });
+        App.RefreshJumpList();
+    }
 
     /// <summary>Reopens and reconnects the pinned sessions from the last run; called once at launch.</summary>
     public void RestorePinnedSessions()
@@ -1941,6 +1955,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             ClearHistory = () => App.History.Clear(),
             IsStorageFailure = Resesh.Core.History.CommandHistoryStore.IsStorageFailure,
             ReportError = App.ReportRecoverableError,
+            CanLaunchAtSignIn = Program.UsesDefaultDataDirectory,
+            LaunchAtSignIn = Interop.SignInLaunch.IsEnabled,
+            SetLaunchAtSignIn = enabled => Interop.SignInLaunch.TrySet(enabled, Environment.ProcessPath!),
         });
         settings.SettingChanged += property => App.ApplySettingChange(property, source: settings);
         return new SettingsPage(settings);
