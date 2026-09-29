@@ -108,6 +108,53 @@ store key passphrases in Credential Manager.
 
 ---
 
+## Identities (design in progress)
+
+Goal: describe who you log in as once, for a whole part of the session tree, instead of
+repeating a username and password in every session. Still being designed; the open
+questions below need answers before work starts.
+
+**Today:** each session carries its own username, auth method, and Credential Manager
+entry (keys are already shared through the key registry). With hundreds of imported
+sessions that means typing the same username repeatedly, retyping a rotated domain or
+TACACS password session by session, and no view of which sessions use which account.
+
+**Identity** = a username plus one way to prove it: a stored password (one Credential
+Manager entry), a registered key, the SSH agent (see Connectivity; also the path to
+password-manager agents in FUTURE.md), ask every time (never stored), and later GSSAPI.
+
+**Attachment and resolution:** identities attach to folders and are inherited by every
+session inside, including ones added later. A session may override with a specific
+identity or "ask every time". Resolution: session override, then the nearest folder with
+an identity, then a prompt.
+
+**Behaviour:**
+- A failed stored-password login offers "Update the password for *identity* (used by N
+  sessions)"; one update fixes every session using it.
+- The session editor shows the effective identity and where it comes from; an Identities
+  manager lists each identity with its usage.
+- New sessions dropped into a folder need no credentials of their own.
+
+**Migration:** nothing changes until the user opts in. Existing sessions keep a private
+per-session identity. A tidy-up assistant proposes groupings (same username and same
+saved password, compared locally only) and folder assignments. Importers suggest
+identities from repeated usernames.
+
+**Related:** jump hosts use the same folder inheritance but stay a separate concept (an
+identity is who you are; a jump host is how you reach the machine). Backups export
+identities without secrets unless the encrypted option is used.
+
+**Hard parts:** folders have no settings of their own today, so folder settings need a
+home that survives renames and moves. Per-host accounts need the override path. One
+stored secret now visibly unlocks many sessions (it usually did already).
+
+**Open questions:**
+- Is password rotation the main pain, or the repetition and lack of visibility?
+- Attach by folder only, or also by tag across folders (for example, all Juniper devices)?
+- Ship jump hosts in the same piece of work, or keep them separate?
+
+---
+
 ## Telnet & serial consoles
 
 Console-cable and terminal-server access — the last standing objection from the SecureCRT
