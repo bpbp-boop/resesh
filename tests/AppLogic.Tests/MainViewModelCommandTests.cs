@@ -110,7 +110,6 @@ public sealed class MainViewModelCommandTests : IDisposable
 
         Assert.True(settings.IsAppPage);
         Assert.False(settings.IsOnboarding);
-        Assert.False(settings.CanDrag);
         Assert.Equal("Settings", settings.Header);
         Assert.Equal("Close Settings", window.CloseTabTitle);
         Assert.False(window.CloneTabCommand.CanExecute(null));
@@ -157,6 +156,20 @@ public sealed class MainViewModelCommandTests : IDisposable
         Assert.True(window.SplitRightCommand.CanExecute(null));
         window.SplitRightCommand.Execute(null);
         Assert.Equal(["SplitRight b"], _window.Calls);
+    }
+
+    [Fact]
+    public void AppPagesSplitAndMoveLikeSessionTabs()
+    {
+        var window = Window();
+        Open(window, Ssh(), TabConnectionState.Connected);
+        var settings = TabViewModel.CreateAppPage(AppPage.Settings, Environment());
+        window.AttachTab(settings, window.FocusedGroup, 1);
+
+        Assert.True(window.SplitDownCommand.CanExecute(settings));
+        Assert.True(window.MoveTabLeftCommand.CanExecute(settings));
+        window.SplitDownCommand.Execute(settings);
+        Assert.Equal(["SplitDown Settings"], _window.Calls);
     }
 
     [Fact]

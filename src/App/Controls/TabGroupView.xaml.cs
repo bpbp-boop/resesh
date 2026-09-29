@@ -214,7 +214,7 @@ public sealed partial class TabGroupView : UserControl
     private async Task PrepareTabDragPreviewAsync(TabViewModel tab, Windows.Foundation.Point pointer)
     {
         ResetTabDragPreview();
-        if (!tab.CanDrag || tab.IsPinned
+        if (tab.IsPinned
             || Tabs.ContainerFromIndex(Group.Tabs.IndexOf(tab)) is not TabViewItem item)
             return;
 
@@ -1188,8 +1188,8 @@ public sealed partial class TabGroupView : UserControl
         _pin.IsEnabled = !isAppPage && !tab.IsPlayback;
         _lock.IsEnabled = !isAppPage && !tab.IsPlayback && !tab.IsLocked;
         // Splitting a lone tab would leave an empty group that immediately collapses — pointless.
-        _split.IsEnabled = !isAppPage && Group.Tabs.Count > 1;
-        _splitDown.IsEnabled = !isAppPage && Group.Tabs.Count > 1;
+        _split.IsEnabled = Group.Tabs.Count > 1;
+        _splitDown.IsEnabled = Group.Tabs.Count > 1;
         _filePane.Visibility = caps.FilePane ? Visibility.Visible : Visibility.Collapsed;
         _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
         var filePaneCwd = caps.FilePane;

@@ -1014,17 +1014,19 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         return tab;
     }
 
+    // Welcome can be dragged to another window, so its actions go to the window hosting it now.
     private void OpenWelcome() => OpenAppPage(AppPage.Welcome, tab =>
     {
+        MainWindow Host() => App.WindowFor(tab) ?? this;
         var view = new OnboardingView(
             App.Settings.Current,
-            ApplyThemeToApp,
-            ViewModel.RebuildTree,
+            App.PreviewThemeInAllWindows,
+            () => Host().ViewModel.RebuildTree(),
             Core.Local.LocalShellDiscovery.DefaultProfile(
                 App.Store, App.Settings.Current.DefaultLocalProfileId, App.AvailableLocalShells)?.Name);
-        view.FinishRequested += () => FinishOnboarding(tab, view);
-        view.NewSessionRequested += () => _ = OpenSessionEditorAsync(existing: null, defaultFolder: "");
-        view.LocalShellRequested += OpenDefaultLocalProfile;
+        view.FinishRequested += () => Host().FinishOnboarding(tab, view);
+        view.NewSessionRequested += () => _ = Host().OpenSessionEditorAsync(existing: null, defaultFolder: "");
+        view.LocalShellRequested += () => Host().OpenDefaultLocalProfile();
         return view;
     });
 
@@ -1966,8 +1968,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     /// <summary>Re-reads this window's Settings page after another window or command changed settings.</summary>
     private void RefreshSettingsPage(SettingsViewModel? source)
     {
-        if (ViewModel.FindAppPage(AppPage.Settings)?.View is SettingsPage page && !ReferenceEquals(page.ViewModel, source))
-            page.ViewModel.Refresh();
+        // Dragging Settings between windows can leave two Settings tabs in one window.
+        foreach (var tab in ViewModel.AllTabs)
+        {
+            if (tab.View is SettingsPage page && !ReferenceEquals(page.ViewModel, source))
+                page.ViewModel.Refresh();
+        }
     }
 
     /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
@@ -2040,6 +2046,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             tab.NotifyAgentVisuals(); // the agent icon/badge is gated on a setting
         }
     }
+
+    /// <summary>Shows an unsaved theme in this window, for Welcome's theme choice.</summary>
+    internal void PreviewTheme(string theme) => ApplyThemeToApp(theme);
 
     /// <summary>Applies a reversible Settings-dialog theme preview without repeating
     /// layout, scrollback, or highlight work in every open terminal.</summary>

@@ -127,8 +127,6 @@ public sealed class TabViewModel : ObservableObject
 
     public bool IsOnboarding => Page == AppPage.Welcome;
 
-    public bool CanDrag => !IsAppPage;
-
     /// <summary>What this tab's target kind supports; drives menu naming and visibility.</summary>
     public SessionCapabilities Capabilities => SessionCapabilities.For(Session);
 
