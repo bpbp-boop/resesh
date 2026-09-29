@@ -154,6 +154,17 @@
                             AutomationProperties.AutomationId="SettingsReopenLastLayout" />
                     </toolkit:SettingsCard>
                     <toolkit:SettingsCard
+                        x:Name="LaunchAtSignInCard"
+                        Header="Start resesh when I sign in to Windows"
+                        Description="{x:Bind ViewModel.LaunchAtSignInDescription}"
+                        IsEnabled="{x:Bind ViewModel.CanLaunchAtSignIn}">
+                        <ToggleSwitch
+                            x:Name="LaunchAtSignInSwitch"
+                            IsOn="{x:Bind ViewModel.LaunchAtSignIn, Mode=TwoWay}"
+                            AutomationProperties.Name="Start resesh when I sign in to Windows"
+                            AutomationProperties.AutomationId="SettingsLaunchAtSignIn" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
                         x:Name="ConfirmCloseCard"
                         Header="Confirm before closing active sessions"
                         Description="Ask before a close or exit ends a connected session or a running local shell.">

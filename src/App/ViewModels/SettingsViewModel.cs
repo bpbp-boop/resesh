@@ -19,6 +19,14 @@ public sealed class SettingsEnvironment
     public Action ClearHistory { get; init; } = () => { };
     public Func<Exception, bool> IsStorageFailure { get; init; } = _ => false;
     public Action<Exception> ReportError { get; init; } = _ => { };
+
+    /// <summary>Starting at sign-in lives in Windows, not in settings.json, so Task Manager can
+    /// turn it off too. Unavailable in demo mode or with --data-dir, which a sign-in launch drops.</summary>
+    public bool CanLaunchAtSignIn { get; init; }
+    public Func<bool> LaunchAtSignIn { get; init; } = () => false;
+
+    /// <summary>Turns starting at sign-in on or off; false when Windows refused.</summary>
+    public Func<bool, bool> SetLaunchAtSignIn { get; init; } = _ => false;
 }
 
 /// <summary>
@@ -119,6 +127,24 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         get => Current.ReopenLastLayoutAtStartup;
         set => Save(value, s => s with { ReopenLastLayoutAtStartup = value }, () => ReopenLastLayoutAtStartup);
+    }
+
+    public bool CanLaunchAtSignIn => _environment.CanLaunchAtSignIn;
+
+    public string LaunchAtSignInDescription => _environment.CanLaunchAtSignIn
+        ? "Task Manager's Startup apps page can also turn this off."
+        : "Unavailable in demo mode or with --data-dir: resesh would start with your usual data instead.";
+
+    public bool LaunchAtSignIn
+    {
+        get => _environment.CanLaunchAtSignIn && _environment.LaunchAtSignIn();
+        set
+        {
+            if (value != LaunchAtSignIn && _environment.CanLaunchAtSignIn && _environment.SetLaunchAtSignIn(value))
+                SettingChanged?.Invoke(nameof(LaunchAtSignIn));
+            if (LaunchAtSignIn != value)
+                OnPropertyChanged();
+        }
     }
 
     public bool ConfirmCloseActiveSessions

@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Resesh.App.Interop;
 
-internal static class TaskbarIntegration
+internal static partial class TaskbarIntegration
 {
     public const string AppUserModelId = "Resesh.Terminal";
 
