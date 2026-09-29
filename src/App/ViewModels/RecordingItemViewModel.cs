@@ -1,4 +1,5 @@
 using System.Globalization;
+using Resesh.Core.Models;
 
 namespace Resesh.App.ViewModels;
 
@@ -13,13 +14,6 @@ public sealed class RecordingItemViewModel
     {
         FilePath = file.FullName,
         Name = Path.GetFileNameWithoutExtension(file.Name),
-        Detail = $"{file.LastWriteTime.ToString("g", CultureInfo.CurrentCulture)}  •  {FormatSize(file.Length)}",
-    };
-
-    private static string FormatSize(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes} B",
-        < 1024 * 1024 => $"{bytes / 1024d:0.#} KB",
-        _ => $"{bytes / (1024d * 1024d):0.#} MB",
+        Detail = $"{file.LastWriteTime.ToString("g", CultureInfo.CurrentCulture)}  •  {ByteSize.Format(file.Length)}",
     };
 }

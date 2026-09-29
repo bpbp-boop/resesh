@@ -117,7 +117,7 @@ public partial class App : Application
 
         try
         {
-            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Resesh");
+            var dir = AppDataPaths.Local();
             Directory.CreateDirectory(dir);
             File.AppendAllText(Path.Combine(dir, "crash.log"), $"[{DateTime.Now:O}] {ex}\n\n");
         }
@@ -168,7 +168,6 @@ public partial class App : Application
         Resesh.Core.Telnet.TelnetTerminalSession.TraceHook = message => MainWindow.Trace(message);
         Resesh.Terminal.TerminalControl.TraceHook = message => MainWindow.Trace(message);
         TaskbarIntegration.TraceHook = message => MainWindow.Trace(message);
-        Resesh.Terminal.NativeTerminalSurface.TraceHook = message => MainWindow.Trace(message);
 #endif
         Resesh.Terminal.TerminalSurface.Shortcuts = AppShortcuts.ForTerminals();
         PruneCommandHistory();
@@ -182,7 +181,11 @@ public partial class App : Application
         ApplyLaunchRequest(window, LaunchRequest.Parse(Environment.GetCommandLineArgs()));
         RefreshJumpList();
 
-        var loadMessages = new[] { Settings.LoadWarning, Workspaces.LoadWarning, KnownHosts.LoadWarning, KnownHosts.LoadError }
+        var loadMessages = new[]
+            {
+                Settings.LoadWarning, Store.LoadWarning, SshKeys.LoadWarning, Highlights.LoadWarning,
+                Workspaces.LoadWarning, KnownHosts.LoadWarning, KnownHosts.LoadError,
+            }
             .Where(message => message is not null).ToList();
         if (loadMessages.Count > 0)
             window.ShowOperationNotice("Stored data needs attention", string.Join("\n", loadMessages));

@@ -6,9 +6,7 @@ const test = require("node:test");
 const app = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "App.xaml.cs"),
   "utf8");
-const windowCode = fs.readFileSync(
-  path.join(__dirname, "..", "src", "App", "MainWindow.xaml.cs"),
-  "utf8");
+const windowCode = require("./support/mainWindowSource");
 const tabGroup = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"),
   "utf8");

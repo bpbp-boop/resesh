@@ -196,13 +196,12 @@ default. When included, the complete backup is encrypted with its passphrase.
 src/App               WinUI 3 app (views, viewmodels, dialogs)
 src/Core              models, session store, importers, SSH/SFTP, shell integration,
                       credential service — no UI dependencies
-src/Terminal          WebView2 host + xterm.js assets, native terminal surface (WIP)
+src/Terminal          WebView2 host + xterm.js assets
 tests/Core.Tests      core unit tests
 tests/AppLogic.Tests  view-model tests without a WinUI window
-tests/Terminal.Tests  terminal buffer and native snapshot tests
 tests/*.js            JavaScript source checks (run with `node --test`)
 installer/            WiX MSI and setup bundle
-eng/                  build scripts, native terminal patches and baselines
+eng/                  MSBuild targets and patches
 tools/                TestSshServer and KeepaliveProbe
 website/              project website
 ```
@@ -218,17 +217,6 @@ dotnet run --project tools/TestSshServer
 
 Listens on `127.0.0.1:2200`, accepts `test` / `test123`. The seeded session **Lab/local-test**
 connects to it. Commands: `big` (10 MB dump), `bye` (server-side close); anything else echoes.
-
-## Native terminal development (WIP)
-
-WebView2 and xterm.js remain the default for live terminals, rewind, and recording playback.
-Normal builds do not enable the native renderer or include its DLL.
-
-For native development, build the native artifacts with `eng/build-native-terminal.ps1`,
-then build the app with `-p:EnableNativeTerminalWip=true` and `-p:Platform=x64`
-(or `ARM64`). Set `RESESH_TERMINAL_SURFACE=native` only for the test process.
-Both the build option and environment setting are required. Native snapshots remain
-part of this WIP and are not used by xterm.js.
 
 ## License
 

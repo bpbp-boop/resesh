@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Resesh.Core.Models;
 using Resesh.Core.Storage;
 
 namespace Resesh.App.ViewModels;
@@ -240,7 +241,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         catch (Exception exception) when (_environment.IsStorageFailure(exception)) { bytes = 0; }
         HistoryUsageText = bytes == 0
             ? "No history is stored."
-            : $"History uses {FormatSize(bytes)} in {_environment.HistoryDirectory}.";
+            : $"History uses {ByteSize.Format(bytes)} in {_environment.HistoryDirectory}.";
         CanClearHistory = bytes > 0;
     }
 
@@ -254,13 +255,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
         RefreshHistoryUsage();
     }
-
-    private static string FormatSize(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes} bytes",
-        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        _ => $"{bytes / (1024.0 * 1024):0.#} MB",
-    };
 
     // ---- Agents ----
 

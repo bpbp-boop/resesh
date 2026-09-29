@@ -138,34 +138,18 @@ public sealed class SettingsStore
     }
 
     public static string DefaultPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "settings.json");
+        AppDataPaths.Roaming("settings.json");
 
     public void Load()
     {
         lock (_gate)
         {
-            LoadWarning = null;
-            _preserveBackup = false;
-            try
-            {
-                Current = Read(_path);
-            }
-            catch (Exception e) when (e is JsonException or IOException or UnauthorizedAccessException)
-            {
-                try
-                {
-                    Current = Read(_path + ".bak");
-                    _preserveBackup = true;
-                    LoadWarning = "Settings were recovered from the backup file.";
-                }
-                catch (Exception backupError) when (backupError is JsonException or IOException or UnauthorizedAccessException)
-                {
-                    Current = new AppSettings { OnboardingCompleted = File.Exists(_path) ? null : false };
-                    if (e is not (FileNotFoundException or DirectoryNotFoundException)
-                        || backupError is not (FileNotFoundException or DirectoryNotFoundException))
-                        LoadWarning = "Settings could not be loaded. Default settings are in use. " + e.Message;
-                }
-            }
+            var load = AtomicFile.Load(_path, Read, "Settings");
+            Current = load.Data ?? new AppSettings { OnboardingCompleted = File.Exists(_path) ? null : false };
+            _preserveBackup = load.PreserveBackup;
+            LoadWarning = load.Data is null && load.Warning is not null
+                ? load.Warning + " Default settings are in use."
+                : load.Warning;
         }
     }
 
@@ -179,9 +163,8 @@ public sealed class SettingsStore
         }
     }
 
-    private static AppSettings Read(string path) =>
-        JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions)
-        ?? throw new JsonException("The settings file is empty.");
+    private static AppSettings? Read(string path) =>
+        JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions);
 
     /// <summary>Moves a saved session to the front of the bounded recent list.</summary>
     public void RecordRecentSession(Guid sessionId, int maximumCount = 12)

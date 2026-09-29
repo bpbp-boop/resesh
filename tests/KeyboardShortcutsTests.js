@@ -9,8 +9,7 @@ const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8");
 const table = read("src", "Core", "Input", "KeyBindings.cs");
 const page = read("src", "Terminal", "wwwroot", "terminal.html");
 const control = read("src", "Terminal", "TerminalControl.cs");
-const native = read("src", "Terminal", "NativeTerminalSurface.cs");
-const mainWindow = read("src", "App", "MainWindow.xaml.cs");
+const mainWindow = require("./support/mainWindowSource");
 
 const idValues = Object.fromEntries(
   [...table.matchAll(/public const string (\w+) = "([^"]+)";/g)].map(m => [m[1], m[2]]));
@@ -53,7 +52,6 @@ test("the page matches chords from the host table, not hardcoded keys", () => {
 test("split-only shortcuts leave Alt+Arrow to the shell in an unsplit window", () => {
   assert.match(page, /if \(shortcut\.whenSplit && !isSplit\) return;/);
   assert.match(page, /isSplit = msg\.isSplit === true;/);
-  assert.match(native, /if \(shortcut\.WhenSplit && !_isSplit\)\s*return false;/);
 });
 
 test("the find field keeps its text-editing keys", () => {
@@ -69,17 +67,6 @@ test("WebView2 hands the table to the page and raises forwarded shortcuts", () =
   assert.match(control, /case "shortcut":/);
   assert.match(control, /ShortcutRequested\?\.Invoke\(id, chord\);/);
   assert.match(control, /type = "invokeShortcut"/);
-});
-
-test("the native surface matches the same table and never strands suppressed input", () => {
-  const handler = methodBody(native, "private bool TryHandleAppShortcut(ushort virtualKey)");
-  assert.match(handler, /MatchShortcut\(virtualKey, control, shift, alt\)/);
-  assert.match(native, /_suppressCharactersForKey != 0 && _suppressCharactersForKey != virtualKey/);
-  const lostFocus = methodBody(native, "private void OnTerminalLostFocus");
-  assert.match(lostFocus, /_suppressCharactersForKey = 0;/);
-  const run = methodBody(native, "private bool RunTerminalShortcut(string id)");
-  for (const [, id] of run.matchAll(/"(terminal\.\w+)"/g))
-    assert.ok(bindings.some(b => b.id === id && b.scope === "Terminal"), id);
 });
 
 test("the window runs every app and window shortcut", () => {

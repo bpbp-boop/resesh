@@ -83,11 +83,11 @@ public sealed partial class SettingsPage : UserControl
 
     private void Show(Section section)
     {
-        GeneralSection.Visibility = Visible(section == Section.General);
-        RecordingSection.Visibility = Visible(section == Section.Recording);
-        HighlightingSection.Visibility = Visible(section == Section.Highlighting);
-        AgentsSection.Visibility = Visible(section == Section.Agents);
-        ShortcutsSection.Visibility = Visible(section == Section.Shortcuts);
+        GeneralSection.Visibility = PresentationValues.Visible(section == Section.General);
+        RecordingSection.Visibility = PresentationValues.Visible(section == Section.Recording);
+        HighlightingSection.Visibility = PresentationValues.Visible(section == Section.Highlighting);
+        AgentsSection.Visibility = PresentationValues.Visible(section == Section.Agents);
+        ShortcutsSection.Visibility = PresentationValues.Visible(section == Section.Shortcuts);
         var item = section switch
         {
             Section.Recording => RecordingItem,
@@ -101,8 +101,6 @@ public sealed partial class SettingsPage : UserControl
         if (section == Section.Recording)
             ViewModel.RefreshHistoryUsage();
     }
-
-    private static Visibility Visible(bool visible) => visible ? Visibility.Visible : Visibility.Collapsed;
 
     private void Sections_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {

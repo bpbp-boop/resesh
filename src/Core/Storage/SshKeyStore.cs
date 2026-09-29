@@ -17,18 +17,19 @@ public sealed class SshKeyStore
     };
 
     private readonly string _path;
-    private readonly string _bakPath;
+    private bool _preserveBackup;
     private readonly object _gate = new();
     private List<SshKeyReference> _keys = [];
 
     public SshKeyStore(string path)
     {
         _path = path;
-        _bakPath = path + ".bak";
     }
 
-    public static string DefaultPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "ssh-keys.json");
+    public static string DefaultPath => AppDataPaths.Roaming("ssh-keys.json");
+
+    /// <summary>Set by <see cref="Load"/> when the file was recovered or unreadable.</summary>
+    public string? LoadWarning { get; private set; }
 
     public IReadOnlyList<SshKeyReference> Keys
     {
@@ -38,7 +39,12 @@ public sealed class SshKeyStore
     public void Load()
     {
         lock (_gate)
-            _keys = TryRead(_path)?.Keys ?? TryRead(_bakPath)?.Keys ?? [];
+        {
+            var load = AtomicFile.Load(_path, Read, "SSH keys");
+            _preserveBackup = load.PreserveBackup;
+            LoadWarning = load.Warning;
+            _keys = load.Data?.Keys ?? [];
+        }
     }
 
     public SshKeyReference? Find(Guid id)
@@ -289,28 +295,12 @@ public sealed class SshKeyStore
     private void Save()
     {
         var json = JsonSerializer.Serialize(new StoreData { Keys = _keys }, JsonOptions);
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var temp = _path + ".tmp";
-        File.WriteAllText(temp, json);
-        if (File.Exists(_path))
-            File.Replace(temp, _path, _bakPath);
-        else
-            File.Move(temp, _path);
+        AtomicFile.Write(_path, json, _preserveBackup);
+        _preserveBackup = false;
     }
 
-    private static StoreData? TryRead(string path)
-    {
-        try
-        {
-            return File.Exists(path)
-                ? JsonSerializer.Deserialize<StoreData>(File.ReadAllText(path), JsonOptions)
-                : null;
-        }
-        catch (Exception ex) when (ex is IOException or JsonException)
-        {
-            return null;
-        }
-    }
+    private static StoreData? Read(string path) =>
+        JsonSerializer.Deserialize<StoreData>(File.ReadAllText(path), JsonOptions);
 
     private sealed class StoreData
     {

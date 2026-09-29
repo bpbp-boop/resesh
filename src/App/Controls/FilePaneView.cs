@@ -497,7 +497,7 @@ public sealed class FilePaneView : UserControl, IDisposable
         ToolTipService.SetToolTip(row, $"{entry.Name}\n{details}");
         var size = new TextBlock
         {
-            Text = entry.IsDirectory ? "" : FormatSize(entry.Size),
+            Text = entry.IsDirectory ? "" : ByteSize.Format(entry.Size),
             Opacity = 0.55,
             FontSize = 12,
             TextAlignment = TextAlignment.Right,
@@ -530,14 +530,6 @@ public sealed class FilePaneView : UserControl, IDisposable
         };
         return row;
     }
-
-    internal static string FormatSize(long bytes) => bytes switch
-    {
-        < 1024 => $"{bytes} B",
-        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
-        < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):0.#} MB",
-        _ => $"{bytes / (1024.0 * 1024 * 1024):0.##} GB",
-    };
 
     // ---- operations (one at a time; transfers show the progress strip) ----
 
@@ -602,7 +594,7 @@ public sealed class FilePaneView : UserControl, IDisposable
             _transferBar.IsIndeterminate = false;
             _transferBar.Maximum = total;
             _transferBar.Value = Math.Min(done, total);
-            _transferText.Text = $"{verb} {name}{position} — {FormatSize(done)} / {FormatSize(total)}";
+            _transferText.Text = $"{verb} {name}{position} — {ByteSize.Format(done)} / {ByteSize.Format(total)}";
         }
         else
         {

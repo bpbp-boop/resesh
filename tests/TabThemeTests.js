@@ -6,9 +6,7 @@ const test = require("node:test");
 const viewModel = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "ViewModels", "TabViewModel.cs"),
   "utf8");
-const mainWindow = fs.readFileSync(
-  path.join(__dirname, "..", "src", "App", "MainWindow.xaml.cs"),
-  "utf8");
+const mainWindow = require("./support/mainWindowSource");
 const presentation = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "PresentationValues.cs"),
   "utf8");
@@ -20,9 +18,6 @@ const visualPalette = fs.readFileSync(
   "utf8");
 const terminalSurface = fs.readFileSync(
   path.join(__dirname, "..", "src", "Terminal", "TerminalSurface.cs"),
-  "utf8");
-const nativeSurface = fs.readFileSync(
-  path.join(__dirname, "..", "src", "Terminal", "NativeTerminalSurface.cs"),
   "utf8");
 const terminalTab = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"),
@@ -51,19 +46,6 @@ test("a focused selected tab border follows its session color", () => {
   assert.match(presentation, /FocusedTabBorderColor\(string appTheme, string\? colorTag\)[\s\S]*?parsed\.A > 0 \? parsed : palette\.Accent/);
   assert.match(visualPalette, /Hex\(0x0078D4\), 1, Hex\(divider\), Hex\(selection\), false\)/);
   assert.match(xaml, /FocusedAccentVisibility\(IsActive, IsGroupFocused\)[\s\S]*?FocusedTabBorderColor\(AppTheme, ColorTag\)/);
-});
-
-test("native terminal pointer input focuses its current tab group", () => {
-  assert.match(terminalSurface, /event Action\? HostFocusRequested/);
-  assert.match(
-    nativeSurface,
-    /OnPointerPressed[\s\S]*?RequestHostFocus\(\);[\s\S]*?Focus\(FocusState\.Pointer\)/);
-  assert.match(
-    terminalTab,
-    /_terminal\.HostFocusRequested \+= [\s\S]*?FocusRequested\?\.Invoke\(\)/);
-  assert.match(
-    mainWindow,
-    /view\.FocusRequested \+= [\s\S]*?App\.WindowFor\(tab\)[\s\S]*?owner\.FocusGroup\(owner\.ViewModel\.GroupOf\(tab\)\)/);
 });
 
 test("an empty tab group does not draw a tab-strip divider", () => {

@@ -35,8 +35,7 @@ public enum ShortcutCondition
 }
 
 /// <summary>One key combination. <see cref="VirtualKey"/> is the Windows virtual-key code,
-/// which WinUI accelerators, the native terminal and the WebView2 page (KeyboardEvent.keyCode)
-/// all report, so one number matches everywhere on every keyboard layout.</summary>
+/// which WinUI accelerators and the WebView2 page (KeyboardEvent.keyCode) both report, so one number matches everywhere on every keyboard layout.</summary>
 public sealed record KeyChord(KeyModifiers Modifiers, int VirtualKey, string KeyLabel)
 {
     public IReadOnlyList<string> Parts

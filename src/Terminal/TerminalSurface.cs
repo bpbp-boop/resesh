@@ -34,11 +34,6 @@ public abstract class TerminalSurface : Grid, IDisposable
     /// <summary>A finished command while history capture is on. Never raised by playback.</summary>
     public abstract event Action<TerminalCommandRecord>? CommandRecorded;
 
-    /// <summary>Requests host-level pane focus when a native child window receives pointer input.</summary>
-    public event Action? HostFocusRequested;
-
-    protected void RequestHostFocus() => HostFocusRequested?.Invoke();
-
     /// <summary>The surface has presented a frame since it was created or last shown.
     /// Surfaces that draw synchronously never raise it; hosts must not wait indefinitely.</summary>
     public event Action? Painted;
@@ -172,18 +167,7 @@ internal static class TerminalLinkPolicy
 
 public static class TerminalSurfaceFactory
 {
-    public const string SurfaceEnvironmentVariable = "RESESH_TERMINAL_SURFACE";
-
-    /// <summary>WebView2 is the default. Native requires a WIP build and an explicit environment setting.</summary>
-    public static TerminalSurface CreateLive()
-    {
-#if NATIVE_TERMINAL_WIP
-        if (string.Equals(Environment.GetEnvironmentVariable(SurfaceEnvironmentVariable),
-            "native", StringComparison.OrdinalIgnoreCase))
-            return new NativeTerminalSurface();
-#endif
-        return new TerminalControl();
-    }
+    public static TerminalSurface CreateLive() => new TerminalControl();
 
     /// <summary>Playback uses the same renderer as live terminals.</summary>
     public static TerminalSurface CreatePlayback() => CreateLive();

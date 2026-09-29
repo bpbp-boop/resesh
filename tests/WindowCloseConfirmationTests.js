@@ -3,9 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
-const source = fs.readFileSync(
-  path.join(__dirname, "..", "src", "App", "MainWindow.xaml.cs"),
-  "utf8");
+const source = require("./support/mainWindowSource");
 
 test("all window-close actions use the shared open-session confirmation guard", () => {
   assert.match(source, /AppWindow\.Closing \+= AppWindow_Closing/);

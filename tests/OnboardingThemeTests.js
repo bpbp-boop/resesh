@@ -104,8 +104,7 @@ test("the palette brushes Welcome shares with the shell live at app scope", () =
     path.join(__dirname, "..", "src", "App", "MainWindow.xaml"), "utf8");
   assert.ok(!/<SolidColorBrush x:Key="SessionTree/.test(mainWindow));
 
-  const mainWindowCode = fs.readFileSync(
-    path.join(__dirname, "..", "src", "App", "MainWindow.xaml.cs"), "utf8");
+  const mainWindowCode = require("./support/mainWindowSource");
   assert.match(
     mainWindowCode,
     /Application\.Current\.Resources\["SessionTreeForegroundBrush"\]/);

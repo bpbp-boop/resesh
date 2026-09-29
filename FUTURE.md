@@ -130,6 +130,10 @@ per-session fingerprint selection must not be described as destination constrain
 
 ## 2. Native terminal surface via Microsoft Terminal
 
+**Status (2026-09-29): parked.** The work through parity phase 9 lives on the
+`native-terminal` branch (tag `native-terminal-parked`) and was removed from master so
+terminal features are no longer built twice. The notes below describe that branch.
+
 **Goal:** determine whether Microsoft's native terminal control can replace
 WebView2 + xterm.js without replacing the WinUI shell, `ITerminalBackend`, SSH.NET,
 ConPTY, recording, or session model.
