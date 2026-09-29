@@ -1,0 +1,32 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.KeyboardInteractiveDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Resesh.App.Dialogs"
+    PrimaryButtonText="Continue"
+    CloseButtonText="Cancel"
+    DefaultButton="Primary">
+
+    <!-- One field per server challenge; secret challenges are never echoed. -->
+    <ItemsControl MinWidth="420" ItemsSource="{x:Bind Challenges}">
+        <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+                <StackPanel Spacing="10" />
+            </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="local:ChallengeResponse">
+                <Grid>
+                    <TextBox
+                        Header="{x:Bind Prompt}"
+                        Text="{x:Bind Response, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        Visibility="{x:Bind IsText}" />
+                    <PasswordBox
+                        Header="{x:Bind Prompt}"
+                        Password="{x:Bind Response, Mode=TwoWay}"
+                        Visibility="{x:Bind IsSecret}" />
+                </Grid>
+            </DataTemplate>
+        </ItemsControl.ItemTemplate>
+    </ItemsControl>
+</ContentDialog>

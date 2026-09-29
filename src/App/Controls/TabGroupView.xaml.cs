@@ -817,7 +817,7 @@ public sealed partial class TabGroupView : UserControl
     private void UpdateTabActionButtons()
     {
         // An empty group has nothing the buttons could act on: hide the whole cluster.
-        TabStripActions.Visibility = Group.Tabs.Count > 0 && Group.SelectedTab is { IsOnboarding: false }
+        TabStripActions.Visibility = Group.Tabs.Count > 0 && Group.SelectedTab is { IsAppPage: false }
             ? Visibility.Visible
             : Visibility.Collapsed;
         TabStripActions.Opacity = Group.SelectedTab?.IsGroupFocused == false ? 0.55 : 1.0;
@@ -1163,14 +1163,14 @@ public sealed partial class TabGroupView : UserControl
     private void ConfigureMenuFor(TabViewModel tab)
     {
         var caps = tab.Capabilities;
-        var isOnboarding = tab.IsOnboarding;
-        _rename.IsEnabled = !isOnboarding;
-        _resetName.IsEnabled = !isOnboarding && tab.TitleOverride is not null;
+        var isAppPage = tab.IsAppPage;
+        _rename.IsEnabled = !isAppPage;
+        _resetName.IsEnabled = !isAppPage && tab.TitleOverride is not null;
         // Local tabs use process verbs (Stop/Restart); remote-only actions disappear entirely.
         _reconnect.Text = caps.StartAgainVerb;
-        _reconnect.IsEnabled = !isOnboarding && IsStopped(tab);
+        _reconnect.IsEnabled = !isAppPage && IsStopped(tab);
         _disconnect.Text = caps.StopVerb;
-        _disconnect.IsEnabled = !isOnboarding && tab.State == TabConnectionState.Connected;
+        _disconnect.IsEnabled = !isAppPage && tab.State == TabConnectionState.Connected;
         _sendBreak.Visibility = caps.SendBreak && !tab.IsPlayback ? Visibility.Visible : Visibility.Collapsed;
         _sendBreak.IsEnabled = caps.SendBreak && !tab.IsLocked && tab.State == TabConnectionState.Connected;
         // Only persistent sessions have a remote session to end; close/disconnect only detach them.
@@ -1184,12 +1184,12 @@ public sealed partial class TabGroupView : UserControl
         _closeOthers.IsEnabled = Group.Tabs.Any(t => t != tab && !t.IsPinned);
         _closeRight.IsEnabled = Group.Tabs.Skip(Group.Tabs.IndexOf(tab) + 1).Any(t => !t.IsPinned);
         _pin.Text = tab.IsPinned ? "Unpin Tab" : "Pin Tab";
-        _clone.IsEnabled = !isOnboarding && !tab.IsPlayback;
-        _pin.IsEnabled = !isOnboarding && !tab.IsPlayback;
-        _lock.IsEnabled = !isOnboarding && !tab.IsPlayback && !tab.IsLocked;
+        _clone.IsEnabled = !isAppPage && !tab.IsPlayback;
+        _pin.IsEnabled = !isAppPage && !tab.IsPlayback;
+        _lock.IsEnabled = !isAppPage && !tab.IsPlayback && !tab.IsLocked;
         // Splitting a lone tab would leave an empty group that immediately collapses — pointless.
-        _split.IsEnabled = !isOnboarding && Group.Tabs.Count > 1;
-        _splitDown.IsEnabled = !isOnboarding && Group.Tabs.Count > 1;
+        _split.IsEnabled = !isAppPage && Group.Tabs.Count > 1;
+        _splitDown.IsEnabled = !isAppPage && Group.Tabs.Count > 1;
         _filePane.Visibility = caps.FilePane ? Visibility.Visible : Visibility.Collapsed;
         _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
         var filePaneCwd = caps.FilePane;
@@ -1200,7 +1200,7 @@ public sealed partial class TabGroupView : UserControl
             : Visibility.Collapsed;
         // Session Options is disabled when the saved session was deleted while connected.
         var sessionExists = _host.ViewModel.RankedMatches("").Any(s => s.Id == tab.Session.Id);
-        _options.IsEnabled = !isOnboarding && sessionExists;
+        _options.IsEnabled = !isAppPage && sessionExists;
         ConfigureHighlightMenu(tab, sessionExists);
         ConfigureAgentMenu(tab, sessionExists);
     }
@@ -1318,18 +1318,9 @@ public sealed partial class TabGroupView : UserControl
 
     private async Task RenameTabAsync(TabViewModel tab)
     {
-        var box = new TextBox { Text = tab.Header, PlaceholderText = "Tab title" };
-        var dialog = new ContentDialog
-        {
-            Title = "Rename Tab",
-            Content = box,
-            PrimaryButtonText = "Rename",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = XamlRoot,
-        };
-        if (await dialog.ShowModalAsync() == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(box.Text))
-            tab.TitleOverride = box.Text.Trim();
+        var title = await Dialogs.TextPromptDialog.PromptAsync(XamlRoot, "Rename Tab", "Tab title", tab.Header, "Rename");
+        if (!string.IsNullOrWhiteSpace(title))
+            tab.TitleOverride = title.Trim();
     }
 
     // ---- drag between groups ----

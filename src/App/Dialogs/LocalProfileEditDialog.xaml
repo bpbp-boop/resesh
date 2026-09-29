@@ -1,0 +1,88 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.LocalProfileEditDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    PrimaryButtonText="Save"
+    CloseButtonText="Cancel"
+    DefaultButton="Primary"
+    PrimaryButtonClick="OnPrimaryButtonClick">
+
+    <!-- The scrollbar gets its own gutter: without it, it sits on top of the fields it
+         overlaps as soon as the form is long enough to scroll (which it always is). -->
+    <ScrollViewer MaxHeight="560" Padding="0,0,12,0" HorizontalScrollBarVisibility="Disabled">
+        <!-- Wide enough for the longest field headers, which the template clips rather than wraps. -->
+        <StackPanel MinWidth="460" Spacing="12">
+            <TextBlock
+                x:Name="ValidationText"
+                Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                TextWrapping="Wrap"
+                Visibility="Collapsed"
+                AutomationProperties.LiveSetting="Polite" />
+
+            <TextBox x:Name="NameBox" Header="Name" />
+            <ComboBox x:Name="FolderBox" Header="Folder (under Local)" IsEditable="True" HorizontalAlignment="Stretch" />
+            <TextBox x:Name="ExecutableBox" Header="Executable" PlaceholderText="e.g. %SystemRoot%\System32\cmd.exe" />
+            <TextBox
+                x:Name="ArgumentsBox"
+                Header="Arguments (one per line — no quoting needed)"
+                Height="72"
+                AcceptsReturn="True"
+                TextWrapping="NoWrap" />
+            <TextBox x:Name="StartDirBox" Header="Starting directory" PlaceholderText="Blank = your user profile folder" />
+            <TextBox
+                x:Name="EnvironmentBox"
+                Header="Environment overrides (NAME=value per line; empty value removes)"
+                Height="72"
+                AcceptsReturn="True"
+                TextWrapping="NoWrap" />
+
+            <ToggleSwitch
+                x:Name="ShellIntegrationSwitch"
+                Header="Enable shell integration (experimental)"
+                AutomationProperties.AutomationId="LocalShellIntegrationToggle" />
+            <TextBlock
+                Text="Detects supported shells (Bash, Zsh, Fish and PowerShell) when a new terminal starts. Enables command and working-directory reporting without editing shell profiles."
+                TextWrapping="Wrap"
+                Style="{StaticResource CaptionTextBlockStyle}" />
+
+            <ComboBox x:Name="IconBox" Header="Icon" DisplayMemberPath="Name" HorizontalAlignment="Stretch" />
+            <ComboBox x:Name="ColorBox" Header="Color tag" HorizontalAlignment="Stretch" />
+
+            <ComboBox x:Name="OverrideThemeBox" Header="Theme override" HorizontalAlignment="Stretch" />
+            <TextBox x:Name="OverrideFontFamilyBox" Header="Font family override" PlaceholderText="Blank = app setting" />
+            <NumberBox
+                x:Name="OverrideFontSizeBox"
+                Header="Font size override"
+                Minimum="8"
+                Maximum="32"
+                PlaceholderText="App setting"
+                SpinButtonPlacementMode="Compact" />
+            <NumberBox
+                x:Name="OverrideScrollbackBox"
+                Header="Scrollback override"
+                Minimum="1000"
+                Maximum="100000"
+                SmallChange="1000"
+                PlaceholderText="App setting"
+                SpinButtonPlacementMode="Compact" />
+            <ComboBox x:Name="OverrideRecordingBox" Header="Automatic recording" SelectedIndex="0" HorizontalAlignment="Stretch">
+                <x:String>Use app setting</x:String>
+                <x:String>Always record</x:String>
+                <x:String>Never record</x:String>
+            </ComboBox>
+            <ComboBox x:Name="OverrideHistoryBox" Header="Command history" SelectedIndex="0" HorizontalAlignment="Stretch">
+                <x:String>Use app setting</x:String>
+                <x:String>Keep history</x:String>
+                <x:String>Don't keep history</x:String>
+            </ComboBox>
+
+            <CheckBox x:Name="MakeDefaultBox" Content="Make this the default local profile (+ Session, Ctrl+Shift+T)" />
+
+            <Button
+                x:Name="ResetButton"
+                Content="Reset to discovered defaults"
+                Visibility="Collapsed"
+                Click="Reset_Click" />
+        </StackPanel>
+    </ScrollViewer>
+</ContentDialog>

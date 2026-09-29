@@ -1,0 +1,374 @@
+<UserControl
+    x:Class="Resesh.App.Controls.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Resesh.App.Controls"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
+    Background="{StaticResource SessionShellBrush}"
+    Foreground="{StaticResource SessionTreeForegroundBrush}">
+
+    <UserControl.Resources>
+        <!-- Cards sit on the recessed input surface of the active theme palette. -->
+        <StaticResource x:Key="SettingsCardBackground" ResourceKey="SettingsCardBackgroundBrush" />
+
+        <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource TitleTextBlockStyle}">
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+        <Style x:Key="GroupHeader" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+            <Setter Property="Margin" Value="1,20,0,4" />
+        </Style>
+        <Style x:Key="GroupDescription" TargetType="TextBlock">
+            <Setter Property="Margin" Value="1,0,0,6" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Opacity" Value="0.75" />
+        </Style>
+        <Style x:Key="SectionScroller" TargetType="ScrollViewer">
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="Visibility" Value="Collapsed" />
+        </Style>
+        <!-- Section content is left-aligned beside the navigation and capped at a readable width. -->
+        <Style x:Key="SectionBody" TargetType="StackPanel">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="Padding" Value="28,20,28,28" />
+            <Setter Property="Spacing" Value="4" />
+        </Style>
+    </UserControl.Resources>
+
+    <NavigationView
+        x:Name="Sections"
+        PaneDisplayMode="Left"
+        OpenPaneLength="220"
+        IsPaneToggleButtonVisible="False"
+        IsBackButtonVisible="Collapsed"
+        IsSettingsVisible="False"
+        AlwaysShowHeader="False"
+        Background="Transparent"
+        AutomationProperties.AutomationId="SettingsSectionSelector"
+        SelectionChanged="Sections_SelectionChanged">
+        <NavigationView.MenuItems>
+            <NavigationViewItem x:Name="GeneralItem" Content="General" Tag="General" AutomationProperties.AutomationId="SettingsGeneralTab">
+                <NavigationViewItem.Icon><FontIcon Glyph="&#xE713;" /></NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="RecordingItem" Content="Recording" Tag="Recording" AutomationProperties.AutomationId="SettingsRecordingTab">
+                <NavigationViewItem.Icon><FontIcon Glyph="&#xE7C8;" /></NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="HighlightingItem" Content="Highlighting" Tag="Highlighting" AutomationProperties.AutomationId="SettingsHighlightingTab">
+                <NavigationViewItem.Icon><FontIcon Glyph="&#xE7E6;" /></NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="AgentsItem" Content="Agents" Tag="Agents" AutomationProperties.AutomationId="SettingsAgentsTab">
+                <NavigationViewItem.Icon><FontIcon Glyph="&#xE99A;" /></NavigationViewItem.Icon>
+            </NavigationViewItem>
+            <NavigationViewItem x:Name="ShortcutsItem" Content="Keyboard Shortcuts" Tag="Shortcuts" AutomationProperties.AutomationId="SettingsShortcutsTab">
+                <NavigationViewItem.Icon><FontIcon Glyph="&#xE765;" /></NavigationViewItem.Icon>
+            </NavigationViewItem>
+        </NavigationView.MenuItems>
+
+        <!-- One section shows at a time; each keeps its own scroll position. -->
+        <Grid AutomationProperties.AutomationId="SettingsTabContent">
+
+            <!-- ==== General ==== -->
+            <ScrollViewer x:Name="GeneralSection" Style="{StaticResource SectionScroller}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MaxWidth="1000" />
+                    </Grid.ColumnDefinitions>
+                <StackPanel Style="{StaticResource SectionBody}">
+                    <TextBlock Text="General" Style="{StaticResource SectionTitle}" />
+                    <TextBlock
+                        Style="{StaticResource GroupDescription}"
+                        Text="These settings apply throughout resesh and take effect as you change them. Saved sessions can override terminal defaults." />
+
+                    <TextBlock Text="Appearance" Style="{StaticResource GroupHeader}" />
+                    <toolkit:SettingsCard x:Name="ThemeCard" Header="Theme">
+                        <ComboBox
+                            x:Name="ThemeBox"
+                            MinWidth="220"
+                            ItemsSource="{x:Bind ViewModel.Themes}"
+                            DisplayMemberPath="Name"
+                            SelectedItem="{x:Bind ViewModel.Theme, Mode=TwoWay}"
+                            AutomationProperties.Name="Theme"
+                            AutomationProperties.AutomationId="SettingsTheme" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard x:Name="FontFamilyCard" Header="Terminal font family">
+                        <TextBox
+                            x:Name="FontFamilyBox"
+                            MinWidth="280"
+                            Text="{x:Bind ViewModel.FontFamily, Mode=TwoWay}"
+                            AutomationProperties.Name="Terminal font family"
+                            AutomationProperties.AutomationId="SettingsFontFamily" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard x:Name="FontSizeCard" Header="Font size">
+                        <NumberBox
+                            x:Name="FontSizeBox"
+                            MinWidth="160"
+                            Minimum="8"
+                            Maximum="32"
+                            SpinButtonPlacementMode="Compact"
+                            Value="{x:Bind ViewModel.FontSize, Mode=TwoWay}"
+                            AutomationProperties.Name="Font size"
+                            AutomationProperties.AutomationId="SettingsFontSize" />
+                    </toolkit:SettingsCard>
+
+                    <TextBlock Text="Terminal" Style="{StaticResource GroupHeader}" />
+                    <toolkit:SettingsCard x:Name="ScrollbackCard" Header="Scrollback lines">
+                        <NumberBox
+                            x:Name="ScrollbackBox"
+                            MinWidth="160"
+                            Minimum="1000"
+                            Maximum="100000"
+                            SmallChange="1000"
+                            SpinButtonPlacementMode="Compact"
+                            Value="{x:Bind ViewModel.Scrollback, Mode=TwoWay}"
+                            AutomationProperties.Name="Scrollback lines"
+                            AutomationProperties.AutomationId="SettingsScrollback" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard x:Name="CopyOnSelectCard" Header="Copy selected text">
+                        <ToggleSwitch
+                            x:Name="CopyOnSelectSwitch"
+                            IsOn="{x:Bind ViewModel.CopyOnSelect, Mode=TwoWay}"
+                            AutomationProperties.Name="Copy selected text"
+                            AutomationProperties.AutomationId="SettingsCopyOnSelect" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard x:Name="RightClickPasteCard" Header="Paste with right-click">
+                        <ToggleSwitch
+                            x:Name="RightClickPasteSwitch"
+                            IsOn="{x:Bind ViewModel.RightClickPaste, Mode=TwoWay}"
+                            AutomationProperties.Name="Paste with right-click"
+                            AutomationProperties.AutomationId="SettingsRightClickPaste" />
+                    </toolkit:SettingsCard>
+
+                    <TextBlock Text="Startup and interface" Style="{StaticResource GroupHeader}" />
+                    <toolkit:SettingsCard x:Name="ShowStatusBarCard" Header="Show status bar">
+                        <ToggleSwitch
+                            x:Name="ShowStatusBarSwitch"
+                            IsOn="{x:Bind ViewModel.ShowStatusBar, Mode=TwoWay}"
+                            AutomationProperties.Name="Show status bar"
+                            AutomationProperties.AutomationId="SettingsShowStatusBar" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard x:Name="ReopenLastLayoutCard" Header="Reopen last layout at startup">
+                        <ToggleSwitch
+                            x:Name="ReopenLastLayoutSwitch"
+                            IsOn="{x:Bind ViewModel.ReopenLastLayoutAtStartup, Mode=TwoWay}"
+                            AutomationProperties.Name="Reopen last layout at startup"
+                            AutomationProperties.AutomationId="SettingsReopenLastLayout" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        x:Name="ConfirmCloseCard"
+                        Header="Confirm before closing active sessions"
+                        Description="Ask before a close or exit ends a connected session or a running local shell.">
+                        <ToggleSwitch
+                            x:Name="ConfirmCloseSwitch"
+                            IsOn="{x:Bind ViewModel.ConfirmCloseActiveSessions, Mode=TwoWay}"
+                            AutomationProperties.Name="Confirm before closing active sessions"
+                            AutomationProperties.AutomationId="SettingsConfirmCloseActiveSessions" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        x:Name="CrashReportsCard"
+                        Header="Write crash reports"
+                        Description="Save a local report when resesh hits an unexpected error. Reports stay on this computer.">
+                        <ToggleSwitch
+                            x:Name="CrashReportsSwitch"
+                            IsOn="{x:Bind ViewModel.WriteCrashReports, Mode=TwoWay}"
+                            AutomationProperties.Name="Write crash reports"
+                            AutomationProperties.AutomationId="SettingsWriteCrashReports" />
+                    </toolkit:SettingsCard>
+                </StackPanel>
+                </Grid>
+            </ScrollViewer>
+
+            <!-- ==== Recording ==== -->
+            <ScrollViewer x:Name="RecordingSection" Style="{StaticResource SectionScroller}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MaxWidth="1000" />
+                    </Grid.ColumnDefinitions>
+                <StackPanel Style="{StaticResource SectionBody}">
+                    <TextBlock Text="Recording" Style="{StaticResource SectionTitle}" />
+                    <TextBlock
+                        Style="{StaticResource GroupDescription}"
+                        Text="Keep a searchable history of commands, record terminal output to disk, or keep bounded in-memory history for instant rewind." />
+
+                    <TextBlock Text="Command history" Style="{StaticResource GroupHeader}" />
+                    <TextBlock x:Name="HistoryDescription" Style="{StaticResource GroupDescription}" />
+                    <toolkit:SettingsCard x:Name="KeepHistoryCard" Header="Keep a searchable command history">
+                        <ToggleSwitch
+                            x:Name="KeepHistorySwitch"
+                            IsOn="{x:Bind ViewModel.KeepCommandHistory, Mode=TwoWay}"
+                            AutomationProperties.Name="Keep a searchable command history"
+                            AutomationProperties.AutomationId="SettingsKeepCommandHistory" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard x:Name="HistoryDaysCard" Header="Keep history for (days)">
+                        <NumberBox
+                            x:Name="HistoryDaysBox"
+                            MinWidth="160"
+                            Minimum="1"
+                            Maximum="3650"
+                            SpinButtonPlacementMode="Compact"
+                            Value="{x:Bind ViewModel.CommandHistoryDays, Mode=TwoWay}"
+                            AutomationProperties.Name="Keep history for (days)"
+                            AutomationProperties.AutomationId="SettingsCommandHistoryDays" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard Header="Saved history" Description="{x:Bind ViewModel.HistoryUsageText, Mode=OneWay}">
+                        <Button
+                            x:Name="ClearHistoryButton"
+                            Content="Clear History…"
+                            IsEnabled="{x:Bind ViewModel.CanClearHistory, Mode=OneWay}"
+                            AutomationProperties.AutomationId="SettingsClearCommandHistory">
+                            <Button.Flyout>
+                                <Flyout x:Name="ClearHistoryFlyout">
+                                    <StackPanel MaxWidth="300" Spacing="12">
+                                        <TextBlock Text="Delete every saved command and its output? This cannot be undone." TextWrapping="Wrap" />
+                                        <Button Content="Delete All History" Click="ConfirmClearHistory_Click" />
+                                    </StackPanel>
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
+                    </toolkit:SettingsCard>
+
+                    <TextBlock Text="Disk recording" Style="{StaticResource GroupHeader}" />
+                    <TextBlock
+                        Style="{StaticResource GroupDescription}"
+                        Text="Each recording writes an asciicast .cast file and a timestamped .log rendered from committed terminal lines. Both can include secrets that a server prints." />
+                    <toolkit:SettingsCard x:Name="RecordingDirectoryCard" Header="Recording directory">
+                        <TextBox
+                            x:Name="RecordingDirectoryBox"
+                            MinWidth="320"
+                            Text="{x:Bind ViewModel.RecordingDirectory, Mode=TwoWay}"
+                            AutomationProperties.Name="Recording directory"
+                            AutomationProperties.AutomationId="SettingsRecordingDirectory" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard x:Name="AlwaysRecordCard" Header="Record new sessions automatically">
+                        <ToggleSwitch
+                            x:Name="AlwaysRecordSwitch"
+                            IsOn="{x:Bind ViewModel.AlwaysRecord, Mode=TwoWay}"
+                            AutomationProperties.Name="Record new sessions automatically"
+                            AutomationProperties.AutomationId="SettingsAlwaysRecord" />
+                    </toolkit:SettingsCard>
+
+                    <TextBlock Text="Instant rewind" Style="{StaticResource GroupHeader}" />
+                    <TextBlock
+                        Style="{StaticResource GroupDescription}"
+                        Text="Rewind data stays in memory and is deleted when the tab closes." />
+                    <toolkit:SettingsCard x:Name="RewindMinutesCard" Header="Rewind history (minutes)">
+                        <NumberBox
+                            x:Name="RewindMinutesBox"
+                            MinWidth="160"
+                            Minimum="1"
+                            Maximum="1440"
+                            SpinButtonPlacementMode="Compact"
+                            Value="{x:Bind ViewModel.RewindMinutes, Mode=TwoWay}"
+                            AutomationProperties.Name="Rewind history (minutes)"
+                            AutomationProperties.AutomationId="SettingsRewindMinutes" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard x:Name="RewindMegabytesCard" Header="Memory limit per tab (MiB)">
+                        <NumberBox
+                            x:Name="RewindMegabytesBox"
+                            MinWidth="160"
+                            Minimum="1"
+                            Maximum="1024"
+                            SpinButtonPlacementMode="Compact"
+                            Value="{x:Bind ViewModel.RewindMegabytes, Mode=TwoWay}"
+                            AutomationProperties.Name="Memory limit per tab (MiB)"
+                            AutomationProperties.AutomationId="SettingsRewindMegabytes" />
+                    </toolkit:SettingsCard>
+                </StackPanel>
+                </Grid>
+            </ScrollViewer>
+
+            <!-- ==== Highlighting ==== -->
+            <ScrollViewer x:Name="HighlightingSection" Style="{StaticResource SectionScroller}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MaxWidth="1000" />
+                    </Grid.ColumnDefinitions>
+                <StackPanel Style="{StaticResource SectionBody}" Spacing="12">
+                    <TextBlock Text="Highlighting" Style="{StaticResource SectionTitle}" />
+                    <TextBlock
+                        Style="{StaticResource GroupDescription}"
+                        Text="Enable the built-in network rules, and create or edit custom regular-expression rules. Open terminals update as soon as a rule is saved or toggled." />
+                    <InfoBar
+                        x:Name="HighlightSaveError"
+                        IsOpen="False"
+                        IsClosable="True"
+                        Severity="Error"
+                        Message="Could not save highlighting rules. Your last change is kept here; make another change to try again." />
+                    <ContentPresenter x:Name="HighlightEditorHost" />
+                </StackPanel>
+                </Grid>
+            </ScrollViewer>
+
+            <!-- ==== Agents ==== -->
+            <ScrollViewer x:Name="AgentsSection" Style="{StaticResource SectionScroller}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MaxWidth="1000" />
+                    </Grid.ColumnDefinitions>
+                <StackPanel Style="{StaticResource SectionBody}">
+                    <TextBlock Text="Agents" Style="{StaticResource SectionTitle}" />
+                    <TextBlock
+                        Style="{StaticResource GroupDescription}"
+                        Text="Track supported coding agents in each terminal tab. resesh can notify you when an agent needs a response." />
+
+                    <TextBlock Text="Tab display" Style="{StaticResource GroupHeader}" />
+                    <toolkit:SettingsCard
+                        x:Name="AgentIconsCard"
+                        Header="Show agent icons"
+                        Description="Replace a session icon while resesh recognizes a supported agent in that tab.">
+                        <ToggleSwitch
+                            x:Name="AgentIconsSwitch"
+                            IsOn="{x:Bind ViewModel.ShowAgentIcons, Mode=TwoWay}"
+                            AutomationProperties.Name="Show agent icons"
+                            AutomationProperties.AutomationId="SettingsShowAgentIcons" />
+                    </toolkit:SettingsCard>
+
+                    <TextBlock Text="Background alerts" Style="{StaticResource GroupHeader}" />
+                    <TextBlock
+                        Style="{StaticResource GroupDescription}"
+                        Text="Get your attention when an agent waits for a response. Turn on agent icons to use alerts." />
+                    <toolkit:SettingsCard
+                        x:Name="AgentFlashCard"
+                        Header="Flash the taskbar"
+                        IsEnabled="{x:Bind ViewModel.AgentAlertsEnabled, Mode=OneWay}">
+                        <ToggleSwitch
+                            x:Name="AgentFlashSwitch"
+                            IsOn="{x:Bind ViewModel.AgentAlertFlash, Mode=TwoWay}"
+                            AutomationProperties.Name="Flash the taskbar"
+                            AutomationProperties.AutomationId="SettingsAgentAlertFlash" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        x:Name="AgentSoundCard"
+                        Header="Play the notification sound"
+                        IsEnabled="{x:Bind ViewModel.AgentAlertsEnabled, Mode=OneWay}">
+                        <ToggleSwitch
+                            x:Name="AgentSoundSwitch"
+                            IsOn="{x:Bind ViewModel.AgentAlertSound, Mode=TwoWay}"
+                            AutomationProperties.Name="Play the notification sound"
+                            AutomationProperties.AutomationId="SettingsAgentAlertSound" />
+                    </toolkit:SettingsCard>
+
+                    <TextBlock Text="Agent adapters" Style="{StaticResource GroupHeader}" />
+                    <TextBlock
+                        Style="{StaticResource GroupDescription}"
+                        Text="resesh identifies supported agents automatically. Add an adapter only for exact working, waiting, and finished states." />
+                    <controls:AgentAdaptersView />
+                </StackPanel>
+                </Grid>
+            </ScrollViewer>
+
+            <!-- ==== Keyboard shortcuts: the reference scrolls within its own list. ==== -->
+            <Grid
+                x:Name="ShortcutsSection"
+                Padding="28,20,28,20"
+                RowDefinitions="Auto,*"
+                RowSpacing="12"
+                Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MaxWidth="944" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Keyboard Shortcuts" Style="{StaticResource SectionTitle}" />
+                <controls:ShortcutsReference x:Name="Shortcuts" Grid.Row="1" />
+            </Grid>
+        </Grid>
+    </NavigationView>
+</UserControl>

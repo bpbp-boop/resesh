@@ -83,9 +83,13 @@ test("the native surface matches the same table and never strands suppressed inp
 });
 
 test("the window runs every app and window shortcut", () => {
+  // Layout keys are handled in ExecuteShortcut; every other key runs its catalog command.
   const body = methodBody(mainWindow, "private bool ExecuteShortcut(string id, int chord, TabViewModel? source = null)");
+  assert.match(body, /ViewModel\.Commands\.ForShortcut\(id\)/);
+  const catalog = read("src", "App", "ViewModels", "AppCommandCatalog.cs");
   for (const binding of bindings.filter(b => b.scope === "App" || b.scope === "Window"))
-    assert.ok(body.includes(`ShortcutIds.${binding.name}`), binding.name);
+    assert.ok(body.includes(`ShortcutIds.${binding.name}`) || catalog.includes(`ShortcutIds.${binding.name}`),
+      binding.name);
 });
 
 test("window accelerators are registered from the table only", () => {

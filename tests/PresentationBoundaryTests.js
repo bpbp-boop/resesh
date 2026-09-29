@@ -59,8 +59,8 @@ test("observable collection bindings state OneWay mode explicitly", () => {
   assert.match(tabXaml, /TabItemsSource="\{x:Bind Group\.Tabs, Mode=OneWay\}"/);
   assert.match(mainXaml, /ItemsSource="\{x:Bind ViewModel\.RootNodes, Mode=OneWay\}"/);
   assert.match(mainXaml, /ItemsSource="\{x:Bind Workspaces, Mode=OneWay\}"/);
-  assert.match(mainXaml, /ItemsSource="\{x:Bind RecentSessions, Mode=OneWay\}"/);
-  assert.match(mainXaml, /ItemsSource="\{x:Bind Recordings, Mode=OneWay\}"/);
+  assert.match(mainXaml, /ItemsSource="\{x:Bind ViewModel\.RecentSessions, Mode=OneWay\}"/);
+  assert.match(mainXaml, /ItemsSource="\{x:Bind ViewModel\.Recordings, Mode=OneWay\}"/);
 });
 
 test("tree selection brushes live at app scope and update with the theme palette", () => {

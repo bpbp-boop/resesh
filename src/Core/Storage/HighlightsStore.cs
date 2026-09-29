@@ -46,7 +46,8 @@ public sealed class HighlightsStore
     }
 
     /// <summary>Save only fields changed in this draft, preserving unrelated edits made
-    /// by another window since the editor opened. Cancelling needs no store mutation.</summary>
+    /// by another window since the editor opened. Cancelling needs no store mutation.
+    /// A committed draft stays open: the next commit saves only what changed after this one.</summary>
     public void CommitDraft(HighlightsStore draft)
     {
         var baseline = draft._draftBaseline
@@ -77,6 +78,7 @@ public sealed class HighlightsStore
                 throw;
             }
         }
+        draft._draftBaseline = edited;
     }
 
     private static void MergeDraftRules(Dictionary<string, HighlightRule> target,

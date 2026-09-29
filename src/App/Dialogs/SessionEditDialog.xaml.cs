@@ -1,21 +1,11 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Automation;
+using Resesh.App.ViewModels;
 using Resesh.Core.Models;
 using Resesh.Core.Storage;
 
 namespace Resesh.App.Dialogs;
-
-public enum SessionSettingsTarget
-{
-    General,
-    Theme,
-    FontFamily,
-    FontSize,
-    Scrollback,
-    AlwaysRecord,
-    CommandHistory,
-}
 
 public sealed partial class SessionEditDialog : ContentDialog
 {

@@ -1,0 +1,15 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.KeyboardShortcutsDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Resesh.App.Controls"
+    Title="Keyboard Shortcuts"
+    CloseButtonText="Close"
+    DefaultButton="Close"
+    Background="{StaticResource SessionShellBrush}"
+    BorderBrush="{StaticResource SettingsCardBorderBrush}"
+    Foreground="{StaticResource SessionTreeForegroundBrush}"
+    AutomationProperties.AutomationId="KeyboardShortcutsDialog">
+
+    <controls:ShortcutsReference x:Name="Reference" />
+</ContentDialog>

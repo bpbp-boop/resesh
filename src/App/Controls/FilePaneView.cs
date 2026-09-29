@@ -931,35 +931,11 @@ public sealed class FilePaneView : UserControl, IDisposable
     private IntPtr WindowHandle() =>
         Microsoft.UI.Win32Interop.GetWindowFromWindowId(XamlRoot.ContentIslandEnvironment.AppWindowId);
 
-    private async Task<string?> PromptAsync(string title, string placeholder, string initial)
-    {
-        var box = new TextBox { PlaceholderText = placeholder, Text = initial };
-        box.SelectAll();
-        var dialog = new ContentDialog
-        {
-            Title = title,
-            Content = box,
-            PrimaryButtonText = "OK",
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = XamlRoot,
-        };
-        return await dialog.ShowModalAsync() == ContentDialogResult.Primary ? box.Text : null;
-    }
+    private Task<string?> PromptAsync(string title, string placeholder, string initial) =>
+        Dialogs.TextPromptDialog.PromptAsync(XamlRoot, title, placeholder, initial);
 
-    private async Task<bool> ConfirmAsync(string title, string message, string primaryText = "Delete")
-    {
-        var dialog = new ContentDialog
-        {
-            Title = title,
-            Content = message,
-            PrimaryButtonText = primaryText,
-            CloseButtonText = "Cancel",
-            DefaultButton = ContentDialogButton.Close,
-            XamlRoot = XamlRoot,
-        };
-        return await dialog.ShowModalAsync() == ContentDialogResult.Primary;
-    }
+    private Task<bool> ConfirmAsync(string title, string message, string primaryText = "Delete") =>
+        Dialogs.ConfirmDialog.ConfirmAsync(XamlRoot, title, message, primaryText);
 
     public void Dispose()
     {

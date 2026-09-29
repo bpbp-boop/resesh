@@ -77,11 +77,11 @@ public sealed class TabViewModel : ObservableObject
     }
 
     public TabViewModel(Session session, ViewModelEnvironment environment)
-        : this(session, environment, isOnboarding: false)
+        : this(session, environment, AppPage.None)
     {
     }
 
-    private TabViewModel(Session session, ViewModelEnvironment environment, bool isOnboarding)
+    private TabViewModel(Session session, ViewModelEnvironment environment, AppPage page)
     {
         _environment = environment;
         _session = session;
@@ -93,26 +93,41 @@ public sealed class TabViewModel : ObservableObject
             if (args.PropertyName is nameof(Header) or nameof(Subtitle) or nameof(StateText))
                 OnPropertyChanged(nameof(AutomationName));
         };
-        IsOnboarding = isOnboarding;
+        Page = page;
     }
 
-    public static TabViewModel CreateOnboarding(ViewModelEnvironment environment) => new(
+    public static TabViewModel CreateAppPage(AppPage page, ViewModelEnvironment environment) => new(
         new Session
         {
             Id = Guid.Empty,
-            Name = "Welcome",
+            Name = PageTitle(page),
             Kind = SessionKind.Local,
             Local = new LocalTarget(),
         },
-        environment, isOnboarding: true)
+        environment, page)
     {
         State = TabConnectionState.Playback,
     };
 
-    /// <summary>A native app page hosted in the tab strip instead of a terminal session.</summary>
-    public bool IsOnboarding { get; }
+    public static TabViewModel CreateOnboarding(ViewModelEnvironment environment) =>
+        CreateAppPage(AppPage.Welcome, environment);
 
-    public bool CanDrag => !IsOnboarding;
+    private static string PageTitle(AppPage page) => page switch
+    {
+        AppPage.Welcome => "Welcome",
+        AppPage.Settings => "Settings",
+        _ => "",
+    };
+
+    /// <summary>The native app page this tab hosts, or <see cref="AppPage.None"/> for a session.</summary>
+    public AppPage Page { get; }
+
+    /// <summary>A native app page hosted in the tab strip instead of a terminal session.</summary>
+    public bool IsAppPage => Page != AppPage.None;
+
+    public bool IsOnboarding => Page == AppPage.Welcome;
+
+    public bool CanDrag => !IsAppPage;
 
     /// <summary>What this tab's target kind supports; drives menu naming and visibility.</summary>
     public SessionCapabilities Capabilities => SessionCapabilities.For(Session);
@@ -436,7 +451,7 @@ public sealed class TabViewModel : ObservableObject
         set => SetProperty(ref _connectionSummary, value);
     }
 
-    public string Header => IsOnboarding ? "Welcome" : TitleOverride ?? Session.Name;
+    public string Header => IsAppPage ? PageTitle(Page) : TitleOverride ?? Session.Name;
 
     // ---- second tab line (tells tabs of the same session apart) ----
 
@@ -568,6 +583,8 @@ public sealed class TabViewModel : ObservableObject
         {
             if (IsOnboarding)
                 return "Setup resesh";
+            if (Page == AppPage.Settings)
+                return "Preferences";
             if (Session.Persistent && RunningCommand is { } persistentCommand)
                 return persistentCommand;
             if (TerminalTitle is not { } title)
@@ -604,7 +621,7 @@ public sealed class TabViewModel : ObservableObject
         }
     }
 
-    public string Endpoint => IsOnboarding
+    public string Endpoint => IsAppPage
         ? ""
         : IsLocal
             ? Session.Local?.Executable ?? ""
@@ -612,9 +629,11 @@ public sealed class TabViewModel : ObservableObject
                 ? $"telnet {Session.Host}:{Session.Port}"
                 : $"{Session.Username}@{Session.Host}:{Session.Port}";
 
-    public string StateText => IsOnboarding
-        ? "setup"
-        : State switch
+    public string StateText => Page switch
+    {
+        AppPage.Welcome => "setup",
+        AppPage.Settings => "changes apply immediately",
+        _ => State switch
         {
             TabConnectionState.Connecting => IsLocal ? "starting…" : "connecting…",
             TabConnectionState.Connected when IsLocal => HasUnseenOutput ? "running — new output" : "running",
@@ -622,7 +641,8 @@ public sealed class TabViewModel : ObservableObject
             TabConnectionState.Playback => "recording playback",
             TabConnectionState.Exited => ExitCode is { } code ? $"exited (code {code})" : "exited",
             _ => IsLocal ? "failed" : "disconnected",
-        };
+        },
+    };
 
     // ---- Pin state (browser-style: pinned tabs can't be closed without unpinning) ----
 
@@ -687,4 +707,12 @@ public sealed class TabViewModel : ObservableObject
         }
         return false;
     }
+}
+
+/// <summary>A native page the app hosts in a tab instead of a terminal session.</summary>
+public enum AppPage
+{
+    None,
+    Welcome,
+    Settings,
 }

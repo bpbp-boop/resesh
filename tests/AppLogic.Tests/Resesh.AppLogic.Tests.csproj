@@ -17,6 +17,14 @@
     <Compile Include="../../src/App/Interop/TaskbarRelaunchPlan.cs" Link="Interop/TaskbarRelaunchPlan.cs" />
     <Compile Include="../../src/App/Controls/TabDragLayout.cs" Link="Controls/TabDragLayout.cs" />
     <Compile Include="../../src/App/ViewModels/MainViewModel.cs" Link="ViewModels/MainViewModel.cs" />
+    <Compile Include="../../src/App/ViewModels/MainViewModel.Commands.cs" Link="ViewModels/MainViewModel.Commands.cs" />
+    <Compile Include="../../src/App/ViewModels/MainViewModel.Rails.cs" Link="ViewModels/MainViewModel.Rails.cs" />
+    <Compile Include="../../src/App/ViewModels/MainViewModel.Tree.cs" Link="ViewModels/MainViewModel.Tree.cs" />
+    <Compile Include="../../src/App/ViewModels/AppCommandCatalog.cs" Link="ViewModels/AppCommandCatalog.cs" />
+    <Compile Include="../../src/App/ViewModels/IMainWindowServices.cs" Link="ViewModels/IMainWindowServices.cs" />
+    <Compile Include="../../src/App/ViewModels/RecordingItemViewModel.cs" Link="ViewModels/RecordingItemViewModel.cs" />
+    <Compile Include="../../src/App/ViewModels/SettingsTargets.cs" Link="ViewModels/SettingsTargets.cs" />
+    <Compile Include="../../src/App/ViewModels/SettingsViewModel.cs" Link="ViewModels/SettingsViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/TabViewModel.cs" Link="ViewModels/TabViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/TabGroupViewModel.cs" Link="ViewModels/TabGroupViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/TreeNodeViewModel.cs" Link="ViewModels/TreeNodeViewModel.cs" />

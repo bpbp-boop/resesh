@@ -7,9 +7,12 @@ const catalog = fs.readFileSync(path.join(__dirname, "..", "src", "Core", "Stora
 const terminal = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "wwwroot", "terminal.html"), "utf8");
 const nativeThemes = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "NativeTerminalThemeCatalog.cs"), "utf8");
 const nativeSurface = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "NativeTerminalSurface.cs"), "utf8");
-const globalDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "GlobalSettingsDialog.cs"), "utf8");
+const settingsPage = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "SettingsPage.xaml"), "utf8");
+const settingsViewModel = fs.readFileSync(path.join(__dirname, "..", "src", "App", "ViewModels", "SettingsViewModel.cs"), "utf8");
+const appCode = fs.readFileSync(path.join(__dirname, "..", "src", "App", "App.xaml.cs"), "utf8");
 const sessionDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "SessionEditDialog.xaml.cs"), "utf8");
-const localDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "LocalProfileEditDialog.cs"), "utf8");
+const localDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "LocalProfileEditDialog.xaml.cs"), "utf8");
+const localDialogXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "LocalProfileEditDialog.xaml"), "utf8");
 const mainWindow = fs.readFileSync(path.join(__dirname, "..", "src", "App", "MainWindow.xaml.cs"), "utf8");
 const mainWindowXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "MainWindow.xaml"), "utf8");
 const appXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "App.xaml"), "utf8");
@@ -195,11 +198,9 @@ test("dialogs follow the live session palette and light-dark mode", () => {
   // pushed onto them instead of relying on the window's element theme.
   assert.match(sessionDialog, /InitializeComponent\(\);\s*DialogTheme\.Apply\(this\)/);
   assert.match(localDialog, /DialogTheme\.Apply\(this\)/);
-  assert.match(globalDialog, /DialogTheme\.Apply\(dialog, PreviewTheme\(\)\)/);
-  assert.match(
-    globalDialog,
-    /theme\.SelectionChanged[\s\S]*?applyThemePreview\(previewTheme\);[\s\S]*?DialogTheme\.SetRequestedTheme\(dialog, previewTheme\)/,
-  );
+  // Settings is a page in the window, so it takes the window's theme and palette brushes.
+  assert.match(settingsPage, /Background="\{StaticResource SessionShellBrush\}"/);
+  assert.match(settingsPage, /x:Key="SettingsCardBackground" ResourceKey="SettingsCardBackgroundBrush"/);
   // Surfaces, fields, and selection reuse the same brushes as the main window.
   assert.match(dialogTheme, /Set\(dialog, shell,[\s\S]*?"ContentDialogBackground"/);
   assert.match(dialogTheme, /Set\(dialog, input,[\s\S]*?"TextControlBackground"[\s\S]*?"ComboBoxBackground"/);
@@ -225,7 +226,7 @@ test("the session options form has room for its columns and scrolls every sectio
     assert.match(section, /VerticalScrollBarVisibility="Auto"/);
     assert.match(section, /Padding="0,0,12,0"/);
   }
-  assert.match(localDialog, /MaxHeight = 560,\s*Padding = new Thickness\(0, 0, 12, 0\)/);
+  assert.match(localDialogXaml, /<ScrollViewer MaxHeight="560" Padding="0,0,12,0"/);
   // No negative margins faking the gap between a heading and its caption.
   assert.doesNotMatch(sessionEditXaml, /Margin="0,-\d/);
 });
@@ -237,19 +238,20 @@ test("the status bar takes a themed chrome surface, not a translucent Fluent lay
 });
 
 test("global and per-session theme pickers use the shared catalog", () => {
-  assert.match(globalDialog, /ItemsSource = ThemeCatalog\.All/);
+  assert.match(settingsViewModel, /Themes => ThemeCatalog\.All/);
+  assert.match(settingsPage, /ItemsSource="\{x:Bind ViewModel\.Themes\}"/);
   assert.match(sessionDialog, /Concat\(ThemeCatalog\.All\)/);
   assert.match(localDialog, /Concat\(ThemeCatalog\.All\)/);
 });
 
-test("global theme selection previews immediately and cancel restores saved theme", () => {
-  assert.match(globalDialog, /theme\.SelectionChanged[\s\S]*?applyThemePreview\(previewTheme\)/);
-  assert.match(globalDialog, /result = await dialog\.ShowModalAsync\(\);[\s\S]*?if \(result != ContentDialogResult\.Primary\)[\s\S]*?applyThemePreview\(current\.Theme\)/);
+test("global theme selection applies immediately in every window", () => {
+  assert.match(settingsPage, /SelectedItem="\{x:Bind ViewModel\.Theme, Mode=TwoWay\}"/);
+  assert.match(appCode, /internal static void ApplySettingChange[\s\S]*?foreach \(var window in app\._windows\.ToList\(\)\)[\s\S]*?window\.ApplySettingChange\(property, source\)/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)/);
 });
 
-test("live theme previews avoid terminal layout and highlight work", () => {
-  assert.match(mainWindow, /GlobalSettingsDialog\.ShowAsync\([\s\S]*?ApplyThemeToApp, PreviewHighlights, target\)/);
+test("live theme changes avoid terminal layout and highlight work", () => {
+  assert.match(mainWindow, /case nameof\(SettingsViewModel\.Theme\):\s*ApplyThemeToApp\(settings\.Theme\);\s*break;/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)[\s\S]*?view\.ApplyTheme\(theme\)/);
 
   const applyTheme = terminalTab.match(/public void ApplyTheme\(string theme\)\s*\{[\s\S]*?\n    \}/)?.[0];

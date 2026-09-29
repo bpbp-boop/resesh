@@ -42,6 +42,25 @@ public sealed class HighlightsStoreTests : IDisposable
     }
 
     [Fact]
+    public void CommitDraft_Repeatedly_SavesEachEditOnce_WithoutRevertingOtherWindowEdits()
+    {
+        var store = NewStore();
+        var draft = store.CreateDraft();
+        draft.SetEnabled("state-negative", false);
+        store.CommitDraft(draft);
+
+        // Another window turns the rule back on; the next commit must not undo that,
+        // because this draft's first edit is already saved.
+        store.SetEnabled("state-negative", true);
+        draft.SaveCustom(new HighlightRule { Id = "second", Name = "Second", Pattern = "second" });
+        store.CommitDraft(draft);
+
+        var reloaded = NewStore();
+        Assert.True(reloaded.AllRules.First(r => r.Id == "state-negative").Enabled);
+        Assert.Contains(reloaded.AllRules, r => r.Id == "second");
+    }
+
+    [Fact]
     public void CommitDraft_PersistsAddsDeletesResetsAndToggles_WithoutLosingOtherWindowEdits()
     {
         var store = NewStore();

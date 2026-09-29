@@ -7,11 +7,12 @@ using Resesh.Core.Storage;
 
 namespace Resesh.App.ViewModels;
 
-public sealed class MainViewModel : ObservableObject
+public sealed partial class MainViewModel : ObservableObject
 {
     private readonly ViewModelEnvironment _environment;
     private readonly SessionStore _store;
     private readonly ICredentialService _credentials;
+    private readonly IMainWindowServices? _services;
 
     // Folder expansion is keyed by TreeNodeViewModel.ExpansionKey (path, with a reserved
     // prefix for the Local scope) so it survives tree rebuilds. Default: expanded.
@@ -31,16 +32,33 @@ public sealed class MainViewModel : ObservableObject
     /// <summary>All tab groups in visual traversal order.</summary>
     public ObservableCollection<TabGroupViewModel> Groups { get; } = [];
 
-    public MainViewModel(SessionStore store, ICredentialService credentials, ViewModelEnvironment environment)
+    public MainViewModel(
+        SessionStore store,
+        ICredentialService credentials,
+        ViewModelEnvironment environment,
+        IMainWindowServices? services = null)
     {
         _environment = environment;
         _store = store;
         _credentials = credentials;
+        _services = services;
+        TreeSelection = new((node, selected) => node.IsSelected = selected);
         var initial = new TabGroupViewModel();
         Groups.Add(initial);
         _focusedGroup = initial;
         RebuildTree();
+        Commands = new AppCommandCatalog(this);
     }
+
+    /// <summary>The window that carries out commands. Only commands need it.</summary>
+    private IMainWindowServices Services =>
+        _services ?? throw new InvalidOperationException("This view model has no window services.");
+
+    /// <summary>Window state the palette reads for titles such as Show/Hide.</summary>
+    internal IMainWindowServices WindowServices => Services;
+
+    /// <summary>Every command with its palette text and shortcut, for the palette and keys.</summary>
+    public AppCommandCatalog Commands { get; }
 
     public string SearchText
     {
@@ -78,6 +96,7 @@ public sealed class MainViewModel : ObservableObject
             if (SetProperty(ref _focusedGroup, value))
             {
                 OnPropertyChanged(nameof(StatusText));
+                OnActiveTabStateChanged();
                 SyncGroupFocus();
             }
         }
@@ -101,12 +120,17 @@ public sealed class MainViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(IsSplit));
         OnPropertyChanged(nameof(StatusText));
+        OnActiveTabStateChanged();
     }
 
     /// <summary>The focused group's selected tab — what the status bar describes.</summary>
     public TabViewModel? ActiveTab => FocusedGroup.SelectedTab;
 
-    public void NotifyActiveTabChanged() => OnPropertyChanged(nameof(StatusText));
+    public void NotifyActiveTabChanged()
+    {
+        OnPropertyChanged(nameof(StatusText));
+        OnActiveTabStateChanged();
+    }
 
     public string StatusText
     {
@@ -116,8 +140,8 @@ public sealed class MainViewModel : ObservableObject
             var tab = ActiveTab;
             if (tab is null)
                 return baseText;
-            if (tab.IsOnboarding)
-                return $"{baseText}  •  Welcome — setup";
+            if (tab.IsAppPage)
+                return $"{baseText}  •  {tab.Header} — {tab.StateText}";
             var status = $"{baseText}  •  {tab.Header} — {tab.Endpoint} • {tab.StateText}";
             return tab.ConnectionSummary.Length > 0 ? $"{status} • {tab.ConnectionSummary}" : status;
         }
@@ -141,6 +165,9 @@ public sealed class MainViewModel : ObservableObject
 
     /// <summary>This window's tabs as one indicator, for its taskbar button.</summary>
     public TerminalProgress Progress => TerminalProgress.Combine(AllTabs.Select(tab => tab.Progress));
+
+    /// <summary>The tab already hosting this app page, so opening it again reuses the tab.</summary>
+    public TabViewModel? FindAppPage(AppPage page) => AllTabs.FirstOrDefault(tab => tab.Page == page);
 
     public TabGroupViewModel GroupOf(TabViewModel tab) =>
         Groups.First(g => g.Tabs.Contains(tab));
@@ -180,6 +207,7 @@ public sealed class MainViewModel : ObservableObject
         tab.IsGroupFocused = group == _focusedGroup;
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(Progress));
+        OnActiveTabStateChanged();
     }
 
     /// <summary>Detaches a live tab without disposing its terminal session.</summary>
@@ -190,6 +218,7 @@ public sealed class MainViewModel : ObservableObject
         group.RemoveTab(tab);
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(Progress));
+        OnActiveTabStateChanged();
         return group;
     }
 
@@ -203,6 +232,14 @@ public sealed class MainViewModel : ObservableObject
         else if (e.PropertyName == nameof(TabViewModel.Progress))
         {
             OnPropertyChanged(nameof(Progress));
+        }
+
+        // Tab commands target the active tab by default, so its state decides what they allow.
+        if (e.PropertyName is nameof(TabViewModel.State) or nameof(TabViewModel.IsLocked)
+            or nameof(TabViewModel.IsPinned) or nameof(TabViewModel.IsPlayback)
+            or nameof(TabViewModel.View) or nameof(TabViewModel.CanNotifyCommandCompletion))
+        {
+            OnActiveTabStateChanged();
         }
     }
 
@@ -228,6 +265,7 @@ public sealed class MainViewModel : ObservableObject
         }
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(Progress));
+        OnActiveTabStateChanged();
     }
 
     // ---- Session CRUD ----

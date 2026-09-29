@@ -1,0 +1,24 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.ChangedPrivateKeyDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="SSH Key Has Changed"
+    PrimaryButtonText="Accept New Key"
+    CloseButtonText="Cancel"
+    DefaultButton="Close"
+    IsPrimaryButtonEnabled="False">
+
+    <!-- Accepting a rotated key needs the key's name typed out. -->
+    <StackPanel MinWidth="460" Spacing="8">
+        <TextBlock
+            Text="The file at the registered path now contains a different public key. Only continue if you expected this key rotation."
+            TextWrapping="Wrap" />
+        <TextBlock Text="{x:Bind PreviousLine}" IsTextSelectionEnabled="True" />
+        <TextBlock Text="{x:Bind CurrentLine}" IsTextSelectionEnabled="True" />
+        <TextBox
+            x:Name="ConfirmBox"
+            Header="{x:Bind ConfirmHeader}"
+            PlaceholderText="{x:Bind KeyName}"
+            TextChanged="ConfirmBox_TextChanged" />
+    </StackPanel>
+</ContentDialog>
