@@ -110,7 +110,7 @@ public sealed partial class MainWindow
 
     void IMainWindowServices.ToggleFullScreen() => ToggleFullScreen();
 
-    bool IMainWindowServices.IsSessionsPaneOpen => _sessionsPaneOpen;
+    bool IMainWindowServices.IsSessionsPaneOpen => SessionsPaneShown;
 
     void IMainWindowServices.SetSessionsPaneOpen(bool open) => SetSessionsPaneOpen(open);
 

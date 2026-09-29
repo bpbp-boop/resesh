@@ -401,7 +401,8 @@
                         IsSettingsVisible="False"
                         AlwaysShowHeader="False"
                         Background="Transparent"
-                        SelectionChanged="SessionsRail_SelectionChanged">
+                        SelectionChanged="SessionsRail_SelectionChanged"
+                        ItemInvoked="SessionsRail_ItemInvoked">
                         <NavigationView.MenuItems>
                             <NavigationViewItem
                                 x:Name="SessionsRailItem"
@@ -953,6 +954,17 @@
             <!-- Recursive tab-group layout. Code builds row/column siblings and inserts
                  a GridSplitter between each pair. -->
             <Grid x:Name="GroupArea" Grid.Column="3" />
+
+            <!-- On narrow windows the sessions pane floats over the tabs. This layer dims
+                 them and closes the pane on a click; terminals never see those clicks. -->
+            <Border
+                x:Name="PaneDismissLayer"
+                Grid.Column="1"
+                Grid.ColumnSpan="3"
+                Canvas.ZIndex="3"
+                Background="#33000000"
+                Visibility="Collapsed"
+                PointerPressed="PaneDismissLayer_PointerPressed" />
         </Grid>
 
         <!-- Status bar -->
