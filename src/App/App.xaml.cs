@@ -182,7 +182,11 @@ public partial class App : Application
         ApplyLaunchRequest(window, LaunchRequest.Parse(Environment.GetCommandLineArgs()));
         RefreshJumpList();
 
-        var loadMessages = new[] { Settings.LoadWarning, Workspaces.LoadWarning, KnownHosts.LoadWarning, KnownHosts.LoadError }
+        var loadMessages = new[]
+            {
+                Settings.LoadWarning, Store.LoadWarning, SshKeys.LoadWarning, Highlights.LoadWarning,
+                Workspaces.LoadWarning, KnownHosts.LoadWarning, KnownHosts.LoadError,
+            }
             .Where(message => message is not null).ToList();
         if (loadMessages.Count > 0)
             window.ShowOperationNotice("Stored data needs attention", string.Join("\n", loadMessages));

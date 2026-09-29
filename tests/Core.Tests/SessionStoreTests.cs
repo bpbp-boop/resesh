@@ -65,6 +65,47 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     [Fact]
+    public void Load_CorruptMainFile_WarnsAndKeepsTheGoodBackupOnNextSave()
+    {
+        var store = NewStore();
+        var session = NewSession();
+        store.Add(session);
+        store.Add(NewSession("web-02", host: "10.0.0.2"));
+        File.WriteAllText(StorePath, "{ this is not json");
+
+        var recovered = NewStore();
+        Assert.Contains("recovered from the backup", recovered.LoadWarning);
+        recovered.Add(NewSession("web-03", host: "10.0.0.3"));
+
+        Assert.Contains(session.Id.ToString(), File.ReadAllText(StorePath + ".bak"));
+        Assert.DoesNotContain("not json", File.ReadAllText(StorePath + ".bak"));
+    }
+
+    [Fact]
+    public void Load_UnreadableWithoutBackup_KeepsACopyThatLaterSavesCannotOverwrite()
+    {
+        File.WriteAllText(StorePath, "{ \"sessions\": [ truncated");
+
+        var store = NewStore();
+        Assert.Empty(store.Sessions);
+        Assert.Contains("could not be loaded", store.LoadWarning);
+        // Startup re-adds built-in shells one save at a time; two saves used to rotate the
+        // only copy of the user's file out of .bak.
+        store.Add(NewSession("pwsh"));
+        store.Add(NewSession("cmd"));
+
+        var kept = Assert.Single(Directory.GetFiles(_dir, "sessions.json.unreadable-*"));
+        Assert.Equal("{ \"sessions\": [ truncated", File.ReadAllText(kept));
+        Assert.Contains(kept, store.LoadWarning);
+    }
+
+    [Fact]
+    public void Load_MissingFile_HasNoWarning()
+    {
+        Assert.Null(NewStore().LoadWarning);
+    }
+
+    [Fact]
     public void Save_KeepsOneBackupRotation()
     {
         var store = NewStore();

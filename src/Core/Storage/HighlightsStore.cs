@@ -19,7 +19,7 @@ public sealed class HighlightsStore
     };
 
     private readonly string? _path;
-    private readonly string? _bakPath;
+    private bool _preserveBackup;
     private HighlightBackupData? _draftBaseline;
     private readonly object _gate = new();
 
@@ -31,10 +31,12 @@ public sealed class HighlightsStore
     public HighlightsStore(string path)
     {
         _path = path;
-        _bakPath = path + ".bak";
     }
 
     private HighlightsStore() { }
+
+    /// <summary>Set by <see cref="Load"/> when the file was recovered or unreadable.</summary>
+    public string? LoadWarning { get; private set; }
 
     /// <summary>An independent in-memory editor. Changes never write to the live store.</summary>
     public HighlightsStore CreateDraft()
@@ -112,7 +114,10 @@ public sealed class HighlightsStore
         if (_path is null) return;
         lock (_gate)
         {
-            var data = TryRead(_path) ?? TryRead(_bakPath) ?? new StoreData();
+            var load = AtomicFile.Load(_path, Read, "Highlight rules");
+            _preserveBackup = load.PreserveBackup;
+            LoadWarning = load.Warning;
+            var data = load.Data ?? new StoreData();
             _enabled = new HashSet<string>(data.EnabledRules ?? [], StringComparer.Ordinal);
             _disabled = new HashSet<string>(data.DisabledRules ?? [], StringComparer.Ordinal);
             // A custom rule with an invalid regex is kept on disk but never offered/applied;
@@ -339,29 +344,12 @@ public sealed class HighlightsStore
         };
         var json = JsonSerializer.Serialize(data, JsonOptions);
 
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var tmpPath = _path + ".tmp";
-        File.WriteAllText(tmpPath, json);
-
-        if (File.Exists(_path))
-            File.Replace(tmpPath, _path, _bakPath);
-        else
-            File.Move(tmpPath, _path);
+        AtomicFile.Write(_path, json, _preserveBackup);
+        _preserveBackup = false;
     }
 
-    private static StoreData? TryRead(string? path)
-    {
-        try
-        {
-            if (!File.Exists(path))
-                return null;
-            return JsonSerializer.Deserialize<StoreData>(File.ReadAllText(path), JsonOptions);
-        }
-        catch (Exception e) when (e is JsonException or IOException)
-        {
-            return null;
-        }
-    }
+    private static StoreData? Read(string path) =>
+        JsonSerializer.Deserialize<StoreData>(File.ReadAllText(path), JsonOptions);
 
     private sealed class StoreData
     {

@@ -19,8 +19,8 @@ public sealed class SessionStore
     };
 
     private readonly string _path;
-    private readonly string _bakPath;
     private readonly object _gate = new();
+    private bool _preserveBackup;
 
     private List<Session> _sessions = [];
     private List<string> _folders = [];
@@ -32,11 +32,13 @@ public sealed class SessionStore
     public SessionStore(string path)
     {
         _path = path;
-        _bakPath = path + ".bak";
     }
 
     public static string DefaultPath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Resesh", "sessions.json");
+
+    /// <summary>Set by <see cref="Load"/> when the file was recovered or unreadable.</summary>
+    public string? LoadWarning { get; private set; }
 
     public IReadOnlyList<Session> Sessions
     {
@@ -71,7 +73,10 @@ public sealed class SessionStore
     {
         lock (_gate)
         {
-            var data = TryRead(_path) ?? TryRead(_bakPath) ?? new StoreData();
+            var load = AtomicFile.Load(_path, Read, "Sessions");
+            _preserveBackup = load.PreserveBackup;
+            LoadWarning = load.Warning;
+            var data = load.Data ?? new StoreData();
             _sessions = data.Sessions ?? [];
             _folders = data.Folders ?? [];
             _localFolders = data.LocalFolders ?? [];
@@ -267,29 +272,12 @@ public sealed class SessionStore
         };
         var json = JsonSerializer.Serialize(data, JsonOptions);
 
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var tmpPath = _path + ".tmp";
-        File.WriteAllText(tmpPath, json);
-
-        if (File.Exists(_path))
-            File.Replace(tmpPath, _path, _bakPath);
-        else
-            File.Move(tmpPath, _path);
+        AtomicFile.Write(_path, json, _preserveBackup);
+        _preserveBackup = false;
     }
 
-    private static StoreData? TryRead(string path)
-    {
-        try
-        {
-            if (!File.Exists(path))
-                return null;
-            return JsonSerializer.Deserialize<StoreData>(File.ReadAllText(path), JsonOptions);
-        }
-        catch (Exception e) when (e is JsonException or IOException)
-        {
-            return null;
-        }
-    }
+    private static StoreData? Read(string path) =>
+        JsonSerializer.Deserialize<StoreData>(File.ReadAllText(path), JsonOptions);
 
     private sealed class StoreData
     {

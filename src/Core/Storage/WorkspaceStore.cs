@@ -56,7 +56,6 @@ public sealed class WorkspaceStore
     };
 
     private readonly string _path;
-    private readonly string _bakPath;
     private readonly object _gate = new();
     private List<Workspace> _workspaces = [];
     private WorkspaceLayout? _lastLayout;
@@ -66,7 +65,6 @@ public sealed class WorkspaceStore
     public WorkspaceStore(string path)
     {
         _path = path;
-        _bakPath = path + ".bak";
     }
 
     public static string DefaultPath => Path.Combine(
@@ -88,13 +86,10 @@ public sealed class WorkspaceStore
     {
         lock (_gate)
         {
-            var primary = TryRead(_path);
-            var backup = primary is null ? TryRead(_bakPath) : null;
-            _preserveBackup = primary is null && backup is not null;
-            LoadWarning = _preserveBackup ? "Workspaces were recovered from the backup file."
-                : primary is null && (File.Exists(_path) || File.Exists(_bakPath))
-                    ? "Workspaces could not be loaded. Restore the workspace file from a backup." : null;
-            var data = primary ?? backup ?? new WorkspaceStoreData { Workspaces = [] };
+            var load = AtomicFile.Load(_path, path => ParsePayload(File.ReadAllBytes(path)), "Workspaces");
+            _preserveBackup = load.PreserveBackup;
+            LoadWarning = load.Warning;
+            var data = load.Data ?? new WorkspaceStoreData { Workspaces = [] };
             _workspaces = data.Workspaces!;
             _lastLayout = data.LastLayout;
         }
@@ -215,18 +210,6 @@ public sealed class WorkspaceStore
         _preserveBackup = false;
         _workspaces = workspaces;
         _lastLayout = lastLayout;
-    }
-
-    private static WorkspaceStoreData? TryRead(string path)
-    {
-        try
-        {
-            return File.Exists(path) ? ParsePayload(File.ReadAllBytes(path)) : null;
-        }
-        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
-        {
-            return null;
-        }
     }
 
     internal static WorkspaceStoreData ParsePayload(byte[] payload)
