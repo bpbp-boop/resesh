@@ -56,6 +56,7 @@ test("settings fields and sections have stable automation IDs", () => {
     "SettingsCopyOnSelect",
     "SettingsRightClickPaste",
     "SettingsShowStatusBar",
+    "SettingsSessionsPaneLayout",
     "SettingsReopenLastLayout",
     "SettingsLaunchAtSignIn",
     "SettingsConfirmCloseActiveSessions",

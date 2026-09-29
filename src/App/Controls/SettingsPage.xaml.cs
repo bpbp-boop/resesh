@@ -67,6 +67,7 @@ public sealed partial class SettingsPage : UserControl
         GlobalSettingsTarget.CopyOnSelect => (CopyOnSelectCard, CopyOnSelectSwitch),
         GlobalSettingsTarget.RightClickPaste => (RightClickPasteCard, RightClickPasteSwitch),
         GlobalSettingsTarget.ShowStatusBar => (ShowStatusBarCard, ShowStatusBarSwitch),
+        GlobalSettingsTarget.SessionsPaneLayout => (SessionsPaneLayoutCard, SessionsPaneLayoutBox),
         GlobalSettingsTarget.ReopenLastLayout => (ReopenLastLayoutCard, ReopenLastLayoutSwitch),
         GlobalSettingsTarget.RecordingDirectory => (RecordingDirectoryCard, RecordingDirectoryBox),
         GlobalSettingsTarget.AlwaysRecord => (AlwaysRecordCard, AlwaysRecordSwitch),

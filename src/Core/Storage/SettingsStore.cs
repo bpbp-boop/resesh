@@ -30,6 +30,10 @@ public sealed record AppSettings
     /// <summary>The selected compact-rail tab: sessions, recent, or recordings.</summary>
     public string SessionsRailTab { get; init; } = "sessions";
 
+    /// <summary>Whether the sessions pane floats over the tabs or docks beside them; see
+    /// <see cref="SessionsPaneLayouts"/>.</summary>
+    public string SessionsPaneLayout { get; init; } = SessionsPaneLayouts.Automatic;
+
 
     /// <summary>Restore the clean-exit tab-group layout when the app next launches.</summary>
     public bool ReopenLastLayoutAtStartup { get; init; }
@@ -98,6 +102,18 @@ public sealed record AppSettings
 }
 
 public sealed record WindowPlacement(int X, int Y, int Width, int Height, bool IsMaximized = false);
+
+/// <summary>Saved values of <see cref="AppSettings.SessionsPaneLayout"/>.</summary>
+public static class SessionsPaneLayouts
+{
+    /// <summary>Floats over the tabs on narrow windows and docks on wide ones.</summary>
+    public const string Automatic = "auto";
+    public const string Float = "float";
+    public const string Dock = "dock";
+
+    /// <summary>A saved value this version knows, or <see cref="Automatic"/>.</summary>
+    public static string Normalize(string? layout) => layout is Float or Dock ? layout : Automatic;
+}
 
 public sealed class SettingsStore
 {

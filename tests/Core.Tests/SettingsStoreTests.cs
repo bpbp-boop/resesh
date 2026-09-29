@@ -17,6 +17,7 @@ public sealed class SettingsStoreTests
                 SessionsPaneOpen = false,
                 ShowStatusBar = false,
                 SessionsRailTab = "recordings",
+                SessionsPaneLayout = SessionsPaneLayouts.Dock,
                 ReopenLastLayoutAtStartup = true,
             });
 
@@ -27,6 +28,7 @@ public sealed class SettingsStoreTests
             Assert.False(loaded.Current.SessionsPaneOpen);
             Assert.False(loaded.Current.ShowStatusBar);
             Assert.Equal("recordings", loaded.Current.SessionsRailTab);
+            Assert.Equal(SessionsPaneLayouts.Dock, loaded.Current.SessionsPaneLayout);
             Assert.True(loaded.Current.ReopenLastLayoutAtStartup);
         }
         finally
@@ -39,6 +41,12 @@ public sealed class SettingsStoreTests
     public void NewSettingsDefaultToShowingStatusBar()
     {
         Assert.True(new AppSettings().ShowStatusBar);
+    }
+
+    [Fact]
+    public void NewSettingsLetTheSessionsPaneLayoutFollowTheWindowWidth()
+    {
+        Assert.Equal(SessionsPaneLayouts.Automatic, new AppSettings().SessionsPaneLayout);
     }
 
     [Fact]

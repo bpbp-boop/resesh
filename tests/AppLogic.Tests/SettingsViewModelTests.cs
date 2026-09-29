@@ -51,6 +51,26 @@ public sealed class SettingsViewModelTests
     }
 
     [Fact]
+    public void SessionsPaneLayoutSavesTheChosenLayout()
+    {
+        var settings = Settings();
+        Assert.Equal(SessionsPaneLayouts.Automatic, settings.SessionsPaneLayout.Id);
+
+        settings.SessionsPaneLayout = settings.SessionsPaneLayoutChoices.Single(c => c.Id == SessionsPaneLayouts.Float);
+
+        Assert.Equal(SessionsPaneLayouts.Float, _settings.SessionsPaneLayout);
+        Assert.Equal([nameof(SettingsViewModel.SessionsPaneLayout)], _changes);
+    }
+
+    [Fact]
+    public void UnknownSessionsPaneLayoutReadsAsAutomatic()
+    {
+        _settings = _settings with { SessionsPaneLayout = "sideways" };
+
+        Assert.Equal(SessionsPaneLayouts.Automatic, Settings().SessionsPaneLayout.Id);
+    }
+
+    [Fact]
     public void EmptiedNumberBoxAndBlankTextKeepTheSavedValue()
     {
         var settings = Settings();

@@ -683,7 +683,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     private const double MinimumWindowHeight = 480;
     private const double MinimumTabAreaWidth = 320;
 
-    // Below this window width the sessions pane floats over the tabs instead of docking.
+    // With the Automatic layout, the sessions pane floats over the tabs below this window width.
     // It docks again only above the wider bound, so resizing near the edge doesn't flicker.
     private const double PaneOverlayBelowWidth = 1000;
     private const double PaneDockAboveWidth = 1060;
@@ -736,7 +736,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         if (Root.XamlRoot is not { } root)
             return;
         var width = root.Size.Width;
-        var overlay = _paneOverlay ? width < PaneDockAboveWidth : width < PaneOverlayBelowWidth;
+        var overlay = SessionsPaneLayouts.Normalize(App.Settings.Current.SessionsPaneLayout) switch
+        {
+            SessionsPaneLayouts.Float => true,
+            SessionsPaneLayouts.Dock => false,
+            _ => _paneOverlay ? width < PaneDockAboveWidth : width < PaneOverlayBelowWidth,
+        };
         if (overlay == _paneOverlay)
         {
             if (_paneOverlay && _overlayPaneShown)
@@ -2205,6 +2210,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             case nameof(SettingsViewModel.ShowStatusBar):
                 ApplyStatusBarVisibility(settings.ShowStatusBar);
                 break;
+            case nameof(SettingsViewModel.SessionsPaneLayout):
+                UpdatePaneMode();
+                break;
             case nameof(SettingsViewModel.RecordingDirectory):
                 if (_sessionsPaneOpen && _selectedRailTab == "recordings")
                     _ = ViewModel.RefreshRecordingsAsync();
@@ -2240,6 +2248,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         ApplyThemeToApp(settings.Theme);
         ApplyStatusBarVisibility(settings.ShowStatusBar);
+        UpdatePaneMode();
         ApplyTerminalSettings(settings);
     }
 

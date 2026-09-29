@@ -104,6 +104,7 @@ public sealed class AppCommandCatalog
         Setting("Theme", "appearance color scheme", GlobalSettingsTarget.Theme);
         Setting("Terminal Font Family", "appearance typeface", GlobalSettingsTarget.FontFamily);
         Setting("Status Bar", "appearance interface bottom chrome", GlobalSettingsTarget.ShowStatusBar);
+        Setting("Sessions Pane Layout", "sidebar float overlay flyout dock narrow window", GlobalSettingsTarget.SessionsPaneLayout);
         Setting("Font Size", "appearance terminal text", GlobalSettingsTarget.FontSize);
         Setting("Scrollback Lines", "terminal history buffer", GlobalSettingsTarget.Scrollback);
         Setting("Copy Selected Text", "clipboard copy on select", GlobalSettingsTarget.CopyOnSelect);

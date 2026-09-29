@@ -11,6 +11,7 @@ public enum GlobalSettingsTarget
     CopyOnSelect,
     RightClickPaste,
     ShowStatusBar,
+    SessionsPaneLayout,
     ReopenLastLayout,
     Recording,
     RecordingDirectory,

@@ -147,6 +147,19 @@
                             AutomationProperties.Name="Show status bar"
                             AutomationProperties.AutomationId="SettingsShowStatusBar" />
                     </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        x:Name="SessionsPaneLayoutCard"
+                        Header="Sessions pane"
+                        Description="Float the pane over the tabs, or dock it beside them. Automatic floats it when the window is narrow.">
+                        <ComboBox
+                            x:Name="SessionsPaneLayoutBox"
+                            MinWidth="220"
+                            ItemsSource="{x:Bind ViewModel.SessionsPaneLayoutChoices}"
+                            DisplayMemberPath="Name"
+                            SelectedItem="{x:Bind ViewModel.SessionsPaneLayout, Mode=TwoWay}"
+                            AutomationProperties.Name="Sessions pane"
+                            AutomationProperties.AutomationId="SettingsSessionsPaneLayout" />
+                    </toolkit:SettingsCard>
                     <toolkit:SettingsCard x:Name="ReopenLastLayoutCard" Header="Reopen last layout at startup">
                         <ToggleSwitch
                             x:Name="ReopenLastLayoutSwitch"

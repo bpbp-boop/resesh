@@ -123,6 +123,27 @@ public sealed partial class SettingsViewModel : ObservableObject
         set => Save(value, s => s with { ShowStatusBar = value }, () => ShowStatusBar);
     }
 
+    public IReadOnlyList<SessionsPaneLayoutChoice> SessionsPaneLayoutChoices { get; } =
+    [
+        new(SessionsPaneLayouts.Automatic, "Automatic"),
+        new(SessionsPaneLayouts.Float, "Float over tabs"),
+        new(SessionsPaneLayouts.Dock, "Dock beside tabs"),
+    ];
+
+    public SessionsPaneLayoutChoice SessionsPaneLayout
+    {
+        get
+        {
+            var saved = SessionsPaneLayouts.Normalize(Current.SessionsPaneLayout);
+            return SessionsPaneLayoutChoices.First(choice => choice.Id == saved);
+        }
+        set
+        {
+            if (value is not null)
+                Save(value, s => s with { SessionsPaneLayout = value.Id }, () => SessionsPaneLayout);
+        }
+    }
+
     public bool ReopenLastLayoutAtStartup
     {
         get => Current.ReopenLastLayoutAtStartup;
@@ -268,3 +289,6 @@ public sealed partial class SettingsViewModel : ObservableObject
         set => Save(value, s => s with { AgentAlertSound = value }, () => AgentAlertSound);
     }
 }
+
+/// <summary>One option in the Settings sessions pane layout list.</summary>
+public sealed record SessionsPaneLayoutChoice(string Id, string Name);
