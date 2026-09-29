@@ -1820,7 +1820,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
                 .Where(other => other.Session.Id == tab.Session.Id && !other.IsPlayback)
                 .Select(other => other.TmuxSlot)
                 .ToHashSet();
-            slot = await RemoteSessionsDialog.ShowAsync(Root.XamlRoot, tab.Session.Name,
+            slot = await RemoteSessionsDialog.ManageAsync(Root.XamlRoot, tab.Session.Name,
                 tab.Session.Id, openSlots,
                 () => Task.Run(() => connection.RunCommand(Resesh.Core.Ssh.TmuxPersistence.ManagementCommand())),
                 selected => Task.Run(() => connection.TryRunCommand(Resesh.Core.Ssh.TmuxPersistence.KillCommand(tab.Session.Id, selected))));

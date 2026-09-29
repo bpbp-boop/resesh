@@ -967,7 +967,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             try
             {
                 if (token.IsCancellationRequested) return;
-                tcs.TrySetResult(await ConnectDialogs.SelectTmuxSessionAsync(XamlRoot, Session.Name, choose.Sessions, choose.NewSlot));
+                tcs.TrySetResult(await ConnectDialogs.SelectTmuxSessionAsync(XamlRoot, Session.Name, choose.Sessions));
             }
             catch (Exception ex)
             {
