@@ -90,6 +90,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         ConfigureSplitter(TreeSplitter, TreeSplitterLine);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
         InitializeTitleBar();
+        InitializeNarrowLayout();
         // Lets the icon catalog rasterize at true device pixels (XamlRoot is null until
         // the content loads; the catalog falls back to scale 1 and re-renders on demand).
         App.Icons.ScaleProvider = () => Root.XamlRoot?.RasterizationScale ?? 1.0;
@@ -257,6 +258,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         QuickConnectHintText.Text = quickConnect;
         ToolTipService.SetToolTip(QuickConnectBox,
             $"Connect with ssh user@host or telnet host port, or search saved sessions ({quickConnect})");
+        ToolTipService.SetToolTip(QuickConnectButton, $"Quick connect or search sessions ({quickConnect})");
     }
 
     /// <summary>Runs one shortcut from the shared table. <paramref name="source"/> is the tab
@@ -340,7 +342,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private void FocusSessionFilter()
     {
-        if (!_sessionsPaneOpen || _selectedRailTab != "sessions")
+        if (!SessionsPaneShown || _selectedRailTab != "sessions")
             SelectSessionsRailTab("sessions");
         FilterBox.Focus(FocusState.Programmatic);
         FilterBox.SelectAll();
@@ -670,6 +672,206 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         TitleBarButtons.SizeChanged += (_, _) => UpdateTitleBarRegions();
     }
 
+    // ---- narrow windows ----
+
+    // Title bar widths, in DIPs, below which parts of it compact. Measured at 100%:
+    // menus 314, caption buttons 144, New SSH session 203 (about 80 as an icon).
+    private const double TitleBarFullWidth = 1000;
+    private const double TitleBarSearchWidth = 860;
+    // Keeps the compact title bar and a usable tab area (rail + minimum tree + tabs).
+    private const double MinimumWindowWidth = 740;
+    private const double MinimumWindowHeight = 480;
+    private const double MinimumTabAreaWidth = 320;
+
+    // Below this window width the sessions pane floats over the tabs instead of docking.
+    // It docks again only above the wider bound, so resizing near the edge doesn't flicker.
+    private const double PaneOverlayBelowWidth = 1000;
+    private const double PaneDockAboveWidth = 1060;
+
+    private bool _quickConnectExpanded;
+    private bool _paneOverlay;
+    private bool _overlayPaneShown;
+    private TabViewModel? _lastActiveTab;
+
+    /// <summary>Whether a sessions pane is on screen: the floating one on a narrow window,
+    /// otherwise the saved docked state.</summary>
+    private bool SessionsPaneShown => _paneOverlay ? _overlayPaneShown : _sessionsPaneOpen;
+
+    private void InitializeNarrowLayout()
+    {
+        AppTitleBar.SizeChanged += (_, _) => ApplyTitleBarWidth();
+        Root.Loaded += (_, _) =>
+        {
+            ApplyMinimumWindowSize();
+            ApplyWindowWidth();
+            Root.XamlRoot.Changed += (_, _) =>
+            {
+                ApplyMinimumWindowSize();
+                ApplyWindowWidth();
+            };
+        };
+        foreach (var pane in SessionsPanes())
+            pane.KeyDown += SessionsPane_KeyDown;
+        // Opening or switching to a tab from the floating pane is done with it.
+        ViewModel.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName != nameof(MainViewModel.StatusText) || ReferenceEquals(ViewModel.ActiveTab, _lastActiveTab))
+                return;
+            _lastActiveTab = ViewModel.ActiveTab;
+            if (_paneOverlay && _overlayPaneShown)
+                SetSessionsPaneOpen(false);
+        };
+    }
+
+    private Grid[] SessionsPanes() => [SessionsPane, WorkspacesPane, RecentPane, RecordingsPane];
+
+    private void ApplyWindowWidth()
+    {
+        UpdatePaneMode();
+        LimitTreeWidth();
+    }
+
+    private void UpdatePaneMode()
+    {
+        if (Root.XamlRoot is not { } root)
+            return;
+        var width = root.Size.Width;
+        var overlay = _paneOverlay ? width < PaneDockAboveWidth : width < PaneOverlayBelowWidth;
+        if (overlay == _paneOverlay)
+        {
+            if (_paneOverlay && _overlayPaneShown)
+                ApplySessionsRailLayout(); // keep the floating width within the window
+            return;
+        }
+        if (overlay && _sessionsPaneOpen && TreeWidthIsUserChosen)
+            _sessionsPaneWidth = TreeColumn.ActualWidth;
+        // The floating pane starts closed; docking restores the saved state.
+        _paneOverlay = overlay;
+        _overlayPaneShown = false;
+        _sessionsPaneStoryboard?.Stop();
+        _sessionsPaneStoryboard = null;
+        if (_animatedSessionsPane is { } pane)
+        {
+            pane.Opacity = 1;
+            if (pane.RenderTransform is TranslateTransform transform)
+                transform.X = 0;
+            _animatedSessionsPane = null;
+        }
+        ApplySessionsRailLayout();
+    }
+
+    /// <summary>The saved width, capped so the floating pane leaves the tabs in view.</summary>
+    private double OverlayPaneWidth()
+    {
+        var available = (Root.XamlRoot?.Size.Width ?? 1000) - MainArea.ColumnDefinitions[0].ActualWidth - 96;
+        return Math.Max(200, Math.Min(Math.Min(_sessionsPaneWidth, 360), available));
+    }
+
+    private void PaneDismissLayer_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        e.Handled = true;
+        SetSessionsPaneOpen(false);
+    }
+
+    private void SessionsPane_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != Windows.System.VirtualKey.Escape || !_paneOverlay || !_overlayPaneShown)
+            return;
+        e.Handled = true;
+        SetSessionsPaneOpen(false);
+        FocusActiveTerminal();
+    }
+
+    /// <summary>AppWindow sizes are physical pixels, so the minimum follows the display scale.</summary>
+    private void ApplyMinimumWindowSize()
+    {
+        var scale = Root.XamlRoot?.RasterizationScale ?? 1.0;
+        if (!double.IsFinite(scale) || scale <= 0 || AppWindow.Presenter is not OverlappedPresenter presenter)
+            return;
+        presenter.PreferredMinimumWidth = (int)Math.Ceiling(MinimumWindowWidth * scale);
+        presenter.PreferredMinimumHeight = (int)Math.Ceiling(MinimumWindowHeight * scale);
+    }
+
+    /// <summary>Drops the New SSH session label first, then folds quick connect into a
+    /// search button that expands over the menus while it is in use.</summary>
+    private void ApplyTitleBarWidth()
+    {
+        var width = AppTitleBar.ActualWidth;
+        NewSessionLabel.Visibility = width >= TitleBarFullWidth ? Visibility.Visible : Visibility.Collapsed;
+        var compact = width < TitleBarSearchWidth;
+        if (!compact)
+            _quickConnectExpanded = false;
+        var showBox = !compact || _quickConnectExpanded;
+        QuickConnectHost.Visibility = showBox ? Visibility.Visible : Visibility.Collapsed;
+        QuickConnectButton.Visibility = showBox ? Visibility.Collapsed : Visibility.Visible;
+        TitleBarMenus.Visibility = compact && _quickConnectExpanded ? Visibility.Collapsed : Visibility.Visible;
+        UpdateTitleBarRegions();
+    }
+
+    private void QuickConnectButton_Click(object sender, RoutedEventArgs e) => FocusQuickConnectBox();
+
+    /// <summary>Focuses quick connect, expanding it first when the title bar shows only its button.</summary>
+    private void FocusQuickConnectBox()
+    {
+        if (QuickConnectHost.Visibility == Visibility.Visible)
+        {
+            QuickConnectBox.Focus(FocusState.Programmatic);
+            return;
+        }
+        // Focus the box before the search button hides. Hiding a focused button moves
+        // focus on to the next control, which would collapse the box again at once.
+        _quickConnectExpanded = true;
+        TitleBarMenus.Visibility = Visibility.Collapsed;
+        QuickConnectHost.Visibility = Visibility.Visible;
+        AppTitleBar.UpdateLayout();
+        QuickConnectBox.Focus(FocusState.Programmatic);
+        ApplyTitleBarWidth();
+    }
+
+    private void CollapseQuickConnectIfIdle()
+    {
+        if (!_quickConnectExpanded)
+            return;
+        // Focus can pass through the suggestion list; decide once it has settled.
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (!_quickConnectExpanded || QuickConnectHasFocus() || QuickConnectBox.IsSuggestionListOpen)
+                return;
+            _quickConnectExpanded = false;
+            ApplyTitleBarWidth();
+        });
+    }
+
+    /// <summary>Focus sits on the box's inner TextBox; the AutoSuggestBox's own FocusState stays Unfocused.</summary>
+    private bool QuickConnectHasFocus()
+    {
+        for (var element = FocusManager.GetFocusedElement(Root.XamlRoot) as DependencyObject; element is not null;
+             element = VisualTreeHelper.GetParent(element))
+        {
+            if (ReferenceEquals(element, QuickConnectBox))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>A wide saved tree pane gives way to the tabs on a narrow window. The saved
+    /// width is kept and returns when the window widens.</summary>
+    private void MainArea_SizeChanged(object sender, SizeChangedEventArgs e) => ApplyWindowWidth();
+
+    private void LimitTreeWidth()
+    {
+        // The window's width, not MainArea's: a grid whose columns overflow is arranged at
+        // its overflowing width and clipped, so MainArea never reports less.
+        if (Root.XamlRoot is not { } root)
+            return;
+        var fixedColumns = MainArea.ColumnDefinitions[0].ActualWidth + TreeSplitterColumn.ActualWidth;
+        TreeColumn.MaxWidth = Math.Max(180, root.Size.Width - fixedColumns - MinimumTabAreaWidth);
+    }
+
+    /// <summary>The tree's current width, unless the window is narrowing it below the saved width.</summary>
+    private bool TreeWidthIsUserChosen =>
+        TreeColumn.ActualWidth >= 180 && TreeColumn.ActualWidth < TreeColumn.MaxWidth - 0.5;
+
     /// <summary>Caption buttons live outside XAML theming; keep them in sync with the app theme.</summary>
     private void ApplyTitleBarButtonColors(string theme)
     {
@@ -962,7 +1164,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         }
     }
 
-    private void QuickConnect_FocusChanged(object sender, RoutedEventArgs e) => UpdateQuickConnectHint();
+    private void QuickConnect_FocusChanged(object sender, RoutedEventArgs e)
+    {
+        UpdateQuickConnectHint();
+        CollapseQuickConnectIfIdle();
+    }
 
     private void UpdateQuickConnectHint()
     {
@@ -1014,17 +1220,19 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         return tab;
     }
 
+    // Welcome can be dragged to another window, so its actions go to the window hosting it now.
     private void OpenWelcome() => OpenAppPage(AppPage.Welcome, tab =>
     {
+        MainWindow Host() => App.WindowFor(tab) ?? this;
         var view = new OnboardingView(
             App.Settings.Current,
-            ApplyThemeToApp,
-            ViewModel.RebuildTree,
+            App.PreviewThemeInAllWindows,
+            () => Host().ViewModel.RebuildTree(),
             Core.Local.LocalShellDiscovery.DefaultProfile(
                 App.Store, App.Settings.Current.DefaultLocalProfileId, App.AvailableLocalShells)?.Name);
-        view.FinishRequested += () => FinishOnboarding(tab, view);
-        view.NewSessionRequested += () => _ = OpenSessionEditorAsync(existing: null, defaultFolder: "");
-        view.LocalShellRequested += OpenDefaultLocalProfile;
+        view.FinishRequested += () => Host().FinishOnboarding(tab, view);
+        view.NewSessionRequested += () => _ = Host().OpenSessionEditorAsync(existing: null, defaultFolder: "");
+        view.LocalShellRequested += () => Host().OpenDefaultLocalProfile();
         return view;
     });
 
@@ -1079,7 +1287,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         view.FilePaneOpenChanged += () =>
         {
             if (view.IsFilePaneOpen && App.WindowFor(tab) is { } owner &&
-                owner.Root.ActualWidth < 1200 && owner._sessionsPaneOpen)
+                owner.Root.ActualWidth < 1200 && owner._sessionsPaneOpen && !owner._paneOverlay)
                 owner.SetSessionsPaneOpen(false);
         };
         view.FocusRequested += () =>
@@ -1966,8 +2174,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     /// <summary>Re-reads this window's Settings page after another window or command changed settings.</summary>
     private void RefreshSettingsPage(SettingsViewModel? source)
     {
-        if (ViewModel.FindAppPage(AppPage.Settings)?.View is SettingsPage page && !ReferenceEquals(page.ViewModel, source))
-            page.ViewModel.Refresh();
+        // Dragging Settings between windows can leave two Settings tabs in one window.
+        foreach (var tab in ViewModel.AllTabs)
+        {
+            if (tab.View is SettingsPage page && !ReferenceEquals(page.ViewModel, source))
+                page.ViewModel.Refresh();
+        }
     }
 
     /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
@@ -2040,6 +2252,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             tab.NotifyAgentVisuals(); // the agent icon/badge is gated on a setting
         }
     }
+
+    /// <summary>Shows an unsaved theme in this window, for Welcome's theme choice.</summary>
+    internal void PreviewTheme(string theme) => ApplyThemeToApp(theme);
 
     /// <summary>Applies a reversible Settings-dialog theme preview without repeating
     /// layout, scrollback, or highlight work in every open terminal.</summary>
@@ -2127,20 +2342,35 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private void ApplySessionsRailLayout()
     {
-        var paneAction = _sessionsPaneOpen ? "Hide sessions pane" : "Show sessions pane";
+        var shown = SessionsPaneShown;
+        var paneAction = shown ? "Hide sessions pane" : "Show sessions pane";
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(SessionsPaneToggleButton, paneAction);
         ToolTipService.SetToolTip(SessionsPaneToggleButton, paneAction);
-        var visible = _sessionsPaneOpen ? Visibility.Visible : Visibility.Collapsed;
+        var visible = shown ? Visibility.Visible : Visibility.Collapsed;
         SessionsPane.Visibility = _selectedRailTab == "sessions" ? visible : Visibility.Collapsed;
         WorkspacesPane.Visibility = _selectedRailTab == "workspaces" ? visible : Visibility.Collapsed;
         RecentPane.Visibility = _selectedRailTab == "recent" ? visible : Visibility.Collapsed;
         RecordingsPane.Visibility = _selectedRailTab == "recordings" ? visible : Visibility.Collapsed;
 
-        TreeColumn.MinWidth = _sessionsPaneOpen ? 180 : 0;
-        TreeColumn.Width = new GridLength(_sessionsPaneOpen ? _sessionsPaneWidth : 0);
-        TreeSplitterColumn.Width = new GridLength(_sessionsPaneOpen ? 1 : 0);
-        TreeSplitter.Visibility = visible;
-        TreeSplitterLine.Visibility = visible;
+        // A floating pane takes no column; it spans the tab area above the dismiss layer.
+        var docked = shown && !_paneOverlay;
+        TreeColumn.MinWidth = docked ? 180 : 0;
+        TreeColumn.Width = new GridLength(docked ? _sessionsPaneWidth : 0);
+        TreeSplitterColumn.Width = new GridLength(docked ? 1 : 0);
+        TreeSplitter.Visibility = docked ? Visibility.Visible : Visibility.Collapsed;
+        TreeSplitterLine.Visibility = docked ? Visibility.Visible : Visibility.Collapsed;
+        PaneDismissLayer.Visibility = shown && _paneOverlay ? Visibility.Visible : Visibility.Collapsed;
+        var overlayWidth = OverlayPaneWidth();
+        foreach (var pane in SessionsPanes())
+        {
+            Grid.SetColumnSpan(pane, _paneOverlay ? 3 : 1);
+            pane.Width = _paneOverlay ? overlayWidth : double.NaN;
+            pane.HorizontalAlignment = _paneOverlay ? HorizontalAlignment.Left : HorizontalAlignment.Stretch;
+            Canvas.SetZIndex(pane, _paneOverlay ? 4 : 0);
+            pane.Background = _paneOverlay ? (Brush)Application.Current.Resources["SessionShellBrush"] : null;
+            pane.BorderBrush = _paneOverlay ? (Brush)Application.Current.Resources["SessionChromeFrameBrush"] : null;
+            pane.BorderThickness = new Thickness(0, 0, _paneOverlay ? 1 : 0, 0);
+        }
 
         SessionsRail.SelectedItem = _selectedRailTab switch
         {
@@ -2149,19 +2379,23 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             "recordings" => RecordingsRailItem,
             _ => SessionsRailItem,
         };
-        SessionsPaneMenuItem.IsChecked = _sessionsPaneOpen;
+        SessionsPaneMenuItem.IsChecked = shown;
     }
 
     private void SelectSessionsRailTab(string tab)
     {
         var normalized = NormalizeRailTab(tab);
         var tabChanged = normalized != _selectedRailTab;
-        var wasOpen = _sessionsPaneOpen;
-        if (wasOpen && TreeColumn.ActualWidth >= 180)
+        var wasOpen = SessionsPaneShown;
+        if (wasOpen && !_paneOverlay && TreeWidthIsUserChosen)
             _sessionsPaneWidth = TreeColumn.ActualWidth;
 
         _selectedRailTab = normalized;
-        _sessionsPaneOpen = true;
+        // A floating pane is temporary; the saved docked state stays as it was.
+        if (_paneOverlay)
+            _overlayPaneShown = true;
+        else
+            _sessionsPaneOpen = true;
         ApplySessionsRailLayout();
         PersistSessionsRailState();
 
@@ -2178,16 +2412,26 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private void SetSessionsPaneOpen(bool open)
     {
-        if (_sessionsPaneOpen == open)
+        if (SessionsPaneShown == open)
         {
             SessionsPaneMenuItem.IsChecked = open;
             return;
         }
 
-        if (_sessionsPaneOpen && !open && TreeColumn.ActualWidth >= 180)
-            _sessionsPaneWidth = TreeColumn.ActualWidth;
-        _sessionsPaneOpen = open;
-        PersistSessionsRailState();
+        if (_paneOverlay)
+        {
+            _overlayPaneShown = open;
+            // Let clicks reach the tabs while the pane slides away.
+            if (!open)
+                PaneDismissLayer.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            if (_sessionsPaneOpen && !open && TreeWidthIsUserChosen)
+                _sessionsPaneWidth = TreeColumn.ActualWidth;
+            _sessionsPaneOpen = open;
+            PersistSessionsRailState();
+        }
 
         if (open)
         {
@@ -2305,7 +2549,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             if (animationVersion != _sessionsPaneAnimationVersion)
                 return;
-            if (animateChrome)
+            if (animateChrome && !_paneOverlay)
             {
                 TreeColumn.Width = new GridLength(opening ? _sessionsPaneWidth : 0);
                 TreeColumn.MinWidth = opening ? 180 : 0;
@@ -2317,7 +2561,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             TreeSplitterLine.Opacity = 1;
             _sessionsPaneStoryboard = null;
             _animatedSessionsPane = null;
-            if (!opening && !_sessionsPaneOpen)
+            if (!opening && !SessionsPaneShown)
                 ApplySessionsRailLayout();
         };
         _sessionsPaneStoryboard = storyboard;
@@ -2338,6 +2582,18 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         if (e.SelectedItemContainer?.Tag is string tab && tab != _selectedRailTab)
             SelectSessionsRailTab(tab);
+    }
+
+    /// <summary>The selected tool's icon raises no SelectionChanged, so it opens its pane
+    /// here when the pane is hidden, and closes a floating pane like a toggle.</summary>
+    private void SessionsRail_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs e)
+    {
+        if (e.InvokedItemContainer?.Tag is not string tab || tab != _selectedRailTab)
+            return;
+        if (!SessionsPaneShown)
+            SelectSessionsRailTab(tab);
+        else if (_paneOverlay)
+            SetSessionsPaneOpen(false);
     }
 
     // ListView has no item-click command; each rail list forwards its click to one.

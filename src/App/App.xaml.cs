@@ -244,6 +244,16 @@ public partial class App : Application
             window.ApplySettingsToApp();
     }
 
+    /// <summary>Previews an unsaved theme in every window. Welcome previews themes and can be
+    /// dragged between windows, so a preview and its cancel must reach them all.</summary>
+    internal static void PreviewThemeInAllWindows(string theme)
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.PreviewTheme(theme);
+    }
+
     /// <summary>Applies one saved setting in every window. <paramref name="source"/> is the
     /// Settings page that changed it, if any; other windows' Settings pages re-read.</summary>
     internal static void ApplySettingChange(string property, ViewModels.SettingsViewModel? source = null)

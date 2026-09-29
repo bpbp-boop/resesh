@@ -45,7 +45,8 @@
         AlwaysShowHeader="False"
         Background="Transparent"
         AutomationProperties.AutomationId="SettingsSectionSelector"
-        SelectionChanged="Sections_SelectionChanged">
+        SelectionChanged="Sections_SelectionChanged"
+        SizeChanged="Sections_SizeChanged">
         <NavigationView.MenuItems>
             <NavigationViewItem x:Name="GeneralItem" Content="General" Tag="General" AutomationProperties.AutomationId="SettingsGeneralTab">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE713;" /></NavigationViewItem.Icon>

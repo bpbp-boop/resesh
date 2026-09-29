@@ -234,7 +234,6 @@
                         AutomationProperties.AutomationId="{x:Bind TabAutomationId}"
                         Style="{StaticResource CodeTabStyle}"
                         IsClosable="False"
-                        CanDrag="{x:Bind CanDrag}"
                         DragStarting="HideSystemTabDragPreview"
                         Height="44">
                         <TabViewItem.Header>
