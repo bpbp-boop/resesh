@@ -98,6 +98,11 @@ public sealed class TerminalControl : TerminalSurface
     private bool _flushTimerPending;
     private bool _pageReady;
     private bool _disposed;
+    // The latest focus request across all terminals; a later request supersedes retries.
+    private static long _focusRequests;
+    private long _focusRequest;
+    private const int FocusAttempts = 10;
+    private static readonly TimeSpan FocusRetryDelay = TimeSpan.FromMilliseconds(50);
     private bool _rulerIsSplit;
     private bool _rulerIsGroupFocused = true;
     private string? _promptPlatform;
@@ -227,6 +232,9 @@ public sealed class TerminalControl : TerminalSurface
                     Columns = root.GetProperty("cols").GetInt32();
                     Rows = root.GetProperty("rows").GetInt32();
                     _pageReady = true;
+                    // Focus asked for while the page loaded still stands if nothing else took it.
+                    if (_focusRequest == _focusRequests)
+                        _ = FocusWebViewAsync(_focusRequest);
                     FlushPendingMessages();
                     PostRulerPresentation();
                     PostPromptPlatform();
@@ -516,8 +524,30 @@ public sealed class TerminalControl : TerminalSurface
     {
         // XAML focus must land on the WebView2 first, or keystrokes go to whatever
         // control had focus (e.g. the search box); then focus xterm inside the page.
-        _ = Microsoft.UI.Xaml.Input.FocusManager.TryFocusAsync(_webView, FocusState.Programmatic);
+        var request = ++_focusRequests;
+        _focusRequest = request;
+        _ = FocusWebViewAsync(request);
         Post(new { type = "focus" });
+    }
+
+    /// <summary>
+    /// A new tab asks for focus before its WebView2 is loaded, and a closed tab's successor
+    /// asks while it is still collapsed; either way the first attempt fails and focus stays
+    /// on the old control (or jumps when the closed terminal is removed). Keep trying until
+    /// the view can take focus, unless another terminal has asked since.
+    /// </summary>
+    private async Task FocusWebViewAsync(long request)
+    {
+        for (var attempt = 0; attempt < FocusAttempts; attempt++)
+        {
+            if (attempt > 0)
+                await Task.Delay(FocusRetryDelay);
+            if (_disposed || request != _focusRequests)
+                return;
+            var result = await Microsoft.UI.Xaml.Input.FocusManager.TryFocusAsync(_webView, FocusState.Programmatic);
+            if (result.Succeeded)
+                return;
+        }
     }
 
     /// <summary>Blocks or restores pointer input to the page (used by session lock).

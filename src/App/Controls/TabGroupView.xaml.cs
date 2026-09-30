@@ -445,6 +445,10 @@ public sealed partial class TabGroupView : UserControl
     {
         TerminalHost.Children.Add(view);
         SyncTerminalVisibility();
+        // A new tab is selected before its view exists, so the selection change had
+        // nothing to focus. Focus it now if it is the focused group's active tab.
+        if (Group.SelectedTab is { IsGroupFocused: true } tab && ReferenceEquals(tab.View, view))
+            FocusTerminal(tab);
     }
 
     private void Tabs_Loaded(object sender, RoutedEventArgs e)
