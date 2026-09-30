@@ -88,6 +88,10 @@
   // Match VS Code's scrollbar timing: quick reveal, slow fade after pointer exit.
   var THUMB_SHOW_MS = 100;
   var THUMB_HIDE_MS = 800;
+  var THUMB_LINGER_MS = 500; // a user scroll keeps the thumb up this long before fading
+  var THUMB_MIN_PX = 20;
+  // xterm's scrollable element moves 50 px per standard wheel unit (one notch).
+  var WHEEL_UNIT_PX = 50;
 
   var HL_MAX_RULES = 32;    // bitmask width; overview rules beyond this are ignored
   var HL_SLICE = 2048;      // hard cap on indexer lines per pass, including idle timeouts
@@ -197,7 +201,8 @@
     this._resizeObserver = null;
 
     this._colors = {
-      background: "#0c0c0c", border: "#333333", thumb: "rgba(255,255,255,0.10)",
+      background: "#0c0c0c", border: "#333333", thumb: "rgba(121,121,121,0.40)",
+      thumbHover: "rgba(100,100,100,0.70)", thumbActive: "rgba(191,191,191,0.40)",
       match: "#7f8ea3", activeMatch: "#f2cc60", bookmark: "#61d6d6",
       flash: "rgba(242,204,96,0.28)", pending: "rgba(255,255,255,0.06)",
       cmdOk: "#2ea043", cmdFail: "#ff5555", cmdUnknown: "#9e9e9e",
@@ -262,7 +267,15 @@
     this._hlScanScheduled = false;
 
     this._paintQueued = false;
-    this._drag = null;        // { pointerId, startY, moved }
+    this._drag = null;        // { pointerId, startY, moved, grabOffset, onThumb }
+    this._thumbTop = 0;       // CSS px, as last painted
+    this._thumbHeight = 0;
+    this._isThumbHot = false; // pointer is over the thumb itself
+    this._scrollRevealed = false; // a user scroll is showing the thumb
+    this._scrollRevealTimer = null;
+    this._scrollSeen = null;  // { viewportY, baseY, anchorLine } at the last onScroll
+    this._scrollAnchor = null;// marker whose drift measures scrollback trimming
+    this._wheelRemainder = 0; // sub-row wheel travel carried to the next event
     this._windowBlurHandler = null;
     this._hoverTimer = null;
     this._flash = null;       // { deco, marker, timer }
@@ -386,7 +399,10 @@
 
     this._applyChromeTheme();
 
-    this._disposables.push(term.onScroll(function () { self._queuePaint(); }));
+    this._disposables.push(term.onScroll(function () {
+      self._onViewportScroll();
+      self._queuePaint();
+    }));
     this._disposables.push(term.onResize(function () {
       self._queuePaint();
       if (self._search) self._scheduleRescan();
@@ -453,17 +469,14 @@
     });
     strip.addEventListener("pointerleave", function () {
       self._isPointerOver = false;
+      self._isThumbHot = false;
       // Grace delay instead of an instant hide: the pointer crosses a 6px gap on
       // its way from the strip to an interactive tooltip's action buttons.
       self._scheduleTooltipHide();
       self._syncThumbVisibility();
       self._queuePaint();
     });
-    strip.addEventListener("wheel", function (e) {
-      e.preventDefault();
-      var lines = Math.round(e.deltaY / 40) || (e.deltaY > 0 ? 1 : -1);
-      self._term.scrollLines(lines);
-    }, { passive: false });
+    strip.addEventListener("wheel", function (e) { self._onWheel(e); }, { passive: false });
 
     // WebView2 can lose pointer capture when its host window deactivates. Chromium does
     // not always deliver the matching pointerup in that case, so do not retain a drag
@@ -506,6 +519,8 @@
     if (this._hlAnchor) { var anchor = this._hlAnchor; this._hlAnchor = null; anchor.marker.dispose(); }
     this._clearFlash();
     this._cancelTooltipHide();
+    if (this._scrollRevealTimer) { clearTimeout(this._scrollRevealTimer); this._scrollRevealTimer = null; }
+    if (this._scrollAnchor) { var scrollAnchor = this._scrollAnchor; this._scrollAnchor = null; scrollAnchor.dispose(); }
     if (this._resizeObserver) this._resizeObserver.disconnect();
     if (this._strip && this._strip.parentElement) this._strip.parentElement.removeChild(this._strip);
     if (this._tooltip && this._tooltip.parentElement) this._tooltip.parentElement.removeChild(this._tooltip);
@@ -530,7 +545,7 @@
   /** Feed the ruler palette to its DOM chrome. */
   RulerAddon.prototype._applyChromeTheme = function () {
     var c = this._colors;
-    if (this._thumb) this._thumb.style.backgroundColor = c.thumb;
+    this._syncThumbVisibility(); // thumb colour follows its hover/drag state
     var hostEl = this._strip && this._strip.parentElement;
     if (!hostEl || !hostEl.style || !hostEl.style.setProperty) return;
     hostEl.style.setProperty("--sr-bg", c.tooltipBg);
@@ -1921,11 +1936,21 @@
     term.scrollToLine(Math.max(0, Math.min(top, Math.max(max, 0))));
   };
 
+  RulerAddon.prototype._isOnThumb = function (y) {
+    return this._thumbHeight > 0 && y >= this._thumbTop && y <= this._thumbTop + this._thumbHeight;
+  };
+
   RulerAddon.prototype._onPointerDown = function (e) {
     if (e.button !== 0) return;
     e.preventDefault(); // keep focus in the terminal
     this._hideTooltip();
-    this._drag = { pointerId: e.pointerId, startY: e.offsetY, moved: false };
+    // Grabbing the thumb keeps the grab point under the pointer, so it never jumps.
+    // A press on the track scrubs with the thumb centred on the pointer.
+    var onThumb = this._isOnThumb(e.offsetY);
+    this._drag = {
+      pointerId: e.pointerId, startY: e.offsetY, moved: false, onThumb: onThumb,
+      grabOffset: onThumb ? e.offsetY - this._thumbTop : this._thumbHeight / 2
+    };
     this._syncThumbVisibility();
     try { this._strip.setPointerCapture(e.pointerId); } catch (err) {}
   };
@@ -1940,8 +1965,14 @@
       }
       if (!this._drag.moved && Math.abs(e.offsetY - this._drag.startY) < DRAG_THRESHOLD) return;
       this._drag.moved = true;
-      this._scrollLineToCenter(this._lineAtY(e.offsetY));
+      var grab = typeof this._drag.grabOffset === "number" ? this._drag.grabOffset : this._thumbHeight / 2;
+      this._scrollThumbTo(e.offsetY - grab);
       return;
+    }
+    var hot = this._isOnThumb(e.offsetY);
+    if (hot !== this._isThumbHot) {
+      this._isThumbHot = hot;
+      this._syncThumbVisibility();
     }
     this._scheduleTooltip(e.offsetY);
   };
@@ -1949,15 +1980,101 @@
   RulerAddon.prototype._onPointerUp = function (e) {
     if (!this._drag || e.pointerId !== this._drag.pointerId) return;
     var wasClick = !this._drag.moved;
+    var onThumb = this._drag.onThumb === true;
     this._cancelDrag(e.pointerId);
     if (!wasClick) return;
 
-    var line = this._lineAtY(e.offsetY);
     var snapped = this._snapToMark(e.offsetY);
-    if (snapped >= 0) line = snapped;
+    if (onThumb) {
+      // The thumb covers what is already on screen: point out a mark, don't scroll.
+      if (snapped >= 0) this._flashLine(snapped);
+      this._term.focus();
+      return;
+    }
+    var line = snapped >= 0 ? snapped : this._lineAtY(e.offsetY);
     this._scrollLineToCenter(line);
     this._flashLine(line);
     this._term.focus();
+  };
+
+  /** Scroll so the thumb's top edge sits at topPx (CSS px) on the track. */
+  RulerAddon.prototype._scrollThumbTo = function (topPx) {
+    var term = this._term;
+    var maxScroll = Math.max(0, this._totalLines() - term.rows);
+    if (maxScroll <= 0) return;
+    var track = this._strip.clientHeight - this._thumbHeight;
+    var line = track > 0 ? Math.round((topPx / track) * maxScroll) : 0;
+    term.scrollToLine(Math.max(0, Math.min(line, maxScroll)));
+  };
+
+  /** Wheel over the ruler scrolls exactly as it would over the text: xterm's
+   * scrollable element moves 50 px per wheel unit, scaled by the terminal's scroll
+   * sensitivity (Alt for fast scroll). Sub-row travel carries over, so precision
+   * touchpads scroll smoothly instead of a full row per tiny event. */
+  RulerAddon.prototype._onWheel = function (e) {
+    var term = this._term;
+    if (!term) return;
+    e.preventDefault();
+    var rowPx = this._rowHeight();
+    var units;
+    if (typeof e.wheelDeltaY === "number" && e.wheelDeltaY !== 0) units = -e.wheelDeltaY / 120;
+    else if (e.deltaMode === 1) units = e.deltaY;
+    else if (e.deltaMode === 2) units = (e.deltaY * term.rows * rowPx) / WHEEL_UNIT_PX;
+    else units = e.deltaY / 40;
+    var options = term.options || {};
+    var px = units * WHEEL_UNIT_PX * (options.scrollSensitivity || 1);
+    if (e.altKey) px *= options.fastScrollSensitivity || 5;
+    if (px === 0) return;
+    if ((px > 0) !== (this._wheelRemainder > 0)) this._wheelRemainder = 0;
+    this._wheelRemainder += px / rowPx;
+    var lines = Math.trunc(this._wheelRemainder);
+    this._wheelRemainder -= lines;
+    if (lines !== 0) term.scrollLines(lines);
+  };
+
+  RulerAddon.prototype._rowHeight = function () {
+    var term = this._term;
+    var el = term.element && (term.element.querySelector(".xterm-screen") || term.element);
+    var h = el && term.rows > 0 ? el.clientHeight / term.rows : 0;
+    return h > 0 ? h : 17;
+  };
+
+  /** onScroll fires for output as well as for the user. Only a user scroll (wheel,
+   * keys, API, drag, snapping back on input) reveals the thumb; output that keeps a
+   * bottom-pinned view following, or scrollback trimming under a scrolled-back view,
+   * does not — the thumb would otherwise flicker for as long as output streams. */
+  RulerAddon.prototype._onViewportScroll = function () {
+    var term = this._term;
+    var buf = term.buffer.active;
+    if (buf.type === "alternate") { this._scrollSeen = null; return; }
+    var anchor = this._ensureScrollAnchor();
+    var now = { viewportY: buf.viewportY, baseY: buf.baseY, anchor: anchor, anchorLine: anchor ? anchor.line : 0 };
+    var prev = this._scrollSeen;
+    this._scrollSeen = now;
+    if (!prev) return;
+    if (prev.viewportY === prev.baseY && now.viewportY === now.baseY) return;
+    // A trimmed top line moves every row, the anchor and the viewport alike, up one.
+    var trimmed = prev.anchor && prev.anchor === anchor ? prev.anchorLine - now.anchorLine : 0;
+    if (now.viewportY - prev.viewportY + trimmed === 0) return;
+    this._revealThumbForScroll();
+  };
+
+  RulerAddon.prototype._ensureScrollAnchor = function () {
+    if (this._scrollAnchor && !this._scrollAnchor.isDisposed) return this._scrollAnchor;
+    this._scrollAnchor = this._term.registerMarker ? this._term.registerMarker(0) || null : null;
+    return this._scrollAnchor;
+  };
+
+  RulerAddon.prototype._revealThumbForScroll = function () {
+    var self = this;
+    this._scrollRevealed = true;
+    this._syncThumbVisibility();
+    if (this._scrollRevealTimer) clearTimeout(this._scrollRevealTimer);
+    this._scrollRevealTimer = setTimeout(function () {
+      self._scrollRevealTimer = null;
+      self._scrollRevealed = false;
+      self._syncThumbVisibility();
+    }, THUMB_LINGER_MS);
   };
 
   RulerAddon.prototype._cancelDrag = function (pointerId, releaseCapture) {
@@ -2251,9 +2368,12 @@
 
   RulerAddon.prototype._syncThumbVisibility = function () {
     if (!this._thumb) return;
-    var visible = this._isPointerOver || this._drag !== null;
+    var c = this._colors;
+    var visible = this._isPointerOver || this._drag !== null || this._scrollRevealed;
     this._thumb.style.transitionDuration = (visible ? THUMB_SHOW_MS : THUMB_HIDE_MS) + "ms";
     this._thumb.style.opacity = visible ? "1" : "0";
+    this._thumb.style.backgroundColor = this._drag !== null ? (c.thumbActive || c.thumb)
+      : this._isThumbHot ? (c.thumbHover || c.thumb) : c.thumb;
   };
 
   RulerAddon.prototype._queuePaint = function () {
@@ -2425,10 +2545,22 @@
 
     // Viewport window / thumb. It is separate from the canvas so its opacity can
     // animate without hiding or continuously repainting the annotated marks below it.
-    var thumbTop = (buf.viewportY / total) * cssH;
-    var thumbH = Math.max((term.rows / total) * cssH, 20);
-    this._thumb.style.top = Math.round(Math.min(thumbTop, cssH - thumbH)) + "px";
-    this._thumb.style.height = Math.round(thumbH) + "px";
+    // Nothing to scroll: no thumb, as with any modern scrollbar. A minimum-size thumb
+    // travels the track minus its own height, so it still meets both ends exactly.
+    var maxScroll = Math.max(0, total - term.rows);
+    if (maxScroll <= 0) {
+      this._thumb.style.display = "none";
+      this._thumbTop = 0;
+      this._thumbHeight = 0;
+      return;
+    }
+    var thumbH = Math.round(Math.min(cssH, Math.max((term.rows / total) * cssH, THUMB_MIN_PX)));
+    var thumbTop = Math.round((Math.min(buf.viewportY, maxScroll) / maxScroll) * (cssH - thumbH));
+    this._thumb.style.display = "";
+    this._thumb.style.top = thumbTop + "px";
+    this._thumb.style.height = thumbH + "px";
+    this._thumbTop = thumbTop;
+    this._thumbHeight = thumbH;
   };
 
   window.RulerAddon = { RulerAddon: RulerAddon };

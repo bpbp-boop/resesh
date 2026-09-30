@@ -46,6 +46,12 @@
     <ProjectReference Include="..\Terminal\Resesh.Terminal.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The terminal page's JS/HTML are copied in from Resesh.Terminal; VS's fast
+         up-to-date check otherwise ignores edits to them. -->
+    <UpToDateCheckInput Include="..\Terminal\wwwroot\**" />
+  </ItemGroup>
+
   <Import Project="..\..\eng\WindowsAppRuntimeResources.targets" />
 
 </Project>

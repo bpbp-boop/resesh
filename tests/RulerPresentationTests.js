@@ -8,7 +8,12 @@ const source = fs.readFileSync(
   path.join(__dirname, "..", "src", "Terminal", "wwwroot", "addon-ruler.js"),
   "utf8");
 const window = { devicePixelRatio: 1 };
-vm.runInNewContext(source, { window, Map, Math, RegExp, Set, requestAnimationFrame() {} });
+const timers = [];
+vm.runInNewContext(source, {
+  window, Map, Math, RegExp, Set, requestAnimationFrame() {},
+  setTimeout(fn, ms) { timers.push({ fn, ms }); return timers.length; },
+  clearTimeout() {},
+});
 const RulerAddon = window.RulerAddon.RulerAddon;
 
 function paintPresentation(isSplit, isGroupFocused, isPointerOver = false, configure = () => {}) {
@@ -139,7 +144,7 @@ test("ruler thumb tracks the viewport independently from annotated marks", () =>
 
   assert.equal(result.thumbStyle.top, "50px");
   assert.equal(result.thumbStyle.height, "20px");
-  assert.equal(operationsWithColor(result, "rgba(255,255,255,0.10)").length, 0);
+  assert.equal(operationsWithColor(result, "rgba(121,121,121,0.40)").length, 0);
 });
 
 test("ruler thumb uses VS Code reveal and fade timing", () => {
@@ -195,6 +200,132 @@ test("ruler cancellation ignores a different pointer", () => {
 
   assert.notEqual(addon._drag, null);
   assert.deepEqual(released, []);
+});
+
+function scrollHarness({ viewportY, baseY }) {
+  const marker = { line: baseY, isDisposed: false };
+  const addon = new RulerAddon();
+  addon._thumb = { style: {} };
+  addon._term = {
+    buffer: { active: { type: "normal", viewportY, baseY } },
+    registerMarker() { return marker; },
+  };
+  addon._onViewportScroll(); // baseline
+  timers.length = 0;
+  const scroll = (next, trimmed = 0) => {
+    Object.assign(addon._term.buffer.active, next);
+    marker.line -= trimmed;
+    addon._onViewportScroll();
+  };
+  return { addon, scroll };
+}
+
+test("a user scroll reveals the thumb, then it fades after a short linger", () => {
+  const { addon, scroll } = scrollHarness({ viewportY: 80, baseY: 80 });
+
+  scroll({ viewportY: 77 }); // wheel up three rows
+  assert.equal(addon._thumb.style.opacity, "1");
+  assert.equal(timers.length, 1);
+  assert.equal(timers[0].ms, 500);
+
+  timers[0].fn();
+  assert.equal(addon._thumb.style.opacity, "0");
+  assert.equal(addon._thumb.style.transitionDuration, "800ms");
+});
+
+test("output following a bottom-pinned view does not reveal the thumb", () => {
+  const { addon, scroll } = scrollHarness({ viewportY: 80, baseY: 80 });
+
+  scroll({ viewportY: 81, baseY: 81 });
+  scroll({ viewportY: 90, baseY: 90 });
+  assert.notEqual(addon._thumb.style.opacity, "1");
+  assert.equal(timers.length, 0);
+});
+
+test("scrollback trimming under a scrolled-back view does not reveal the thumb", () => {
+  const { addon, scroll } = scrollHarness({ viewportY: 40, baseY: 80 });
+
+  scroll({ viewportY: 39 }, 1); // full scrollback: top line trimmed, view kept still
+  assert.equal(timers.length, 0);
+
+  scroll({ viewportY: 38 }, 0); // a real one-row scroll up
+  assert.equal(timers.length, 1);
+});
+
+test("dragging the thumb keeps the grab point under the pointer", () => {
+  const scrolled = [];
+  const addon = new RulerAddon();
+  addon._strip = { clientHeight: 100, setPointerCapture() {} };
+  addon._term = {
+    rows: 20,
+    buffer: { active: { length: 100 } },
+    scrollToLine(line) { scrolled.push(line); },
+  };
+  addon._thumbTop = 40;
+  addon._thumbHeight = 20;
+
+  // Grab near the thumb's top edge; a centring scrub would jump 8 px here.
+  addon._onPointerDown({ button: 0, pointerId: 1, offsetY: 42, preventDefault() {} });
+  addon._onPointerMove({ pointerId: 1, buttons: 1, offsetY: 52 });
+  // Thumb top moves 40 -> 50 of an 80 px track over 80 scrollable rows.
+  assert.deepEqual(scrolled, [50]);
+});
+
+test("clicking the thumb without dragging does not scroll", () => {
+  const scrolled = [];
+  const addon = new RulerAddon();
+  addon._strip = { clientHeight: 100, setPointerCapture() {}, releasePointerCapture() {} };
+  addon._term = {
+    rows: 20,
+    buffer: { active: { length: 100 } },
+    scrollToLine(line) { scrolled.push(line); },
+    focus() {},
+  };
+  addon._thumbTop = 40;
+  addon._thumbHeight = 20;
+
+  addon._onPointerDown({ button: 0, pointerId: 1, offsetY: 50, preventDefault() {} });
+  addon._onPointerUp({ pointerId: 1, offsetY: 50 });
+  assert.deepEqual(scrolled, []);
+});
+
+test("thumb meets both track ends and hides when nothing can scroll", () => {
+  const atBottom = paintPresentation(false, true, false, addon => {
+    addon._term.buffer.active.length = 10000;
+    addon._term.buffer.active.viewportY = 9980;
+  });
+  assert.equal(atBottom.thumbStyle.height, "20px");
+  assert.equal(atBottom.thumbStyle.top, "80px");
+
+  const fits = paintPresentation(false, true, false, addon => {
+    addon._term.buffer.active.length = 20;
+    addon._term.buffer.active.viewportY = 0;
+  });
+  assert.equal(fits.thumbStyle.display, "none");
+});
+
+test("wheel over the ruler accumulates touchpad travel by row", () => {
+  const scrolledLines = [];
+  const addon = new RulerAddon();
+  addon._term = {
+    rows: 10,
+    options: {},
+    element: { querySelector: () => ({ clientHeight: 200 }) }, // 20 px rows
+    scrollLines(lines) { scrolledLines.push(lines); },
+  };
+  const wheel = deltaY => addon._onWheel({ deltaY, deltaMode: 0, preventDefault() {} });
+
+  // 8 px of wheel is 10 px of scroll: half a row each, never a whole row per event.
+  wheel(8);
+  assert.deepEqual(scrolledLines, []);
+  wheel(8);
+  assert.deepEqual(scrolledLines, [1]);
+
+  // A mouse notch (wheelDeltaY 120) is 50 px: two rows, with half a row carried.
+  scrolledLines.length = 0;
+  addon._wheelRemainder = 0;
+  addon._onWheel({ deltaY: 100, wheelDeltaY: -120, deltaMode: 0, preventDefault() {} });
+  assert.deepEqual(scrolledLines, [2]);
 });
 
 function timestampHarness(lines, cursorLine) {
