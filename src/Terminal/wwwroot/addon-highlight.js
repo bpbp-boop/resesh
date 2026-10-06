@@ -4,7 +4,10 @@
  * Scans only the rows currently in the viewport — never the raw output stream —
  * and paints regex matches via the decorations API. Marker-backed cache entries
  * follow lines through scrollback trimming. Parse events update decorations before
- * the next paint; decoration-only renders never schedule another scan.
+ * the next paint; decoration-only renders never schedule another scan. While output
+ * streams, several parsed writes land per frame: after each output render a scan is
+ * queued ahead of the next frame's render, and parses until then only mark it dirty,
+ * so the viewport is scanned once per painted frame instead of once per write.
  *
  * Rendering notes:
  *  - color   -> decoration foregroundColor (cell text recolored by the renderer)
@@ -26,12 +29,16 @@
     this._nextRows = new Map();  // reused while reconciling marker positions
     this._disposables = [];
     this._scanFrame = null;
+    this._preRenderFrame = null; // armed by an output render; runs before the next one
+    this._preRenderDirty = false;
+    this._parsedSinceRender = false;
   }
 
   HighlightAddon.prototype.activate = function (term) {
     var self = this;
     this._term = term;
-    this._disposables.push(term.onWriteParsed(function () { self._scanNow(); }));
+    this._disposables.push(term.onWriteParsed(function () { self._onWriteParsed(); }));
+    this._disposables.push(term.onRender(function () { self._onRender(); }));
     this._disposables.push(term.onScroll(function () { self._queueScan(); }));
     this._disposables.push(term.onResize(function () { self._clear(); self._queueScan(); }));
   };
@@ -39,6 +46,8 @@
   HighlightAddon.prototype.dispose = function () {
     if (this._scanFrame !== null) cancelAnimationFrame(this._scanFrame);
     this._scanFrame = null;
+    if (this._preRenderFrame !== null) cancelAnimationFrame(this._preRenderFrame);
+    this._preRenderFrame = null;
     this._clear();
     for (var i = 0; i < this._disposables.length; i++) this._disposables[i].dispose();
     this._disposables = [];
@@ -94,7 +103,31 @@
     this._scanFrame = requestAnimationFrame(function () { self._scanNow(); });
   };
 
+  HighlightAddon.prototype._onWriteParsed = function () {
+    this._parsedSinceRender = true;
+    if (this._preRenderFrame !== null) {
+      this._preRenderDirty = true;
+      return;
+    }
+    this._scanNow();
+  };
+
+  // Runs inside the renderer's animation frame. A frame requested now is queued before
+  // any render the next parse requests, so it still updates decorations before paint.
+  HighlightAddon.prototype._onRender = function () {
+    if (!this._parsedSinceRender || this._preRenderFrame !== null) return;
+    this._parsedSinceRender = false;
+    var self = this;
+    this._preRenderFrame = requestAnimationFrame(function () {
+      self._preRenderFrame = null;
+      if (!self._preRenderDirty) return;
+      self._preRenderDirty = false;
+      self._scanNow();
+    });
+  };
+
   HighlightAddon.prototype._scanNow = function () {
+    this._preRenderDirty = false;
     if (this._scanFrame !== null) cancelAnimationFrame(this._scanFrame);
     this._scanFrame = null;
     try {
