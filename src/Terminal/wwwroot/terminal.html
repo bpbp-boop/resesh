@@ -403,7 +403,15 @@
 
     function fitPreservingTimestamps() {
       ruler.captureTimestampReflow();
-      fit.fit();
+      if (init.fixed80Columns === true) {
+        // Keep wrapping and cursor reports at the same width as Telnet NAWS.
+        // Height still follows the pane. A narrow pane must not reflow BBS art.
+        const dimensions = fit.proposeDimensions();
+        if (dimensions && Number.isFinite(dimensions.rows))
+          term.resize(80, dimensions.rows);
+      } else {
+        fit.fit();
+      }
       ruler.restoreTimestampReflow();
     }
 

@@ -115,7 +115,8 @@ public abstract class TerminalSurface : Grid, IDisposable
         bool rightClickPaste,
         int scrollback,
         IReadOnlyList<object>? highlights = null,
-        bool readOnly = false);
+        bool readOnly = false,
+        bool fixed80Columns = false);
     public abstract void ApplyOptions(
         int? fontSize = null,
         string? fontFamily = null,

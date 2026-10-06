@@ -700,14 +700,15 @@ public sealed class TerminalControl : TerminalSurface
         int fontSize, string fontFamily, string theme,
         bool copyOnSelect, bool rightClickPaste, int scrollback,
         IReadOnlyList<object>? highlights = null,
-        bool readOnly = false)
+        bool readOnly = false,
+        bool fixed80Columns = false)
     {
         _executionReadOnly = readOnly;
         SetThemeBackground(ThemeBackground(theme));
         _initialOptions = new
         {
             type = "initOptions", fontSize, fontFamily, theme, copyOnSelect, rightClickPaste, scrollback, highlights,
-            readOnly,
+            readOnly, fixed80Columns,
             shortcuts = Shortcuts.Select(shortcut => new
             {
                 id = shortcut.Id,

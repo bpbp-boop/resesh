@@ -66,6 +66,17 @@ public sealed class TelnetBbsSizeFilterTests
         Assert.True((session with { Name = "copy" }).TelnetReport80x25);
     }
 
+    [Fact]
+    public void FixedWidth_DefaultsOffAndSurvivesSerializationAndCloning()
+    {
+        Assert.False(JsonSerializer.Deserialize<Session>("{}")!.TelnetFixed80Columns);
+        var session = new Session { Kind = SessionKind.Telnet, TelnetFixed80Columns = true };
+        var restored = JsonSerializer.Deserialize<Session>(JsonSerializer.Serialize(session))!;
+        Assert.True(restored.TelnetFixed80Columns);
+        Assert.False(restored.TelnetReport80x25);
+        Assert.True((session with { Name = "copy" }).TelnetFixed80Columns);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

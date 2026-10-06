@@ -172,6 +172,10 @@ public sealed record Session
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool TelnetReport80x25 { get; init; }
 
+    /// <summary>Keeps the actual Telnet terminal at 80 columns, including text wrapping.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool TelnetFixed80Columns { get; init; }
+
     /// <summary>Run the remote shell inside tmux so it survives disconnects (requires tmux on the host).</summary>
     public bool Persistent { get; init; }
 

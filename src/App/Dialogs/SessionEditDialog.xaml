@@ -217,6 +217,12 @@
                 </ComboBox>
 
                 <StackPanel x:Name="TelnetSizePanel" Spacing="4" Visibility="Collapsed">
+                    <ToggleSwitch x:Name="TelnetFixed80ColumnsToggle"
+                                  AutomationProperties.AutomationId="TelnetFixed80ColumnsToggle"
+                                  Header="Keep Terminal at 80 Columns" />
+                    <TextBlock Text="Keeps text wrapping at 80 columns. Height follows the window. Close and reopen the session to apply."
+                               TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <ToggleSwitch x:Name="TelnetReport80x25Toggle"
                                   AutomationProperties.AutomationId="TelnetReport80x25Toggle"
                                   Header="Report 80 × 25 to BBS Servers" />

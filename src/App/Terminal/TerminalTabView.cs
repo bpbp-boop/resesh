@@ -169,7 +169,8 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.SetInitialOptions(
             initial.FontSize, initial.FontFamily, initialTheme,
             initial.CopyOnSelect, initial.RightClickPaste, initial.Scrollback,
-            BuildHighlightPayload());
+            BuildHighlightPayload(),
+            fixed80Columns: Session.IsTelnet && Session.TelnetFixed80Columns);
         _terminal.SetPromptPlatform(Session.Icon);
         _terminal.SetHistoryCapture(initial.KeepCommandHistory);
 

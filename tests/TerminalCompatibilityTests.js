@@ -11,6 +11,46 @@ const { Unicode11Addon } = require(path.join(wwwroot, "addon-unicode11.js"));
 
 const page = fs.readFileSync(path.join(wwwroot, "terminal.html"), "utf8");
 
+test("fixed width preserves 80-column wrapping and cursor reports across pane resizes", async () => {
+  const helper = page.match(/    function fitPreservingTimestamps\(\) {[\s\S]*?\r?\n    }/)[0];
+  const term = new Terminal({ cols: 132, rows: 25, allowProposedApi: true });
+  const replies = [];
+  term.onData(data => replies.push(data));
+  let dimensions = { cols: 160, rows: 40 };
+  const init = { fixed80Columns: true };
+  const context = vm.createContext({
+    init, term,
+    ruler: { captureTimestampReflow() {}, restoreTimestampReflow() {} },
+    fit: {
+      proposeDimensions: () => dimensions,
+      fit: () => term.resize(dimensions.cols, dimensions.rows),
+    },
+  });
+  vm.runInContext(helper, context);
+  const write = data => new Promise(resolve => term.write(data, resolve));
+  try {
+    for (const cols of [160, 220, 50]) {
+      dimensions = { cols, rows: 35 };
+      context.fitPreservingTimestamps();
+      assert.equal(term.cols, 80);
+      assert.equal(term.rows, 35);
+    }
+    await write("x".repeat(80) + "Y");
+    assert.equal(term.buffer.active.getLine(1).translateToString(true), "Y");
+    await write("\x1b[999;999H\x1b[6n");
+    assert.equal(replies.at(-1), "\x1b[35;80R");
+    dimensions = undefined;
+    context.fitPreservingTimestamps();
+    assert.equal(term.cols, 80, "hidden panes preserve the current size");
+    init.fixed80Columns = false;
+    dimensions = { cols: 132, rows: 42 };
+    context.fitPreservingTimestamps();
+    assert.equal(term.cols, 132, "ordinary terminals still use the pane width");
+  } finally {
+    term.dispose();
+  }
+});
+
 test("the page measures emoji with Unicode 11 widths, as remote wcwidth does", async () => {
   assert.match(page, /term\.loadAddon\(new Unicode11Addon\.Unicode11Addon\(\)\);\s*term\.unicode\.activeVersion = "11";/);
   const term = new Terminal({ allowProposedApi: true });

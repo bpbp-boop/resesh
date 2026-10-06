@@ -86,6 +86,7 @@ public sealed partial class SessionEditDialog : ContentDialog
                 _ => 0,
             };
             TelnetReport80x25Toggle.IsOn = existing.TelnetReport80x25;
+            TelnetFixed80ColumnsToggle.IsOn = existing.TelnetFixed80Columns;
             var terminalIndex = TerminalTypeBox.Items.IndexOf(existing.TerminalType);
             if (terminalIndex >= 0)
                 TerminalTypeBox.SelectedIndex = terminalIndex;
@@ -415,6 +416,7 @@ public sealed partial class SessionEditDialog : ContentDialog
                 _ => TelnetTextEncoding.Auto,
             },
             TelnetReport80x25 = telnet && TelnetReport80x25Toggle.IsOn,
+            TelnetFixed80Columns = telnet && TelnetFixed80ColumnsToggle.IsOn,
             Persistent = !telnet && PersistentToggle.IsOn,
             DetachedSessions = DetachedSessionsBox.SelectedIndex switch
             {
