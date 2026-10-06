@@ -105,3 +105,20 @@ test("viewport scrolling, alternate screen, resize and rule removal leave no sta
   assert.deepEqual(spans(decorations), []);
   assert.equal(term.markers.length, 0);
 });
+
+test("streamed writes between output renders are scanned once, before the next render", async t => {
+  const { addon, write, decorations, frames, flushFrames } = harness(t);
+  await write("error\r\n");
+  assert.equal(decorations.size, 1, "a write with no render pending is scanned immediately");
+  addon._onRender(); // the renderer painted that output; the next scan is queued ahead of it
+  assert.equal(frames.size, 1);
+  await write("error\r\n");
+  await write("error\r\n");
+  assert.equal(decorations.size, 1, "writes before the next frame only mark the viewport dirty");
+  flushFrames();
+  assert.deepEqual(spans(decorations).map(s => s[0]).sort((a, b) => a - b), [0, 1, 2]);
+  addon._onRender(); // paints the last writes; queues one more (clean) pre-render pass
+  flushFrames();
+  addon._onRender();
+  assert.equal(frames.size, 0, "a render with no new output queues nothing");
+});
