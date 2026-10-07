@@ -86,8 +86,9 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private bool _fixed80Columns;
 
     private bool _selecting;
-    private bool _selectionMoved;
-    private (int X, int Y) _selectionAnchor;
+    private int _autoscroll; // 0 none, 1 up, 2 down (libghostty-vt's request while dragging)
+    private (float X, float Y) _lastPointer;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _autoscrollTimer;
     private uint _buttonsDown;
 
     /// <summary>Why the surface cannot be used on this machine, or null when it can.</summary>
@@ -168,7 +169,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         PointerPressed += OnPointerPressed;
         PointerMoved += OnPointerMoved;
         PointerReleased += OnPointerReleased;
-        PointerCaptureLost += (_, _) => _selecting = false;
+        PointerCaptureLost += (_, _) => EndSelectionGesture(null);
         PointerWheelChanged += OnPointerWheelChanged;
         ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
     }
@@ -1048,12 +1049,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         }
         if (button == 1)
         {
-            var (x, y) = PixelPosition(args);
-            _selectionAnchor = CellAt(x, y);
             _selecting = true;
-            _selectionMoved = false;
-            GhosttyNative.rvt_select_clear(_term);
-            RequestFrame();
+            Gesture(GestureKind.Press, PixelPosition(args));
         }
         else if (button == 2 && _rightClickPaste)
         {
@@ -1073,13 +1070,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         }
         if (!_selecting)
             return;
-        var (px, py) = PixelPosition(args);
-        var cell = CellAt(px, py);
-        if (cell == _selectionAnchor && !_selectionMoved)
-            return;
-        _selectionMoved = true;
-        GhosttyNative.rvt_select(_term, (ushort)_selectionAnchor.X, (ushort)_selectionAnchor.Y, (ushort)cell.X, (ushort)cell.Y);
-        RequestFrame();
+        Gesture(GestureKind.Drag, PixelPosition(args));
     }
 
     private void OnPointerReleased(object sender, PointerRoutedEventArgs args)
@@ -1095,11 +1086,64 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             return;
         }
         if (_selecting && button == 1)
+            EndSelectionGesture(PixelPosition(args));
+    }
+
+    private enum GestureKind { Press = 0, Release = 1, Drag = 2, AutoscrollTick = 3 }
+
+    /// <summary>Feeds libghostty-vt's selection gesture: it counts clicks (word on double,
+    /// line on triple), extends by the same unit while dragging, and asks for autoscroll
+    /// when the pointer leaves the grid.</summary>
+    private (int Clicks, bool Dragged) Gesture(GestureKind kind, (float X, float Y) position, (int X, int Y)? cell = null)
+    {
+        _lastPointer = position;
+        var (x, y) = cell ?? CellAt(position.X, position.Y);
+        var nanoseconds = (ulong)(System.Diagnostics.Stopwatch.GetTimestamp() * (1_000_000_000.0 / System.Diagnostics.Stopwatch.Frequency));
+        GhosttyNative.rvt_gesture(_term, (int)kind, position.X, position.Y, (ushort)x, (ushort)y, nanoseconds,
+            (uint)_renderer.OriginX, out var autoscroll, out var clicks, out var dragged);
+        SetAutoscroll(kind is GestureKind.Drag or GestureKind.AutoscrollTick ? autoscroll : 0);
+        RequestFrame();
+        return (clicks, dragged != 0);
+    }
+
+    private void EndSelectionGesture((float X, float Y)? position)
+    {
+        if (!_selecting || _term == IntPtr.Zero)
+            return;
+        _selecting = false;
+        SetAutoscroll(0);
+        var (clicks, dragged) = Gesture(GestureKind.Release, position ?? _lastPointer);
+        // A plain click selects nothing; a drag or a word/line click copies when asked to.
+        if (_copyOnSelect && (dragged || clicks >= 2))
+            CopySelection();
+    }
+
+    private void SetAutoscroll(int direction)
+    {
+        _autoscroll = direction;
+        if (direction == 0)
         {
-            _selecting = false;
-            if (_selectionMoved && _copyOnSelect)
-                CopySelection();
+            _autoscrollTimer?.Stop();
+            return;
         }
+        if (_autoscrollTimer is null)
+        {
+            _autoscrollTimer = DispatcherQueue.CreateTimer();
+            _autoscrollTimer.Interval = TimeSpan.FromMilliseconds(50);
+            _autoscrollTimer.Tick += (_, _) =>
+            {
+                if (!_selecting || _autoscroll == 0 || _term == IntPtr.Zero)
+                {
+                    _autoscrollTimer.Stop();
+                    return;
+                }
+                GhosttyNative.rvt_scroll(_term, GhosttyNative.ScrollDelta, _autoscroll == 1 ? -1 : 1);
+                var edge = (CellAt(_lastPointer.X, 0).X, _autoscroll == 1 ? 0 : Rows - 1);
+                Gesture(GestureKind.AutoscrollTick, _lastPointer, edge);
+            };
+        }
+        if (!_autoscrollTimer.IsRunning)
+            _autoscrollTimer.Start();
     }
 
     private void OnPointerWheelChanged(object sender, PointerRoutedEventArgs args)

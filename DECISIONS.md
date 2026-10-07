@@ -847,3 +847,25 @@ dialog sets `Style="{StaticResource DefaultContentDialogStyle}"`: WinUI does not
 the implicit `ContentDialog` style to an `x:Class` subclass, so without it the dialog
 falls back to the legacy template (square corners, regular-weight title, no footer
 band). A minimal WinUI 2.3.6 app reproduced this with a one-element XAML dialog.
+
+## 2026-10-07 - libghostty-vt terminal surface (behind a flag)
+- `RESESH_TERMINAL_SURFACE=ghostty` gives live tabs `GhosttyTerminalSurface`: libghostty-vt
+  (ghostty-org/ghostty, commit pinned in `eng/ghostty-vt.json`, built unpatched by
+  `eng/build-ghostty-vt.ps1`) parses on the backend reader thread; a Direct2D/DirectWrite
+  renderer presents into a `SwapChainPanel` on the next `CompositionTarget.Rendering` after a
+  write, then unhooks so idle tabs cost nothing. Playback and the rewind player stay on WebView2.
+  Measurements that motivated it: `tools/terminal-bench/RESULTS.md`.
+- Every libghostty-vt layout the library marks unstable (sized structs, implicit enum values,
+  callback payloads) stays in `src/Terminal/Ghostty/native/reseshvt.c`. C# sees flat cells, one
+  event callback and an ABI number checked at load. The shim owns an SRW lock: writes hold it,
+  frames hold it only for `begin_update`.
+- Rendering: dirty rows draw into a retained opaque canvas (ClearType) that is copied to the
+  flip-model back buffer each present. Glyph runs advance whole cells; pictographs prefer Segoe UI
+  Emoji, and grapheme clusters (mode 2027 on by default) draw through DirectWrite layout.
+- Rewind keyframes are the library's VT formatter output, which the existing player replays.
+  They are taken on the parsing thread, and output timestamps stay strictly after the last
+  keyframe so replay (events with time > keyframe time) never drops a chunk.
+- Find uses the library's search (case-insensitive ASCII, no regex); selection uses its gesture
+  API (double click word, triple click line, autoscroll). Overlays (find bar, scroll bar) are
+  plain XAML over the swap chain, and input whose source is an overlay never reaches the shell.
+- Not yet: command marks/ruler/panel, highlights, history capture, IME composition, UIA text.

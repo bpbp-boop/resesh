@@ -86,6 +86,8 @@ typedef struct {
   GhosttyMouseEncoder mouse;
   GhosttyMouseEvent mouse_event;
   GhosttySearch search;
+  GhosttySelectionGesture gesture;
+  GhosttySelectionGestureEvent gesture_events[4]; // press, release, drag, autoscroll tick
   bool searching;
   RvtSpan spans[RVT_MAX_SPANS];
   int span_count;
@@ -208,6 +210,9 @@ RVT_API void rvt_free(RvtTerm* t) {
   if (!t) return;
   lock(t);
   if (t->search) ghostty_search_free(t->search);
+  if (t->gesture) ghostty_selection_gesture_free(t->gesture, t->term);
+  for (int i = 0; i < 4; i++)
+    if (t->gesture_events[i]) ghostty_selection_gesture_event_free(t->gesture_events[i]);
   ghostty_mouse_event_free(t->mouse_event);
   ghostty_mouse_encoder_free(t->mouse);
   ghostty_key_event_free(t->key);
@@ -696,6 +701,80 @@ RVT_API void rvt_search_status(RvtTerm* t, size_t* total, size_t* current) {
       *current = index + 1;
   }
   unlock(t);
+}
+
+// ---- selection gestures -------------------------------------------------------------------
+
+// kind: 0 press, 1 release, 2 drag, 3 autoscroll tick. (x, y) are surface pixels including
+// the left padding; (vx, vy) the viewport cell under the pointer, already clamped to the
+// grid. Click counting, word (double click) and line (triple click) selection, and
+// granular drag extension are libghostty-vt's. Installs the resulting selection.
+// Returns 1 when a selection was installed, 0 when the event produced none, -1 on error.
+// *autoscroll receives 0 none, 1 up, 2 down; *clicks the click count; *dragged whether
+// the gesture has dragged.
+RVT_API int rvt_gesture(RvtTerm* t, int kind, double x, double y, uint16_t vx, uint16_t vy, uint64_t time_ns,
+                        uint32_t padding_left, int* autoscroll, int* clicks, int* dragged) {
+  static const GhosttySelectionGestureEventType types[4] = {
+    GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_PRESS, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_RELEASE,
+    GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_AUTOSCROLL_TICK };
+  if (kind < 0 || kind > 3) return -1;
+  int rc = -1;
+  lock(t);
+  if (!t->gesture && ghostty_selection_gesture_new(NULL, &t->gesture) != GHOSTTY_SUCCESS) goto done;
+  if (!t->gesture_events[kind] &&
+      ghostty_selection_gesture_event_new(NULL, &t->gesture_events[kind], types[kind]) != GHOSTTY_SUCCESS) goto done;
+  GhosttySelectionGestureEvent ev = t->gesture_events[kind];
+
+  GhosttyGridRef ref = GHOSTTY_INIT_SIZED(GhosttyGridRef);
+  GhosttyPoint pt = { .tag = GHOSTTY_POINT_TAG_VIEWPORT, .value = { .coordinate = { .x = vx, .y = vy } } };
+  bool have_ref = ghostty_terminal_grid_ref(t->term, pt, &ref) == GHOSTTY_SUCCESS;
+  GhosttySurfacePosition pos = { x, y };
+  GhosttySelectionGestureGeometry geo = { t->cell_w ? t->screen_w / t->cell_w : 1, t->cell_w ? t->cell_w : 1,
+                                          padding_left, t->screen_h ? t->screen_h : 1 };
+  if (kind == 0) {
+    uint64_t interval = 500000000ull; // 500 ms, the Windows default double-click time
+    double distance = 4;
+    if (!have_ref) goto done;
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF, &ref);
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_POSITION, &pos);
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_TIME_NS, &time_ns);
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REPEAT_INTERVAL_NS, &interval);
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REPEAT_DISTANCE, &distance);
+  } else if (kind == 1) {
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF, have_ref ? &ref : NULL);
+  } else if (kind == 2) {
+    if (!have_ref) goto done;
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF, &ref);
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_POSITION, &pos);
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_GEOMETRY, &geo);
+  } else {
+    GhosttyPointCoordinate vp = { vx, vy };
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_VIEWPORT, &vp);
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_POSITION, &pos);
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_GEOMETRY, &geo);
+  }
+
+  GhosttySelection sel = GHOSTTY_INIT_SIZED(GhosttySelection);
+  GhosttyResult r = ghostty_selection_gesture_event(t->gesture, t->term, ev, &sel);
+  if (r == GHOSTTY_SUCCESS) {
+    rc = ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SELECTION, &sel) == GHOSTTY_SUCCESS ? 1 : -1;
+  } else if (r == GHOSTTY_NO_VALUE) {
+    if (kind == 0) ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SELECTION, NULL); // a plain click clears
+    rc = 0;
+  }
+
+  GhosttySelectionGestureAutoscroll as = GHOSTTY_SELECTION_GESTURE_AUTOSCROLL_NONE;
+  uint8_t count = 0;
+  bool drag = false;
+  ghostty_selection_gesture_get(t->gesture, t->term, GHOSTTY_SELECTION_GESTURE_DATA_AUTOSCROLL, &as);
+  ghostty_selection_gesture_get(t->gesture, t->term, GHOSTTY_SELECTION_GESTURE_DATA_CLICK_COUNT, &count);
+  ghostty_selection_gesture_get(t->gesture, t->term, GHOSTTY_SELECTION_GESTURE_DATA_DRAGGED, &drag);
+  *autoscroll = (int)as;
+  *clicks = count;
+  *dragged = drag ? 1 : 0;
+done:
+  unlock(t);
+  return rc;
 }
 
 typedef struct { const uint8_t* data; size_t len; } RvtPasteSource;

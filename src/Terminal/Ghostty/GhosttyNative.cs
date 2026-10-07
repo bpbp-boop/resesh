@@ -109,6 +109,9 @@ internal static unsafe partial class GhosttyNative
     public static partial int rvt_encode_mouse(IntPtr term, int action, int button, int mods, float x, float y,
         int anyButtonPressed, byte* output, nuint capacity);
     [LibraryImport(Library)] public static partial int rvt_select(IntPtr term, ushort x0, ushort y0, ushort x1, ushort y1);
+    [LibraryImport(Library)]
+    public static partial int rvt_gesture(IntPtr term, int kind, double x, double y, ushort viewportX, ushort viewportY,
+        ulong timeNanoseconds, uint paddingLeft, out int autoscroll, out int clicks, out int dragged);
     [LibraryImport(Library)] public static partial void rvt_select_clear(IntPtr term);
     [LibraryImport(Library)] public static partial byte* rvt_selection_text(IntPtr term, out nuint length);
     [LibraryImport(Library)] public static partial void rvt_free_buffer(byte* buffer, nuint length);
