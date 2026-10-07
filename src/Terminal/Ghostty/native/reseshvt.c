@@ -44,6 +44,11 @@ typedef void (*RvtEventFn)(void* user, int kind, const uint8_t* data, size_t len
 #define RVT_FAINT 32u
 #define RVT_INVISIBLE 64u
 #define RVT_SELECTED 128u
+#define RVT_MATCH 256u
+#define RVT_MATCH_CURRENT 512u
+#define RVT_MAX_SPANS 512
+
+typedef struct { uint16_t y, x0, x1, current; } RvtSpan;
 
 typedef struct {
   uint32_t cp;      // base codepoint, 0 when empty
@@ -80,6 +85,12 @@ typedef struct {
   GhosttyKeyEvent key;
   GhosttyMouseEncoder mouse;
   GhosttyMouseEvent mouse_event;
+  GhosttySearch search;
+  bool searching;
+  RvtSpan spans[RVT_MAX_SPANS];
+  int span_count;
+  uint32_t span_hash;
+  GhosttySelection match_buf[RVT_MAX_SPANS];
   RvtSrwLock lock;
   RvtEventFn on_event;
   void* user;
@@ -196,6 +207,7 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
 RVT_API void rvt_free(RvtTerm* t) {
   if (!t) return;
   lock(t);
+  if (t->search) ghostty_search_free(t->search);
   ghostty_mouse_event_free(t->mouse_event);
   ghostty_mouse_encoder_free(t->mouse);
   ghostty_key_event_free(t->key);
@@ -252,6 +264,56 @@ static uint32_t resolve(GhosttyStyleColor c, const GhosttyRenderStateColors* col
   }
 }
 
+static bool same_selection(const GhosttySelection* a, const GhosttySelection* b) {
+  return memcmp(&a->start, &b->start, sizeof a->start) == 0 && memcmp(&a->end, &b->end, sizeof a->end) == 0;
+}
+
+// Under the lock: refresh the search and turn on-screen matches into per-row spans.
+static void collect_spans(RvtTerm* t, uint16_t rows) {
+  t->span_count = 0;
+  uint32_t hash = 2166136261u;
+  if (t->searching && t->search) {
+    GhosttySearchStatus status = GHOSTTY_SEARCH_STATUS_FEED_REQUIRED;
+    ghostty_search_feed(t->search);
+    for (int i = 0; i < 64; i++) {
+      if (ghostty_search_tick(t->search, &status) != GHOSTTY_SUCCESS || status != GHOSTTY_SEARCH_STATUS_RUNNING) break;
+    }
+    GhosttySelectionBuffer buf = { t->match_buf, RVT_MAX_SPANS, 0 };
+    GhosttySelection current = GHOSTTY_INIT_SIZED(GhosttySelection);
+    bool has_current = ghostty_search_get(t->search, GHOSTTY_SEARCH_DATA_SELECTED_MATCH, &current) == GHOSTTY_SUCCESS;
+    // More on-screen matches than the buffer holds: highlight none rather than read garbage.
+    if (ghostty_search_get(t->search, GHOSTTY_SEARCH_DATA_VIEWPORT_MATCHES, &buf) == GHOSTTY_SUCCESS) {
+      size_t n = buf.len < RVT_MAX_SPANS ? buf.len : RVT_MAX_SPANS;
+      for (size_t i = 0; i < n && t->span_count < RVT_MAX_SPANS; i++) {
+        GhosttyPointCoordinate a, b;
+        if (ghostty_terminal_point_from_grid_ref(t->term, &t->match_buf[i].start, GHOSTTY_POINT_TAG_VIEWPORT, &a) != GHOSTTY_SUCCESS ||
+            ghostty_terminal_point_from_grid_ref(t->term, &t->match_buf[i].end, GHOSTTY_POINT_TAG_VIEWPORT, &b) != GHOSTTY_SUCCESS)
+          continue;
+        uint16_t cur = has_current && same_selection(&t->match_buf[i], &current) ? 1 : 0;
+        for (uint32_t y = a.y; y <= b.y && y < rows && t->span_count < RVT_MAX_SPANS; y++) {
+          RvtSpan sp = { (uint16_t)y, y == a.y ? a.x : 0, y == b.y ? b.x : 0xFFFF, cur };
+          t->spans[t->span_count++] = sp;
+          hash = (hash ^ (sp.y | ((uint32_t)sp.x0 << 16))) * 16777619u;
+          hash = (hash ^ (sp.x1 | ((uint32_t)sp.current << 16))) * 16777619u;
+        }
+      }
+    }
+  }
+  t->span_hash = t->span_count ? hash : 0;
+}
+
+static void apply_spans(const RvtTerm* t, RvtCell* row, uint16_t y, uint16_t cols) {
+  for (int i = 0; i < t->span_count; i++) {
+    const RvtSpan* sp = &t->spans[i];
+    if (sp->y != y) continue;
+    uint16_t end = sp->x1 < cols ? sp->x1 : (uint16_t)(cols - 1);
+    for (uint16_t x = sp->x0; x <= end && x < cols; x++) {
+      row[x].flags |= sp->current ? RVT_MATCH_CURRENT : RVT_MATCH;
+      if (sp->current) row[x].fg = 0x1E1E1E; // dark text on the bright current-match color
+    }
+  }
+}
+
 // Captures the terminal under the lock (cheap), then copies dirty rows into out[y * cols + x]
 // outside it, flags them in dirty_rows and cleans the render state. force_all re-reads every
 // row (after a resize or a lost frame). Returns the number of rows copied.
@@ -261,6 +323,9 @@ RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t row
   lock(t);
   ghostty_render_state_begin_update(t->rs, t->term);
   ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &bar);
+  uint32_t old_hash = t->span_hash;
+  collect_spans(t, rows);
+  if (t->span_hash != old_hash) force_all = 1; // highlights moved: repaint every row
   unlock(t);
   ghostty_render_state_end_update(t->rs);
   info->scroll_total = bar.total;
@@ -358,6 +423,7 @@ RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t row
       c->fg = dfg; c->bg = dbg; c->flags = RVT_DEFAULT_BG;
       if (has_sel && x >= sel.start_x && x <= sel.end_x) c->flags |= RVT_SELECTED;
     }
+    apply_spans(t, row, y, cols);
     dirty_rows[y] = 1;
     count++;
   }
@@ -591,6 +657,45 @@ RVT_API uint8_t* rvt_format_vt(RvtTerm* t, size_t* out_len) {
   }
   unlock(t);
   return buf;
+}
+
+// ---- search ---------------------------------------------------------------------------------
+
+// Sets (or with len 0 clears) the find needle. Matching is libghostty-vt's: byte-exact
+// except ASCII letters, which compare case-insensitively.
+RVT_API int rvt_search_set(RvtTerm* t, const uint8_t* needle, size_t len) {
+  int rc = 0;
+  lock(t);
+  if (!t->search && len > 0 && ghostty_search_new(NULL, &t->search, t->term) != GHOSTTY_SUCCESS) rc = -1;
+  if (t->search) {
+    GhosttyString s = { needle, len };
+    ghostty_search_set(t->search, GHOSTTY_SEARCH_OPT_NEEDLE, len ? &s : NULL);
+    if (len) ghostty_search_run(t->search);
+  }
+  t->searching = len > 0 && t->search != NULL;
+  unlock(t);
+  return rc;
+}
+
+// direction: 1 toward older output (up), -1 toward newer. Scrolls the match into view.
+RVT_API void rvt_search_step(RvtTerm* t, int direction) {
+  lock(t);
+  if (t->searching)
+    ghostty_search_set(t->search, direction > 0 ? GHOSTTY_SEARCH_OPT_SELECT_NEXT : GHOSTTY_SEARCH_OPT_SELECT_PREV, NULL);
+  unlock(t);
+}
+
+// Match count and 1-based position of the selected match (0 when none is selected).
+RVT_API void rvt_search_status(RvtTerm* t, size_t* total, size_t* current) {
+  *total = 0; *current = 0;
+  lock(t);
+  if (t->searching) {
+    ghostty_search_get(t->search, GHOSTTY_SEARCH_DATA_TOTAL_MATCHES, total);
+    size_t index = 0;
+    if (ghostty_search_get(t->search, GHOSTTY_SEARCH_DATA_SELECTED_INDEX, &index) == GHOSTTY_SUCCESS)
+      *current = index + 1;
+  }
+  unlock(t);
 }
 
 typedef struct { const uint8_t* data; size_t len; } RvtPasteSource;

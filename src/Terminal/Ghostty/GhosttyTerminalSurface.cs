@@ -37,6 +37,12 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         IsTabStop = false,
     };
     private bool _updatingScrollBar;
+
+    // Find bar: ordinary XAML over the swap chain (no airspace to work around).
+    private readonly Border _findBar = new();
+    private readonly TextBox _findInput = new();
+    private readonly TextBlock _findCount = new();
+    private bool _findOpen;
     private (ulong Total, ulong Offset, ulong Length) _scrollState;
     private readonly GhosttyRenderer _renderer = new();
     private readonly object _termGate = new();
@@ -132,6 +138,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         // ValueChanged, not Scroll: Scroll fires only for pointer input, while keyboard and
         // UI Automation (screen readers, tests) move the bar through its value.
         _scrollBar.ValueChanged += OnScrollBarValueChanged;
+        ConfigureFindBar();
 
         _renderer.GraphemeAt = GraphemeAt;
         _blinkTimer = DispatcherQueue.CreateTimer();
@@ -506,6 +513,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         }
         _lastInfo = info;
         UpdateScrollBar(info);
+        if (_findOpen)
+            UpdateFindCount();
         if (info.CursorVisible != 0 && info.CursorY < Rows)
             _dirty[info.CursorY] = 1;
         if (_lastCursorRow >= 0 && _lastCursorRow < Rows)
@@ -688,9 +697,12 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         return n > 0 ? new string(buffer, 0, n) : string.Empty;
     }
 
+    /// <summary>Input aimed at the find bar or scroll bar is theirs, not the shell's.</summary>
+    private bool FromTerminal(RoutedEventArgs args) => ReferenceEquals(args.OriginalSource, this);
+
     private void OnKeyDown(object sender, KeyRoutedEventArgs args)
     {
-        if (_disposed || !_inputEnabled || _term == IntPtr.Zero)
+        if (_disposed || !_inputEnabled || _term == IntPtr.Zero || !FromTerminal(args))
             return;
         var virtualKey = (ushort)args.Key;
         if (_suppressCharactersForKey != 0 && _suppressCharactersForKey != virtualKey)
@@ -753,7 +765,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 
     private void OnCharacterReceived(UIElement sender, CharacterReceivedRoutedEventArgs args)
     {
-        if (_disposed || !_inputEnabled || _term == IntPtr.Zero)
+        if (_disposed || !_inputEnabled || _term == IntPtr.Zero || !FromTerminal(args))
             return;
         args.Handled = true;
         if (_suppressCharactersForKey != 0 || !_connected)
@@ -809,6 +821,9 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     {
         switch (id)
         {
+            case "terminal.find":
+                OpenFind();
+                return true;
             case "terminal.copy":
                 return CopySelection();
             case "terminal.paste":
@@ -825,6 +840,145 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
                 return true;
             default:
                 return false;
+        }
+    }
+
+    // ---- find -----------------------------------------------------------------------------
+
+    private void ConfigureFindBar()
+    {
+        _findInput.Width = 200;
+        _findInput.PlaceholderText = "Find";
+        _findInput.VerticalAlignment = VerticalAlignment.Center;
+        AutomationProperties.SetName(_findInput, "Find in terminal");
+        _findCount.VerticalAlignment = VerticalAlignment.Center;
+        _findCount.Margin = new Thickness(8, 0, 4, 0);
+        _findCount.MinWidth = 64;
+        _findCount.Opacity = 0.8;
+        Button Glyph(string glyph, string name, RoutedEventHandler click)
+        {
+            var button = new Button
+            {
+                Content = new FontIcon { Glyph = glyph, FontSize = 12 },
+                Padding = new Thickness(6),
+                Margin = new Thickness(2, 0, 0, 0),
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+            };
+            AutomationProperties.SetName(button, name);
+            ToolTipService.SetToolTip(button, name);
+            button.Click += click;
+            return button;
+        }
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(_findInput);
+        row.Children.Add(_findCount);
+        row.Children.Add(Glyph("\uE70E", "Older match, above (Enter)", (_, _) => StepFind(1)));
+        row.Children.Add(Glyph("\uE70D", "Newer match, below (Shift+Enter)", (_, _) => StepFind(-1)));
+        row.Children.Add(Glyph("\uE711", "Close (Esc)", (_, _) => CloseFind()));
+        _findBar.Child = row;
+        _findBar.Padding = new Thickness(6, 4, 6, 4);
+        _findBar.CornerRadius = new CornerRadius(0, 0, 6, 6);
+        _findBar.BorderThickness = new Thickness(1, 0, 1, 1);
+        _findBar.HorizontalAlignment = HorizontalAlignment.Right;
+        _findBar.VerticalAlignment = VerticalAlignment.Top;
+        _findBar.Margin = new Thickness(0, 0, 8, 0);
+        _findBar.Visibility = Visibility.Collapsed;
+        _findBar.Background = (Brush)Application.Current.Resources["SolidBackgroundFillColorSecondaryBrush"];
+        _findBar.BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
+        Children.Add(_findBar);
+
+        _findInput.TextChanged += (_, _) => RunFind();
+        _findInput.KeyDown += (_, args) =>
+        {
+            if (args.Key == VirtualKey.Enter)
+            {
+                StepFind(Down(0x10) ? -1 : 1);
+                args.Handled = true;
+            }
+            else if (args.Key == VirtualKey.Escape)
+            {
+                CloseFind();
+                args.Handled = true;
+            }
+        };
+    }
+
+    private void OpenFind()
+    {
+        if (!_findOpen)
+        {
+            _findOpen = true;
+            _findBar.Visibility = Visibility.Visible;
+            // Seed with the selected text, like most find bars.
+            var selected = SelectionText();
+            if (!string.IsNullOrEmpty(selected) && !selected.Contains('\n'))
+                _findInput.Text = selected;
+            RunFind();
+        }
+        _findInput.Focus(FocusState.Programmatic);
+        _findInput.SelectAll();
+    }
+
+    private void CloseFind()
+    {
+        if (!_findOpen)
+            return;
+        _findOpen = false;
+        _findBar.Visibility = Visibility.Collapsed;
+        if (_term != IntPtr.Zero)
+            GhosttyNative.rvt_search_set(_term, null, 0);
+        RequestFrame();
+        FocusTerminal();
+    }
+
+    private void RunFind()
+    {
+        if (_term == IntPtr.Zero)
+            return;
+        var needle = Encoding.UTF8.GetBytes(_findInput.Text);
+        fixed (byte* p = needle)
+            GhosttyNative.rvt_search_set(_term, p, (nuint)needle.Length);
+        if (needle.Length > 0)
+            GhosttyNative.rvt_search_step(_term, 1); // select the newest match
+        UpdateFindCount();
+        RequestFrame();
+    }
+
+    private void StepFind(int direction)
+    {
+        if (_term == IntPtr.Zero || _findInput.Text.Length == 0)
+            return;
+        GhosttyNative.rvt_search_step(_term, direction);
+        UpdateFindCount();
+        RequestFrame();
+    }
+
+    private void UpdateFindCount()
+    {
+        if (_term == IntPtr.Zero)
+            return;
+        GhosttyNative.rvt_search_status(_term, out var total, out var current);
+        _findCount.Text = _findInput.Text.Length == 0 ? ""
+            : total == 0 ? "No results"
+            : current == 0 ? $"{total} found"
+            : $"{current} of {total}";
+    }
+
+    private string? SelectionText()
+    {
+        if (_term == IntPtr.Zero)
+            return null;
+        var buffer = GhosttyNative.rvt_selection_text(_term, out var length);
+        if (buffer == null)
+            return null;
+        try
+        {
+            return Encoding.UTF8.GetString(buffer, checked((int)length));
+        }
+        finally
+        {
+            GhosttyNative.rvt_free_buffer(buffer, length);
         }
     }
 
@@ -879,7 +1033,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 
     private void OnPointerPressed(object sender, PointerRoutedEventArgs args)
     {
-        if (_disposed || _term == IntPtr.Zero)
+        if (_disposed || _term == IntPtr.Zero || !FromTerminal(args))
             return;
         Focus(FocusState.Pointer);
         var props = args.GetCurrentPoint(this).Properties;

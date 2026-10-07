@@ -249,6 +249,9 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
 
     /// <summary>Draws the rows flagged in <paramref name="dirty"/> (clearing the flags), then
     /// presents. <paramref name="full"/> also repaints the margin outside the grid.</summary>
+    /// <summary>Find highlight colors (terminal.html's search decorations).</summary>
+    private const uint MatchColor = 0x515C6A, CurrentMatchColor = 0xF2CC60;
+
     public void Draw(GhosttyCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
         bool cursorShown, bool focused, uint selectionColor, bool full)
     {
@@ -288,20 +291,13 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
         _brush.Color = Rgb(defaultBackground);
         _dc.FillRectangle(new Rect(0, top, PixelWidth, CellHeight), _brush);
 
-        // Background runs; selection overrides the cell background.
+        // Background runs: selection, then find matches, override the cell background.
         for (var x = 0; x < cols;)
         {
-            var selected = (row[x].Flags & GhosttyCell.Selected) != 0;
-            if (!selected && (row[x].Flags & GhosttyCell.DefaultBackground) != 0) { x++; continue; }
-            var bg = selected ? selectionColor : row[x].Background;
+            if (BackgroundOf(row[x], selectionColor) is not { } bg) { x++; continue; }
             var start = x;
-            while (x < cols)
-            {
-                var s = (row[x].Flags & GhosttyCell.Selected) != 0;
-                var b = s ? selectionColor : row[x].Background;
-                if ((!s && (row[x].Flags & GhosttyCell.DefaultBackground) != 0) || b != bg) break;
+            while (x < cols && BackgroundOf(row[x], selectionColor) == bg)
                 x++;
-            }
             _brush.Color = Rgb(bg);
             _dc.FillRectangle(new Rect(OriginX + start * CellWidth, top, (x - start) * CellWidth, CellHeight), _brush);
         }
@@ -369,6 +365,13 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
     }
 
     private static bool IsEmojiPresentation(uint codepoint) => codepoint is >= 0x1F000 and <= 0x1FAFF;
+
+    private static uint? BackgroundOf(in GhosttyCell c, uint selectionColor) =>
+        (c.Flags & GhosttyCell.Selected) != 0 ? selectionColor
+        : (c.Flags & GhosttyCell.MatchCurrent) != 0 ? CurrentMatchColor
+        : (c.Flags & GhosttyCell.Match) != 0 ? MatchColor
+        : (c.Flags & GhosttyCell.DefaultBackground) != 0 ? null
+        : c.Background;
 
     private bool IsEmojiCell(in GhosttyCell c) =>
         IsEmojiPresentation(c.Codepoint) && _isEmojiFace[Lookup(c.Codepoint, 0).Face];
