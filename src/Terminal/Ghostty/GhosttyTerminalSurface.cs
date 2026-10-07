@@ -21,6 +21,9 @@ namespace Resesh.Terminal.Ghostty;
 public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 {
     private const int BlinkMilliseconds = 530;
+    private const long KeyframeMinimumBytes = 1024 * 1024;
+    private const long KeyframeMinimumMilliseconds = 1000;
+    private const long KeyframeMaximumMilliseconds = 10000;
 
     private readonly SwapChainPanel _panel = new();
     private readonly GhosttyRenderer _renderer = new();
@@ -49,6 +52,11 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private char _pendingHighSurrogate;
     private float _fontScale;
 
+    // Rewind keyframes (guarded by _termGate): same cadence as terminal.html.
+    private long _keyframeBytes;
+    private long _lastKeyframeMs;
+    private long _lastObservedMs;
+
     private int _fontSize = 14;
     private int _zoomDelta;
     private string _fontFamily = "Cascadia Mono, Consolas, monospace";
@@ -70,7 +78,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     public override event Action<byte[]>? InputReceived;
     public override event Action<int, int>? Resized;
     public override event TerminalOutputObservedHandler? OutputObserved;
-    public override event Action<ReadOnlyMemory<byte>, int, int, long>? KeyframeCaptured { add { } remove { } }
+    public override event Action<ReadOnlyMemory<byte>, int, int, long>? KeyframeCaptured;
     public override event Action? ReconnectRequested;
     public override event Action<string, int>? ShortcutRequested;
     public override event Action<int, int>? Ready;
@@ -87,7 +95,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     public override event Action<bool>? CommandsPanelOpenChanged { add { } remove { } }
     public override event Action<TerminalCommandRecord>? CommandRecorded { add { } remove { } }
 
-    public override bool SupportsRewindCapture => false;
+    public override bool SupportsRewindCapture => true;
     public override int Columns { get; protected set; } = 80;
     public override int Rows { get; protected set; } = 24;
 
@@ -158,6 +166,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
                 fixed (byte* p = chunk)
                     GhosttyNative.rvt_write(_term, p, (nuint)chunk.Length);
             _earlyOutput.Clear();
+            CaptureKeyframeLocked(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         }
         Relayout();
         return Task.CompletedTask;
@@ -192,15 +201,59 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     {
         if (_disposed || data.IsEmpty)
             return;
+        lock (_termGate)
+        {
+            // Replay takes the events strictly after a keyframe's time, so output must never
+            // share a millisecond with the keyframe that already contains earlier output.
+            var unixMs = Math.Max(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), _lastKeyframeMs + 1);
+            _lastObservedMs = unixMs;
+            try
+            {
+                OutputObserved?.Invoke(data, unixMs);
+            }
+            catch (Exception exception)
+            {
+                TerminalControl.TraceHook?.Invoke($"output observer failed: {exception.Message}");
+            }
+            WriteToTerminal(data);
+            if (_term == IntPtr.Zero)
+                return;
+            _keyframeBytes += data.Length;
+            var since = unixMs - _lastKeyframeMs;
+            if (since >= KeyframeMinimumMilliseconds &&
+                (_keyframeBytes >= KeyframeMinimumBytes || since >= KeyframeMaximumMilliseconds))
+                CaptureKeyframeLocked(unixMs);
+        }
+    }
+
+    /// <summary>Serializes the full screen as VT text on the parsing thread, so the keyframe
+    /// holds exactly the output observed up to <paramref name="unixMs"/>.</summary>
+    private void CaptureKeyframeLocked(long unixMs)
+    {
+        if (_term == IntPtr.Zero || _readOnly || KeyframeCaptured is not { } handler)
+            return;
+        var buffer = GhosttyNative.rvt_format_vt(_term, out var length);
+        byte[] state;
         try
         {
-            OutputObserved?.Invoke(data, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            state = buffer == null || length == 0
+                ? "\u001b[0m"u8.ToArray() // an empty screen still needs a non-empty keyframe
+                : new ReadOnlySpan<byte>(buffer, checked((int)length)).ToArray();
+        }
+        finally
+        {
+            GhosttyNative.rvt_free_buffer(buffer, length);
+        }
+        _keyframeBytes = 0;
+        _lastKeyframeMs = Math.Max(unixMs, _lastObservedMs);
+        try
+        {
+            handler(state, Columns, Rows, _lastKeyframeMs);
         }
         catch (Exception exception)
         {
-            TerminalControl.TraceHook?.Invoke($"output observer failed: {exception.Message}");
+            TerminalControl.TraceHook?.Invoke($"keyframe capture failed: {exception.Message}");
         }
-        WriteToTerminal(data);
     }
 
     private void WriteToTerminal(ReadOnlySpan<byte> data)

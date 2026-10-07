@@ -560,6 +560,39 @@ RVT_API void rvt_free_buffer(uint8_t* buf, size_t len) {
   if (buf) ghostty_free(NULL, buf, len);
 }
 
+// The whole active screen (history included) as VT text: styles, wraps, cursor, modes and
+// scrolling region, ready to replay into a fresh terminal of the same size. This is the
+// rewind keyframe format the WebView player already understands. Free with rvt_free_buffer.
+RVT_API uint8_t* rvt_format_vt(RvtTerm* t, size_t* out_len) {
+  GhosttyFormatterTerminalOptions opts = GHOSTTY_INIT_SIZED(GhosttyFormatterTerminalOptions);
+  opts.emit = GHOSTTY_FORMATTER_FORMAT_VT;
+  opts.unwrap = true;
+  opts.trim = true;
+  opts.extra.size = sizeof opts.extra;
+  opts.extra.modes = true;
+  opts.extra.scrolling_region = true;
+  opts.extra.tabstops = true;
+  opts.extra.screen.size = sizeof opts.extra.screen;
+  opts.extra.screen.cursor = true;
+  opts.extra.screen.style = true;
+  opts.extra.screen.hyperlink = true;
+  opts.extra.screen.charsets = true;
+  opts.selection = NULL;
+  uint8_t* buf = NULL;
+  *out_len = 0;
+  lock(t);
+  GhosttyFormatter f = NULL;
+  if (ghostty_formatter_terminal_new(NULL, &f, t->term, opts) == GHOSTTY_SUCCESS) {
+    if (ghostty_formatter_format_alloc(f, NULL, &buf, out_len) != GHOSTTY_SUCCESS) {
+      buf = NULL;
+      *out_len = 0;
+    }
+    ghostty_formatter_free(f);
+  }
+  unlock(t);
+  return buf;
+}
+
 typedef struct { const uint8_t* data; size_t len; } RvtPasteSource;
 
 static bool paste_reader(void* user, GhosttyString mime, GhosttyWriter writer) {
