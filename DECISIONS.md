@@ -873,4 +873,8 @@ band). A minimal WinUI 2.3.6 app reproduced this with a one-element XAML dialog.
   per-line text from the shim), so `tests/Terminal.Tests` runs it on a fake buffer. OSC 133
   arrives through libghostty-vt's semantic-prompt callback with the cursor and a marker captured
   in C while the output is parsed, because the C# side handles it a dispatcher turn later.
-- Not yet: keyword highlights (and the ruler's highlight/search lanes), IME composition, UIA text.
+- Keyword highlights match rows as the renderer reads them (so only what is on screen), and
+  the ruler's highlight lane is a separate whole-scrollback index keyed by virtual lines
+  anchored to a marker. Host patterns compile non-backtracking when possible, otherwise with a
+  50 ms match timeout: they run over untrusted output.
+- Not yet: IME composition, UIA text. Recording playback and the rewind player stay on WebView2.
