@@ -181,6 +181,8 @@ test("dialogs follow the live session palette and light-dark mode", () => {
   // Surfaces, fields, and selection reuse the same brushes as the main window.
   assert.match(dialogTheme, /Set\(dialog, shell,[\s\S]*?"ContentDialogBackground"/);
   assert.match(dialogTheme, /Set\(dialog, input,[\s\S]*?"TextControlBackground"[\s\S]*?"ComboBoxBackground"/);
+  // Buttons keep the native Fluent fill and elevation border; only text and accent are themed.
+  assert.doesNotMatch(dialogTheme, /"Button(?:Background|BorderBrush)/);
   assert.match(dialogTheme, /Set\(dialog, selection,[\s\S]*?"ComboBoxItemBackgroundSelected"/);
   assert.match(dialogTheme, /Set\(dialog, accent,[\s\S]*?"TextControlBorderBrushFocused"[\s\S]*?"AccentFillColorDefaultBrush"/);
   assert.match(
@@ -266,7 +268,7 @@ test("unknown saved theme identifiers fall back safely", () => {
 test("custom themes recolor the app shell and tab strip", () => {
   assert.match(mainWindow, /SessionShellBrush"\]\)\.Color = palette\.Shell/);
   assert.match(mainWindow, /SessionInputBrush"\]\)\.Color = palette\.Input/);
-  assert.match(mainWindowXaml, /x:Name="ExpandAllButton"[\s\S]*?Background="\{StaticResource SessionInputBrush\}"/);
+  assert.doesNotMatch(mainWindowXaml, /x:Name="(?:Expand|Collapse)AllButton"[^>]*?Background=/);
   assert.match(appXaml, /x:Key="SessionShellBrush"/);
   assert.match(appXaml, /x:Key="SessionInputBrush"/);
   assert.match(appXaml, /x:Key="SessionChromeFrameBrush"/);
@@ -374,4 +376,18 @@ test("resesh Dark keeps its original divider and bypasses stale Fluent strokes",
   assert.match(visualPalette, /_ => New\(0x0C0C0C, 0x181818, 0x2B2B2B,/);
   assert.match(tabGroup, /Resources\["TabViewBorderBrush"\] = divider/);
   assert.match(tabGroup, /ActualThemeChanged \+= \(_, _\) => QueueTabTemplateRefresh\(\)/);
+});
+
+test("XAML dialogs opt in to the Fluent ContentDialog style", () => {
+  // WinUI does not apply the implicit ContentDialog style to an x:Class subclass, which
+  // then falls back to the legacy square template with a flat footer.
+  const dialogsDir = path.join(__dirname, "..", "src", "App", "Dialogs");
+  const missing = fs.readdirSync(dialogsDir)
+    .filter(name => name.endsWith(".xaml"))
+    .filter(name => {
+      const xaml = fs.readFileSync(path.join(dialogsDir, name), "utf8");
+      return /^<ContentDialog\b/m.test(xaml)
+        && !/Style="\{StaticResource DefaultContentDialogStyle\}"/.test(xaml);
+    });
+  assert.deepEqual(missing, []);
 });

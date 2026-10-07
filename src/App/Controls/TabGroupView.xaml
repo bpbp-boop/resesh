@@ -458,7 +458,6 @@
                                         Margin="6,0,0,0"
                                         Background="Transparent"
                                         BorderThickness="0"
-                                        CornerRadius="3"
                                         VerticalAlignment="Center"
                                         Opacity="{x:Bind CloseOpacity, Mode=OneWay}"
                                         IsHitTestVisible="{x:Bind CloseInteractive, Mode=OneWay}"
@@ -487,15 +486,16 @@
                 Height="44"
                 Background="{ThemeResource TabViewBackground}">
                 <Grid.Resources>
-                    <!-- Tab-bar actions stay flat at rest. Hover and press reveal a small
-                         surface; checked toggles use an accent glyph without a persistent
-                         box. Theme-local aliases keep those states consistent in both themes. -->
+                    <!-- Tab-bar actions are Fluent subtle buttons: flat at rest, with the stock
+                         subtle fills on hover and press. Checked toggles use an accent glyph
+                         without a persistent box. Theme-local aliases keep those states
+                         consistent in both themes. -->
                     <ResourceDictionary>
                         <ResourceDictionary.ThemeDictionaries>
                             <ResourceDictionary x:Key="Dark">
                                 <SolidColorBrush x:Key="TabActionButtonRestBrush" Color="Transparent" />
-                                <SolidColorBrush x:Key="TabActionButtonHoverBrush" Color="#1FFFFFFF" />
-                                <SolidColorBrush x:Key="TabActionButtonPressedBrush" Color="#2AFFFFFF" />
+                                <StaticResource x:Key="TabActionButtonHoverBrush" ResourceKey="SubtleFillColorSecondaryBrush" />
+                                <StaticResource x:Key="TabActionButtonPressedBrush" ResourceKey="SubtleFillColorTertiaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundChecked" ResourceKey="AccentTextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundCheckedPointerOver" ResourceKey="AccentTextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundCheckedPressed" ResourceKey="AccentTextFillColorSecondaryBrush" />
@@ -511,8 +511,8 @@
                             </ResourceDictionary>
                             <ResourceDictionary x:Key="Light">
                                 <SolidColorBrush x:Key="TabActionButtonRestBrush" Color="Transparent" />
-                                <SolidColorBrush x:Key="TabActionButtonHoverBrush" Color="#14000000" />
-                                <SolidColorBrush x:Key="TabActionButtonPressedBrush" Color="#22000000" />
+                                <StaticResource x:Key="TabActionButtonHoverBrush" ResourceKey="SubtleFillColorSecondaryBrush" />
+                                <StaticResource x:Key="TabActionButtonPressedBrush" ResourceKey="SubtleFillColorTertiaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundChecked" ResourceKey="AccentTextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundCheckedPointerOver" ResourceKey="AccentTextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundCheckedPressed" ResourceKey="AccentTextFillColorSecondaryBrush" />

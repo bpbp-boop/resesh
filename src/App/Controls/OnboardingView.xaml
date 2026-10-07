@@ -22,63 +22,31 @@
 
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Dark">
-                    <SolidColorBrush x:Key="OnboardingHoverBrush" Color="#1FFFFFFF" />
-                    <SolidColorBrush x:Key="OnboardingPressedBrush" Color="#2AFFFFFF" />
-                    <StaticResource x:Key="ButtonBackground" ResourceKey="SessionShellBrush" />
-                    <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="OnboardingHoverBrush" />
-                    <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="OnboardingPressedBrush" />
-                    <StaticResource x:Key="ButtonBackgroundDisabled" ResourceKey="SessionShellBrush" />
-                    <StaticResource x:Key="ButtonBorderBrush" ResourceKey="SessionChromeFrameBrush" />
-                    <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="SessionChromeFrameBrush" />
-                    <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="SessionChromeFrameBrush" />
-                    <StaticResource x:Key="ButtonBorderBrushDisabled" ResourceKey="SessionChromeFrameBrush" />
                     <StaticResource x:Key="ButtonForeground" ResourceKey="OnboardingPrimaryTextBrush" />
                     <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="OnboardingPrimaryTextBrush" />
                     <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="OnboardingPrimaryTextBrush" />
                     <StaticResource x:Key="ButtonForegroundDisabled" ResourceKey="OnboardingSecondaryTextBrush" />
-                    <StaticResource x:Key="ToggleButtonBackground" ResourceKey="SessionShellBrush" />
                     <StaticResource x:Key="ToggleButtonBackgroundChecked" ResourceKey="SessionAccentBrush" />
                     <StaticResource x:Key="ToggleButtonBackgroundCheckedPointerOver" ResourceKey="SessionAccentBrush" />
                     <StaticResource x:Key="ToggleButtonBackgroundCheckedPressed" ResourceKey="SessionAccentBrush" />
                     <StaticResource x:Key="ToggleButtonForegroundChecked" ResourceKey="OnboardingAccentForegroundBrush" />
                     <StaticResource x:Key="ToggleButtonForegroundCheckedPointerOver" ResourceKey="OnboardingAccentForegroundBrush" />
                     <StaticResource x:Key="ToggleButtonForegroundCheckedPressed" ResourceKey="OnboardingAccentForegroundBrush" />
-                    <StaticResource x:Key="ToggleButtonBackgroundPointerOver" ResourceKey="OnboardingHoverBrush" />
-                    <StaticResource x:Key="ToggleButtonBackgroundPressed" ResourceKey="OnboardingPressedBrush" />
-                    <StaticResource x:Key="ToggleButtonBorderBrush" ResourceKey="SessionChromeFrameBrush" />
-                    <StaticResource x:Key="ToggleButtonBorderBrushPointerOver" ResourceKey="SessionChromeFrameBrush" />
-                    <StaticResource x:Key="ToggleButtonBorderBrushPressed" ResourceKey="SessionChromeFrameBrush" />
                     <StaticResource x:Key="ToggleButtonForeground" ResourceKey="OnboardingPrimaryTextBrush" />
                     <StaticResource x:Key="ToggleButtonForegroundPointerOver" ResourceKey="OnboardingPrimaryTextBrush" />
                     <StaticResource x:Key="ToggleButtonForegroundPressed" ResourceKey="OnboardingPrimaryTextBrush" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="OnboardingHoverBrush" Color="#14000000" />
-                    <SolidColorBrush x:Key="OnboardingPressedBrush" Color="#22000000" />
-                    <StaticResource x:Key="ButtonBackground" ResourceKey="SessionShellBrush" />
-                    <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="OnboardingHoverBrush" />
-                    <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="OnboardingPressedBrush" />
-                    <StaticResource x:Key="ButtonBackgroundDisabled" ResourceKey="SessionShellBrush" />
-                    <StaticResource x:Key="ButtonBorderBrush" ResourceKey="SessionChromeFrameBrush" />
-                    <StaticResource x:Key="ButtonBorderBrushPointerOver" ResourceKey="SessionChromeFrameBrush" />
-                    <StaticResource x:Key="ButtonBorderBrushPressed" ResourceKey="SessionChromeFrameBrush" />
-                    <StaticResource x:Key="ButtonBorderBrushDisabled" ResourceKey="SessionChromeFrameBrush" />
                     <StaticResource x:Key="ButtonForeground" ResourceKey="OnboardingPrimaryTextBrush" />
                     <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="OnboardingPrimaryTextBrush" />
                     <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="OnboardingPrimaryTextBrush" />
                     <StaticResource x:Key="ButtonForegroundDisabled" ResourceKey="OnboardingSecondaryTextBrush" />
-                    <StaticResource x:Key="ToggleButtonBackground" ResourceKey="SessionShellBrush" />
                     <StaticResource x:Key="ToggleButtonBackgroundChecked" ResourceKey="SessionAccentBrush" />
                     <StaticResource x:Key="ToggleButtonBackgroundCheckedPointerOver" ResourceKey="SessionAccentBrush" />
                     <StaticResource x:Key="ToggleButtonBackgroundCheckedPressed" ResourceKey="SessionAccentBrush" />
                     <StaticResource x:Key="ToggleButtonForegroundChecked" ResourceKey="OnboardingAccentForegroundBrush" />
                     <StaticResource x:Key="ToggleButtonForegroundCheckedPointerOver" ResourceKey="OnboardingAccentForegroundBrush" />
                     <StaticResource x:Key="ToggleButtonForegroundCheckedPressed" ResourceKey="OnboardingAccentForegroundBrush" />
-                    <StaticResource x:Key="ToggleButtonBackgroundPointerOver" ResourceKey="OnboardingHoverBrush" />
-                    <StaticResource x:Key="ToggleButtonBackgroundPressed" ResourceKey="OnboardingPressedBrush" />
-                    <StaticResource x:Key="ToggleButtonBorderBrush" ResourceKey="SessionChromeFrameBrush" />
-                    <StaticResource x:Key="ToggleButtonBorderBrushPointerOver" ResourceKey="SessionChromeFrameBrush" />
-                    <StaticResource x:Key="ToggleButtonBorderBrushPressed" ResourceKey="SessionChromeFrameBrush" />
                     <StaticResource x:Key="ToggleButtonForeground" ResourceKey="OnboardingPrimaryTextBrush" />
                     <StaticResource x:Key="ToggleButtonForegroundPointerOver" ResourceKey="OnboardingPrimaryTextBrush" />
                     <StaticResource x:Key="ToggleButtonForegroundPressed" ResourceKey="OnboardingPrimaryTextBrush" />
