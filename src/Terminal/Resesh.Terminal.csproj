@@ -10,11 +10,30 @@
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <GhosttyVtArchitecture Condition="'$(Platform)'=='x64'">x64</GhosttyVtArchitecture>
+    <GhosttyVtArchitecture Condition="'$(Platform)'=='ARM64'">arm64</GhosttyVtArchitecture>
+    <GhosttyVtArchitecture Condition="'$(GhosttyVtArchitecture)'=='' and '$(RuntimeIdentifier)'=='win-x64'">x64</GhosttyVtArchitecture>
+    <GhosttyVtArchitecture Condition="'$(GhosttyVtArchitecture)'=='' and '$(RuntimeIdentifier)'=='win-arm64'">arm64</GhosttyVtArchitecture>
+    <GhosttyVtDir>$(MSBuildThisFileDirectory)..\..\.artifacts\ghostty-vt\$(GhosttyVtArchitecture)\</GhosttyVtDir>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.6" />
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.6" />
+    <PackageReference Include="Vortice.Direct2D1" Version="3.8.3" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(GhosttyVtArchitecture)'!='' and Exists('$(GhosttyVtDir)ghostty-vt.dll') and Exists('$(GhosttyVtDir)reseshvt.dll')">
+    <!-- libghostty-vt surface (RESESH_TERMINAL_SURFACE=ghostty); built by eng/build-ghostty-vt.ps1 -->
+    <None Include="$(GhosttyVtDir)ghostty-vt.dll;$(GhosttyVtDir)reseshvt.dll;$(GhosttyVtDir)LICENSE.ghostty.txt"
+          Link="GhosttyVt\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
