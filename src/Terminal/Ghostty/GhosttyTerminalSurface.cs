@@ -54,6 +54,20 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private bool _historyCapture;
     private string? _promptPlatform;
     private bool _annotationsPending;
+
+    // Rewind and recording playback: the grid is pinned to the recorded size, replays run on a
+    // worker thread (the shim serializes terminal access) while rendering pauses.
+    private (int Columns, int Rows)? _fixedGrid;
+    private volatile bool _replaying;
+    private int _replayGeneration;
+    private readonly SemaphoreSlim _replayGate = new(1, 1);
+    private PlaybackModel? _playback;
+    private double _pendingPlaybackSeek;
+    private double _playbackPosition = -1; // time the terminal currently shows (-1: unknown)
+    private int _playbackIndex;           // next event to write when moving forward
+
+    private sealed record PlaybackFrame(double Time, int Index, int Columns, int Rows, byte[] State);
+    private sealed record PlaybackModel(TerminalTimedReplayEvent[] Events, List<PlaybackFrame> Frames);
     private GhosttyOverviewIndex? _overview;
     private readonly int[] _searchLineBuffer = new int[4096];
     private (ulong Total, ulong Offset, ulong Length) _scrollState;
@@ -446,8 +460,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         _renderer.SetCompositionScale(scale, scale);
 
         _renderer.OriginX = (int)Math.Round(6 * scale);
-        var cols = _fixed80Columns ? 80 : Math.Max(2, (pixelWidth - _renderer.OriginX) / _renderer.CellWidth);
-        var rows = Math.Max(1, pixelHeight / _renderer.CellHeight);
+        var cols = _fixedGrid?.Columns ?? (_fixed80Columns ? 80 : Math.Max(2, (pixelWidth - _renderer.OriginX) / _renderer.CellWidth));
+        var rows = _fixedGrid?.Rows ?? Math.Max(1, pixelHeight / _renderer.CellHeight);
         var sizeChanged = cols != Columns || rows != Rows;
         Columns = cols;
         Rows = rows;
@@ -548,7 +562,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 
     private void RenderFrame()
     {
-        if (_disposed || _term == IntPtr.Zero || _cells == null || _renderer.SwapChain is null || Visibility != Visibility.Visible)
+        if (_disposed || _replaying || _term == IntPtr.Zero || _cells == null || _renderer.SwapChain is null || Visibility != Visibility.Visible)
             return;
         GhosttyFrameInfo info;
         var full = _forceFull;
@@ -1438,11 +1452,18 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 
     private void OnSemanticEvent(byte[] data)
     {
-        if (data.Length < sizeof(GhosttySemanticEvent) || RefreshCommands() is not { } commands)
+        if (data.Length < sizeof(GhosttySemanticEvent))
             return;
         GhosttySemanticEvent e;
         fixed (byte* p = data)
             e = *(GhosttySemanticEvent*)p;
+        if (RefreshCommands() is not { } commands)
+        {
+            // No tracker (a replay is rebuilding it): the marker made for this event is ours.
+            if (e.Marker != 0 && _term != IntPtr.Zero)
+                GhosttyNative.rvt_marker_free(_term, e.Marker);
+            return;
+        }
         var commandLength = (int)Math.Min(e.CommandLength, (uint)(data.Length - sizeof(GhosttySemanticEvent)));
         var command = commandLength > 0 ? Encoding.UTF8.GetString(data, sizeof(GhosttySemanticEvent), commandLength) : "";
         commands.OnSemanticPrompt(e.Kind, e.PromptKind, e.HasExit != 0 ? e.ExitCode : null,
@@ -1550,9 +1571,22 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         }
         RequestFrame();
     }
-    public override Task ShowReplayAsync(int columns, int rows, ReadOnlyMemory<byte> keyframe, IReadOnlyList<TerminalReplayEvent> events) =>
-        Task.CompletedTask;
-    public override Task LoadPlaybackAsync(int columns, int rows, IReadOnlyList<TerminalTimedReplayEvent> events) =>
-        Task.CompletedTask;
-    public override Task SeekPlaybackAsync(double time) => Task.CompletedTask;
+    private void WriteLocked(ReadOnlySpan<byte> data)
+    {
+        fixed (byte* p = data)
+            GhosttyNative.rvt_write(_term, p, (nuint)data.Length);
+    }
+
+    private byte[] FormatVtLocked()
+    {
+        var buffer = GhosttyNative.rvt_format_vt(_term, out var length);
+        try
+        {
+            return buffer == null ? [] : new ReadOnlySpan<byte>(buffer, checked((int)length)).ToArray();
+        }
+        finally
+        {
+            GhosttyNative.rvt_free_buffer(buffer, length);
+        }
+    }
 }

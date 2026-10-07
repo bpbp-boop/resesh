@@ -168,20 +168,20 @@ internal static class TerminalLinkPolicy
 
 public static class TerminalSurfaceFactory
 {
-    /// <summary>RESESH_TERMINAL_SURFACE=ghostty selects the in-process libghostty-vt surface
-    /// for live tabs; anything else (or missing native libraries) keeps WebView2 + xterm.js.</summary>
-    public static TerminalSurface CreateLive()
+    /// <summary>Live tabs, rewind and recording playback draw in-process with libghostty-vt.
+    /// RESESH_TERMINAL_SURFACE=webview keeps WebView2 + xterm.js, which is also the fallback
+    /// when the native libraries are missing.</summary>
+    public static TerminalSurface CreateLive() => Create();
+
+    public static TerminalSurface CreatePlayback() => Create();
+
+    private static TerminalSurface Create()
     {
-        if (string.Equals(Environment.GetEnvironmentVariable("RESESH_TERMINAL_SURFACE"), "ghostty", StringComparison.OrdinalIgnoreCase))
-        {
-            if (Ghostty.GhosttyTerminalSurface.UnavailableReason is not { } reason)
-                return new Ghostty.GhosttyTerminalSurface();
-            TerminalControl.TraceHook?.Invoke($"ghostty surface unavailable, using WebView2: {reason}");
-        }
+        if (string.Equals(Environment.GetEnvironmentVariable("RESESH_TERMINAL_SURFACE"), "webview", StringComparison.OrdinalIgnoreCase))
+            return new TerminalControl();
+        if (Ghostty.GhosttyTerminalSurface.UnavailableReason is not { } reason)
+            return new Ghostty.GhosttyTerminalSurface();
+        TerminalControl.TraceHook?.Invoke($"ghostty surface unavailable, using WebView2: {reason}");
         return new TerminalControl();
     }
-
-    /// <summary>Recording playback and rewind stay on the WebView surface, which has the
-    /// replay pipeline.</summary>
-    public static TerminalSurface CreatePlayback() => new TerminalControl();
 }

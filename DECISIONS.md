@@ -877,4 +877,11 @@ band). A minimal WinUI 2.3.6 app reproduced this with a one-element XAML dialog.
   the ruler's highlight lane is a separate whole-scrollback index keyed by virtual lines
   anchored to a marker. Host patterns compile non-backtracking when possible, otherwise with a
   50 ms match timeout: they run over untrusted output.
-- Not yet: IME composition, UIA text. Recording playback and the rewind player stay on WebView2.
+- Rewind and recording playback also use the ghostty surface: the grid is pinned to the recorded
+  size and replays run on a worker thread while rendering pauses. Playback builds VT keyframes
+  every 10 s or 1 MiB once, like terminal.html, but a forward seek only writes the events since
+  the current position, so playing never rebuilds from a keyframe.
+- 2026-10-08: ghostty is the default for live tabs and playback. RESESH_TERMINAL_SURFACE=webview
+  keeps WebView2 + xterm.js, which is also the automatic fallback when the native libraries are
+  missing; Release builds warn and the installer fails without them.
+- Not yet: IME composition, UIA text.

@@ -41,4 +41,9 @@
     <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <Target Name="WarnMissingGhosttyVt" BeforeTargets="Build"
+          Condition="'$(GhosttyVtArchitecture)'!='' and (!Exists('$(GhosttyVtDir)ghostty-vt.dll') or !Exists('$(GhosttyVtDir)reseshvt.dll'))">
+    <Warning Text="libghostty-vt is not built for $(GhosttyVtArchitecture): terminals will fall back to WebView2. Run eng/build-ghostty-vt.ps1 -Architecture $(GhosttyVtArchitecture)." />
+  </Target>
+
 </Project>
