@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <Using Include="Xunit" />
+    <!-- The command tracker is plain C# over ICommandBuffer: test it without WinUI or the
+         native terminal. -->
+    <Compile Include="../../src/Terminal/Ghostty/GhosttyCommandTracker.cs" Link="Ghostty/GhosttyCommandTracker.cs" />
+    <Compile Include="../../src/Terminal/TerminalCommandExecution.cs" Link="TerminalCommandExecution.cs" />
+    <Compile Include="../../src/Terminal/TerminalCommandRecord.cs" Link="TerminalCommandRecord.cs" />
+  </ItemGroup>
+</Project>

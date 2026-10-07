@@ -45,6 +45,7 @@ internal enum GhosttyEventKind
     WorkingDirectory = 4,
     Clipboard = 5,
     Osc = 6,
+    Semantic = 7,
 }
 
 /// <summary>
@@ -116,6 +117,11 @@ internal static unsafe partial class GhosttyNative
     [LibraryImport(Library)] public static partial byte* rvt_selection_text(IntPtr term, out nuint length);
     [LibraryImport(Library)] public static partial void rvt_free_buffer(byte* buffer, nuint length);
     [LibraryImport(Library)] public static partial byte* rvt_format_vt(IntPtr term, out nuint length);
+    [LibraryImport(Library)] public static partial void rvt_buffer_info(IntPtr term, GhosttyBufferInfo* info);
+    [LibraryImport(Library)] public static partial int rvt_line_text(IntPtr term, int line, byte* output, nuint capacity, int* wrapped);
+    [LibraryImport(Library)] public static partial uint rvt_marker_new(IntPtr term, int line);
+    [LibraryImport(Library)] public static partial int rvt_marker_line(IntPtr term, uint id);
+    [LibraryImport(Library)] public static partial void rvt_marker_free(IntPtr term, uint id);
     [LibraryImport(Library)] public static partial int rvt_search_set(IntPtr term, byte* needle, nuint length);
     [LibraryImport(Library)] public static partial void rvt_search_step(IntPtr term, int direction);
     [LibraryImport(Library)] public static partial void rvt_search_status(IntPtr term, out nuint total, out nuint current);

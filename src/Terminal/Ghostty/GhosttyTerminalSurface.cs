@@ -43,6 +43,17 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private readonly TextBox _findInput = new();
     private readonly TextBlock _findCount = new();
     private bool _findOpen;
+
+    // Command marks, ruler, commands panel (terminal.html's addon-ruler.js).
+    private readonly GhosttyRuler _ruler = new();
+    private readonly GhosttyCommandsPanel _commandsPanel = new();
+    private readonly Border _flash = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _flashTimer;
+    private GhosttyCommandBuffer? _commandBuffer;
+    private GhosttyCommandTracker? _commands;
+    private bool _historyCapture;
+    private string? _promptPlatform;
+    private bool _annotationsPending;
     private (ulong Total, ulong Offset, ulong Length) _scrollState;
     private readonly GhosttyRenderer _renderer = new();
     private readonly object _termGate = new();
@@ -102,17 +113,17 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     public override event Action<string, int>? ShortcutRequested;
     public override event Action<int, int>? Ready;
     public override event Action<string>? TitleChanged;
-    public override event Action<string, bool>? CommandChanged { add { } remove { } }
-    public override event Action<TerminalCommandExecution>? CommandExecutionChanged { add { } remove { } }
-    public override event Action<string, string?>? PromptContextChanged { add { } remove { } }
+    public override event Action<string, bool>? CommandChanged;
+    public override event Action<TerminalCommandExecution>? CommandExecutionChanged;
+    public override event Action<string, string?>? PromptContextChanged;
     public override event Action<string>? WorkingDirectoryReported;
     public override event Action<string>? WindowsWorkingDirectoryReported;
     public override event Action<string>? ContextReported;
     public override event Action<int, string>? AgentOscReceived;
     public override event Action? BellReceived;
-    public override event Action<string>? CommandObserved { add { } remove { } }
-    public override event Action<bool>? CommandsPanelOpenChanged { add { } remove { } }
-    public override event Action<TerminalCommandRecord>? CommandRecorded { add { } remove { } }
+    public override event Action<string>? CommandObserved;
+    public override event Action<bool>? CommandsPanelOpenChanged;
+    public override event Action<TerminalCommandRecord>? CommandRecorded;
 
     public override bool SupportsRewindCapture => true;
     public override int Columns { get; protected set; } = 80;
@@ -132,10 +143,27 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         Background = new SolidColorBrush(ToColor(_theme.Background));
         _panel.IsHitTestVisible = false;
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(GhosttyRuler.LaneWidth) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ScrollBarWidth) });
         Children.Add(_panel);
-        SetColumn(_scrollBar, 1);
+        Children.Add(_flash);
+        SetColumn(_ruler, 1);
+        Children.Add(_ruler);
+        SetColumn(_scrollBar, 2);
         Children.Add(_scrollBar);
+        Children.Add(_ruler.Card);
+        Children.Add(_commandsPanel);
+        _ruler.JumpRequested += JumpToMark;
+        _ruler.CopyRequested += CopyMarkOutput;
+        _commandsPanel.JumpRequested += JumpToMark;
+        _commandsPanel.CopyRequested += CopyMarkOutput;
+        _commandsPanel.CloseRequested += () => SetCommandsPanelOpen(false);
+        _flashTimer = DispatcherQueue.CreateTimer();
+        _flashTimer.Interval = TimeSpan.FromMilliseconds(700);
+        _flashTimer.IsRepeating = false;
+        _flashTimer.Tick += (_, _) => _flash.Visibility = Visibility.Collapsed;
+        _flash.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x47, 0xF2, 0xCC, 0x60));
+        _flash.VerticalAlignment = VerticalAlignment.Top;
         // ValueChanged, not Scroll: Scroll fires only for pointer input, while keyboard and
         // UI Automation (screen readers, tests) move the bar through its value.
         _scrollBar.ValueChanged += OnScrollBarValueChanged;
@@ -195,6 +223,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             _earlyOutput.Clear();
             CaptureKeyframeLocked(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         }
+        CreateCommandTracker();
         Relayout();
         return Task.CompletedTask;
     }
@@ -206,6 +235,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         _disposed = true;
         _blinkTimer.Stop();
         UnhookRendering();
+        _commands?.Dispose();
+        _commandBuffer?.Detach();
         lock (_termGate)
         {
             if (_term != IntPtr.Zero)
@@ -304,11 +335,20 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 
     private string Rule() => "\r\n\x1b[90m" + new string('─', Math.Max(Columns - 1, 10)) + "\x1b[0m\r\n";
 
-    public override void NotifyConnected() => _connected = true;
+    public override void NotifyConnected()
+    {
+        _connected = true;
+        RefreshCommands()?.SetExecutionReporting(!_readOnly);
+    }
 
     public override void NotifyDisconnected(string message, string action = "reconnect", bool neutral = false)
     {
         _connected = false;
+        if (RefreshCommands() is { } commands)
+        {
+            commands.FlushHistory(); // before the divider: it is not the command's output
+            commands.SetExecutionReporting(false);
+        }
         WriteDisplayText(Rule() + (neutral ? "\x1b[90m" : "\x1b[1;33m") +
             (string.IsNullOrEmpty(message) ? "Disconnected." : message) +
             "\x1b[0m Press Enter to " + (string.IsNullOrEmpty(action) ? "reconnect" : action) + ".\r\n");
@@ -349,7 +389,11 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
                 BellReceived?.Invoke();
                 break;
             case GhosttyEventKind.Title:
+                _commands?.NoteTitleChanged();
                 TitleChanged?.Invoke(Encoding.UTF8.GetString(data));
+                break;
+            case GhosttyEventKind.Semantic:
+                OnSemanticEvent(data);
                 break;
             case GhosttyEventKind.WorkingDirectory:
                 var directory = Encoding.UTF8.GetString(data);
@@ -371,7 +415,10 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
                 if (code == 7377)
                     AgentOscReceived?.Invoke(code, payload.Length > 2048 ? payload[..2048] : payload);
                 else if (code == 3008)
+                {
+                    RefreshCommands()?.OnOsc3008(payload);
                     ContextReported?.Invoke(payload);
+                }
                 break;
         }
     }
@@ -516,6 +563,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         UpdateScrollBar(info);
         if (_findOpen)
             UpdateFindCount();
+        if (rows > 0 || full)
+            QueueAnnotations();
         if (info.CursorVisible != 0 && info.CursorY < Rows)
             _dirty[info.CursorY] = 1;
         if (_lastCursorRow >= 0 && _lastCursorRow < Rows)
@@ -589,6 +638,10 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         fixed (uint* palette = _theme.Ansi)
             GhosttyNative.rvt_set_colors(_term, _theme.Foreground, _theme.Background, _theme.Cursor, palette);
         Background = new SolidColorBrush(ToColor(_theme.Background));
+        _commandsPanel.ApplyTheme(_theme, _fontFamily);
+        var b = _theme.Background;
+        var luminance = ((b >> 16) & 0xFF) * 299 + ((b >> 8) & 0xFF) * 587 + (b & 0xFF) * 114;
+        _ruler.SetTheme(dark: luminance < 128_000);
     }
 
     private static Windows.UI.Color ToColor(uint rgb) =>
@@ -738,6 +791,20 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         if (printable && (!control && !alt || altGr))
             return;
 
+        // Shift+Enter sends ESC CR (Meta+Enter), the newline chord Claude Code and similar
+        // prompts read in legacy keyboard mode (terminal.html does the same). Full-screen
+        // programs keep plain Enter, and a program that enabled the kitty keyboard protocol
+        // gets the encoder's exact Shift+Enter instead.
+        if (args.Key == VirtualKey.Enter && shift && !control && !alt
+            && RefreshCommands() is not null && !_commandBuffer!.IsAlternate
+            && GhosttyNative.rvt_kitty_flags(_term) == 0)
+        {
+            args.Handled = true;
+            _suppressCharactersForKey = virtualKey;
+            SendUserInput([0x1B, 0x0D]);
+            return;
+        }
+
         var mods = (shift ? GhosttyNative.ModShift : 0) | (control ? GhosttyNative.ModCtrl : 0) | (alt ? GhosttyNative.ModAlt : 0);
         var unshiftedText = TextFor(virtualKey, scanCode, shift: false);
         var unshifted = unshiftedText.Length > 0 ? (uint)char.ConvertToUtf32(unshiftedText, 0) : 0;
@@ -752,6 +819,11 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         }
         if (written < 0)
             return; // a key libghostty-vt does not know: leave it to XAML
+        // Enter on a prompt-shaped line becomes a discovered command mark; checked before the
+        // input round-trips, while the typed command is echoed but its newline is not.
+        // Shift/Alt+Enter insert a newline rather than submit.
+        if (args.Key == VirtualKey.Enter && !shift && !alt && !control)
+            RefreshCommands()?.NotifyEnter();
         args.Handled = true; // also keeps Tab and the arrows from moving XAML focus
         _suppressCharactersForKey = virtualKey;
         if (written > 0)
@@ -824,6 +896,16 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         {
             case "terminal.find":
                 OpenFind();
+                return true;
+            case "terminal.commandsPanel":
+                ToggleCommandsPanel();
+                return true;
+            case "terminal.bookmark":
+                RefreshCommands()?.ToggleBookmark();
+                return true;
+            case "terminal.previousCommand" or "terminal.nextCommand":
+                if (RefreshCommands()?.JumpTarget(id == "terminal.nextCommand" ? 1 : -1) is { } line)
+                    ScrollLineToCenter(line);
                 return true;
             case "terminal.copy":
                 return CopySelection();
@@ -1212,6 +1294,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     {
         if (_disposed || _readOnly || _term == IntPtr.Zero || string.IsNullOrEmpty(text))
             return;
+        if (text.Contains('\r') || text.Contains('\n'))
+            RefreshCommands()?.NotifyEnter();
         var bytes = Encoding.UTF8.GetBytes(text);
         fixed (byte* p = bytes)
             GhosttyNative.rvt_paste(_term, p, (nuint)bytes.Length);
@@ -1221,14 +1305,161 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 
     // ---- features the WebView surface has and this one does not yet ----------------------
 
-    public override void ToggleCommandsPanel() { }
-    public override void SetHistoryCapture(bool enabled) { }
-    public override void FlushHistory() { }
-    public override void ScrollToCommand(long id) { }
-    public override void SetPromptPlatform(string? platform) { }
+    public override void ToggleCommandsPanel() => SetCommandsPanelOpen(!_commandsPanel.IsOpen);
+
+    public override void SetHistoryCapture(bool enabled)
+    {
+        _historyCapture = enabled && !_readOnly;
+        _commands?.SetHistoryCapture(_historyCapture);
+    }
+
+    public override void FlushHistory() => RefreshCommands()?.FlushHistory();
+
+    public override void ScrollToCommand(long id)
+    {
+        if (RefreshCommands()?.LineForExecution(id) is { } line)
+            ScrollLineToCenter(line);
+    }
+
+    public override void SetPromptPlatform(string? platform)
+    {
+        _promptPlatform = platform;
+        RefreshCommands()?.SetPromptPlatform(platform);
+    }
+
     public override void ApplyHighlights(IReadOnlyList<object> rules) { }
+
     public override Task<(string Context, string? Platform)?> RequestPromptContextAsync() =>
-        Task.FromResult<(string Context, string? Platform)?>(null);
+        Task.FromResult(RefreshCommands()?.ReportPromptContext(force: true));
+
+    // ---- command marks ------------------------------------------------------------------
+
+    private void CreateCommandTracker()
+    {
+        _commandBuffer = new GhosttyCommandBuffer(() => _disposed ? IntPtr.Zero : _term);
+        _commands = new GhosttyCommandTracker(_commandBuffer)
+        {
+            Schedule = (delay, action) =>
+            {
+                var timer = DispatcherQueue.CreateTimer();
+                timer.Interval = delay;
+                timer.IsRepeating = false;
+                timer.Tick += (_, _) =>
+                {
+                    timer.Stop();
+                    if (_disposed || _commands is null)
+                        return;
+                    _commandBuffer?.Refresh();
+                    action();
+                };
+                timer.Start();
+            },
+        };
+        _commands.RunningCommand += (text, exact) => CommandChanged?.Invoke(text, exact);
+        _commands.CommandExecution += execution => CommandExecutionChanged?.Invoke(execution);
+        _commands.CommandRecorded += record => CommandRecorded?.Invoke(record);
+        _commands.PromptContext += (context, platform) => PromptContextChanged?.Invoke(context, platform);
+        _commands.CommandMarked += command => CommandObserved?.Invoke(command);
+        _commands.Changed += QueueAnnotations;
+        _commands.SetHistoryCapture(_historyCapture);
+        if (_promptPlatform is not null)
+            _commands.SetPromptPlatform(_promptPlatform);
+        if (_connected && !_readOnly)
+            _commands.SetExecutionReporting(true);
+    }
+
+    /// <summary>The tracker with a fresh buffer snapshot, or null before the terminal exists.</summary>
+    private GhosttyCommandTracker? RefreshCommands()
+    {
+        if (_commands is null || _disposed)
+            return null;
+        _commandBuffer!.Refresh();
+        return _commands;
+    }
+
+    private void OnSemanticEvent(byte[] data)
+    {
+        if (data.Length < sizeof(GhosttySemanticEvent) || RefreshCommands() is not { } commands)
+            return;
+        GhosttySemanticEvent e;
+        fixed (byte* p = data)
+            e = *(GhosttySemanticEvent*)p;
+        var commandLength = (int)Math.Min(e.CommandLength, (uint)(data.Length - sizeof(GhosttySemanticEvent)));
+        var command = commandLength > 0 ? Encoding.UTF8.GetString(data, sizeof(GhosttySemanticEvent), commandLength) : "";
+        commands.OnSemanticPrompt(e.Kind, e.PromptKind, e.HasExit != 0 ? e.ExitCode : null,
+            _commandBuffer!.Adopt(e.Marker), e.CursorX, command);
+    }
+
+    /// <summary>Coalesces ruler/panel refreshes and the tracker's after-output work to one
+    /// pass per dispatcher turn.</summary>
+    private void QueueAnnotations()
+    {
+        if (_annotationsPending || _disposed)
+            return;
+        _annotationsPending = true;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            _annotationsPending = false;
+            if (_disposed || RefreshCommands() is not { } commands)
+                return;
+            commands.NoteOutput(_lastObservedMs);
+            commands.OnOutputParsed();
+            var marks = commands.Commands();
+            _ruler.Visibility = _commandBuffer!.IsAlternate ? Visibility.Collapsed : Visibility.Visible;
+            _ruler.Update(marks, commands.BookmarkLines(), _commandBuffer.Length);
+            if (_commandsPanel.IsOpen)
+                _commandsPanel.SetCommands(marks);
+        });
+    }
+
+    private void SetCommandsPanelOpen(bool open)
+    {
+        if (open == _commandsPanel.IsOpen)
+            return;
+        _commandsPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        if (open && RefreshCommands() is { } commands)
+            _commandsPanel.SetCommands(commands.Commands());
+        if (!open)
+            FocusTerminal();
+        CommandsPanelOpenChanged?.Invoke(open);
+    }
+
+    private void JumpToMark(long id)
+    {
+        if (RefreshCommands()?.LineForMark(id) is { } line)
+            ScrollLineToCenter(line);
+        FocusTerminal();
+    }
+
+    private void CopyMarkOutput(long id)
+    {
+        if (RefreshCommands() is not { } commands || commands.LineForMark(id) is not { } line)
+            return;
+        var text = commands.CommandOutput(line);
+        if (text.Length > 0)
+            CopyText(text);
+    }
+
+    /// <summary>Scrolls a line to the middle of the viewport and flashes it.</summary>
+    private void ScrollLineToCenter(int line)
+    {
+        if (_term == IntPtr.Zero || _commandBuffer is null)
+            return;
+        var top = Math.Max(0, line - Rows / 2);
+        GhosttyNative.rvt_scroll(_term, GhosttyNative.ScrollRow, top);
+        _commandBuffer.Refresh();
+        var visibleRow = line - _commandBuffer.ViewportTop;
+        if (visibleRow >= 0 && visibleRow < Rows && _fontScale > 0)
+        {
+            var rowHeight = _renderer.CellHeight / _fontScale;
+            _flash.Height = rowHeight;
+            _flash.Margin = new Thickness(0, visibleRow * rowHeight, 0, 0);
+            _flash.Visibility = Visibility.Visible;
+            _flashTimer.Stop();
+            _flashTimer.Start();
+        }
+        RequestFrame();
+    }
     public override Task ShowReplayAsync(int columns, int rows, ReadOnlyMemory<byte> keyframe, IReadOnlyList<TerminalReplayEvent> events) =>
         Task.CompletedTask;
     public override Task LoadPlaybackAsync(int columns, int rows, IReadOnlyList<TerminalTimedReplayEvent> events) =>

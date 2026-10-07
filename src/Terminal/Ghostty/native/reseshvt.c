@@ -28,7 +28,23 @@ enum {
   RVT_EVENT_PWD = 4,        // raw OSC 7 URI or OSC 9;9 / 1337 path
   RVT_EVENT_CLIPBOARD = 5,  // UTF-8 text a program copied (OSC 52)
   RVT_EVENT_OSC = 6,        // unknown OSC content, "number;payload"
+  RVT_EVENT_SEMANTIC = 7,   // RvtSemanticEvent followed by the UTF-8 command line (OSC 133)
 };
+
+// Shell integration step, captured while the output is parsed (the C# side handles it
+// later, after more output may have arrived, so positions are taken here).
+typedef struct {
+  int32_t kind;          // 1 prompt start, 2 input start, 3 output start, 4 command end
+  int32_t prompt_kind;   // 0 primary, 1 right, 2 continuation, 3 secondary
+  int32_t has_exit;
+  int32_t exit_code;
+  int32_t cursor_line;   // absolute line (scrollback + active row)
+  int32_t cursor_x;
+  uint32_t marker;       // marker at the cursor line, owned by the receiver (0 if none)
+  uint32_t command_len;  // bytes of command text that follow this struct
+} RvtSemanticEvent;
+
+#define RVT_MAX_MARKERS 4096
 
 // Called synchronously on the thread that wrote output, with the terminal lock held. The
 // handler must copy what it needs and must not call back into this library.
@@ -85,6 +101,8 @@ typedef struct {
   GhosttyKeyEvent key;
   GhosttyMouseEncoder mouse;
   GhosttyMouseEvent mouse_event;
+  GhosttyTrackedGridRef markers[RVT_MAX_MARKERS]; // index = marker id - 1
+  uint32_t marker_hint;
   GhosttySearch search;
   GhosttySelectionGesture gesture;
   GhosttySelectionGestureEvent gesture_events[4]; // press, release, drag, autoscroll tick
@@ -109,6 +127,40 @@ static GhosttyColorRgb unpack(uint32_t v) {
 
 static void emit(RvtTerm* t, int kind, const uint8_t* data, size_t len) {
   if (t->on_event) t->on_event(t->user, kind, data, len);
+}
+
+// ---- markers and lines (caller holds the lock) ---------------------------------------------
+
+static bool alternate_active(RvtTerm* t) {
+  GhosttyTerminalScreen screen = GHOSTTY_TERMINAL_SCREEN_PRIMARY;
+  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN, &screen);
+  return screen != GHOSTTY_TERMINAL_SCREEN_PRIMARY;
+}
+
+static int32_t cursor_line(RvtTerm* t, uint16_t* x) {
+  uint16_t cx = 0, cy = 0;
+  size_t scrollback = 0;
+  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_CURSOR_X, &cx);
+  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &cy);
+  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS, &scrollback);
+  if (x) *x = cx;
+  return (int32_t)(scrollback + cy);
+}
+
+static uint32_t marker_new_locked(RvtTerm* t, int32_t line) {
+  if (line < 0) return 0;
+  for (uint32_t n = 0; n < RVT_MAX_MARKERS; n++) {
+    uint32_t i = (t->marker_hint + n) % RVT_MAX_MARKERS;
+    if (t->markers[i]) continue;
+    GhosttyPoint pt = { .tag = GHOSTTY_POINT_TAG_SCREEN, .value = { .coordinate = { .x = 0, .y = (uint32_t)line } } };
+    if (ghostty_terminal_grid_ref_track(t->term, pt, &t->markers[i]) != GHOSTTY_SUCCESS) {
+      t->markers[i] = NULL;
+      return 0;
+    }
+    t->marker_hint = i + 1;
+    return i + 1;
+  }
+  return 0;
 }
 
 static void on_write_pty(GhosttyTerminal term, void* user, const uint8_t* data, size_t len) {
@@ -150,6 +202,27 @@ static void on_clipboard_write(GhosttyTerminal term, void* user, const GhosttyCl
     reply.remember = false;
     write->reply(write, &reply);
   }
+}
+
+static void on_semantic(GhosttyTerminal term, void* user, const GhosttyTerminalSemanticPrompt* ev) {
+  (void)term;
+  RvtTerm* t = (RvtTerm*)user;
+  if (alternate_active(t)) return; // marks belong to the normal screen, as in terminal.html
+  uint8_t buf[sizeof(RvtSemanticEvent) + 4096];
+  RvtSemanticEvent* e = (RvtSemanticEvent*)buf;
+  memset(e, 0, sizeof *e);
+  e->kind = (int32_t)ev->kind;
+  e->prompt_kind = (int32_t)ev->prompt_kind;
+  e->has_exit = ev->has_exit_code ? 1 : 0;
+  e->exit_code = ev->exit_code;
+  uint16_t x = 0;
+  e->cursor_line = cursor_line(t, &x);
+  e->cursor_x = x;
+  e->marker = marker_new_locked(t, e->cursor_line);
+  size_t n = ev->command.len < 4096 ? ev->command.len : 4096;
+  if (n) memcpy(buf + sizeof *e, ev->command.ptr, n);
+  e->command_len = (uint32_t)n;
+  emit(t, RVT_EVENT_SEMANTIC, buf, sizeof *e + n);
 }
 
 static void on_unknown(GhosttyTerminal term, void* user, const GhosttyTerminalUnknownSequence* seq) {
@@ -203,12 +276,15 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_PWD_CHANGED, (const void*)on_pwd);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, (const void*)on_clipboard_write);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE, (const void*)on_unknown);
+  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT, (const void*)on_semantic);
   return t;
 }
 
 RVT_API void rvt_free(RvtTerm* t) {
   if (!t) return;
   lock(t);
+  for (int i = 0; i < RVT_MAX_MARKERS; i++)
+    if (t->markers[i]) ghostty_tracked_grid_ref_free(t->markers[i]);
   if (t->search) ghostty_search_free(t->search);
   if (t->gesture) ghostty_selection_gesture_free(t->gesture, t->term);
   for (int i = 0; i < 4; i++)
@@ -775,6 +851,106 @@ RVT_API int rvt_gesture(RvtTerm* t, int kind, double x, double y, uint16_t vx, u
 done:
   unlock(t);
   return rc;
+}
+
+// ---- buffer access for the command tracker -------------------------------------------------
+
+typedef struct {
+  int32_t cursor_line;   // absolute
+  int32_t cursor_x;
+  int32_t viewport_top;  // absolute line at the top of the viewport
+  int32_t total_lines;   // scrollback + active rows
+  int32_t rows;
+  int32_t cols;
+  int32_t alternate;
+} RvtBufferInfo;
+
+RVT_API void rvt_buffer_info(RvtTerm* t, RvtBufferInfo* out) {
+  memset(out, 0, sizeof *out);
+  GhosttyTerminalScrollbar bar = { 0 };
+  uint16_t cols = 0, rows = 0, x = 0;
+  size_t total = 0;
+  lock(t);
+  out->cursor_line = cursor_line(t, &x);
+  out->cursor_x = x;
+  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &bar);
+  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_COLS, &cols);
+  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_ROWS, &rows);
+  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_TOTAL_ROWS, &total);
+  out->alternate = alternate_active(t) ? 1 : 0;
+  unlock(t);
+  out->viewport_top = (int32_t)bar.offset;
+  out->total_lines = (int32_t)total;
+  out->rows = rows;
+  out->cols = cols;
+}
+
+// Text of one absolute line, trailing blanks trimmed (xterm's translateToString(true)).
+// *wrapped: the line continues the one above (a soft wrap). Returns bytes written, or -1
+// when the line does not exist.
+RVT_API int rvt_line_text(RvtTerm* t, int32_t line, uint8_t* out, size_t cap, int* wrapped) {
+  *wrapped = 0;
+  if (line < 0) return -1;
+  int rc = -1;
+  lock(t);
+  uint16_t cols = 0;
+  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_COLS, &cols);
+  GhosttyGridRef a = GHOSTTY_INIT_SIZED(GhosttyGridRef), b = GHOSTTY_INIT_SIZED(GhosttyGridRef);
+  GhosttyPoint pa = { .tag = GHOSTTY_POINT_TAG_SCREEN, .value = { .coordinate = { .x = 0, .y = (uint32_t)line } } };
+  GhosttyPoint pb = { .tag = GHOSTTY_POINT_TAG_SCREEN, .value = { .coordinate = { .x = (uint16_t)(cols ? cols - 1 : 0), .y = (uint32_t)line } } };
+  if (cols && ghostty_terminal_grid_ref(t->term, pa, &a) == GHOSTTY_SUCCESS &&
+      ghostty_terminal_grid_ref(t->term, pb, &b) == GHOSTTY_SUCCESS) {
+    GhosttyRow row = 0;
+    if (ghostty_grid_ref_row(&a, &row) == GHOSTTY_SUCCESS) {
+      bool cont = false;
+      ghostty_row_get(row, GHOSTTY_ROW_DATA_WRAP_CONTINUATION, &cont);
+      *wrapped = cont ? 1 : 0;
+    }
+    GhosttySelection sel = GHOSTTY_INIT_SIZED(GhosttySelection);
+    sel.start = a;
+    sel.end = b;
+    GhosttyTerminalSelectionFormatOptions opts = GHOSTTY_INIT_SIZED(GhosttyTerminalSelectionFormatOptions);
+    opts.emit = GHOSTTY_FORMATTER_FORMAT_PLAIN;
+    opts.trim = true;
+    opts.unwrap = false;
+    opts.selection = &sel;
+    size_t written = 0;
+    GhosttyResult r = ghostty_terminal_selection_format_buf(t->term, opts, out, cap, &written);
+    if (r == GHOSTTY_SUCCESS) rc = (int)written;
+    else if (r == GHOSTTY_NO_VALUE) rc = 0; // an empty line
+    while (rc > 0 && (out[rc - 1] == '\n' || out[rc - 1] == '\r')) rc--;
+  }
+  unlock(t);
+  return rc;
+}
+
+RVT_API uint32_t rvt_marker_new(RvtTerm* t, int32_t line) {
+  lock(t);
+  uint32_t id = alternate_active(t) ? 0 : marker_new_locked(t, line);
+  unlock(t);
+  return id;
+}
+
+// Current absolute line of a marker, or -1 once its line has left the scrollback.
+RVT_API int32_t rvt_marker_line(RvtTerm* t, uint32_t id) {
+  if (id == 0 || id > RVT_MAX_MARKERS) return -1;
+  int32_t line = -1;
+  lock(t);
+  GhosttyTrackedGridRef ref = t->markers[id - 1];
+  GhosttyPointCoordinate p;
+  if (ref && ghostty_tracked_grid_ref_has_value(ref) &&
+      ghostty_tracked_grid_ref_point(ref, GHOSTTY_POINT_TAG_SCREEN, &p) == GHOSTTY_SUCCESS)
+    line = (int32_t)p.y;
+  unlock(t);
+  return line;
+}
+
+RVT_API void rvt_marker_free(RvtTerm* t, uint32_t id) {
+  if (id == 0 || id > RVT_MAX_MARKERS) return;
+  lock(t);
+  if (t->markers[id - 1]) ghostty_tracked_grid_ref_free(t->markers[id - 1]);
+  t->markers[id - 1] = NULL;
+  unlock(t);
 }
 
 typedef struct { const uint8_t* data; size_t len; } RvtPasteSource;
