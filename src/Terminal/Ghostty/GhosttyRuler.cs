@@ -8,14 +8,15 @@ using Windows.UI;
 namespace Resesh.Terminal.Ghostty;
 
 /// <summary>
-/// The annotation lane beside the scroll bar: one tick per command mark (colored by exit
-/// status) and per bookmark, positioned by absolute line over the whole scrollback. Clicking
-/// near a tick jumps to its command; hovering shows a card with the command and Jump / Copy
-/// output actions (terminal.html's ruler popover).
+/// The annotation lane beside the scroll bar, positioned by absolute line over the whole
+/// scrollback: command marks (colored by exit status) on the left half, keyword-highlight and
+/// find-match ticks on the right half (find on top, the current match in amber), bookmarks
+/// across the full width. Clicking near a command tick jumps to it; hovering shows a card with
+/// the command and Jump / Copy output actions (terminal.html's ruler popover).
 /// </summary>
 internal sealed class GhosttyRuler : Grid
 {
-    internal const double LaneWidth = 6;
+    internal const double LaneWidth = 8;
     private const double TickHeight = 3;
     private const double SnapPixels = 8;
 
@@ -27,6 +28,10 @@ internal sealed class GhosttyRuler : Grid
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _hideTimer;
     private IReadOnlyList<CommandMarkInfo> _marks = [];
     private IReadOnlyList<int> _bookmarks = [];
+    private IReadOnlyList<(int Line, uint Color)> _highlights = [];
+    private IReadOnlyList<int> _searchLines = [];
+    private int _currentSearchLine = -1;
+    private Color _match, _activeMatch;
     private long _total = 1;
     private CommandMarkInfo? _cardMark;
     private Color _ok, _fail, _unknown, _bookmark;
@@ -69,6 +74,8 @@ internal sealed class GhosttyRuler : Grid
         _fail = dark ? Rgb(0xFF5555) : Rgb(0xE45649);
         _unknown = dark ? Rgb(0x9E9E9E) : Rgb(0x6A6A6A);
         _bookmark = dark ? Rgb(0x61D6D6) : Rgb(0x0997B3);
+        _match = dark ? Rgb(0x7F8EA3) : Rgb(0x5A6B85);
+        _activeMatch = dark ? Rgb(0xF2CC60) : Rgb(0xC18401);
         _card.Background = new SolidColorBrush(dark ? Rgb(0x1E1E2B) : Rgb(0xF7F7FA));
         _card.BorderBrush = new SolidColorBrush(dark ? Rgb(0x3A3A50) : Rgb(0xC8C8D2));
         _cardCommand.Foreground = new SolidColorBrush(dark ? Rgb(0xE6EDF3) : Rgb(0x24242B));
@@ -76,10 +83,14 @@ internal sealed class GhosttyRuler : Grid
         Paint();
     }
 
-    internal void Update(IReadOnlyList<CommandMarkInfo> marks, IReadOnlyList<int> bookmarks, long totalLines)
+    internal void Update(IReadOnlyList<CommandMarkInfo> marks, IReadOnlyList<int> bookmarks, long totalLines,
+        IReadOnlyList<(int Line, uint Color)> highlights, IReadOnlyList<int> searchLines, int currentSearchLine)
     {
         _marks = marks;
         _bookmarks = bookmarks;
+        _highlights = highlights;
+        _searchLines = searchLines;
+        _currentSearchLine = currentSearchLine;
         _total = Math.Max(1, totalLines);
         Paint();
     }
@@ -91,26 +102,40 @@ internal sealed class GhosttyRuler : Grid
         _ticks.Children.Clear();
         if (ActualHeight <= 0)
             return;
+        // Lanes: 0 commands (left half), 1 highlights and 2 find (right half), 3 bookmarks
+        // (full width). Ticks in the same pixel row and lane are painted once; lanes painted
+        // later sit on top.
         var used = new HashSet<(int Bucket, int Lane)>();
-        void Tick(int line, Color color, int lane)
+        void Tick(int line, Color color, int lane, double opacity = 1)
         {
             var bucket = (int)(YForLine(line) / TickHeight);
             if (!used.Add((bucket, lane)))
-                return; // same pixel row already painted; later marks win nothing
+                return;
             var rect = new Rectangle
             {
-                Width = lane == 0 ? LaneWidth : LaneWidth / 2,
+                Width = lane == 3 ? LaneWidth : LaneWidth / 2,
                 Height = TickHeight - 1,
                 Fill = new SolidColorBrush(color),
+                Opacity = opacity,
             };
-            Canvas.SetLeft(rect, lane == 0 ? 0 : LaneWidth / 2);
+            Canvas.SetLeft(rect, lane is 1 or 2 ? LaneWidth / 2 : 0);
             Canvas.SetTop(rect, Math.Min(ActualHeight - TickHeight, bucket * TickHeight));
             _ticks.Children.Add(rect);
         }
-        foreach (var line in _bookmarks)
-            Tick(line, _bookmark, 1);
+        foreach (var (line, color) in _highlights)
+            Tick(line, Rgb(color), 1, opacity: 0.8); // slightly dim: find ticks stay dominant
+        foreach (var line in _searchLines)
+            if (line != _currentSearchLine)
+                Tick(line, _match, 2);
+        if (_currentSearchLine >= 0)
+        {
+            used.Remove(((int)(YForLine(_currentSearchLine) / TickHeight), 2));
+            Tick(_currentSearchLine, _activeMatch, 2);
+        }
         foreach (var mark in _marks)
             Tick(mark.Line, mark.Exit switch { 0 => _ok, not null => _fail, null => _unknown }, 0);
+        foreach (var line in _bookmarks)
+            Tick(line, _bookmark, 3);
     }
 
     private CommandMarkInfo? Nearest(double y)

@@ -2,22 +2,6 @@ using System.Runtime.InteropServices;
 
 namespace Resesh.Terminal.Ghostty;
 
-/// <summary>One viewport cell as reseshvt.dll flattens it (see RvtCell in reseshvt.c).</summary>
-[StructLayout(LayoutKind.Sequential)]
-internal struct GhosttyCell
-{
-    public uint Codepoint;
-    public uint Foreground;
-    public uint Background;
-    public ushort Flags;
-    public byte Wide;
-    public byte GraphemeLength;
-
-    public const ushort Bold = 1, Italic = 2, Underline = 4, Strike = 8, DefaultBackground = 16,
-        Faint = 32, Invisible = 64, Selected = 128, Match = 256, MatchCurrent = 512;
-    public const byte Narrow = 0, WideChar = 1, SpacerTail = 2, SpacerHead = 3;
-}
-
 [StructLayout(LayoutKind.Sequential)]
 internal struct GhosttyFrameInfo
 {
@@ -31,7 +15,7 @@ internal struct GhosttyFrameInfo
     public byte CursorBlinking;
     public byte Dirty;
     public ushort DirtyRows;
-    public ushort Reserved;
+    public ushort Alternate; // the alternate screen (vim, htop) is active
     public ulong ScrollTotal;
     public ulong ScrollOffset;
     public ulong ScrollLength;
@@ -126,6 +110,7 @@ internal static unsafe partial class GhosttyNative
     [LibraryImport(Library)] public static partial int rvt_search_set(IntPtr term, byte* needle, nuint length);
     [LibraryImport(Library)] public static partial void rvt_search_step(IntPtr term, int direction);
     [LibraryImport(Library)] public static partial void rvt_search_status(IntPtr term, out nuint total, out nuint current);
+    [LibraryImport(Library)] public static partial int rvt_search_lines(IntPtr term, int* output, int capacity, out int current);
     [LibraryImport(Library)] public static partial int rvt_paste(IntPtr term, byte* text, nuint length);
 
     public const int ScrollTop = 0, ScrollBottom = 1, ScrollDelta = 2, ScrollRow = 3;

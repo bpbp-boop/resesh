@@ -54,8 +54,11 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private bool _historyCapture;
     private string? _promptPlatform;
     private bool _annotationsPending;
+    private GhosttyOverviewIndex? _overview;
+    private readonly int[] _searchLineBuffer = new int[4096];
     private (ulong Total, ulong Offset, ulong Length) _scrollState;
     private readonly GhosttyRenderer _renderer = new();
+    private readonly GhosttyHighlighter _highlighter = new();
     private readonly object _termGate = new();
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _blinkTimer;
     private readonly List<byte[]> _earlyOutput = [];
@@ -450,7 +453,11 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         Rows = rows;
         EnsureCellBuffers();
         if (_term != IntPtr.Zero && (sizeChanged || fontChanged || !_readyRaised))
+        {
             GhosttyNative.rvt_resize(_term, (ushort)cols, (ushort)rows, (uint)_renderer.CellWidth, (uint)_renderer.CellHeight);
+            if (sizeChanged)
+                _overview?.Reset(); // reflow rewraps rows: indexed line numbers all move
+        }
         _forceFull = true;
         RequestFrame();
 
@@ -546,6 +553,18 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         GhosttyFrameInfo info;
         var full = _forceFull;
         var rows = GhosttyNative.rvt_read_frame(_term, _cells, (ushort)Columns, (ushort)Rows, _dirty, full ? 1 : 0, &info);
+        // Highlight only the rows just read: their cells are fresh, so tints never compound.
+        // The alternate screen (vim, htop) is never highlighted, as in terminal.html.
+        if (rows > 0 && _highlighter.HasRules && info.Alternate == 0)
+        {
+            for (var y = 0; y < Rows; y++)
+            {
+                if (_dirty[y] == 0)
+                    continue;
+                var row = y;
+                _highlighter.ApplyRow(new Span<GhosttyCell>(_cells + y * Columns, Columns), x => GraphemeAt(x, row));
+            }
+        }
 
         var cursorMoved = info.CursorY != _lastInfo.CursorY || info.CursorX != _lastInfo.CursorX
             || info.CursorVisible != _lastInfo.CursorVisible || info.CursorStyle != _lastInfo.CursorStyle;
@@ -661,6 +680,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         _scrollback = scrollback;
         _readOnly = readOnly;
         _fixed80Columns = fixed80Columns;
+        _highlighter.SetRules(highlights);
         Background = new SolidColorBrush(ToColor(_theme.Background));
     }
 
@@ -1040,6 +1060,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         if (_term != IntPtr.Zero)
             GhosttyNative.rvt_search_set(_term, null, 0);
         RequestFrame();
+        QueueAnnotations();
         FocusTerminal();
     }
 
@@ -1054,6 +1075,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             GhosttyNative.rvt_search_step(_term, 1); // select the newest match
         UpdateFindCount();
         RequestFrame();
+        QueueAnnotations();
     }
 
     private void StepFind(int direction)
@@ -1063,6 +1085,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         GhosttyNative.rvt_search_step(_term, direction);
         UpdateFindCount();
         RequestFrame();
+        QueueAnnotations();
     }
 
     private void UpdateFindCount()
@@ -1355,7 +1378,14 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         RefreshCommands()?.SetPromptPlatform(platform);
     }
 
-    public override void ApplyHighlights(IReadOnlyList<object> rules) { }
+    public override void ApplyHighlights(IReadOnlyList<object> rules)
+    {
+        _highlighter.SetRules(rules);
+        _overview?.Reset();
+        QueueAnnotations();
+        _forceFull = true; // re-read every row so old highlights go and new ones appear
+        RequestFrame();
+    }
 
     public override Task<(string Context, string? Platform)?> RequestPromptContextAsync() =>
         Task.FromResult(RefreshCommands()?.ReportPromptContext(force: true));
@@ -1389,6 +1419,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         _commands.PromptContext += (context, platform) => PromptContextChanged?.Invoke(context, platform);
         _commands.CommandMarked += command => CommandObserved?.Invoke(command);
         _commands.Changed += QueueAnnotations;
+        _overview = new GhosttyOverviewIndex(_commandBuffer, _highlighter);
         _commands.SetHistoryCapture(_historyCapture);
         if (_promptPlatform is not null)
             _commands.SetPromptPlatform(_promptPlatform);
@@ -1434,10 +1465,41 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             commands.OnOutputParsed();
             var marks = commands.Commands();
             _ruler.Visibility = _commandBuffer!.IsAlternate ? Visibility.Collapsed : Visibility.Visible;
-            _ruler.Update(marks, commands.BookmarkLines(), _commandBuffer.Length);
+            var moreToIndex = _overview?.Advance() ?? false;
+            _ruler.Update(marks, commands.BookmarkLines(), _commandBuffer.Length,
+                OverviewTicks(), SearchLines(out var currentSearchLine), currentSearchLine);
+            if (moreToIndex)
+                QueueAnnotations(); // keep indexing older scrollback at low priority
             if (_commandsPanel.IsOpen)
                 _commandsPanel.SetCommands(marks);
         });
+    }
+
+    /// <summary>Highlight-lane ticks: each indexed line in the color of its first overview rule.</summary>
+    private List<(int Line, uint Color)> OverviewTicks()
+    {
+        var ticks = new List<(int, uint)>();
+        if (_overview is null)
+            return ticks;
+        var rules = _highlighter.Rules;
+        foreach (var (line, mask) in _overview.Lines())
+        {
+            var index = System.Numerics.BitOperations.TrailingZeroCount(mask);
+            if (index < rules.Count)
+                ticks.Add((line, rules[index].Color));
+        }
+        return ticks;
+    }
+
+    private int[] SearchLines(out int current)
+    {
+        current = -1;
+        if (!_findOpen || _term == IntPtr.Zero)
+            return [];
+        int count;
+        fixed (int* lines = _searchLineBuffer)
+            count = GhosttyNative.rvt_search_lines(_term, lines, _searchLineBuffer.Length, out current);
+        return _searchLineBuffer[..count];
     }
 
     private void SetCommandsPanelOpen(bool open)

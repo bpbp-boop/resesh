@@ -86,7 +86,7 @@ typedef struct {
   uint8_t cursor_blinking;
   uint8_t dirty;          // GhosttyRenderStateDirty before cleaning
   uint16_t dirty_rows;
-  uint16_t reserved;
+  uint16_t alternate;     // the alternate screen is active
   uint64_t scroll_total;  // rows in the scrollable area
   uint64_t scroll_offset; // first viewport row within it
   uint64_t scroll_len;    // viewport rows
@@ -404,6 +404,7 @@ RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t row
   lock(t);
   ghostty_render_state_begin_update(t->rs, t->term);
   ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &bar);
+  info->alternate = alternate_active(t) ? 1 : 0;
   uint32_t old_hash = t->span_hash;
   collect_spans(t, rows);
   if (t->span_hash != old_hash) force_all = 1; // highlights moved: repaint every row
@@ -962,6 +963,36 @@ RVT_API void rvt_marker_free(RvtTerm* t, uint32_t id) {
   if (t->markers[id - 1]) ghostty_tracked_grid_ref_free(t->markers[id - 1]);
   t->markers[id - 1] = NULL;
   unlock(t);
+}
+
+// Absolute lines of every find match (newest first, up to cap) for the ruler, and the
+// selected match's line in *current (-1 when none). Returns the number written.
+RVT_API int rvt_search_lines(RvtTerm* t, int32_t* out, int cap, int32_t* current) {
+  *current = -1;
+  if (cap <= 0) return 0;
+  int n = 0;
+  GhosttySelection* buf = (GhosttySelection*)calloc((size_t)cap, sizeof(GhosttySelection));
+  if (!buf) return 0;
+  lock(t);
+  if (t->searching && t->search) {
+    GhosttySelectionBuffer matches = { buf, (size_t)cap, 0 };
+    GhosttyResult r = ghostty_search_get(t->search, GHOSTTY_SEARCH_DATA_MATCHES, &matches);
+    // More matches than fit leaves the buffer unfilled: no ticks rather than wrong ones.
+    size_t count = r == GHOSTTY_SUCCESS ? matches.len : 0;
+    for (size_t i = 0; i < count && n < cap; i++) {
+      GhosttyPointCoordinate p;
+      if (ghostty_terminal_point_from_grid_ref(t->term, &buf[i].start, GHOSTTY_POINT_TAG_SCREEN, &p) == GHOSTTY_SUCCESS)
+        out[n++] = (int32_t)p.y;
+    }
+    GhosttySelection selected = GHOSTTY_INIT_SIZED(GhosttySelection);
+    GhosttyPointCoordinate p;
+    if (ghostty_search_get(t->search, GHOSTTY_SEARCH_DATA_SELECTED_MATCH, &selected) == GHOSTTY_SUCCESS &&
+        ghostty_terminal_point_from_grid_ref(t->term, &selected.start, GHOSTTY_POINT_TAG_SCREEN, &p) == GHOSTTY_SUCCESS)
+      *current = (int32_t)p.y;
+  }
+  unlock(t);
+  free(buf);
+  return n;
 }
 
 typedef struct { const uint8_t* data; size_t len; } RvtPasteSource;
