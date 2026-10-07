@@ -54,6 +54,9 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private bool _historyCapture;
     private string? _promptPlatform;
     private bool _annotationsPending;
+    private const int AnnotationIntervalMs = 100;
+    private long _lastAnnotationsMs;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _annotationTimer;
 
     // Rewind and recording playback: the grid is pinned to the recorded size, replays run on a
     // worker thread (the shim serializes terminal access) while rendering pauses.
@@ -1471,29 +1474,46 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     }
 
     /// <summary>Coalesces ruler/panel refreshes and the tracker's after-output work to one
-    /// pass per dispatcher turn.</summary>
+    /// pass per dispatcher turn, and at most one per 100 ms: streaming output asks every frame.</summary>
     private void QueueAnnotations()
     {
         if (_annotationsPending || _disposed)
             return;
         _annotationsPending = true;
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        var wait = _lastAnnotationsMs + AnnotationIntervalMs - Environment.TickCount64;
+        if (wait > 0)
         {
-            _annotationsPending = false;
-            if (_disposed || RefreshCommands() is not { } commands)
-                return;
-            commands.NoteOutput(_lastObservedMs);
-            commands.OnOutputParsed();
-            var marks = commands.Commands();
-            _ruler.Visibility = _commandBuffer!.IsAlternate ? Visibility.Collapsed : Visibility.Visible;
-            var moreToIndex = _overview?.Advance() ?? false;
-            _ruler.Update(marks, commands.BookmarkLines(), _commandBuffer.Length,
-                OverviewTicks(), SearchLines(out var currentSearchLine), currentSearchLine);
-            if (moreToIndex)
-                QueueAnnotations(); // keep indexing older scrollback at low priority
-            if (_commandsPanel.IsOpen)
-                _commandsPanel.SetCommands(marks);
-        });
+            if (_annotationTimer is null)
+            {
+                _annotationTimer = DispatcherQueue.CreateTimer();
+                _annotationTimer.IsRepeating = false;
+                _annotationTimer.Tick += (_, _) =>
+                    DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RunAnnotations);
+            }
+            _annotationTimer.Interval = TimeSpan.FromMilliseconds(wait);
+            _annotationTimer.Start();
+            return;
+        }
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RunAnnotations);
+    }
+
+    private void RunAnnotations()
+    {
+        _annotationsPending = false;
+        _lastAnnotationsMs = Environment.TickCount64;
+        if (_disposed || RefreshCommands() is not { } commands)
+            return;
+        commands.NoteOutput(_lastObservedMs);
+        commands.OnOutputParsed();
+        var marks = commands.Commands();
+        _ruler.Visibility = _commandBuffer!.IsAlternate ? Visibility.Collapsed : Visibility.Visible;
+        var moreToIndex = _overview?.Advance() ?? false;
+        _ruler.Update(marks, commands.BookmarkLines(), _commandBuffer.Length,
+            OverviewTicks(), SearchLines(out var currentSearchLine), currentSearchLine);
+        if (moreToIndex)
+            QueueAnnotations(); // keep indexing older scrollback at low priority
+        if (_commandsPanel.IsOpen)
+            _commandsPanel.SetCommands(marks);
     }
 
     /// <summary>Highlight-lane ticks: each indexed line in the color of its first overview rule.</summary>

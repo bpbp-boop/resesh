@@ -63,6 +63,7 @@ internal sealed unsafe class GhosttyCommandBuffer(Func<IntPtr> terminal) : IComm
     public int Rows => _info.Rows;
     public int Length => _info.TotalLines;
 
+    [System.Runtime.CompilerServices.SkipLocalsInit] // the shim fills the buffer before it is read
     private (string? Text, bool Wrapped) Line(int line)
     {
         if (_lines.TryGetValue(line, out var cached))

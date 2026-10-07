@@ -244,6 +244,17 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
         return result;
     }
 
+    // The brush's Color setter is a COM call; consecutive runs mostly share a color.
+    private Color4 _brushColor = new(1, 1, 1, 1);
+
+    private void SetBrush(Color4 color)
+    {
+        if (color.Equals(_brushColor))
+            return;
+        _brushColor = color;
+        _brush.Color = color;
+    }
+
     private static Color4 Rgb(uint c, float alpha = 1f) =>
         new(((c >> 16) & 0xFF) / 255f, ((c >> 8) & 0xFF) / 255f, (c & 0xFF) / 255f, alpha);
 
@@ -266,7 +277,7 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
         _dc.BeginDraw();
         if (full)
         {
-            _brush.Color = Rgb(info.DefaultBackground);
+            SetBrush(Rgb(info.DefaultBackground));
             _dc.FillRectangle(new Rect(0, 0, PixelWidth, PixelHeight), _brush);
         }
         for (var y = 0; y < rows; y++)
@@ -288,7 +299,7 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
     private void DrawRow(GhosttyCell* row, int cols, int y, uint defaultBackground, uint selectionColor)
     {
         float top = y * CellHeight;
-        _brush.Color = Rgb(defaultBackground);
+        SetBrush(Rgb(defaultBackground));
         _dc.FillRectangle(new Rect(0, top, PixelWidth, CellHeight), _brush);
 
         // Background runs: selection, then find matches, override the cell background.
@@ -298,7 +309,7 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
             var start = x;
             while (x < cols && BackgroundOf(row[x], selectionColor) == bg)
                 x++;
-            _brush.Color = Rgb(bg);
+            SetBrush(Rgb(bg));
             _dc.FillRectangle(new Rect(OriginX + start * CellWidth, top, (x - start) * CellWidth, CellHeight), _brush);
         }
 
@@ -344,7 +355,7 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
                 x++;
             }
             if (n == 0) { x++; continue; }
-            _brush.Color = Rgb(fg, faint ? 0.55f : 1f);
+            SetBrush(Rgb(fg, faint ? 0.55f : 1f));
             var run = new GlyphRun
             {
                 FontFace = _faces[style][face],
@@ -386,7 +397,7 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
         var text = c.GraphemeLength > 1 ? GraphemeAt?.Invoke(x, y) : null;
         text ??= char.ConvertFromUtf32((int)c.Codepoint);
         var width = (c.Wide == GhosttyCell.WideChar ? 2 : 1) * CellWidth;
-        _brush.Color = Rgb(c.Foreground);
+        SetBrush(Rgb(c.Foreground));
         var emoji = IsEmojiPresentation(c.Codepoint) || text.Contains('️');
         if (emoji)
         {
@@ -406,7 +417,7 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
     {
         float left = OriginX + info.CursorX * CellWidth, top = info.CursorY * CellHeight;
         var width = cell->Wide == GhosttyCell.WideChar ? 2 * CellWidth : CellWidth;
-        _brush.Color = Rgb(info.CursorColor);
+        SetBrush(Rgb(info.CursorColor));
         if (!focused || info.CursorStyle == 3)
         {
             _dc.DrawRectangle(new Rect(left + 0.5f, top + 0.5f, width - 1, CellHeight - 1), _brush, 1);
@@ -429,7 +440,7 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
         var (face, glyph) = Lookup(cell->Codepoint, style);
         if (_isEmojiFace[face] || cell->GraphemeLength > 1)
             return;
-        _brush.Color = Rgb(info.DefaultBackground);
+        SetBrush(Rgb(info.DefaultBackground));
         var run = new GlyphRun
         {
             FontFace = _faces[style][face],

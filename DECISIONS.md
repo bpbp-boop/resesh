@@ -884,4 +884,12 @@ band). A minimal WinUI 2.3.6 app reproduced this with a one-element XAML dialog.
 - 2026-10-08: ghostty is the default for live tabs and playback. RESESH_TERMINAL_SURFACE=webview
   keeps WebView2 + xterm.js, which is also the automatic fallback when the native libraries are
   missing; Release builds warn and the installer fails without them.
+- 2026-10-08 profiling (dotnet-trace thread-time + gc-verbose, in-app flood of 8 MB logs):
+  the parser was never the cost. Fixed: the recorder flushed per fragment (AutoFlush, four
+  writes per .log line) - now at most every 250 ms with a timer for the tail, and cast lines
+  go through a reused Utf8JsonWriter; the ruler painted one XAML Rectangle per tick - now one
+  WriteableBitmap, uploaded only when pixels change; annotations ran every frame - now at most
+  every 100 ms; highlights re-matched rows that only scrolled - now cached by row text; the D2D
+  brush color is set only when it changes. App CPU for the logs flood went 5.9 s -> 3.8 s
+  (WebView2 9.2 s -> 8.1 s, it shares the recorder), tiny-writes 9.0 s -> 3.2 s.
 - Not yet: IME composition, UIA text.

@@ -8,11 +8,13 @@ namespace Resesh.Terminal.Ghostty;
 /// rule's regex runs over a row's text, and matched cells take the rule color; "bold" adds a
 /// translucent tint of that color behind the text and "underline" underlines it. Later rules
 /// paint over earlier ones, at most 40 matches per row. Rows are matched as the renderer reads
-/// them, so only what is on screen is ever scanned.
+/// them, so only what is on screen is ever scanned, and matches are cached by row text: output
+/// scrolling past re-reads the same rows at new positions every frame.
 /// </summary>
 internal sealed class GhosttyHighlighter
 {
     private const int MaxMatchesPerRow = 40;
+    private const int MaxCachedRows = 4096;
     private const double TintAlpha = 0.22;
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(50);
 
@@ -22,6 +24,7 @@ internal sealed class GhosttyHighlighter
     private readonly StringBuilder _text = new();
     private readonly List<int> _starts = [];
     private readonly List<int> _ends = [];
+    private readonly Dictionary<string, (int Index, int Length, int Rule)[]> _matches = new(StringComparer.Ordinal);
 
     public IReadOnlyList<Rule> Rules => _rules;
     public bool HasRules => _rules.Count > 0;
@@ -45,6 +48,7 @@ internal sealed class GhosttyHighlighter
                 Read<bool?>(item, "underline") ?? false, Read<bool?>(item, "showInOverview") ?? false));
         }
         _rules = rules;
+        _matches.Clear();
     }
 
     private static T? Read<T>(object item, string name)
@@ -99,14 +103,28 @@ internal sealed class GhosttyHighlighter
             if (cell.Wide == GhosttyCell.SpacerTail)
                 continue;
             var width = cell.Wide == GhosttyCell.WideChar ? 2 : 1;
-            var chars = cell.Codepoint == 0 ? " "
-                : cell.GraphemeLength > 1 ? grapheme?.Invoke(x) ?? char.ConvertFromUtf32((int)cell.Codepoint)
-                : char.ConvertFromUtf32((int)cell.Codepoint);
-            foreach (var c in chars)
+            if (cell.GraphemeLength > 1 && grapheme?.Invoke(x) is { } cluster)
             {
-                _text.Append(c);
-                _starts.Add(x);
-                _ends.Add(x + width);
+                foreach (var c in cluster)
+                    Append(c, x, width);
+            }
+            else if (cell.Codepoint == 0)
+            {
+                Append(' ', x, width);
+            }
+            else if (cell.Codepoint < 0x10000)
+            {
+                Append((char)cell.Codepoint, x, width);
+            }
+            else if (cell.Codepoint <= 0x10FFFF)
+            {
+                var v = cell.Codepoint - 0x10000;
+                Append((char)(0xD800 + (v >> 10)), x, width);
+                Append((char)(0xDC00 + (v & 0x3FF)), x, width);
+            }
+            else
+            {
+                Append('\uFFFD', x, width);
             }
         }
         var length = _text.Length;
@@ -114,6 +132,13 @@ internal sealed class GhosttyHighlighter
             length--;
         _text.Length = length;
         return _text.ToString();
+    }
+
+    private void Append(char c, int x, int width)
+    {
+        _text.Append(c);
+        _starts.Add(x);
+        _ends.Add(x + width);
     }
 
     /// <summary>Applies every rule to one freshly read row (never to an already highlighted
@@ -125,41 +150,55 @@ internal sealed class GhosttyHighlighter
         var text = RowText(row, grapheme);
         if (text.Length == 0)
             return;
-        var budget = MaxMatchesPerRow;
-        foreach (var rule in _rules)
+        if (!_matches.TryGetValue(text, out var matches))
         {
-            if (budget == 0)
-                break;
+            matches = FindMatches(text);
+            if (_matches.Count >= MaxCachedRows)
+                _matches.Clear();
+            _matches[text] = matches;
+        }
+        foreach (var (index, length, ruleIndex) in matches)
+        {
+            var rule = _rules[ruleIndex];
+            var start = _starts[index];
+            var end = _ends[index + length - 1];
+            for (var x = start; x < end && x < row.Length; x++)
+            {
+                ref var cell = ref row[x];
+                cell.Foreground = rule.Color;
+                if (rule.Tint)
+                {
+                    cell.Background = Blend(cell.Background, rule.Color, TintAlpha);
+                    cell.Flags &= unchecked((ushort)~GhosttyCell.DefaultBackground);
+                }
+                if (rule.Underline)
+                    cell.Flags |= GhosttyCell.Underline;
+            }
+        }
+    }
+
+    /// <summary>Every rule's matches in a row's text, in paint order, at most 40.</summary>
+    private (int Index, int Length, int Rule)[] FindMatches(string text)
+    {
+        List<(int, int, int)>? found = null;
+        for (var i = 0; i < _rules.Count && (found?.Count ?? 0) < MaxMatchesPerRow; i++)
+        {
             Match match;
             try
             {
-                match = rule.Pattern.Match(text);
+                match = _rules[i].Pattern.Match(text);
             }
             catch (RegexMatchTimeoutException)
             {
                 continue;
             }
-            for (; match.Success && budget > 0; match = NextMatch(match))
+            for (; match.Success && (found?.Count ?? 0) < MaxMatchesPerRow; match = NextMatch(match))
             {
-                if (match.Length == 0)
-                    continue;
-                var start = _starts[match.Index];
-                var end = _ends[match.Index + match.Length - 1];
-                for (var x = start; x < end && x < row.Length; x++)
-                {
-                    ref var cell = ref row[x];
-                    cell.Foreground = rule.Color;
-                    if (rule.Tint)
-                    {
-                        cell.Background = Blend(cell.Background, rule.Color, TintAlpha);
-                        cell.Flags &= unchecked((ushort)~GhosttyCell.DefaultBackground);
-                    }
-                    if (rule.Underline)
-                        cell.Flags |= GhosttyCell.Underline;
-                }
-                budget--;
+                if (match.Length > 0)
+                    (found ??= []).Add((match.Index, match.Length, i));
             }
         }
+        return found is null ? [] : [.. found];
     }
 
     private static Match NextMatch(Match match)

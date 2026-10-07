@@ -1,7 +1,10 @@
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.UI;
 
@@ -12,7 +15,8 @@ namespace Resesh.Terminal.Ghostty;
 /// scrollback: command marks (colored by exit status) on the left half, keyword-highlight and
 /// find-match ticks on the right half (find on top, the current match in amber), bookmarks
 /// across the full width. Clicking near a command tick jumps to it; hovering shows a card with
-/// the command and Jump / Copy output actions (terminal.html's ruler popover).
+/// the command and Jump / Copy output actions (terminal.html's ruler popover). Ticks are painted
+/// into one bitmap: the lane repaints with every batch of output, too often for an element per tick.
 /// </summary>
 internal sealed class GhosttyRuler : Grid
 {
@@ -20,7 +24,10 @@ internal sealed class GhosttyRuler : Grid
     private const double TickHeight = 3;
     private const double SnapPixels = 8;
 
-    private readonly Canvas _ticks = new() { IsHitTestVisible = false };
+    private readonly Image _ticks = new() { IsHitTestVisible = false, Stretch = Stretch.Fill };
+    private WriteableBitmap? _bitmap;
+    private uint[] _pixels = [];
+    private uint[] _shown = [];
     private readonly Border _card = new();
     private readonly TextBlock _cardCommand = new();
     private readonly TextBlock _cardMeta = new();
@@ -99,9 +106,24 @@ internal sealed class GhosttyRuler : Grid
 
     private void Paint()
     {
-        _ticks.Children.Clear();
-        if (ActualHeight <= 0)
+        var scale = XamlRoot?.RasterizationScale ?? 1;
+        var width = Math.Max(2, (int)Math.Round(LaneWidth * scale));
+        var height = (int)Math.Round(ActualHeight * scale);
+        if (height <= 0)
+        {
+            _ticks.Source = _bitmap = null;
             return;
+        }
+        var fresh = false;
+        if (_bitmap is null || _bitmap.PixelWidth != width || _bitmap.PixelHeight != height)
+        {
+            _bitmap = new WriteableBitmap(width, height);
+            _pixels = new uint[width * height];
+            _shown = new uint[width * height];
+            _ticks.Source = _bitmap;
+            fresh = true;
+        }
+        Array.Clear(_pixels);
         // Lanes: 0 commands (left half), 1 highlights and 2 find (right half), 3 bookmarks
         // (full width). Ticks in the same pixel row and lane are painted once; lanes painted
         // later sit on top.
@@ -111,16 +133,16 @@ internal sealed class GhosttyRuler : Grid
             var bucket = (int)(YForLine(line) / TickHeight);
             if (!used.Add((bucket, lane)))
                 return;
-            var rect = new Rectangle
-            {
-                Width = lane == 3 ? LaneWidth : LaneWidth / 2,
-                Height = TickHeight - 1,
-                Fill = new SolidColorBrush(color),
-                Opacity = opacity,
-            };
-            Canvas.SetLeft(rect, lane is 1 or 2 ? LaneWidth / 2 : 0);
-            Canvas.SetTop(rect, Math.Min(ActualHeight - TickHeight, bucket * TickHeight));
-            _ticks.Children.Add(rect);
+            var top = Math.Max(0, Math.Min(ActualHeight - TickHeight, bucket * TickHeight));
+            var y0 = (int)Math.Round(top * scale);
+            var y1 = Math.Min(height, Math.Max(y0 + 1, (int)Math.Round((top + TickHeight - 1) * scale)));
+            var x0 = lane is 1 or 2 ? width / 2 : 0;
+            var x1 = lane == 0 ? width / 2 : width;
+            // premultiplied BGRA
+            var a = (uint)Math.Round(255 * opacity);
+            var pixel = a << 24 | (color.R * a / 255) << 16 | (color.G * a / 255) << 8 | color.B * a / 255;
+            for (var y = y0; y < y1; y++)
+                _pixels.AsSpan(y * width + x0, x1 - x0).Fill(pixel);
         }
         foreach (var (line, color) in _highlights)
             Tick(line, Rgb(color), 1, opacity: 0.8); // slightly dim: find ticks stay dominant
@@ -136,6 +158,13 @@ internal sealed class GhosttyRuler : Grid
             Tick(mark.Line, mark.Exit switch { 0 => _ok, not null => _fail, null => _unknown }, 0);
         foreach (var line in _bookmarks)
             Tick(line, _bookmark, 3);
+
+        if (!fresh && _pixels.AsSpan().SequenceEqual(_shown))
+            return;
+        _pixels.CopyTo(_shown, 0);
+        using (var stream = _bitmap.PixelBuffer.AsStream())
+            stream.Write(MemoryMarshal.AsBytes(_pixels.AsSpan()));
+        _bitmap.Invalidate();
     }
 
     private CommandMarkInfo? Nearest(double y)

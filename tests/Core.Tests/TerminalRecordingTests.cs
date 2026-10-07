@@ -31,6 +31,33 @@ public sealed class TerminalRecordingTests : IDisposable
     }
 
     [Fact]
+    public void CastLinesMatchTheSerializerAndReachDiskWhileRecording()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(80, 24, startedAt: started);
+        var path = capture.StartRecording(_directory, "flush");
+        const string text = "tab\t quote\" slash\\ \u001b[1m é 😀 <&>\r\n";
+        capture.CaptureOutput(Encoding.UTF8.GetBytes(text), started.AddSeconds(1).ToUnixTimeMilliseconds());
+
+        // The tail is flushed by a timer within 250 ms, while the recording is still open.
+        string[] lines = [];
+        for (var attempt = 0; attempt < 100 && lines.Length < 2; attempt++)
+        {
+            Thread.Sleep(20);
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            lines = new StreamReader(stream).ReadToEnd().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
+        }
+        Assert.Equal(2, lines.Length);
+        var options = new System.Text.Json.JsonSerializerOptions
+        {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        };
+        var time = System.Text.Json.JsonDocument.Parse(lines[1]).RootElement[0].GetDouble();
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(new object[] { time, "o", text }, options), lines[1]);
+        capture.StopRecording();
+    }
+
+    [Fact]
     public void RewindTrimKeepsAFullStateAnchor()
     {
         var started = DateTimeOffset.UtcNow;

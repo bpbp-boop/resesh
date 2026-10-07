@@ -400,11 +400,24 @@ internal sealed class TerminalDiskRecorder : IDisposable
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    private readonly StreamWriter _castWriter;
+    // Output arrives in many small chunks; a write per chunk cost seconds of the reader thread
+    // under a flood. Files are flushed at most every 250 ms, and a timer flushes the tail, so a
+    // killed process loses at most that much.
+    private const int FlushIntervalMs = 250;
+
+    private static readonly byte[] NewLine = Encoding.UTF8.GetBytes(Environment.NewLine);
+
+    private readonly FileStream _cast;
+    private readonly ArrayBufferWriter<byte> _castLine = new(4096);
+    private readonly Utf8JsonWriter _castJson;
     private readonly StreamWriter _plainWriter;
     private readonly AnsiPlainTextRenderer _plainRenderer = new();
     private readonly DateTimeOffset _startedAt;
     private readonly double _captureOffset;
+    private readonly object _gate = new();
+    private readonly Timer _flushTimer;
+    private long _lastFlushMs;
+    private bool _flushScheduled;
     private bool _disposed;
 
     public TerminalDiskRecorder(
@@ -421,16 +434,17 @@ internal sealed class TerminalDiskRecorder : IDisposable
         _startedAt = startedAt;
         _captureOffset = captureOffset;
 
-        StreamWriter? castWriter = null;
+        FileStream? cast = null;
         try
         {
-            castWriter = OpenWriter(paths.CastPath);
-            _plainWriter = OpenWriter(paths.LogPath);
-            _castWriter = castWriter;
+            cast = OpenFile(paths.CastPath);
+            _plainWriter = new StreamWriter(OpenFile(paths.LogPath), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                bufferSize: 16 * 1024);
+            _cast = cast;
         }
         catch
         {
-            castWriter?.Dispose();
+            cast?.Dispose();
             TryDelete(paths.CastPath);
             TryDelete(paths.LogPath);
             throw;
@@ -449,7 +463,12 @@ internal sealed class TerminalDiskRecorder : IDisposable
                 ["SHELL"] = "resesh",
             },
         };
-        _castWriter.WriteLine(JsonSerializer.Serialize(header, JsonOptions));
+        _cast.Write(JsonSerializer.SerializeToUtf8Bytes(header, JsonOptions));
+        _cast.Write(NewLine);
+        _cast.Flush();
+        _castJson = new Utf8JsonWriter(_castLine, new JsonWriterOptions { Encoder = JsonOptions.Encoder });
+        _lastFlushMs = Environment.TickCount64;
+        _flushTimer = new Timer(_ => FlushScheduled());
     }
 
     public string Path { get; }
@@ -457,33 +476,87 @@ internal sealed class TerminalDiskRecorder : IDisposable
 
     public void Write(TerminalRecordingEvent item)
     {
-        if (_disposed)
-            return;
+        lock (_gate)
+        {
+            if (_disposed)
+                return;
 
-        var relativeTime = Math.Max(0, item.Time - _captureOffset);
-        _castWriter.WriteLine(JsonSerializer.Serialize(new object[] { relativeTime, item.Type, item.Data }, JsonOptions));
-        if (!item.IsOutput)
-            return;
+            var relativeTime = Math.Max(0, item.Time - _captureOffset);
+            // [time, type, data], as JsonSerializer writes it, without the intermediate string
+            _castLine.ResetWrittenCount();
+            _castJson.Reset(_castLine);
+            _castJson.WriteStartArray();
+            _castJson.WriteNumberValue(relativeTime);
+            _castJson.WriteStringValue(item.Type);
+            _castJson.WriteStringValue(item.Data);
+            _castJson.WriteEndArray();
+            _castJson.Flush();
+            _cast.Write(_castLine.WrittenSpan);
+            _cast.Write(NewLine);
+            if (item.IsOutput)
+            {
+                var eventTime = _startedAt.AddSeconds(relativeTime);
+                foreach (var line in _plainRenderer.Feed(item.Data, eventTime))
+                    WritePlainLine(line);
+            }
 
-        var eventTime = _startedAt.AddSeconds(relativeTime);
-        foreach (var line in _plainRenderer.Feed(item.Data, eventTime))
-            WritePlainLine(line);
+            var sinceFlush = Environment.TickCount64 - _lastFlushMs;
+            if (sinceFlush >= FlushIntervalMs)
+            {
+                FlushLocked();
+            }
+            else if (!_flushScheduled)
+            {
+                _flushScheduled = true;
+                _flushTimer.Change(FlushIntervalMs - sinceFlush, Timeout.Infinite);
+            }
+        }
+    }
+
+    private void FlushScheduled()
+    {
+        lock (_gate)
+        {
+            if (_disposed || !_flushScheduled)
+                return;
+            try
+            {
+                FlushLocked();
+            }
+            catch (IOException)
+            {
+                // The next write or Dispose reports it.
+            }
+        }
+    }
+
+    private void FlushLocked()
+    {
+        _flushScheduled = false;
+        _lastFlushMs = Environment.TickCount64;
+        _cast.Flush();
+        _plainWriter.Flush();
     }
 
     public void Dispose()
     {
-        if (_disposed)
-            return;
-        _disposed = true;
-        foreach (var line in _plainRenderer.Flush())
-            WritePlainLine(line);
-        try
+        lock (_gate)
         {
-            _castWriter.Dispose();
-        }
-        finally
-        {
-            _plainWriter.Dispose();
+            if (_disposed)
+                return;
+            _disposed = true;
+            _flushTimer.Dispose();
+            foreach (var line in _plainRenderer.Flush())
+                WritePlainLine(line);
+            try
+            {
+                _castJson.Dispose();
+                _cast.Dispose();
+            }
+            finally
+            {
+                _plainWriter.Dispose();
+            }
         }
     }
 
@@ -501,12 +574,8 @@ internal sealed class TerminalDiskRecorder : IDisposable
         _plainWriter.WriteLine(line.Text);
     }
 
-    private static StreamWriter OpenWriter(string path) => new(
-        new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read),
-        new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
-    {
-        AutoFlush = true,
-    };
+    private static FileStream OpenFile(string path) =>
+        new(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read, bufferSize: 64 * 1024);
 
     private static void TryDelete(string path)
     {
