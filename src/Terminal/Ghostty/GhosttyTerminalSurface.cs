@@ -25,7 +25,19 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private const long KeyframeMinimumMilliseconds = 1000;
     private const long KeyframeMaximumMilliseconds = 10000;
 
+    private const double ScrollBarWidth = 14;
+
     private readonly SwapChainPanel _panel = new();
+    private readonly Microsoft.UI.Xaml.Controls.Primitives.ScrollBar _scrollBar = new()
+    {
+        Orientation = Orientation.Vertical,
+        IndicatorMode = Microsoft.UI.Xaml.Controls.Primitives.ScrollingIndicatorMode.MouseIndicator,
+        Width = ScrollBarWidth,
+        SmallChange = 1,
+        IsTabStop = false,
+    };
+    private bool _updatingScrollBar;
+    private (ulong Total, ulong Offset, ulong Length) _scrollState;
     private readonly GhosttyRenderer _renderer = new();
     private readonly object _termGate = new();
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _blinkTimer;
@@ -112,7 +124,14 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         UseSystemFocusVisuals = false;
         Background = new SolidColorBrush(ToColor(_theme.Background));
         _panel.IsHitTestVisible = false;
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ScrollBarWidth) });
         Children.Add(_panel);
+        SetColumn(_scrollBar, 1);
+        Children.Add(_scrollBar);
+        // ValueChanged, not Scroll: Scroll fires only for pointer input, while keyboard and
+        // UI Automation (screen readers, tests) move the bar through its value.
+        _scrollBar.ValueChanged += OnScrollBarValueChanged;
 
         _renderer.GraphemeAt = GraphemeAt;
         _blinkTimer = DispatcherQueue.CreateTimer();
@@ -124,7 +143,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             RequestFrame();
         };
 
-        SizeChanged += (_, _) => Relayout();
+        _panel.SizeChanged += (_, _) => Relayout();
         _panel.CompositionScaleChanged += (_, _) => Relayout();
         Loaded += (_, _) => Relayout();
         Unloaded += (_, _) => UnhookRendering();
@@ -353,7 +372,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 
     private void Relayout()
     {
-        if (_disposed || ActualWidth <= 0 || ActualHeight <= 0)
+        if (_disposed || _panel.ActualWidth <= 0 || _panel.ActualHeight <= 0)
             return;
         var scale = _panel.CompositionScaleX > 0 ? _panel.CompositionScaleX : (float)(XamlRoot?.RasterizationScale ?? 1);
         var fontChanged = scale != _fontScale;
@@ -362,8 +381,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             _fontScale = scale;
             _renderer.SetFont(_fontFamily, EffectiveFontSize * scale);
         }
-        var pixelWidth = (int)Math.Round(ActualWidth * scale);
-        var pixelHeight = (int)Math.Round(ActualHeight * scale);
+        var pixelWidth = (int)Math.Round(_panel.ActualWidth * scale);
+        var pixelHeight = (int)Math.Round(_panel.ActualHeight * scale);
         if (_renderer.Resize(pixelWidth, pixelHeight))
             AttachSwapChain();
         _renderer.SetCompositionScale(scale, scale);
@@ -486,6 +505,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             if (blink) _blinkTimer.Start(); else { _blinkTimer.Stop(); _cursorBlinkOn = true; }
         }
         _lastInfo = info;
+        UpdateScrollBar(info);
         if (info.CursorVisible != 0 && info.CursorY < Rows)
             _dirty[info.CursorY] = 1;
         if (_lastCursorRow >= 0 && _lastCursorRow < Rows)
@@ -502,6 +522,39 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     }
 
     private bool _cursorRowDirty;
+
+    /// <summary>Mirrors libghostty-vt's scroll state; it has no change event, so every frame
+    /// compares against the last values.</summary>
+    private void UpdateScrollBar(in GhosttyFrameInfo info)
+    {
+        var state = (info.ScrollTotal, info.ScrollOffset, info.ScrollLength);
+        if (state == _scrollState)
+            return;
+        _scrollState = state;
+        var maximum = info.ScrollTotal > info.ScrollLength ? info.ScrollTotal - info.ScrollLength : 0;
+        _updatingScrollBar = true;
+        try
+        {
+            _scrollBar.Minimum = 0;
+            _scrollBar.Maximum = maximum;
+            _scrollBar.ViewportSize = Math.Max(1, info.ScrollLength);
+            _scrollBar.LargeChange = Math.Max(1, info.ScrollLength - 1);
+            _scrollBar.Value = Math.Min(info.ScrollOffset, maximum);
+            _scrollBar.IsEnabled = maximum > 0;
+        }
+        finally
+        {
+            _updatingScrollBar = false;
+        }
+    }
+
+    private void OnScrollBarValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs args)
+    {
+        if (_updatingScrollBar || _disposed || _term == IntPtr.Zero)
+            return;
+        GhosttyNative.rvt_scroll(_term, GhosttyNative.ScrollRow, (nint)Math.Round(args.NewValue));
+        RequestFrame();
+    }
 
     private void MarkCursorDirty() => _cursorRowDirty = true;
 
