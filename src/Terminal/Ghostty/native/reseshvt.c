@@ -682,6 +682,17 @@ RVT_API int rvt_select(RvtTerm* t, uint16_t x0, uint16_t y0, uint16_t x1, uint16
   return rc;
 }
 
+// Selects everything selectable (scrollback included). Returns 0 on success.
+RVT_API int rvt_select_all(RvtTerm* t) {
+  int rc = -1;
+  lock(t);
+  GhosttySelection sel = GHOSTTY_INIT_SIZED(GhosttySelection);
+  if (ghostty_terminal_select_all(t->term, &sel) == GHOSTTY_SUCCESS)
+    rc = ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SELECTION, &sel) == GHOSTTY_SUCCESS ? 0 : -1;
+  unlock(t);
+  return rc;
+}
+
 RVT_API void rvt_select_clear(RvtTerm* t) {
   lock(t);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SELECTION, NULL);

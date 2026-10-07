@@ -909,6 +909,34 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
                 return true;
             case "terminal.copy":
                 return CopySelection();
+            case "terminal.selectAll":
+                if (_term != IntPtr.Zero && GhosttyNative.rvt_select_all(_term) == 0)
+                {
+                    if (_copyOnSelect)
+                        CopySelection();
+                    RequestFrame();
+                }
+                return true;
+            case "terminal.clearScrollback":
+                // ED 3 drops the scrollback and keeps the screen, like xterm's clear() keeping
+                // the prompt; marks on dropped lines go with them.
+                WriteToTerminal("\u001b[3J"u8);
+                return true;
+            case "terminal.scrollPageUp" or "terminal.scrollPageDown":
+                if (_term != IntPtr.Zero)
+                {
+                    var page = Math.Max(1, Rows - 1);
+                    GhosttyNative.rvt_scroll(_term, GhosttyNative.ScrollDelta, id == "terminal.scrollPageUp" ? -page : page);
+                    RequestFrame();
+                }
+                return true;
+            case "terminal.scrollToTop" or "terminal.scrollToBottom":
+                if (_term != IntPtr.Zero)
+                {
+                    GhosttyNative.rvt_scroll(_term, id == "terminal.scrollToTop" ? GhosttyNative.ScrollTop : GhosttyNative.ScrollBottom, 0);
+                    RequestFrame();
+                }
+                return true;
             case "terminal.paste":
                 _ = PasteFromClipboardAsync();
                 return true;
