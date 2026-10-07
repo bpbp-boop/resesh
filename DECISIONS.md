@@ -838,3 +838,12 @@ in xterm.js page code and once in C#. The two cannot share that logic because th
 xterm path runs it inside the page. The work is kept on the `native-terminal` branch
 (tag `native-terminal-parked`) and removed from master. `TerminalSurface` stays as
 the abstraction between the tab and its renderer.
+
+## 2026-10-07 - Native Fluent buttons and dialogs
+Buttons use the stock WinUI fill, elevation border and corner radius; only text color
+and the accent follow the session palette. Dialogs and Welcome no longer repaint button
+backgrounds and borders, and tab-strip actions use Fluent's subtle fills. Every XAML
+dialog sets `Style="{StaticResource DefaultContentDialogStyle}"`: WinUI does not apply
+the implicit `ContentDialog` style to an `x:Class` subclass, so without it the dialog
+falls back to the legacy template (square corners, regular-weight title, no footer
+band). A minimal WinUI 2.3.6 app reproduced this with a one-element XAML dialog.

@@ -43,6 +43,8 @@ internal static class DialogTheme
         Set(dialog, muted, "TextFillColorSecondaryBrush");
 
         // Entry fields sit on the recessed surface, exactly like the sidebar's filter box.
+        // Buttons keep Fluent's own translucent fill and elevation border, which already
+        // pick up the palette's surface tint; only their text and the accent are themed.
         Set(dialog, input,
             "TextControlBackground",
             "TextControlBackgroundPointerOver",
@@ -52,20 +54,14 @@ internal static class DialogTheme
             "ComboBoxBackgroundPointerOver",
             "ComboBoxBackgroundPressed",
             "ComboBoxBackgroundFocused",
-            "ComboBoxBackgroundUnfocused",
-            "ButtonBackground",
-            "ButtonBackgroundPointerOver",
-            "ButtonBackgroundPressed");
+            "ComboBoxBackgroundUnfocused");
         Set(dialog, frame,
             "TextControlBorderBrush",
             "TextControlBorderBrushPointerOver",
             "TextControlBorderBrushDisabled",
             "ComboBoxBorderBrush",
             "ComboBoxBorderBrushPointerOver",
-            "ComboBoxBorderBrushPressed",
-            "ButtonBorderBrush",
-            "ButtonBorderBrushPointerOver",
-            "ButtonBorderBrushPressed");
+            "ComboBoxBorderBrushPressed");
         Set(dialog, text,
             "TextControlForeground",
             "TextControlForegroundPointerOver",

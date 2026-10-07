@@ -551,7 +551,6 @@
                         Width="30"
                         Height="30"
                         Padding="0"
-                        Background="{StaticResource SessionInputBrush}"
                         Command="{x:Bind ViewModel.ExpandAllCommand}"
                         ToolTipService.ToolTip="Expand all"
                         AutomationProperties.Name="Expand all">
@@ -565,7 +564,6 @@
                         Width="30"
                         Height="30"
                         Padding="0"
-                        Background="{StaticResource SessionInputBrush}"
                         Command="{x:Bind ViewModel.CollapseAllCommand}"
                         ToolTipService.ToolTip="Collapse all"
                         AutomationProperties.Name="Collapse all">

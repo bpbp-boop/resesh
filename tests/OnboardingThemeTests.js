@@ -52,10 +52,8 @@ test("Welcome keeps custom-theme contrast resources local to the page", () => {
   assert.match(codeBehind, /EnsureContrast\(palette\.Frame, palette\.Shell, 3\.0\)/);
 });
 
-test("Welcome buttons and theme toggles follow the palette through their states", () => {
-  assert.match(
-    xaml,
-    /<StaticResource x:Key="ButtonBackground" ResourceKey="SessionShellBrush" \/>/);
+test("Welcome buttons keep the native Fluent surface and theme only text and accent", () => {
+  assert.doesNotMatch(xaml, /x:Key="(?:Toggle)?Button(?:Background|BorderBrush)(?:PointerOver|Pressed|Disabled)?"/);
   assert.match(
     xaml,
     /<StaticResource x:Key="ButtonForegroundDisabled" ResourceKey="OnboardingSecondaryTextBrush" \/>/);
