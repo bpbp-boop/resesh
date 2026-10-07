@@ -868,4 +868,9 @@ band). A minimal WinUI 2.3.6 app reproduced this with a one-element XAML dialog.
 - Find uses the library's search (case-insensitive ASCII, no regex); selection uses its gesture
   API (double click word, triple click line, autoscroll). Overlays (find bar, scroll bar) are
   plain XAML over the swap chain, and input whose source is an overlay never reaches the shell.
-- Not yet: command marks/ruler/panel, highlights, history capture, IME composition, UIA text.
+- Command marks, history capture and prompt context are `GhosttyCommandTracker`, a port of
+  addon-ruler.js that reads the terminal only through `ICommandBuffer` (tracked grid refs and
+  per-line text from the shim), so `tests/Terminal.Tests` runs it on a fake buffer. OSC 133
+  arrives through libghostty-vt's semantic-prompt callback with the cursor and a marker captured
+  in C while the output is parsed, because the C# side handles it a dispatcher turn later.
+- Not yet: keyword highlights (and the ruler's highlight/search lanes), IME composition, UIA text.
