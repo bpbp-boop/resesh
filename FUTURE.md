@@ -225,9 +225,9 @@ Automation behind a small C ABI used by Microsoft's C# WPF wrapper.
 
 ## 3. Native terminal surface via libghostty-vt
 
-**Status (2026-10-07): measurement spike** on branch `native-ghostty`. Nothing in the app uses
-it. Harnesses: `tools/GhosttyVtBench` (libghostty-vt + Direct2D/DirectWrite) and
-`tools/terminal-bench` (the same workloads through the real WebView page); numbers and caveats in
+**Status (2026-10-08): shipped as the default terminal** for live tabs, rewind and recording
+playback (`GhosttyTerminalSurface`; `RESESH_TERMINAL_SURFACE=webview` still selects the WebView2
+surface). Decisions in DECISIONS.md ("libghostty-vt terminal surface"); numbers in
 [tools/terminal-bench/RESULTS.md](tools/terminal-bench/RESULTS.md).
 
 **Why another native attempt:** a terminal drawn in-process on a XAML `SwapChainPanel` removes the
@@ -242,12 +242,11 @@ bare xterm.js + WebGL it is 1.8–8× faster on burst output (≈1.2× on `yes`-
 1.6–6× less CPU at 2 MB/s; parsing runs off the UI thread, whose longest block stays under
 1.5 ms where the WebView main thread blocks 43–66 ms today.
 
-**Open before any product work:**
-- TSF/IME and a UIA text provider for a custom WinUI 3 control (spike both first; kill criteria).
-- DirectWrite details the spike skipped: color emoji, ligatures, box-drawing geometry,
-  fractional DPI, ClearType vs grayscale.
-- An `ITerminalModel` interface so the C# features from the `native-terminal` branch (search,
-  marks, ruler, commands panel, snapshot envelope) port over instead of being rewritten.
-- The library's C API is explicitly unstable: pin a commit, build in `eng/`, keep it behind our
-  own interface.
-- Snapshot size: exact snapshots are 3–4× larger than ANSI keyframes on colored output.
+**Parked:**
+- Screen readers (a UIA text provider: text ranges, caret, output announcements). The WebView2
+  surface never enabled xterm.js's screen reader mode either, and the audience (network
+  engineers) rarely needs it. Revisit if enterprise procurement asks for a VPAT, or to let UI
+  tests read terminal text directly.
+- DirectWrite details not yet tuned: ligatures, box-drawing geometry, ClearType vs grayscale.
+- The library's C API is explicitly unstable: the commit is pinned in `eng/ghostty-vt.json` and
+  everything goes through our `reseshvt` shim.
