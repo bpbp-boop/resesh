@@ -14,9 +14,8 @@ namespace Resesh.Terminal.Ghostty;
 /// <summary>
 /// Live terminal drawn in-process: libghostty-vt parses on the backend's reader thread and a
 /// Direct2D/DirectWrite renderer presents into a SwapChainPanel on the UI thread, so the
-/// terminal is ordinary XAML content (no WebView2 airspace, focus or accelerator workarounds).
-/// Selected with RESESH_TERMINAL_SURFACE=ghostty. Not yet implemented here: rewind capture,
-/// command marks and the ruler, highlights, find, command history, IME composition, UIA text.
+/// terminal is ordinary XAML content. Partial files: Playback (rewind and recordings),
+/// TextInput (keyboard focus, IME), Links. Not implemented: UIA text for screen readers.
 /// </summary>
 public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 {
@@ -312,7 +311,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             }
             catch (Exception exception)
             {
-                TerminalControl.TraceHook?.Invoke($"output observer failed: {exception.Message}");
+                TerminalSurface.TraceHook?.Invoke($"output observer failed: {exception.Message}");
             }
             WriteToTerminal(data);
             if (_term == IntPtr.Zero)
@@ -351,7 +350,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         }
         catch (Exception exception)
         {
-            TerminalControl.TraceHook?.Invoke($"keyframe capture failed: {exception.Message}");
+            TerminalSurface.TraceHook?.Invoke($"keyframe capture failed: {exception.Message}");
         }
     }
 
@@ -407,12 +406,12 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             if (GCHandle.FromIntPtr(user).Target is not GhosttyTerminalSurface self || self._disposed)
                 return;
             var bytes = length == 0 ? [] : new ReadOnlySpan<byte>(data, checked((int)length)).ToArray();
-            // Raised on the UI thread, like the WebView surface's events.
+            // Raised on the UI thread.
             self.DispatcherQueue.TryEnqueue(() => self.DispatchNativeEvent((GhosttyEventKind)kind, bytes));
         }
         catch (Exception exception)
         {
-            TerminalControl.TraceHook?.Invoke($"ghostty event failed: {exception.Message}");
+            TerminalSurface.TraceHook?.Invoke($"ghostty event failed: {exception.Message}");
         }
     }
 
@@ -582,7 +581,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         }
         catch (Exception exception)
         {
-            TerminalControl.TraceHook?.Invoke($"ghostty render failed: {exception}");
+            TerminalSurface.TraceHook?.Invoke($"ghostty render failed: {exception}");
             _forceFull = true;
         }
     }
@@ -644,8 +643,6 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         _renderer.Draw(_cells, Columns, Rows, _dirty, info, _cursorBlinkOn, _focused, _theme.Selection, full);
         _forceFull = false;
         _lastCursorRow = info.CursorVisible != 0 ? info.CursorY : -1;
-        if (!HasPainted)
-            OnPainted();
     }
 
     private bool _cursorRowDirty;
@@ -803,7 +800,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     }
 
     /// <summary>Off while a tab is locked or behind the rewind player: keys, text, pointer and
-    /// wheel all stop, as TerminalControl stopped them by hit-testing.</summary>
+    /// wheel all stop.</summary>
     public override void SetInputEnabled(bool enabled)
     {
         _inputEnabled = enabled;
@@ -1316,7 +1313,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         var (clicks, dragged) = Gesture(GestureKind.Release, position ?? _lastPointer);
         if (position is not null && Math.Max(clicks, _pressClicks) == 1 && !dragged && _hoverUri is { } uri)
         {
-            TerminalLinkPolicy.Open(uri, TerminalControl.TraceHook);
+            TerminalLinkPolicy.Open(uri, TerminalSurface.TraceHook);
             return;
         }
         // A plain click selects nothing; a drag or a word/line click copies when asked to.
@@ -1452,7 +1449,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         }
         catch (Exception exception)
         {
-            TerminalControl.TraceHook?.Invoke($"clipboard copy failed: {exception.Message}");
+            TerminalSurface.TraceHook?.Invoke($"clipboard copy failed: {exception.Message}");
         }
     }
 
@@ -1473,7 +1470,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         RequestFrame();
     }
 
-    // ---- features the WebView surface has and this one does not yet ----------------------
+    // ---- commands panel and history ------------------------------------------------------
 
     public override void ToggleCommandsPanel() => SetCommandsPanelOpen(!_commandsPanelOpen);
 

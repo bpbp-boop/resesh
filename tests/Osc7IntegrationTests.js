@@ -3,21 +3,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
-const ruler = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "wwwroot", "addon-ruler.js"), "utf8");
-const page = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "wwwroot", "terminal.html"), "utf8");
-const control = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "TerminalControl.cs"), "utf8");
+const surface = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "Ghostty", "GhosttyTerminalSurface.cs"), "utf8");
 const tab = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"), "utf8");
 
-test("OSC 7 crosses the terminal boundary as bounded raw data", () => {
-  assert.match(ruler, /registerOscHandler\(7,[\s\S]*?onWorkingDirectory[\s\S]*?slice\(0, 2048\)/);
-  assert.match(page, /onWorkingDirectory[\s\S]*?type: "workingDirectory"[\s\S]*?slice\(0, 2048\)/);
-  assert.match(control, /case "workingDirectory"[\s\S]*?WorkingDirectoryReported\?\.Invoke/);
+test("OSC 7 crosses the terminal boundary as raw data", () => {
+  assert.match(surface, /case GhosttyEventKind\.WorkingDirectory:[\s\S]*?WorkingDirectoryReported\?\.Invoke\(directory\)/);
   assert.match(tab, /Osc7WorkingDirectoryParser\.TryParse[\s\S]*?_workingDirectory\.Observe/);
 });
 
 test("local current-folder requests rescan the live prompt before process fallback", () => {
-  assert.match(page, /case "requestPromptContext":[\s\S]*?_reportPromptContext\(true\)/);
-  assert.match(control, /RequestPromptContextAsync\(\)[\s\S]*?type = "requestPromptContext"/);
+  assert.match(surface, /RequestPromptContextAsync\(\) =>\s*Task\.FromResult\(RefreshCommands\(\)\?\.ReportPromptContext\(force: true\)\)/);
   assert.match(tab, /await _terminal\.RequestPromptContextAsync\(\)[\s\S]*?ResolveLocalTerminalDirectory\(requestedPrompt/);
 });
 

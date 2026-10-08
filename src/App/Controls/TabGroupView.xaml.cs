@@ -97,18 +97,6 @@ public sealed partial class TabGroupView : UserControl
     private double _expandedTabActionsWidth = ExpandedTabActionsFallbackWidth;
     private bool _syncingFilePaneToggle;
     private bool _terminalVisibilityDeferred;
-    private UIElement? _shownTerminal;
-    private UIElement? _heldTerminal;
-    private bool _heldTerminalHitTestVisible;
-    private Action? _heldTerminalReleased;
-    private Terminal.TerminalTabView? _terminalAwaitingPaint;
-    // Fallback when the incoming surface never reports a frame (native surface, a page
-    // that failed to load). Well above WebView2's usual 50-150 ms first-frame delay.
-    private static readonly TimeSpan TerminalHoldFallback = TimeSpan.FromMilliseconds(400);
-    private static readonly TimeSpan TerminalPaintSettle = TimeSpan.FromMilliseconds(100);
-    private readonly DispatcherTimer _terminalHoldTimer = new();
-    private readonly List<UIElement> _fadingTerminals = [];
-    private readonly DispatcherTimer _terminalCollapseTimer = new() { Interval = TerminalPaintSettle };
 
     public TabGroupViewModel Group { get; }
 
@@ -196,7 +184,7 @@ public sealed partial class TabGroupView : UserControl
         Tabs.AddHandler(PointerReleasedEvent, new PointerEventHandler(Tabs_PointerReleased), true);
         Tabs.AddHandler(RightTappedEvent, new RightTappedEventHandler(Tabs_RightTapped), true);
         // TabView can keep keyboard focus on an already-selected header after a click. In
-        // that state xterm cannot see Enter, so retain its stopped-terminal shortcut here.
+        // that state the terminal cannot see Enter, so retain its stopped-terminal shortcut here.
         Tabs.AddHandler(KeyDownEvent, new KeyEventHandler(Tabs_KeyDown), true);
         // A clicked header takes focus after its pointer handling, which can land after
         // the focus queued from PointerPressed/SelectionChanged. Hand pointer focus on a
@@ -219,14 +207,7 @@ public sealed partial class TabGroupView : UserControl
         TabStripHost.Children.Add(_tabDragLayer);
         AddHandler(DragOverEvent, new DragEventHandler(UpdateTabDragPreview), true);
         _dragScrollTimer.Tick += (_, _) => ScrollDraggedTabs();
-        _terminalHoldTimer.Tick += (_, _) => ReleaseHeldTerminal();
-        _terminalCollapseTimer.Tick += (_, _) => CollapseFadedTerminals();
-        Unloaded += (_, _) =>
-        {
-            StopDragScroll();
-            // Finish a pending close so its terminal is still disposed with this group gone.
-            ReleaseHeldTerminal();
-        };
+        Unloaded += (_, _) => StopDragScroll();
     }
 
     private async Task PrepareTabDragPreviewAsync(TabViewModel tab, Windows.Foundation.Point pointer)
@@ -657,20 +638,13 @@ public sealed partial class TabGroupView : UserControl
 
     public void RemoveTerminal(UIElement view)
     {
-        if (ReferenceEquals(view, _heldTerminal))
-            ReleaseHeldTerminal();
-        if (ReferenceEquals(view, _shownTerminal))
-            _shownTerminal = null;
-        _fadingTerminals.Remove(view);
         TerminalHost.Children.Remove(view);
         SyncTerminalVisibility();
     }
 
     /// <summary>
-    /// Closes a tab's terminal the way a tab switch hides one. Selection settles before any
-    /// terminal changes visibility, so TabView's intermediate picks never reach the screen.
-    /// The closing terminal stays on top until its successor paints, then fades out before
-    /// it is removed and disposed.
+    /// Closes a tab's terminal. Selection settles before any terminal changes visibility, so
+    /// TabView's intermediate picks never reach the screen.
     /// </summary>
     public void CloseTerminal(UIElement? view, Action detachTab, Action disposeTab)
     {
@@ -678,138 +652,24 @@ public sealed partial class TabGroupView : UserControl
         try { detachTab(); }
         finally { _terminalVisibilityDeferred = false; }
         SyncTerminalVisibility();
-
-        void Remove()
-        {
-            if (view is not null)
-                view.Opacity = 0;
-            var remove = DispatcherQueue.CreateTimer();
-            remove.Interval = TerminalPaintSettle;
-            remove.IsRepeating = false;
-            remove.Tick += (_, _) =>
-            {
-                if (view is not null)
-                {
-                    _fadingTerminals.Remove(view);
-                    TerminalHost.Children.Remove(view);
-                }
-                disposeTab();
-            };
-            remove.Start();
-        }
-        if (view is not null && ReferenceEquals(view, _heldTerminal))
-            _heldTerminalReleased += Remove;
-        else
-            Remove();
+        if (view is not null)
+            TerminalHost.Children.Remove(view);
+        disposeTab();
     }
 
+    /// <summary>The selected tab's terminal is shown, every other one collapsed. Terminals draw
+    /// in-process, so a switch needs no hold or fade.</summary>
     public void SyncTerminalVisibility()
     {
         if (_terminalVisibilityDeferred)
             return;
         var selected = Group.SelectedTab?.View;
-        MainWindow.Trace($"SyncTerminalVisibility: selected='{Group.SelectedTab?.Header}' children={TerminalHost.Children.Count}");
-        if (!ReferenceEquals(selected, _shownTerminal))
-        {
-            var outgoing = _shownTerminal;
-            var returning = ReferenceEquals(selected, _heldTerminal);
-            ReleaseHeldTerminal();
-            // Only a terminal that has never painted shows WebView2's gray fill; switching to
-            // one that has already rendered is instant, so it needs no hold.
-            if (!returning && outgoing is not null
-                && selected is Terminal.TerminalTabView { HasPainted: false } incoming
-                && TerminalHost.Children.Contains(outgoing))
-            {
-                HoldTerminal(outgoing, incoming);
-            }
-            _shownTerminal = selected as UIElement;
-        }
         foreach (var child in TerminalHost.Children)
         {
-            if (ReferenceEquals(child, selected) || ReferenceEquals(child, _heldTerminal))
-                ShowTerminal(child);
-            else
-                HideTerminal(child);
+            var visibility = ReferenceEquals(child, selected) ? Visibility.Visible : Visibility.Collapsed;
+            if (child.Visibility != visibility)
+                child.Visibility = visibility;
         }
-    }
-
-    private void ShowTerminal(UIElement view)
-    {
-        _fadingTerminals.Remove(view);
-        view.Opacity = 1;
-        view.Visibility = Visibility.Visible;
-    }
-
-    /// <summary>
-    /// Collapsing WebView2 drops its frame at once, a frame before XAML stops drawing the
-    /// element, which exposes its gray fill. Make it transparent first and collapse it once
-    /// that has rendered.
-    /// </summary>
-    private void HideTerminal(UIElement view)
-    {
-        if (view.Visibility == Visibility.Collapsed || _fadingTerminals.Contains(view))
-            return;
-        view.Opacity = 0;
-        _fadingTerminals.Add(view);
-        _terminalCollapseTimer.Start();
-    }
-
-    private void CollapseFadedTerminals()
-    {
-        _terminalCollapseTimer.Stop();
-        foreach (var view in _fadingTerminals)
-        {
-            view.Visibility = Visibility.Collapsed;
-            view.Opacity = 1;
-        }
-        _fadingTerminals.Clear();
-    }
-
-    /// <summary>
-    /// WebView2 composes a system gray fill after it is created or shown until its page
-    /// presents a frame. Keep the outgoing terminal above the incoming one until then so a
-    /// switch or close goes straight from one terminal to the next.
-    /// </summary>
-    private void HoldTerminal(UIElement outgoing, Terminal.TerminalTabView incoming)
-    {
-        _heldTerminal = outgoing;
-        _heldTerminalHitTestVisible = outgoing.IsHitTestVisible;
-        outgoing.IsHitTestVisible = false;
-        Canvas.SetZIndex(outgoing, 1);
-        _terminalAwaitingPaint = incoming;
-        incoming.TerminalPainted += IncomingTerminalPainted;
-        _terminalHoldTimer.Interval = TerminalHoldFallback;
-        _terminalHoldTimer.Start();
-    }
-
-    private void IncomingTerminalPainted()
-    {
-        // A re-shown page runs its animation frames before WebView2 swaps the new frame
-        // onto the screen; releasing at once still exposes the gray fill briefly.
-        _terminalHoldTimer.Stop();
-        _terminalHoldTimer.Interval = TerminalPaintSettle;
-        _terminalHoldTimer.Start();
-    }
-
-    private void ReleaseHeldTerminal()
-    {
-        _terminalHoldTimer.Stop();
-        if (_terminalAwaitingPaint is not null)
-        {
-            _terminalAwaitingPaint.TerminalPainted -= IncomingTerminalPainted;
-            _terminalAwaitingPaint = null;
-        }
-        if (_heldTerminal is not { } held)
-            return;
-
-        _heldTerminal = null;
-        Canvas.SetZIndex(held, 0);
-        held.IsHitTestVisible = _heldTerminalHitTestVisible;
-        if (!ReferenceEquals(held, Group.SelectedTab?.View))
-            HideTerminal(held);
-        var released = _heldTerminalReleased;
-        _heldTerminalReleased = null;
-        released?.Invoke();
     }
 
     // ---- tab-bar action buttons (show commands, current folder, file pane) ----
@@ -1035,7 +895,7 @@ public sealed partial class TabGroupView : UserControl
         _middleClickTab = point.Properties.IsMiddleButtonPressed ? tab : null;
 
         // SelectionChanged does not run when the selected tab is clicked again. Queue the
-        // focus so the TabView can finish its pointer handling before focus enters WebView2.
+        // focus so the TabView can finish its pointer handling before focus enters the terminal.
         if (point.Properties.IsLeftButtonPressed && tab is not null && !IsButtonSource(e.OriginalSource))
         {
             FocusTerminal(tab);

@@ -7,8 +7,8 @@ const root = path.join(__dirname, "..");
 const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8");
 
 const table = read("src", "Core", "Input", "KeyBindings.cs");
-const page = read("src", "Terminal", "wwwroot", "terminal.html");
-const control = read("src", "Terminal", "TerminalControl.cs");
+const surface = read("src", "Terminal", "TerminalSurface.cs");
+const ghostty = read("src", "Terminal", "Ghostty", "GhosttyTerminalSurface.cs");
 const mainWindow = require("./support/mainWindowSource");
 
 const idValues = Object.fromEntries(
@@ -35,38 +35,30 @@ test("the table parses into every scope", () => {
   for (const binding of bindings) assert.ok(binding.id, binding.name);
 });
 
-test("the terminal page runs every terminal-scope shortcut", () => {
-  const actions = page.slice(page.indexOf("const terminalActions = {"), page.indexOf("function runTerminalAction"));
+test("the terminal surface runs every terminal-scope shortcut", () => {
+  const actions = methodBody(ghostty, "private bool RunTerminalShortcut(string id)");
   for (const binding of bindings.filter(b => b.scope === "Terminal"))
     assert.ok(actions.includes(`"${binding.id}"`), binding.id);
 });
 
-test("the page matches chords from the host table, not hardcoded keys", () => {
-  assert.match(page, /const shortcuts = Array\.isArray\(init\.shortcuts\) \? init\.shortcuts : \[\];/);
-  assert.match(page, /chord\.key === e\.keyCode && chord\.ctrl === e\.ctrlKey &&\s*chord\.shift === e\.shiftKey && chord\.alt === e\.altKey/);
-  assert.doesNotMatch(page, /e\.code === "Key[A-Z]"/);
-  assert.doesNotMatch(page, /type: "(closeTab|splitTab|filePane|newLocalTab|commandPalette|quickConnect)"/);
-  assert.match(page, /host\.postMessage\(\{ type: "shortcut", id: shortcut\.id, chord: match\.chord \}\)/);
+test("the terminal matches chords from the host table, not hardcoded keys", () => {
+  assert.match(surface, /foreach \(var shortcut in _shortcuts\)/);
+  assert.match(surface, /chord\.Key == virtualKey && chord\.Ctrl == control && chord\.Shift == shift && chord\.Alt == alt/);
+  assert.match(ghostty, /if \(shortcut\.Forward\)\s*ShortcutRequested\?\.Invoke\(shortcut\.Id, chord\);/);
 });
 
 test("split-only shortcuts leave Alt+Arrow to the shell in an unsplit window", () => {
-  assert.match(page, /if \(shortcut\.whenSplit && !isSplit\) return;/);
-  assert.match(page, /isSplit = msg\.isSplit === true;/);
-});
-
-test("the find field keeps its text-editing keys", () => {
-  assert.match(page, /if \(inTextField && shortcut\.id !== "terminal\.find"\) return;/);
+  assert.match(ghostty, /if \(shortcut\.WhenSplit && !_isSplit\)\s*return false;/);
 });
 
 test("Shift+Enter still sends ESC CR on the normal buffer", () => {
-  assert.ok(page.includes('term.input("\\x1b\\r", true);'));
+  assert.match(ghostty, /!_commandBuffer!\.IsAlternate/);
+  assert.ok(ghostty.includes("SendUserInput([0x1B, 0x0D]);"));
 });
 
-test("WebView2 hands the table to the page and raises forwarded shortcuts", () => {
-  assert.match(control, /shortcuts = Shortcuts\.Select\(/);
-  assert.match(control, /case "shortcut":/);
-  assert.match(control, /ShortcutRequested\?\.Invoke\(id, chord\);/);
-  assert.match(control, /type = "invokeShortcut"/);
+test("the app hands the table to the terminals and runs forwarded shortcuts", () => {
+  assert.match(read("src", "App", "App.xaml.cs"), /Resesh\.Terminal\.TerminalSurface\.Shortcuts = AppShortcuts\.ForTerminals\(\);/);
+  assert.match(read("src", "App", "Terminal", "TerminalTabView.cs"), /_terminal\.ShortcutRequested \+= \(id, chord\) =>/);
 });
 
 test("the window runs every app and window shortcut", () => {

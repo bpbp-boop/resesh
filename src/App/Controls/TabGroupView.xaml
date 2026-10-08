@@ -198,7 +198,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Tab strip only; terminals render in TerminalHost so WebView2 gets real space. -->
+        <!-- Tab strip only; terminals render in TerminalHost below it. -->
         <Grid
             x:Name="TabStripHost"
             Grid.Row="0"
@@ -683,7 +683,7 @@
 
         <Grid x:Name="TerminalHost" Grid.Row="1" />
 
-        <!-- Visible only during an in-app tab drag. It sits above WebView2 so the XAML
+        <!-- Visible only during an in-app tab drag. It sits above the terminal so the XAML
              drag target stays reliable, while the rectangle previews the resulting group. -->
         <Grid
             x:Name="ContentDropSurface"

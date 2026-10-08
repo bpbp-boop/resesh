@@ -1,7 +1,7 @@
 # resesh
 
 A tabbed SSH and local-terminal client for Windows, built to replace SecureCRT for daily use:
-a folder tree of saved sessions, fast search, tabbed xterm.js terminals, paired asciicast
+a folder tree of saved sessions, fast search, tabbed native terminals, paired asciicast
 and timestamped plain-text recording with instant rewind, `.cast` playback, and import from
 SecureCRT, PuTTY, and OpenSSH `~/.ssh/config`.
 
@@ -12,19 +12,24 @@ version-specific findings and design decisions.
 
 - WinUI 3 (Windows App SDK 2.4.0), C#, .NET 10
 - SSH.NET for transport
-- WebView2 + xterm.js (bundled), with GPU rendering and automatic DOM fallback
+- A native terminal: [libghostty-vt](https://github.com/ghostty-org/ghostty) for parsing, drawn
+  with Direct2D/DirectWrite into a XAML `SwapChainPanel`
 - Unpackaged deployment; release builds are self-contained
 
 ## Build & run
 
-Requires the .NET 10 SDK on Windows 10 21H2 or later.
+Requires the .NET 10 SDK on Windows 10 21H2 or later, and Git. Build the terminal's native
+libraries once per architecture first (the script downloads the pinned Zig and Ghostty commit;
+`-BuildRoot` holds about 2 GB of toolchain and caches):
 
 ```
+.\eng\build-ghostty-vt.ps1 -Architecture x64
 dotnet build src/App/Resesh.App.csproj -p:Platform=x64
 src/App/bin/x64/Debug/net10.0-windows10.0.19041.0/Resesh.App.exe
 ```
 
-On ARM64, substitute `-p:Platform=ARM64`.
+On ARM64, substitute `-Architecture arm64` and `-p:Platform=ARM64`. Rerun the script when
+`eng/ghostty-vt.json` or `src/Terminal/Ghostty/native/` changes.
 
 ### Screenshot demo
 
@@ -44,10 +49,9 @@ GitHub Actions builds and tests each push to `master` and each pull request. Eac
 for x64 and Arm64:
 
 - a `-setup.exe` bundle — the recommended download. The app is self-contained (.NET 10 and the
-  Windows App Runtime ship inside it), and the bundle installs the two remaining prerequisites,
-  the Visual C++ Runtime and the WebView2 Runtime, only when the computer lacks them.
-- a bare `.msi` for scripted deployments. It assumes the Visual C++ and WebView2 runtimes are
-  already present.
+  Windows App Runtime ship inside it), and the bundle installs the one remaining prerequisite,
+  the Visual C++ Runtime, only when the computer lacks it.
+- a bare `.msi` for scripted deployments. It assumes the Visual C++ Runtime is already present.
 - a portable ZIP with the same assumption as the MSI.
 
 The installers install for all users, so Windows requests administrator approval.
@@ -196,13 +200,13 @@ default. When included, the complete backup is encrypted with its passphrase.
 src/App               WinUI 3 app (views, viewmodels, dialogs)
 src/Core              models, session store, importers, SSH/SFTP, shell integration,
                       credential service — no UI dependencies
-src/Terminal          WebView2 host + xterm.js assets
+src/Terminal          the terminal surface (libghostty-vt shim, renderer, ruler, find)
 tests/Core.Tests      core unit tests
 tests/AppLogic.Tests  view-model tests without a WinUI window
 tests/*.js            JavaScript source checks (run with `node --test`)
 installer/            WiX MSI and setup bundle
-eng/                  MSBuild targets and patches
-tools/                TestSshServer and KeepaliveProbe
+eng/                  MSBuild targets, patches and the libghostty-vt build
+tools/                TestSshServer, KeepaliveProbe and terminal benchmarks
 website/              project website
 ```
 

@@ -11,7 +11,7 @@ public delegate void TerminalOutputHandler(ReadOnlySpan<byte> data);
 /// </summary>
 public interface ITerminalBackend : IDisposable
 {
-    /// <summary>Raw bytes from the shell (already UTF-8/VT — fed to xterm.js unmodified).</summary>
+    /// <summary>Raw bytes from the shell (already UTF-8/VT — fed to the terminal unmodified).</summary>
     event TerminalOutputHandler? OutputReceived;
 
     void Write(byte[] data);

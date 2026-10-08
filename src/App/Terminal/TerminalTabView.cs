@@ -20,7 +20,7 @@ using Resesh.Terminal;
 namespace Resesh.App.Terminal;
 
 /// <summary>
-/// The content of one tab: a TerminalControl plus the shell lifecycle for each target
+/// The content of one tab: a terminal surface plus the shell lifecycle for each target
 /// kind — SSH (credential prompt, host key confirmation, connect/reconnect, teardown),
 /// telnet (plain TCP connect/reconnect), or a local ConPTY process (launch, exit code,
 /// restart). The live shell is an
@@ -82,16 +82,6 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// <summary>A window shortcut pressed inside this tab's terminal or rewind player:
     /// the binding id and matched chord index. The window runs it for this tab.</summary>
     public event Action<string, int>? ShortcutRequested;
-
-    /// <summary>The terminal presented a frame after being created or shown again.</summary>
-    /// <summary>Whether the terminal has presented its first frame.</summary>
-    public bool HasPainted => _terminal.HasPainted;
-
-    public event Action? TerminalPainted
-    {
-        add => _terminal.Painted += value;
-        remove => _terminal.Painted -= value;
-    }
 
     /// <summary>Raised when the user clicks the lock overlay wanting to unlock.</summary>
     public event Action? UnlockRequested;
@@ -239,7 +229,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             _initialLaunchStarted = true;
 
             // Capture must exist before the backend can emit. The page reports its measured
-            // size later; until then both transports start at TerminalControl's 80x24 default.
+            // size later; until then both transports start at the terminal's 80x24 default.
             EnsureCapture(_terminal.Columns, _terminal.Rows);
             if (initial.AlwaysRecord)
                 TryStartAutomaticRecording();
@@ -535,7 +525,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         }
         catch (Exception ex)
         {
-            TerminalControl.TraceHook?.Invoke($"agent poll: {ex.Message}");
+            TerminalSurface.TraceHook?.Invoke($"agent poll: {ex.Message}");
         }
         finally
         {
@@ -801,7 +791,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             _terminal.WriteNotice($"Connecting to {Session.Username}@{Session.Host}:{Session.Port} …");
 
             // Connect and its integration diagnostics run on the backend worker.
-            // WebView2 notices must be delivered on this view's UI thread.
+            // Terminal notices must be delivered on this view's UI thread.
             var uiDispatcher = DispatcherQueue;
             var session = new SshTerminalSession(_knownHosts)
             {
@@ -1147,7 +1137,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.ApplyOptions(theme: App.ResolveTheme(Session.Overrides?.Theme ?? theme));
     }
 
-    /// <summary>Pushes layout and interaction settings into the xterm page, with this
+    /// <summary>Pushes layout and interaction settings into the terminal, with this
     /// session's overrides layered on top.</summary>
     public void ApplyNonThemeSettings(Core.Storage.AppSettings settings)
     {
@@ -1681,7 +1671,7 @@ public sealed class TerminalTabView : Grid, IDisposable
 
     public void ShowLockOverlay()
     {
-        _terminal.SetInputEnabled(false); // blocks keyboard/pointer into the WebView2
+        _terminal.SetInputEnabled(false); // blocks keyboard and pointer input into the terminal
         if (_lockOverlay is null)
         {
             var panel = new StackPanel

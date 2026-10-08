@@ -15,7 +15,7 @@ internal static class GhosttyClipboard
         }
         catch (Exception exception)
         {
-            TerminalControl.TraceHook?.Invoke($"clipboard paste failed: {exception.Message}");
+            TerminalSurface.TraceHook?.Invoke($"clipboard paste failed: {exception.Message}");
         }
     }
 }

@@ -72,13 +72,15 @@ async def handle(process):
             await process.stdout.drain()
     elif name != 'styles':
         process.stdout.write(f'no workload {name}\r\n'.encode())
-    try:
-        while await process.stdin.read(4096):
-            pass
-    except (asyncssh.BreakReceived, asyncssh.TerminalSizeChanged, asyncssh.DisconnectError):
-        pass
-    except Exception:
-        pass
+    # Idle like a quiet shell until the client closes; a resize or break is not the end.
+    while True:
+        try:
+            if not await process.stdin.read(4096):
+                break
+        except (asyncssh.BreakReceived, asyncssh.TerminalSizeChanged):
+            continue
+        except Exception:
+            break
     process.exit(0)
 
 

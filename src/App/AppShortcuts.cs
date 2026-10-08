@@ -10,7 +10,8 @@ namespace Resesh.App;
 internal static class AppShortcuts
 {
     /// <summary>Everything a focused terminal must recognize: its own actions, plus the window
-    /// shortcuts it forwards because WebView2 does not deliver window accelerators.</summary>
+    /// shortcuts it forwards, because the terminal consumes keys before window accelerators
+    /// see them.</summary>
     internal static IReadOnlyList<TerminalShortcut> ForTerminals() =>
         [.. KeyBindings.All
             .Where(binding => binding.Scope is ShortcutScope.App or ShortcutScope.Terminal)

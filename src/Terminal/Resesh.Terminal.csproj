@@ -30,20 +30,15 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(GhosttyVtArchitecture)'!='' and Exists('$(GhosttyVtDir)ghostty-vt.dll') and Exists('$(GhosttyVtDir)reseshvt.dll')">
-    <!-- libghostty-vt surface (RESESH_TERMINAL_SURFACE=ghostty); built by eng/build-ghostty-vt.ps1 -->
+    <!-- The terminal's native libraries, built by eng/build-ghostty-vt.ps1 -->
     <None Include="$(GhosttyVtDir)ghostty-vt.dll;$(GhosttyVtDir)reseshvt.dll;$(GhosttyVtDir)LICENSE.ghostty.txt"
           Link="GhosttyVt\%(Filename)%(Extension)"
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- xterm.js assets for default live terminals, rewind, and recording playback -->
-    <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
-  <Target Name="WarnMissingGhosttyVt" BeforeTargets="Build"
+  <Target Name="RequireGhosttyVt" BeforeTargets="Build"
           Condition="'$(GhosttyVtArchitecture)'!='' and (!Exists('$(GhosttyVtDir)ghostty-vt.dll') or !Exists('$(GhosttyVtDir)reseshvt.dll'))">
-    <Warning Text="libghostty-vt is not built for $(GhosttyVtArchitecture): terminals will fall back to WebView2. Run eng/build-ghostty-vt.ps1 -Architecture $(GhosttyVtArchitecture)." />
+    <Error Text="The terminal's native libraries are not built for $(GhosttyVtArchitecture). Run eng/build-ghostty-vt.ps1 -Architecture $(GhosttyVtArchitecture)." />
   </Target>
 
 </Project>

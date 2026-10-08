@@ -1,5 +1,5 @@
-# Downloads the redistributables the resesh setup bundle embeds. Both URLs are
-# Microsoft's evergreen "latest" permalinks.
+# Downloads the redistributable the resesh setup bundle embeds, from Microsoft's
+# evergreen "latest" permalink.
 param(
     [ValidateSet("x64", "arm64")]
     [string]$Arch = "x64"
@@ -13,11 +13,6 @@ $downloads = @(
     @{
         Name = "vc_redist.$Arch.exe"
         Url  = "https://aka.ms/vs/17/release/vc_redist.$Arch.exe"
-    },
-    @{
-        # WebView2 Evergreen Bootstrapper (architecture-neutral).
-        Name = "MicrosoftEdgeWebView2Setup.exe"
-        Url  = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
     }
 )
 

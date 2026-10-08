@@ -47,8 +47,8 @@
   <div class="chips">
     <span class="chip">winui 3 · .net 10</span>
     <span class="chip">ssh.net transport</span>
-    <span class="chip">webview2 + xterm.js</span>
-    <span class="chip">webgl rendering</span>
+    <span class="chip">libghostty-vt</span>
+    <span class="chip">direct2d rendering</span>
     <span class="chip">sqlite fts5</span>
     <span class="chip">gpl-2.0</span>
   </div>
@@ -618,8 +618,8 @@
     <div class="cards">
       <div class="card">
         <span class="card__tag">rendering</span>
-        <span class="card__name">gpu glyphs, fixed to the pixel grid</span>
-        <span class="card__note">xterm.js draws through webgl, with a dom fallback if the gpu context is lost. at fractional display scaling the canvas can end up one device pixel off the character grid; resesh pins the glyph viewport to the grid so text stays sharp instead of being resampled.</span>
+        <span class="card__name">a native terminal, no browser inside</span>
+        <span class="card__note">output is parsed by libghostty-vt, the terminal core of ghostty, on the connection's own thread, and drawn with direct2d and directwrite straight into the window at the display's refresh rate. every glyph advances by whole cells, so text stays on the character grid at any display scaling.</span>
       </div>
       <div class="card">
         <span class="card__tag">rewind</span>

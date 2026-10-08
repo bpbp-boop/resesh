@@ -526,7 +526,7 @@ public sealed partial class MainWindow
         _paneBoundaries.Clear();
         GroupArea.Children.Add(BuildGroupLayoutElement(_groupLayout.Root));
         UpdateRulerPresentations();
-        // Re-assert after WebView2 controls settle into their new rows and columns.
+        // Re-assert once the rebuilt groups settle into their new rows and columns.
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
     }
 
@@ -598,7 +598,7 @@ public sealed partial class MainWindow
                 // Keep this wider resize target transparent so it cannot cover that line.
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
             };
-            // Keep the seven-pixel hit target above the WebView2 content while its
+            // Keep the seven-pixel hit target above the terminal content while its
             // one-pixel grid track lets both tab groups meet the visible divider.
             Canvas.SetZIndex(splitter, 1);
             if (isColumns)

@@ -4,7 +4,8 @@ const path = require("node:path");
 const test = require("node:test");
 
 const catalog = fs.readFileSync(path.join(__dirname, "..", "src", "Core", "Storage", "ThemeCatalog.cs"), "utf8");
-const terminal = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "wwwroot", "terminal.html"), "utf8");
+const terminalThemes = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "Ghostty", "GhosttyThemes.cs"), "utf8");
+const terminalSurface = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "Ghostty", "GhosttyTerminalSurface.cs"), "utf8");
 const settingsPage = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "SettingsPage.xaml"), "utf8");
 const settingsViewModel = fs.readFileSync(path.join(__dirname, "..", "src", "App", "ViewModels", "SettingsViewModel.cs"), "utf8");
 const appCode = fs.readFileSync(path.join(__dirname, "..", "src", "App", "App.xaml.cs"), "utf8");
@@ -17,7 +18,6 @@ const appXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "App.xa
 const tabGroup = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"), "utf8");
 const tabGroupXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml"), "utf8");
 const terminalTab = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"), "utf8");
-const terminalControl = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "TerminalControl.cs"), "utf8");
 const dialogTheme = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "DialogTheme.cs"), "utf8");
 const sessionEditXaml = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "SessionEditDialog.xaml"), "utf8");
 const commandPalette = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "CommandPaletteView.xaml"), "utf8");
@@ -25,94 +25,26 @@ const presentation = fs.readFileSync(path.join(__dirname, "..", "src", "App", "P
 const visualPalette = fs.readFileSync(path.join(__dirname, "..", "src", "App", "ThemeVisualPalette.cs"), "utf8");
 
 const ids = [...catalog.matchAll(/new\("([a-z-]+)",/g)].map(match => match[1]);
-const paletteProperties = [
-  "background", "foreground", "cursor", "selectionBackground",
-  "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
-  "brightBlack", "brightRed", "brightGreen", "brightYellow",
-  "brightBlue", "brightMagenta", "brightCyan", "brightWhite",
-];
-
-function webPalette(id) {
-  let body;
-  if (id === "dark" || id === "system") {
-    body = terminal.match(/const DARK_THEME = \{([\s\S]*?)\n  \};/)?.[1];
-  } else if (id === "light") {
-    body = terminal.match(/const LIGHT_THEME = \{([\s\S]*?)\n  \};/)?.[1];
-  } else {
-    const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    body = terminal.match(new RegExp(`(?:"${escapedId}"|${escapedId})\\s*:\\s*\\{([\\s\\S]*?)\\n\\s*\\}`))?.[1];
-  }
-  assert.ok(body, `web palette ${id}`);
-
-  return paletteProperties.map(property => {
-    const color = body.match(new RegExp(`${property}:\\s*"#([0-9a-f]{6})"`, "i"))?.[1];
-    if (id === "dark" || id === "system") {
-      if (property === "selectionBackground") return "264F78";
-    }
-    assert.ok(color, `${id}.${property}`);
-    return color.toUpperCase();
-  });
+function terminalPalette(id) {
+  // Catalog ids are [a-z-] only, so they need no regex escaping.
+  const body = terminalThemes.match(new RegExp(`\\["${id}"\\] = New\\(([^)]*)\\)`))?.[1];
+  assert.ok(body, `terminal palette ${id}`);
+  return body.match(/0x[0-9A-F]{6}\b/g) ?? [];
 }
 
 test("every terminal palette defines all twenty colors", () => {
-  for (const id of ids) webPalette(id);
+  for (const id of ids) assert.equal(terminalPalette(id).length, 20, id);
 });
 
 test("each catalog theme has a terminal palette", () => {
-  for (const id of ids) {
-    if (id === "dark" || id === "light") continue;
-    assert.match(terminal, new RegExp(`(?:"${id}"|${id})\\s*:`), id);
-  }
-});
-
-test("partial settings updates preserve the terminal, scrollbar, and light UI theme", () => {
-  const vm = require("node:vm");
-  const palettes = terminal.slice(terminal.indexOf("  const DARK_THEME ="), terminal.indexOf("  const host ="));
-  const handler = terminal.match(/case "setOptions":([\s\S]*?)\n\s*break;/)?.[1];
-  assert.ok(handler);
-  let lightUi = false;
-  let rulerTheme;
-  let rulerUpdates = 0;
-  const context = vm.createContext({
-    term: { options: { fontSize: 14, fontFamily: "Consolas", scrollback: 1000 } },
-    document: { body: { style: {}, classList: { toggle(name, value) { lightUi = value; } } } },
-    ruler: { setTheme(theme) { rulerTheme = theme; rulerUpdates++; } },
-    copyOnSelect: false,
-    rightClickPaste: false,
-    baseFontSize: 14,
-    zoomDelta: 0,
-    fitPreservingTimestamps() {},
-    reportSize() {},
-    pageTrace(error) { assert.fail(error); },
-  });
-  vm.runInContext(palettes + "\nfunction applySettings(msg) {" + handler + "\n}", context);
-  for (const id of ["vaporwave", "light", "solarized-light", "nord", "dark"]) {
-    context.msg = { theme: id };
-    vm.runInContext("applySettings(msg)", context);
-    const activeTheme = context.term.options.theme;
-    const activeRuler = rulerTheme;
-    const activeLightUi = lightUi;
-    const updateCount = rulerUpdates;
-    assert.equal(activeRuler.background, activeTheme.background, id);
-    assert.equal(activeLightUi, id === "light" || id === "solarized-light", id);
-
-    for (const update of [{ theme: null, fontSize: 16 }, { fontFamily: "Cascadia Mono", scrollback: 2000 }, { copyOnSelect: true }]) {
-      context.msg = update;
-      vm.runInContext("applySettings(msg)", context);
-      assert.equal(context.term.options.theme, activeTheme, id);
-      assert.equal(rulerTheme, activeRuler, id);
-      assert.equal(rulerUpdates, updateCount, id);
-      assert.equal(lightUi, activeLightUi, id);
-      assert.equal(context.document.body.style.background, activeTheme.background, id);
-    }
-  }
+  for (const id of ids) assert.ok(terminalThemes.includes(`["${id}"] = New(`), id);
 });
 
 test("Phthalo Green uses its green shell and terminal palette", () => {
   assert.match(catalog, /new\("phthalo-green", "Phthalo Green"\)/);
   assert.match(
-    terminal,
-    /"phthalo-green": \{\s*background: "#123524", foreground: "#d7eee5", cursor: "#72e0ad", selectionBackground: "#245a46"/,
+    terminalThemes,
+    /\["phthalo-green"\] = New\(\s*0x123524, 0xD7EEE5, 0x72E0AD, 0x245A46,/,
   );
   assert.match(visualPalette, /"phthalo-green" => New\(0x123524, 0x0B2118, 0x2D5A48, 0xD7EEE5, 0x245A46\)/);
 });
@@ -238,7 +170,6 @@ test("live theme changes avoid terminal layout and highlight work", () => {
   assert.match(applyTheme, /_terminal\.ApplyOptions\(theme:/);
   assert.doesNotMatch(applyTheme, /ApplyHighlights|fontSize|fontFamily|scrollback/);
 
-  assert.match(terminal, /let layoutChanged = false;[\s\S]*?if \(layoutChanged\) \{[\s\S]*?fitPreservingTimestamps\(\)/);
   assert.match(mainWindow, /private void ApplyThemePalette\(string theme\)[\s\S]*?view\.ApplyTheme\(theme\)/);
 });
 
@@ -262,7 +193,7 @@ test("light-dark changes commit custom colors in the framework composition frame
 
 test("unknown saved theme identifiers fall back safely", () => {
   assert.match(catalog, /\?\? All\[0\]/);
-  assert.match(terminal, /THEMES\[id\] \|\| DARK_THEME/);
+  assert.match(terminalThemes, /Themes\.TryGetValue\(id, out var theme\) \? theme : Themes\["dark"\]/);
 });
 
 test("custom themes recolor the app shell and tab strip", () => {
@@ -334,17 +265,16 @@ test("new split groups start with the live app palette", () => {
 });
 
 test("the tab-row divider spans both sides without crossing the active tab", () => {
-  assert.match(terminalControl, /SetInitialOptions[\s\S]*?SetThemeBackground\(ThemeBackground\(theme\)\)/);
-  assert.match(terminalControl, /void SetThemeBackground[\s\S]*?_webView\.DefaultBackgroundColor = color;/);
-  assert.match(terminalControl, /"solarized-light" => Windows\.UI\.Color\.FromArgb\(255, 0xFD, 0xF6, 0xE3\)/);
-  assert.match(terminalControl, /"phthalo-green" => Windows\.UI\.Color\.FromArgb\(255, 0x12, 0x35, 0x24\)/);
+  assert.match(terminalSurface, /void SetInitialOptions[\s\S]*?_theme = GhosttyThemes\.Find\(theme\);[\s\S]*?Background = new SolidColorBrush\(ToColor\(_theme\.Background\)\);/);
+  assert.match(terminalThemes, /\["solarized-light"\] = New\(\s*0xFDF6E3,/);
+  assert.match(terminalThemes, /\["phthalo-green"\] = New\(\s*0x123524,/);
   assert.match(tabGroupXaml, /x:Name="LeftTabStripDivider"[\s\S]*?x:Name="RightTabStripDivider"/);
   assert.match(tabGroup, /Tabs\.ContainerFromItem\(Tabs\.SelectedItem\)[\s\S]*?LeftTabStripDivider\.Width = activeLeft;[\s\S]*?RightTabStripDivider\.Width = stripWidth - activeRight;/);
 });
 
 test("the terminal ruler edge uses a visible theme colour", () => {
-  assert.match(terminal, /border: theme\.selectionBackground \|\| theme\.brightBlack/);
-  assert.match(terminal, /"solarized-dark": \{[\s\S]*?selectionBackground: "#274852"/);
+  assert.match(terminalSurface, /_ruler\.SetTheme\(dark: [^,]+, _theme\.Background, _theme\.Selection\);/);
+  assert.match(terminalThemes, /\["solarized-dark"\] = New\(\s*0x002B36, 0x839496, 0x93A1A1, 0x274852,/);
 });
 
 test("live theme changes repaint existing shell and pane dividers", () => {

@@ -23,7 +23,7 @@
   <Target Name="ValidateInstallerInputs" BeforeTargets="Build">
     <Error Condition="'$(PayloadDir)' == ''" Text="PayloadDir must point to a Resesh release build." />
     <Error Condition="!Exists('$(PayloadDir)\Resesh.App.exe')" Text="PayloadDir does not contain Resesh.App.exe." />
-    <!-- The terminal surface is libghostty-vt by default; without these the app silently falls back to WebView2. -->
+    <!-- The terminal's native libraries (libghostty-vt and the reseshvt shim): no terminal works without them. -->
     <Error Condition="!Exists('$(PayloadDir)\GhosttyVt\ghostty-vt.dll') Or !Exists('$(PayloadDir)\GhosttyVt\reseshvt.dll')"
            Text="PayloadDir has no GhosttyVt libraries. Run eng/build-ghostty-vt.ps1 for this architecture before building the app." />
   </Target>

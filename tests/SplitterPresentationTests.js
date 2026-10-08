@@ -10,9 +10,6 @@ const terminalViewSource = fs.readFileSync(
 const appResources = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "App.xaml"),
   "utf8");
-const terminalHtml = fs.readFileSync(
-  path.join(__dirname, "..", "src", "Terminal", "wwwroot", "terminal.html"),
-  "utf8");
 
 test("session splitters keep a visible one-pixel divider under a transparent hit target", () => {
   const layoutBuilder = source.match(
@@ -40,12 +37,7 @@ test("pane divider stays one pixel wide while hover color changes", () => {
   assert.doesNotMatch(filePaneActivation, /_paneSplitterLine\.Width\s*=/);
 });
 
-test("dark session divider is lighter than the scrollbar edge", () => {
-  const divider = appResources.match(/x:Key="SessionDividerBrush" Color="(#[0-9A-F]{6})"/)?.[1];
-  const scrollbarEdge = terminalHtml.match(/const DARK_RULER = \{[\s\S]*?border: "(#[0-9a-f]{6})"/)?.[1];
-
-  assert.ok(divider);
-  assert.ok(scrollbarEdge);
-  assert.ok(parseInt(divider.slice(1), 16) > parseInt(scrollbarEdge.slice(1), 16));
+test("session divider brushes are defined per theme", () => {
+  assert.match(appResources, /x:Key="SessionDividerBrush" Color="#[0-9A-F]{6}"/);
   assert.match(appResources, /x:Key="Light"[\s\S]*x:Key="SessionDividerBrush" Color="#E6E6E6"/);
 });

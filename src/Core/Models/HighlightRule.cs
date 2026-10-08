@@ -5,7 +5,7 @@ namespace Resesh.Core.Models;
 /// <summary>
 /// One keyword-highlight rule: a regex applied per terminal row, painting its matches.
 /// Patterns must stay in the syntax subset valid in both .NET and JavaScript regexes —
-/// they are validated host-side but executed by the xterm page.
+/// they are validated host-side and run by the terminal's highlighter.
 /// </summary>
 public sealed record HighlightRule
 {

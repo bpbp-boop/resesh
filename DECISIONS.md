@@ -848,7 +848,7 @@ the implicit `ContentDialog` style to an `x:Class` subclass, so without it the d
 falls back to the legacy template (square corners, regular-weight title, no footer
 band). A minimal WinUI 2.3.6 app reproduced this with a one-element XAML dialog.
 
-## 2026-10-07 - libghostty-vt terminal surface (behind a flag)
+## 2026-10-07 - libghostty-vt terminal surface
 - `RESESH_TERMINAL_SURFACE=ghostty` gives live tabs `GhosttyTerminalSurface`: libghostty-vt
   (ghostty-org/ghostty, commit pinned in `eng/ghostty-vt.json`, built unpatched by
   `eng/build-ghostty-vt.ps1`) parses on the backend reader thread; a Direct2D/DirectWrite
@@ -892,4 +892,32 @@ band). A minimal WinUI 2.3.6 app reproduced this with a one-element XAML dialog.
   every 100 ms; highlights re-matched rows that only scrolled - now cached by row text; the D2D
   brush color is set only when it changes. App CPU for the logs flood went 5.9 s -> 3.8 s
   (WebView2 9.2 s -> 8.1 s, it shares the recorder), tiny-writes 9.0 s -> 3.2 s.
-- Not yet: IME composition, UIA text.
+- 2026-10-08: IME, the emoji panel, dictation and the touch keyboard work through a hidden
+  TextBox parked on the cursor cell that holds keyboard focus (xterm.js's textarea approach):
+  XAML connects text services only to text controls, and WinUI exposes no CoreTextEditContext
+  for desktop windows. Encoded keys are handled in the surface's PreviewKeyDown first; the box
+  flushes on TextChanging (TextChanged is not raised for every change).
+- Screen readers (UIA text) are parked in FUTURE.md: the WebView surface never enabled them.
+
+## 2026-10-08 - WebView2 and xterm.js removed
+
+The ghostty surface replaced `TerminalControl` and `src/Terminal/wwwroot` entirely, after a
+parity pass against the page: links (OSC 8 and plain URLs), OSC 9 / 777 notifications and 9;4
+progress (the shim rebuilds the raw payloads the page forwarded), XTVERSION "Resesh", focus
+reporting, wheel behavior (Ctrl zoom, touchpad accumulation, alternate-screen arrows), Alt
+rectangle and Shift extend selection, underline styles and colors, bold-bright, the ruler's
+theme colors and calm split presentation, the whole-lane ruler card and click, line
+timestamps (`GhosttyLineTimes`), and command marks during rewind and playback.
+
+- Gone with it: the tab hold/fade timers that hid WebView2's gray fill (a terminal now shows
+  its theme background until its first frame, and collapsing a SwapChainPanel exposes
+  nothing), the Painted event, the WebView2 runtime in the setup bundle, the page's JS tests
+  and the WebView side of tools/terminal-bench.
+- Kept, with corrected reasons: window shortcuts are still forwarded by the terminal (it
+  consumes keys before window accelerators see them); the splitter hit target and the tab
+  drop overlay still sit above terminal content.
+- No fallback: missing native libraries are a build error, and at run time the surface
+  factory throws with the reason. Development builds run eng/build-ghostty-vt.ps1 first
+  (demo.ps1 does it when needed); CI builds both architectures and caches the output.
+- Deferred: find match-case and regex (libghostty-vt's search is literal and ASCII
+  case-insensitive; needs our own scrollback search).

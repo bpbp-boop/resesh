@@ -9,6 +9,9 @@ namespace Resesh.Terminal;
 /// </summary>
 public abstract class TerminalSurface : Grid, IDisposable
 {
+    /// <summary>Debug diagnostics sink (same pattern as SshTerminalSession.TraceHook).</summary>
+    public static Action<string>? TraceHook { get; set; }
+
     public abstract event Action<byte[]>? InputReceived;
     public abstract event Action<int, int>? Resized;
     public abstract event TerminalOutputObservedHandler? OutputObserved;
@@ -33,22 +36,6 @@ public abstract class TerminalSurface : Grid, IDisposable
 
     /// <summary>A finished command while history capture is on. Never raised by playback.</summary>
     public abstract event Action<TerminalCommandRecord>? CommandRecorded;
-
-    /// <summary>The surface has presented a frame since it was created or last shown.
-    /// Surfaces that draw synchronously never raise it; hosts must not wait indefinitely.</summary>
-    public event Action? Painted;
-
-    /// <summary>Whether the surface has presented its first frame. Surfaces that draw
-    /// synchronously report true from the start.</summary>
-    public virtual bool HasPainted => _hasPainted;
-
-    private bool _hasPainted;
-
-    protected void OnPainted()
-    {
-        _hasPainted = true;
-        Painted?.Invoke();
-    }
 
     public abstract bool SupportsRewindCapture { get; }
 
@@ -133,7 +120,7 @@ public abstract class TerminalSurface : Grid, IDisposable
 }
 
 /// <summary>One key combination as the terminal surfaces match it: a Windows virtual-key code
-/// (KeyboardEvent.keyCode in the WebView2 page) plus exact modifier state.</summary>
+/// (as WinUI reports it) plus exact modifier state.</summary>
 public sealed record TerminalKeyChord(int Key, bool Ctrl, bool Shift, bool Alt);
 
 /// <summary>A shortcut the terminal must recognize. <paramref name="Forward"/> shortcuts go to the
@@ -166,22 +153,22 @@ internal static class TerminalLinkPolicy
     }
 }
 
+public delegate void TerminalOutputObservedHandler(ReadOnlySpan<byte> data, long unixTimeMilliseconds);
+public sealed record TerminalReplayEvent(string Type, string Data);
+public sealed record TerminalTimedReplayEvent(double Time, string Type, string Data);
+
 public static class TerminalSurfaceFactory
 {
-    /// <summary>Live tabs, rewind and recording playback draw in-process with libghostty-vt.
-    /// RESESH_TERMINAL_SURFACE=webview keeps WebView2 + xterm.js, which is also the fallback
-    /// when the native libraries are missing.</summary>
+    /// <summary>Live tabs, rewind and recording playback all draw in-process with
+    /// libghostty-vt (<see cref="Ghostty.GhosttyTerminalSurface"/>).</summary>
     public static TerminalSurface CreateLive() => Create();
 
     public static TerminalSurface CreatePlayback() => Create();
 
-    private static TerminalSurface Create()
-    {
-        if (string.Equals(Environment.GetEnvironmentVariable("RESESH_TERMINAL_SURFACE"), "webview", StringComparison.OrdinalIgnoreCase))
-            return new TerminalControl();
-        if (Ghostty.GhosttyTerminalSurface.UnavailableReason is not { } reason)
-            return new Ghostty.GhosttyTerminalSurface();
-        TerminalControl.TraceHook?.Invoke($"ghostty surface unavailable, using WebView2: {reason}");
-        return new TerminalControl();
-    }
+    private static TerminalSurface Create() =>
+        Ghostty.GhosttyTerminalSurface.UnavailableReason is { } reason
+            ? throw new InvalidOperationException(
+                $"The terminal libraries could not be loaded ({reason}). Reinstall Resesh, or for a development "
+                + "build run eng/build-ghostty-vt.ps1.")
+            : new Ghostty.GhosttyTerminalSurface();
 }

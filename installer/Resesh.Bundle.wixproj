@@ -24,7 +24,6 @@
     <Error Condition="'$(MsiPath)' == ''" Text="MsiPath must point to the built Resesh MSI." />
     <Error Condition="'$(MsiPath)' != '' And !Exists('$(MsiPath)')" Text="MsiPath does not exist: $(MsiPath)" />
     <Error Condition="!Exists('prereqs\vc_redist.$(InstallerPlatform).exe')" Text="Missing prereqs\vc_redist.$(InstallerPlatform).exe. Run installer\download-prereqs.ps1 -Arch $(InstallerPlatform) first." />
-    <Error Condition="!Exists('prereqs\MicrosoftEdgeWebView2Setup.exe')" Text="Missing prereqs\MicrosoftEdgeWebView2Setup.exe. Run installer\download-prereqs.ps1 first." />
   </Target>
 
   <!-- WiX detaches the engine before SignBundleEngine and reattaches it before

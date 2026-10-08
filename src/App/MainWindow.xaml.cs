@@ -656,8 +656,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             new Uri(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico")));
         AppTitleBar.Loaded += (_, _) => UpdateTitleBarRegions();
         AppTitleBar.SizeChanged += (_, _) => UpdateTitleBarRegions();
-        // Re-assert regions on every activation: creating a WebView2 (e.g. opening the
-        // second split group) can transiently disturb the non-client drag region.
+        // Re-assert regions on every activation: layout changes elsewhere in the window
+        // (e.g. opening a second split group) can disturb the non-client drag region.
         Activated += (_, _) => UpdateTitleBarRegions();
         // The center/right blocks move without AppTitleBar itself resizing (e.g. the
         // MenuBar collapsing items), so track them individually too.

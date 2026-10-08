@@ -324,13 +324,13 @@
     <div class="head-block">
       <span class="eyebrow">08 / under the hood</span>
       <h2 class="h2-md">native windows, measured</h2>
-      <p class="lede">winui 3 and .net 10 for the app, xterm.js on webgl for the terminal, ssh.net for the transport. the numbers below were measured while building it.</p>
+      <p class="lede">winui 3 and .net 10 for the app, libghostty-vt and direct2d for the terminal, ssh.net for the transport. the numbers below were measured while building it.</p>
     </div>
     <div class="stats">
       <div class="stat">
-        <span class="stat__n">~700</span>
+        <span class="stat__n">~900</span>
         <span class="stat__k">automated tests</span>
-        <span class="stat__v">xunit for the core and the app logic, node for the terminal page.</span>
+        <span class="stat__v">xunit for the core, the app logic and the terminal.</span>
       </div>
       <div class="stat">
         <span class="stat__n">&lt;90<small>ms</small></span>
@@ -338,9 +338,9 @@
         <span class="stat__v">a common word across 30,000 commands with output, from a sqlite fts5 trigram index.</span>
       </div>
       <div class="stat">
-        <span class="stat__n">16<small>ms</small></span>
-        <span class="stat__k">output batching</span>
-        <span class="stat__v">ssh output reaches the terminal in 16 ms or 32 kb batches, each with its arrival time.</span>
+        <span class="stat__n">~7<small>mb/s</small></span>
+        <span class="stat__k">ssh throughput</span>
+        <span class="stat__v">an 8 mb log flood over ssh, parsed off the ui thread and drawn at the display's refresh rate.</span>
       </div>
       <div class="stat">
         <span class="stat__n">0</span>

@@ -226,8 +226,7 @@ Automation behind a small C ABI used by Microsoft's C# WPF wrapper.
 ## 3. Native terminal surface via libghostty-vt
 
 **Status (2026-10-08): shipped as the default terminal** for live tabs, rewind and recording
-playback (`GhosttyTerminalSurface`; `RESESH_TERMINAL_SURFACE=webview` still selects the WebView2
-surface). Decisions in DECISIONS.md ("libghostty-vt terminal surface"); numbers in
+playback (`GhosttyTerminalSurface`). The WebView2 + xterm.js surface was removed the same day. Decisions in DECISIONS.md ("libghostty-vt terminal surface"); numbers in
 [tools/terminal-bench/RESULTS.md](tools/terminal-bench/RESULTS.md).
 
 **Why another native attempt:** a terminal drawn in-process on a XAML `SwapChainPanel` removes the

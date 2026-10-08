@@ -1,12 +1,13 @@
-# In-app flood benchmark: ghostty vs WebView2 surfaces on the same Release build.
-# For each run: launch the test instance on a flood profile, sum CPU of the app process and
-# its WebView2 descendants until the tree goes idle, then record wall time, private memory and
-# the producer's CPU (conhost + shell for -Prefix Flood, the -ServerPid process for -Prefix SSH).
+# In-app flood benchmark on a Release build.
+# For each run: launch the test instance on a flood profile, sum CPU of the app process (and
+# any WebView2 children, which builds before 2026-10-08 had) until it goes idle, then record
+# wall time, private memory and the producer's CPU (conhost + shell for -Prefix Flood, the
+# -ServerPid process for -Prefix SSH).
 # Profiles come from profiles.py; SSH runs need sshflood.py listening.
 param(
     [Parameter(Mandatory)][string]$Exe,
     [Parameter(Mandatory)][string]$DataDir,
-    [string[]]$Surfaces = @('ghostty', 'webview'),
+    [string]$Label = 'app',   # recorded with each result, e.g. a build or commit name
     [string[]]$Workloads = @('baseline', 'logs', 'color', 'unicode', 'tui', 'tiny'),
     [int]$Reps = 2,
     [string]$Out = 'appbench.json',
@@ -14,7 +15,6 @@ param(
     [int]$ServerPid = 0   # SSH runs: the real server process (a venv python.exe is a launcher)
 )
 $ErrorActionPreference = 'Stop'
-$webViewData = Join-Path (Split-Path $DataDir) 'webview-udf'
 
 function Tree([int]$root) {
     $all = Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId, Name
@@ -67,12 +67,10 @@ function ProducerCpu([hashtable]$seen) {
 function ServerCpu { if ($ServerPid) { (Get-Process -Id $ServerPid).TotalProcessorTime.TotalMilliseconds } else { 0 } }
 
 $results = @()
-foreach ($surface in $Surfaces) {
+foreach ($surface in @($Label)) {
     foreach ($wl in $Workloads) {
         $profile = if ($wl -eq 'baseline') { if ($Prefix -eq 'SSH') { 'SSH idle' } else { 'Idle baseline' } } else { "$Prefix $wl" }
         for ($r = 0; $r -lt $Reps; $r++) {
-            $env:RESESH_TERMINAL_SURFACE = $surface
-            $env:WEBVIEW2_USER_DATA_FOLDER = $webViewData
             $sw = [Diagnostics.Stopwatch]::StartNew()
             $serverStart = ServerCpu
             $seen = @{}
