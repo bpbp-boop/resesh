@@ -98,7 +98,6 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private int _lastCursorRow = -1;
     private GhosttyFrameInfo _lastInfo;
     private ushort _suppressCharactersForKey;
-    private char _pendingHighSurrogate;
     private float _fontScale;
 
     // Rewind keyframes (guarded by _termGate): same cadence as terminal.html.
@@ -188,6 +187,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         // UI Automation (screen readers, tests) move the bar through its value.
         _scrollBar.ValueChanged += OnScrollBarValueChanged;
         ConfigureFindBar();
+        ConfigureTextInput();
 
         _renderer.GraphemeAt = GraphemeAt;
         _blinkTimer = DispatcherQueue.CreateTimer();
@@ -211,7 +211,6 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 
         PreviewKeyDown += OnKeyDown;
         KeyUp += OnKeyUp;
-        CharacterReceived += OnCharacterReceived;
         GotFocus += (_, _) => SetFocused(true);
         LostFocus += (_, _) => SetFocused(false);
         PointerPressed += OnPointerPressed;
@@ -455,6 +454,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         {
             _fontScale = scale;
             _renderer.SetFont(_fontFamily, EffectiveFontSize * scale);
+            ApplyTextInputStyle();
         }
         var pixelWidth = (int)Math.Round(_panel.ActualWidth * scale);
         var pixelHeight = (int)Math.Round(_panel.ActualHeight * scale);
@@ -477,6 +477,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         }
         _forceFull = true;
         RequestFrame();
+        PlaceTextInput();
 
         if (!_initialized)
             return;
@@ -596,6 +597,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             if (blink) _blinkTimer.Start(); else { _blinkTimer.Stop(); _cursorBlinkOn = true; }
         }
         _lastInfo = info;
+        if (cursorMoved)
+            PlaceTextInput();
         UpdateScrollBar(info);
         if (_findOpen)
             UpdateFindCount();
@@ -678,6 +681,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         var b = _theme.Background;
         var luminance = ((b >> 16) & 0xFF) * 299 + ((b >> 8) & 0xFF) * 587 + (b & 0xFF) * 114;
         _ruler.SetTheme(dark: luminance < 128_000);
+        ApplyTextInputStyle();
     }
 
     private static Windows.UI.Color ToColor(uint rgb) =>
@@ -742,7 +746,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     public override void FocusTerminal()
     {
         if (!_disposed)
-            Focus(FocusState.Programmatic);
+            _textInput.Focus(FocusState.Programmatic);
     }
 
     private void SetFocused(bool focused)
@@ -789,15 +793,21 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     }
 
     /// <summary>Input aimed at the find bar or scroll bar is theirs, not the shell's.</summary>
-    private bool FromTerminal(RoutedEventArgs args) => ReferenceEquals(args.OriginalSource, this);
+    private bool FromTerminal(RoutedEventArgs args) =>
+        ReferenceEquals(args.OriginalSource, this) || ReferenceEquals(args.OriginalSource, _textInput);
 
     private void OnKeyDown(object sender, KeyRoutedEventArgs args)
     {
         if (_disposed || !_inputEnabled || _term == IntPtr.Zero || !FromTerminal(args))
             return;
+        // While an IME composes, every key (Enter commits, arrows pick candidates) is its own;
+        // VK_PROCESSKEY marks a key the IME already took.
+        if (_composing || (int)args.Key == 229)
+            return;
         var virtualKey = (ushort)args.Key;
         if (_suppressCharactersForKey != 0 && _suppressCharactersForKey != virtualKey)
             _suppressCharactersForKey = 0; // a missed key-up must not swallow later typing
+        FlushTextInput(); // text typed before this key goes first
         if (TryHandleShortcut(virtualKey))
         {
             args.Handled = true;
@@ -824,7 +834,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         var scanCode = args.KeyStatus.ScanCode;
         var text = TextFor(virtualKey, scanCode, shift);
         var printable = text.Length > 0 && !char.IsControl(text[0]);
-        // Plain and AltGr text arrives through CharacterReceived, which knows dead keys and layouts.
+        // Plain and AltGr text reaches the text box, which knows dead keys, layouts and IMEs.
         if (printable && (!control && !alt || altGr))
             return;
 
@@ -871,32 +881,6 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     {
         if (_suppressCharactersForKey == (ushort)args.Key)
             _suppressCharactersForKey = 0;
-    }
-
-    private void OnCharacterReceived(UIElement sender, CharacterReceivedRoutedEventArgs args)
-    {
-        if (_disposed || !_inputEnabled || _term == IntPtr.Zero || !FromTerminal(args))
-            return;
-        args.Handled = true;
-        if (_suppressCharactersForKey != 0 || !_connected)
-            return;
-        var ch = args.Character;
-        string text;
-        if (char.IsHighSurrogate(ch))
-        {
-            _pendingHighSurrogate = ch;
-            return;
-        }
-        if (char.IsLowSurrogate(ch) && _pendingHighSurrogate != 0)
-        {
-            text = new string([_pendingHighSurrogate, ch]);
-            _pendingHighSurrogate = '\0';
-        }
-        else
-        {
-            text = ch.ToString();
-        }
-        SendUserInput(Encoding.UTF8.GetBytes(text));
     }
 
     private void SendUserInput(byte[] bytes)
@@ -1186,7 +1170,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     {
         if (_disposed || _term == IntPtr.Zero || !FromTerminal(args))
             return;
-        Focus(FocusState.Pointer);
+        _textInput.Focus(FocusState.Pointer);
         var props = args.GetCurrentPoint(this).Properties;
         var button = ButtonOf(props);
         CapturePointer(args.Pointer);
