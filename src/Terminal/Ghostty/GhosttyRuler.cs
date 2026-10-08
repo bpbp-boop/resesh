@@ -42,6 +42,8 @@ internal sealed class GhosttyRuler : Grid
     private long _total = 1;
     private CommandMarkInfo? _cardMark;
     private Color _ok, _fail, _unknown, _bookmark;
+    private uint _laneBackground = 0x0C0C0C, _laneBorder = 0x333333;
+    private bool _split, _groupFocused = true, _pointerOver;
 
     internal event Action<long>? JumpRequested;
     internal event Action<long>? CopyRequested;
@@ -60,7 +62,12 @@ internal sealed class GhosttyRuler : Grid
         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); // hit-testable lane
         Children.Add(_ticks);
         PointerMoved += (_, e) => ShowCardNear(e.GetCurrentPoint(this).Position.Y);
-        PointerExited += (_, _) => _hideTimer.Start();
+        PointerEntered += (_, _) => SetPointerOver(true);
+        PointerExited += (_, _) =>
+        {
+            _hideTimer.Start();
+            SetPointerOver(false);
+        };
         PointerPressed += (_, e) =>
         {
             if (Nearest(e.GetCurrentPoint(this).Position.Y) is { } mark)
@@ -71,11 +78,15 @@ internal sealed class GhosttyRuler : Grid
         };
         SizeChanged += (_, _) => Paint();
         BuildCard();
-        SetTheme(dark: true);
+        SetTheme(dark: true, 0x0C0C0C, 0x333333);
     }
 
-    internal void SetTheme(bool dark)
+    /// <summary>terminal.html's getRuler: the command, bookmark and find palette by lightness,
+    /// the lane background from the theme and its edge from the selection color.</summary>
+    internal void SetTheme(bool dark, uint background, uint border)
     {
+        _laneBackground = background;
+        _laneBorder = border;
         // terminal.html's DARK_RULER / LIGHT_RULER command and bookmark colors.
         _ok = dark ? Rgb(0x2EA043) : Rgb(0x50A14F);
         _fail = dark ? Rgb(0xFF5555) : Rgb(0xE45649);
@@ -88,6 +99,26 @@ internal sealed class GhosttyRuler : Grid
         _cardCommand.Foreground = new SolidColorBrush(dark ? Rgb(0xE6EDF3) : Rgb(0x24242B));
         _cardMeta.Foreground = new SolidColorBrush(dark ? Rgb(0xA7A7B5) : Rgb(0x666675));
         Paint();
+    }
+
+    /// <summary>Calm presentation in split view: routine marks recede (more so in an unfocused
+    /// group), failures and bookmarks stay strong; hovering the lane restores full detail.</summary>
+    internal void SetPresentation(bool isSplit, bool isGroupFocused)
+    {
+        if (isSplit == _split && isGroupFocused == _groupFocused)
+            return;
+        _split = isSplit;
+        _groupFocused = isGroupFocused;
+        Paint();
+    }
+
+    private void SetPointerOver(bool over)
+    {
+        if (over == _pointerOver)
+            return;
+        _pointerOver = over;
+        if (_split)
+            Paint();
     }
 
     internal void Update(IReadOnlyList<CommandMarkInfo> marks, IReadOnlyList<int> bookmarks, long totalLines,
@@ -123,41 +154,54 @@ internal sealed class GhosttyRuler : Grid
             _ticks.Source = _bitmap;
             fresh = true;
         }
-        Array.Clear(_pixels);
+        // Opaque BGRA: the lane background with a one-pixel edge toward the terminal.
+        var background = 0xFF000000 | _laneBackground;
+        Array.Fill(_pixels, background);
+        var edge = Math.Max(1, (int)Math.Round(scale));
+        for (var y = 0; y < height; y++)
+            _pixels.AsSpan(y * width, Math.Min(edge, width)).Fill(0xFF000000 | _laneBorder);
+
+        var calm = _split && !_pointerOver;
+        var ordinary = calm ? (_groupFocused ? 0.42 : 0.25) : 1;
+        var important = calm ? (_groupFocused ? 0.90 : 0.62) : 1;
+        var search = calm ? (_groupFocused ? 0.75 : 0.50) : 1;
+
         // Lanes: 0 commands (left half), 1 highlights and 2 find (right half), 3 bookmarks
-        // (full width). Ticks in the same pixel row and lane are painted once; lanes painted
-        // later sit on top.
+        // (full width). Ticks in the same pixel row and lane are painted once unless forced;
+        // lanes painted later sit on top.
         var used = new HashSet<(int Bucket, int Lane)>();
-        void Tick(int line, Color color, int lane, double opacity = 1)
+        void Tick(int line, Color color, int lane, double opacity = 1, bool force = false)
         {
             var bucket = (int)(YForLine(line) / TickHeight);
-            if (!used.Add((bucket, lane)))
+            if (!used.Add((bucket, lane)) && !force)
                 return;
             var top = Math.Max(0, Math.Min(ActualHeight - TickHeight, bucket * TickHeight));
             var y0 = (int)Math.Round(top * scale);
             var y1 = Math.Min(height, Math.Max(y0 + 1, (int)Math.Round((top + TickHeight - 1) * scale)));
             var x0 = lane is 1 or 2 ? width / 2 : 0;
             var x1 = lane == 0 ? width / 2 : width;
-            // premultiplied BGRA
-            var a = (uint)Math.Round(255 * opacity);
-            var pixel = a << 24 | (color.R * a / 255) << 16 | (color.G * a / 255) << 8 | color.B * a / 255;
+            x0 = Math.Max(x0, edge);
+            var pixel = Over(color, opacity, background);
             for (var y = y0; y < y1; y++)
-                _pixels.AsSpan(y * width + x0, x1 - x0).Fill(pixel);
+                _pixels.AsSpan(y * width + x0, Math.Max(0, x1 - x0)).Fill(pixel);
         }
         foreach (var (line, color) in _highlights)
-            Tick(line, Rgb(color), 1, opacity: 0.8); // slightly dim: find ticks stay dominant
+            Tick(line, Rgb(color), 1, opacity: 0.8 * ordinary); // slightly dim: find ticks stay dominant
         foreach (var line in _searchLines)
             if (line != _currentSearchLine)
-                Tick(line, _match, 2);
+                Tick(line, _match, 2, search);
         if (_currentSearchLine >= 0)
-        {
-            used.Remove(((int)(YForLine(_currentSearchLine) / TickHeight), 2));
-            Tick(_currentSearchLine, _activeMatch, 2);
-        }
+            Tick(_currentSearchLine, _activeMatch, 2, important, force: true);
+        // Failures paint in a second pass so an overlapping success never buries a red tick;
+        // calm mode keeps routine successes neutral.
         foreach (var mark in _marks)
-            Tick(mark.Line, mark.Exit switch { 0 => _ok, not null => _fail, null => _unknown }, 0);
+            if (mark.Exit is null or 0)
+                Tick(mark.Line, mark.Exit == 0 && !calm ? _ok : _unknown, 0, ordinary);
+        foreach (var mark in _marks)
+            if (mark.Exit is not (null or 0))
+                Tick(mark.Line, _fail, 0, important, force: true);
         foreach (var line in _bookmarks)
-            Tick(line, _bookmark, 3);
+            Tick(line, _bookmark, 3, important, force: true);
 
         if (!fresh && _pixels.AsSpan().SequenceEqual(_shown))
             return;
@@ -257,6 +301,15 @@ internal sealed class GhosttyRuler : Grid
         SetColumn(copy, 3);
         row.Children.Add(copy);
         _card.Child = row;
+    }
+
+    private static uint Over(Color color, double alpha, uint background)
+    {
+        static uint Mix(uint c, uint b, double a) => (uint)Math.Round(c * a + b * (1 - a));
+        return 0xFF000000
+            | Mix(color.R, (background >> 16) & 0xFF, alpha) << 16
+            | Mix(color.G, (background >> 8) & 0xFF, alpha) << 8
+            | Mix(color.B, background & 0xFF, alpha);
     }
 
     private static Color Rgb(uint rgb) => Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);

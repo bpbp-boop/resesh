@@ -46,11 +46,23 @@ async def probe(process):
     process.exit(0)
 
 
+STYLES = (
+    '\x1b[4:1msingle\x1b[0m \x1b[4:2mdouble\x1b[0m \x1b[4:3mcurly\x1b[0m \x1b[4:4mdotted\x1b[0m '
+    '\x1b[4:5mdashed\x1b[0m \x1b[4:3;58:2::255:85:85mred curly\x1b[0m \x1b[53moverline\x1b[0m '
+    '\x1b[9mstrike\x1b[0m \x1b[2;4mfaint underline\x1b[0m\r\n'
+    + ''.join(f'\x1b[3{i}mN{i}\x1b[0m ' for i in range(8)) + '\r\n'
+    + ''.join(f'\x1b[1;3{i}mB{i}\x1b[0m ' for i in range(8)) + '\r\n'
+    'link: https://example.com/a/very/long/path?q=1 and \x1b]8;;https://ghostty.org\x07OSC 8 text\x1b]8;;\x07\r\n'
+)
+
+
 async def handle(process):
     name = process.get_extra_info('username')
     if name == 'probe':
         await probe(process)
         return
+    if name == 'styles':
+        process.stdout.write(STYLES.encode())
     path = os.path.join(WORKLOADS, name + '.bin')
     if os.path.exists(path):
         with open(path, 'rb') as f:
@@ -58,7 +70,7 @@ async def handle(process):
         for i in range(0, len(data), 32768):
             process.stdout.write(data[i:i + 32768])
             await process.stdout.drain()
-    else:
+    elif name != 'styles':
         process.stdout.write(f'no workload {name}\r\n'.encode())
     try:
         while await process.stdin.read(4096):

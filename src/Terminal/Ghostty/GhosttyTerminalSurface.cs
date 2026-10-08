@@ -54,6 +54,9 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private bool _historyCapture;
     private string? _promptPlatform;
     private bool _annotationsPending;
+    private bool _commandsPanelOpen;
+    private readonly Border _toast = new() { Visibility = Visibility.Collapsed };
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _toastTimer;
     private const int AnnotationIntervalMs = 100;
     private long _lastAnnotationsMs;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _annotationTimer;
@@ -413,7 +416,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
                 break;
             case GhosttyEventKind.Title:
                 _commands?.NoteTitleChanged();
-                TitleChanged?.Invoke(Encoding.UTF8.GetString(data));
+                TitleChanged?.Invoke(Cap(Encoding.UTF8.GetString(data)));
                 break;
             case GhosttyEventKind.Semantic:
                 OnSemanticEvent(data);
@@ -691,7 +694,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         _commandsPanel.ApplyTheme(_theme, _fontFamily);
         var b = _theme.Background;
         var luminance = ((b >> 16) & 0xFF) * 299 + ((b >> 8) & 0xFF) * 587 + (b & 0xFF) * 114;
-        _ruler.SetTheme(dark: luminance < 128_000);
+        _ruler.SetTheme(dark: luminance < 128_000, _theme.Background, _theme.Selection);
         ApplyTextInputStyle();
     }
 
@@ -792,7 +795,11 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         IsHitTestVisible = enabled;
     }
 
-    public override void SetRulerPresentation(bool isSplit, bool isGroupFocused) => _isSplit = isSplit;
+    public override void SetRulerPresentation(bool isSplit, bool isGroupFocused)
+    {
+        _isSplit = isSplit;
+        _ruler.SetPresentation(isSplit, isGroupFocused);
+    }
 
     // ---- keyboard -------------------------------------------------------------------------
 
@@ -1051,6 +1058,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         _findBar.Background = (Brush)Application.Current.Resources["SolidBackgroundFillColorSecondaryBrush"];
         _findBar.BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
         Children.Add(_findBar);
+        _findBar.SizeChanged += (_, _) => UpdateCommandsPanelPresentation();
 
         _findInput.TextChanged += (_, _) => RunFind();
         _findInput.KeyDown += (_, args) =>
@@ -1074,6 +1082,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         {
             _findOpen = true;
             _findBar.Visibility = Visibility.Visible;
+            UpdateCommandsPanelPresentation();
             // Seed with the selected text, like most find bars.
             var selected = SelectionText();
             if (!string.IsNullOrEmpty(selected) && !selected.Contains('\n'))
@@ -1090,6 +1099,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             return;
         _findOpen = false;
         _findBar.Visibility = Visibility.Collapsed;
+        UpdateCommandsPanelPresentation();
         if (_term != IntPtr.Zero)
             GhosttyNative.rvt_search_set(_term, null, 0);
         RequestFrame();
@@ -1450,7 +1460,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 
     // ---- features the WebView surface has and this one does not yet ----------------------
 
-    public override void ToggleCommandsPanel() => SetCommandsPanelOpen(!_commandsPanel.IsOpen);
+    public override void ToggleCommandsPanel() => SetCommandsPanelOpen(!_commandsPanelOpen);
 
     public override void SetHistoryCapture(bool enabled)
     {
@@ -1507,11 +1517,11 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
                 timer.Start();
             },
         };
-        _commands.RunningCommand += (text, exact) => CommandChanged?.Invoke(text, exact);
+        _commands.RunningCommand += (text, exact) => CommandChanged?.Invoke(Cap(text), exact);
         _commands.CommandExecution += execution => CommandExecutionChanged?.Invoke(execution);
         _commands.CommandRecorded += record => CommandRecorded?.Invoke(record);
         _commands.PromptContext += (context, platform) => PromptContextChanged?.Invoke(context, platform);
-        _commands.CommandMarked += command => CommandObserved?.Invoke(command);
+        _commands.CommandMarked += command => CommandObserved?.Invoke(Cap(command));
         _commands.Changed += QueueAnnotations;
         _overview = new GhosttyOverviewIndex(_commandBuffer, _highlighter);
         _commands.SetHistoryCapture(_historyCapture);
@@ -1589,6 +1599,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             OverviewTicks(), SearchLines(out var currentSearchLine), currentSearchLine);
         if (moreToIndex)
             QueueAnnotations(); // keep indexing older scrollback at low priority
+        UpdateCommandsPanelPresentation();
         if (_commandsPanel.IsOpen)
             _commandsPanel.SetCommands(marks);
     }
@@ -1602,7 +1613,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         var rules = _highlighter.Rules;
         foreach (var (line, mask) in _overview.Lines())
         {
-            var index = System.Numerics.BitOperations.TrailingZeroCount(mask);
+            var index = 31 - System.Numerics.BitOperations.LeadingZeroCount(mask); // the last rule wins, as in terminal.html
             if (index < rules.Count)
                 ticks.Add((line, rules[index].Color));
         }
@@ -1620,16 +1631,62 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         return _searchLineBuffer[..count];
     }
 
+    /// <summary>Titles and commands reach tab labels and the agent tracker: bounded, as
+    /// terminal.html bounded them (512 characters).</summary>
+    private static string Cap(string text) => text.Length > 512 ? text[..512] : text;
+
     private void SetCommandsPanelOpen(bool open)
     {
-        if (open == _commandsPanel.IsOpen)
+        if (open == _commandsPanelOpen)
             return;
-        _commandsPanel.Visibility = open ? Visibility.Visible : Visibility.Collapsed;
+        _commandsPanelOpen = open;
+        UpdateCommandsPanelPresentation();
         if (open && RefreshCommands() is { } commands)
             _commandsPanel.SetCommands(commands.Commands());
         if (!open)
             FocusTerminal();
         CommandsPanelOpenChanged?.Invoke(open);
+    }
+
+    /// <summary>The panel stays open across full-screen programs but hides while one runs (its
+    /// marks describe the normal screen), and sits below the find bar while that is open.</summary>
+    private void UpdateCommandsPanelPresentation()
+    {
+        var visible = _commandsPanelOpen && !(_commandBuffer?.IsAlternate ?? false);
+        var visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        if (_commandsPanel.Visibility != visibility)
+            _commandsPanel.Visibility = visibility;
+        var top = _findOpen ? Math.Max(_findBar.ActualHeight, 36) + 8 : 8;
+        if (_commandsPanel.Margin.Top != top)
+            _commandsPanel.Margin = new Thickness(0, top, 22, 0);
+    }
+
+    /// <summary>Brief "Copied" / "No output" confirmation for the copy-output actions.</summary>
+    private void ShowToast(string text)
+    {
+        if (_toast.Child is not TextBlock label)
+        {
+            label = new TextBlock { FontSize = 12 };
+            _toast.Child = label;
+            _toast.Padding = new Thickness(10, 4, 10, 4);
+            _toast.CornerRadius = new CornerRadius(4);
+            _toast.HorizontalAlignment = HorizontalAlignment.Center;
+            _toast.VerticalAlignment = VerticalAlignment.Top;
+            _toast.Margin = new Thickness(0, 8, 0, 0);
+            _toast.IsHitTestVisible = false;
+            _toast.Background = (Brush)Application.Current.Resources["SolidBackgroundFillColorSecondaryBrush"];
+            _toast.BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
+            _toast.BorderThickness = new Thickness(1);
+            Children.Add(_toast);
+            _toastTimer = DispatcherQueue.CreateTimer();
+            _toastTimer.Interval = TimeSpan.FromMilliseconds(1200);
+            _toastTimer.IsRepeating = false;
+            _toastTimer.Tick += (_, _) => _toast.Visibility = Visibility.Collapsed;
+        }
+        label.Text = text;
+        _toast.Visibility = Visibility.Visible;
+        _toastTimer!.Stop();
+        _toastTimer.Start();
     }
 
     private void JumpToMark(long id)
@@ -1646,6 +1703,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         var text = commands.CommandOutput(line);
         if (text.Length > 0)
             CopyText(text);
+        ShowToast(text.Length > 0 ? "Copied" : "No output");
     }
 
     /// <summary>Scrolls a line to the middle of the viewport and flashes it.</summary>

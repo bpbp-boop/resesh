@@ -364,13 +364,71 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
                 Advances = _runAdvances.AsSpan(0, n).ToArray(),
             };
             _dc.DrawGlyphRun(new Vector2(OriginX + start * CellWidth, baseline), run, _brush, MeasuringMode.Natural);
-            for (var i = start; i < x; i++)
+        }
+        DrawDecorations(row, cols, top, baseline);
+    }
+
+    private const ushort DecorationFlags = GhosttyCell.Underline | GhosttyCell.Strike | GhosttyCell.Overline;
+
+    /// <summary>Underlines (single, double, curly, dotted, dashed; SGR 58 colors), overlines and
+    /// strikethrough for every cell, blanks included (links and highlights underline spaces too).</summary>
+    private void DrawDecorations(GhosttyCell* row, int cols, float top, float baseline)
+    {
+        float thickness = Math.Max(1, (int)Math.Round(CellHeight / 16f));
+        var underlineY = Math.Min(baseline + 2, top + CellHeight - 2 * thickness);
+        for (var x = 0; x < cols; x++)
+        {
+            ref var c = ref row[x];
+            if ((c.Flags & DecorationFlags) == 0 || c.Wide == GhosttyCell.SpacerTail || (c.Flags & GhosttyCell.Invisible) != 0)
+                continue;
+            float left = OriginX + x * CellWidth;
+            float width = c.Wide == GhosttyCell.WideChar ? 2 * CellWidth : CellWidth;
+            var alpha = (c.Flags & GhosttyCell.Faint) != 0 ? 0.55f : 1f;
+            if ((c.Flags & GhosttyCell.Underline) != 0)
             {
-                var flags = row[i].Flags;
-                if ((flags & GhosttyCell.Underline) != 0)
-                    _dc.FillRectangle(new Rect(OriginX + i * CellWidth, baseline + 2, CellWidth, 1), _brush);
-                if ((flags & GhosttyCell.Strike) != 0)
-                    _dc.FillRectangle(new Rect(OriginX + i * CellWidth, top + CellHeight / 2, CellWidth, 1), _brush);
+                SetBrush(Rgb(c.UnderlineColor == GhosttyCell.DefaultUnderlineColor ? c.Foreground : c.UnderlineColor, alpha));
+                switch (c.UnderlineStyle)
+                {
+                    case 2: // double
+                        _dc.FillRectangle(new Rect(left, underlineY - thickness, width, thickness), _brush);
+                        _dc.FillRectangle(new Rect(left, underlineY + thickness, width, thickness), _brush);
+                        break;
+                    case 3: // curly: one wave per cell, continuous across cells
+                    {
+                        var amplitude = Math.Max(1f, thickness);
+                        var steps = Math.Max(4, (int)width / 2);
+                        var previous = new Vector2(left, underlineY);
+                        for (var i = 1; i <= steps; i++)
+                        {
+                            var px = left + width * i / steps;
+                            var phase = (px - OriginX) / CellWidth * 2 * MathF.PI;
+                            var next = new Vector2(px, underlineY + amplitude * MathF.Sin(phase));
+                            _dc.DrawLine(previous, next, _brush, thickness);
+                            previous = next;
+                        }
+                        break;
+                    }
+                    case 4: // dotted
+                        for (var dx = 0f; dx < width; dx += 2 * thickness)
+                            _dc.FillRectangle(new Rect(left + dx, underlineY, thickness, thickness), _brush);
+                        break;
+                    case 5: // dashed
+                        var dash = Math.Max(2f, CellWidth / 2f);
+                        for (var dx = 0f; dx < width; dx += CellWidth)
+                            _dc.FillRectangle(new Rect(left + dx, underlineY, Math.Min(dash, width - dx), thickness), _brush);
+                        break;
+                    default: // single
+                        _dc.FillRectangle(new Rect(left, underlineY, width, thickness), _brush);
+                        break;
+                }
+            }
+            if ((c.Flags & (GhosttyCell.Strike | GhosttyCell.Overline)) != 0)
+            {
+                SetBrush(Rgb(c.Foreground, alpha));
+                if ((c.Flags & GhosttyCell.Strike) != 0)
+                    _dc.FillRectangle(new Rect(left, top + CellHeight / 2, width, thickness), _brush);
+                if ((c.Flags & GhosttyCell.Overline) != 0)
+                    _dc.FillRectangle(new Rect(left, top, width, thickness), _brush);
             }
         }
     }

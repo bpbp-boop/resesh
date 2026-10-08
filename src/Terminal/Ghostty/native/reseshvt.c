@@ -18,7 +18,7 @@ __declspec(dllimport) void __stdcall InitializeSRWLock(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall AcquireSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(RvtSrwLock* lock);
 
-#define RVT_ABI_VERSION 3
+#define RVT_ABI_VERSION 4
 
 // ---- events -------------------------------------------------------------------------------
 
@@ -63,6 +63,9 @@ typedef void (*RvtEventFn)(void* user, int kind, const uint8_t* data, size_t len
 #define RVT_SELECTED 128u
 #define RVT_MATCH 256u
 #define RVT_MATCH_CURRENT 512u
+#define RVT_UL_STYLE_SHIFT 10   // bits 10-12: GHOSTTY_SGR_UNDERLINE_* when RVT_UNDERLINE is set
+#define RVT_OVERLINE 8192u
+#define RVT_UL_DEFAULT 0x01000000u // ul: no underline color, draw in the foreground
 #define RVT_MAX_SPANS 512
 
 typedef struct { uint16_t y, x0, x1, current; } RvtSpan;
@@ -74,6 +77,7 @@ typedef struct {
   uint16_t flags;   // RVT_*
   uint8_t wide;     // GhosttyCellWide
   uint8_t glen;     // grapheme codepoint count
+  uint32_t ul;      // underline color 0x00RRGGBB, or RVT_UL_DEFAULT
 } RvtCell;
 
 typedef struct {
@@ -519,18 +523,24 @@ RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t row
       if (tag == GHOSTTY_CELL_CONTENT_CODEPOINT_GRAPHEME)
         ghostty_render_state_row_cells_get(t->cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN, &glen);
 
-      uint32_t fg = dfg, bg = dbg;
+      uint32_t fg = dfg, bg = dbg, ul = RVT_UL_DEFAULT;
       uint16_t flags = 0;
       bool bg_default = true;
       if (styled) {
         GhosttyStyle st = GHOSTTY_INIT_SIZED(GhosttyStyle);
         ghostty_render_state_row_cells_get(t->cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE, &st);
-        fg = resolve(st.fg_color, &colors, dfg);
+        GhosttyStyleColor fg_color = st.fg_color;
+        // Bold draws the first eight palette colors bright, xterm.js's default.
+        if (st.bold && fg_color.tag == GHOSTTY_STYLE_COLOR_PALETTE && fg_color.value.palette < 8)
+          fg_color.value.palette += 8;
+        fg = resolve(fg_color, &colors, dfg);
         bg_default = st.bg_color.tag == GHOSTTY_STYLE_COLOR_NONE;
         bg = resolve(st.bg_color, &colors, dbg);
         if (st.bold) flags |= RVT_BOLD;
         if (st.italic) flags |= RVT_ITALIC;
-        if (st.underline) flags |= RVT_UNDERLINE;
+        if (st.underline) flags |= RVT_UNDERLINE | (uint16_t)((st.underline & 7) << RVT_UL_STYLE_SHIFT);
+        if (st.overline) flags |= RVT_OVERLINE;
+        if (st.underline_color.tag != GHOSTTY_STYLE_COLOR_NONE) ul = resolve(st.underline_color, &colors, dfg);
         if (st.strikethrough) flags |= RVT_STRIKE;
         if (st.faint) flags |= RVT_FAINT;
         if (st.invisible) flags |= RVT_INVISIBLE;
@@ -544,14 +554,14 @@ RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t row
       }
       if (bg_default) flags |= RVT_DEFAULT_BG;
       if (has_sel && x >= sel.start_x && x <= sel.end_x) flags |= RVT_SELECTED;
-      c->cp = cp; c->fg = fg; c->bg = bg; c->flags = flags; c->wide = (uint8_t)wide;
+      c->cp = cp; c->fg = fg; c->bg = bg; c->flags = flags; c->wide = (uint8_t)wide; c->ul = ul;
       c->glen = (uint8_t)(glen > 255 ? 255 : glen);
       x++;
     }
     for (; x < cols; x++) {
       RvtCell* c = &row[x];
       memset(c, 0, sizeof *c);
-      c->fg = dfg; c->bg = dbg; c->flags = RVT_DEFAULT_BG;
+      c->fg = dfg; c->bg = dbg; c->flags = RVT_DEFAULT_BG; c->ul = RVT_UL_DEFAULT;
       if (has_sel && x >= sel.start_x && x <= sel.end_x) c->flags |= RVT_SELECTED;
     }
     apply_spans(t, row, y, cols);
