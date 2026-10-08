@@ -6,6 +6,7 @@
 // C# sees flat structs and one event callback.
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ghostty/vt.h>
@@ -17,7 +18,7 @@ __declspec(dllimport) void __stdcall InitializeSRWLock(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall AcquireSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(RvtSrwLock* lock);
 
-#define RVT_ABI_VERSION 1
+#define RVT_ABI_VERSION 3
 
 // ---- events -------------------------------------------------------------------------------
 
@@ -231,6 +232,51 @@ static void on_unknown(GhosttyTerminal term, void* user, const GhosttyTerminalUn
     emit((RvtTerm*)user, RVT_EVENT_OSC, seq->value.osc.content.ptr, seq->value.osc.content.len);
 }
 
+// OSC 9 / OSC 777 notifications and OSC 9;4 progress are parsed by libghostty-vt; they are
+// handed on rebuilt as the raw OSC content terminal.html forwarded ("9;body",
+// "777;notify;title;body", "9;4;state;progress"), so the host parses one format.
+static void emit_osc_text(RvtTerm* t, const char* head, const GhosttyString* a, const GhosttyString* b) {
+  uint8_t buf[4096];
+  size_t n = 0;
+  size_t head_len = strlen(head);
+  memcpy(buf, head, head_len);
+  n = head_len;
+  const GhosttyString* parts[2] = { a, b };
+  for (int i = 0; i < 2; i++) {
+    if (!parts[i]) continue;
+    if (i == 1) buf[n++] = ';';
+    size_t len = parts[i]->len < sizeof buf - n - 1 ? parts[i]->len : sizeof buf - n - 1;
+    memcpy(buf + n, parts[i]->ptr, len);
+    n += len;
+  }
+  emit(t, RVT_EVENT_OSC, buf, n);
+}
+
+static void on_notification(GhosttyTerminal term, void* user, const GhosttyTerminalDesktopNotification* note) {
+  (void)term;
+  if (note->title.len > 0)
+    emit_osc_text((RvtTerm*)user, "777;notify;", &note->title, &note->body);
+  else
+    emit_osc_text((RvtTerm*)user, "9;", &note->body, NULL);
+}
+
+static void on_progress(GhosttyTerminal term, void* user, const GhosttyTerminalProgressReport* report) {
+  (void)term;
+  char buf[32];
+  int n = report->progress >= 0
+    ? snprintf(buf, sizeof buf, "9;4;%d;%d", (int)report->state, (int)report->progress)
+    : snprintf(buf, sizeof buf, "9;4;%d", (int)report->state);
+  if (n > 0) emit((RvtTerm*)user, RVT_EVENT_OSC, (const uint8_t*)buf, (size_t)n);
+}
+
+// CSI > q: Claude Code enables synchronized output only for terminals that answer
+// (DECISIONS.md, "XTVERSION reply"); the page answered "Resesh".
+static GhosttyString on_xtversion(GhosttyTerminal term, void* user) {
+  (void)term; (void)user;
+  GhosttyString s = { (const uint8_t*)"Resesh", 6 };
+  return s;
+}
+
 RVT_API int rvt_abi_version(void) { return RVT_ABI_VERSION; }
 
 RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, RvtEventFn on_event, void* user) {
@@ -277,6 +323,9 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_CLIPBOARD_WRITE, (const void*)on_clipboard_write);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_UNKNOWN_SEQUENCE, (const void*)on_unknown);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT, (const void*)on_semantic);
+  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION, (const void*)on_notification);
+  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT, (const void*)on_progress);
+  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_XTVERSION, (const void*)on_xtversion);
   return t;
 }
 
@@ -530,6 +579,22 @@ RVT_API int rvt_cell_graphemes(RvtTerm* t, uint16_t x, uint16_t y, uint32_t* out
   return n;
 }
 
+// OSC 8 hyperlink URI of one viewport cell. Returns its length in bytes: 0 when the cell has
+// no hyperlink, -1 when the URI does not fit.
+RVT_API int rvt_cell_hyperlink(RvtTerm* t, uint16_t x, uint16_t y, uint8_t* out, int cap) {
+  GhosttyGridRef ref = GHOSTTY_INIT_SIZED(GhosttyGridRef);
+  GhosttyPoint pt = { .tag = GHOSTTY_POINT_TAG_VIEWPORT, .value = { .coordinate = { .x = x, .y = y } } };
+  int n = 0;
+  lock(t);
+  if (ghostty_terminal_grid_ref(t->term, pt, &ref) == GHOSTTY_SUCCESS) {
+    size_t len = 0;
+    GhosttyResult r = ghostty_grid_ref_hyperlink_uri(&ref, out, (size_t)cap, &len);
+    n = r == GHOSTTY_SUCCESS ? (int)len : (len > 0 ? -1 : 0);
+  }
+  unlock(t);
+  return n;
+}
+
 // ---- viewport -----------------------------------------------------------------------------
 
 RVT_API void rvt_scroll(RvtTerm* t, int mode, intptr_t value) {
@@ -626,6 +691,18 @@ RVT_API int rvt_kitty_flags(RvtTerm* t) {
   ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS, &flags);
   unlock(t);
   return flags;
+}
+
+// Focus in/out report (CSI I / CSI O) when the program enabled mode 1004; 0 otherwise.
+RVT_API int rvt_focus(RvtTerm* t, int focused, char* out, size_t cap) {
+  GhosttyTerminalModeConfig mode = { GHOSTTY_MODE_FOCUS_EVENT, false };
+  size_t written = 0;
+  lock(t);
+  bool on = ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_MODE, &mode) == GHOSTTY_SUCCESS && mode.value;
+  unlock(t);
+  if (on && ghostty_focus_encode(focused ? GHOSTTY_FOCUS_GAINED : GHOSTTY_FOCUS_LOST, out, cap, &written) != GHOSTTY_SUCCESS)
+    written = 0;
+  return (int)written;
 }
 
 // ---- mouse --------------------------------------------------------------------------------
@@ -799,9 +876,10 @@ RVT_API void rvt_search_status(RvtTerm* t, size_t* total, size_t* current) {
 // granular drag extension are libghostty-vt's. Installs the resulting selection.
 // Returns 1 when a selection was installed, 0 when the event produced none, -1 on error.
 // *autoscroll receives 0 none, 1 up, 2 down; *clicks the click count; *dragged whether
-// the gesture has dragged.
+// the gesture has dragged. flags: 1 rectangular (Alt+drag), 2 extend the current selection to
+// this cell instead of starting a new one (Shift+click).
 RVT_API int rvt_gesture(RvtTerm* t, int kind, double x, double y, uint16_t vx, uint16_t vy, uint64_t time_ns,
-                        uint32_t padding_left, int* autoscroll, int* clicks, int* dragged) {
+                        uint32_t padding_left, int flags, int* autoscroll, int* clicks, int* dragged) {
   static const GhosttySelectionGestureEventType types[4] = {
     GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_PRESS, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_RELEASE,
     GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_AUTOSCROLL_TICK };
@@ -817,6 +895,19 @@ RVT_API int rvt_gesture(RvtTerm* t, int kind, double x, double y, uint16_t vx, u
   GhosttyPoint pt = { .tag = GHOSTTY_POINT_TAG_VIEWPORT, .value = { .coordinate = { .x = vx, .y = vy } } };
   bool have_ref = ghostty_terminal_grid_ref(t->term, pt, &ref) == GHOSTTY_SUCCESS;
   GhosttySurfacePosition pos = { x, y };
+  bool rectangle = (flags & 1) != 0;
+  if (kind == 0 && (flags & 2) && have_ref) {
+    GhosttySelection current = GHOSTTY_INIT_SIZED(GhosttySelection);
+    if (ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_SELECTION, &current) == GHOSTTY_SUCCESS) {
+      current.end = ref;
+      rc = ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SELECTION, &current) == GHOSTTY_SUCCESS ? 1 : -1;
+      if (autoscroll) *autoscroll = 0;
+      if (clicks) *clicks = 1;
+      if (dragged) *dragged = 1; // a changed selection: copy-on-select copies it
+      unlock(t);
+      return rc;
+    }
+  }
   GhosttySelectionGestureGeometry geo = { t->cell_w ? t->screen_w / t->cell_w : 1, t->cell_w ? t->cell_w : 1,
                                           padding_left, t->screen_h ? t->screen_h : 1 };
   if (kind == 0) {
@@ -835,11 +926,13 @@ RVT_API int rvt_gesture(RvtTerm* t, int kind, double x, double y, uint16_t vx, u
     ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_REF, &ref);
     ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_POSITION, &pos);
     ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_GEOMETRY, &geo);
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_RECTANGLE, &rectangle);
   } else {
     GhosttyPointCoordinate vp = { vx, vy };
     ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_VIEWPORT, &vp);
     ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_POSITION, &pos);
     ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_GEOMETRY, &geo);
+    ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_RECTANGLE, &rectangle);
   }
 
   GhosttySelection sel = GHOSTTY_INIT_SIZED(GhosttySelection);

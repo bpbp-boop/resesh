@@ -27,6 +27,11 @@ internal sealed class GhosttyHighlighter
     private readonly Dictionary<string, (int Index, int Length, int Rule)[]> _matches = new(StringComparer.Ordinal);
 
     public IReadOnlyList<Rule> Rules => _rules;
+
+    /// <summary>The column map of the last <see cref="RowText"/>: the first cell and the cell
+    /// after the last that each UTF-16 code unit covers.</summary>
+    internal IReadOnlyList<int> ColumnStarts => _starts;
+    internal IReadOnlyList<int> ColumnEnds => _ends;
     public bool HasRules => _rules.Count > 0;
 
     /// <summary>Replaces the rule set from the host payload (anonymous objects with pattern,

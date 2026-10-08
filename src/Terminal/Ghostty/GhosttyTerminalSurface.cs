@@ -91,6 +91,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private bool _initialized;
     private bool _readyRaised;
     private bool _focused;
+    private bool _reportedFocus;
     private bool _inputEnabled = true;
     private bool _connected = true;
     private bool _isSplit;
@@ -116,6 +117,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private bool _fixed80Columns;
 
     private bool _selecting;
+    private int _pressClicks;
+    private double _wheelAccumulated;
     private int _autoscroll; // 0 none, 1 up, 2 down (libghostty-vt's request while dragging)
     private (float X, float Y) _lastPointer;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _autoscrollTimer;
@@ -217,6 +220,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         PointerMoved += OnPointerMoved;
         PointerReleased += OnPointerReleased;
         PointerCaptureLost += (_, _) => EndSelectionGesture(null);
+        PointerExited += (_, _) => UpdateHoverLink(null);
         PointerWheelChanged += OnPointerWheelChanged;
         ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
     }
@@ -431,7 +435,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
                 if (separator <= 0 || !int.TryParse(content.AsSpan(0, separator), out var code))
                     break;
                 var payload = content[(separator + 1)..];
-                if (code == 7377)
+                // 7377 agent state; 9 / 777 notifications and 9;4 progress (rebuilt by the shim).
+                if (code is 7377 or 9 or 777)
                     AgentOscReceived?.Invoke(code, payload.Length > 2048 ? payload[..2048] : payload);
                 else if (code == 3008)
                 {
@@ -582,6 +587,12 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
                 var row = y;
                 _highlighter.ApplyRow(new Span<GhosttyCell>(_cells + y * Columns, Columns), x => GraphemeAt(x, row));
             }
+        }
+        if (rows > 0 && _hoverSpans.Length > 0)
+        {
+            ApplyHoverLink();
+            if (_hoverSpans.Any(span => span.Row < Rows && _dirty[span.Row] != 0))
+                UpdateHoverLink(_hoverCell, force: true); // output moved under the pointer
         }
 
         var cursorMoved = info.CursorY != _lastInfo.CursorY || info.CursorX != _lastInfo.CursorX
@@ -752,13 +763,34 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private void SetFocused(bool focused)
     {
         _focused = focused;
+        // Settles first: focus moving between the surface, its text box and the find field
+        // raises a lost/got pair that is not a focus change for the program.
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ReportFocus);
         _cursorBlinkOn = true;
         if (!focused) _suppressCharactersForKey = 0;
         MarkCursorDirty();
         RequestFrame();
     }
 
-    public override void SetInputEnabled(bool enabled) => _inputEnabled = enabled;
+    /// <summary>Focus reporting (mode 1004): vim, tmux and others refresh or redraw on it.</summary>
+    private void ReportFocus()
+    {
+        if (_focused == _reportedFocus || _disposed || _term == IntPtr.Zero || _readOnly || !_connected)
+            return;
+        _reportedFocus = _focused;
+        var report = stackalloc byte[8];
+        var n = GhosttyNative.rvt_focus(_term, _focused ? 1 : 0, report, 8);
+        if (n > 0)
+            InputReceived?.Invoke(new ReadOnlySpan<byte>(report, n).ToArray());
+    }
+
+    /// <summary>Off while a tab is locked or behind the rewind player: keys, text, pointer and
+    /// wheel all stop, as TerminalControl stopped them by hit-testing.</summary>
+    public override void SetInputEnabled(bool enabled)
+    {
+        _inputEnabled = enabled;
+        IsHitTestVisible = enabled;
+    }
 
     public override void SetRulerPresentation(bool isSplit, bool isGroupFocused) => _isSplit = isSplit;
 
@@ -1184,7 +1216,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         if (button == 1)
         {
             _selecting = true;
-            Gesture(GestureKind.Press, PixelPosition(args));
+            _pressClicks = Gesture(GestureKind.Press, PixelPosition(args)).Clicks;
         }
         else if (button == 2 && _rightClickPaste)
         {
@@ -1199,11 +1231,16 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             return;
         if (_buttonsDown != 0 || (ReportsMouse(args) && !_selecting))
         {
+            UpdateHoverLink(null);
             SendMouse(GhosttyNative.MouseMotion, 0, args);
             return;
         }
         if (!_selecting)
+        {
+            var position = PixelPosition(args);
+            UpdateHoverLink(CellAt(position.X, position.Y));
             return;
+        }
         Gesture(GestureKind.Drag, PixelPosition(args));
     }
 
@@ -1212,15 +1249,18 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         if (_disposed || _term == IntPtr.Zero)
             return;
         var button = ButtonOf(args.GetCurrentPoint(this).Properties);
-        ReleasePointerCapture(args.Pointer);
         if (button != 0 && (_buttonsDown & (1u << button)) != 0)
         {
             _buttonsDown &= ~(1u << button);
             SendMouse(GhosttyNative.MouseRelease, button, args);
-            return;
         }
-        if (_selecting && button == 1)
+        else if (_selecting && button == 1)
+        {
             EndSelectionGesture(PixelPosition(args));
+        }
+        // Last: releasing capture raises PointerCaptureLost at once, which would end the
+        // gesture without a position (and so without opening a link).
+        ReleasePointerCapture(args.Pointer);
     }
 
     private enum GestureKind { Press = 0, Release = 1, Drag = 2, AutoscrollTick = 3 }
@@ -1233,8 +1273,10 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         _lastPointer = position;
         var (x, y) = cell ?? CellAt(position.X, position.Y);
         var nanoseconds = (ulong)(System.Diagnostics.Stopwatch.GetTimestamp() * (1_000_000_000.0 / System.Diagnostics.Stopwatch.Frequency));
+        // Alt+drag selects a rectangle (columns of show output); Shift+click extends.
+        var flags = (Down(0x12) ? 1 : 0) | (kind == GestureKind.Press && Down(0x10) ? 2 : 0);
         GhosttyNative.rvt_gesture(_term, (int)kind, position.X, position.Y, (ushort)x, (ushort)y, nanoseconds,
-            (uint)_renderer.OriginX, out var autoscroll, out var clicks, out var dragged);
+            (uint)_renderer.OriginX, flags, out var autoscroll, out var clicks, out var dragged);
         SetAutoscroll(kind is GestureKind.Drag or GestureKind.AutoscrollTick ? autoscroll : 0);
         RequestFrame();
         return (clicks, dragged != 0);
@@ -1247,6 +1289,11 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         _selecting = false;
         SetAutoscroll(0);
         var (clicks, dragged) = Gesture(GestureKind.Release, position ?? _lastPointer);
+        if (position is not null && Math.Max(clicks, _pressClicks) == 1 && !dragged && _hoverUri is { } uri)
+        {
+            TerminalLinkPolicy.Open(uri, TerminalControl.TraceHook);
+            return;
+        }
         // A plain click selects nothing; a drag or a word/line click copies when asked to.
         if (_copyOnSelect && (dragged || clicks >= 2))
             CopySelection();
@@ -1286,15 +1333,61 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
             return;
         args.Handled = true;
         var delta = args.GetCurrentPoint(this).Properties.MouseWheelDelta;
-        var notches = Math.Max(1, Math.Abs(delta) / 120);
-        if (ReportsMouse(args))
+        if (delta == 0)
+            return;
+        // Precision touchpads send small deltas: accumulate them into notches (120) and lines
+        // (3 per notch) instead of rounding every event up to a whole notch.
+        if (Math.Sign(delta) != Math.Sign(_wheelAccumulated))
+            _wheelAccumulated = 0;
+        _wheelAccumulated += delta;
+        if (Down(0x11))
         {
-            for (var i = 0; i < notches; i++)
-                SendMouse(GhosttyNative.MousePress, delta > 0 ? 4 : 5, args);
+            // Ctrl+wheel zooms, as in terminal.html, even in programs that track the mouse.
+            var steps = (int)(_wheelAccumulated / 120);
+            if (steps == 0)
+                return;
+            _wheelAccumulated -= steps * 120;
+            SetZoom(_zoomDelta + steps);
             return;
         }
-        GhosttyNative.rvt_scroll(_term, GhosttyNative.ScrollDelta, (delta > 0 ? -3 : 3) * notches);
+        if (ReportsMouse(args))
+        {
+            var notches = (int)(_wheelAccumulated / 120);
+            _wheelAccumulated -= notches * 120;
+            for (var i = 0; i < Math.Abs(notches); i++)
+                SendMouse(GhosttyNative.MousePress, notches > 0 ? 4 : 5, args);
+            return;
+        }
+        var lines = (int)(_wheelAccumulated * 3 / 120);
+        if (lines == 0)
+            return;
+        _wheelAccumulated -= lines * 120 / 3.0;
+        if (_lastInfo.Alternate != 0)
+        {
+            // No scrollback on the alternate screen: less, man and similar scroll by arrow keys,
+            // as xterm.js sends them (the encoder honors application cursor mode).
+            SendArrows((ushort)(lines > 0 ? 0x26 : 0x28), Math.Abs(lines));
+            return;
+        }
+        if (Down(0x12))
+            lines *= 5; // Alt scrolls fast, as the ruler's wheel handling did
+        GhosttyNative.rvt_scroll(_term, GhosttyNative.ScrollDelta, -lines);
         RequestFrame();
+    }
+
+    private void SendArrows(ushort virtualKey, int count)
+    {
+        if (_readOnly || !_connected || !_inputEnabled)
+            return;
+        var output = stackalloc byte[16];
+        var written = GhosttyNative.rvt_encode_key(_term, virtualKey, 0, GhosttyNative.KeyPress, null, 0, 0, output, 16);
+        if (written <= 0)
+            return;
+        var one = new ReadOnlySpan<byte>(output, written);
+        var bytes = new byte[written * Math.Min(count, 50)];
+        for (var i = 0; i < bytes.Length; i += written)
+            one.CopyTo(bytes.AsSpan(i));
+        InputReceived?.Invoke(bytes);
     }
 
     private bool CopySelection(bool clear = false)
@@ -1344,7 +1437,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     /// through the PTY event and leave as <see cref="InputReceived"/>.</summary>
     public override void PasteText(string text)
     {
-        if (_disposed || _readOnly || _term == IntPtr.Zero || string.IsNullOrEmpty(text))
+        if (_disposed || _readOnly || !_connected || !_inputEnabled || _term == IntPtr.Zero || string.IsNullOrEmpty(text))
             return;
         if (text.Contains('\r') || text.Contains('\n'))
             RefreshCommands()?.NotifyEnter();

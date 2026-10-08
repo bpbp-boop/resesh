@@ -140,6 +140,32 @@ public class GhosttyCommandTrackerTests
     }
 
     [Fact]
+    public void DiscoveryDropsAnAnchorThatMovedToAnotherCommand()
+    {
+        // A full-screen program's redraw moved the anchored line before the echo settled:
+        // the line now shows an old command, which must not become this Enter's mark.
+        var h = new Harness();
+        h.Buffer.Add("root@rct-keep:~# ls -l");
+        h.Buffer.Add("total 24");
+        var line = h.Buffer.Add("root@rct-keep:/srv/rct-keep# codex");
+        h.Tracker.NotifyEnter();
+        h.Buffer.Lines[line] = ("root@rct-keep:~# ls -l", false);
+        h.RunTimers();
+        Assert.Empty(h.Tracker.Commands());
+    }
+
+    [Fact]
+    public void DiscoveryAcceptsAnEchoThatGrewAfterEnter()
+    {
+        var h = new Harness();
+        var line = h.Buffer.Add("admin@router:~$ cod");
+        h.Tracker.NotifyEnter();
+        h.Buffer.Lines[line] = ("admin@router:~$ codex", false);
+        h.RunTimers();
+        Assert.Equal("codex", Assert.Single(h.Tracker.Commands()).Text);
+    }
+
+    [Fact]
     public void DiscoveryWaitsForLateEchoAndRetriesOnce()
     {
         var h = new Harness();

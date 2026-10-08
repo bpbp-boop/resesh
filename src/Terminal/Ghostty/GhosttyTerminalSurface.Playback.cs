@@ -107,12 +107,15 @@ public sealed partial class GhosttyTerminalSurface
             _playbackIndex = index;
             _playbackPosition = target;
             return size;
-        });
+        }, resets: () => !(_playbackPosition >= 0 && target >= _playbackPosition && _fixedGrid is not null));
     }
 
     /// <summary>Runs one replay off the UI thread, newest request wins: an older replay that
-    /// has not started is skipped. Rendering pauses until the replay settles, then repaints.</summary>
-    private async Task RunReplayAsync(int generation, Func<(int Columns, int Rows)> replay)
+    /// has not started is skipped. Rendering pauses until the replay settles, then repaints.
+    /// A replay that resets the terminal starts a fresh command tracker first, so the OSC 133
+    /// marks in the recording land in it (playback views do not listen to its events); one
+    /// that only writes on (a forward seek) keeps the marks it has.</summary>
+    private async Task RunReplayAsync(int generation, Func<(int Columns, int Rows)> replay, Func<bool>? resets = null)
     {
         if (_disposed)
             return;
@@ -123,8 +126,13 @@ public sealed partial class GhosttyTerminalSurface
         {
             if (generation != _replayGeneration || _disposed)
                 return;
-            _commands?.Dispose();
-            _commands = null; // marks from before the replay describe other content
+            // Decided under the gate: only replays move the playback position.
+            if ((resets?.Invoke() ?? true) || _commands is null)
+            {
+                _commands?.Dispose();
+                _commands = null; // marks from before the replay describe other content
+                CreateCommandTracker();
+            }
             _replaying = true;
             var size = await Task.Run(() =>
             {
@@ -135,7 +143,6 @@ public sealed partial class GhosttyTerminalSurface
                 return;
             _fixedGrid = size;
             _replaying = false;
-            CreateCommandTracker();
             _forceFull = true;
             Relayout();
             RequestFrame();

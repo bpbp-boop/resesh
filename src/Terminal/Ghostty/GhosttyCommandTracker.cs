@@ -479,7 +479,8 @@ internal sealed class GhosttyCommandTracker
 
         // Most input was echoed before Enter: capture it now, because a program such as
         // nano can switch buffers before the settle timer runs.
-        if (ReadCommand() is { } visible)
+        var atEnter = ReadCommand();
+        if (atEnter is { } visible)
         {
             reported = true;
             FireCommand(visible.Text, epoch, exact: false);
@@ -500,6 +501,14 @@ internal sealed class GhosttyCommandTracker
             attempts++;
             if (ReadCommand() is { } command)
             {
+                // An echo only grows after Enter ("cod" -> "codex"). Different text means the
+                // anchored line moved under a full-screen program's redraw: committing it would
+                // mark (and record) an old command with everything since as its output.
+                if (atEnter is { Text.Length: > 0 } before && !command.Text.StartsWith(before.Text, StringComparison.Ordinal))
+                {
+                    FinishProbe(probe);
+                    return;
+                }
                 if (!reported)
                 {
                     reported = true;

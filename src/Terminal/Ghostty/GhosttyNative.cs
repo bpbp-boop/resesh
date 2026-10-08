@@ -40,7 +40,7 @@ internal enum GhosttyEventKind
 internal static unsafe partial class GhosttyNative
 {
     private const string Library = "reseshvt";
-    private const int ExpectedAbi = 1;
+    private const int ExpectedAbi = 3;
 
     private static readonly Lazy<string?> LoadError = new(Load);
 
@@ -83,12 +83,14 @@ internal static unsafe partial class GhosttyNative
     public static partial int rvt_read_frame(IntPtr term, GhosttyCell* cells, ushort cols, ushort rows,
         byte* dirtyRows, int forceAll, GhosttyFrameInfo* info);
     [LibraryImport(Library)] public static partial int rvt_cell_graphemes(IntPtr term, ushort x, ushort y, uint* output, int capacity);
+    [LibraryImport(Library)] public static partial int rvt_cell_hyperlink(IntPtr term, ushort x, ushort y, byte* output, int capacity);
     [LibraryImport(Library)] public static partial void rvt_scroll(IntPtr term, int mode, nint value);
     [LibraryImport(Library)] public static partial void rvt_reset(IntPtr term);
     [LibraryImport(Library)]
     public static partial int rvt_encode_key(IntPtr term, int virtualKey, int mods, int action, byte* utf8, nuint utf8Length,
         uint unshifted, byte* output, nuint capacity);
     [LibraryImport(Library)] public static partial int rvt_kitty_flags(IntPtr term);
+    [LibraryImport(Library)] public static partial int rvt_focus(IntPtr term, int focused, byte* output, nuint capacity);
     [LibraryImport(Library)] public static partial int rvt_mouse_tracking(IntPtr term);
     [LibraryImport(Library)]
     public static partial int rvt_encode_mouse(IntPtr term, int action, int button, int mods, float x, float y,
@@ -96,7 +98,7 @@ internal static unsafe partial class GhosttyNative
     [LibraryImport(Library)] public static partial int rvt_select(IntPtr term, ushort x0, ushort y0, ushort x1, ushort y1);
     [LibraryImport(Library)]
     public static partial int rvt_gesture(IntPtr term, int kind, double x, double y, ushort viewportX, ushort viewportY,
-        ulong timeNanoseconds, uint paddingLeft, out int autoscroll, out int clicks, out int dragged);
+        ulong timeNanoseconds, uint paddingLeft, int flags, out int autoscroll, out int clicks, out int dragged);
     [LibraryImport(Library)] public static partial void rvt_select_clear(IntPtr term);
     [LibraryImport(Library)] public static partial int rvt_select_all(IntPtr term);
     [LibraryImport(Library)] public static partial byte* rvt_selection_text(IntPtr term, out nuint length);

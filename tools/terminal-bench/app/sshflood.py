@@ -25,8 +25,32 @@ class Server(asyncssh.SSHServer):
         return False  # no authentication required
 
 
+async def probe(process):
+    # Protocol probe: asks XTVERSION, enables focus reporting, reports progress and sends a
+    # notification, then logs every byte the terminal sends back to <state>/probe.log.
+    log = open(os.path.join(STATE, 'probe.log'), 'ab')
+    process.stdout.write(b'probe: XTVERSION, focus 1004, OSC 9;4 progress, OSC 777 notify\r\n')
+    process.stdout.write(b'\x1b[>q\x1b[?1004h\x1b]9;4;1;42\x07\x1b]777;notify;Probe;Hello from probe\x07')
+    process.stdout.write(b'\x1b]9;plain osc 9 notification\x07')
+    await process.stdout.drain()
+    try:
+        while True:
+            data = await process.stdin.read(4096)
+            if not data:
+                break
+            log.write(repr(data).encode() + b'\n')
+            log.flush()
+    except Exception:
+        pass
+    log.close()
+    process.exit(0)
+
+
 async def handle(process):
     name = process.get_extra_info('username')
+    if name == 'probe':
+        await probe(process)
+        return
     path = os.path.join(WORKLOADS, name + '.bin')
     if os.path.exists(path):
         with open(path, 'rb') as f:
