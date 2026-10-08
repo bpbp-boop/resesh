@@ -39,3 +39,22 @@ main thread), `threaded` (IO thread parses under a lock; render thread holds it 
 PNGs for a visual check. Set `NUGET_PACKAGES` to a roomy drive before building.
 
 Results and conclusions: `RESULTS.md`.
+
+## In-app (`app/`)
+
+The real app on its real output paths, ghostty vs WebView2 (`RESESH_TERMINAL_SURFACE`), local
+(ConPTY) vs SSH. Uses an isolated `--data-dir` and a Release build:
+
+```bash
+python app/profiles.py <data-dir> <workload dir>               # "Flood <wl>", "SSH <wl>", baselines
+python app/sshflood.py <workload dir> <data-dir>                # SSH runs only; pip install asyncssh
+pwsh app/appbench.ps1 -Exe <build>/Resesh.App.exe -DataDir <data-dir> -Prefix Flood
+pwsh app/appbench.ps1 -Exe <build>/Resesh.App.exe -DataDir <data-dir> -Prefix SSH -ServerPid <pid>
+```
+
+`sshflood.py` streams a workload's bytes untouched (Windows OpenSSH would put ConPTY back on the
+server side) and trusts its own host key in the data dir. Do one SSH warm-up run first: the first
+connection pays SSH.NET and server start-up. For hot paths, `dotnet-trace collect -p <pid>
+--profile dotnet-sampled-thread-time --format Speedscope` (wall-clock samples: `PollGC` frames are
+GC waits, `UNMANAGED_CODE_TIME` is native work or blocking) and `--profile gc-verbose` for
+allocation ticks.

@@ -93,3 +93,27 @@ output is 3–4× larger than an ANSI keyframe. Web restore cost was not measure
   and keep the C# surface behind our own interface.
 - Windows-side work the library will not do: DirectWrite shaping/fallback/color glyphs,
   TSF/IME, UIA text provider, SwapChainPanel hosting.
+
+## In-app floods, ConPTY vs SSH (2026-10-08, after b1aa030)
+
+App CPU for the flood minus the idle run for the same surface and connection, mean of 2,
+Release build, recording on (`alwaysRecord`), `app/appbench.ps1`:
+
+| workload | ghostty local | ghostty SSH | webview local | webview SSH | conhost (local) |
+|---|---|---|---|---|---|
+| logs (8 MB) | 3.4 s | 1.4 s | 5.7 s | 2.2 s | 3.0 s |
+| color | 3.0 s | 1.3 s | 2.9 s | 2.1 s | 3.1 s |
+| unicode | 3.0 s | 0.9 s | 4.0 s | 1.1 s | 3.1 s |
+| tiny | 2.8 s | 1.5 s | 3.8 s | 3.4 s | 5.9 s |
+| tui | 0.5 s | 0.6 s | 0.9 s | 0.9 s | 2.1 s |
+
+- ConPTY doubles the work: conhost parses everything into its own buffer and re-renders it as
+  VT, which costs ~3 s of its own CPU per 8 MB, and its re-rendered output (cursor moves, many
+  small reads) costs the app ~2 s more to consume than the original bytes over SSH.
+- Ghostty's logs flood reaches idle ~1.1 s after start-up over SSH (~7 MB/s) vs ~3.6 s locally
+  (~2.3 MB/s): local tabs are capped by conhost, not by the surface.
+- Private memory: ghostty ~240-310 MB, WebView2 ~480-750 MB.
+- The same session's before/after for b1aa030 (local, ghostty, CPU incl. start-up): logs
+  5.9 s -> 3.8 s, tiny 9.0 s -> 3.2 s; WebView2 logs 9.2 s -> 8.1 s (it shares the recorder).
+- Baselines drift between sessions (the producer tracking polls the process list): compare
+  within one table only.
