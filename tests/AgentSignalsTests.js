@@ -4,7 +4,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const surfaceSource = fs.readFileSync(
-  path.join(__dirname, "..", "src", "Terminal", "Ghostty", "GhosttyTerminalSurface.cs"),
+  path.join(__dirname, "..", "src", "Terminal", "Native", "NativeTerminalSurface.cs"),
   "utf8");
 
 test("the terminal surface forwards agent evidence with bounded payloads", () => {

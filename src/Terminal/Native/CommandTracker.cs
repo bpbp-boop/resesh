@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>A position in the normal screen that follows its line through scrolling, reflow and
 /// scrollback trimming. <see cref="Line"/> is -1 once the line is gone.</summary>
@@ -38,7 +38,7 @@ internal sealed record CommandMarkInfo(long Id, int Line, int? Exit, bool Exact,
 /// results attached to discovered marks, and Enter-gated prompt discovery for hosts with no
 /// shell integration. UI thread only; timers go through <see cref="Schedule"/>.
 /// </summary>
-internal sealed class GhosttyCommandTracker
+internal sealed class CommandTracker
 {
     private const int EchoSettleMs = 300;
     private const int EchoRetryMs = 900;
@@ -151,7 +151,7 @@ internal sealed class GhosttyCommandTracker
     /// <summary>Marks, bookmarks or exits changed: repaint the ruler and panel.</summary>
     public event Action? Changed;
 
-    public GhosttyCommandTracker(ICommandBuffer buffer, Func<long>? now = null)
+    public CommandTracker(ICommandBuffer buffer, Func<long>? now = null)
     {
         _buffer = buffer;
         _now = now ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());

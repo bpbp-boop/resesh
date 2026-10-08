@@ -1,4 +1,4 @@
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>
 /// When each line of output arrived (terminal.html's Phase 9.5 line timestamps), for the
@@ -8,7 +8,7 @@ namespace Resesh.Terminal.Ghostty;
 /// survive both. The oldest runs are dropped beyond <see cref="MaxRuns"/>; lines before the
 /// first run, and the alternate screen, have no time.
 /// </summary>
-internal sealed class GhosttyLineTimes(ICommandBuffer buffer)
+internal sealed class LineTimes(ICommandBuffer buffer)
 {
     internal const int MaxRuns = 1024;
 

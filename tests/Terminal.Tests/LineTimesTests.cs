@@ -1,16 +1,16 @@
-using Resesh.Terminal.Ghostty;
+using Resesh.Terminal.Native;
 
 namespace Resesh.Terminal.Tests;
 
 /// <summary>Line timestamps (terminal.html's Phase 9.5).</summary>
-public class GhosttyLineTimesTests
+public class LineTimesTests
 {
-    private static (FakeBuffer Buffer, GhosttyLineTimes Times) Setup(int lines)
+    private static (FakeBuffer Buffer, LineTimes Times) Setup(int lines)
     {
         var buffer = new FakeBuffer();
         for (var i = 0; i < lines; i++)
             buffer.Add("line " + i);
-        return (buffer, new GhosttyLineTimes(buffer));
+        return (buffer, new LineTimes(buffer));
     }
 
     [Fact]
@@ -65,12 +65,12 @@ public class GhosttyLineTimesTests
     public void DropsTheOldestRunsBeyondTheCap()
     {
         var (buffer, times) = Setup(1);
-        for (var i = 0; i < GhosttyLineTimes.MaxRuns + 5; i++)
+        for (var i = 0; i < LineTimes.MaxRuns + 5; i++)
         {
             buffer.Add("z");
             times.Note((i + 1) * 1000L);
         }
         Assert.Null(times.TimeOf(1));          // its run was dropped
-        Assert.Equal((GhosttyLineTimes.MaxRuns + 5) * 1000L, times.TimeOf(buffer.Length - 1));
+        Assert.Equal((LineTimes.MaxRuns + 5) * 1000L, times.TimeOf(buffer.Length - 1));
     }
 }

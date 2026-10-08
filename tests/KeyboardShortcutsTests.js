@@ -8,7 +8,7 @@ const read = (...parts) => fs.readFileSync(path.join(root, ...parts), "utf8");
 
 const table = read("src", "Core", "Input", "KeyBindings.cs");
 const surface = read("src", "Terminal", "TerminalSurface.cs");
-const ghostty = read("src", "Terminal", "Ghostty", "GhosttyTerminalSurface.cs");
+const ghostty = read("src", "Terminal", "Native", "NativeTerminalSurface.cs");
 const mainWindow = require("./support/mainWindowSource");
 
 const idValues = Object.fromEntries(

@@ -1,10 +1,10 @@
 using System.Text;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 // Async playback code lives outside the unsafe part of the class (await is not allowed in an
-// unsafe context); pointer work stays in GhosttyTerminalSurface.cs.
-public sealed partial class GhosttyTerminalSurface
+// unsafe context); pointer work stays in NativeTerminalSurface.cs.
+public sealed partial class NativeTerminalSurface
 {
     // ---- rewind and recording playback ----------------------------------------------------
 

@@ -6,12 +6,12 @@ using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>Floating list of the terminal's command marks (terminal.html's commands panel):
 /// an exit-status dot, the command, when it ran, and a copy-output button. Clicking a row
 /// jumps to the command. Adapted from the parked native-terminal branch.</summary>
-internal sealed class GhosttyCommandsPanel : Grid
+internal sealed class CommandsPanel : Grid
 {
     internal const double PreferredWidth = 420;
     internal const double MaximumHeight = 520;
@@ -39,7 +39,7 @@ internal sealed class GhosttyCommandsPanel : Grid
     internal event Action<long>? JumpRequested;
     internal event Action<long>? CopyRequested;
 
-    internal GhosttyCommandsPanel()
+    internal CommandsPanel()
     {
         _copyCommand = new DelegateCommand(parameter =>
         {
@@ -55,7 +55,7 @@ internal sealed class GhosttyCommandsPanel : Grid
         HorizontalAlignment = HorizontalAlignment.Right;
         VerticalAlignment = VerticalAlignment.Top;
         Visibility = Visibility.Collapsed;
-        AutomationProperties.SetAutomationId(this, "GhosttyCommandsPanel");
+        AutomationProperties.SetAutomationId(this, "CommandsPanel");
         AutomationProperties.SetName(this, "Commands");
 
         _title.Text = "Commands";
@@ -112,7 +112,7 @@ internal sealed class GhosttyCommandsPanel : Grid
 
     internal bool IsOpen => Visibility == Visibility.Visible;
 
-    internal void ApplyTheme(GhosttyTheme theme, string fontFamily)
+    internal void ApplyTheme(TerminalTheme theme, string fontFamily)
     {
         var foreground = ToColor(theme.Foreground);
         _backgroundBrush.Color = ToColor(theme.Background);

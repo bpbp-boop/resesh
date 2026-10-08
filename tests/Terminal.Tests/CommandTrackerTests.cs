@@ -1,15 +1,15 @@
 using Resesh.Terminal;
-using Resesh.Terminal.Ghostty;
+using Resesh.Terminal.Native;
 
 namespace Resesh.Terminal.Tests;
 
 /// <summary>The ghostty surface's port of addon-ruler.js command marks, over a fake buffer.</summary>
-public class GhosttyCommandTrackerTests
+public class CommandTrackerTests
 {
     private sealed class Harness
     {
         public readonly FakeBuffer Buffer = new();
-        public readonly GhosttyCommandTracker Tracker;
+        public readonly CommandTracker Tracker;
         public readonly List<(TimeSpan Delay, Action Action)> Timers = [];
         public readonly List<(string Text, bool Exact)> Running = [];
         public readonly List<TerminalCommandExecution> Executions = [];
@@ -20,7 +20,7 @@ public class GhosttyCommandTrackerTests
 
         public Harness()
         {
-            Tracker = new GhosttyCommandTracker(Buffer, () => Now)
+            Tracker = new CommandTracker(Buffer, () => Now)
             {
                 Schedule = (delay, action) => Timers.Add((delay, action)),
             };
@@ -385,13 +385,13 @@ public class GhosttyCommandTrackerTests
     [InlineData("end=x;status=137", "end", "x", null, null, 137)]
     public void ParsesOsc3008(string data, string action, string id, string? type, string? exit, int? status)
     {
-        var parsed = GhosttyCommandTracker.ParseOsc3008(data);
-        Assert.Equal(new GhosttyCommandTracker.Osc3008(action, id, type, exit, status), parsed);
+        var parsed = CommandTracker.ParseOsc3008(data);
+        Assert.Equal(new CommandTracker.Osc3008(action, id, type, exit, status), parsed);
     }
 
     [Theory]
     [InlineData("start=")]
     [InlineData("begin=x")]
     [InlineData("start=bad\\escape")]
-    public void RejectsMalformedOsc3008(string data) => Assert.Null(GhosttyCommandTracker.ParseOsc3008(data));
+    public void RejectsMalformedOsc3008(string data) => Assert.Null(CommandTracker.ParseOsc3008(data));
 }

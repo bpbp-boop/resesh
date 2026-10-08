@@ -1,9 +1,9 @@
 using Windows.ApplicationModel.DataTransfer;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>Clipboard reads for the ghostty surface (async code cannot live in its unsafe class).</summary>
-internal static class GhosttyClipboard
+internal static class TerminalClipboard
 {
     public static async Task PasteIntoAsync(Action<string> paste)
     {

@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
-const surface = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "Ghostty", "GhosttyTerminalSurface.cs"), "utf8");
+const surface = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "Native", "NativeTerminalSurface.cs"), "utf8");
 const tab = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"), "utf8");
 
 test("OSC 7 crosses the terminal boundary as raw data", () => {

@@ -1,4 +1,4 @@
-using Resesh.Terminal.Ghostty;
+using Resesh.Terminal.Native;
 
 namespace Resesh.Terminal.Tests;
 

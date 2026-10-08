@@ -1,34 +1,34 @@
-using Resesh.Terminal.Ghostty;
+using Resesh.Terminal.Native;
 
 namespace Resesh.Terminal.Tests;
 
 /// <summary>The ghostty surface's port of addon-highlight.js.</summary>
-public class GhosttyHighlighterTests
+public class HighlighterTests
 {
     private const uint Fg = 0xCCCCCC, Bg = 0x0C0C0C;
 
     /// <summary>A row as the shim flattens it: CJK and other wide characters take two cells.</summary>
-    private static GhosttyCell[] Row(string text, int width = 40)
+    private static TerminalCell[] Row(string text, int width = 40)
     {
-        var cells = new List<GhosttyCell>();
+        var cells = new List<TerminalCell>();
         var e = System.Globalization.StringInfo.GetTextElementEnumerator(text);
         while (e.MoveNext())
         {
             var element = (string)e.Current;
             var cp = (uint)char.ConvertToUtf32(element, 0);
             var wide = cp is >= 0x1100 and (<= 0x115F or (>= 0x2E80 and <= 0xA4CF) or (>= 0xAC00 and <= 0xD7A3) or (>= 0xFF00 and <= 0xFF60));
-            cells.Add(new GhosttyCell { Codepoint = cp == ' ' ? ' ' : cp, Foreground = Fg, Background = Bg, Flags = GhosttyCell.DefaultBackground, Wide = wide ? GhosttyCell.WideChar : GhosttyCell.Narrow, GraphemeLength = 1 });
+            cells.Add(new TerminalCell { Codepoint = cp == ' ' ? ' ' : cp, Foreground = Fg, Background = Bg, Flags = TerminalCell.DefaultBackground, Wide = wide ? TerminalCell.WideChar : TerminalCell.Narrow, GraphemeLength = 1 });
             if (wide)
-                cells.Add(new GhosttyCell { Foreground = Fg, Background = Bg, Flags = GhosttyCell.DefaultBackground, Wide = GhosttyCell.SpacerTail });
+                cells.Add(new TerminalCell { Foreground = Fg, Background = Bg, Flags = TerminalCell.DefaultBackground, Wide = TerminalCell.SpacerTail });
         }
         while (cells.Count < width)
-            cells.Add(new GhosttyCell { Foreground = Fg, Background = Bg, Flags = GhosttyCell.DefaultBackground });
+            cells.Add(new TerminalCell { Foreground = Fg, Background = Bg, Flags = TerminalCell.DefaultBackground });
         return [.. cells];
     }
 
-    private static GhosttyHighlighter With(params object[] rules)
+    private static Highlighter With(params object[] rules)
     {
-        var h = new GhosttyHighlighter();
+        var h = new Highlighter();
         h.SetRules(rules);
         return h;
     }
@@ -80,10 +80,10 @@ public class GhosttyHighlighterTests
     {
         var row = Row("warn");
         With(Rule("warn", color: "#ffffff", bold: true, underline: true)).ApplyRow(row, null);
-        Assert.Equal(GhosttyHighlighter.Blend(Bg, 0xFFFFFF, 0.22), row[0].Background);
-        Assert.Equal(0, row[0].Flags & GhosttyCell.DefaultBackground);
-        Assert.NotEqual(0, row[0].Flags & GhosttyCell.Underline);
-        Assert.Equal(GhosttyCell.DefaultBackground, row[4].Flags);
+        Assert.Equal(Highlighter.Blend(Bg, 0xFFFFFF, 0.22), row[0].Background);
+        Assert.Equal(0, row[0].Flags & TerminalCell.DefaultBackground);
+        Assert.NotEqual(0, row[0].Flags & TerminalCell.Underline);
+        Assert.Equal(TerminalCell.DefaultBackground, row[4].Flags);
     }
 
     [Fact]

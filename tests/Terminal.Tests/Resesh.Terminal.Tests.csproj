@@ -12,11 +12,11 @@
     <Using Include="Xunit" />
     <!-- The command tracker is plain C# over ICommandBuffer: test it without WinUI or the
          native terminal. -->
-    <Compile Include="../../src/Terminal/Ghostty/GhosttyCommandTracker.cs" Link="Ghostty/GhosttyCommandTracker.cs" />
-    <Compile Include="../../src/Terminal/Ghostty/GhosttyHighlighter.cs" Link="Ghostty/GhosttyHighlighter.cs" />
-    <Compile Include="../../src/Terminal/Ghostty/GhosttyCell.cs" Link="Ghostty/GhosttyCell.cs" />
-    <Compile Include="../../src/Terminal/Ghostty/GhosttyOverviewIndex.cs" Link="Ghostty/GhosttyOverviewIndex.cs" />
-    <Compile Include="../../src/Terminal/Ghostty/GhosttyLineTimes.cs" Link="Ghostty/GhosttyLineTimes.cs" />
+    <Compile Include="../../src/Terminal/Native/CommandTracker.cs" Link="Native/CommandTracker.cs" />
+    <Compile Include="../../src/Terminal/Native/Highlighter.cs" Link="Native/Highlighter.cs" />
+    <Compile Include="../../src/Terminal/Native/TerminalCell.cs" Link="Native/TerminalCell.cs" />
+    <Compile Include="../../src/Terminal/Native/OverviewIndex.cs" Link="Native/OverviewIndex.cs" />
+    <Compile Include="../../src/Terminal/Native/LineTimes.cs" Link="Native/LineTimes.cs" />
     <Compile Include="../../src/Terminal/TerminalCommandExecution.cs" Link="TerminalCommandExecution.cs" />
     <Compile Include="../../src/Terminal/TerminalCommandRecord.cs" Link="TerminalCommandRecord.cs" />
   </ItemGroup>

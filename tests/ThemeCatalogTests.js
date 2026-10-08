@@ -4,8 +4,8 @@ const path = require("node:path");
 const test = require("node:test");
 
 const catalog = fs.readFileSync(path.join(__dirname, "..", "src", "Core", "Storage", "ThemeCatalog.cs"), "utf8");
-const terminalThemes = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "Ghostty", "GhosttyThemes.cs"), "utf8");
-const terminalSurface = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "Ghostty", "GhosttyTerminalSurface.cs"), "utf8");
+const terminalThemes = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "Native", "TerminalThemes.cs"), "utf8");
+const terminalSurface = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "Native", "NativeTerminalSurface.cs"), "utf8");
 const settingsPage = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "SettingsPage.xaml"), "utf8");
 const settingsViewModel = fs.readFileSync(path.join(__dirname, "..", "src", "App", "ViewModels", "SettingsViewModel.cs"), "utf8");
 const appCode = fs.readFileSync(path.join(__dirname, "..", "src", "App", "App.xaml.cs"), "utf8");
@@ -265,7 +265,7 @@ test("new split groups start with the live app palette", () => {
 });
 
 test("the tab-row divider spans both sides without crossing the active tab", () => {
-  assert.match(terminalSurface, /void SetInitialOptions[\s\S]*?_theme = GhosttyThemes\.Find\(theme\);[\s\S]*?Background = new SolidColorBrush\(ToColor\(_theme\.Background\)\);/);
+  assert.match(terminalSurface, /void SetInitialOptions[\s\S]*?_theme = TerminalThemes\.Find\(theme\);[\s\S]*?Background = new SolidColorBrush\(ToColor\(_theme\.Background\)\);/);
   assert.match(terminalThemes, /\["solarized-light"\] = New\(\s*0xFDF6E3,/);
   assert.match(terminalThemes, /\["phthalo-green"\] = New\(\s*0x123524,/);
   assert.match(tabGroupXaml, /x:Name="LeftTabStripDivider"[\s\S]*?x:Name="RightTabStripDivider"/);

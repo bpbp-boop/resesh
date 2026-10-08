@@ -8,7 +8,7 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.UI;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>
 /// The annotation lane beside the scroll bar, positioned by absolute line over the whole
@@ -18,7 +18,7 @@ namespace Resesh.Terminal.Ghostty;
 /// the command and Jump / Copy output actions (terminal.html's ruler popover). Ticks are painted
 /// into one bitmap: the lane repaints with every batch of output, too often for an element per tick.
 /// </summary>
-internal sealed class GhosttyRuler : Grid
+internal sealed class TerminalRuler : Grid
 {
     internal const double LaneWidth = 8;
     private const double TickHeight = 3;
@@ -60,7 +60,7 @@ internal sealed class GhosttyRuler : Grid
     /// adds it to its own grid.</summary>
     internal FrameworkElement Card => _card;
 
-    internal GhosttyRuler()
+    internal TerminalRuler()
     {
         _hideTimer = DispatcherQueue.CreateTimer();
         _hideTimer.Interval = TimeSpan.FromMilliseconds(250);

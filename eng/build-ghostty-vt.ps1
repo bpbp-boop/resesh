@@ -1,6 +1,6 @@
 # Builds the libghostty-vt terminal surface's native DLLs from the commit pinned in
 # eng/ghostty-vt.json: ghostty-vt.dll (upstream, unpatched) and reseshvt.dll (our shim in
-# src/Terminal/Ghostty/native). Output: .artifacts/ghostty-vt/<arch>/, which the Terminal
+# src/Terminal/Native/Shim). Output: .artifacts/ghostty-vt/<arch>/, which the Terminal
 # project links into the app output when present.
 #
 # -BuildRoot holds Zig, the Ghostty checkout and Zig caches (~2 GB); point it at a fast drive.
@@ -52,7 +52,7 @@ try {
 $out = Join-Path $repo ".artifacts\ghostty-vt\$Architecture"
 New-Item -ItemType Directory -Force $out | Out-Null
 & $zig cc -shared -O2 -Wall -Werror -target $target -I (Join-Path $prefix 'include') `
-    (Join-Path $repo 'src\Terminal\Ghostty\native\reseshvt.c') (Join-Path $prefix 'lib\ghostty-vt.lib') -lkernel32 `
+    (Join-Path $repo 'src\Terminal\Native\Shim\reseshvt.c') (Join-Path $prefix 'lib\ghostty-vt.lib') -lkernel32 `
     -o (Join-Path $out 'reseshvt.dll')
 if ($LASTEXITCODE -ne 0) { throw 'reseshvt build failed' }
 Copy-Item (Join-Path $prefix 'bin\ghostty-vt.dll') $out -Force

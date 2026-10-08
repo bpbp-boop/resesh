@@ -113,7 +113,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .artifacts/ghostty-vt/${{ matrix.asset_architecture }}
-          key: ghostty-vt-${{ matrix.asset_architecture }}-${{ hashFiles('eng/ghostty-vt.json', 'eng/build-ghostty-vt.ps1', 'src/Terminal/Ghostty/native/**') }}
+          key: ghostty-vt-${{ matrix.asset_architecture }}-${{ hashFiles('eng/ghostty-vt.json', 'eng/build-ghostty-vt.ps1', 'src/Terminal/Native/Shim/**') }}
 
       - name: Build libghostty-vt
         if: steps.ghostty-cache.outputs.cache-hit != 'true'

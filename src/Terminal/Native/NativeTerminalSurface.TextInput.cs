@@ -5,7 +5,7 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>
 /// Text input through a hidden <see cref="TextBox"/> parked on the cursor cell, as xterm.js
@@ -15,7 +15,7 @@ namespace Resesh.Terminal.Ghostty;
 /// receives is sent and cleared. While an IME composes, the box shows the composition over
 /// the cursor in the terminal font and the keys belong to the IME.
 /// </summary>
-public sealed partial class GhosttyTerminalSurface
+public sealed partial class NativeTerminalSurface
 {
     private readonly TextBox _textInput = new();
     private readonly SolidColorBrush _textInputForeground = new();
@@ -26,7 +26,7 @@ public sealed partial class GhosttyTerminalSurface
     private void ConfigureTextInput()
     {
         var box = _textInput;
-        AutomationProperties.SetAutomationId(box, "GhosttyTextInput");
+        AutomationProperties.SetAutomationId(box, "TerminalTextInput");
         AutomationProperties.SetAccessibilityView(box, AccessibilityView.Raw);
         box.IsSpellCheckEnabled = false;
         box.IsTextPredictionEnabled = false; // no suggestion popups over the terminal

@@ -1,10 +1,10 @@
 using System.Runtime.InteropServices;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>One viewport cell as reseshvt.dll flattens it (see RvtCell in reseshvt.c).</summary>
 [StructLayout(LayoutKind.Sequential)]
-internal struct GhosttyCell
+internal struct TerminalCell
 {
     public uint Codepoint;
     public uint Foreground;

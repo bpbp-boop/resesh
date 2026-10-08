@@ -11,7 +11,7 @@ using DxgiAlphaMode = Vortice.DXGI.AlphaMode;
 using FeatureLevel = Vortice.Direct3D.FeatureLevel;
 using MeasuringMode = Vortice.DCommon.MeasuringMode;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>
 /// Draws a flattened libghostty-vt grid with Direct2D/DirectWrite into a composition swap chain
@@ -19,7 +19,7 @@ namespace Resesh.Terminal.Ghostty;
 /// the canvas to the back buffer, because flip-model buffers do not keep their contents.
 /// UI thread only.
 /// </summary>
-internal sealed unsafe class GhosttyRenderer : IDisposable
+internal sealed unsafe class TerminalRenderer : IDisposable
 {
     // One device for every terminal: D2D objects are cheap per surface, devices are not.
     private static ID3D11Device? s_device;
@@ -65,7 +65,7 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
     /// combining marks). Set by the surface, which owns the terminal.</summary>
     public Func<int, int, string?>? GraphemeAt { get; set; }
 
-    public GhosttyRenderer()
+    public TerminalRenderer()
     {
         EnsureShared();
         _dc = s_d2dDevice!.CreateDeviceContext(DeviceContextOptions.None);
@@ -263,7 +263,7 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
     /// <summary>Find highlight colors (terminal.html's search decorations).</summary>
     private const uint MatchColor = 0x515C6A, CurrentMatchColor = 0xF2CC60;
 
-    public void Draw(GhosttyCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
+    public void Draw(TerminalCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
         bool cursorShown, bool focused, uint selectionColor, bool full)
     {
         if (_swapChain is null || _canvas is null)
@@ -296,7 +296,7 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
         _swapChain.Present(1, PresentFlags.None);
     }
 
-    private void DrawRow(GhosttyCell* row, int cols, int y, uint defaultBackground, uint selectionColor)
+    private void DrawRow(TerminalCell* row, int cols, int y, uint defaultBackground, uint selectionColor)
     {
         float top = y * CellHeight;
         SetBrush(Rgb(defaultBackground));
@@ -318,7 +318,7 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
         for (var x = 0; x < cols;)
         {
             ref var c = ref row[x];
-            if (c.Codepoint is 0 or ' ' || c.Wide == GhosttyCell.SpacerTail || (c.Flags & GhosttyCell.Invisible) != 0)
+            if (c.Codepoint is 0 or ' ' || c.Wide == TerminalCell.SpacerTail || (c.Flags & TerminalCell.Invisible) != 0)
             {
                 x++;
                 continue;
@@ -326,31 +326,31 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
             if (c.GraphemeLength > 1 || IsEmojiCell(c))
             {
                 DrawCluster(x, y, c);
-                x += c.Wide == GhosttyCell.WideChar ? 2 : 1;
+                x += c.Wide == TerminalCell.WideChar ? 2 : 1;
                 continue;
             }
             var style = StyleOf(c.Flags);
             var (face, _) = Lookup(c.Codepoint, style);
             var fg = c.Foreground;
-            var faint = (c.Flags & GhosttyCell.Faint) != 0;
+            var faint = (c.Flags & TerminalCell.Faint) != 0;
             var start = x;
             var n = 0;
             while (x < cols)
             {
                 ref var d = ref row[x];
-                if (d.Wide == GhosttyCell.SpacerTail) { x++; continue; }
+                if (d.Wide == TerminalCell.SpacerTail) { x++; continue; }
                 if (d.Codepoint is 0 or ' ')
                 {
                     if (n > 0) { _runAdvances[n - 1] += CellWidth; x++; continue; }
                     break;
                 }
-                if (d.Foreground != fg || StyleOf(d.Flags) != style || ((d.Flags & GhosttyCell.Faint) != 0) != faint
-                    || d.GraphemeLength > 1 || (d.Flags & GhosttyCell.Invisible) != 0)
+                if (d.Foreground != fg || StyleOf(d.Flags) != style || ((d.Flags & TerminalCell.Faint) != 0) != faint
+                    || d.GraphemeLength > 1 || (d.Flags & TerminalCell.Invisible) != 0)
                     break;
                 var (f, g) = Lookup(d.Codepoint, style);
                 if (f != face || _isEmojiFace[f]) break;
                 _runGlyphs[n] = g;
-                _runAdvances[n] = d.Wide == GhosttyCell.WideChar ? 2 * CellWidth : CellWidth;
+                _runAdvances[n] = d.Wide == TerminalCell.WideChar ? 2 * CellWidth : CellWidth;
                 n++;
                 x++;
             }
@@ -368,25 +368,25 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
         DrawDecorations(row, cols, top, baseline);
     }
 
-    private const ushort DecorationFlags = GhosttyCell.Underline | GhosttyCell.Strike | GhosttyCell.Overline;
+    private const ushort DecorationFlags = TerminalCell.Underline | TerminalCell.Strike | TerminalCell.Overline;
 
     /// <summary>Underlines (single, double, curly, dotted, dashed; SGR 58 colors), overlines and
     /// strikethrough for every cell, blanks included (links and highlights underline spaces too).</summary>
-    private void DrawDecorations(GhosttyCell* row, int cols, float top, float baseline)
+    private void DrawDecorations(TerminalCell* row, int cols, float top, float baseline)
     {
         float thickness = Math.Max(1, (int)Math.Round(CellHeight / 16f));
         var underlineY = Math.Min(baseline + 2, top + CellHeight - 2 * thickness);
         for (var x = 0; x < cols; x++)
         {
             ref var c = ref row[x];
-            if ((c.Flags & DecorationFlags) == 0 || c.Wide == GhosttyCell.SpacerTail || (c.Flags & GhosttyCell.Invisible) != 0)
+            if ((c.Flags & DecorationFlags) == 0 || c.Wide == TerminalCell.SpacerTail || (c.Flags & TerminalCell.Invisible) != 0)
                 continue;
             float left = OriginX + x * CellWidth;
-            float width = c.Wide == GhosttyCell.WideChar ? 2 * CellWidth : CellWidth;
-            var alpha = (c.Flags & GhosttyCell.Faint) != 0 ? 0.55f : 1f;
-            if ((c.Flags & GhosttyCell.Underline) != 0)
+            float width = c.Wide == TerminalCell.WideChar ? 2 * CellWidth : CellWidth;
+            var alpha = (c.Flags & TerminalCell.Faint) != 0 ? 0.55f : 1f;
+            if ((c.Flags & TerminalCell.Underline) != 0)
             {
-                SetBrush(Rgb(c.UnderlineColor == GhosttyCell.DefaultUnderlineColor ? c.Foreground : c.UnderlineColor, alpha));
+                SetBrush(Rgb(c.UnderlineColor == TerminalCell.DefaultUnderlineColor ? c.Foreground : c.UnderlineColor, alpha));
                 switch (c.UnderlineStyle)
                 {
                     case 2: // double
@@ -422,12 +422,12 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
                         break;
                 }
             }
-            if ((c.Flags & (GhosttyCell.Strike | GhosttyCell.Overline)) != 0)
+            if ((c.Flags & (TerminalCell.Strike | TerminalCell.Overline)) != 0)
             {
                 SetBrush(Rgb(c.Foreground, alpha));
-                if ((c.Flags & GhosttyCell.Strike) != 0)
+                if ((c.Flags & TerminalCell.Strike) != 0)
                     _dc.FillRectangle(new Rect(left, top + CellHeight / 2, width, thickness), _brush);
-                if ((c.Flags & GhosttyCell.Overline) != 0)
+                if ((c.Flags & TerminalCell.Overline) != 0)
                     _dc.FillRectangle(new Rect(left, top, width, thickness), _brush);
             }
         }
@@ -435,26 +435,26 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
 
     private static bool IsEmojiPresentation(uint codepoint) => codepoint is >= 0x1F000 and <= 0x1FAFF;
 
-    private static uint? BackgroundOf(in GhosttyCell c, uint selectionColor) =>
-        (c.Flags & GhosttyCell.Selected) != 0 ? selectionColor
-        : (c.Flags & GhosttyCell.MatchCurrent) != 0 ? CurrentMatchColor
-        : (c.Flags & GhosttyCell.Match) != 0 ? MatchColor
-        : (c.Flags & GhosttyCell.DefaultBackground) != 0 ? null
+    private static uint? BackgroundOf(in TerminalCell c, uint selectionColor) =>
+        (c.Flags & TerminalCell.Selected) != 0 ? selectionColor
+        : (c.Flags & TerminalCell.MatchCurrent) != 0 ? CurrentMatchColor
+        : (c.Flags & TerminalCell.Match) != 0 ? MatchColor
+        : (c.Flags & TerminalCell.DefaultBackground) != 0 ? null
         : c.Background;
 
-    private bool IsEmojiCell(in GhosttyCell c) =>
+    private bool IsEmojiCell(in TerminalCell c) =>
         IsEmojiPresentation(c.Codepoint) && _isEmojiFace[Lookup(c.Codepoint, 0).Face];
 
     private static int StyleOf(ushort flags) =>
-        ((flags & GhosttyCell.Bold) != 0 ? 1 : 0) | ((flags & GhosttyCell.Italic) != 0 ? 2 : 0);
+        ((flags & TerminalCell.Bold) != 0 ? 1 : 0) | ((flags & TerminalCell.Italic) != 0 ? 2 : 0);
 
     /// <summary>Grapheme clusters and color emoji go through DirectWrite layout, centered on
     /// their cells, so shaping and color fonts work without a glyph-run path for them.</summary>
-    private void DrawCluster(int x, int y, in GhosttyCell c)
+    private void DrawCluster(int x, int y, in TerminalCell c)
     {
         var text = c.GraphemeLength > 1 ? GraphemeAt?.Invoke(x, y) : null;
         text ??= char.ConvertFromUtf32((int)c.Codepoint);
-        var width = (c.Wide == GhosttyCell.WideChar ? 2 : 1) * CellWidth;
+        var width = (c.Wide == TerminalCell.WideChar ? 2 : 1) * CellWidth;
         SetBrush(Rgb(c.Foreground));
         var emoji = IsEmojiPresentation(c.Codepoint) || text.Contains('️');
         if (emoji)
@@ -471,10 +471,10 @@ internal sealed unsafe class GhosttyRenderer : IDisposable
             DrawTextOptions.Clip);
     }
 
-    private void DrawCursor(GhosttyCell* cell, in GhosttyFrameInfo info, bool focused)
+    private void DrawCursor(TerminalCell* cell, in GhosttyFrameInfo info, bool focused)
     {
         float left = OriginX + info.CursorX * CellWidth, top = info.CursorY * CellHeight;
-        var width = cell->Wide == GhosttyCell.WideChar ? 2 * CellWidth : CellWidth;
+        var width = cell->Wide == TerminalCell.WideChar ? 2 * CellWidth : CellWidth;
         SetBrush(Rgb(info.CursorColor));
         if (!focused || info.CursorStyle == 3)
         {

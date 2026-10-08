@@ -1,24 +1,24 @@
-using Resesh.Terminal.Ghostty;
+using Resesh.Terminal.Native;
 
 namespace Resesh.Terminal.Tests;
 
 /// <summary>The ruler's highlight lane index (terminal.html's Phase 9.3).</summary>
-public class GhosttyOverviewIndexTests
+public class OverviewIndexTests
 {
-    private static (FakeBuffer Buffer, GhosttyOverviewIndex Index) Setup(int lines, Func<int, string> text, int rows = 10)
+    private static (FakeBuffer Buffer, OverviewIndex Index) Setup(int lines, Func<int, string> text, int rows = 10)
     {
         var buffer = new FakeBuffer { Rows = rows };
         for (var i = 0; i < lines; i++)
             buffer.Add(text(i));
-        var highlighter = new GhosttyHighlighter();
+        var highlighter = new Highlighter();
         highlighter.SetRules([
             new { id = "err", pattern = "error", color = "#ff5555", bold = false, underline = false, matchCase = false, showInOverview = true },
             new { id = "warn", pattern = "warn", color = "#f1fa8c", bold = false, underline = false, matchCase = false, showInOverview = false },
         ]);
-        return (buffer, new GhosttyOverviewIndex(buffer, highlighter));
+        return (buffer, new OverviewIndex(buffer, highlighter));
     }
 
-    private static int[] Indexed(GhosttyOverviewIndex index) => [.. index.Lines().Select(l => l.Line).OrderBy(l => l)];
+    private static int[] Indexed(OverviewIndex index) => [.. index.Lines().Select(l => l.Line).OrderBy(l => l)];
 
     [Fact]
     public void IndexesOnlyOverviewRules()

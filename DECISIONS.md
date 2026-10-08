@@ -919,5 +919,10 @@ timestamps (`GhosttyLineTimes`), and command marks during rewind and playback.
 - No fallback: missing native libraries are a build error, and at run time the surface
   factory throws with the reason. Development builds run eng/build-ghostty-vt.ps1 first
   (demo.ps1 does it when needed); CI builds both architectures and caches the output.
+- Naming: libghostty-vt only parses and models the screen; rendering (Direct2D/DirectWrite),
+  input, the ruler, find UI, marks and history are ours. The code moved to
+  `src/Terminal/Native` (`Resesh.Terminal.Native`, `NativeTerminalSurface`, `TerminalRenderer`,
+  `TerminalRuler`, `CommandTracker`, ...) and the C shim to `Native/Shim`; only the interop layer
+  (`GhosttyNative` and its structs) and the library's build files keep the Ghostty name.
 - Deferred: find match-case and regex (libghostty-vt's search is literal and ASCII
   case-insensitive; needs our own scrollback search).

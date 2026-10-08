@@ -9,7 +9,7 @@ using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>
 /// Live terminal drawn in-process: libghostty-vt parses on the backend's reader thread and a
@@ -17,7 +17,7 @@ namespace Resesh.Terminal.Ghostty;
 /// terminal is ordinary XAML content. Partial files: Playback (rewind and recordings),
 /// TextInput (keyboard focus, IME), Links. Not implemented: UIA text for screen readers.
 /// </summary>
-public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
+public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 {
     private const int BlinkMilliseconds = 530;
     private const long KeyframeMinimumBytes = 1024 * 1024;
@@ -44,12 +44,12 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private bool _findOpen;
 
     // Command marks, ruler, commands panel (terminal.html's addon-ruler.js).
-    private readonly GhosttyRuler _ruler = new();
-    private readonly GhosttyCommandsPanel _commandsPanel = new();
+    private readonly TerminalRuler _ruler = new();
+    private readonly CommandsPanel _commandsPanel = new();
     private readonly Border _flash = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _flashTimer;
-    private GhosttyCommandBuffer? _commandBuffer;
-    private GhosttyCommandTracker? _commands;
+    private TerminalCommandBuffer? _commandBuffer;
+    private CommandTracker? _commands;
     private bool _historyCapture;
     private string? _promptPlatform;
     private bool _annotationsPending;
@@ -73,18 +73,18 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 
     private sealed record PlaybackFrame(double Time, int Index, int Columns, int Rows, byte[] State);
     private sealed record PlaybackModel(TerminalTimedReplayEvent[] Events, List<PlaybackFrame> Frames);
-    private GhosttyOverviewIndex? _overview;
-    private GhosttyLineTimes? _lineTimes;
+    private OverviewIndex? _overview;
+    private LineTimes? _lineTimes;
     private readonly int[] _searchLineBuffer = new int[4096];
     private (ulong Total, ulong Offset, ulong Length) _scrollState;
-    private readonly GhosttyRenderer _renderer = new();
-    private readonly GhosttyHighlighter _highlighter = new();
+    private readonly TerminalRenderer _renderer = new();
+    private readonly Highlighter _highlighter = new();
     private readonly object _termGate = new();
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _blinkTimer;
     private readonly List<byte[]> _earlyOutput = [];
     private IntPtr _term;
     private GCHandle _self;
-    private GhosttyCell* _cells;
+    private TerminalCell* _cells;
     private byte* _dirty;
     private int _cellCapacity;
     private int _framePending;
@@ -112,7 +112,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private int _fontSize = 14;
     private int _zoomDelta;
     private string _fontFamily = "Cascadia Mono, Consolas, monospace";
-    private GhosttyTheme _theme = GhosttyThemes.Find("dark");
+    private TerminalTheme _theme = TerminalThemes.Find("dark");
     private bool _copyOnSelect;
     private bool _rightClickPaste;
     private int _scrollback = 10000;
@@ -156,19 +156,19 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 
     private int EffectiveFontSize => Math.Clamp(_fontSize + _zoomDelta, 6, 72);
 
-    public GhosttyTerminalSurface()
+    public NativeTerminalSurface()
     {
         if (UnavailableReason is { } reason)
             throw new InvalidOperationException(reason);
 
-        AutomationProperties.SetAutomationId(this, "GhosttyTerminalSurface");
+        AutomationProperties.SetAutomationId(this, "NativeTerminalSurface");
         AutomationProperties.SetName(this, "Terminal");
         IsTabStop = true;
         UseSystemFocusVisuals = false;
         Background = new SolidColorBrush(ToColor(_theme.Background));
         _panel.IsHitTestVisible = false;
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(GhosttyRuler.LaneWidth) });
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TerminalRuler.LaneWidth) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ScrollBarWidth) });
         Children.Add(_panel);
         Children.Add(_flash);
@@ -403,7 +403,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     {
         try
         {
-            if (GCHandle.FromIntPtr(user).Target is not GhosttyTerminalSurface self || self._disposed)
+            if (GCHandle.FromIntPtr(user).Target is not NativeTerminalSurface self || self._disposed)
                 return;
             var bytes = length == 0 ? [] : new ReadOnlySpan<byte>(data, checked((int)length)).ToArray();
             // Raised on the UI thread.
@@ -522,7 +522,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         if (_cells != null) NativeMemory.Free(_cells);
         if (_dirty != null) NativeMemory.Free(_dirty);
         _cellCapacity = Math.Max(needed, 1);
-        _cells = (GhosttyCell*)NativeMemory.AllocZeroed((nuint)(_cellCapacity * sizeof(GhosttyCell)));
+        _cells = (TerminalCell*)NativeMemory.AllocZeroed((nuint)(_cellCapacity * sizeof(TerminalCell)));
         _dirty = (byte*)NativeMemory.AllocZeroed((nuint)Math.Max(Rows, 512));
     }
 
@@ -602,7 +602,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
                 if (_dirty[y] == 0)
                     continue;
                 var row = y;
-                _highlighter.ApplyRow(new Span<GhosttyCell>(_cells + y * Columns, Columns), x => GraphemeAt(x, row));
+                _highlighter.ApplyRow(new Span<TerminalCell>(_cells + y * Columns, Columns), x => GraphemeAt(x, row));
             }
         }
         if (rows > 0 && _hoverSpans.Length > 0)
@@ -721,7 +721,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     {
         _fontSize = fontSize > 0 ? fontSize : 14;
         _fontFamily = string.IsNullOrWhiteSpace(fontFamily) ? _fontFamily : fontFamily;
-        _theme = GhosttyThemes.Find(theme);
+        _theme = TerminalThemes.Find(theme);
         _copyOnSelect = copyOnSelect;
         _rightClickPaste = rightClickPaste;
         _scrollback = scrollback;
@@ -739,7 +739,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         if (!string.IsNullOrWhiteSpace(fontFamily) && fontFamily != _fontFamily) { _fontFamily = fontFamily; relayout = true; }
         if (theme is not null)
         {
-            _theme = GhosttyThemes.Find(theme);
+            _theme = TerminalThemes.Find(theme);
             ApplyColors();
         }
         if (copyOnSelect is { } c) _copyOnSelect = c;
@@ -1453,7 +1453,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         }
     }
 
-    private Task PasteFromClipboardAsync() => GhosttyClipboard.PasteIntoAsync(PasteText);
+    private Task PasteFromClipboardAsync() => TerminalClipboard.PasteIntoAsync(PasteText);
 
     /// <summary>Bracketed when the program enabled mode 2004; the encoded bytes come back
     /// through the PTY event and leave as <see cref="InputReceived"/>.</summary>
@@ -1510,8 +1510,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
 
     private void CreateCommandTracker()
     {
-        _commandBuffer = new GhosttyCommandBuffer(() => _disposed ? IntPtr.Zero : _term);
-        _commands = new GhosttyCommandTracker(_commandBuffer)
+        _commandBuffer = new TerminalCommandBuffer(() => _disposed ? IntPtr.Zero : _term);
+        _commands = new CommandTracker(_commandBuffer)
         {
             Schedule = (delay, action) =>
             {
@@ -1535,9 +1535,9 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         _commands.PromptContext += (context, platform) => PromptContextChanged?.Invoke(context, platform);
         _commands.CommandMarked += command => CommandObserved?.Invoke(Cap(command));
         _commands.Changed += QueueAnnotations;
-        _overview = new GhosttyOverviewIndex(_commandBuffer, _highlighter);
+        _overview = new OverviewIndex(_commandBuffer, _highlighter);
         _lineTimes?.Reset();
-        _lineTimes = new GhosttyLineTimes(_commandBuffer);
+        _lineTimes = new LineTimes(_commandBuffer);
         _commands.SetHistoryCapture(_historyCapture);
         if (_promptPlatform is not null)
             _commands.SetPromptPlatform(_promptPlatform);
@@ -1546,7 +1546,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     }
 
     /// <summary>The tracker with a fresh buffer snapshot, or null before the terminal exists.</summary>
-    private GhosttyCommandTracker? RefreshCommands()
+    private CommandTracker? RefreshCommands()
     {
         if (_commands is null || _disposed)
             return null;

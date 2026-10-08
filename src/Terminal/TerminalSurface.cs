@@ -160,15 +160,15 @@ public sealed record TerminalTimedReplayEvent(double Time, string Type, string D
 public static class TerminalSurfaceFactory
 {
     /// <summary>Live tabs, rewind and recording playback all draw in-process with
-    /// libghostty-vt (<see cref="Ghostty.GhosttyTerminalSurface"/>).</summary>
+    /// libghostty-vt (<see cref="Native.NativeTerminalSurface"/>).</summary>
     public static TerminalSurface CreateLive() => Create();
 
     public static TerminalSurface CreatePlayback() => Create();
 
     private static TerminalSurface Create() =>
-        Ghostty.GhosttyTerminalSurface.UnavailableReason is { } reason
+        Native.NativeTerminalSurface.UnavailableReason is { } reason
             ? throw new InvalidOperationException(
                 $"The terminal libraries could not be loaded ({reason}). Reinstall Resesh, or for a development "
                 + "build run eng/build-ghostty-vt.ps1.")
-            : new Ghostty.GhosttyTerminalSurface();
+            : new Native.NativeTerminalSurface();
 }

@@ -1,4 +1,4 @@
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>
 /// The ruler's highlight lane (terminal.html's Phase 9.3 content index): which lines of the
@@ -8,7 +8,7 @@ namespace Resesh.Terminal.Ghostty;
 /// invalidate the index: virtual = absolute line + (anchor's virtual - anchor's line). Losing
 /// the anchor, a reflow, or a rule change rebuilds it.
 /// </summary>
-internal sealed class GhosttyOverviewIndex(ICommandBuffer buffer, GhosttyHighlighter highlighter)
+internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlighter)
 {
     private const int SliceLines = 2000;
     private const int ReanchorGap = 4096;

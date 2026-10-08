@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>
 /// Keyword highlighting for the ghostty surface (terminal.html's addon-highlight.js): each
@@ -11,7 +11,7 @@ namespace Resesh.Terminal.Ghostty;
 /// them, so only what is on screen is ever scanned, and matches are cached by row text: output
 /// scrolling past re-reads the same rows at new positions every frame.
 /// </summary>
-internal sealed class GhosttyHighlighter
+internal sealed class Highlighter
 {
     private const int MaxMatchesPerRow = 40;
     private const int MaxCachedRows = 4096;
@@ -97,7 +97,7 @@ internal sealed class GhosttyHighlighter
     /// <summary>Text of a row with a column map: every UTF-16 code unit knows the cells it
     /// covers, so wide characters and grapheme clusters map to their full cells. Trailing
     /// blanks are trimmed, as xterm's translateToString(true) does.</summary>
-    internal string RowText(ReadOnlySpan<GhosttyCell> row, Func<int, string?>? grapheme)
+    internal string RowText(ReadOnlySpan<TerminalCell> row, Func<int, string?>? grapheme)
     {
         _text.Clear();
         _starts.Clear();
@@ -105,9 +105,9 @@ internal sealed class GhosttyHighlighter
         for (var x = 0; x < row.Length; x++)
         {
             ref readonly var cell = ref row[x];
-            if (cell.Wide == GhosttyCell.SpacerTail)
+            if (cell.Wide == TerminalCell.SpacerTail)
                 continue;
-            var width = cell.Wide == GhosttyCell.WideChar ? 2 : 1;
+            var width = cell.Wide == TerminalCell.WideChar ? 2 : 1;
             if (cell.GraphemeLength > 1 && grapheme?.Invoke(x) is { } cluster)
             {
                 foreach (var c in cluster)
@@ -148,7 +148,7 @@ internal sealed class GhosttyHighlighter
 
     /// <summary>Applies every rule to one freshly read row (never to an already highlighted
     /// row: the tint blends with the cell's current background).</summary>
-    public void ApplyRow(Span<GhosttyCell> row, Func<int, string?>? grapheme)
+    public void ApplyRow(Span<TerminalCell> row, Func<int, string?>? grapheme)
     {
         if (_rules.Count == 0)
             return;
@@ -174,10 +174,10 @@ internal sealed class GhosttyHighlighter
                 if (rule.Tint)
                 {
                     cell.Background = Blend(cell.Background, rule.Color, TintAlpha);
-                    cell.Flags &= unchecked((ushort)~GhosttyCell.DefaultBackground);
+                    cell.Flags &= unchecked((ushort)~TerminalCell.DefaultBackground);
                 }
                 if (rule.Underline)
-                    cell.Flags |= GhosttyCell.Underline;
+                    cell.Flags |= TerminalCell.Underline;
             }
         }
     }

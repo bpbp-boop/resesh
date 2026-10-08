@@ -29,7 +29,7 @@ src/App/bin/x64/Debug/net10.0-windows10.0.19041.0/Resesh.App.exe
 ```
 
 On ARM64, substitute `-Architecture arm64` and `-p:Platform=ARM64`. Rerun the script when
-`eng/ghostty-vt.json` or `src/Terminal/Ghostty/native/` changes.
+`eng/ghostty-vt.json` or `src/Terminal/Native/Shim/` changes.
 
 ### Screenshot demo
 

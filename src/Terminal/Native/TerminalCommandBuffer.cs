@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 [StructLayout(LayoutKind.Sequential)]
 internal struct GhosttyBufferInfo
@@ -35,7 +35,7 @@ internal struct GhosttySemanticEvent
 /// line reads are cached until <see cref="Refresh"/>, which the surface calls before each
 /// tracker entry point, so one pass sees one consistent snapshot of positions.
 /// </summary>
-internal sealed unsafe class GhosttyCommandBuffer(Func<IntPtr> terminal) : ICommandBuffer
+internal sealed unsafe class TerminalCommandBuffer(Func<IntPtr> terminal) : ICommandBuffer
 {
     private GhosttyBufferInfo _info;
     private IntPtr Terminal => terminal();
@@ -113,7 +113,7 @@ internal sealed unsafe class GhosttyCommandBuffer(Func<IntPtr> terminal) : IComm
         _live.Clear();
     }
 
-    private sealed class NativeMarker(GhosttyCommandBuffer owner, uint id) : ICommandMarker
+    private sealed class NativeMarker(TerminalCommandBuffer owner, uint id) : ICommandMarker
     {
         private bool _disposed;
         private bool _orphaned;

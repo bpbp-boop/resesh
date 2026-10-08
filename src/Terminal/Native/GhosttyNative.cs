@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 [StructLayout(LayoutKind.Sequential)]
 internal struct GhosttyFrameInfo
@@ -80,7 +80,7 @@ internal static unsafe partial class GhosttyNative
     [LibraryImport(Library)] public static partial void rvt_set_scrollback(IntPtr term, nuint lines);
     [LibraryImport(Library)] public static partial void rvt_set_colors(IntPtr term, uint fg, uint bg, uint cursor, uint* palette16);
     [LibraryImport(Library)]
-    public static partial int rvt_read_frame(IntPtr term, GhosttyCell* cells, ushort cols, ushort rows,
+    public static partial int rvt_read_frame(IntPtr term, TerminalCell* cells, ushort cols, ushort rows,
         byte* dirtyRows, int forceAll, GhosttyFrameInfo* info);
     [LibraryImport(Library)] public static partial int rvt_cell_graphemes(IntPtr term, ushort x, ushort y, uint* output, int capacity);
     [LibraryImport(Library)] public static partial int rvt_cell_hyperlink(IntPtr term, ushort x, ushort y, byte* output, int capacity);

@@ -2,14 +2,14 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.UI.Input;
 
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>
 /// Clickable links, as terminal.html's link handler and WebLinksAddon: OSC 8 hyperlinks and
 /// plain http(s) URLs (soft-wrapped lines joined) underline under the pointer and open in the
 /// default browser on a plain click. Programs that track the mouse keep the pointer.
 /// </summary>
-public sealed unsafe partial class GhosttyTerminalSurface
+public sealed unsafe partial class NativeTerminalSurface
 {
     // WebLinksAddon's URL pattern.
     private static readonly Regex UrlPattern = new(
@@ -47,7 +47,7 @@ public sealed unsafe partial class GhosttyTerminalSurface
             if (row < 0 || row >= Rows || _dirty[row] == 0)
                 continue;
             for (var x = Math.Max(0, start); x < end && x < Columns; x++)
-                _cells[row * Columns + x].Flags |= GhosttyCell.Underline;
+                _cells[row * Columns + x].Flags |= TerminalCell.Underline;
         }
     }
 
@@ -97,7 +97,7 @@ public sealed unsafe partial class GhosttyTerminalSurface
         for (var row = top; row <= bottom; row++)
         {
             var r = row;
-            var rowText = _highlighter.RowText(new ReadOnlySpan<GhosttyCell>(_cells + row * Columns, Columns), c => GraphemeAt(c, r));
+            var rowText = _highlighter.RowText(new ReadOnlySpan<TerminalCell>(_cells + row * Columns, Columns), c => GraphemeAt(c, r));
             text.Append(rowText);
             for (var i = 0; i < rowText.Length; i++)
                 map.Add((row, _highlighter.ColumnStarts[i], _highlighter.ColumnEnds[i]));

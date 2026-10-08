@@ -1,12 +1,12 @@
-namespace Resesh.Terminal.Ghostty;
+namespace Resesh.Terminal.Native;
 
 /// <summary>A terminal theme as 0xRRGGBB values: defaults plus the 16 ANSI colors.</summary>
-internal sealed record GhosttyTheme(uint Background, uint Foreground, uint Cursor, uint Selection, uint[] Ansi);
+internal sealed record TerminalTheme(uint Background, uint Foreground, uint Cursor, uint Selection, uint[] Ansi);
 
 /// <summary>The same palettes terminal.html uses, keyed by theme id.</summary>
-internal static class GhosttyThemes
+internal static class TerminalThemes
 {
-    private static readonly Dictionary<string, GhosttyTheme> Themes =
+    private static readonly Dictionary<string, TerminalTheme> Themes =
         new(StringComparer.OrdinalIgnoreCase)
         {
             ["dark"] = New(
@@ -95,13 +95,13 @@ internal static class GhosttyThemes
                 0xC5BAFF, 0xFFA1F0, 0x9AFAFF, 0xFFF5FF),
         };
 
-    internal static GhosttyTheme Find(string? id) =>
+    internal static TerminalTheme Find(string? id) =>
         id is not null && Themes.TryGetValue(id, out var theme) ? theme : Themes["dark"];
 
-    private static GhosttyTheme New(uint background, uint foreground, uint cursor, uint selection, params uint[] ansi)
+    private static TerminalTheme New(uint background, uint foreground, uint cursor, uint selection, params uint[] ansi)
     {
         if (ansi.Length != 16)
             throw new ArgumentException("A terminal palette must contain 16 ANSI colors.", nameof(ansi));
-        return new GhosttyTheme(background, foreground, cursor, selection, ansi);
+        return new TerminalTheme(background, foreground, cursor, selection, ansi);
     }
 }
