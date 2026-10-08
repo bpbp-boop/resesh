@@ -50,6 +50,9 @@ jobs:
       - name: Run app logic tests
         run: dotnet test tests/AppLogic.Tests/Resesh.AppLogic.Tests.csproj --configuration Release
 
+      - name: Run terminal surface tests
+        run: dotnet test tests/Terminal.Tests/Resesh.Terminal.Tests.csproj --configuration Release
+
       - name: Run terminal tests
         shell: pwsh
         run: |
@@ -101,6 +104,21 @@ jobs:
           }
 
           "VERSION=$version" >> $env:GITHUB_ENV
+
+      # The terminal's native libraries (libghostty-vt and our reseshvt shim). The installer
+      # refuses to build without them. Zig and the Ghostty commit are pinned in
+      # eng/ghostty-vt.json; a cold build takes a few minutes, so the output is cached.
+      - name: Cache libghostty-vt
+        id: ghostty-cache
+        uses: actions/cache@v5
+        with:
+          path: .artifacts/ghostty-vt/${{ matrix.asset_architecture }}
+          key: ghostty-vt-${{ matrix.asset_architecture }}-${{ hashFiles('eng/ghostty-vt.json', 'eng/build-ghostty-vt.ps1', 'src/Terminal/Ghostty/native/**') }}
+
+      - name: Build libghostty-vt
+        if: steps.ghostty-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./eng/build-ghostty-vt.ps1 -Architecture "${{ matrix.asset_architecture }}" -BuildRoot "$env:RUNNER_TEMP/ghostty-build"
 
       - name: Build self-contained app
         shell: pwsh
@@ -351,7 +369,9 @@ jobs:
             "Resesh.App.exe",
             "Resesh.App.dll",
             "Resesh.Core.dll",
-            "Resesh.Terminal.dll"
+            "Resesh.Terminal.dll",
+            "GhosttyVt\ghostty-vt.dll",
+            "GhosttyVt\reseshvt.dll"
           ) | ForEach-Object { Join-Path $appOutputDir $_ }
 
           foreach ($file in $files) {
