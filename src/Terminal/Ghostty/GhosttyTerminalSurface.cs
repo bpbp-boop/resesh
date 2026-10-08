@@ -75,6 +75,7 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
     private sealed record PlaybackFrame(double Time, int Index, int Columns, int Rows, byte[] State);
     private sealed record PlaybackModel(TerminalTimedReplayEvent[] Events, List<PlaybackFrame> Frames);
     private GhosttyOverviewIndex? _overview;
+    private GhosttyLineTimes? _lineTimes;
     private readonly int[] _searchLineBuffer = new int[4096];
     private (ulong Total, ulong Offset, ulong Length) _scrollState;
     private readonly GhosttyRenderer _renderer = new();
@@ -179,6 +180,20 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         Children.Add(_ruler.Card);
         Children.Add(_commandsPanel);
         _ruler.JumpRequested += JumpToMark;
+        _ruler.LineRequested += (line, snapped) =>
+        {
+            if (snapped)
+            {
+                ScrollLineToCenter(line);
+            }
+            else if (_term != IntPtr.Zero)
+            {
+                GhosttyNative.rvt_scroll(_term, GhosttyNative.ScrollRow, Math.Max(0, line - Rows / 2));
+                RequestFrame();
+            }
+        };
+        _ruler.LineText = line => _commandBuffer?.LineText(line);
+        _ruler.LineTime = line => _lineTimes?.TimeOf(line);
         _ruler.CopyRequested += CopyMarkOutput;
         _commandsPanel.JumpRequested += JumpToMark;
         _commandsPanel.CopyRequested += CopyMarkOutput;
@@ -1524,6 +1539,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         _commands.CommandMarked += command => CommandObserved?.Invoke(Cap(command));
         _commands.Changed += QueueAnnotations;
         _overview = new GhosttyOverviewIndex(_commandBuffer, _highlighter);
+        _lineTimes?.Reset();
+        _lineTimes = new GhosttyLineTimes(_commandBuffer);
         _commands.SetHistoryCapture(_historyCapture);
         if (_promptPlatform is not null)
             _commands.SetPromptPlatform(_promptPlatform);
@@ -1591,6 +1608,8 @@ public sealed unsafe partial class GhosttyTerminalSurface : TerminalSurface
         if (_disposed || RefreshCommands() is not { } commands)
             return;
         commands.NoteOutput(_lastObservedMs);
+        if (!_replaying && _lastObservedMs > 0)
+            _lineTimes?.Note(_lastObservedMs);
         commands.OnOutputParsed();
         var marks = commands.Commands();
         _ruler.Visibility = _commandBuffer!.IsAlternate ? Visibility.Collapsed : Visibility.Visible;

@@ -47,6 +47,14 @@ internal sealed class GhosttyRuler : Grid
 
     internal event Action<long>? JumpRequested;
     internal event Action<long>? CopyRequested;
+    /// <summary>Scroll to a line: (line, true when snapped to a bookmark, match or highlight).</summary>
+    internal event Action<int, bool>? LineRequested;
+
+    /// <summary>Line text and arrival time for the card away from command marks.</summary>
+    internal Func<int, string?>? LineText { get; set; }
+    internal Func<int, long?>? LineTime { get; set; }
+
+    private readonly List<Button> _cardActions = [];
 
     /// <summary>The card lives in the terminal area (it is wider than the lane); the surface
     /// adds it to its own grid.</summary>
@@ -70,11 +78,14 @@ internal sealed class GhosttyRuler : Grid
         };
         PointerPressed += (_, e) =>
         {
-            if (Nearest(e.GetCurrentPoint(this).Position.Y) is { } mark)
-            {
+            var y = e.GetCurrentPoint(this).Position.Y;
+            e.Handled = true;
+            if (Nearest(y) is { } mark)
                 JumpRequested?.Invoke(mark.Id);
-                e.Handled = true;
-            }
+            else if (Snap(y) is { } snapped)
+                LineRequested?.Invoke(snapped, true);
+            else if (ActualHeight > 0)
+                LineRequested?.Invoke(LineForY(y), false);
         };
         SizeChanged += (_, _) => Paint();
         BuildCard();
@@ -134,6 +145,41 @@ internal sealed class GhosttyRuler : Grid
     }
 
     private double YForLine(int line) => line / (double)_total * ActualHeight;
+
+    private int LineForY(double y) =>
+        (int)Math.Clamp(Math.Floor(y / Math.Max(1, ActualHeight) * _total), 0, Math.Max(0, _total - 1));
+
+    /// <summary>The nearest bookmark, find match or highlight line within snapping distance.</summary>
+    private int? Snap(double y)
+    {
+        int? best = null;
+        var bestDistance = SnapPixels;
+        void Consider(int line)
+        {
+            var distance = Math.Abs(YForLine(line) - y);
+            if (distance <= bestDistance)
+            {
+                best = line;
+                bestDistance = distance;
+            }
+        }
+        foreach (var line in _bookmarks) Consider(line);
+        foreach (var line in _searchLines) Consider(line);
+        foreach (var (line, _) in _highlights) Consider(line);
+        return best;
+    }
+
+    private static string Age(long unixMs)
+    {
+        var age = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(unixMs);
+        return age.TotalSeconds < 60 ? "just now"
+            : age.TotalMinutes < 60 ? $"{(int)age.TotalMinutes}m ago"
+            : age.TotalHours < 24 ? $"{(int)age.TotalHours}h ago"
+            : $"{(int)age.TotalDays}d ago";
+    }
+
+    private static string Clock(long unixMs) =>
+        $"{DateTimeOffset.FromUnixTimeMilliseconds(unixMs).ToLocalTime():HH:mm:ss} ({Age(unixMs)})";
 
     private void Paint()
     {
@@ -227,21 +273,54 @@ internal sealed class GhosttyRuler : Grid
         return best;
     }
 
+    /// <summary>Near a command mark: the command card (Jump to / Copy output). Elsewhere: the
+    /// line under the pointer, when it arrived, and what the lane shows around it.</summary>
     private void ShowCardNear(double y)
     {
-        if (Nearest(y) is not { } mark)
+        if (ActualHeight <= 0 || _total <= 1)
         {
             _hideTimer.Start();
             return;
         }
         _hideTimer.Stop();
-        _cardMark = mark;
-        _cardCommand.Text = string.IsNullOrWhiteSpace(mark.Text) ? $"Line {mark.Line + 1}" : mark.Text;
-        var status = mark.Exit switch { 0 => "succeeded", { } code => $"exit {code}", null => "status unknown" };
-        _cardMeta.Text = $"{DateTimeOffset.FromUnixTimeMilliseconds(mark.UnixMs).ToLocalTime():HH:mm:ss} · {status}"
-            + (mark.Exact ? "" : " · detected");
-        _cardDot.Fill = new SolidColorBrush(mark.Exit switch { 0 => _ok, not null => _fail, null => _unknown });
-        _card.Margin = new Thickness(0, Math.Max(0, YForLine(mark.Line) - 24), 6, 0);
+        if (Nearest(y) is { } mark)
+        {
+            _cardMark = mark;
+            _cardCommand.Text = string.IsNullOrWhiteSpace(mark.Text) ? $"Line {mark.Line + 1}" : mark.Text;
+            var status = mark.Exit switch { 0 => "succeeded", { } code => $"exit {code}", null => "status unknown" };
+            _cardMeta.Text = $"{Clock(LineTime?.Invoke(mark.Line) ?? mark.UnixMs)} · {status}" + (mark.Exact ? "" : " · detected");
+            _cardDot.Fill = new SolidColorBrush(mark.Exit switch { 0 => _ok, not null => _fail, null => _unknown });
+            _cardDot.Visibility = Visibility.Visible;
+            foreach (var action in _cardActions)
+                action.Visibility = Visibility.Visible;
+            _card.Margin = new Thickness(0, Math.Max(0, YForLine(mark.Line) - 24), 6, 0);
+            _card.Visibility = Visibility.Visible;
+            return;
+        }
+
+        _cardMark = null;
+        var line = LineForY(y);
+        var sample = "";
+        for (var l = line; l < Math.Min(_total, line + 8) && sample.Length == 0; l++)
+            sample = (LineText?.Invoke(l) ?? "").Trim();
+        _cardCommand.Text = sample.Length > 0 ? sample : "(blank)";
+        var parts = new List<string> { $"Line {line + 1}" };
+        if (LineTime?.Invoke(line) is { } time)
+            parts.Add(Clock(time));
+        // What the lane shows within this pixel band.
+        var lo = LineForY(y - TickHeight);
+        var hi = LineForY(y + TickHeight);
+        var matches = _searchLines.Count(l => l >= lo && l <= hi);
+        var bookmarks = _bookmarks.Count(l => l >= lo && l <= hi);
+        var highlights = _highlights.Count(h => h.Line >= lo && h.Line <= hi);
+        if (matches > 0) parts.Add(matches == 1 ? "1 match" : $"{matches} matches");
+        if (bookmarks > 0) parts.Add(bookmarks == 1 ? "bookmark" : $"{bookmarks} bookmarks");
+        if (highlights > 0) parts.Add(highlights == 1 ? "1 highlight" : $"{highlights} highlights");
+        _cardMeta.Text = string.Join(" · ", parts);
+        _cardDot.Visibility = Visibility.Collapsed;
+        foreach (var action in _cardActions)
+            action.Visibility = Visibility.Collapsed;
+        _card.Margin = new Thickness(0, Math.Max(0, y - 24), 6, 0);
         _card.Visibility = Visibility.Visible;
     }
 
@@ -284,6 +363,7 @@ internal sealed class GhosttyRuler : Grid
                     run(mark.Id);
                 _card.Visibility = Visibility.Collapsed;
             };
+            _cardActions.Add(button);
             return button;
         }
         var row = new Grid();
