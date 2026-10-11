@@ -518,6 +518,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             Notes = NotesBox.Text,
             ColorTag = ColorChoices[Math.Max(0, ColorBox.SelectedIndex)].Hex,
             Icon = _selectedIcon,
+            Agent = _existing?.Agent,
             CredentialNeeded = _existing?.CredentialNeeded ?? false,
             Overrides = overrides.IsEmpty ? null : overrides,
         };

@@ -94,7 +94,6 @@ public sealed partial class OnboardingView : UserControl, IDisposable
 
     public AppSettings Complete()
     {
-        _completed = true;
         return App.Settings.Current with
         {
             Theme = _selectedTheme,
@@ -106,6 +105,8 @@ public sealed partial class OnboardingView : UserControl, IDisposable
             OnboardingCompleted = true,
         };
     }
+
+    public void MarkCompleted() => _completed = true;
 
     public void CancelPreview()
     {

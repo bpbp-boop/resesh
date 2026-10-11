@@ -186,14 +186,6 @@ public sealed partial class MainViewModel : ObservableObject
             insertionIndex = Math.Max(sourceIndex + 1, group.Tabs.Count(t => t.IsPinned));
         }
         var tab = new TabViewModel(session, _environment);
-        if (session.Persistent)
-        {
-            // Lowest unused slot, so a clone gets its own tmux session and a reopened
-            // tab (all others closed) attaches back to the primary.
-            var used = AllTabs.Where(t => t.Session.Id == session.Id).Select(t => t.TmuxSlot).ToHashSet();
-            while (used.Contains(tab.TmuxSlot))
-                tab.TmuxSlot++;
-        }
         AttachTab(tab, group, insertionIndex);
         return tab;
     }
@@ -276,6 +268,7 @@ public sealed partial class MainViewModel : ObservableObject
         if (!string.IsNullOrEmpty(password))
             _credentials.Write(session.Id, password);
         RebuildTree();
+        _environment.SessionsChanged(this);
     }
 
     public void UpdateSession(Session session, string? password)
@@ -306,6 +299,7 @@ public sealed partial class MainViewModel : ObservableObject
             RebuildTree();
         else
             node.UpdateSession(session);
+        _environment.SessionsChanged(this);
     }
 
     /// <summary>True when the session keeps its own password under its id. Identity logins
@@ -325,12 +319,14 @@ public sealed partial class MainViewModel : ObservableObject
         _store.Remove(session.Id);
         _credentials.Delete(session.Id);
         RebuildTree();
+        _environment.SessionsChanged(this);
     }
 
     public void MoveSessionsToFolder(IEnumerable<Guid> sessionIds, string folderPath)
     {
         _store.MoveToFolder(sessionIds, folderPath);
         RebuildTree();
+        _environment.SessionsChanged(this);
     }
 
     // ---- Folder CRUD (SSH and Local folders are separate namespaces) ----
@@ -343,6 +339,7 @@ public sealed partial class MainViewModel : ObservableObject
 
         _store.CreateFolder(path, kind);
         RebuildTree();
+        _environment.SessionsChanged(this);
     }
 
     public void RenameFolder(string oldPath, string newPath, SessionKind kind = SessionKind.Ssh)
@@ -351,6 +348,7 @@ public sealed partial class MainViewModel : ObservableObject
             _expansion[ExpansionKeyFor(FolderPaths.Normalize(newPath), kind)] = wasExpanded;
         _store.RenameFolder(oldPath, newPath, kind);
         RebuildTree();
+        _environment.SessionsChanged(this);
     }
 
     /// <summary>Number of same-kind sessions that would be removed by deleting this folder.</summary>
@@ -362,6 +360,22 @@ public sealed partial class MainViewModel : ObservableObject
         foreach (var removed in _store.DeleteFolder(path, kind))
             _credentials.Delete(removed.Id);
         RebuildTree();
+        _environment.SessionsChanged(this);
+    }
+
+    public void RefreshSessions(bool rebuildTree = true)
+    {
+        foreach (var tab in AllTabs)
+        {
+            if (_store.Find(tab.Session.Id) is { } session && session != tab.Session)
+            {
+                tab.Session = session;
+                _environment.ApplySessionSettings(tab);
+            }
+        }
+        OnActiveTabStateChanged();
+        if (rebuildTree)
+            RebuildTree();
     }
 
     // ---- Tree ----

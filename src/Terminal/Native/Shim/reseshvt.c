@@ -17,8 +17,9 @@ typedef struct { void* ptr; } RvtSrwLock;
 __declspec(dllimport) void __stdcall InitializeSRWLock(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall AcquireSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(RvtSrwLock* lock);
+__declspec(dllimport) uint64_t __stdcall GetTickCount64(void);
 
-#define RVT_ABI_VERSION 4
+#define RVT_ABI_VERSION 5
 
 // ---- events -------------------------------------------------------------------------------
 
@@ -45,7 +46,8 @@ typedef struct {
   uint32_t command_len;  // bytes of command text that follow this struct
 } RvtSemanticEvent;
 
-#define RVT_MAX_MARKERS 4096
+#define RVT_INITIAL_MARKERS 4096u
+#define RVT_MAX_MARKERS (1u << 20)
 
 // Called synchronously on the thread that wrote output, with the terminal lock held. The
 // handler must copy what it needs and must not call back into this library.
@@ -95,6 +97,7 @@ typedef struct {
   uint64_t scroll_total;  // rows in the scrollable area
   uint64_t scroll_offset; // first viewport row within it
   uint64_t scroll_len;    // viewport rows
+  uint8_t render_held;    // no frame published; keep polling until release or the 1s timeout
 } RvtFrameInfo;
 
 typedef struct {
@@ -106,7 +109,8 @@ typedef struct {
   GhosttyKeyEvent key;
   GhosttyMouseEncoder mouse;
   GhosttyMouseEvent mouse_event;
-  GhosttyTrackedGridRef markers[RVT_MAX_MARKERS]; // index = marker id - 1
+  GhosttyTrackedGridRef* markers; // index = marker id - 1, stable across growth
+  uint32_t marker_capacity;
   uint32_t marker_hint;
   GhosttySearch search;
   GhosttySelectionGesture gesture;
@@ -120,6 +124,8 @@ typedef struct {
   RvtEventFn on_event;
   void* user;
   uint32_t cell_w, cell_h, screen_w, screen_h;
+  bool render_held;
+  uint64_t hold_started_ms;
 } RvtTerm;
 
 static void lock(RvtTerm* t) { AcquireSRWLockExclusive(&t->lock); }
@@ -154,18 +160,35 @@ static int32_t cursor_line(RvtTerm* t, uint16_t* x) {
 
 static uint32_t marker_new_locked(RvtTerm* t, int32_t line) {
   if (line < 0) return 0;
-  for (uint32_t n = 0; n < RVT_MAX_MARKERS; n++) {
-    uint32_t i = (t->marker_hint + n) % RVT_MAX_MARKERS;
-    if (t->markers[i]) continue;
-    GhosttyPoint pt = { .tag = GHOSTTY_POINT_TAG_SCREEN, .value = { .coordinate = { .x = 0, .y = (uint32_t)line } } };
-    if (ghostty_terminal_grid_ref_track(t->term, pt, &t->markers[i]) != GHOSTTY_SUCCESS) {
-      t->markers[i] = NULL;
-      return 0;
-    }
-    t->marker_hint = i + 1;
-    return i + 1;
+  uint32_t i = t->marker_capacity;
+  for (uint32_t n = 0; n < t->marker_capacity; n++) {
+    uint32_t candidate = (t->marker_hint + n) % t->marker_capacity;
+    if (!t->markers[candidate]) { i = candidate; break; }
   }
-  return 0;
+  if (i == t->marker_capacity) {
+    if (t->marker_capacity >= RVT_MAX_MARKERS) return 0;
+    uint32_t capacity = t->marker_capacity ? t->marker_capacity * 2 : RVT_INITIAL_MARKERS;
+    GhosttyTrackedGridRef* markers = (GhosttyTrackedGridRef*)realloc(t->markers, (size_t)capacity * sizeof *markers);
+    if (!markers) return 0;
+    memset(markers + t->marker_capacity, 0, (size_t)(capacity - t->marker_capacity) * sizeof *markers);
+    t->markers = markers;
+    t->marker_capacity = capacity;
+  }
+  GhosttyPoint pt = { .tag = GHOSTTY_POINT_TAG_SCREEN, .value = { .coordinate = { .x = 0, .y = (uint32_t)line } } };
+  if (ghostty_terminal_grid_ref_track(t->term, pt, &t->markers[i]) != GHOSTTY_SUCCESS) {
+    t->markers[i] = NULL;
+    return 0;
+  }
+  t->marker_hint = i + 1;
+  return i + 1;
+}
+
+static void on_render_hold(GhosttyTerminal term, void* user, bool held) {
+  (void)term;
+  RvtTerm* t = (RvtTerm*)user;
+  // This callback runs with our terminal lock held, at the exact start of the hold.
+  if (held) t->hold_started_ms = GetTickCount64();
+  t->render_held = held;
 }
 
 static void on_write_pty(GhosttyTerminal term, void* user, const uint8_t* data, size_t len) {
@@ -248,8 +271,12 @@ static void emit_osc_text(RvtTerm* t, const char* head, const GhosttyString* a, 
   const GhosttyString* parts[2] = { a, b };
   for (int i = 0; i < 2; i++) {
     if (!parts[i]) continue;
-    if (i == 1) buf[n++] = ';';
-    size_t len = parts[i]->len < sizeof buf - n - 1 ? parts[i]->len : sizeof buf - n - 1;
+    if (i == 1) {
+      if (n >= sizeof buf) break;
+      buf[n++] = ';';
+    }
+    size_t room = sizeof buf - n;
+    size_t len = parts[i]->len < room ? parts[i]->len : room;
     memcpy(buf + n, parts[i]->ptr, len);
     n += len;
   }
@@ -330,14 +357,16 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION, (const void*)on_notification);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT, (const void*)on_progress);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_XTVERSION, (const void*)on_xtversion);
+  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, (const void*)on_render_hold);
   return t;
 }
 
 RVT_API void rvt_free(RvtTerm* t) {
   if (!t) return;
   lock(t);
-  for (int i = 0; i < RVT_MAX_MARKERS; i++)
+  for (uint32_t i = 0; i < t->marker_capacity; i++)
     if (t->markers[i]) ghostty_tracked_grid_ref_free(t->markers[i]);
+  free(t->markers);
   if (t->search) ghostty_search_free(t->search);
   if (t->gesture) ghostty_selection_gesture_free(t->gesture, t->term);
   for (int i = 0; i < 4; i++)
@@ -451,10 +480,25 @@ static void apply_spans(const RvtTerm* t, RvtCell* row, uint16_t y, uint16_t col
 // Captures the terminal under the lock (cheap), then copies dirty rows into out[y * cols + x]
 // outside it, flags them in dirty_rows and cleans the render state. force_all re-reads every
 // row (after a resize or a lost frame). Returns the number of rows copied.
+// During synchronized output, copies nothing and only sets dirty/dirty_rows to zero and
+// render_held to one. The caller retains its previous frame and polls for release.
 RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, uint8_t* dirty_rows,
                            int force_all, RvtFrameInfo* info) {
   GhosttyTerminalScrollbar bar = { 0 };
   lock(t);
+  if (t->render_held && GetTickCount64() - t->hold_started_ms >= 1000) {
+    GhosttyTerminalModeConfig mode = { GHOSTTY_MODE_SYNC_OUTPUT, false };
+    ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_MODE, &mode);
+    // Programmatic mode changes do not invoke the render-hold callback.
+    t->render_held = false;
+  }
+  info->render_held = t->render_held ? 1 : 0;
+  if (t->render_held) {
+    info->dirty = 0;
+    info->dirty_rows = 0;
+    unlock(t);
+    return 0;
+  }
   ghostty_render_state_begin_update(t->rs, t->term);
   ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &bar);
   info->alternate = alternate_active(t) ? 1 : 0;
@@ -1048,10 +1092,9 @@ RVT_API uint32_t rvt_marker_new(RvtTerm* t, int32_t line) {
 
 // Current absolute line of a marker, or -1 once its line has left the scrollback.
 RVT_API int32_t rvt_marker_line(RvtTerm* t, uint32_t id) {
-  if (id == 0 || id > RVT_MAX_MARKERS) return -1;
   int32_t line = -1;
   lock(t);
-  GhosttyTrackedGridRef ref = t->markers[id - 1];
+  GhosttyTrackedGridRef ref = id > 0 && id <= t->marker_capacity ? t->markers[id - 1] : NULL;
   GhosttyPointCoordinate p;
   if (ref && ghostty_tracked_grid_ref_has_value(ref) &&
       ghostty_tracked_grid_ref_point(ref, GHOSTTY_POINT_TAG_SCREEN, &p) == GHOSTTY_SUCCESS)
@@ -1061,10 +1104,12 @@ RVT_API int32_t rvt_marker_line(RvtTerm* t, uint32_t id) {
 }
 
 RVT_API void rvt_marker_free(RvtTerm* t, uint32_t id) {
-  if (id == 0 || id > RVT_MAX_MARKERS) return;
   lock(t);
-  if (t->markers[id - 1]) ghostty_tracked_grid_ref_free(t->markers[id - 1]);
-  t->markers[id - 1] = NULL;
+  if (id > 0 && id <= t->marker_capacity) {
+    if (t->markers[id - 1]) ghostty_tracked_grid_ref_free(t->markers[id - 1]);
+    t->markers[id - 1] = NULL;
+    t->marker_hint = id - 1;
+  }
   unlock(t);
 }
 

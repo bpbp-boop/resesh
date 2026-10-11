@@ -305,6 +305,106 @@ public class CommandTrackerTests
     }
 
     [Fact]
+    public void OutputRetiresTrimmedPromptBeforeAnotherSemanticEvent()
+    {
+        var h = new Harness();
+        h.Buffer.Add("user@host:~$ stale");
+        h.Semantic(1);
+        h.Buffer.Add("output");
+        h.Buffer.Trimmed = 1;
+        h.Buffer.CursorLine = 0;
+        Assert.Equal(1, h.Buffer.LiveMarkerCount);
+
+        h.Tracker.OnOutputParsed();
+
+        Assert.Equal(0, h.Buffer.LiveMarkerCount);
+        h.Semantic(3, command: "stale");
+        Assert.Empty(h.Tracker.Commands());
+        h.Tracker.Dispose();
+        Assert.All(h.Buffer.Markers, marker => Assert.Equal(1, marker.ReleaseCount));
+    }
+
+    [Fact]
+    public void OutputRetiresTrimmedProbeAndItsTimerCannotAffectAReusedContext()
+    {
+        var h = new Harness();
+        h.Buffer.Add("user@host:~$ old");
+        h.Tracker.NotifyEnter();
+        h.Tracker.OnOsc3008("start=reused;type=command");
+        var oldProbe = Assert.Single(h.Buffer.Markers);
+        h.Buffer.Add("user@host:~$ new");
+        h.Buffer.Trimmed = 1;
+        h.Buffer.CursorLine = 0;
+
+        h.Tracker.OnOutputParsed();
+
+        Assert.True(oldProbe.Disposed);
+        Assert.Equal(0, h.Buffer.LiveMarkerCount);
+        h.Tracker.NotifyEnter();
+        h.Tracker.OnOsc3008("start=reused;type=command");
+        h.Tracker.OnOsc3008("end=reused;status=7");
+        h.RunTimers(); // includes the retired probe's pending callback
+        var mark = Assert.Single(h.Tracker.Commands());
+        Assert.Equal("new", mark.Text);
+        Assert.Equal(7, mark.Exit);
+        Assert.Equal(1, h.Buffer.LiveMarkerCount);
+        h.Tracker.Dispose();
+        Assert.Equal(0, h.Buffer.LiveMarkerCount);
+        Assert.All(h.Buffer.Markers, marker => Assert.Equal(1, marker.ReleaseCount));
+    }
+
+    [Theory]
+    [InlineData("commands")]
+    [InlineData("jump")]
+    [InlineData("mark")]
+    [InlineData("execution")]
+    [InlineData("output")]
+    public void ReadingTrimmedCommandRetiresItsMarker(string read)
+    {
+        var h = new Harness();
+        h.Tracker.SetExecutionReporting(true);
+        h.Buffer.Add("user@host:~$ cmd");
+        h.Semantic(1);
+        h.Semantic(3, command: "cmd");
+        var mark = Assert.Single(h.Tracker.Commands());
+        h.Buffer.Add("output");
+        h.Buffer.Trimmed = 1;
+        Assert.Equal(1, h.Buffer.LiveMarkerCount);
+
+        switch (read)
+        {
+            case "commands": Assert.Empty(h.Tracker.Commands()); break;
+            case "jump": Assert.Null(h.Tracker.JumpTarget(1)); break;
+            case "mark": Assert.Null(h.Tracker.LineForMark(mark.Id)); break;
+            case "execution": Assert.Null(h.Tracker.LineForExecution(mark.ExecutionId!.Value)); break;
+            case "output": Assert.Equal("", h.Tracker.CommandOutput(0)); break;
+        }
+
+        Assert.Equal(0, h.Buffer.LiveMarkerCount);
+        h.Tracker.OnOutputParsed();
+        h.Tracker.Dispose();
+        Assert.All(h.Buffer.Markers, marker => Assert.Equal(1, marker.ReleaseCount));
+    }
+
+    [Fact]
+    public void ReadingTrimmedBookmarkRetiresItsMarker()
+    {
+        var h = new Harness();
+        h.Buffer.Add("bookmarked");
+        h.Tracker.ToggleBookmark();
+        h.Buffer.Add("remaining");
+        h.Buffer.Trimmed = 1;
+        Assert.Equal(1, h.Buffer.LiveMarkerCount);
+
+        Assert.Empty(h.Tracker.BookmarkLines());
+
+        Assert.Equal(0, h.Buffer.LiveMarkerCount);
+        h.Tracker.OnOutputParsed();
+        h.Tracker.Dispose();
+        Assert.All(h.Buffer.Markers, marker => Assert.Equal(1, marker.ReleaseCount));
+    }
+
+    [Fact]
     public void BookmarkTogglesOnCursorLine()
     {
         var h = new Harness();

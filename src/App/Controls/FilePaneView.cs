@@ -458,9 +458,15 @@ public sealed class FilePaneView : UserControl, IDisposable
             return _sftp;
         _sftp?.Dispose();
         _sftp = null;
-        _sftp = await (_connectFactory?.Invoke()
+        var sftp = await (_connectFactory?.Invoke()
             ?? throw new InvalidOperationException("This pane has no SFTP connection factory."));
-        return _sftp;
+        if (_disposed)
+        {
+            await Task.Run(sftp.Dispose);
+            throw new ObjectDisposedException(nameof(FilePaneView));
+        }
+        _sftp = sftp;
+        return sftp;
     }
 
     private void PopulateList(IReadOnlyList<RemoteFileEntry> entries)
@@ -639,6 +645,10 @@ public sealed class FilePaneView : UserControl, IDisposable
             if (paths.Count > 0)
                 await UploadPathsAsync(paths);
         }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or IOException or UnauthorizedAccessException)
+        {
+            ShowStatus($"Upload failed: {ex.Message}", isError: true);
+        }
         finally
         {
             deferral.Complete();
@@ -665,9 +675,19 @@ public sealed class FilePaneView : UserControl, IDisposable
             if (files.Count == 0 && directories.Count == 0)
                 return;
 
-            var existing = await Task.Run(() => sftp.ListDirectory(target), token);
-            var taken = existing.Select(x => x.Name).ToHashSet(StringComparer.Ordinal);
-            var clashes = files.Count(f => RemotePath.Parent(f.Remote) == target && taken.Contains(RemotePath.FileName(f.Remote)));
+            var clashes = await Task.Run(() =>
+            {
+                var count = 0;
+                foreach (var group in files.GroupBy(f => RemotePath.Parent(f.Remote)))
+                {
+                    token.ThrowIfCancellationRequested();
+                    if (!sftp.DirectoryExists(group.Key))
+                        continue;
+                    var taken = sftp.ListDirectory(group.Key).Select(x => x.Name).ToHashSet(StringComparer.Ordinal);
+                    count += group.Count(f => taken.Contains(RemotePath.FileName(f.Remote)));
+                }
+                return count;
+            }, token);
             if (clashes > 0 && !await ConfirmAsync(
                     "Overwrite Files",
                     $"{clashes} file{(clashes == 1 ? " already exists" : "s already exist")} in {target} and will be overwritten.",
@@ -742,6 +762,7 @@ public sealed class FilePaneView : UserControl, IDisposable
             var openTargets = new List<string>();
             await Task.Run(() =>
             {
+                var plannedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var entry in entries)
                 {
                     var safeName = WindowsDownloadPath.ValidateName(entry.Name);
@@ -750,9 +771,10 @@ public sealed class FilePaneView : UserControl, IDisposable
                         name =>
                         {
                             var candidate = WindowsDownloadPath.Combine(targetDir, targetDir, name);
-                            return File.Exists(candidate) || Directory.Exists(candidate);
+                            return plannedPaths.Contains(candidate) || File.Exists(candidate) || Directory.Exists(candidate);
                         });
                     var localPath = WindowsDownloadPath.Combine(targetDir, targetDir, localName);
+                    plannedPaths.Add(localPath);
                     if (entry.IsDirectory && !entry.IsSymlink)
                         PlanRemoteDirectory(sftp, entry.FullPath, localPath, targetDir, files, token);
                     else
@@ -787,9 +809,18 @@ public sealed class FilePaneView : UserControl, IDisposable
     {
         token.ThrowIfCancellationRequested();
         Directory.CreateDirectory(localDir);
+        var plannedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var child in sftp.ListDirectory(remoteDir))
         {
-            var childLocalPath = WindowsDownloadPath.Combine(targetRoot, localDir, child.Name);
+            var localName = RemotePath.UniqueName(
+                WindowsDownloadPath.ValidateName(child.Name),
+                name =>
+                {
+                    var candidate = WindowsDownloadPath.Combine(targetRoot, localDir, name);
+                    return plannedPaths.Contains(candidate) || File.Exists(candidate) || Directory.Exists(candidate);
+                });
+            var childLocalPath = WindowsDownloadPath.Combine(targetRoot, localDir, localName);
+            plannedPaths.Add(childLocalPath);
             if (child.IsDirectory && !child.IsSymlink)
                 PlanRemoteDirectory(sftp, child.FullPath, childLocalPath, targetRoot, files, token);
             else

@@ -189,6 +189,7 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
             },
             ColorTag = ColorChoices[Math.Max(0, ColorBox.SelectedIndex)].Hex,
             Icon = (IconBox.SelectedItem as Icons.IconChoice)?.Key,
+            Agent = _existing?.Agent,
             Notes = _existing?.Notes ?? "",
             Overrides = overrides.IsEmpty ? null : overrides,
         };

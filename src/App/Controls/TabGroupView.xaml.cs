@@ -998,7 +998,7 @@ public sealed partial class TabGroupView : UserControl
         _close.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.CloseTab);
         _closeDisconnected = Item("Close Disconnected Tabs", tab =>
             _ = _host.RequestCloseManyAsync(
-                Group.Tabs.Where(t => t.State == TabConnectionState.Disconnected).ToList(),
+                Group.Tabs.Where(IsStopped).ToList(),
                 "disconnected tab(s) in this group"));
         _closeOthers = Item("Close Other Tabs", tab =>
             _ = _host.RequestCloseManyAsync(Group.Tabs.Where(t => t != tab).ToList(), "other tab(s)"));

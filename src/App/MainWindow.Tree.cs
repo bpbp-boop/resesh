@@ -534,9 +534,16 @@ public sealed partial class MainWindow
             {
                 if (plan.SessionIds.Count > 0)
                 {
-                    var before = LoginIdentities(plan.SessionIds);
-                    ViewModel.MoveSessionsToFolder(plan.SessionIds, targetFolder);
-                    NoteLoginChanges(before, LoginIdentities(plan.SessionIds));
+                    try
+                    {
+                        var before = LoginIdentities(plan.SessionIds);
+                        ViewModel.MoveSessionsToFolder(plan.SessionIds, targetFolder);
+                        NoteLoginChanges(before, LoginIdentities(plan.SessionIds));
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                    {
+                        App.ReportRecoverableError(exception);
+                    }
                 }
                 else
                     ViewModel.RebuildTree();

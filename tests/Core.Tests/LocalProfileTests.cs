@@ -1,4 +1,7 @@
 using System.Text;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using Resesh.Core.Local;
 using Resesh.Core.Models;
 using Resesh.Core.Search;
@@ -373,6 +376,83 @@ public class LocalTerminalSessionTests
         }
         Assert.False(exitedRaised); // a user-initiated stop is reported by the caller, not the backend
     }
+
+    [Fact]
+    public async Task Stop_PreservesTheProcessHandleUntilItsLastReaderFinishes()
+    {
+        var session = new Session
+        {
+            Kind = SessionKind.Local,
+            Name = "handle-lifetime-test",
+            Local = new LocalTarget { Executable = @"%SystemRoot%\System32\cmd.exe" },
+        };
+        using var local = new LocalTerminalSession();
+        var exitCount = 0;
+        local.Exited += _ => Interlocked.Increment(ref exitCount);
+        local.Start(session, 80, 24);
+        Assert.NotNull(local.TryGetCurrentDirectory());
+
+        // Hold the same lifetime reference a cwd query uses across Stop. Let the real
+        // waiter finish too: neither owner may close a handle still used by this reader.
+        var process = Assert.IsType<SafeProcessHandle>(typeof(LocalTerminalSession)
+            .GetField("_process", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(local));
+        var waiter = Assert.IsType<Thread>(typeof(LocalTerminalSession)
+            .GetField("_exitThread", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(local));
+        var pinned = false;
+        process.DangerousAddRef(ref pinned);
+        try
+        {
+            var handle = process.DangerousGetHandle();
+            local.Stop();
+            Assert.False(local.IsRunning);
+            Assert.Null(local.TryGetCurrentDirectory());
+            Assert.True(await Task.Run(() => waiter.Join(TimeSpan.FromSeconds(10))));
+            Assert.True(GetExitCodeProcess(handle, out var code));
+            Assert.Equal(1u, code);
+            Assert.Equal(0, Volatile.Read(ref exitCount));
+        }
+        finally
+        {
+            if (pinned)
+                process.DangerousRelease();
+        }
+        Assert.True(process.IsClosed);
+    }
+
+    [Fact]
+    public async Task CurrentDirectory_CanBeQueriedConcurrentlyWithStop()
+    {
+        var directory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        using var local = new LocalTerminalSession();
+        local.Start(new Session
+        {
+            Kind = SessionKind.Local,
+            Name = "cwd-stop-race-test",
+            Local = new LocalTarget
+            {
+                Executable = @"%SystemRoot%\System32\cmd.exe",
+                StartingDirectory = directory,
+            },
+        }, 80, 24);
+        using var started = new ManualResetEventSlim();
+        var reader = Task.Run(() =>
+        {
+            started.Set();
+            for (var i = 0; i < 500; i++)
+            {
+                var path = local.TryGetCurrentDirectory();
+                if (path is not null)
+                    Assert.Equal(Path.TrimEndingDirectorySeparator(directory), path, ignoreCase: true);
+            }
+        });
+        Assert.True(started.Wait(TimeSpan.FromSeconds(10)));
+        local.Stop();
+        await reader.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Null(local.TryGetCurrentDirectory());
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetExitCodeProcess(IntPtr process, out uint exitCode);
 
     [Fact]
     public void Start_MissingExecutable_ThrowsLocalSessionException()

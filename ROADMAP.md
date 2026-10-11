@@ -354,7 +354,7 @@ The states map almost one to one onto `AgentAttention`:
 | `clear` | record removed; tracker falls back to the other evidence sources |
 
 ### Steps
-1. **Shim (reseshvt ABI 4 → 5):** register the program-status callback and emit a new
+1. **Shim (next reseshvt ABI bump):** register the program-status callback and emit a new
    `RVT_EVENT_PROGRAM_STATUS` carrying state, kind, progress, id, app, title and message
    (copied; libghostty's strings live only for the callback). Confirm the probe reply
    leaves through `write_pty` ahead of the DA1 reply on both the SSH and ConPTY paths.

@@ -531,7 +531,8 @@ internal sealed class CommandTracker
     private void FinishProbe(Probe probe)
     {
         probe.Marker.Dispose();
-        _probes.Remove(probe);
+        if (!_probes.Remove(probe))
+            return; // a settle timer can outlive pruning or tracker disposal
         if (probe.Osc3008Id is not { } id || !_osc3008.TryGetValue(id, out var record))
             return;
         record.Probe = null;
@@ -595,6 +596,13 @@ internal sealed class CommandTracker
     /// history, say its output is gone.</summary>
     private void PruneDisposed()
     {
+        if (_promptMarker is { Line: < 0 })
+            ClearPrompt();
+        for (var i = _probes.Count - 1; i >= 0; i--)
+        {
+            if (_probes[i].Marker.Line < 0)
+                FinishProbe(_probes[i]);
+        }
         var changed = false;
         for (var i = _marks.Count - 1; i >= 0; i--)
         {

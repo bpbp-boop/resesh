@@ -11,6 +11,7 @@ public sealed class ViewModelEnvironment
     public required Func<Session, bool> IsSessionVisible { get; init; }
     public required Action<TabViewModel> ApplySessionSettings { get; init; }
     public required Action<Exception> ReportError { get; init; }
+    public Action<MainViewModel> SessionsChanged { get; init; } = _ => { };
 
     public Func<IReadOnlyList<Guid>> RecentSessionIds { get; init; } = () => [];
     public Action<IReadOnlyList<Guid>> SaveRecentSessionIds { get; init; } = _ => { };

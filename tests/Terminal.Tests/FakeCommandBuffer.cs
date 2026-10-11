@@ -7,14 +7,34 @@ internal sealed class FakeMarker(FakeBuffer buffer, int line) : ICommandMarker
 {
     public int Origin = line;
     public bool Disposed;
-    public int Line => Disposed ? -1 : Origin - buffer.Trimmed < 0 ? -1 : Origin - buffer.Trimmed;
+    public int ReleaseCount;
+    public int Line
+    {
+        get
+        {
+            if (Disposed)
+                return -1;
+            var current = Origin - buffer.Trimmed;
+            if (current < 0)
+                Dispose(); // like the native adapter, a read retires an invalid tracked reference
+            return current < 0 ? -1 : current;
+        }
+    }
     public bool IsDisposed => Disposed || Line < 0;
-    public void Dispose() => Disposed = true;
+    public void Dispose()
+    {
+        if (Disposed)
+            return;
+        Disposed = true;
+        ReleaseCount++;
+    }
 }
 
 internal sealed class FakeBuffer : ICommandBuffer
 {
     public readonly List<(string Text, bool Wrapped)> Lines = [];
+    public readonly List<FakeMarker> Markers = [];
+    public int LiveMarkerCount => Markers.Count(marker => !marker.Disposed);
     public int Trimmed; // lines dropped from the top of the scrollback
     public bool IsAlternate { get; set; }
     public int CursorLine { get; set; }
@@ -24,7 +44,12 @@ internal sealed class FakeBuffer : ICommandBuffer
     public int Length => Lines.Count - Trimmed;
     public string? LineText(int line) => line >= 0 && line + Trimmed < Lines.Count ? Lines[line + Trimmed].Text.TrimEnd() : null; // trimmed, like the real buffer
     public bool IsWrapped(int line) => line >= 0 && line + Trimmed < Lines.Count && Lines[line + Trimmed].Wrapped;
-    public ICommandMarker? CreateMarker(int line) => new FakeMarker(this, line + Trimmed);
+    public ICommandMarker? CreateMarker(int line)
+    {
+        var marker = new FakeMarker(this, line + Trimmed);
+        Markers.Add(marker);
+        return marker;
+    }
 
     public int Add(string text, bool wrapped = false)
     {

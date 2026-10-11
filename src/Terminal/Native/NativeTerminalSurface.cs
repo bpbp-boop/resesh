@@ -87,6 +87,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private TerminalCell* _cells;
     private byte* _dirty;
     private int _cellCapacity;
+    private int _dirtyCapacity;
     private int _framePending;
     private bool _renderingHooked;
     private bool _forceFull = true;
@@ -210,6 +211,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         ConfigureTextInput();
 
         _renderer.GraphemeAt = GraphemeAt;
+        _renderer.SwapChainChanged += OnRendererSwapChainChanged;
         _blinkTimer = DispatcherQueue.CreateTimer();
         _blinkTimer.Interval = TimeSpan.FromMilliseconds(BlinkMilliseconds);
         _blinkTimer.Tick += (_, _) =>
@@ -221,8 +223,19 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
         _panel.SizeChanged += (_, _) => Relayout();
         _panel.CompositionScaleChanged += (_, _) => Relayout();
-        Loaded += (_, _) => Relayout();
-        Unloaded += (_, _) => UnhookRendering();
+        Loaded += (_, _) =>
+        {
+            if (_disposed)
+                return;
+            AttachSwapChain();
+            Relayout();
+            RequestFrame();
+        };
+        Unloaded += (_, _) =>
+        {
+            UnhookRendering();
+            AttachSwapChain(detach: true);
+        };
         RegisterPropertyChangedCallback(VisibilityProperty, (_, _) =>
         {
             _forceFull = true;
@@ -255,7 +268,11 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _term = GhosttyNative.rvt_new((ushort)Columns, (ushort)Rows, (nuint)Math.Max(0, _scrollback),
                 &OnNativeEvent, GCHandle.ToIntPtr(_self));
             if (_term == IntPtr.Zero)
+            {
+                _self.Free();
+                _initialized = false;
                 throw new InvalidOperationException("libghostty-vt could not create a terminal.");
+            }
             ApplyColors();
             foreach (var chunk in _earlyOutput)
                 fixed (byte* p = chunk)
@@ -285,6 +302,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         }
         if (_self.IsAllocated)
             _self.Free();
+        _renderer.SwapChainChanged -= OnRendererSwapChainChanged;
+        AttachSwapChain(detach: true);
         _renderer.Dispose();
         if (_cells != null) NativeMemory.Free(_cells);
         if (_dirty != null) NativeMemory.Free(_dirty);
@@ -516,19 +535,39 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void EnsureCellBuffers()
     {
-        var needed = Columns * Rows;
-        if (needed <= _cellCapacity && _dirty != null)
-            return;
-        if (_cells != null) NativeMemory.Free(_cells);
-        if (_dirty != null) NativeMemory.Free(_dirty);
-        _cellCapacity = Math.Max(needed, 1);
-        _cells = (TerminalCell*)NativeMemory.AllocZeroed((nuint)(_cellCapacity * sizeof(TerminalCell)));
-        _dirty = (byte*)NativeMemory.AllocZeroed((nuint)Math.Max(Rows, 512));
+        var needed = checked(Columns * Rows);
+        if (needed > _cellCapacity || _cells == null)
+        {
+            var capacity = Math.Max(needed, 1);
+            var cells = (TerminalCell*)NativeMemory.AllocZeroed(checked((nuint)capacity * (nuint)sizeof(TerminalCell)));
+            if (_cells != null) NativeMemory.Free(_cells);
+            _cells = cells;
+            _cellCapacity = capacity;
+        }
+        // A narrower, taller grid can need more dirty flags without needing more cells.
+        if (Rows > _dirtyCapacity || _dirty == null)
+        {
+            var capacity = Math.Max(Rows, 512);
+            var dirty = (byte*)NativeMemory.AllocZeroed((nuint)capacity);
+            if (_dirty != null) NativeMemory.Free(_dirty);
+            _dirty = dirty;
+            _dirtyCapacity = capacity;
+        }
     }
 
-    private void AttachSwapChain()
+    private void OnRendererSwapChainChanged()
     {
-        if (_renderer.SwapChain is not { } chain)
+        if (_disposed)
+            return;
+        _forceFull = true;
+        AttachSwapChain();
+        RequestFrame();
+    }
+
+    private void AttachSwapChain(bool detach = false)
+    {
+        var chain = detach ? null : _renderer.SwapChain;
+        if (chain is not null && !IsLoaded)
             return;
         var unknown = ((WinRT.IWinRTObject)_panel).NativeObject.ThisPtr;
         var iid = new Guid("63aad0b8-7c24-40ff-85a8-640d944cc325"); // ISwapChainPanelNative
@@ -536,7 +575,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         try
         {
             var setSwapChain = (delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int>)(*(IntPtr**)native)[3];
-            Marshal.ThrowExceptionForHR(setSwapChain(native, chain.NativePointer));
+            Marshal.ThrowExceptionForHR(setSwapChain(native, chain?.NativePointer ?? IntPtr.Zero));
         }
         finally
         {
@@ -556,7 +595,12 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void HookRendering()
     {
-        if (_disposed || _renderingHooked)
+        if (_disposed || !IsLoaded)
+        {
+            Volatile.Write(ref _framePending, 0);
+            return;
+        }
+        if (_renderingHooked)
             return;
         _renderingHooked = true;
         CompositionTarget.Rendering += OnRendering;
@@ -564,10 +608,11 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void UnhookRendering()
     {
-        if (!_renderingHooked)
-            return;
-        _renderingHooked = false;
-        CompositionTarget.Rendering -= OnRendering;
+        if (_renderingHooked)
+        {
+            _renderingHooked = false;
+            CompositionTarget.Rendering -= OnRendering;
+        }
         Volatile.Write(ref _framePending, 0);
     }
 
@@ -588,11 +633,20 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void RenderFrame()
     {
-        if (_disposed || _replaying || _term == IntPtr.Zero || _cells == null || _renderer.SwapChain is null || Visibility != Visibility.Visible)
+        if (_disposed || !IsLoaded || _replaying || _term == IntPtr.Zero || _cells == null || _renderer.SwapChain is null || Visibility != Visibility.Visible)
             return;
-        GhosttyFrameInfo info;
+        if ((long)Columns * Rows > _cellCapacity || Rows > _dirtyCapacity)
+            return; // a failed resize must not read a frame into the previous, smaller buffers
+        var info = _lastInfo;
         var full = _forceFull;
         var rows = GhosttyNative.rvt_read_frame(_term, _cells, (ushort)Columns, (ushort)Rows, _dirty, full ? 1 : 0, &info);
+        if (info.RenderHeld != 0)
+        {
+            // Poll through the native synchronized-output timeout even without more output.
+            // Nothing from a held frame, including cursor/scroll metadata, is published.
+            RequestFrame();
+            return;
+        }
         // Highlight only the rows just read: their cells are fresh, so tints never compound.
         // The alternate screen (vim, htop) is never highlighted, as in terminal.html.
         if (rows > 0 && _highlighter.HasRules && info.Alternate == 0)
@@ -640,7 +694,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             return;
         _cursorRowDirty = false;
 
-        _renderer.Draw(_cells, Columns, Rows, _dirty, info, _cursorBlinkOn, _focused, _theme.Selection, full);
+        if (!_renderer.Draw(_cells, Columns, Rows, _dirty, info, _cursorBlinkOn, _focused, _theme.Selection, full))
+            return; // recovery requested a full frame; do not clear that request
         _forceFull = false;
         _lastCursorRow = info.CursorVisible != 0 ? info.CursorY : -1;
     }
@@ -1510,7 +1565,11 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void CreateCommandTracker()
     {
-        _commandBuffer = new TerminalCommandBuffer(() => _disposed ? IntPtr.Zero : _term);
+        _overview?.Reset();
+        _lineTimes?.Reset();
+        _commandBuffer?.Detach();
+        var commandBuffer = new TerminalCommandBuffer(() => _disposed ? IntPtr.Zero : _term);
+        _commandBuffer = commandBuffer;
         _commands = new CommandTracker(_commandBuffer)
         {
             Schedule = (delay, action) =>
@@ -1521,7 +1580,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
                 timer.Tick += (_, _) =>
                 {
                     timer.Stop();
-                    if (_disposed || _commands is null)
+                    if (_disposed || _commands is null || _commandBuffer != commandBuffer)
                         return;
                     _commandBuffer?.Refresh();
                     action();
@@ -1536,7 +1595,6 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _commands.CommandMarked += command => CommandObserved?.Invoke(Cap(command));
         _commands.Changed += QueueAnnotations;
         _overview = new OverviewIndex(_commandBuffer, _highlighter);
-        _lineTimes?.Reset();
         _lineTimes = new LineTimes(_commandBuffer);
         _commands.SetHistoryCapture(_historyCapture);
         if (_promptPlatform is not null)

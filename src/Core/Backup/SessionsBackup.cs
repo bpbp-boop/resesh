@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Resesh.Core.Credentials;
+using Resesh.Core.Identities;
 using Resesh.Core.Models;
 using Resesh.Core.Ssh;
 using Resesh.Core.Storage;
@@ -126,6 +127,24 @@ public static class SessionsBackup
             throw new ArgumentException("A passphrase is required when secrets are included.", nameof(options));
 
         var selected = SelectSessions(sessions.Sessions, options.Scope).ToList();
+        if (options.Scope is { Kind: SessionKind.Ssh } exportScope && identities is not null)
+        {
+            var resolver = new LoginResolver(sessions, identities);
+            for (var index = 0; index < selected.Count; index++)
+            {
+                var session = selected[index];
+                if (session.Kind != SessionKind.Ssh || session.Login != SessionLogin.Inherit)
+                    continue;
+                var login = resolver.Resolve(session);
+                if (login.Source == LoginSource.Folder
+                    && !FolderPaths.IsSelfOrDescendant(login.FolderPath!, exportScope.FolderPath))
+                {
+                    // The ancestor is outside this archive; preserve its effective login
+                    // without attaching its identity to unrelated destination folders.
+                    selected[index] = session with { IdentityId = login.Identity!.Id, InheritLogin = false };
+                }
+            }
+        }
         var selectedIds = selected.Select(s => s.Id).ToHashSet();
         var selectedFolderSettings = SelectFolderSettings(sessions.FolderSettings, options.Scope);
         var selectedIdentities = SelectIdentities(identities, selected, selectedFolderSettings, options.Scope);
@@ -257,6 +276,13 @@ public static class SessionsBackup
                 throw new InvalidDataException($"Backup schema {manifest.SchemaVersion} is not supported.");
 
             var sessionData = ReadRequired<BackupSessionData>(zip, "sessions.json");
+            if (sessionData.Sessions is null || sessionData.Folders is null || sessionData.LocalFolders is null
+                || sessionData.Sessions.Any(session => session is null || session.Name is null
+                    || session.Host is null || session.Username is null || session.FolderPath is null)
+                || sessionData.FolderSettings?.Any(setting => setting is null) == true)
+            {
+                throw new InvalidDataException("The backup contains invalid session or folder data.");
+            }
             if (sessionData.Sessions.Select(s => s.Id).Distinct().Count() != sessionData.Sessions.Count)
                 throw new InvalidDataException("The backup contains duplicate session ids.");
             var secrets = ReadOptional<Dictionary<Guid, string>>(zip, "secrets.json") ?? [];
@@ -365,7 +391,7 @@ public static class SessionsBackup
                 match = existing.FirstOrDefault(s => s.Kind == imported.Kind
                     && s.Port == imported.Port
                     && s.Host.Equals(imported.Host, StringComparison.OrdinalIgnoreCase)
-                    && s.Username.Equals(imported.Username, StringComparison.OrdinalIgnoreCase));
+                    && s.Username.Equals(imported.Username, StringComparison.Ordinal));
                 if (match is not null)
                 {
                     conflicts.Add(new BackupConflict
@@ -397,6 +423,7 @@ public static class SessionsBackup
         var importedWorkspaceData = package.Workspaces is null
             ? null
             : WorkspaceStore.ParsePayload(package.Workspaces);
+        var existingKeyIds = sshKeyStore.Keys.Select(key => key.Id).ToHashSet();
         var keyIdMap = sshKeyStore.MergeImport(package.SshKeys);
         // Identities that already exist keep their local definition and password; new ones
         // arrive with their password when the backup includes secrets.
@@ -478,7 +505,12 @@ public static class SessionsBackup
 
         foreach (var (sourceKeyId, secret) in package.KeySecrets)
         {
-            credentials.WriteKey(keyIdMap.GetValueOrDefault(sourceKeyId, sourceKeyId), secret);
+            var targetKeyId = keyIdMap.GetValueOrDefault(sourceKeyId, sourceKeyId);
+            // A matched key retains its local file. Its encryption passphrase may differ
+            // from the imported copy even when both files have the same public key.
+            if (existingKeyIds.Contains(targetKeyId))
+                continue;
+            credentials.WriteKey(targetKeyId, secret);
             secretsImported++;
         }
 

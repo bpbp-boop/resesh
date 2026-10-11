@@ -8,8 +8,8 @@ namespace Resesh.Core.Identities;
 /// and the fingerprint of the password the source saved for it.</summary>
 public sealed record ImportLogin(string Username, string KeyPath, string PasswordFingerprint = "")
 {
-    /// <summary>Stable key for checkbox state and plan lookups.</summary>
-    public string Key => $"{Username.ToLowerInvariant()}|{KeyPath.ToLowerInvariant()}|{PasswordFingerprint}";
+    /// <summary>Stable key for checkbox state and plan lookups. SSH usernames are case-sensitive.</summary>
+    public string Key => $"{Username}|{KeyPath.ToLowerInvariant()}|{PasswordFingerprint}";
 
     public bool UsesKey => KeyPath.Length > 0;
 
@@ -203,18 +203,22 @@ public static class ImportIdentityPlanner
         return name;
     }
 
-    private static ImportLogin? LoginOf(ImportCandidate candidate) =>
-        string.IsNullOrWhiteSpace(candidate.Username)
-            ? null
-            : new ImportLogin(candidate.Username.Trim(), NormalizeKeyPath(candidate.PrivateKeyPath),
-                candidate.PasswordFingerprint ?? "");
+    private static ImportLogin? LoginOf(ImportCandidate candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate.Username))
+            return null;
+        var keyPath = NormalizeKeyPath(candidate.PrivateKeyPath);
+        return new ImportLogin(candidate.Username.Trim(), keyPath,
+            keyPath.Length > 0 ? "" : candidate.PasswordFingerprint ?? "");
+    }
 
     private static ImportLogin? LoginOf(Identity identity, Func<Guid, string?> keyPathOf)
     {
         if (string.IsNullOrWhiteSpace(identity.Username))
             return null;
         var keyPath = identity.Proof == IdentityProof.Key
-            ? identity.KeyId is { } keyId ? NormalizeKeyPath(keyPathOf(keyId)) : null
+            ? identity.KeyId is { } keyId && keyPathOf(keyId) is { } path && !string.IsNullOrWhiteSpace(path)
+                ? NormalizeKeyPath(path) : null
             : "";
         return keyPath is null ? null : new ImportLogin(identity.Username.Trim(), keyPath);
     }

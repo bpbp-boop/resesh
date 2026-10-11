@@ -145,8 +145,7 @@ public static class SecureCrtImporter
                     candidate = candidate with
                     {
                         Username = GetStringValue(personalContent, "Username")?.Trim() ?? candidate.Username,
-                        PasswordFingerprint = PasswordFingerprint(GetStringValue(personalContent, "Password V2"))
-                            ?? candidate.PasswordFingerprint,
+                        PasswordFingerprint = PasswordFingerprint(GetStringValue(content, "Password V2")),
                         PrivateKeyPath = GetIdentity(personalContent) ?? candidate.PrivateKeyPath,
                     };
                 }
@@ -247,25 +246,27 @@ public static class SecureCrtImporter
 
     /// <summary>
     /// Lets sessions be grouped by saved password without decrypting anything. SecureCRT's
-    /// "Password V2" is AES-CBC over [length][password][SHA-256 of it][random padding] with
-    /// a key and IV that are fixed per configuration ("02:" from the config passphrase;
-    /// "03:" from it plus a salt stored as the first 16 bytes, shared config-wide). The first
-    /// two cipher blocks hold the length, the password (up to 28 bytes), and checksum bytes,
-    /// so they are equal exactly when the passwords are; later blocks carry the random
-    /// padding. The token is a hash of those leading bytes, so it never contains them.
+    /// "Password V2" is AES-CBC over [length][password][SHA-256 of it][random padding].
+    /// "03:" prepends a salt used to derive its key and IV; "02:" derives its key from the
+    /// config passphrase. Padding occupies 8–23 bytes, so omit the final two cipher blocks.
+    /// All remaining blocks are deterministic and include the entire password plus at least
+    /// eight checksum bytes. Comparing only two leading blocks would conflate long passwords
+    /// of the same length and prefix. The token never contains ciphertext or plaintext.
     /// </summary>
     internal static string? PasswordFingerprint(string? stored)
     {
         if (string.IsNullOrWhiteSpace(stored))
             return null;
         stored = stored.Trim();
-        var leadingHex = stored.StartsWith("03:", StringComparison.Ordinal) ? (16 + 32) * 2
-            : stored.StartsWith("02:", StringComparison.Ordinal) ? 32 * 2
-            : 0;
-        if (leadingHex == 0 || stored.Length < 3 + leadingHex
+        var saltHex = stored.StartsWith("03:", StringComparison.Ordinal) ? 16 * 2
+            : stored.StartsWith("02:", StringComparison.Ordinal) ? 0
+            : -1;
+        var ciphertextHex = stored.Length - 3 - saltHex;
+        if (saltHex < 0 || ciphertextHex < 3 * 16 * 2 || ciphertextHex % (16 * 2) != 0
             || stored.AsSpan(3).ContainsAnyExcept("0123456789abcdefABCDEF"))
             return null;
-        var leading = System.Text.Encoding.ASCII.GetBytes(stored[..(3 + leadingHex)].ToLowerInvariant());
+        var deterministicHex = stored.Length - 2 * 16 * 2;
+        var leading = System.Text.Encoding.ASCII.GetBytes(stored[..deterministicHex].ToLowerInvariant());
         return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(leading));
     }
 

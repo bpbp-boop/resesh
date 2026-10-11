@@ -34,7 +34,7 @@ public sealed partial class NativeTerminalSurface
         var generation = ++_replayGeneration;
         _playback = null;
         var items = events.ToArray();
-        var frames = new List<PlaybackFrame> { new(0, 0, Math.Max(1, columns), Math.Max(1, rows), []) };
+        var frames = new List<PlaybackFrame> { new(0, 0, Math.Clamp(columns, 1, ushort.MaxValue), Math.Clamp(rows, 1, ushort.MaxValue), []) };
         await RunReplayAsync(generation, () =>
         {
             var size = ResetLocked(columns, rows);
@@ -157,7 +157,7 @@ public sealed partial class NativeTerminalSurface
     private (int Columns, int Rows) ResetLocked(int columns, int rows)
     {
         GhosttyNative.rvt_reset(_term);
-        var size = (Math.Max(1, columns), Math.Max(1, rows));
+        var size = (Math.Clamp(columns, 1, ushort.MaxValue), Math.Clamp(rows, 1, ushort.MaxValue));
         ResizeLocked(size);
         _playbackPosition = -1;
         return size;
@@ -179,7 +179,7 @@ public sealed partial class NativeTerminalSurface
             var x = data.IndexOf('x');
             if (x > 0 && int.TryParse(data.AsSpan(0, x), out var c) && int.TryParse(data.AsSpan(x + 1), out var r))
             {
-                size = (Math.Max(1, c), Math.Max(1, r));
+                size = (Math.Clamp(c, 1, ushort.MaxValue), Math.Clamp(r, 1, ushort.MaxValue));
                 ResizeLocked(size);
             }
         }

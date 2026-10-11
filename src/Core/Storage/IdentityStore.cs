@@ -62,9 +62,10 @@ public sealed class IdentityStore
         {
             if (_identities.Any(i => i.Id == identity.Id))
                 throw new InvalidOperationException($"Identity {identity.Id} already exists.");
-            stored = Normalize(identity) with { Name = UniqueName(NameOf(identity)) };
-            _identities.Add(stored);
-            Save();
+            var candidate = new List<Identity>(_identities);
+            stored = Normalize(identity) with { Name = UniqueName(candidate, NameOf(identity)) };
+            candidate.Add(stored);
+            Save(candidate);
         }
         Changed?.Invoke();
         return stored;
@@ -76,9 +77,10 @@ public sealed class IdentityStore
         lock (_gate)
         {
             var index = IndexOf(identity.Id);
-            stored = Normalize(identity) with { Name = UniqueName(NameOf(identity), identity.Id) };
-            _identities[index] = stored;
-            Save();
+            var candidate = new List<Identity>(_identities);
+            stored = Normalize(identity) with { Name = UniqueName(candidate, NameOf(identity), identity.Id) };
+            candidate[index] = stored;
+            Save(candidate);
         }
         Changed?.Invoke();
         return stored;
@@ -90,9 +92,13 @@ public sealed class IdentityStore
         bool removed;
         lock (_gate)
         {
-            removed = _identities.RemoveAll(i => i.Id == id) > 0;
+            removed = _identities.Any(i => i.Id == id);
             if (removed)
-                Save();
+            {
+                var candidate = new List<Identity>(_identities);
+                candidate.RemoveAll(i => i.Id == id);
+                Save(candidate);
+            }
         }
         if (removed)
             Changed?.Invoke();
@@ -107,21 +113,24 @@ public sealed class IdentityStore
         var changed = false;
         lock (_gate)
         {
+            var candidate = _identities;
             foreach (var identity in imported)
             {
-                if (_identities.Any(i => i.Id == identity.Id))
+                if (candidate.Any(i => i.Id == identity.Id))
                 {
                     map[identity.Id] = identity.Id;
                     continue;
                 }
                 var keyId = identity.KeyId is { } key && mapKeyId is not null ? mapKeyId(key) ?? key : identity.KeyId;
-                var added = Normalize(identity with { KeyId = keyId }) with { Name = UniqueName(NameOf(identity)) };
-                _identities.Add(added);
+                var added = Normalize(identity with { KeyId = keyId }) with { Name = UniqueName(candidate, NameOf(identity)) };
+                if (!changed)
+                    candidate = new List<Identity>(_identities);
+                candidate.Add(added);
                 map[identity.Id] = added.Id;
                 changed = true;
             }
             if (changed)
-                Save();
+                Save(candidate);
         }
         if (changed)
             Changed?.Invoke();
@@ -143,20 +152,21 @@ public sealed class IdentityStore
         return index >= 0 ? index : throw new KeyNotFoundException($"Identity {id} was not found.");
     }
 
-    private string UniqueName(string requested, Guid? except = null)
+    private static string UniqueName(List<Identity> identities, string requested, Guid? except = null)
     {
         var baseName = requested.Length > 0 ? requested : "Identity";
         var candidate = baseName;
         var suffix = 2;
-        while (_identities.Any(i => i.Id != except && i.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase)))
+        while (identities.Any(i => i.Id != except && i.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase)))
             candidate = $"{baseName} ({suffix++})";
         return candidate;
     }
 
-    private void Save()
+    private void Save(List<Identity> candidate)
     {
-        var json = JsonSerializer.Serialize(new StoreData { Identities = _identities }, JsonOptions);
+        var json = JsonSerializer.Serialize(new StoreData { Identities = candidate }, JsonOptions);
         AtomicFile.Write(_path, json, _preserveBackup);
+        _identities = candidate;
         _preserveBackup = false;
     }
 

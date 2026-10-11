@@ -440,10 +440,10 @@ public static partial class OutputDiff
     private static partial Regex WordToken();
 
     // ISO and common log timestamps, dates, clock times, month-day stamps, weekday names,
-    // and compact uptimes such as 1d02h or 3w4d.
+    // and compact uptimes such as 1d02h or 3w4d. Dotted dates must not match part of an IPv4 address.
     [GeneratedRegex(
         @"\b\d{4}-\d{2}-\d{2}(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b"
-        + @"|\b\d{1,4}[/.]\d{1,2}[/.]\d{2,4}\b"
+        + @"|(?<!\d\.)\b\d{1,4}[/.]\d{1,2}[/.]\d{2,4}\b(?!\.\d)"
         + @"|\b\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:\s?[AaPp][Mm])?\b"
         + @"|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:,?\s+\d{4})?\b"
         + @"|\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\b"

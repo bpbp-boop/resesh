@@ -410,7 +410,7 @@ public sealed partial class MainWindow
         RebuildGroupLayout();
         FocusGroup(targetGroups.FirstOrDefault(group => group.Tabs.Count > 0) ?? targetGroups[0]);
         ViewModel.SyncGroupFocus();
-        SavePinnedSessions();
+        App.SavePinnedSessions();
 
         if (missing.Count > 0)
         {

@@ -231,10 +231,12 @@ public sealed class TerminalCapture : IDisposable
                 return _recorder.Path;
 
             var recordingStartedAt = DateTimeOffset.Now;
+            var captureOffset = Math.Max(_latestTime,
+                (recordingStartedAt.ToUnixTimeMilliseconds() - StartedAt.ToUnixTimeMilliseconds()) / 1000d);
             var paths = TerminalRecordingFiles.CreatePaths(directory, sessionName, recordingStartedAt);
             _recorder = new TerminalDiskRecorder(
                 paths, sessionName, terminalType,
-                _currentColumns, _currentRows, recordingStartedAt, _latestTime);
+                _currentColumns, _currentRows, recordingStartedAt, captureOffset);
             path = paths.CastPath;
         }
         RecordingChanged?.Invoke(true, path);
@@ -435,40 +437,52 @@ internal sealed class TerminalDiskRecorder : IDisposable
         _captureOffset = captureOffset;
 
         FileStream? cast = null;
+        FileStream? plain = null;
         try
         {
             cast = OpenFile(paths.CastPath);
-            _plainWriter = new StreamWriter(OpenFile(paths.LogPath), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+            plain = OpenFile(paths.LogPath);
+            _plainWriter = new StreamWriter(plain, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
                 bufferSize: 16 * 1024);
             _cast = cast;
+
+            var header = new
+            {
+                version = 2,
+                width,
+                height,
+                timestamp = startedAt.ToUnixTimeSeconds(),
+                title,
+                env = new Dictionary<string, string>
+                {
+                    ["TERM"] = string.IsNullOrWhiteSpace(terminalType) ? "xterm-256color" : terminalType,
+                    ["SHELL"] = "resesh",
+                },
+            };
+            _cast.Write(JsonSerializer.SerializeToUtf8Bytes(header, JsonOptions));
+            _cast.Write(NewLine);
+            _cast.Flush();
+            _castJson = new Utf8JsonWriter(_castLine, new JsonWriterOptions { Encoder = JsonOptions.Encoder });
+            _lastFlushMs = Environment.TickCount64;
+            _flushTimer = new Timer(_ => FlushScheduled());
         }
         catch
         {
-            cast?.Dispose();
-            TryDelete(paths.CastPath);
-            TryDelete(paths.LogPath);
+            _castJson?.Dispose();
+            try
+            {
+                cast?.Dispose();
+            }
+            finally
+            {
+                plain?.Dispose();
+                if (cast is not null)
+                    TryDelete(paths.CastPath);
+                if (plain is not null)
+                    TryDelete(paths.LogPath);
+            }
             throw;
         }
-
-        var header = new
-        {
-            version = 2,
-            width,
-            height,
-            timestamp = startedAt.ToUnixTimeSeconds(),
-            title,
-            env = new Dictionary<string, string>
-            {
-                ["TERM"] = string.IsNullOrWhiteSpace(terminalType) ? "xterm-256color" : terminalType,
-                ["SHELL"] = "resesh",
-            },
-        };
-        _cast.Write(JsonSerializer.SerializeToUtf8Bytes(header, JsonOptions));
-        _cast.Write(NewLine);
-        _cast.Flush();
-        _castJson = new Utf8JsonWriter(_castLine, new JsonWriterOptions { Encoder = JsonOptions.Encoder });
-        _lastFlushMs = Environment.TickCount64;
-        _flushTimer = new Timer(_ => FlushScheduled());
     }
 
     public string Path { get; }
@@ -546,16 +560,22 @@ internal sealed class TerminalDiskRecorder : IDisposable
                 return;
             _disposed = true;
             _flushTimer.Dispose();
-            foreach (var line in _plainRenderer.Flush())
-                WritePlainLine(line);
             try
             {
-                _castJson.Dispose();
-                _cast.Dispose();
+                foreach (var line in _plainRenderer.Flush())
+                    WritePlainLine(line);
             }
             finally
             {
-                _plainWriter.Dispose();
+                try
+                {
+                    _castJson.Dispose();
+                    _cast.Dispose();
+                }
+                finally
+                {
+                    _plainWriter.Dispose();
+                }
             }
         }
     }
@@ -628,7 +648,7 @@ public static class AsciicastReader
                 ? item[1].GetString()
                 : null;
             if (item.ValueKind != JsonValueKind.Array || item.GetArrayLength() != 3 ||
-                !item[0].TryGetDouble(out var time) || type is not ("o" or "r"))
+                !item[0].TryGetDouble(out var time) || !double.IsFinite(time) || type is not ("o" or "r"))
             {
                 throw new InvalidDataException($"Invalid asciicast event at line {lineNumber}.");
             }
@@ -680,6 +700,9 @@ internal sealed record TimestampedPlainLine(DateTimeOffset Timestamp, string Tex
 /// </summary>
 internal sealed class AnsiPlainTextRenderer
 {
+    // Cursor controls are untrusted output, not requests to allocate multi-gigabyte rows.
+    private const int MaximumCursorPosition = ushort.MaxValue;
+
     private readonly Dictionary<int, PlainRow> _rows = [];
     private readonly StringBuilder _csi = new();
     private AnsiState _state;
@@ -712,10 +735,19 @@ internal sealed class AnsiPlainTextRenderer
                         _csi.Clear();
                         _state = AnsiState.Text;
                     }
-                    else
+                    else if (_csi.Length < 1024)
                     {
                         _csi.Append(character);
                     }
+                    else
+                    {
+                        _csi.Clear();
+                        _state = AnsiState.IgnoreCsi;
+                    }
+                    break;
+                case AnsiState.IgnoreCsi:
+                    if (character is >= '@' and <= '~')
+                        _state = AnsiState.Text;
                     break;
                 case AnsiState.Osc:
                 case AnsiState.ControlString:
@@ -866,17 +898,17 @@ internal sealed class AnsiPlainTextRenderer
                 break;
             case 'B':
             case 'e':
-                _row += Parameter(0, 1);
+                _row = (int)Math.Min(MaximumCursorPosition, (long)_row + Parameter(0, 1));
                 break;
             case 'C':
             case 'a':
-                _column += Parameter(0, 1);
+                _column = (int)Math.Min(MaximumCursorPosition, (long)_column + Parameter(0, 1));
                 break;
             case 'D':
                 _column = Math.Max(0, _column - Parameter(0, 1));
                 break;
             case 'E':
-                _row += Parameter(0, 1);
+                _row = (int)Math.Min(MaximumCursorPosition, (long)_row + Parameter(0, 1));
                 _column = 0;
                 break;
             case 'F':
@@ -928,7 +960,7 @@ internal sealed class AnsiPlainTextRenderer
         {
             return defaultValue;
         }
-        return value;
+        return Math.Min(value, MaximumCursorPosition);
     }
 
     private void WriteCharacter(char character, DateTimeOffset timestamp)
@@ -1000,6 +1032,9 @@ internal sealed class AnsiPlainTextRenderer
     private void InsertSpaces(int count)
     {
         var row = GetRow();
+        count = Math.Min(count, Math.Max(0, MaximumCursorPosition - Math.Max(_column, row.Text.Length)));
+        if (count == 0)
+            return;
         while (row.Text.Length < _column)
             row.Text.Append(' ');
         row.Text.Insert(_column, new string(' ', count));
@@ -1007,6 +1042,9 @@ internal sealed class AnsiPlainTextRenderer
 
     private void EraseCharacters(int count)
     {
+        count = Math.Min(count, Math.Max(0, MaximumCursorPosition - _column));
+        if (count == 0)
+            return;
         var row = GetRow();
         while (row.Text.Length < _column + count)
             row.Text.Append(' ');
@@ -1025,6 +1063,7 @@ internal sealed class AnsiPlainTextRenderer
         Text,
         Escape,
         Csi,
+        IgnoreCsi,
         Osc,
         ControlString,
         StringEscape,

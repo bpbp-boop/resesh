@@ -80,7 +80,6 @@ public sealed class TabOwnershipTests : IDisposable
         Assert.True(clone.IsActive);
         Assert.False(clone.IsPinned);
         Assert.Same(source.Session, clone.Session);
-        Assert.NotEqual(source.TmuxSlot, clone.TmuxSlot);
         Assert.Equal(tabs, group.Tabs.Where(tab => tab != clone));
         Assert.Empty(otherGroup.Tabs);
     }

@@ -208,7 +208,6 @@ test("local sessions use the direct filesystem pane and Explorer path", () => {
 test("SFTP downloads validate each remote name and keep recursive paths below the selected folder", () => {
   assert.match(filePaneView, /WindowsDownloadPath\.ValidateName\(entry\.Name\)/);
   assert.match(filePaneView, /PlanRemoteDirectory\(sftp, entry\.FullPath, localPath, targetDir, files, token\)/);
-  assert.match(filePaneView, /WindowsDownloadPath\.Combine\(targetRoot, localDir, child\.Name\)/);
   assert.doesNotMatch(filePaneView, /Path\.Combine\(localDir, child\.Name\)/);
 });
 

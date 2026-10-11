@@ -4,6 +4,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GhosttyVtArchitecture Condition="'$(Platform)'=='ARM64' or '$(RuntimeIdentifier)'=='win-arm64' or '$(PROCESSOR_ARCHITECTURE)'=='ARM64'">arm64</GhosttyVtArchitecture>
+    <GhosttyVtArchitecture Condition="'$(GhosttyVtArchitecture)'==''">x64</GhosttyVtArchitecture>
+    <GhosttyVtDir>$(MSBuildThisFileDirectory)..\..\.artifacts\ghostty-vt\$(GhosttyVtArchitecture)\</GhosttyVtDir>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
@@ -15,9 +19,15 @@
     <Compile Include="../../src/Terminal/Native/CommandTracker.cs" Link="Native/CommandTracker.cs" />
     <Compile Include="../../src/Terminal/Native/Highlighter.cs" Link="Native/Highlighter.cs" />
     <Compile Include="../../src/Terminal/Native/TerminalCell.cs" Link="Native/TerminalCell.cs" />
+    <Compile Include="../../src/Terminal/Native/GhosttyNative.cs" Link="Native/GhosttyNative.cs" />
+    <Compile Include="../../src/Terminal/Native/TerminalCommandBuffer.cs" Link="Native/TerminalCommandBuffer.cs" />
     <Compile Include="../../src/Terminal/Native/OverviewIndex.cs" Link="Native/OverviewIndex.cs" />
     <Compile Include="../../src/Terminal/Native/LineTimes.cs" Link="Native/LineTimes.cs" />
     <Compile Include="../../src/Terminal/TerminalCommandExecution.cs" Link="TerminalCommandExecution.cs" />
     <Compile Include="../../src/Terminal/TerminalCommandRecord.cs" Link="TerminalCommandRecord.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="Exists('$(GhosttyVtDir)ghostty-vt.dll') and Exists('$(GhosttyVtDir)reseshvt.dll')">
+    <None Include="$(GhosttyVtDir)ghostty-vt.dll;$(GhosttyVtDir)reseshvt.dll"
+          Link="GhosttyVt\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

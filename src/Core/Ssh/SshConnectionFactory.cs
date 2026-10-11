@@ -44,6 +44,22 @@ internal static class SshConnectionFactory
         }
     }
 
+    // Clients built with an external ConnectionInfo do not own the authentication
+    // methods. PrivateKeyAuthenticationMethod also does not own its key files.
+    internal static void DisposeAuthMethods(AuthenticationMethod[] methods)
+    {
+        foreach (var method in methods)
+        {
+            method.Dispose();
+            if (method is PrivateKeyAuthenticationMethod privateKey)
+            {
+                foreach (var keyFile in privateKey.KeyFiles)
+                    if (keyFile is IDisposable disposable)
+                        disposable.Dispose();
+            }
+        }
+    }
+
     private static KeyboardInteractiveAuthenticationMethod Interactive(
         string user, Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? responder)
     {

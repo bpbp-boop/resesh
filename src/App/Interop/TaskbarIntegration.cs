@@ -106,7 +106,9 @@ internal static partial class TaskbarIntegration
         public readonly uint PropertyId;
     }
 
-    [StructLayout(LayoutKind.Explicit)]
+    // PROPVARIANT's union occupies 16 bytes on both supported 64-bit targets.
+    // PropVariantClear zeros the full native structure, including the unused tail.
+    [StructLayout(LayoutKind.Explicit, Size = 24)]
     private sealed class PropVariant
     {
         [FieldOffset(0)]

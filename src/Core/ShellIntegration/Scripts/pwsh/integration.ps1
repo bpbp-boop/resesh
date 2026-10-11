@@ -32,8 +32,9 @@ function Global:__Resesh-ReportCwd {
     $location = $ExecutionContext.SessionState.Path.CurrentLocation.ProviderPath
     if ($null -eq $location -or $location -match '[\x00-\x1f\x7f]') { return '' }
 
-    # $IsWindows is 7-only; on 5.1 it is simply absent, and $env:OS is the older tell.
-    if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+    # OSVersion works in 5.1 too, including profiles that enable StrictMode
+    # (where reading the undefined, 7-only $IsWindows variable would throw).
+    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
         # OSC 9;9 with a bare quoted path -- the form Microsoft's own prompts emit and the
         # emulator already reads. A file:// URI for C:\Users would decode to /C:/Users, a leading
         # slash that no Windows API accepts.
@@ -91,7 +92,9 @@ function Global:prompt {
     # statement the user ran; $LASTEXITCODE is the code of the last NATIVE command, which a
     # failing cmdlet leaves untouched -- so $? decides whether $LASTEXITCODE is even relevant.
     $succeeded = $?
-    $lastExit = $global:LASTEXITCODE
+    # A fresh shell may not have run a native command yet. Reading an undefined
+    # LASTEXITCODE directly throws when the user's profile enables StrictMode.
+    $lastExit = Get-Variable -Name LASTEXITCODE -Scope Global -ValueOnly -ErrorAction Ignore
 
     $state = $Global:__ReseshIntegration
     $out = ''

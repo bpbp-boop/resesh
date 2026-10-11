@@ -95,8 +95,13 @@ internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlight
     /// <summary>Absolute line -> rule mask for every indexed line still in the buffer.</summary>
     public IEnumerable<(int Line, uint Mask)> Lines()
     {
-        if (_anchor is null || _anchor.Line < 0)
+        if (_anchor is null)
             yield break;
+        if (_anchor.Line < 0)
+        {
+            Reset();
+            yield break;
+        }
         var offset = _anchorVirtual - _anchor.Line;
         foreach (var (key, mask) in _scrollback)
         {

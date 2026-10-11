@@ -156,9 +156,8 @@ public sealed class TabViewModel : ObservableObject
     public int? ExitCode { get; set; }
 
     /// <summary>
-    /// Distinguishes this tab's tmux session when several tabs of the same saved session are
-    /// open (Clone): slot 0 is the primary; clones get their own remote session. Fixed at
-    /// tab creation so Reconnect re-attaches to the same remote session.
+    /// Identifies the remote shell selected at connect time. Ownership lives with the
+    /// terminal view's app-wide reservation, not this display/reconnect target.
     /// </summary>
     public int TmuxSlot { get; set; }
 

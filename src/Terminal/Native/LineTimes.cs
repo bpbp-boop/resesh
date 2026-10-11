@@ -78,6 +78,11 @@ internal sealed class LineTimes(ICommandBuffer buffer)
     /// moves to the top; the rest go.</summary>
     private void Prune()
     {
+        if (_frontier is { Line: < 0 })
+        {
+            _frontier.Dispose();
+            _frontier = null;
+        }
         var gone = 0;
         while (gone < _runs.Count && _runs[gone].Marker.Line < 0)
             gone++;

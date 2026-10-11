@@ -119,7 +119,7 @@ public sealed partial class MainWindow
             App.Icons.InvalidateCustomIcons();
             App.Workspaces.Load();
             App.RefreshWorkspaceMenus();
-            ViewModel.RebuildTree();
+            App.RefreshSessionsInAllWindows();
             App.ApplySettingsToAllWindows();
 
             await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Import complete",
