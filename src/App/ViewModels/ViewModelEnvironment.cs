@@ -17,4 +17,7 @@ public sealed class ViewModelEnvironment
     public Func<string> RecordingDirectory { get; init; } = () => "";
     public Func<Guid?> DefaultLocalProfileId { get; init; } = () => null;
     public Action<Guid> SetDefaultLocalProfile { get; init; } = _ => { };
+
+    /// <summary>The username a remote session logs in as (its own, or its identity's).</summary>
+    public Func<Session, string> LoginUsername { get; init; } = session => session.Username;
 }

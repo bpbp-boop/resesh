@@ -68,7 +68,7 @@ test("Welcome buttons keep the native Fluent surface and theme only text and acc
 test("Welcome uses platform typography, one aligned section grid, and responsive cards", () => {
   assert.doesNotMatch(xaml, /FontSize="(?:[0-9]|1[01])"/);
   assert.match(xaml, /Style="\{ThemeResource TitleTextBlockStyle\}"/);
-  assert.equal((xaml.match(/Style="\{ThemeResource SubtitleTextBlockStyle\}"/g) || []).length, 4);
+  assert.equal((xaml.match(/Style="\{ThemeResource SubtitleTextBlockStyle\}"/g) || []).length, 5);
   assert.match(xaml, /<Grid ColumnDefinitions="24,\*" ColumnSpacing="8">/);
   assert.match(xaml, /<AdaptiveTrigger MinWindowWidth="1280" \/>/);
   assert.match(xaml, /<AdaptiveTrigger MinWindowWidth="900" \/>/);

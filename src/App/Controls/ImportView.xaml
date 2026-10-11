@@ -1,0 +1,215 @@
+<UserControl
+    x:Class="Resesh.App.Controls.ImportView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Resesh.App.Controls"
+    Background="{StaticResource SessionShellBrush}"
+    Foreground="{StaticResource SessionTreeForegroundBrush}">
+
+    <UserControl.Resources>
+        <Style x:Key="Secondary" TargetType="TextBlock" BasedOn="{StaticResource BodyTextBlockStyle}">
+            <Setter Property="Foreground" Value="{ThemeResource SessionTreeMutedForegroundBrush}" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+        </Style>
+        <Style x:Key="PanelCard" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource SessionInputBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource SessionChromeFrameBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="{ThemeResource OverlayCornerRadius}" />
+        </Style>
+        <local:ImportRowTemplateSelector x:Key="RowTemplates">
+            <local:ImportRowTemplateSelector.FolderTemplate>
+                <DataTemplate x:DataType="local:ImportFolderRow">
+                    <Grid Margin="{x:Bind Indent}" ColumnSpacing="4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            Width="28" Height="28" Padding="0"
+                            Background="Transparent" BorderThickness="0"
+                            Click="{x:Bind Toggle}"
+                            AutomationProperties.Name="{x:Bind ToggleName, Mode=OneWay}">
+                            <FontIcon Glyph="{x:Bind Chevron, Mode=OneWay}" FontSize="10" />
+                        </Button>
+                        <CheckBox
+                            Grid.Column="1"
+                            MinWidth="0"
+                            IsChecked="{x:Bind AllSelected, Mode=TwoWay}"
+                            AutomationProperties.Name="{x:Bind Header, Mode=OneWay}" />
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <FontIcon Glyph="&#xE8B7;" FontSize="14" />
+                            <TextBlock Text="{x:Bind Name}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                            <TextBlock Text="{x:Bind CountText, Mode=OneWay}" Style="{StaticResource Secondary}" />
+                        </StackPanel>
+                    </Grid>
+                </DataTemplate>
+            </local:ImportRowTemplateSelector.FolderTemplate>
+            <local:ImportRowTemplateSelector.SessionTemplate>
+                <DataTemplate x:DataType="local:ImportCandidateVm">
+                    <Grid Margin="{x:Bind Indent}" ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="2*" MinWidth="120" />
+                            <ColumnDefinition Width="3*" />
+                            <ColumnDefinition Width="2*" MinWidth="120" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox
+                            MinWidth="0"
+                            IsChecked="{x:Bind IsSelected, Mode=TwoWay}"
+                            IsEnabled="{x:Bind CanImport}"
+                            AutomationProperties.Name="{x:Bind AccessibleName, Mode=OneWay}" />
+                        <TextBlock Grid.Column="1" Text="{x:Bind Name}" VerticalAlignment="Center"
+                                   Style="{StaticResource BodyStrongTextBlockStyle}"
+                                   TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                        <TextBlock Grid.Column="2" Text="{x:Bind Endpoint}" VerticalAlignment="Center"
+                                   Style="{StaticResource Secondary}"
+                                   ToolTipService.ToolTip="{x:Bind EndpointTip}" />
+                        <TextBlock Grid.Column="3" Text="{x:Bind LoginDetail, Mode=OneWay}" VerticalAlignment="Center"
+                                   HorizontalAlignment="Right" TextAlignment="Right"
+                                   Style="{StaticResource Secondary}"
+                                   ToolTipService.ToolTip="{x:Bind LoginDetail, Mode=OneWay}" />
+                    </Grid>
+                </DataTemplate>
+            </local:ImportRowTemplateSelector.SessionTemplate>
+        </local:ImportRowTemplateSelector>
+    </UserControl.Resources>
+
+    <Grid x:Name="Root" SizeChanged="Root_SizeChanged">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Padding="28,20,28,12" Spacing="4">
+            <TextBlock x:Name="TitleText" Style="{StaticResource TitleTextBlockStyle}" />
+            <TextBlock x:Name="SummaryText" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap"
+                       Foreground="{ThemeResource SessionTreeMutedForegroundBrush}" />
+        </StackPanel>
+
+        <!-- Review: sessions on the left, shared logins on the right (stacked when narrow) -->
+        <Grid x:Name="ReviewBody" Grid.Row="1" Padding="28,0,28,16" ColumnSpacing="24" RowSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition x:Name="SessionsColumn" Width="*" />
+                <ColumnDefinition x:Name="LoginsColumn" Width="400" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition x:Name="SessionsRow" Height="*" />
+                <RowDefinition x:Name="LoginsRow" Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid x:Name="SessionsPane" RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MaxWidth="420" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox
+                        x:Name="FilterBox"
+                        PlaceholderText="Filter by name, host, user, or folder"
+                        TextChanged="FilterBox_TextChanged"
+                        AutomationProperties.Name="Filter sessions to import"
+                        AutomationProperties.AutomationId="ImportFilter" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                        <HyperlinkButton Content="Select all" Click="SelectAll_Click" AutomationProperties.AutomationId="ImportSelectAll" />
+                        <HyperlinkButton Content="Select none" Click="SelectNone_Click" AutomationProperties.AutomationId="ImportSelectNone" />
+                    </StackPanel>
+                    <TextBlock x:Name="SelectionText" Grid.Column="3" VerticalAlignment="Center"
+                               Style="{StaticResource Secondary}" />
+                </Grid>
+
+                <Border Grid.Row="1" Style="{StaticResource PanelCard}" Padding="0,4">
+                    <ListView
+                        x:Name="CandidateList"
+                        SelectionMode="None"
+                        ItemTemplateSelector="{StaticResource RowTemplates}"
+                        AutomationProperties.Name="Sessions to import">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="MinHeight" Value="34" />
+                                <Setter Property="Padding" Value="12,0,16,0" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                    </ListView>
+                </Border>
+            </Grid>
+
+            <!-- Shared logins -->
+            <ScrollViewer x:Name="LoginsPane" Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="0,0,4,0">
+                <StackPanel Spacing="12">
+                    <Border Style="{StaticResource PanelCard}" Padding="16">
+                        <StackPanel Spacing="10">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon Glyph="&#xE77B;" FontSize="18" />
+                                <TextBlock Text="Shared logins" Style="{StaticResource SubtitleTextBlockStyle}" />
+                            </StackPanel>
+                            <TextBlock x:Name="LoginsIntro" TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}"
+                                       Foreground="{ThemeResource SessionTreeMutedForegroundBrush}" />
+                            <StackPanel x:Name="SuggestionRows" Spacing="8" />
+                        </StackPanel>
+                    </Border>
+                    <TextBlock
+                        TextWrapping="Wrap"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource SessionTreeMutedForegroundBrush}"
+                        Text="Passwords and key passphrases are not imported: each identity asks for its password the first time you connect. SSH key files stay where they are and are added to Settings › Identities &amp; Keys. OpenSSH sessions use the first configured IdentityFile." />
+                    <Expander x:Name="SkippedExpander" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Visibility="Collapsed">
+                        <ItemsControl x:Name="SkippedList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="x:String">
+                                    <TextBlock Text="{x:Bind}" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Expander>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- Result, shown in place of the review after importing -->
+        <ScrollViewer x:Name="ResultBody" Grid.Row="1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
+            <StackPanel Padding="28,8,28,28" Spacing="16" MaxWidth="720" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <FontIcon Glyph="&#xE930;" FontSize="28" Foreground="{ThemeResource SessionAccentBrush}" />
+                    <TextBlock x:Name="ResultTitle" Style="{StaticResource SubtitleTextBlockStyle}" VerticalAlignment="Center" />
+                </StackPanel>
+                <TextBlock x:Name="ResultText" TextWrapping="Wrap" Style="{StaticResource BodyTextBlockStyle}" />
+                <StackPanel x:Name="ResultIdentities" Spacing="8" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="ManageIdentitiesButton" Content="Manage identities" Click="ManageIdentities_Click"
+                            AutomationProperties.AutomationId="ImportManageIdentities" />
+                    <Button Content="Close" Click="Close_Click" AutomationProperties.AutomationId="ImportClose" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Footer -->
+        <Border x:Name="Footer" Grid.Row="2" BorderThickness="0,1,0,0" BorderBrush="{ThemeResource SessionChromeFrameBrush}"
+                Padding="28,12">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="FooterText" VerticalAlignment="Center" TextWrapping="Wrap"
+                           Style="{StaticResource BodyTextBlockStyle}" />
+                <Button Grid.Column="1" Content="Cancel" MinWidth="96" Click="Close_Click"
+                        AutomationProperties.AutomationId="ImportCancel" />
+                <Button x:Name="ImportButton" Grid.Column="2" MinWidth="160" Style="{StaticResource AccentButtonStyle}"
+                        Click="Import_Click" AutomationProperties.AutomationId="ImportConfirm" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

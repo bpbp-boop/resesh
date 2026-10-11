@@ -479,6 +479,28 @@ public sealed partial class MainWindow
             args.Cancel = true;
     }
 
+    /// <summary>The identity each remote session currently logs in as (null = its own login or a prompt).</summary>
+    private static Dictionary<Guid, Identity?> LoginIdentities(IEnumerable<Guid> sessionIds) =>
+        sessionIds.Select(App.Store.Find)
+            .Where(session => session is { Kind: SessionKind.Ssh })
+            .ToDictionary(session => session!.Id, session => App.Logins.Resolve(session!).Identity);
+
+    /// <summary>Moving sessions changes the folder they inherit their login from; say so once.</summary>
+    private void NoteLoginChanges(Dictionary<Guid, Identity?> before, Dictionary<Guid, Identity?> after)
+    {
+        var changed = after.Where(pair => before.GetValueOrDefault(pair.Key)?.Id != pair.Value?.Id).ToList();
+        if (changed.Count == 0)
+            return;
+        var subject = changed.Count == 1 ? "The moved session now" : $"{changed.Count} moved sessions now";
+        var targets = changed.Select(pair => pair.Value?.Id).Distinct().ToList();
+        var message = targets is [null]
+            ? $"{subject} ask for a login when connecting."
+            : targets is [_]
+                ? $"{subject} log in as {changed[0].Value!.Name}."
+                : $"{subject} use the login of their new folder.";
+        ShowOperationNotice("Login changed", message);
+    }
+
     private void SessionTree_DragItemsCompleted(TreeView sender, TreeViewDragItemsCompletedEventArgs args)
     {
         var draggedSessions = _dragSessions;
@@ -511,7 +533,11 @@ public sealed partial class MainWindow
             () =>
             {
                 if (plan.SessionIds.Count > 0)
+                {
+                    var before = LoginIdentities(plan.SessionIds);
                     ViewModel.MoveSessionsToFolder(plan.SessionIds, targetFolder);
+                    NoteLoginChanges(before, LoginIdentities(plan.SessionIds));
+                }
                 else
                     ViewModel.RebuildTree();
             });

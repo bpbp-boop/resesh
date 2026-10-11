@@ -116,6 +116,7 @@ public sealed class TabViewModel : ObservableObject
     {
         AppPage.Welcome => "Welcome",
         AppPage.Settings => "Settings",
+        AppPage.Import => "Import",
         _ => "",
     };
 
@@ -583,6 +584,8 @@ public sealed class TabViewModel : ObservableObject
                 return "Setup resesh";
             if (Page == AppPage.Settings)
                 return "Preferences";
+            if (Page == AppPage.Import)
+                return "Review sessions";
             if (Session.Persistent && RunningCommand is { } persistentCommand)
                 return persistentCommand;
             if (TerminalTitle is not { } title)
@@ -613,9 +616,10 @@ public sealed class TabViewModel : ObservableObject
                     ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
                     : directory;
             }
-            return string.IsNullOrEmpty(Session.Username) || Session.IsTelnet
+            var username = Session.IsTelnet ? "" : _environment.LoginUsername(Session);
+            return string.IsNullOrEmpty(username)
                 ? Session.Host
-                : $"{Session.Username}@{Session.Host}";
+                : $"{username}@{Session.Host}";
         }
     }
 
@@ -625,12 +629,13 @@ public sealed class TabViewModel : ObservableObject
             ? Session.Local?.Executable ?? ""
             : Session.IsTelnet
                 ? $"telnet {Session.Host}:{Session.Port}"
-                : $"{Session.Username}@{Session.Host}:{Session.Port}";
+                : $"{_environment.LoginUsername(Session)}@{Session.Host}:{Session.Port}";
 
     public string StateText => Page switch
     {
         AppPage.Welcome => "setup",
         AppPage.Settings => "changes apply immediately",
+        AppPage.Import => "review before importing",
         _ => State switch
         {
             TabConnectionState.Connecting => IsLocal ? "starting…" : "connecting…",
@@ -713,4 +718,5 @@ public enum AppPage
     None,
     Welcome,
     Settings,
+    Import,
 }

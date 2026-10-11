@@ -8,6 +8,7 @@ using Resesh.Core.Agents;
 using Resesh.Core.Backend;
 using Resesh.Core.Credentials;
 using Resesh.Core.History;
+using Resesh.Core.Identities;
 using Resesh.Core.Local;
 using Resesh.Core.Models;
 using Resesh.Core.Recording;
@@ -89,6 +90,10 @@ public sealed class TerminalTabView : Grid, IDisposable
     /// <summary>Raised (UI thread) when a connect to a session with no icon set identified
     /// the OS/vendor from the server banner. The window decides whether to persist it.</summary>
     public event Action<string>? IconSuggested;
+
+    /// <summary>Raised (UI thread) when the login prompt changed where this session's login
+    /// comes from, with the session's own password to store (or null). The window saves it.</summary>
+    public event Action<Session, string?>? LoginChanged;
 
     /// <summary>Raised (UI thread) when this tab's agent moved into a state worth alerting
     /// on. The window decides whether anything is shown — an agent event may change UI
@@ -764,9 +769,10 @@ public sealed class TerminalTabView : Grid, IDisposable
     private async Task ConnectSshAsync(bool isReconnect)
     {
         var connection = _connection;
+        Identity? authenticatingWith = null;
         try
         {
-            if (string.IsNullOrWhiteSpace(Session.Username))
+            if (Session.Login == SessionLogin.Own && string.IsNullOrWhiteSpace(Session.Username))
             {
                 _tab.State = TabConnectionState.Disconnected;
                 _terminal.NotifyDisconnected(
@@ -782,13 +788,14 @@ public sealed class TerminalTabView : Grid, IDisposable
                 _terminal.NotifyDisconnected("No credential provided.");
                 return;
             }
-            var (connectionSession, secret) = resolved;
+            var (connectionSession, secret, identitySecret) = resolved;
             _secret = secret; // reused by the file pane's SFTP connection
             _resolvedSshSession = connectionSession;
+            authenticatingWith = identitySecret;
 
             if (isReconnect)
                 _terminal.WriteDivider();
-            _terminal.WriteNotice($"Connecting to {Session.Username}@{Session.Host}:{Session.Port} …");
+            _terminal.WriteNotice($"Connecting to {connectionSession.Username}@{Session.Host}:{Session.Port} …");
 
             // Connect and its integration diagnostics run on the backend worker.
             // Terminal notices must be delivered on this view's UI thread.
@@ -859,6 +866,8 @@ public sealed class TerminalTabView : Grid, IDisposable
             if (connection.Token.IsCancellationRequested) return;
             _tab.State = TabConnectionState.Disconnected;
             _terminal.NotifyDisconnected(ex.Message);
+            if (ex.Kind == SshFailureKind.AuthenticationFailed && authenticatingWith is { } identity)
+                await OfferIdentityPasswordUpdateAsync(identity, connection.Token);
         }
         catch (OperationCanceledException)
         {
@@ -872,6 +881,33 @@ public sealed class TerminalTabView : Grid, IDisposable
             _tab.State = TabConnectionState.Disconnected;
             _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}");
         }
+    }
+
+    /// <summary>A stored or remembered identity password was rejected: offer to replace it
+    /// for every session using the identity, then reconnect with the new one.</summary>
+    private async Task OfferIdentityPasswordUpdateAsync(Identity identity, CancellationToken token)
+    {
+        if (_disposed || XamlRoot is null)
+            return;
+        var users = App.Logins.UsersOf(identity.Id, App.Store.Sessions).Count;
+        var usedBy = users == 1 ? "used by 1 session" : $"used by {users} sessions";
+        var remembered = identity.Proof == IdentityProof.Ask;
+        var result = await ConnectDialogs.PromptCredentialAsync(
+            XamlRoot,
+            $"Update the password for {identity.Name}",
+            $"The server rejected the {(remembered ? "remembered" : "saved")} password. "
+                + $"New password for {identity.Username} ({usedBy})",
+            saveLabel: remembered ? null : "Save for every session using this identity",
+            primaryText: "Update and reconnect").WaitAsync(token);
+        if (result is not { } update || _disposed || token.IsCancellationRequested)
+            return;
+        if (remembered)
+            App.AskedSecrets.Set(identity.Id, update.Secret);
+        else if (update.Save && update.Secret.Length > 0)
+            _credentials.WriteIdentity(identity.Id, update.Secret);
+        else
+            _pendingIdentitySecret = (identity.Id, update.Secret);
+        DispatcherQueue.TryEnqueue(() => _ = ConnectAsync(isReconnect: true));
     }
 
     /// <summary>Runs after SSH authentication and before the interactive shell opens.</summary>
@@ -967,16 +1003,63 @@ public sealed class TerminalTabView : Grid, IDisposable
             ?? throw new OperationCanceledException("tmux session selection was cancelled.");
     }
 
-    private sealed record ResolvedSshCredential(Session Session, string Secret);
+    /// <summary>The session to connect as (login applied), its secret, and the identity
+    /// whose stored or remembered password supplied it (so a rejection can offer an update).</summary>
+    private sealed record ResolvedSshCredential(Session Session, string Secret, Identity? IdentitySecret = null);
 
-    /// <summary>Resolves a session password or a registered key plus its shared passphrase.</summary>
+    /// <summary>A password typed after a rejection but not saved: used once by the next connect.</summary>
+    private (Guid IdentityId, string Secret)? _pendingIdentitySecret;
+
+    /// <summary>Resolves the login (own, chosen identity, folder identity, or a prompt) and its secret.</summary>
     private async Task<ResolvedSshCredential?> ResolveSshCredentialAsync(CancellationToken token)
+    {
+        var login = App.Logins.Resolve(Session);
+        if (login.Source == LoginSource.None)
+            return await PromptLoginAsync(login, token);
+        if (login.Source == LoginSource.Session)
+            return await ResolveOwnCredentialAsync(token);
+
+        var identity = login.Identity!;
+        var session = login.ApplyTo(Session);
+        if (string.IsNullOrWhiteSpace(session.Username))
+            throw new InvalidOperationException(
+                $"The identity '{identity.Name}' has no username. Edit it in Settings > Identities & Keys.");
+        if (identity.Proof == IdentityProof.Key)
+            return await ResolvePrivateKeyAsync(session, token);
+
+        if (_pendingIdentitySecret is { } pending && pending.IdentityId == identity.Id)
+        {
+            _pendingIdentitySecret = null;
+            return new ResolvedSshCredential(session, pending.Secret);
+        }
+        var ask = identity.Proof == IdentityProof.Ask;
+        var remembered = ask ? App.AskedSecrets.Get(identity.Id) : _credentials.ReadIdentity(identity.Id);
+        if (!string.IsNullOrEmpty(remembered))
+            return new ResolvedSshCredential(session, remembered, identity);
+
+        var result = await ConnectDialogs.PromptCredentialAsync(
+            XamlRoot,
+            $"Connect to {Session.Name}",
+            $"Password for {session.Username}@{Session.Host} ({identity.Name})",
+            saveLabel: ask ? null : "Save for every session using this identity").WaitAsync(token);
+        token.ThrowIfCancellationRequested();
+        if (result is not { } cred)
+            return null;
+        if (ask)
+            App.AskedSecrets.Set(identity.Id, cred.Secret);
+        else if (cred.Save && cred.Secret.Length > 0)
+            _credentials.WriteIdentity(identity.Id, cred.Secret);
+        return new ResolvedSshCredential(session, cred.Secret);
+    }
+
+    /// <summary>The session's own credential: a session password or a registered key.</summary>
+    private async Task<ResolvedSshCredential?> ResolveOwnCredentialAsync(CancellationToken token)
     {
         if (Session.AuthMethod == AuthMethod.None)
             return new ResolvedSshCredential(Session, "");
 
         if (Session.AuthMethod == AuthMethod.PrivateKey)
-            return await ResolvePrivateKeyAsync(token);
+            return await ResolvePrivateKeyAsync(Session, token);
 
         var stored = _credentials.Read(Session.Id);
         if (!string.IsNullOrEmpty(stored))
@@ -995,13 +1078,63 @@ public sealed class TerminalTabView : Grid, IDisposable
         return new ResolvedSshCredential(Session, cred.Secret);
     }
 
-    private async Task<ResolvedSshCredential?> ResolvePrivateKeyAsync(CancellationToken token)
+    /// <summary>No login applies: ask for a username and password and where to remember
+    /// them — every session in the folder (a new folder identity), this session, or nowhere.</summary>
+    private async Task<ResolvedSshCredential?> PromptLoginAsync(ResolvedLogin login, CancellationToken token)
     {
-        if (Session.PrivateKeyId is not { } keyId || _sshKeys.Find(keyId) is not { } key)
+        var saved = App.Store.Find(Session.Id) is not null;
+        var answer = await ConnectDialogs.PromptLoginAsync(
+            XamlRoot,
+            Session,
+            login.Username,
+            canRemember: saved,
+            identityMissing: login.IdentityMissing).WaitAsync(token);
+        token.ThrowIfCancellationRequested();
+        if (answer is null)
+            return null;
+
+        var session = Session with
+        {
+            Username = answer.Username,
+            AuthMethod = AuthMethod.Password,
+            PrivateKeyId = null,
+            PrivateKeyPath = null,
+        };
+        switch (answer.Remember)
+        {
+            case LoginRemember.Folder:
+            {
+                var identity = App.Identities.Add(new Identity
+                {
+                    Name = LoginDialog.SuggestedIdentityName(answer.Username, Session.FolderPath),
+                    Username = answer.Username,
+                    Proof = answer.SavePassword ? IdentityProof.Password : IdentityProof.Ask,
+                });
+                if (answer.SavePassword)
+                    _credentials.WriteIdentity(identity.Id, answer.Password);
+                else
+                    App.AskedSecrets.Set(identity.Id, answer.Password);
+                App.Store.SetFolderIdentity(Session.FolderPath, identity.Id);
+                // A session pointing at a deleted identity goes back to inheriting the new one.
+                if (Session.Login != SessionLogin.Inherit)
+                    LoginChanged?.Invoke(Session with { IdentityId = null, InheritLogin = true }, null);
+                break;
+            }
+            case LoginRemember.Session:
+                LoginChanged?.Invoke(session with { IdentityId = null, InheritLogin = false },
+                    answer.SavePassword ? answer.Password : null);
+                break;
+        }
+        return new ResolvedSshCredential(session, answer.Password);
+    }
+
+    private async Task<ResolvedSshCredential?> ResolvePrivateKeyAsync(Session session, CancellationToken token)
+    {
+        if (session.PrivateKeyId is not { } keyId || _sshKeys.Find(keyId) is not { } key)
             throw new InvalidOperationException("The session does not have a registered SSH key.");
         if (!key.IsAvailable)
             throw new FileNotFoundException(
-                $"The SSH key '{key.Name}' is unavailable. Use File > SSH Keys to locate it.", key.Path);
+                $"The SSH key '{key.Name}' is unavailable. Locate it in Settings > Identities & Keys.", key.Path);
 
         var secret = key.IsEncrypted == true
             ? _credentials.ReadKey(keyId) ?? _credentials.Read(Session.Id)
@@ -1039,7 +1172,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         }
 
         return new ResolvedSshCredential(
-            Session with { PrivateKeyPath = validated.Path, PassphraseRequired = validated.IsEncrypted == true },
+            session with { PrivateKeyPath = validated.Path, PassphraseRequired = validated.IsEncrypted == true },
             secret ?? "");
     }
 
@@ -1240,7 +1373,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     {
         var resolved = await ResolveSshCredentialAsync(CancellationToken.None);
         if (resolved is null) return null;
-        var (profile, secret) = resolved;
+        var (profile, secret, _) = resolved;
         var connection = new SshTerminalSession(_knownHosts)
         {
             HostKeyDecision = info => ConfirmHostKeyBlocking(info, CancellationToken.None),
@@ -1641,7 +1774,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         connection.Token.ThrowIfCancellationRequested();
         if (resolved is null)
             throw new SshSessionException(SshFailureKind.AuthenticationFailed, "No credential provided.");
-        var (session, secret) = resolved;
+        var (session, secret, _) = resolved;
         _secret = secret;
         _resolvedSshSession = session;
         var sftp = new SftpSession(_knownHosts);

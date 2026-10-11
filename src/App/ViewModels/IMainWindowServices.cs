@@ -28,6 +28,9 @@ public interface IMainWindowServices
 
     Task EditSessionSettingsAsync(TabViewModel tab, SessionSettingsTarget target);
     Task ImportSessionsAsync();
+
+    /// <summary>Opens the identity dialog for a remote folder ("" = the tree root) and saves it.</summary>
+    Task SetFolderIdentityAsync(string folderPath);
     Task ExportBackupAsync();
     Task ImportBackupAsync();
 

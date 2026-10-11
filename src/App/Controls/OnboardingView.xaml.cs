@@ -25,6 +25,10 @@ public sealed partial class OnboardingView : UserControl, IDisposable
     public event Action? FinishRequested;
     public event Action? NewSessionRequested;
     public event Action? LocalShellRequested;
+    public event Action? ManageIdentitiesRequested;
+
+    /// <summary>Opens the import review (a tab) and completes with what was imported, or null.</summary>
+    public Func<ImportScanResult, string, Task<ImportOutcome?>>? ReviewImport { get; set; }
 
     public OnboardingView(
         AppSettings settings,
@@ -55,8 +59,38 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         UpdateThemeSelection();
         _updatingThemeUi = false;
         UpdateSaveButtonState();
+        RefreshLogins();
         Loaded += OnLoaded;
     }
+
+    /// <summary>Summarizes the identities in use, so the section reads as state, not only as advice.</summary>
+    private void RefreshLogins()
+    {
+        var identities = App.Identities.Identities;
+        if (identities.Count == 0)
+        {
+            LoginsStatus.Text = "No identities yet.";
+            DefaultLoginButton.Content = "Set a login for all sessions…";
+            return;
+        }
+        var sessions = App.Store.Sessions;
+        var users = sessions.Count(s => s.Kind == Resesh.Core.Models.SessionKind.Ssh
+            && App.Logins.Resolve(s).Identity is not null);
+        var defaultId = App.Store.FolderIdentity("");
+        var defaultName = identities.FirstOrDefault(i => i.Id == defaultId)?.Name;
+        LoginsStatus.Text = $"{identities.Count} identit{(identities.Count == 1 ? "y" : "ies")}, used by "
+            + $"{users} session{(users == 1 ? "" : "s")}."
+            + (defaultName is null ? "" : $" Sessions without a folder login use {defaultName}.");
+        DefaultLoginButton.Content = defaultName is null ? "Set a login for all sessions…" : "Change the login for all sessions…";
+    }
+
+    private async void DefaultLogin_Click(object sender, RoutedEventArgs e)
+    {
+        await FolderIdentityDialog.EditAsync(XamlRoot, "");
+        RefreshLogins();
+    }
+
+    private void ManageIdentities_Click(object sender, RoutedEventArgs e) => ManageIdentitiesRequested?.Invoke();
 
     public AppSettings Complete()
     {
@@ -183,24 +217,27 @@ public sealed partial class OnboardingView : UserControl, IDisposable
     {
         try
         {
-            var preview = new ImportPreviewDialog(scan, source)
-            {
-                XamlRoot = XamlRoot,
-            };
-            await preview.ShowModalAsync();
-            if (preview.Confirmed is not { Count: > 0 } confirmed)
+            if (ReviewImport is null || await ReviewImport(scan, source) is not { } outcome)
                 return;
+            var (imported, duplicates, identities) = outcome;
 
-            var (imported, duplicates) = SecureCrtImporter.Commit(App.Store, confirmed, App.SshKeys);
+            var identityNote = identities.Count switch
+            {
+                0 => "",
+                1 => $"Created the identity {identities[0]}.",
+                _ => $"Created {identities.Count} identities: {string.Join(", ", identities)}.",
+            };
             _sessionsChanged();
             button.IsEnabled = false;
             label.Text = $"{imported} imported";
             label.Foreground = Brush("OnboardingAccentTextBrush");
             ImportStatus.Severity = InfoBarSeverity.Success;
             ImportStatus.Title = $"{source} import complete";
-            ImportStatus.Message = duplicates == 0
+            ImportStatus.Message = (duplicates == 0
                 ? $"Added {imported} session{(imported == 1 ? "" : "s")}."
-                : $"Added {imported}; skipped {duplicates} duplicate{(duplicates == 1 ? "" : "s")}.";
+                : $"Added {imported}; skipped {duplicates} duplicate{(duplicates == 1 ? "" : "s")}.")
+                + (identityNote.Length > 0 ? $" {identityNote}" : "");
+            RefreshLogins();
             ImportStatus.IsOpen = true;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)

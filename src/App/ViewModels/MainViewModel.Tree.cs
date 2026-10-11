@@ -153,6 +153,10 @@ public sealed partial class MainViewModel
         RenameFolder(folder.FolderPath, newPath, KindOf(folder));
     }
 
+    /// <summary>Attaches an identity to a remote folder; local folders have no logins.</summary>
+    [RelayCommand(AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
+    private Task SetFolderIdentityAsync(TreeNodeViewModel folder) => Services.SetFolderIdentityAsync(folder.FolderPath);
+
     [RelayCommand]
     private void SetDefaultLocalProfile(Session profile) => _environment.SetDefaultLocalProfile(profile.Id);
 
@@ -273,8 +277,9 @@ public sealed partial class MainViewModel
                 ];
 
             case [{ IsFolder: true } folder]:
-                return
-                [
+            {
+                var menu = new List<MenuEntry>
+                {
                     new("Connect in Tabs", OpenSelectionCommand, selection),
                     new("Open in new window", OpenSelectionInNewWindowCommand, selection),
                     MenuEntry.Separator,
@@ -284,9 +289,13 @@ public sealed partial class MainViewModel
                     new(folder.IsLocalScope ? "New Local Profile…" : "New Session…", NewSessionInFolderCommand, folder),
                     new("New Folder…", NewSubfolderCommand, folder),
                     MenuEntry.Separator,
-                    new("Rename…", RenameFolderCommand, folder),
-                    new("Delete", DeleteSelectionCommand, selection),
-                ];
+                };
+                if (!folder.IsLocalScope)
+                    menu.Add(new("Set Identity…", SetFolderIdentityCommand, folder));
+                menu.Add(new("Rename…", RenameFolderCommand, folder));
+                menu.Add(new("Delete", DeleteSelectionCommand, selection));
+                return menu;
+            }
 
             // Mixed selections get the shared subset.
             default:

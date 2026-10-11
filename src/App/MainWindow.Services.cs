@@ -88,8 +88,10 @@ public sealed partial class MainWindow
 
     Task IMainWindowServices.ShowSettingsAsync(GlobalSettingsTarget target) => ShowSettingsAsync(target);
 
-    Task IMainWindowServices.ShowSshKeysAsync() =>
-        Dialogs.SshKeyManagerDialog.ManageAsync(Root.XamlRoot, App.SshKeys, App.Store, App.Credentials);
+    Task IMainWindowServices.ShowSshKeysAsync() => ShowSettingsAsync(GlobalSettingsTarget.Identities);
+
+    Task IMainWindowServices.SetFolderIdentityAsync(string folderPath) =>
+        Dialogs.FolderIdentityDialog.EditAsync(Root.XamlRoot, folderPath);
 
     Task IMainWindowServices.ShowKeyboardShortcutsAsync() =>
         ShowThenRefocusAsync(ShowKeyboardShortcutsAsync, _invokedFromTerminal);

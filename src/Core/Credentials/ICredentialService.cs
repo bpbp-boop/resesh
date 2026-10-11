@@ -21,4 +21,12 @@ public interface ICredentialService
 
     /// <summary>Deletes a key passphrase; no-op if absent.</summary>
     void DeleteKey(Guid keyId) => Delete(keyId);
+
+    /// <summary>Returns the password shared by every session that logs in as this identity.</summary>
+    string? ReadIdentity(Guid identityId) => Read(identityId);
+
+    void WriteIdentity(Guid identityId, string secret) => Write(identityId, secret);
+
+    /// <summary>Deletes an identity password; no-op if absent.</summary>
+    void DeleteIdentity(Guid identityId) => Delete(identityId);
 }

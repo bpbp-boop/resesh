@@ -385,6 +385,103 @@ public sealed class SessionsBackupTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(workspacePath));
     }
 
+    [Fact]
+    public void ExportImport_CarriesIdentitiesFolderSettingsAndIdentityPasswords()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "identity-source"));
+        var sourceIdentities = new IdentityStore(Path.Combine(source.Directory, "identities.json"));
+        sourceIdentities.Load();
+        var tacacs = sourceIdentities.Add(new Identity { Name = "TACACS", Username = "ops" });
+        var asked = sourceIdentities.Add(new Identity { Name = "Asked", Username = "lab", Proof = IdentityProof.Ask });
+        source.Credentials.WriteIdentity(tacacs.Id, "tacacs-secret");
+        source.Sessions.SetFolderIdentity("Branch", tacacs.Id);
+        source.Sessions.SetFolderIdentity("", asked.Id);
+        var inheriting = Ssh("r1", "10.0.0.1", "Branch") with { Username = "", InheritLogin = true };
+        var chooser = Ssh("lab1", "10.9.0.1", "Lab") with { Username = "", IdentityId = asked.Id };
+        source.Sessions.Add(inheriting);
+        source.Sessions.Add(chooser);
+
+        var path = Path.Combine(_dir.FullName, "identities.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
+            new BackupExportOptions { IncludeSecrets = true, Passphrase = "backup pass" }, sourceIdentities);
+        var package = SessionsBackup.Read(path, "backup pass");
+        Assert.Equal(2, package.Identities.Count);
+        Assert.Equal("tacacs-secret", Assert.Single(package.IdentitySecrets).Value);
+        Assert.Equal(2, package.FolderSettings.Count);
+
+        var target = CreateStores(Path.Combine(_dir.FullName, "identity-target"));
+        var targetIdentities = new IdentityStore(Path.Combine(target.Directory, "identities.json"));
+        targetIdentities.Load();
+        var result = SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>(), targetIdentities);
+
+        Assert.Equal(2, targetIdentities.Identities.Count);
+        Assert.Equal("tacacs-secret", target.Credentials.ReadIdentity(tacacs.Id));
+        Assert.Equal(tacacs.Id, target.Sessions.FolderIdentity("Branch"));
+        Assert.Equal(asked.Id, target.Sessions.FolderIdentity(""));
+        Assert.Equal(asked.Id, target.Sessions.Find(chooser.Id)!.IdentityId);
+        Assert.True(target.Sessions.Find(inheriting.Id)!.InheritLogin);
+        Assert.Equal(1, result.SecretsImported);
+    }
+
+    [Fact]
+    public void Import_KeepsLocalIdentityPasswordsAndFolderSettings()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "keep-source"));
+        var sourceIdentities = new IdentityStore(Path.Combine(source.Directory, "identities.json"));
+        sourceIdentities.Load();
+        var shared = sourceIdentities.Add(new Identity { Name = "Shared", Username = "ops" });
+        var other = sourceIdentities.Add(new Identity { Name = "Other", Username = "other" });
+        source.Credentials.WriteIdentity(shared.Id, "old-secret");
+        source.Sessions.SetFolderIdentity("Branch", other.Id);
+        var path = Path.Combine(_dir.FullName, "keep.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
+            new BackupExportOptions { IncludeSecrets = true, Passphrase = "backup pass" }, sourceIdentities);
+
+        var target = CreateStores(Path.Combine(_dir.FullName, "keep-target"));
+        var targetIdentities = new IdentityStore(Path.Combine(target.Directory, "identities.json"));
+        targetIdentities.Load();
+        targetIdentities.MergeImport([shared]);
+        target.Credentials.WriteIdentity(shared.Id, "rotated-secret");
+        target.Sessions.SetFolderIdentity("Branch", shared.Id);
+
+        SessionsBackup.Import(SessionsBackup.Read(path, "backup pass"), target.Directory, target.Sessions,
+            target.Settings, target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>(), targetIdentities);
+
+        Assert.Equal("rotated-secret", target.Credentials.ReadIdentity(shared.Id));
+        Assert.Equal(shared.Id, target.Sessions.FolderIdentity("Branch"));
+        Assert.Equal(2, targetIdentities.Identities.Count);
+    }
+
+    [Fact]
+    public void ScopedExport_CarriesOnlyReferencedIdentitiesAndFolderSettingsInScope()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "scope-source"));
+        var identities = new IdentityStore(Path.Combine(source.Directory, "identities.json"));
+        identities.Load();
+        var inScope = identities.Add(new Identity { Name = "In", Username = "in" });
+        var chosen = identities.Add(new Identity { Name = "Chosen", Username = "chosen" });
+        var outOfScope = identities.Add(new Identity { Name = "Out", Username = "out" });
+        source.Sessions.SetFolderIdentity("Ops/Prod", inScope.Id);
+        source.Sessions.SetFolderIdentity("Personal", outOfScope.Id);
+        source.Sessions.SetFolderIdentity("", outOfScope.Id);
+        source.Sessions.Add(Ssh("a", "a", "Ops") with { IdentityId = chosen.Id });
+
+        var path = Path.Combine(_dir.FullName, "scoped-identities.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
+            new BackupExportOptions { Scope = new BackupScope(SessionKind.Ssh, "Ops") }, identities);
+        var package = SessionsBackup.Read(path);
+
+        Assert.Equal(["Chosen", "In"], package.Identities.Select(i => i.Name).Order().ToArray());
+        Assert.Equal("Ops/Prod", Assert.Single(package.FolderSettings).Path);
+        Assert.Empty(package.IdentitySecrets);
+    }
+
     public void Dispose() => _dir.Delete(recursive: true);
 
     private static Session Ssh(string name, string host, string folder) => new()
@@ -430,5 +527,7 @@ public sealed class SessionsBackupTests : IDisposable
         public string? ReadKey(Guid keyId) => _keySecrets.GetValueOrDefault(keyId);
         public void WriteKey(Guid keyId, string secret) => _keySecrets[keyId] = secret;
         public void DeleteKey(Guid keyId) => _keySecrets.Remove(keyId);
+        public string? ReadIdentity(Guid identityId) => _secrets.GetValueOrDefault(identityId);
+        public void WriteIdentity(Guid identityId, string secret) => _secrets[identityId] = secret;
     }
 }

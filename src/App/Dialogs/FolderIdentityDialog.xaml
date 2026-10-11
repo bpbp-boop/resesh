@@ -1,0 +1,29 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.FolderIdentityDialog"
+    Style="{StaticResource DefaultContentDialogStyle}"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:dialogs="using:Resesh.App.Dialogs"
+    PrimaryButtonText="Save"
+    CloseButtonText="Cancel"
+    DefaultButton="Primary"
+    PrimaryButtonClick="OnPrimaryButtonClick">
+
+    <StackPanel Width="460" Spacing="12">
+        <InfoBar x:Name="ErrorBar" IsOpen="False" IsClosable="True" Severity="Error" />
+        <TextBlock x:Name="Description" TextWrapping="Wrap" />
+        <ComboBox
+            x:Name="ChoiceBox"
+            Header="Identity"
+            DisplayMemberPath="Label"
+            HorizontalAlignment="Stretch"
+            AutomationProperties.AutomationId="FolderIdentityChoice"
+            SelectionChanged="ChoiceBox_SelectionChanged" />
+        <dialogs:IdentityForm x:Name="Form" Visibility="Collapsed" />
+        <TextBlock
+            x:Name="ImpactText"
+            Style="{ThemeResource CaptionTextBlockStyle}"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            TextWrapping="Wrap" />
+    </StackPanel>
+</ContentDialog>

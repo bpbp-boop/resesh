@@ -1,0 +1,21 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.IdentityEditDialog"
+    Style="{StaticResource DefaultContentDialogStyle}"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:dialogs="using:Resesh.App.Dialogs"
+    PrimaryButtonText="Save"
+    CloseButtonText="Cancel"
+    DefaultButton="Primary"
+    PrimaryButtonClick="OnPrimaryButtonClick">
+
+    <StackPanel Width="460" Spacing="12">
+        <InfoBar x:Name="ErrorBar" IsOpen="False" IsClosable="True" Severity="Error" />
+        <dialogs:IdentityForm x:Name="Form" />
+        <TextBlock
+            x:Name="UsageText"
+            Style="{ThemeResource CaptionTextBlockStyle}"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            TextWrapping="Wrap" />
+    </StackPanel>
+</ContentDialog>

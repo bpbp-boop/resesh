@@ -25,6 +25,7 @@ public sealed class SessionStore
     private List<Session> _sessions = [];
     private List<string> _folders = [];
     private List<string> _localFolders = [];
+    private List<FolderSettings> _folderSettings = [];
 
     private List<string> FolderListOf(SessionKind kind) =>
         kind == SessionKind.Local ? _localFolders : _folders;
@@ -80,6 +81,84 @@ public sealed class SessionStore
             _sessions = data.Sessions ?? [];
             _folders = data.Folders ?? [];
             _localFolders = data.LocalFolders ?? [];
+            _folderSettings = (data.FolderSettings ?? [])
+                .Select(f => f with { Path = FolderPaths.Normalize(f.Path) })
+                .Where(f => f.IdentityId is not null)
+                .DistinctBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+    }
+
+    // ---- Folder settings (remote tree only; local profiles have no logins) ----
+
+    /// <summary>Settings saved on remote-tree folders. The empty path is the tree root.</summary>
+    public IReadOnlyList<FolderSettings> FolderSettings
+    {
+        get { lock (_gate) return _folderSettings.ToList(); }
+    }
+
+    /// <summary>The identity attached directly to this folder (not inherited), or null.</summary>
+    public Guid? FolderIdentity(string folderPath)
+    {
+        folderPath = FolderPaths.Normalize(folderPath);
+        lock (_gate)
+            return _folderSettings.FirstOrDefault(f => f.Path.Equals(folderPath, StringComparison.OrdinalIgnoreCase))?.IdentityId;
+    }
+
+    /// <summary>Attaches an identity to a remote-tree folder, or detaches it with null.</summary>
+    public void SetFolderIdentity(string folderPath, Guid? identityId)
+    {
+        folderPath = FolderPaths.Normalize(folderPath);
+        lock (_gate)
+        {
+            var index = _folderSettings.FindIndex(f => f.Path.Equals(folderPath, StringComparison.OrdinalIgnoreCase));
+            if (index >= 0 && _folderSettings[index].IdentityId == identityId)
+                return;
+            if (index >= 0)
+                _folderSettings.RemoveAt(index);
+            if (identityId is not null)
+                _folderSettings.Add(new FolderSettings { Path = folderPath, IdentityId = identityId });
+            Save();
+        }
+    }
+
+    /// <summary>Adds imported folder settings for folders that have none; local settings win.</summary>
+    public void MergeFolderSettings(IEnumerable<FolderSettings> settings)
+    {
+        lock (_gate)
+        {
+            var changed = false;
+            foreach (var setting in settings)
+            {
+                var path = FolderPaths.Normalize(setting.Path);
+                if (setting.IdentityId is null
+                    || _folderSettings.Any(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                _folderSettings.Add(setting with { Path = path });
+                changed = true;
+            }
+            if (changed)
+                Save();
+        }
+    }
+
+    /// <summary>Detaches an identity everywhere: folders drop it, sessions that chose it
+    /// inherit again. Returns the number of folders and sessions changed.</summary>
+    public int DetachIdentity(Guid identityId)
+    {
+        lock (_gate)
+        {
+            var changed = _folderSettings.RemoveAll(f => f.IdentityId == identityId);
+            for (var i = 0; i < _sessions.Count; i++)
+            {
+                if (_sessions[i].IdentityId != identityId)
+                    continue;
+                _sessions[i] = _sessions[i] with { IdentityId = null, InheritLogin = true };
+                changed++;
+            }
+            if (changed > 0)
+                Save();
+            return changed;
         }
     }
 
@@ -235,8 +314,29 @@ public sealed class SessionStore
             if (kind == SessionKind.Local)
                 _localFolders = renamed;
             else
+            {
                 _folders = renamed;
+                ReparentFolderSettings(oldPath, newPath);
+            }
             Save();
+        }
+    }
+
+    /// <summary>Moves folder settings with their folder. When the destination already has
+    /// its own setting, the destination keeps it: sessions already there keep their login.</summary>
+    private void ReparentFolderSettings(string oldPath, string newPath)
+    {
+        var moved = _folderSettings
+            .Select(f => (Setting: f, Path: FolderPaths.Reparent(f.Path, oldPath, newPath)))
+            .Where(m => m.Path is not null)
+            .ToList();
+        if (moved.Count == 0)
+            return;
+        _folderSettings.RemoveAll(f => moved.Any(m => ReferenceEquals(m.Setting, f)));
+        foreach (var (setting, path) in moved)
+        {
+            if (!_folderSettings.Any(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
+                _folderSettings.Add(setting with { Path = path! });
         }
     }
 
@@ -257,6 +357,8 @@ public sealed class SessionStore
                 .ToList();
             _sessions.RemoveAll(s => s.FolderScope == kind && FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath));
             FolderListOf(kind).RemoveAll(f => FolderPaths.IsSelfOrDescendant(f, folderPath));
+            if (kind != SessionKind.Local)
+                _folderSettings.RemoveAll(f => f.Path.Length > 0 && FolderPaths.IsSelfOrDescendant(f.Path, folderPath));
             Save();
             return removed;
         }
@@ -269,6 +371,7 @@ public sealed class SessionStore
             Sessions = _sessions,
             Folders = _folders,
             LocalFolders = _localFolders.Count > 0 ? _localFolders : null,
+            FolderSettings = _folderSettings.Count > 0 ? _folderSettings : null,
         };
         var json = JsonSerializer.Serialize(data, JsonOptions);
 
@@ -286,5 +389,8 @@ public sealed class SessionStore
 
         /// <summary>Folders under the virtual Local root (separate namespace from Folders).</summary>
         public List<string>? LocalFolders { get; set; }
+
+        /// <summary>Remote-tree folder settings, keyed by path. Older builds ignore it.</summary>
+        public List<FolderSettings>? FolderSettings { get; set; }
     }
 }

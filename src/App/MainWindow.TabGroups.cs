@@ -59,6 +59,26 @@ public sealed partial class MainWindow
         return tab;
     }
 
+    /// <summary>Opens an import review tab; completes when the user imports (with the
+    /// outcome) or closes the tab (null). Each review gets its own tab.</summary>
+    internal Task<ImportOutcome?> ReviewImportAsync(Core.Import.ImportScanResult scan, string sourceName)
+    {
+        var group = ViewModel.FocusedGroup;
+        var tab = TabViewModel.CreateAppPage(AppPage.Import, _viewModelEnvironment);
+        ViewModel.AttachTab(tab, group, group.Tabs.Count);
+        MainWindow Host() => App.WindowFor(tab) ?? this;
+        var view = new ImportView(scan, sourceName);
+        view.CloseRequested += () => Host().CloseTabCore(tab);
+        view.ManageIdentitiesRequested += () => _ = Host().ShowSettingsAsync(GlobalSettingsTarget.Identities);
+        view.Completion.ContinueWith(_ => DispatcherQueue.TryEnqueue(() => Host().ViewModel.RebuildTree()),
+            TaskScheduler.Default);
+        tab.View = view;
+        _groupViews[group].AddTerminal(view);
+        group.SelectedTab = tab;
+        FocusGroup(group);
+        return view.Completion;
+    }
+
     // Welcome can be dragged to another window, so its actions go to the window hosting it now.
     private void OpenWelcome() => OpenAppPage(AppPage.Welcome, tab =>
     {
@@ -72,6 +92,8 @@ public sealed partial class MainWindow
         view.FinishRequested += () => Host().FinishOnboarding(tab, view);
         view.NewSessionRequested += () => _ = Host().OpenSessionEditorAsync(existing: null, defaultFolder: "");
         view.LocalShellRequested += () => Host().OpenDefaultLocalProfile();
+        view.ManageIdentitiesRequested += () => _ = Host().ShowSettingsAsync(GlobalSettingsTarget.Identities);
+        view.ReviewImport = (scan, source) => Host().ReviewImportAsync(scan, source);
         return view;
     });
 
@@ -135,6 +157,17 @@ public sealed partial class MainWindow
             if (App.WindowFor(tab) is { } owner && App.Store.Find(tab.Session.Id) is { Icon: null } current)
             {
                 try { owner.ViewModel.UpdateSession(current with { Icon = key }, null); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    App.ReportRecoverableError(exception);
+                }
+            }
+        };
+        view.LoginChanged += (session, password) =>
+        {
+            if (App.WindowFor(tab) is { } owner && App.Store.Find(session.Id) is not null)
+            {
+                try { owner.ViewModel.UpdateSession(session, password); }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
                     App.ReportRecoverableError(exception);

@@ -53,6 +53,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         ResolveTheme = App.ResolveTheme,
         ShowAgentIcons = () => App.Settings.Current.ShowAgentIcons,
         IsSessionVisible = session => !session.IsLocal || !session.BuiltIn || App.AvailableLocalShells.Contains(session.Id),
+        LoginUsername = App.LoginUsername,
         ApplySessionSettings = tab =>
         {
             if (tab.View is TerminalTabView view)
@@ -1210,7 +1211,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             SetLaunchAtSignIn = enabled => Interop.SignInLaunch.TrySet(enabled, Environment.ProcessPath!),
         });
         settings.SettingChanged += property => App.ApplySettingChange(property, source: settings);
-        return new SettingsPage(settings);
+        var page = new SettingsPage(settings);
+        page.ConnectRequested += session => ConnectSession(session);
+        return page;
     }
 
     /// <summary>Re-reads this window's Settings page after another window or command changed settings.</summary>

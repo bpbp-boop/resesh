@@ -284,7 +284,7 @@ public sealed partial class MainViewModel : ObservableObject
         _store.Update(session);
         if (!string.IsNullOrEmpty(password))
             _credentials.Write(session.Id, password);
-        else if (previous?.AuthMethod == AuthMethod.Password && session.AuthMethod != AuthMethod.Password)
+        else if (UsesOwnPassword(previous) && !UsesOwnPassword(session))
             _credentials.Delete(session.Id);
         foreach (var tab in AllTabs.Where(t => t.Session.Id == session.Id))
         {
@@ -307,6 +307,11 @@ public sealed partial class MainViewModel : ObservableObject
         else
             node.UpdateSession(session);
     }
+
+    /// <summary>True when the session keeps its own password under its id. Identity logins
+    /// keep theirs under the identity, so moving to one drops the session's copy.</summary>
+    private static bool UsesOwnPassword(Session? session) =>
+        session is { Login: SessionLogin.Own, AuthMethod: AuthMethod.Password };
 
     private static bool SearchableFieldsChanged(Session before, Session after) =>
         before.Name != after.Name

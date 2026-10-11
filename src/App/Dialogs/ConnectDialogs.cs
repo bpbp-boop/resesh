@@ -38,12 +38,22 @@ public static class ConnectDialogs
 
     /// <summary>Prompts for a password/passphrase. Returns (secret, save) or null on cancel.</summary>
     public static async Task<(string Secret, bool Save)?> PromptCredentialAsync(
-        XamlRoot xamlRoot, string title, string prompt)
+        XamlRoot xamlRoot, string title, string prompt,
+        string? saveLabel = "Save in Windows Credential Manager", string primaryText = "Connect")
     {
-        var dialog = new CredentialDialog(title, prompt) { XamlRoot = xamlRoot };
+        var dialog = new CredentialDialog(title, prompt, saveLabel, primaryText) { XamlRoot = xamlRoot };
         return await ShowAsync(dialog) == ContentDialogResult.Primary
             ? (dialog.Secret, dialog.Save)
             : null;
+    }
+
+    /// <summary>Asks for a username and password when no login applies to the session, and
+    /// where to remember them. Returns null on cancel.</summary>
+    public static async Task<LoginAnswer?> PromptLoginAsync(
+        XamlRoot xamlRoot, Resesh.Core.Models.Session session, string username, bool canRemember, bool identityMissing)
+    {
+        var dialog = new LoginDialog(session, username, canRemember, identityMissing) { XamlRoot = xamlRoot };
+        return await ShowAsync(dialog) == ContentDialogResult.Primary ? dialog.Answer : null;
     }
 
     /// <summary>Shows each keyboard-interactive challenge and returns its explicit response.</summary>

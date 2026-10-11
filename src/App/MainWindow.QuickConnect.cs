@@ -51,7 +51,8 @@ public sealed partial class MainWindow
                     ? s.Local?.Executable ?? "local shell"
                     : s.IsTelnet
                         ? $"telnet {s.Host}" + (s.Port != 23 ? $":{s.Port}" : "")
-                        : $"{s.Username}@{s.Host}" + (s.Port != 22 ? $":{s.Port}" : ""),
+                        : (App.LoginUsername(s) is { Length: > 0 } user ? $"{user}@{s.Host}" : s.Host)
+                            + (s.Port != 22 ? $":{s.Port}" : ""),
                 Glyph = s.IsLocal ? "\uE7F8" : "\uEDA2",
                 Session = s,
             }));

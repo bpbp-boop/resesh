@@ -153,7 +153,7 @@
                     <MenuFlyoutItem Text="Open Recording…" Command="{x:Bind ViewModel.OpenRecordingCommand}" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Import sessions…" Command="{x:Bind ViewModel.ImportSessionsCommand}" />
-                    <MenuFlyoutItem Text="SSH Keys…" Command="{x:Bind ViewModel.ShowSshKeysCommand}" />
+                    <MenuFlyoutItem Text="Identities &amp; Keys…" Command="{x:Bind ViewModel.ShowSshKeysCommand}" />
                     <MenuFlyoutItem Text="Export backup…" Command="{x:Bind ViewModel.ExportBackupCommand}" />
                     <MenuFlyoutItem Text="Import backup…" Command="{x:Bind ViewModel.ImportBackupCommand}" />
                     <MenuFlyoutSeparator />

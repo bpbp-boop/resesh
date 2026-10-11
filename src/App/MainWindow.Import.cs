@@ -58,7 +58,8 @@ public sealed partial class MainWindow
                 App.Highlights,
                 App.SshKeys,
                 App.Credentials,
-                options));
+                options,
+                App.Identities));
 
             await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Backup complete", options.IncludeSecrets
                 ? "The encrypted backup was saved. Keep its passphrase in a safe place."
@@ -112,7 +113,8 @@ public sealed partial class MainWindow
                 App.Highlights,
                 App.SshKeys,
                 App.Credentials,
-                resolutions));
+                resolutions,
+                App.Identities));
 
             App.Icons.InvalidateCustomIcons();
             App.Workspaces.Load();
@@ -179,16 +181,8 @@ public sealed partial class MainWindow
                 return;
             }
 
-            var preview = new ImportPreviewDialog(scan, sourceName) { XamlRoot = Root.XamlRoot };
-            await preview.ShowModalAsync();
-            if (preview.Confirmed is not { Count: > 0 } confirmed)
-                return;
-
-            var (imported, duplicates) = Core.Import.SecureCrtImporter.Commit(App.Store, confirmed, App.SshKeys);
-            ViewModel.RebuildTree();
-            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Import complete", duplicates == 0
-                ? $"Imported {imported} session(s)."
-                : $"Imported {imported} session(s); skipped {duplicates} duplicate(s).");
+            // The review tab shows the result itself and rebuilds the tree when it imports.
+            _ = ReviewImportAsync(scan, sourceName);
         }
         catch (Exception ex)
         {

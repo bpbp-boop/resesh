@@ -26,30 +26,40 @@ internal static class SshConnectionFactory
                 var password = new PasswordAuthenticationMethod(user, secret ?? "");
                 // Some servers demand keyboard-interactive. Every prompt must be answered
                 // explicitly; never send the saved password to an arbitrary challenge.
-                var interactive = new KeyboardInteractiveAuthenticationMethod(user);
-                interactive.AuthenticationPrompt += (_, e) =>
-                {
-                    var requests = e.Prompts
-                        .Select(prompt => new KeyboardInteractivePrompt(prompt.Request, !prompt.IsEchoed))
-                        .ToList();
-                    var responses = interactiveResponder?.Invoke(requests);
-                    if (responses is null || responses.Count != e.Prompts.Count)
-                        return;
-                    for (var index = 0; index < e.Prompts.Count; index++)
-                        e.Prompts[index].Response = responses[index];
-                };
-                return [password, interactive];
+                return [password, Interactive(user, interactiveResponder)];
             }
             case Models.AuthMethod.PrivateKey:
             {
                 var keyFile = string.IsNullOrEmpty(secret)
                     ? new PrivateKeyFile(session.PrivateKeyPath!)
                     : new PrivateKeyFile(session.PrivateKeyPath!, secret);
-                return [new PrivateKeyAuthenticationMethod(user, keyFile)];
+                // Like SecureCRT's publickey-then-keyboard-interactive order: a host that
+                // refuses the key can still ask for a password, answered by the user.
+                return interactiveResponder is null
+                    ? [new PrivateKeyAuthenticationMethod(user, keyFile)]
+                    : [new PrivateKeyAuthenticationMethod(user, keyFile), Interactive(user, interactiveResponder)];
             }
             default:
                 return [new NoneAuthenticationMethod(user)];
         }
+    }
+
+    private static KeyboardInteractiveAuthenticationMethod Interactive(
+        string user, Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? responder)
+    {
+        var interactive = new KeyboardInteractiveAuthenticationMethod(user);
+        interactive.AuthenticationPrompt += (_, e) =>
+        {
+            var requests = e.Prompts
+                .Select(prompt => new KeyboardInteractivePrompt(prompt.Request, !prompt.IsEchoed))
+                .ToList();
+            var responses = responder?.Invoke(requests);
+            if (responses is null || responses.Count != e.Prompts.Count)
+                return;
+            for (var index = 0; index < e.Prompts.Count; index++)
+                e.Prompts[index].Response = responses[index];
+        };
+        return interactive;
     }
 
     internal static SshSessionException Classify(Exception ex) => ex switch
