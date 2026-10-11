@@ -20,7 +20,10 @@ public static class AgentAdapters
     public const string SequenceReference =
         "ESC ] 7377 ; agent ; id=<agent> ; state=<state> ; label=<text> BEL\n" +
         "states: working | needs-approval | needs-answer | complete | failed | idle | exit\n" +
-        "values are percent-encoded; label is optional and shown only in the tab tooltip";
+        "values are percent-encoded; label is optional and shown only in the tab tooltip\n\n" +
+        "Claude Code hooks return stdout JSON with terminalSequence containing:\n" +
+        "ESC ] 777 ; notify ; resesh-agent ; id=<agent> ; state=<state> ; label=<text> BEL\n" +
+        "The exact title resesh-agent is reserved for structured status. Other terminals may show it as a desktop notification.";
 
     public static IReadOnlyList<AgentAdapterSnippet> All =>
     [
@@ -93,41 +96,51 @@ public static class AgentAdapters
         + $"$b=[Text.Encoding]::UTF8.GetBytes([char]27+']7377;agent;id=codex;state={state}'+[char]7); "
         + "$s.Write($b,0,$b.Length); $s.Dispose()\"";
 
-    /// <summary>Claude Code hooks on a POSIX host (Linux/macOS/WSL). Writes straight to the
-    /// tty so the sequence reaches the terminal instead of the hook's captured stdout.</summary>
+    /// <summary>Claude Code emits terminalSequence from hook stdout; hooks themselves
+    /// have no controlling terminal. printf %s preserves the JSON's Unicode escapes.</summary>
     public static AgentAdapterSnippet ClaudeCodePosix() => new(
         "Claude Code",
         "~/.claude/settings.json · Linux, macOS, WSL",
-        "Reports working, approval, finished, and exit states from Claude Code hooks.",
-        """
-        {
-          "hooks": {
-            "SessionStart":     [{ "hooks": [{ "type": "command", "command": "printf '\\033]7377;agent;id=claude;state=working\\007' > /dev/tty" }] }],
-            "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "printf '\\033]7377;agent;id=claude;state=working\\007' > /dev/tty" }] }],
-            "Notification":     [{ "hooks": [{ "type": "command", "command": "printf '\\033]7377;agent;id=claude;state=needs-approval\\007' > /dev/tty" }] }],
-            "Stop":             [{ "hooks": [{ "type": "command", "command": "printf '\\033]7377;agent;id=claude;state=complete\\007' > /dev/tty" }] }],
-            "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "printf '\\033]7377;agent;id=claude;state=exit\\007' > /dev/tty" }] }]
-          }
-        }
-        """);
+        "Reports working, approval, finished, and exit states via Claude Code's terminalSequence JSON output. " +
+        "Interactive sessions only. In another terminal, the reserved resesh-agent title may appear as a desktop notification.",
+        ClaudeCodeHooksJson(windows: false));
 
-    /// <summary>Claude Code hooks on Windows. A hook process inherits the tab's
-    /// pseudoconsole, so writing to the console reaches the terminal directly.</summary>
+    /// <summary>The single-quoted echo argument preserves JSON escapes in both Git Bash
+    /// and PowerShell, without a console device or a nested PowerShell command.</summary>
     public static AgentAdapterSnippet ClaudeCodeWindows() => new(
         "Claude Code",
         "%USERPROFILE%\\.claude\\settings.json · Windows",
-        "Reports the same lifecycle states through the Windows pseudoconsole.",
-        """
+        "Reports the same lifecycle states via Claude Code's terminalSequence JSON output (Git Bash or PowerShell). " +
+        "Interactive sessions only. In another terminal, the reserved resesh-agent title may appear as a desktop notification.",
+        ClaudeCodeHooksJson(windows: true));
+
+    private static string ClaudeCodeHooksJson(bool windows)
+    {
+        var eventStates = new (string Event, string State)[]
         {
-          "hooks": {
-            "SessionStart":     [{ "hooks": [{ "type": "command", "command": "powershell -NoProfile -Command \"[Console]::Write([char]27+']7377;agent;id=claude;state=working'+[char]7)\"" }] }],
-            "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "powershell -NoProfile -Command \"[Console]::Write([char]27+']7377;agent;id=claude;state=working'+[char]7)\"" }] }],
-            "Notification":     [{ "hooks": [{ "type": "command", "command": "powershell -NoProfile -Command \"[Console]::Write([char]27+']7377;agent;id=claude;state=needs-approval'+[char]7)\"" }] }],
-            "Stop":             [{ "hooks": [{ "type": "command", "command": "powershell -NoProfile -Command \"[Console]::Write([char]27+']7377;agent;id=claude;state=complete'+[char]7)\"" }] }],
-            "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "powershell -NoProfile -Command \"[Console]::Write([char]27+']7377;agent;id=claude;state=exit'+[char]7)\"" }] }]
-          }
+            ("SessionStart", "working"),
+            ("UserPromptSubmit", "working"),
+            ("Notification", "needs-approval"),
+            ("Stop", "complete"),
+            ("SessionEnd", "exit"),
+        };
+        var hooks = new Dictionary<string, object>();
+        foreach (var (eventName, state) in eventStates)
+        {
+            // The payload is constant and never inspects tool input or returns decisions.
+            // Ignoring stdin is harmless; no input field is needed to report the event.
+            // Literal JSON escapes keep control bytes off the shell command line.
+            var json = "{\"terminalSequence\":\"\\u001b]777;notify;" +
+                AgentOsc.StructuredNotifyTitle + ";id=claude;state=" + state + "\\u0007\"}";
+            var command = windows ? $"echo '{json}'" : $"printf '%s\\n' '{json}'";
+            hooks[eventName] = new[]
+            {
+                new { hooks = new[] { new { type = "command", command } } },
+            };
         }
-        """);
+        return JsonSerializer.Serialize(new { hooks },
+            new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+    }
 
     /// <summary>A shell helper for agents with no hook system: wrap the run, and report
     /// its start, end and exit status by hand.</summary>

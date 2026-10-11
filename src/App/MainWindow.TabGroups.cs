@@ -59,6 +59,26 @@ public sealed partial class MainWindow
         return tab;
     }
 
+    /// <summary>Opens an import review tab; completes when the user imports (with the
+    /// outcome) or closes the tab (null). Each review gets its own tab.</summary>
+    internal Task<ImportOutcome?> ReviewImportAsync(Core.Import.ImportScanResult scan, string sourceName)
+    {
+        var group = ViewModel.FocusedGroup;
+        var tab = TabViewModel.CreateAppPage(AppPage.Import, _viewModelEnvironment);
+        ViewModel.AttachTab(tab, group, group.Tabs.Count);
+        MainWindow Host() => App.WindowFor(tab) ?? this;
+        var view = new ImportView(scan, sourceName);
+        view.CloseRequested += () => Host().CloseTabCore(tab);
+        view.ManageIdentitiesRequested += () => _ = Host().ShowSettingsAsync(GlobalSettingsTarget.Identities);
+        view.Completion.ContinueWith(_ => DispatcherQueue.TryEnqueue(() => App.RefreshSessionsInAllWindows()),
+            TaskScheduler.Default);
+        tab.View = view;
+        _groupViews[group].AddTerminal(view);
+        group.SelectedTab = tab;
+        FocusGroup(group);
+        return view.Completion;
+    }
+
     // Welcome can be dragged to another window, so its actions go to the window hosting it now.
     private void OpenWelcome() => OpenAppPage(AppPage.Welcome, tab =>
     {
@@ -66,12 +86,14 @@ public sealed partial class MainWindow
         var view = new OnboardingView(
             App.Settings.Current,
             App.PreviewThemeInAllWindows,
-            () => Host().ViewModel.RebuildTree(),
+            () => App.RefreshSessionsInAllWindows(),
             Core.Local.LocalShellDiscovery.DefaultProfile(
                 App.Store, App.Settings.Current.DefaultLocalProfileId, App.AvailableLocalShells)?.Name);
         view.FinishRequested += () => Host().FinishOnboarding(tab, view);
         view.NewSessionRequested += () => _ = Host().OpenSessionEditorAsync(existing: null, defaultFolder: "");
         view.LocalShellRequested += () => Host().OpenDefaultLocalProfile();
+        view.ManageIdentitiesRequested += () => _ = Host().ShowSettingsAsync(GlobalSettingsTarget.Identities);
+        view.ReviewImport = (scan, source) => Host().ReviewImportAsync(scan, source);
         return view;
     });
 
@@ -80,7 +102,9 @@ public sealed partial class MainWindow
         if (!ViewModel.AllTabs.Contains(tab))
             return;
 
-        App.SaveSettings(view.Complete());
+        if (!App.SaveSettings(view.Complete()))
+            return;
+        view.MarkCompleted();
         App.ApplySettingsToAllWindows();
         CloseTabCore(tab);
     }
@@ -95,14 +119,8 @@ public sealed partial class MainWindow
         TabViewModel? insertAfter = null)
     {
         var tab = ViewModel.Connect(session, group, insertAfter);
-        if (resumeTmuxSlot is { } slot)
-            tab.TmuxSlot = slot;
-        var tmuxSlotsAlreadyOpen = ViewModel.AllTabs
-            .Where(other => other != tab && other.Session.Id == session.Id)
-            .Select(other => other.TmuxSlot)
-            .ToHashSet();
         var view = new TerminalTabView(
-            tab, App.Credentials, App.KnownHosts, App.SshKeys, tmuxSlotsAlreadyOpen, resumeTmuxSlot);
+            tab, App.Credentials, App.KnownHosts, App.SshKeys, resumeTmuxSlot);
         WireTerminalWindowEvents(tab, view);
         tab.View = view;
         _groupViews[ViewModel.GroupOf(tab)].AddTerminal(view);
@@ -135,6 +153,17 @@ public sealed partial class MainWindow
             if (App.WindowFor(tab) is { } owner && App.Store.Find(tab.Session.Id) is { Icon: null } current)
             {
                 try { owner.ViewModel.UpdateSession(current with { Icon = key }, null); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    App.ReportRecoverableError(exception);
+                }
+            }
+        };
+        view.LoginChanged += (session, password) =>
+        {
+            if (App.WindowFor(tab) is { } owner && App.Store.Find(session.Id) is not null)
+            {
+                try { owner.ViewModel.UpdateSession(session, password); }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
                     App.ReportRecoverableError(exception);
@@ -538,7 +567,8 @@ public sealed partial class MainWindow
         var branch = (SplitLayoutBranch<TabGroupViewModel>)node;
         var grid = new Grid();
         var isColumns = branch.Orientation == SplitOrientation.Columns;
-        var hasSavedSizes = _savedPaneSizes.TryGetValue(branch, out var savedSizes);
+        var hasSavedSizes = _savedPaneSizes.TryGetValue(branch, out var savedSizes)
+            && savedSizes.Count == branch.Children.Count;
 
         for (var index = 0; index < branch.Children.Count; index++)
         {
@@ -672,17 +702,9 @@ public sealed partial class MainWindow
                 group.Tabs.Move(index, target);
             group.SelectedTab = selected; // the move must not steal selection
         }
-        SavePinnedSessions();
+        App.SavePinnedSessions();
     }
 
-    private void SavePinnedSessions()
-    {
-        App.SaveSettings(App.Settings.Current with
-        {
-            PinnedSessionIds = ViewModel.AllTabs.Where(t => t.IsPinned).Select(t => t.Session.Id).Distinct().ToList(),
-        });
-        App.RefreshJumpList();
-    }
 
     /// <summary>Reopens and reconnects the pinned sessions from the last run; called once at launch.</summary>
     public void RestorePinnedSessions()
@@ -801,14 +823,26 @@ public sealed partial class MainWindow
         {
             using var connection = await view.CreateRemoteManagementConnectionAsync();
             if (connection is null) return;
-            var openSlots = ViewModel.AllTabs
-                .Where(other => other.Session.Id == tab.Session.Id && !other.IsPlayback)
-                .Select(other => other.TmuxSlot)
-                .ToHashSet();
+            var openSlots = App.TmuxSlots.ReservedSlots(tab.Session.Id);
             slot = await RemoteSessionsDialog.ManageAsync(Root.XamlRoot, tab.Session.Name,
                 tab.Session.Id, openSlots,
                 () => Task.Run(() => connection.RunCommand(Resesh.Core.Ssh.TmuxPersistence.ManagementCommand())),
-                selected => Task.Run(() => connection.TryRunCommand(Resesh.Core.Ssh.TmuxPersistence.KillCommand(tab.Session.Id, selected))));
+                selected => Task.Run(() =>
+                {
+                    // Each target is held while it ends; one claimed by a tab since discovery is skipped.
+                    var guards = selected.Select(_ => App.TmuxSlots.CreateOwner(tab.Session.Id)).ToList();
+                    try
+                    {
+                        var ending = selected.Where((target, index) => guards[index].TryReserve(target)).ToList();
+                        return ending.Count > 0
+                            && connection.TryRunCommand(Resesh.Core.Ssh.TmuxPersistence.KillCommand(tab.Session.Id, ending));
+                    }
+                    finally
+                    {
+                        foreach (var guard in guards)
+                            guard.Dispose();
+                    }
+                }));
         }
         catch (Exception exception)
         {
@@ -819,13 +853,15 @@ public sealed partial class MainWindow
         finally { _managingRemoteSessions = false; }
         if (slot is not { } selectedSlot)
             return;
-        var existing = ViewModel.AllTabs.FirstOrDefault(other => other.Session.Id == tab.Session.Id
-            && other.TmuxSlot == selectedSlot && !other.IsPlayback);
+        var existing = App.AllTabs.FirstOrDefault(other => other.Session.Id == tab.Session.Id
+            && other.View is TerminalTabView candidate && candidate.ReservedTmuxSlot == selectedSlot && !other.IsPlayback);
         if (existing is not null)
         {
-            var group = ViewModel.GroupOf(existing);
+            var owner = App.WindowFor(existing)!;
+            var group = owner.ViewModel.GroupOf(existing);
             group.SelectedTab = existing;
-            FocusGroup(group);
+            owner.FocusGroup(group);
+            owner.BringToFront();
             if (!existing.IsLocked && existing.View is TerminalTabView existingView
                 && existing.State is TabConnectionState.Disconnected or TabConnectionState.Exited)
                 await existingView.ResumeRemoteSessionAsync(selectedSlot);

@@ -27,13 +27,14 @@ public sealed class LocalTerminalSession : ITerminalBackend
     private FileStream? _inputStream;
     private IntPtr _console;               // HPCON
     private IntPtr _job;
-    private IntPtr _process;
+    private SafeProcessHandle? _process;
     private int _processId;
     private Thread? _readerThread;
     private Thread? _exitThread;
     private int _exitRaised;
     private long _lastOutputTicks;
     private volatile bool _disposed;
+    private readonly object _exitGate = new();
 
     public event TerminalOutputHandler? OutputReceived;
 
@@ -47,7 +48,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
     public int ProcessId => _processId;
     public string? ShellIntegrationMessage { get; private set; }
 
-    public bool IsRunning => _process != IntPtr.Zero && _exitRaised == 0 && !_disposed;
+    public bool IsRunning => _process is not null && Volatile.Read(ref _exitRaised) == 0 && !_disposed;
 
     /// <summary>
     /// Starts the shell described by the session's <see cref="LocalTarget"/> at the given
@@ -56,7 +57,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
     /// </summary>
     public void Start(Session session, int columns, int rows)
     {
-        if (_process != IntPtr.Zero)
+        if (_process is not null || _disposed)
             throw new InvalidOperationException("Session already used; create a new instance per launch.");
         var target = session.Local
             ?? throw new ArgumentException("Session has no local target.", nameof(session));
@@ -73,6 +74,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
         SafeFileHandle? inputRead = null, outputWrite = null;
         var attributes = IntPtr.Zero;
         var environment = IntPtr.Zero;
+        var processThread = IntPtr.Zero;
         try
         {
             if (!CreatePipe(out inputRead, out _inputWrite, IntPtr.Zero, 0)
@@ -131,7 +133,8 @@ public sealed class LocalTerminalSession : ITerminalBackend
                 throw new LocalSessionException($"Could not start {executable}: {error.Message}", error);
             }
 
-            _process = process.hProcess;
+            processThread = process.hThread;
+            _process = new SafeProcessHandle(process.hProcess, ownsHandle: true);
             _processId = process.dwProcessId;
 
             _job = CreateJobObjectW(IntPtr.Zero, null);
@@ -145,26 +148,43 @@ public sealed class LocalTerminalSession : ITerminalBackend
                     ref limits, Marshal.SizeOf<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>());
                 AssignProcessToJobObject(_job, _process);
             }
-            ResumeThread(process.hThread);
-            CloseHandle(process.hThread);
+            ResumeThread(processThread);
+            CloseHandle(processThread);
+            processThread = IntPtr.Zero;
 
             _lastOutputTicks = Environment.TickCount64;
             _inputStream = new FileStream(_inputWrite!, FileAccess.Write);
             _readerThread = new Thread(() => ReadLoop(_outputRead!)) { IsBackground = true, Name = "conpty-read" };
             _readerThread.Start();
-            _exitThread = new Thread(WaitForExit) { IsBackground = true, Name = "conpty-wait" };
-            _exitThread.Start();
+            // Pin before launching the waiter: Stop may dispose the SafeHandle before the
+            // thread is scheduled, but the native handle must survive both wait and exit-code read.
+            var processHandle = _process;
+            var pinned = false;
+            processHandle.DangerousAddRef(ref pinned);
+            try
+            {
+                _exitThread = new Thread(() => WaitForExit(processHandle)) { IsBackground = true, Name = "conpty-wait" };
+                _exitThread.Start();
+            }
+            catch
+            {
+                if (pinned)
+                    processHandle.DangerousRelease();
+                throw;
+            }
             TraceHook?.Invoke($"local start: pid {_processId} {commandLine}");
         }
         catch
         {
             inputRead?.Dispose();
             outputWrite?.Dispose();
-            Cleanup();
+            Stop();
             throw;
         }
         finally
         {
+            if (processThread != IntPtr.Zero)
+                CloseHandle(processThread);
             if (attributes != IntPtr.Zero)
             {
                 DeleteProcThreadAttributeList(attributes);
@@ -198,10 +218,20 @@ public sealed class LocalTerminalSession : ITerminalBackend
         TraceHook?.Invoke($"local read loop exit: pid {_processId}");
     }
 
-    private void WaitForExit()
+    private void WaitForExit(SafeProcessHandle process)
     {
-        WaitForSingleObject(_process, INFINITE);
-        GetExitCodeProcess(_process, out var code);
+        uint code;
+        try
+        {
+            var handle = process.DangerousGetHandle(); // pinned by Start
+            WaitForSingleObject(handle, INFINITE);
+            GetExitCodeProcess(handle, out code);
+        }
+        finally
+        {
+            process.Dispose();
+            process.DangerousRelease();
+        }
         // conhost renders the client's final output asynchronously; closing the console too
         // early drops it (observed: a fast `cmd /c echo` lost its line). Wait for the output
         // stream to go quiet, then close — which EOFs the reader — and drain it, so the exit
@@ -214,10 +244,13 @@ public sealed class LocalTerminalSession : ITerminalBackend
         }
         CloseConsole();
         try { _readerThread?.Join(TimeSpan.FromSeconds(5)); } catch (ThreadStateException) { }
-        if (Interlocked.Exchange(ref _exitRaised, 1) == 0 && !_disposed)
+        lock (_exitGate)
         {
-            TraceHook?.Invoke($"local exit: pid {_processId} code {code}");
-            Exited?.Invoke(unchecked((int)code));
+            if (Interlocked.Exchange(ref _exitRaised, 1) == 0 && !_disposed)
+            {
+                TraceHook?.Invoke($"local exit: pid {_processId} code {code}");
+                Exited?.Invoke(unchecked((int)code));
+            }
         }
     }
 
@@ -296,9 +329,27 @@ public sealed class LocalTerminalSession : ITerminalBackend
     public string? TryGetCurrentDirectory()
     {
         var process = _process;
-        if (_disposed || process == IntPtr.Zero || IntPtr.Size != 8)
+        if (_disposed || process is null || IntPtr.Size != 8)
             return null;
+        var pinned = false;
+        try
+        {
+            process.DangerousAddRef(ref pinned);
+            return ReadCurrentDirectory(process.DangerousGetHandle());
+        }
+        catch (ObjectDisposedException)
+        {
+            return null; // Stop or the exit waiter disposed it before we could pin it.
+        }
+        finally
+        {
+            if (pinned)
+                process.DangerousRelease();
+        }
+    }
 
+    private static string? ReadCurrentDirectory(IntPtr process)
+    {
         if (NtQueryInformationProcess(
                 process, ProcessBasicInformation, out var basic, Marshal.SizeOf<PROCESS_BASIC_INFORMATION>(),
                 out _) != 0 ||
@@ -397,20 +448,29 @@ public sealed class LocalTerminalSession : ITerminalBackend
     /// stop is reported by the caller). Idempotent; also the Dispose path.</summary>
     public void Stop()
     {
-        if (_disposed)
-            return;
-        _disposed = true;
-        Interlocked.Exchange(ref _exitRaised, 1);
+        lock (_exitGate)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            Interlocked.Exchange(ref _exitRaised, 1);
+        }
         Cleanup();
     }
 
     private void Cleanup()
     {
         // Order: kill the tree, close the console (conhost exits), then release the pipes.
-        if (_job != IntPtr.Zero)
-            TerminateJobObject(_job, 1);
-        else if (_process != IntPtr.Zero)
-            TerminateProcess(_process, 1);
+        lock (_jobGate)
+        {
+            if (_job != IntPtr.Zero)
+                TerminateJobObject(_job, 1);
+            // Also terminate the shell if job creation/assignment failed during launch.
+            if (_process is { IsClosed: false } process)
+            {
+                try { TerminateProcess(process, 1); } catch (ObjectDisposedException) { }
+            }
+        }
         CloseConsole();
         try { _inputStream?.Dispose(); } catch (IOException) { }
         _inputStream = null;
@@ -426,11 +486,9 @@ public sealed class LocalTerminalSession : ITerminalBackend
                 _job = IntPtr.Zero;
             }
         }
-        if (_process != IntPtr.Zero)
-        {
-            CloseHandle(_process);
-            _process = IntPtr.Zero;
-        }
+        // Dispose releases ownership, not a waiter's or cwd reader's pinned reference.
+        // The last user closes the native handle without making Stop wait for the thread.
+        _process?.Dispose();
     }
 
     public void Dispose() => Stop();
@@ -662,13 +720,13 @@ public sealed class LocalTerminalSession : ITerminalBackend
         IntPtr lpReturnLength);
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+    private static extern bool AssignProcessToJobObject(IntPtr hJob, SafeProcessHandle hProcess);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool TerminateJobObject(IntPtr hJob, uint uExitCode);
 
     [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
+    private static extern bool TerminateProcess(SafeProcessHandle hProcess, uint uExitCode);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern uint ResumeThread(IntPtr hThread);

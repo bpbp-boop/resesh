@@ -153,6 +153,8 @@ public sealed class SettingsStore
         }
     }
 
+    /// <summary>Persists the candidate before publishing it as <see cref="Current"/>.
+    /// A failed write leaves the current settings and backup recovery state unchanged.</summary>
     public void Save(AppSettings settings)
     {
         lock (_gate)
@@ -163,8 +165,17 @@ public sealed class SettingsStore
         }
     }
 
-    private static AppSettings? Read(string path) =>
-        JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions);
+    private static AppSettings? Read(string path)
+    {
+        var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions);
+        // Validate before AtomicFile.Load accepts the primary, so recovery can use .bak.
+        if (settings is not null
+            && (settings.PinnedSessionIds is null || settings.RecentSessionIds is null))
+        {
+            throw new InvalidDataException("The settings payload contains a null session list.");
+        }
+        return settings;
+    }
 
     /// <summary>Moves a saved session to the front of the bounded recent list.</summary>
     public void RecordRecentSession(Guid sessionId, int maximumCount = 12)

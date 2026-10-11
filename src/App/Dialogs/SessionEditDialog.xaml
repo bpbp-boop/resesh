@@ -95,6 +95,20 @@
                         Message="Telnet sends everything in plain text, including passwords typed at the server's login prompt. Use it for console servers and lab or management networks, not general remote access." />
 
                     <StackPanel x:Name="SshOptionsPanel" Spacing="12">
+                    <StackPanel Spacing="4">
+                        <ComboBox
+                            x:Name="LoginBox"
+                            Header="Login"
+                            DisplayMemberPath="Label"
+                            AutomationProperties.AutomationId="SessionLoginBox"
+                            SelectionChanged="LoginBox_SelectionChanged"
+                            HorizontalAlignment="Stretch" />
+                        <TextBlock
+                            x:Name="LoginDescription"
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
                     <Grid ColumnSpacing="12">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
@@ -149,7 +163,7 @@
                         x:Name="KeyHint"
                         Style="{ThemeResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="resesh keeps a reference to the key in its current location. Manage registered keys from the File menu."
+                        Text="resesh keeps a reference to the key in its current location. Manage registered keys in Settings › Identities &amp; Keys."
                         TextWrapping="Wrap"
                         Visibility="Collapsed" />
 

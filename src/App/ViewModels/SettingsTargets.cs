@@ -25,6 +25,7 @@ public enum GlobalSettingsTarget
     ShowAgentIcons,
     AgentAlertFlash,
     AgentAlertSound,
+    Identities,
 }
 
 /// <summary>The session editor field to focus when a session's settings open from a command.</summary>

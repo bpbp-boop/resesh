@@ -15,6 +15,13 @@ public sealed partial class SessionEditDialog : ContentDialog
         public string Label { get; init; } = "";
     }
 
+    private sealed class LoginChoice
+    {
+        public SessionLogin Login { get; init; }
+        public Identity? Identity { get; init; }
+        public string Label { get; init; } = "";
+    }
+
     private static readonly (string Name, string? Hex)[] ColorChoices =
     [
         ("None", null),
@@ -66,6 +73,11 @@ public sealed partial class SessionEditDialog : ContentDialog
 
         PopulateIconPicker(existing?.Icon);
         PopulateKeyChoices(existing?.PrivateKeyId);
+        // New sessions inherit the folder's login; saved ones keep whatever they had.
+        PopulateLoginChoices(existing is null ? SessionLogin.Inherit : existing.Login, existing?.IdentityId);
+        FolderBox.TextSubmitted += (_, _) => UpdateLoginFields();
+        FolderBox.SelectionChanged += (_, _) => UpdateLoginFields();
+        FolderBox.LostFocus += (_, _) => UpdateLoginFields();
 
         _updatingProtocol = true;
         ProtocolBox.SelectedIndex = (existing?.Kind ?? newKind) == SessionKind.Telnet ? 1 : 0;
@@ -129,7 +141,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             }
         }
 
-        UpdateAuthFieldVisibility();
+        UpdateLoginFields();
         UpdateProtocolVisibility();
         UpdateAdvancedHeader();
         ShellIntegrationBox.SelectionChanged += (_, _) =>
@@ -197,6 +209,72 @@ public sealed partial class SessionEditDialog : ContentDialog
     private AuthMethod SelectedAuth => IsTelnet ? AuthMethod.None : (AuthMethod)Math.Max(0, AuthBox.SelectedIndex);
 
     private Guid? SelectedKeyId => (KeyBox.SelectedItem as KeyChoice)?.Id;
+
+    private LoginChoice SelectedLogin => LoginBox.SelectedItem as LoginChoice
+        ?? new LoginChoice { Login = SessionLogin.Inherit };
+
+    private void PopulateLoginChoices(SessionLogin login, Guid? identityId)
+    {
+        var choices = new List<LoginChoice> { new() { Login = SessionLogin.Inherit, Label = "Inherit from folder" } };
+        choices.AddRange(App.Identities.Identities.Select(identity => new LoginChoice
+        {
+            Login = SessionLogin.Identity,
+            Identity = identity,
+            Label = $"{identity.Name} ({identity.Username}, {ProofText(identity)})",
+        }));
+        choices.Add(new LoginChoice { Login = SessionLogin.Own, Label = "This session only" });
+        LoginBox.ItemsSource = choices;
+        LoginBox.SelectedItem = choices.FirstOrDefault(c => c.Login == login
+                && (login != SessionLogin.Identity || c.Identity?.Id == identityId))
+            ?? choices[0];
+    }
+
+    internal static string ProofText(Identity identity) => identity.Proof switch
+    {
+        IdentityProof.Key => App.SshKeys.Find(identity.KeyId ?? Guid.Empty)?.Name is { } keyName ? $"key {keyName}" : "key",
+        IdentityProof.Ask => "asks for the password",
+        _ => "saved password",
+    };
+
+    private void LoginBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateLoginFields();
+
+    /// <summary>Own logins show the username and credential fields; identity logins show
+    /// where the login comes from and an optional username override.</summary>
+    private void UpdateLoginFields()
+    {
+        // SelectionChanged fires mid-InitializeComponent, before later controls exist.
+        if (LoginDescription is null || UsernameBox is null || AuthBox is null || FolderBox is null)
+            return;
+        var choice = SelectedLogin;
+        var own = choice.Login == SessionLogin.Own;
+        AuthBox.Visibility = own ? Visibility.Visible : Visibility.Collapsed;
+        UsernameBox.Header = own ? "Username" : "Username override (optional)";
+
+        Identity? identity = choice.Identity;
+        if (choice.Login == SessionLogin.Inherit)
+        {
+            var folder = FolderPaths.Normalize(FolderBox.Text);
+            if (App.Logins.InheritedAt(folder) is { } found)
+            {
+                var (inherited, from) = found;
+                identity = inherited;
+                LoginDescription.Text = $"Uses {inherited.Name} ({inherited.Username}, {ProofText(inherited)}) from "
+                    + (from.Length == 0 ? "the top level." : $"{from}.");
+            }
+            else
+            {
+                LoginDescription.Text = "No folder login yet. You'll be asked when connecting, and can remember "
+                    + "the answer for every session in the folder.";
+            }
+        }
+        else if (choice.Login == SessionLogin.Identity)
+            LoginDescription.Text = "This session always uses this identity, whatever folder it is in.";
+        else
+            LoginDescription.Text = "Stored with this session. Choose an identity to share one login across sessions.";
+
+        UsernameBox.PlaceholderText = own ? "admin" : identity?.Username ?? "Asked when connecting";
+        UpdateAuthFieldVisibility();
+    }
 
     private Control? InitialFocus(SessionSettingsTarget target) => target switch
     {
@@ -305,7 +383,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         if (PasswordPanel is null || KeyPathPanel is null || KeyHint is null)
             return;
 
-        var auth = SelectedAuth;
+        var auth = SelectedLogin.Login == SessionLogin.Own ? SelectedAuth : AuthMethod.None;
         PasswordPanel.Visibility = auth == AuthMethod.Password ? Visibility.Visible : Visibility.Collapsed;
         KeyPathPanel.Visibility = auth == AuthMethod.PrivateKey ? Visibility.Visible : Visibility.Collapsed;
         KeyHint.Visibility = auth == AuthMethod.PrivateKey ? Visibility.Visible : Visibility.Collapsed;
@@ -348,8 +426,11 @@ public sealed partial class SessionEditDialog : ContentDialog
         }
         Validate(NameBox, NameError, string.IsNullOrWhiteSpace(NameBox.Text), "Enter a session name.");
         Validate(HostBox, HostError, string.IsNullOrWhiteSpace(HostBox.Text), "Enter a host name or IP address.");
-        Validate(KeyBox, KeyError, SelectedAuth == AuthMethod.PrivateKey && SelectedKeyId is null, "Select an SSH key.");
         var telnet = IsTelnet;
+        var login = telnet ? new LoginChoice { Login = SessionLogin.Own } : SelectedLogin;
+        var ownLogin = login.Login == SessionLogin.Own;
+        var auth = ownLogin ? SelectedAuth : AuthMethod.Password;
+        Validate(KeyBox, KeyError, ownLogin && auth == AuthMethod.PrivateKey && SelectedKeyId is null, "Select an SSH key.");
 
         if (firstInvalid is not null)
         {
@@ -404,8 +485,10 @@ public sealed partial class SessionEditDialog : ContentDialog
             Host = HostBox.Text.Trim(),
             Port = Math.Clamp(port, 1, 65535),
             Username = telnet ? "" : UsernameBox.Text.Trim(),
-            AuthMethod = SelectedAuth,
-            PrivateKeyId = SelectedAuth == AuthMethod.PrivateKey ? SelectedKeyId : null,
+            InheritLogin = login.Login == SessionLogin.Inherit,
+            IdentityId = login.Login == SessionLogin.Identity ? login.Identity?.Id : null,
+            AuthMethod = telnet ? AuthMethod.None : auth,
+            PrivateKeyId = ownLogin && auth == AuthMethod.PrivateKey ? SelectedKeyId : null,
             PrivateKeyPath = null,
             PassphraseRequired = false,
             TerminalType = string.IsNullOrWhiteSpace(TerminalTypeBox.Text) ? "xterm-256color" : TerminalTypeBox.Text.Trim(),
@@ -435,10 +518,11 @@ public sealed partial class SessionEditDialog : ContentDialog
             Notes = NotesBox.Text,
             ColorTag = ColorChoices[Math.Max(0, ColorBox.SelectedIndex)].Hex,
             Icon = _selectedIcon,
+            Agent = _existing?.Agent,
             CredentialNeeded = _existing?.CredentialNeeded ?? false,
             Overrides = overrides.IsEmpty ? null : overrides,
         };
-        Password = SelectedAuth == AuthMethod.Password && PasswordBox.Password.Length > 0
+        Password = ownLogin && auth == AuthMethod.Password && PasswordBox.Password.Length > 0
             ? PasswordBox.Password
             : null;
     }

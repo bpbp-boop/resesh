@@ -21,7 +21,8 @@ public sealed record CommandHistorySummary(
 /// loading history into memory; triggers keep it in step with the entry table. Deleted
 /// rows are overwritten on disk (secure_delete) and the index is re-merged afterwards so
 /// removed text does not linger in old index segments. Monthly <c>*.jsonl</c> files from
-/// the first version of this store are imported once and then deleted.
+/// the first version of this store are imported once and then deleted. Operations are serialized
+/// through connection disposal so clearing history cannot remove a database still in use.
 /// </summary>
 public sealed class CommandHistoryStore
 {
@@ -79,9 +80,10 @@ public sealed class CommandHistoryStore
         if (entry.Command.Length == 0)
             return;
 
-        using (var connection = Open())
-        using (var command = connection.CreateCommand())
+        lock (_gate)
         {
+            using var connection = Open();
+            using var command = connection.CreateCommand();
             Insert(command, entry);
         }
         Changed?.Invoke();
@@ -90,43 +92,46 @@ public sealed class CommandHistoryStore
     /// <summary>Counts, sessions, and busy days, for filters and the calendar.</summary>
     public CommandHistorySummary Summary()
     {
-        using var connection = OpenExisting();
-        if (connection is null)
-            return new CommandHistorySummary(0, [], new Dictionary<DateOnly, int>());
-
-        using var count = connection.CreateCommand();
-        count.CommandText = "SELECT count(*) FROM entry";
-        var total = Convert.ToInt32(count.ExecuteScalar(), CultureInfo.InvariantCulture);
-
-        var sessions = new List<(Guid, string, string)>();
-        using (var query = connection.CreateCommand())
+        lock (_gate)
         {
-            // The newest row per session carries its current name.
-            query.CommandText = """
-                SELECT session_id, session_name, target FROM entry
-                WHERE id IN (SELECT max(id) FROM entry WHERE session_id IS NOT NULL GROUP BY session_id)
-                """;
-            using var reader = query.ExecuteReader();
-            while (reader.Read())
-            {
-                if (Guid.TryParse(reader.GetString(0), out var id))
-                    sessions.Add((id, reader.GetString(1), reader.GetString(2)));
-            }
-        }
+            using var connection = OpenExisting();
+            if (connection is null)
+                return new CommandHistorySummary(0, [], new Dictionary<DateOnly, int>());
 
-        var days = new Dictionary<DateOnly, int>();
-        using (var query = connection.CreateCommand())
-        {
-            query.CommandText = "SELECT started_at FROM entry";
-            using var reader = query.ExecuteReader();
-            while (reader.Read())
+            using var count = connection.CreateCommand();
+            count.CommandText = "SELECT count(*) FROM entry";
+            var total = Convert.ToInt32(count.ExecuteScalar(), CultureInfo.InvariantCulture);
+
+            var sessions = new List<(Guid, string, string)>();
+            using (var query = connection.CreateCommand())
             {
-                var day = DateOnly.FromDateTime(
-                    DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(0)).ToLocalTime().DateTime);
-                days[day] = days.GetValueOrDefault(day) + 1;
+                // The newest row per session carries its current name.
+                query.CommandText = """
+                    SELECT session_id, session_name, target FROM entry
+                    WHERE id IN (SELECT max(id) FROM entry WHERE session_id IS NOT NULL GROUP BY session_id)
+                    """;
+                using var reader = query.ExecuteReader();
+                while (reader.Read())
+                {
+                    if (Guid.TryParse(reader.GetString(0), out var id))
+                        sessions.Add((id, reader.GetString(1), reader.GetString(2)));
+                }
             }
+
+            var days = new Dictionary<DateOnly, int>();
+            using (var query = connection.CreateCommand())
+            {
+                query.CommandText = "SELECT started_at FROM entry";
+                using var reader = query.ExecuteReader();
+                while (reader.Read())
+                {
+                    var day = DateOnly.FromDateTime(
+                        DateTimeOffset.FromUnixTimeMilliseconds(reader.GetInt64(0)).ToLocalTime().DateTime);
+                    days[day] = days.GetValueOrDefault(day) + 1;
+                }
+            }
+            return new CommandHistorySummary(total, sessions, days);
         }
-        return new CommandHistorySummary(total, sessions, days);
     }
 
     /// <summary>Matching entries, most recently recorded first. Terms of three or more characters use the
@@ -138,96 +143,99 @@ public sealed class CommandHistoryStore
     {
         ArgumentNullException.ThrowIfNull(query);
         var parsed = CommandHistorySearch.Parse(query.Text);
-        using var connection = OpenExisting();
-        if (connection is null)
-            return new CommandHistoryResults([], 0, parsed.Terms);
-
-        var where = new List<string>();
-        var parameters = new List<SqliteParameter>();
-        string Parameter(object value)
+        lock (_gate)
         {
-            var name = "$p" + parameters.Count.ToString(CultureInfo.InvariantCulture);
-            parameters.Add(new SqliteParameter(name, value));
-            return name;
-        }
+            using var connection = OpenExisting();
+            if (connection is null)
+                return new CommandHistoryResults([], 0, parsed.Terms);
 
-        var status = parsed.Status != CommandHistoryStatus.Any ? parsed.Status : query.Status;
-        if (status == CommandHistoryStatus.Failed)
-            where.Add("e.exit_code IS NOT NULL AND e.exit_code <> 0");
-        else if (status == CommandHistoryStatus.Succeeded)
-            where.Add("e.exit_code = 0");
-        if (parsed.ExitCode is { } exit)
-            where.Add($"e.exit_code = {Parameter(exit)}");
-        if (query.SessionId is { } sessionId)
-            where.Add($"e.session_id = {Parameter(sessionId.ToString("D"))}");
-        if (query.Since is { } since)
-            where.Add($"e.started_at >= {Parameter(since.ToUnixTimeMilliseconds())}");
-        if (query.Until is { } until)
-            where.Add($"e.started_at < {Parameter(until.ToUnixTimeMilliseconds())}");
-        foreach (var host in parsed.Hosts)
-        {
-            var value = Parameter(host);
-            where.Add($"({Contains("e.session_name", value)} OR {Contains("e.target", value)})");
-        }
-        foreach (var directory in parsed.Directories)
-            where.Add(Contains("e.directory", Parameter(directory)));
-
-        var searchedColumns = query.SearchOutput
-            ? new[] { "command", "output", "session_name", "target", "directory" }
-            : new[] { "command", "session_name", "target", "directory" };
-        var indexed = new List<string>();
-        foreach (var term in parsed.Terms)
-        {
-            if (term.Length >= MinimumIndexedTermLength)
+            var where = new List<string>();
+            var parameters = new List<SqliteParameter>();
+            string Parameter(object value)
             {
-                indexed.Add($"{{{string.Join(' ', searchedColumns)}}} : \"{term.Replace("\"", "\"\"")}\"");
+                var name = "$p" + parameters.Count.ToString(CultureInfo.InvariantCulture);
+                parameters.Add(new SqliteParameter(name, value));
+                return name;
             }
-            else
+
+            var status = parsed.Status != CommandHistoryStatus.Any ? parsed.Status : query.Status;
+            if (status == CommandHistoryStatus.Failed)
+                where.Add("e.exit_code IS NOT NULL AND e.exit_code <> 0");
+            else if (status == CommandHistoryStatus.Succeeded)
+                where.Add("e.exit_code = 0");
+            if (parsed.ExitCode is { } exit)
+                where.Add($"e.exit_code = {Parameter(exit)}");
+            if (query.SessionId is { } sessionId)
+                where.Add($"e.session_id = {Parameter(sessionId.ToString("D"))}");
+            if (query.Since is { } since)
+                where.Add($"e.started_at >= {Parameter(since.ToUnixTimeMilliseconds())}");
+            if (query.Until is { } until)
+                where.Add($"e.started_at < {Parameter(until.ToUnixTimeMilliseconds())}");
+            foreach (var host in parsed.Hosts)
             {
-                var value = Parameter(term);
-                where.Add("(" + string.Join(" OR ", searchedColumns.Select(column => Contains("e." + column, value))) + ")");
+                var value = Parameter(host);
+                where.Add($"({Contains("e.session_name", value)} OR {Contains("e.target", value)})");
             }
-        }
+            foreach (var directory in parsed.Directories)
+                where.Add(Contains("e.directory", Parameter(directory)));
 
-        // Newest first means most recently recorded: rowid order, which the full-text index
-        // returns natively, so a LIMIT stops early instead of sorting every match.
-        var from = "entry e";
-        var order = "e.id DESC";
-        var countSql = "";
-        if (indexed.Count > 0)
-        {
-            var match = Parameter(string.Join(" AND ", indexed));
-            // Without other filters the index alone can count, with no row lookups.
-            if (where.Count == 0)
-                countSql = $"SELECT count(*) FROM entry_fts WHERE entry_fts MATCH {match}";
-            from = "entry_fts f JOIN entry e ON e.id = f.rowid";
-            order = "f.rowid DESC";
-            where.Insert(0, $"entry_fts MATCH {match}");
-        }
-        var whereClause = where.Count == 0 ? "" : "WHERE " + string.Join(" AND ", where);
-        if (countSql.Length == 0)
-            countSql = $"SELECT count(*) FROM {from} {whereClause}";
-
-        cancellationToken.ThrowIfCancellationRequested();
-        using var count = connection.CreateCommand();
-        count.CommandText = countSql;
-        count.Parameters.AddRange(parameters.Select(Clone));
-        var total = Convert.ToInt32(count.ExecuteScalar(), CultureInfo.InvariantCulture);
-
-        var hits = new List<CommandHistoryHit>(Math.Min(total, limit));
-        if (total > 0 && limit > 0)
-        {
-            using var select = connection.CreateCommand();
-            select.CommandText = $"SELECT {EntryColumns("e")} FROM {from} {whereClause} ORDER BY {order} LIMIT {limit}";
-            select.Parameters.AddRange(parameters.Select(Clone));
-            using var reader = select.ExecuteReader();
-            while (reader.Read())
+            var searchedColumns = query.SearchOutput
+                ? new[] { "command", "output", "session_name", "target", "directory" }
+                : new[] { "command", "session_name", "target", "directory" };
+            var indexed = new List<string>();
+            foreach (var term in parsed.Terms)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                hits.Add(CommandHistorySearch.CreateHit(ReadEntry(reader), parsed.Terms, query.SearchOutput));
+                if (term.Length >= MinimumIndexedTermLength)
+                {
+                    indexed.Add($"{{{string.Join(' ', searchedColumns)}}} : \"{term.Replace("\"", "\"\"")}\"");
+                }
+                else
+                {
+                    var value = Parameter(term);
+                    where.Add("(" + string.Join(" OR ", searchedColumns.Select(column => Contains("e." + column, value))) + ")");
+                }
             }
+
+            // Newest first means most recently recorded: rowid order, which the full-text index
+            // returns natively, so a LIMIT stops early instead of sorting every match.
+            var from = "entry e";
+            var order = "e.id DESC";
+            var countSql = "";
+            if (indexed.Count > 0)
+            {
+                var match = Parameter(string.Join(" AND ", indexed));
+                // Without other filters the index alone can count, with no row lookups.
+                if (where.Count == 0)
+                    countSql = $"SELECT count(*) FROM entry_fts WHERE entry_fts MATCH {match}";
+                from = "entry_fts f JOIN entry e ON e.id = f.rowid";
+                order = "f.rowid DESC";
+                where.Insert(0, $"entry_fts MATCH {match}");
+            }
+            var whereClause = where.Count == 0 ? "" : "WHERE " + string.Join(" AND ", where);
+            if (countSql.Length == 0)
+                countSql = $"SELECT count(*) FROM {from} {whereClause}";
+
+            cancellationToken.ThrowIfCancellationRequested();
+            using var count = connection.CreateCommand();
+            count.CommandText = countSql;
+            count.Parameters.AddRange(parameters.Select(Clone));
+            var total = Convert.ToInt32(count.ExecuteScalar(), CultureInfo.InvariantCulture);
+
+            var hits = new List<CommandHistoryHit>(Math.Min(total, limit));
+            if (total > 0 && limit > 0)
+            {
+                using var select = connection.CreateCommand();
+                select.CommandText = $"SELECT {EntryColumns("e")} FROM {from} {whereClause} ORDER BY {order} LIMIT {limit}";
+                select.Parameters.AddRange(parameters.Select(Clone));
+                using var reader = select.ExecuteReader();
+                while (reader.Read())
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    hits.Add(CommandHistorySearch.CreateHit(ReadEntry(reader), parsed.Terms, query.SearchOutput));
+                }
+            }
+            return new CommandHistoryResults(hits, total, parsed.Terms);
         }
-        return new CommandHistoryResults(hits, total, parsed.Terms);
     }
 
     /// <summary>Every recorded run of this entry's command on its host, most recent first,
@@ -235,39 +243,45 @@ public sealed class CommandHistoryStore
     public IReadOnlyList<CommandHistoryEntry> Runs(CommandHistoryEntry entry, int limit = 50)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        using var connection = OpenExisting();
-        if (connection is null)
-            return [];
-        using var command = connection.CreateCommand();
-        command.CommandText = $"""
-            SELECT {EntryColumns("e")} FROM entry e
-            WHERE e.host_key = $host AND e.command_key = $command
-            ORDER BY e.id DESC LIMIT $limit
-            """;
-        command.Parameters.AddWithValue("$host", entry.HostKey);
-        command.Parameters.AddWithValue("$command", entry.CommandKey);
-        command.Parameters.AddWithValue("$limit", limit);
-        return ReadAll(command);
+        lock (_gate)
+        {
+            using var connection = OpenExisting();
+            if (connection is null)
+                return [];
+            using var command = connection.CreateCommand();
+            command.CommandText = $"""
+                SELECT {EntryColumns("e")} FROM entry e
+                WHERE e.host_key = $host AND e.command_key = $command
+                ORDER BY e.id DESC LIMIT $limit
+                """;
+            command.Parameters.AddWithValue("$host", entry.HostKey);
+            command.Parameters.AddWithValue("$command", entry.CommandKey);
+            command.Parameters.AddWithValue("$limit", limit);
+            return ReadAll(command);
+        }
     }
 
     /// <summary>The run of the same command on the same host recorded just before this one.</summary>
     public CommandHistoryEntry? PreviousRun(CommandHistoryEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        using var connection = OpenExisting();
-        if (connection is null)
-            return null;
-        using var command = connection.CreateCommand();
-        command.CommandText = $"""
-            SELECT {EntryColumns("e")} FROM entry e
-            WHERE e.host_key = $host AND e.command_key = $command
-              AND e.id < (SELECT id FROM entry WHERE uid = $uid)
-            ORDER BY e.id DESC LIMIT 1
-            """;
-        command.Parameters.AddWithValue("$host", entry.HostKey);
-        command.Parameters.AddWithValue("$command", entry.CommandKey);
-        command.Parameters.AddWithValue("$uid", entry.Id);
-        return ReadAll(command).FirstOrDefault();
+        lock (_gate)
+        {
+            using var connection = OpenExisting();
+            if (connection is null)
+                return null;
+            using var command = connection.CreateCommand();
+            command.CommandText = $"""
+                SELECT {EntryColumns("e")} FROM entry e
+                WHERE e.host_key = $host AND e.command_key = $command
+                  AND e.id < (SELECT id FROM entry WHERE uid = $uid)
+                ORDER BY e.id DESC LIMIT 1
+                """;
+            command.Parameters.AddWithValue("$host", entry.HostKey);
+            command.Parameters.AddWithValue("$command", entry.CommandKey);
+            command.Parameters.AddWithValue("$uid", entry.Id);
+            return ReadAll(command).FirstOrDefault();
+        }
     }
 
     private static List<CommandHistoryEntry> ReadAll(SqliteCommand command)
@@ -286,8 +300,9 @@ public sealed class CommandHistoryStore
         if (list.Count == 0)
             return 0;
         var removed = 0;
-        using (var connection = OpenExisting())
+        lock (_gate)
         {
+            using var connection = OpenExisting();
             if (connection is null)
                 return 0;
             using (var transaction = connection.BeginTransaction())
@@ -304,12 +319,10 @@ public sealed class CommandHistoryStore
                 transaction.Commit();
             }
             if (removed > 0)
-            {
-                // The view refreshes now; the slower on-disk cleanup follows.
-                Changed?.Invoke();
                 Scrub(connection);
-            }
         }
+        if (removed > 0)
+            Changed?.Invoke();
         return removed;
     }
 
@@ -337,8 +350,9 @@ public sealed class CommandHistoryStore
         ArgumentOutOfRangeException.ThrowIfLessThan(retentionDays, 1);
         var cutoff = _clock().AddDays(-retentionDays).ToUnixTimeMilliseconds();
         int removed;
-        using (var connection = OpenExisting())
+        lock (_gate)
         {
+            using var connection = OpenExisting();
             if (connection is null)
                 return false;
             using (var command = connection.CreateCommand())
@@ -348,37 +362,42 @@ public sealed class CommandHistoryStore
                 removed = command.ExecuteNonQuery();
             }
             if (removed > 0)
-            {
-                Changed?.Invoke();
                 Scrub(connection);
-            }
         }
+        if (removed > 0)
+            Changed?.Invoke();
         return removed > 0;
     }
 
     /// <summary>Total size of the history files on disk, in bytes.</summary>
     public long SizeOnDisk()
     {
-        if (!System.IO.Directory.Exists(_directory))
-            return 0;
-        return System.IO.Directory.EnumerateFiles(_directory, "history.db*")
-            .Concat(System.IO.Directory.EnumerateFiles(_directory, "*.jsonl"))
-            .Sum(file => new FileInfo(file).Length);
+        lock (_gate)
+        {
+            if (!System.IO.Directory.Exists(_directory))
+                return 0;
+            return System.IO.Directory.EnumerateFiles(_directory, "history.db*")
+                .Concat(System.IO.Directory.EnumerateFiles(_directory, "*.jsonl"))
+                .Sum(file => new FileInfo(file).Length);
+        }
     }
 
     /// <summary>Every entry, in the order recorded. For tests and diagnostics; the view searches instead.</summary>
     internal IReadOnlyList<CommandHistoryEntry> Snapshot()
     {
-        using var connection = OpenExisting();
-        if (connection is null)
-            return [];
-        using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT {EntryColumns("e")} FROM entry e ORDER BY e.id";
-        using var reader = command.ExecuteReader();
-        var entries = new List<CommandHistoryEntry>();
-        while (reader.Read())
-            entries.Add(ReadEntry(reader));
-        return entries;
+        lock (_gate)
+        {
+            using var connection = OpenExisting();
+            if (connection is null)
+                return [];
+            using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT {EntryColumns("e")} FROM entry e ORDER BY e.id";
+            using var reader = command.ExecuteReader();
+            var entries = new List<CommandHistoryEntry>();
+            while (reader.Read())
+                entries.Add(ReadEntry(reader));
+            return entries;
+        }
     }
 
     // ---- connection and schema ----
@@ -411,13 +430,21 @@ public sealed class CommandHistoryStore
     private SqliteConnection Connect()
     {
         var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-        using var pragmas = connection.CreateCommand();
-        // secure_delete overwrites removed rows, so deleted history does not stay readable
-        // in free pages. WAL lets a search read while a finished command is written.
-        pragmas.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;";
-        pragmas.ExecuteNonQuery();
-        return connection;
+        try
+        {
+            connection.Open();
+            using var pragmas = connection.CreateCommand();
+            // secure_delete overwrites removed rows, so deleted history does not stay readable
+            // in free pages. WAL keeps committed writes separate until the next checkpoint.
+            pragmas.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA secure_delete=ON;";
+            pragmas.ExecuteNonQuery();
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
     }
 
     private static void CreateSchema(SqliteConnection connection)

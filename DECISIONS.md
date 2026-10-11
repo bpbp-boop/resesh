@@ -926,3 +926,80 @@ timestamps (`GhosttyLineTimes`), and command marks during rewind and playback.
   (`GhosttyNative` and its structs) and the library's build files keep the Ghostty name.
 - Deferred: find match-case and regex (libghostty-vt's search is literal and ASCII
   case-insensitive; needs our own scrollback search).
+
+## 2026-10-11 - Store mutations publish only after persistence succeeds
+- Sessions, identities, SSH keys, workspaces, settings, and highlight rules prepare detached
+  candidate state, save it atomically, then publish it to readers. Failed writes leave the
+  live state unchanged, and change notifications follow publication. The recovered-backup
+  preservation flag is cleared only after a successful write.
+- Multi-collection operations (folder moves/deletions, imports, and highlight draft merges)
+  publish their complete candidate together; a later successful save cannot accidentally
+  persist changes from a previously failed operation.
+
+## 2026-10-11 - Native terminal device recovery, markers and synchronized output
+- GPU loss rebuilds the shared D3D/D2D/DirectWrite resources once per device generation
+  on the render UI thread, then rebuilds every live renderer and reattaches its composition
+  swap chain. Terminal state and connections survive; each surface requests a full repaint.
+- Tracked marker IDs remain array indices plus one across geometric capacity growth,
+  capped at 1,048,576 live slots. Managed owners release invalid markers when their lines
+  leave scrollback instead of retaining unusable native references.
+- Shim ABI 5 adds a render-held flag to frame metadata. libghostty-vt's render-hold callback
+  starts a monotonic one-second deadline; reads during mode 2026 retain the previous frame.
+  Surfaces continue requesting composition frames until release or timeout, and timeout
+  resets the native mode, so a stalled program cannot freeze the display indefinitely.
+
+## 2026-10-11 - Explorer SSHFS mounts use the app's trusted host key
+- Accepted host keys now retain the public key blob as well as the fingerprint. Legacy
+  files and backups remain readable; terminal and SFTP handshakes backfill a missing blob
+  only when it hashes to the already trusted fingerprint. Imports still cannot replace
+  any existing endpoint's trust.
+- Every Explorer mount uses foreground `sshfs.exe` with `StrictHostKeyChecking=yes`,
+  a per-mount known_hosts file in a current-user-only temporary directory, and no global
+  known_hosts fallback. Its line uses `session.Host`, OpenSSH's non-default-port bracket
+  form, and the blob's leading SSH key type (not an RSA signature algorithm). The mount
+  owns and deletes the file; fingerprint-only entries must reconnect the terminal first.
+- The password UNC route is removed: SSHFS-Win's [`do_svc` defaults](https://github.com/winfsp/sshfs-win/blob/master/sshfs-win.c)
+  explicitly pass `UserKnownHostsFile=/dev/null` and `StrictHostKeyChecking=no`, so that
+  provider does not verify against a safe trust store. Password mounts now use the same
+  verified direct process with `password_stdin`; the password is never a command-line
+  argument. Key mounts retain the session's own IdentityFile and the existing refusal
+  of passphrase-protected keys.
+- Both redirected output pipes are drained asynchronously for the mount's entire life;
+  startup failure messages retain a bounded stderr tail rather than letting an unread
+  pipe stall the filesystem process.
+
+## 2026-10-11 - Local process lifetime and Claude hook notifications
+- Local shells use a SafeProcessHandle. Launch pins it before scheduling the exit waiter;
+  the waiter retains the native handle through both its wait and exit-code read. Current
+  directory queries also pin across all remote-memory reads. Stop terminates the tree
+  and disposes ownership without joining the waiter, so a remaining reader, not Stop,
+  closes the native handle. The initial process thread handle is released even when
+  launch fails before resume. Stop and exit-event delivery share a short serialization
+  gate so a user stop cannot be followed by an Exited event.
+- Claude Code command hooks have no controlling terminal and capture stdout. Following
+  [Emit terminal notifications](https://code.claude.com/docs/en/hooks#emit-terminal-notifications),
+  they now return constant `terminalSequence` JSON rather than opening `/dev/tty` or
+  `CONOUT$`. Claude allows OSC 777, but rejects our OSC 7377: the adapter uses
+  `OSC 777 ; notify ; resesh-agent ; id=claude ; state=… BEL`. Only that exact reserved
+  title selects structured parsing; other titles remain generic notifications, with
+  the same percent-decoding and label sanitization as OSC 7377.
+- POSIX uses `printf '%s\n' '<json>'`; Windows uses `echo '<json>'`, whose single-quoted
+  argument is literal in both Git Bash and PowerShell. JSON Unicode escapes keep ESC
+  and BEL off the command line. Hooks ignore stdin, inspect no tool arguments, and
+  return no approval decision. Claude only emits terminalSequence in interactive
+  sessions while its interface is visible; other terminals may display the reserved
+  title and structured body as a desktop notification. Codex and shell wrappers are
+  unchanged.
+
+## 2026-10-11 - Process-wide persistent shell reservations
+- One thread-safe registry owns `(saved session id, tmux slot)` across all windows.
+  Each terminal view owns its reservation, so tab transfer preserves ownership. Planning
+  and claiming share one critical section after remote discovery; construction-time tab
+  snapshots and provisional viewmodel slot allocation no longer determine ownership.
+- Pickers recheck explicit resume claims and re-plan new-shell choices when they return.
+  Reconnect keeps its selected target only if it can claim it. Failed startup releases
+  the claim; disposal also prevents a late cancelled worker claiming another slot.
+- Ending detached shells temporarily claims each deletion target until its exec completes,
+  skipping shells claimed since discovery. The pending new shell reserves a slot outside
+  deletion targets, then atomically switches to a free slot after re-listing survivors.
+  A stopped tab keeps its selected shell reserved for reconnect until it closes or switches.

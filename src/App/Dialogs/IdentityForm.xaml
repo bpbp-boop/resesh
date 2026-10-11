@@ -1,0 +1,66 @@
+<UserControl
+    x:Class="Resesh.App.Dialogs.IdentityForm"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <StackPanel Spacing="12">
+        <Grid ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Spacing="4">
+                <TextBox x:Name="UsernameBox" Header="Username" PlaceholderText="admin" AutomationProperties.AutomationId="IdentityUsername" />
+                <TextBlock x:Name="UsernameError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+            </StackPanel>
+            <TextBox x:Name="NameBox" Grid.Column="1" VerticalAlignment="Top" Header="Name" AutomationProperties.AutomationId="IdentityName" />
+        </Grid>
+
+        <ComboBox
+            x:Name="ProofBox"
+            Header="Sign in with"
+            SelectedIndex="0"
+            HorizontalAlignment="Stretch"
+            AutomationProperties.AutomationId="IdentityProof"
+            SelectionChanged="ProofBox_SelectionChanged">
+            <ComboBoxItem Content="Saved password" />
+            <ComboBoxItem Content="SSH key" />
+            <ComboBoxItem Content="Password, asked once per app run" />
+        </ComboBox>
+
+        <StackPanel x:Name="PasswordPanel" Spacing="4">
+            <PasswordBox x:Name="PasswordBox" Header="Password" AutomationProperties.AutomationId="IdentityPassword" />
+            <TextBlock
+                x:Name="PasswordHint"
+                Style="{ThemeResource CaptionTextBlockStyle}"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                TextWrapping="Wrap" />
+        </StackPanel>
+
+        <StackPanel x:Name="KeyPanel" Spacing="4" Visibility="Collapsed">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ComboBox
+                    x:Name="KeyBox"
+                    Header="SSH key"
+                    DisplayMemberPath="Label"
+                    PlaceholderText="Select a registered key"
+                    HorizontalAlignment="Stretch"
+                    AutomationProperties.AutomationId="IdentityKey" />
+                <Button Grid.Column="1" Content="Add…" VerticalAlignment="Bottom" Click="AddKey_Click" />
+            </Grid>
+            <TextBlock x:Name="KeyError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+        </StackPanel>
+
+        <TextBlock
+            x:Name="AskHint"
+            Visibility="Collapsed"
+            Style="{ThemeResource CaptionTextBlockStyle}"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            TextWrapping="Wrap"
+            Text="The first connection after resesh starts asks for the password. It stays in memory, never on disk, until resesh closes." />
+    </StackPanel>
+</UserControl>

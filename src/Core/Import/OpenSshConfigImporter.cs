@@ -18,9 +18,6 @@ public static class OpenSshConfigImporter
     {
         var importable = new List<ImportCandidate>();
         List<string>? aliases = null;
-        var hostName = "";
-        var username = "";
-        var port = 22;
 
         void CommitBlock()
         {
@@ -29,16 +26,14 @@ public static class OpenSshConfigImporter
 
             foreach (var alias in aliases.Where(IsConcreteAlias))
             {
-                var resolvedHost = string.IsNullOrWhiteSpace(hostName) || hostName == "%h" ? alias : hostName;
-                importable.Add(new ImportCandidate
+                importable.Add(ResolveOptions(content, new ImportCandidate
                 {
                     Name = alias,
                     RelativePath = sourcePath,
-                    Host = resolvedHost,
-                    Port = port,
-                    Username = string.IsNullOrWhiteSpace(username) ? Environment.UserName : username,
+                    Host = alias,
+                    Username = Environment.UserName,
                     Protocol = "SSH2",
-                });
+                }));
             }
         }
 
@@ -58,9 +53,6 @@ public static class OpenSshConfigImporter
             {
                 CommitBlock();
                 aliases = SplitArguments(value).ToList();
-                hostName = "";
-                username = "";
-                port = 22;
                 continue;
             }
 
@@ -70,24 +62,9 @@ public static class OpenSshConfigImporter
                 aliases = null;
                 continue;
             }
-            if (aliases is null)
-                continue;
-
-            if (key.Equals("HostName", StringComparison.OrdinalIgnoreCase) && hostName.Length == 0)
-                hostName = Unquote(value);
-            else if (key.Equals("User", StringComparison.OrdinalIgnoreCase) && username.Length == 0)
-                username = Unquote(value);
-            else if (key.Equals("Port", StringComparison.OrdinalIgnoreCase)
-                     && int.TryParse(Unquote(value), out var parsedPort)
-                     && parsedPort is > 0 and <= 65535)
-                port = parsedPort;
         }
 
         CommitBlock();
-        importable = importable.Select(candidate => candidate with
-        {
-            PrivateKeyPath = FindIdentity(content, candidate),
-        }).ToList();
         return new ImportScanResult
         {
             Importable = importable
@@ -99,11 +76,13 @@ public static class OpenSshConfigImporter
         };
     }
 
-    // Evaluate matching Host blocks in file order, including shared Host * keys.
-    // Sessions currently select one key; the first configured identity is used.
-    private static string? FindIdentity(string content, ImportCandidate candidate)
+    // Evaluate matching Host blocks in file order, including global and shared Host * options.
+    // OpenSSH uses the first configured value; sessions currently select only the first key.
+    private static ImportCandidate ResolveOptions(string content, ImportCandidate candidate)
     {
         var matches = true;
+        string? hostName = null, username = null, identity = null;
+        int? port = null;
         foreach (var rawLine in content.Split('\n'))
         {
             var line = StripComment(rawLine).Trim();
@@ -120,19 +99,38 @@ public static class OpenSshConfigImporter
             }
             else if (directive.Equals("Match", StringComparison.OrdinalIgnoreCase))
                 matches = false;
-            else if (matches && directive.Equals("IdentityFile", StringComparison.OrdinalIgnoreCase))
+            else if (matches)
             {
-                value = Unquote(value);
-                var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                value = System.Text.RegularExpressions.Regex.Replace(value, "%[%dhru]", match => match.Value switch
-                {
-                    "%%" => "%", "%d" => home, "%h" => candidate.Host,
-                    "%r" => candidate.Username, "%u" => Environment.UserName, _ => match.Value,
-                });
-                return ImportKeyPath.Resolve(value);
+                if (directive.Equals("HostName", StringComparison.OrdinalIgnoreCase) && hostName is null)
+                    hostName = Unquote(value);
+                else if (directive.Equals("User", StringComparison.OrdinalIgnoreCase) && username is null)
+                    username = Unquote(value);
+                else if (directive.Equals("Port", StringComparison.OrdinalIgnoreCase) && port is null
+                    && int.TryParse(Unquote(value), out var parsedPort) && parsedPort is > 0 and <= 65535)
+                    port = parsedPort;
+                else if (directive.Equals("IdentityFile", StringComparison.OrdinalIgnoreCase) && identity is null)
+                    identity = Unquote(value);
             }
         }
-        return null;
+        candidate = candidate with
+        {
+            Host = string.IsNullOrWhiteSpace(hostName) ? candidate.Name
+                : System.Text.RegularExpressions.Regex.Replace(hostName, "%[%h]", match =>
+                    match.Value == "%%" ? "%" : candidate.Name),
+            Username = string.IsNullOrWhiteSpace(username) ? Environment.UserName : username,
+            Port = port ?? 22,
+        };
+        if (identity is not null)
+        {
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            identity = System.Text.RegularExpressions.Regex.Replace(identity, "%[%dhru]", match => match.Value switch
+            {
+                "%%" => "%", "%d" => home, "%h" => candidate.Host,
+                "%r" => candidate.Username, "%u" => Environment.UserName, _ => match.Value,
+            });
+            candidate = candidate with { PrivateKeyPath = ImportKeyPath.Resolve(identity) };
+        }
+        return candidate;
     }
 
     private static bool Matches(string pattern, string host) =>

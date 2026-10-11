@@ -153,7 +153,7 @@ public static class PuttyRegistryImporter
             return null;
 
         if (val is int i)
-            return i;
+            return i is > 0 and <= 65535 ? i : null;
 
         if (int.TryParse(val.ToString(), out var parsed) && parsed is > 0 and <= 65535)
             return parsed;

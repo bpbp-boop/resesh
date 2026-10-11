@@ -162,6 +162,55 @@ public sealed class SecureCrtImporterTests
         Assert.Equal(2222, candidate.Port);
     }
 
+    [Fact]
+    public void Parse_SshNamedSessionOnTheRdpPortWithRdpSettings_IsRdpAndSkipped()
+    {
+        // Seen in a real config: domain controllers saved as "SSH2" with RDP's port and settings.
+        var rdp = SecureCrtImporter.Parse(
+            "D:\"RDP View Height\"=00000400\nD:\"Port\"=00000d3d\nS:\"Protocol Name\"=SSH2\n"
+            + "S:\"Hostname\"=dc3\nD:\"[SSH2] Port\"=00000016",
+            "dc3", "", "dc3.ini");
+        Assert.Equal("RDP", rdp.Protocol);
+        Assert.False(rdp.IsSupported);
+
+        // A leftover 3389 without RDP settings stays SSH on its own port.
+        var ssh = SecureCrtImporter.Parse(
+            "D:\"Port\"=00000d3d\nS:\"Protocol Name\"=SSH2\nD:\"[SSH2] Port\"=00000016", "x", "", "x.ini");
+        Assert.True(ssh.IsSupported);
+        Assert.Equal(22, ssh.Port);
+    }
+
+    [Fact]
+    public void Scan_GlobalKeyComesFromSsh2IniAndFindsThePrivateKeyBesideThePub()
+    {
+        var root = Directory.CreateTempSubdirectory("securecrt-global-key-test");
+        try
+        {
+            var sessions = Directory.CreateDirectory(Path.Combine(root.FullName, "Sessions"));
+            var keyDir = Directory.CreateDirectory(Path.Combine(root.FullName, "ssh"));
+            File.WriteAllText(Path.Combine(keyDir.FullName, "ops.pub"), "ssh-ed25519 AAAA ops");
+            File.WriteAllText(Path.Combine(keyDir.FullName, "ops.key"), "private");
+            File.WriteAllText(Path.Combine(root.FullName, "SSH2.ini"),
+                $"S:\"Identity Filename V2\"={Path.Combine(keyDir.FullName, "ops.pub")}\n");
+            const string common = "S:\"Protocol Name\"=SSH2\nS:\"Hostname\"=h\nS:\"Username\"=root\n"
+                + "D:\"Use Global Public Key\"=00000001\nS:\"Identity Filename V2\"=\n";
+            File.WriteAllText(Path.Combine(sessions.FullName, "keyed.ini"),
+                common + "S:\"SSH2 Authentications V2\"=publickey,keyboard-interactive,password,gssapi\n");
+            File.WriteAllText(Path.Combine(sessions.FullName, "passwordonly.ini"),
+                common + "S:\"SSH2 Authentications V2\"=password,keyboard-interactive,gssapi\n");
+
+            var scan = SecureCrtImporter.Scan(sessions.FullName);
+
+            Assert.Equal(Path.Combine(keyDir.FullName, "ops.key"),
+                scan.Importable.Single(c => c.Name == "keyed").PrivateKeyPath);
+            Assert.Null(scan.Importable.Single(c => c.Name == "passwordonly").PrivateKeyPath);
+        }
+        finally
+        {
+            root.Delete(recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("Telnet", true, 23)]
     [InlineData("Telnet/SSL", false, 22)] // TLS-wrapped telnet is not something we speak

@@ -53,6 +53,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         ResolveTheme = App.ResolveTheme,
         ShowAgentIcons = () => App.Settings.Current.ShowAgentIcons,
         IsSessionVisible = session => !session.IsLocal || !session.BuiltIn || App.AvailableLocalShells.Contains(session.Id),
+        LoginUsername = App.LoginUsername,
         ApplySessionSettings = tab =>
         {
             if (tab.View is TerminalTabView view)
@@ -62,6 +63,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             }
         },
         ReportError = App.ReportRecoverableError,
+        SessionsChanged = App.RefreshSessionsInAllWindows,
         RecentSessionIds = () => App.Settings.Current.RecentSessionIds,
         SaveRecentSessionIds = ids => App.SaveSettings(App.Settings.Current with { RecentSessionIds = ids }),
         RecordingDirectory = () => App.Settings.Current.RecordingDirectory,
@@ -1188,13 +1190,13 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     /// open) at the given field.</summary>
     private Task ShowSettingsAsync(GlobalSettingsTarget target)
     {
-        var tab = OpenAppPage(AppPage.Settings, _ => CreateSettingsPage());
+        var tab = OpenAppPage(AppPage.Settings, createdTab => CreateSettingsPage(createdTab));
         if (tab.View is SettingsPage page)
             page.Navigate(target);
         return Task.CompletedTask;
     }
 
-    private SettingsPage CreateSettingsPage()
+    private SettingsPage CreateSettingsPage(TabViewModel tab)
     {
         var settings = new SettingsViewModel(new SettingsEnvironment
         {
@@ -1210,7 +1212,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             SetLaunchAtSignIn = enabled => Interop.SignInLaunch.TrySet(enabled, Environment.ProcessPath!),
         });
         settings.SettingChanged += property => App.ApplySettingChange(property, source: settings);
-        return new SettingsPage(settings);
+        var page = new SettingsPage(settings);
+        page.ConnectRequested += session => App.WindowFor(tab)?.ConnectSession(session);
+        return page;
     }
 
     /// <summary>Re-reads this window's Settings page after another window or command changed settings.</summary>

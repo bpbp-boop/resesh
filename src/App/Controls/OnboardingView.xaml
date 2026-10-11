@@ -225,6 +225,33 @@
                     <Rectangle Height="1" Fill="{ThemeResource SessionChromeFrameBrush}" />
 
                     <Grid ColumnDefinitions="24,*" ColumnSpacing="8">
+                        <FontIcon Glyph="&#xE77B;" FontSize="20" Foreground="{ThemeResource OnboardingAccentTextBrush}"
+                                  VerticalAlignment="Top" Margin="0,2,0,0" />
+                        <StackPanel Grid.Column="1" Spacing="12">
+                            <StackPanel Spacing="4">
+                                <TextBlock Text="Shared logins" Style="{ThemeResource SubtitleTextBlockStyle}" />
+                                <TextBlock Text="Type a username and password once for a whole folder of sessions. An identity is a username and how it signs in: a saved password, an SSH key, or a password asked once each time resesh starts. Attach it to a folder and every session inside uses it, including sessions you add later. Imports suggest identities for usernames that repeat."
+                                           TextWrapping="Wrap" Style="{ThemeResource BodyTextBlockStyle}"
+                                           Foreground="{ThemeResource OnboardingSecondaryTextBrush}" />
+                            </StackPanel>
+                            <TextBlock x:Name="LoginsStatus" TextWrapping="Wrap" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <Button x:Name="DefaultLoginButton" Content="Set a login for all sessions…" Padding="12,6"
+                                        Click="DefaultLogin_Click"
+                                        AutomationProperties.AutomationId="WelcomeDefaultLoginButton" />
+                                <Button x:Name="ManageIdentitiesButton" Content="Manage identities" Padding="12,6"
+                                        Click="ManageIdentities_Click"
+                                        AutomationProperties.AutomationId="WelcomeManageIdentitiesButton" />
+                            </StackPanel>
+                            <TextBlock Text="For one folder, right-click it in the session tree and choose Set Identity."
+                                       TextWrapping="Wrap" Style="{ThemeResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource OnboardingSecondaryTextBrush}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Rectangle Height="1" Fill="{ThemeResource SessionChromeFrameBrush}" />
+
+                    <Grid ColumnDefinitions="24,*" ColumnSpacing="8">
                         <FontIcon Glyph="&#xE790;" FontSize="20" Foreground="{ThemeResource OnboardingAccentTextBrush}"
                                   VerticalAlignment="Top" Margin="0,2,0,0" />
                         <StackPanel Grid.Column="1" Spacing="16">

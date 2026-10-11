@@ -19,6 +19,7 @@ internal struct GhosttyFrameInfo
     public ulong ScrollTotal;
     public ulong ScrollOffset;
     public ulong ScrollLength;
+    public byte RenderHeld; // no frame published; request another frame for release/timeout
 }
 
 internal enum GhosttyEventKind
@@ -40,7 +41,7 @@ internal enum GhosttyEventKind
 internal static unsafe partial class GhosttyNative
 {
     private const string Library = "reseshvt";
-    private const int ExpectedAbi = 4;
+    private const int ExpectedAbi = 5;
 
     private static readonly Lazy<string?> LoadError = new(Load);
 

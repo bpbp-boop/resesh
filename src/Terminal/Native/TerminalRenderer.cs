@@ -28,6 +28,10 @@ internal sealed unsafe class TerminalRenderer : IDisposable
     private static ID2D1Device? s_d2dDevice;
     private static IDWriteFactory2? s_dwrite;
     private static IDXGIFactory2? s_dxgiFactory;
+    private static readonly HashSet<TerminalRenderer> s_renderers = [];
+    private static int s_uiThread;
+    private static int s_generation;
+    private static bool s_recovering;
 
     private static readonly string[] FallbackFamilies =
     [
@@ -35,15 +39,15 @@ internal sealed unsafe class TerminalRenderer : IDisposable
         "Malgun Gothic", "Nirmala UI", "Ebrima", "Segoe UI Historic", "Cambria Math", "Segoe UI",
     ];
 
-    private readonly ID2D1DeviceContext _dc;
-    private readonly ID2D1SolidColorBrush _brush;
+    private ID2D1DeviceContext _dc = null!;
+    private ID2D1SolidColorBrush _brush = null!;
     private IDXGISwapChain1? _swapChain;
     private ID3D11Texture2D? _canvas;
     private ID2D1Bitmap1? _canvasBitmap;
 
     // Faces per style (0 regular, 1 bold, 2 italic, 3 bold italic), each a fallback chain.
     private readonly IDWriteFontFace[][] _faces = new IDWriteFontFace[4][];
-    private readonly bool[] _isEmojiFace = new bool[FallbackFamilies.Length + 1];
+    private bool[] _isEmojiFace = [];
     private IDWriteTextFormat? _emojiFormat;
     private IDWriteTextFormat? _clusterFormat;
     private int _emojiFace = -1;
@@ -52,6 +56,11 @@ internal sealed unsafe class TerminalRenderer : IDisposable
     private float[] _runAdvances = [];
     private float _emSize;
     private float _baseline;
+    private string? _fontFamilyList;
+    private float _compositionScaleX = 1;
+    private float _compositionScaleY = 1;
+    private int _generation;
+    private bool _disposed;
 
     /// <summary>Left padding in pixels before column 0 (terminal.html uses 6 CSS px).</summary>
     public int OriginX { get; set; }
@@ -60,6 +69,7 @@ internal sealed unsafe class TerminalRenderer : IDisposable
     public int PixelWidth { get; private set; }
     public int PixelHeight { get; private set; }
     public IDXGISwapChain1? SwapChain => _swapChain;
+    public event Action? SwapChainChanged;
 
     /// <summary>Text for a cell whose grapheme has more than one codepoint (emoji sequences,
     /// combining marks). Set by the surface, which owns the terminal.</summary>
@@ -68,26 +78,108 @@ internal sealed unsafe class TerminalRenderer : IDisposable
     public TerminalRenderer()
     {
         EnsureShared();
+        CreateDeviceResources();
+        s_renderers.Add(this);
+    }
+
+    private void CreateDeviceResources()
+    {
         _dc = s_d2dDevice!.CreateDeviceContext(DeviceContextOptions.None);
         _dc.TextAntialiasMode = Vortice.Direct2D1.TextAntialiasMode.Cleartype;
-        _brush = _dc.CreateSolidColorBrush(new Color4(1, 1, 1, 1));
+        _brushColor = new Color4(1, 1, 1, 1);
+        _brush = _dc.CreateSolidColorBrush(_brushColor);
+        _generation = s_generation;
     }
 
     private static void EnsureShared()
     {
+        var thread = Environment.CurrentManagedThreadId;
+        if (s_uiThread != 0 && s_uiThread != thread)
+            throw new InvalidOperationException("Terminal graphics resources must be used on their UI thread.");
+        s_uiThread = thread;
         if (s_device is not null)
             return;
-        D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport,
-            [FeatureLevel.Level_11_1, FeatureLevel.Level_11_0, FeatureLevel.Level_10_1],
-            out ID3D11Device device, out ID3D11DeviceContext context).CheckError();
-        s_device = device;
-        s_context = context;
-        s_d2dFactory = D2D1.D2D1CreateFactory<ID2D1Factory1>(D2DFactoryType.SingleThreaded);
-        using var dxgiDevice = device.QueryInterface<IDXGIDevice>();
-        s_d2dDevice = s_d2dFactory.CreateDevice(dxgiDevice);
-        using var adapter = dxgiDevice.GetAdapter();
-        s_dxgiFactory = adapter.GetParent<IDXGIFactory2>();
-        s_dwrite = DWrite.DWriteCreateFactory<IDWriteFactory2>(DWFactoryType.Shared);
+        try
+        {
+            D3D11.D3D11CreateDevice(null, DriverType.Hardware, DeviceCreationFlags.BgraSupport,
+                [FeatureLevel.Level_11_1, FeatureLevel.Level_11_0, FeatureLevel.Level_10_1],
+                out ID3D11Device device, out ID3D11DeviceContext context).CheckError();
+            s_device = device;
+            s_context = context;
+            s_d2dFactory = D2D1.D2D1CreateFactory<ID2D1Factory1>(D2DFactoryType.SingleThreaded);
+            using var dxgiDevice = device.QueryInterface<IDXGIDevice>();
+            s_d2dDevice = s_d2dFactory.CreateDevice(dxgiDevice);
+            using var adapter = dxgiDevice.GetAdapter();
+            s_dxgiFactory = adapter.GetParent<IDXGIFactory2>();
+            s_dwrite = DWrite.DWriteCreateFactory<IDWriteFactory2>(DWFactoryType.Shared);
+            s_generation++;
+        }
+        catch
+        {
+            DisposeShared();
+            throw;
+        }
+    }
+
+    private static void DisposeShared()
+    {
+        s_context?.ClearState();
+        s_context?.Flush();
+        s_dwrite?.Dispose();
+        s_dwrite = null;
+        s_d2dDevice?.Dispose();
+        s_d2dDevice = null;
+        s_d2dFactory?.Dispose();
+        s_d2dFactory = null;
+        s_dxgiFactory?.Dispose();
+        s_dxgiFactory = null;
+        s_context?.Dispose();
+        s_context = null;
+        s_device?.Dispose();
+        s_device = null;
+    }
+
+    private static void RecoverShared(int observedGeneration)
+    {
+        if (Environment.CurrentManagedThreadId != s_uiThread)
+            throw new InvalidOperationException("Terminal graphics recovery must run on the UI thread.");
+        if (s_recovering || observedGeneration != s_generation)
+            return;
+        s_recovering = true;
+        var renderers = s_renderers.ToArray();
+        try
+        {
+            foreach (var renderer in renderers)
+            {
+                if (renderer._disposed)
+                    continue;
+                renderer.DisposeDeviceResources();
+                renderer.SwapChainChanged?.Invoke();
+            }
+            DisposeShared();
+            EnsureShared();
+            foreach (var renderer in renderers)
+            {
+                if (renderer._disposed)
+                    continue;
+                renderer.CreateDeviceResources();
+                if (renderer._fontFamilyList is { } family)
+                    renderer.SetFont(family, renderer._emSize);
+                if (renderer.PixelWidth > 0 && renderer.PixelHeight > 0)
+                {
+                    renderer.Resize(renderer.PixelWidth, renderer.PixelHeight);
+                    renderer.SetCompositionScale(renderer._compositionScaleX, renderer._compositionScaleY);
+                }
+            }
+            // Notify only after every renderer is rebuilt; callbacks can schedule another frame.
+            foreach (var renderer in renderers)
+                if (!renderer._disposed)
+                    renderer.SwapChainChanged?.Invoke();
+        }
+        finally
+        {
+            s_recovering = false;
+        }
     }
 
     /// <summary>Loads the font chain and measures the cell. <paramref name="emPixels"/> is the
@@ -95,6 +187,7 @@ internal sealed unsafe class TerminalRenderer : IDisposable
     public void SetFont(string fontFamilyList, float emPixels)
     {
         DisposeFaces();
+        _fontFamilyList = fontFamilyList;
         _emSize = emPixels;
         _glyphs.Clear();
         using var collection = s_dwrite!.GetSystemFontCollection(false);
@@ -121,7 +214,7 @@ internal sealed unsafe class TerminalRenderer : IDisposable
                 return font.CreateFontFace();
             })];
         }
-        Array.Clear(_isEmojiFace);
+        _isEmojiFace = new bool[families.Length];
         _emojiFace = -1;
         for (var i = 0; i < families.Length && i < _isEmojiFace.Length; i++)
         {
@@ -199,22 +292,24 @@ internal sealed unsafe class TerminalRenderer : IDisposable
     /// <summary>Maps the physical-pixel swap chain onto the panel's DIP layout.</summary>
     public void SetCompositionScale(float scaleX, float scaleY)
     {
+        _compositionScaleX = scaleX;
+        _compositionScaleY = scaleY;
         if (_swapChain is null)
             return;
         using var chain2 = _swapChain.QueryInterface<IDXGISwapChain2>();
         chain2.MatrixTransform = Matrix3x2.CreateScale(1 / scaleX, 1 / scaleY);
     }
 
-    public void ReleaseSwapChain()
+    private void ReleaseSwapChain()
     {
-        _dc.Target = null;
+        if (_dc is not null)
+            _dc.Target = null;
         _canvasBitmap?.Dispose();
         _canvasBitmap = null;
         _canvas?.Dispose();
         _canvas = null;
         _swapChain?.Dispose();
         _swapChain = null;
-        PixelWidth = PixelHeight = 0;
     }
 
     private (int Face, ushort Glyph) Lookup(uint codepoint, int style)
@@ -263,11 +358,12 @@ internal sealed unsafe class TerminalRenderer : IDisposable
     /// <summary>Find highlight colors (terminal.html's search decorations).</summary>
     private const uint MatchColor = 0x515C6A, CurrentMatchColor = 0xF2CC60;
 
-    public void Draw(TerminalCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
+    public bool Draw(TerminalCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
         bool cursorShown, bool focused, uint selectionColor, bool full)
     {
-        if (_swapChain is null || _canvas is null)
-            return;
+        if (_disposed || _swapChain is null || _canvas is null)
+            return false;
+        var observedGeneration = _generation;
         if (_runGlyphs.Length < cols)
         {
             _runGlyphs = new ushort[cols];
@@ -289,11 +385,26 @@ internal sealed unsafe class TerminalRenderer : IDisposable
         }
         if (cursorShown && info.CursorVisible != 0 && info.CursorY < rows && info.CursorX < cols)
             DrawCursor(cells + info.CursorY * cols + info.CursorX, info, focused);
-        _dc.EndDraw();
+        var endDraw = _dc.EndDraw();
+        if (endDraw == Vortice.Direct2D1.ResultCode.RecreateTarget)
+        {
+            RecoverShared(observedGeneration);
+            return false;
+        }
+        endDraw.CheckError();
 
         using (var backBuffer = _swapChain.GetBuffer<ID3D11Texture2D>(0))
             s_context!.CopyResource(backBuffer, _canvas);
-        _swapChain.Present(1, PresentFlags.None);
+        var present = _swapChain.Present(1, PresentFlags.None);
+        if (present == Vortice.DXGI.ResultCode.DeviceRemoved
+            || present == Vortice.DXGI.ResultCode.DeviceReset
+            || present == Vortice.DXGI.ResultCode.DeviceHung)
+        {
+            RecoverShared(observedGeneration);
+            return false;
+        }
+        present.CheckError();
+        return true;
     }
 
     private void DrawRow(TerminalCell* row, int cols, int y, uint defaultBackground, uint selectionColor)
@@ -511,19 +622,41 @@ internal sealed unsafe class TerminalRenderer : IDisposable
 
     private void DisposeFaces()
     {
-        foreach (var chain in _faces)
-            if (chain is not null)
+        for (var i = 0; i < _faces.Length; i++)
+        {
+            if (_faces[i] is { } chain)
                 foreach (var face in chain)
                     face.Dispose();
+            _faces[i] = [];
+        }
     }
 
-    public void Dispose()
+    private void DisposeDeviceResources()
     {
         ReleaseSwapChain();
         DisposeFaces();
         _emojiFormat?.Dispose();
+        _emojiFormat = null;
         _clusterFormat?.Dispose();
-        _brush.Dispose();
-        _dc.Dispose();
+        _clusterFormat = null;
+        _glyphs.Clear();
+        _isEmojiFace = [];
+        _emojiFace = -1;
+        _brush?.Dispose();
+        _brush = null!;
+        _dc?.Dispose();
+        _dc = null!;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _disposed = true;
+        s_renderers.Remove(this);
+        SwapChainChanged = null;
+        DisposeDeviceResources();
+        if (s_renderers.Count == 0)
+            DisposeShared();
     }
 }

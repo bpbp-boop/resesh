@@ -116,6 +116,181 @@ public sealed class SessionStoreTests : IDisposable
         Assert.False(File.Exists(StorePath + ".tmp"));
     }
 
+    [Theory]
+    [InlineData("Add")]
+    [InlineData("Update")]
+    [InlineData("Remove")]
+    [InlineData("MoveToFolder")]
+    [InlineData("MoveToFolderBatch")]
+    [InlineData("CreateFolder")]
+    [InlineData("CreateLocalFolder")]
+    [InlineData("SetFolderIdentity")]
+    [InlineData("ReplaceFolderIdentity")]
+    [InlineData("ClearFolderIdentity")]
+    [InlineData("MergeFolderSettings")]
+    [InlineData("DetachIdentity")]
+    [InlineData("ApplyImport")]
+    [InlineData("RenameFolder")]
+    [InlineData("RenameLocalFolder")]
+    [InlineData("DeleteFolder")]
+    [InlineData("DeleteLocalFolder")]
+    public void Mutation_SaveFailure_DoesNotPublishOrPersistOnLaterSave(string mutation)
+    {
+        var store = NewStore();
+        var identityId = Guid.NewGuid();
+        var first = NewSession("first", "Original/Child") with { IdentityId = identityId };
+        var second = NewSession("second", "Original");
+        var local = NewSession("local", "Original/Child") with { Kind = SessionKind.Local };
+        store.ApplyImport([first, second, local], ["Original/Empty"], ["Original/Empty"]);
+        store.SetFolderIdentity("", identityId);
+        store.SetFolderIdentity("Original", identityId);
+        store.SetFolderIdentity("Original/Child", identityId);
+
+        var sessions = store.Sessions;
+        var folders = store.Folders;
+        var localFolders = store.FoldersOf(SessionKind.Local);
+        var folderSettings = store.FolderSettings;
+        var originalFile = File.ReadAllText(StorePath);
+        var originalBackup = File.ReadAllText(StorePath + ".bak");
+        var attempted = NewSession("failed", "Imported");
+        Action mutate = mutation switch
+        {
+            "Add" => () => store.Add(attempted),
+            "Update" => () => store.Update(first with { Name = "failed", Host = "10.9.9.9" }),
+            "Remove" => () => store.Remove(first.Id),
+            "MoveToFolder" => () => store.MoveToFolder(first.Id, "Moved"),
+            "MoveToFolderBatch" => () => store.MoveToFolder([first.Id, second.Id, local.Id], "Moved"),
+            "CreateFolder" => () => store.CreateFolder("Failed/Empty"),
+            "CreateLocalFolder" => () => store.CreateFolder("Failed/Empty", SessionKind.Local),
+            "SetFolderIdentity" => () => store.SetFolderIdentity("Failed", identityId),
+            "ReplaceFolderIdentity" => () => store.SetFolderIdentity("Original", Guid.NewGuid()),
+            "ClearFolderIdentity" => () => store.SetFolderIdentity("Original", null),
+            "MergeFolderSettings" => () => store.MergeFolderSettings(
+                [
+                    new FolderSettings { Path = "Imported", IdentityId = identityId },
+                    new FolderSettings { Path = "Imported/Child", IdentityId = identityId },
+                ]),
+            "DetachIdentity" => () => store.DetachIdentity(identityId),
+            "ApplyImport" => () => store.ApplyImport(
+                [first with { Name = "failed" }, attempted], ["Imported/Empty"], ["Imported/Local"]),
+            "RenameFolder" => () => store.RenameFolder("Original", "Renamed"),
+            "RenameLocalFolder" => () => store.RenameFolder("Original", "Renamed", SessionKind.Local),
+            "DeleteFolder" => () => store.DeleteFolder("Original"),
+            "DeleteLocalFolder" => () => store.DeleteFolder("Original", SessionKind.Local),
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation)),
+        };
+
+        Directory.CreateDirectory(StorePath + ".tmp");
+        try
+        {
+            var error = Record.Exception(mutate);
+            Assert.True(error is IOException or UnauthorizedAccessException,
+                $"Expected an atomic-write failure, got {error}.");
+            Assert.Equal(sessions, store.Sessions);
+            Assert.Equal(folders, store.Folders);
+            Assert.Equal(localFolders, store.FoldersOf(SessionKind.Local));
+            Assert.Equal(folderSettings, store.FolderSettings);
+            Assert.Equal(first, store.Find(first.Id));
+            Assert.Null(store.Find(attempted.Id));
+            Assert.Equal(originalFile, File.ReadAllText(StorePath));
+            Assert.Equal(originalBackup, File.ReadAllText(StorePath + ".bak"));
+        }
+        finally
+        {
+            Directory.Delete(StorePath + ".tmp");
+        }
+
+        var committed = NewSession("committed");
+        store.Add(committed);
+        var reloaded = NewStore();
+        Assert.Equal(sessions.Append(committed), store.Sessions);
+        Assert.Equal(sessions.Append(committed), reloaded.Sessions);
+        Assert.Equal(folders, reloaded.Folders);
+        Assert.Equal(localFolders, reloaded.FoldersOf(SessionKind.Local));
+        Assert.Equal(folderSettings, reloaded.FolderSettings);
+    }
+
+    [Fact]
+    public void RecoveredStore_SaveFailure_PreservesGoodBackupForNextSuccessfulSave()
+    {
+        var store = NewStore();
+        var original = NewSession("original");
+        store.Add(original);
+        store.Add(NewSession("not-in-backup"));
+        var backup = File.ReadAllText(StorePath + ".bak");
+        File.WriteAllText(StorePath, "{ corrupt");
+        var recovered = NewStore();
+        Assert.Contains("recovered from the backup", recovered.LoadWarning);
+
+        var attempted = NewSession("failed");
+        Directory.CreateDirectory(StorePath + ".tmp");
+        try
+        {
+            var error = Record.Exception(() => recovered.Add(attempted));
+            Assert.True(error is IOException or UnauthorizedAccessException,
+                $"Expected an atomic-write failure, got {error}.");
+            Assert.Equal(new[] { original }, recovered.Sessions);
+            Assert.Equal(backup, File.ReadAllText(StorePath + ".bak"));
+        }
+        finally
+        {
+            Directory.Delete(StorePath + ".tmp");
+        }
+
+        var committed = NewSession("committed");
+        recovered.Add(committed);
+        Assert.Equal(backup, File.ReadAllText(StorePath + ".bak"));
+        Assert.Equal(new[] { original, committed }, NewStore().Sessions);
+
+        var next = NewSession("next");
+        recovered.Add(next);
+        File.Copy(StorePath + ".bak", StorePath, overwrite: true);
+        Assert.Equal(new[] { original, committed }, NewStore().Sessions);
+    }
+
+    [Theory]
+    [InlineData("ApplyImportSessions")]
+    [InlineData("ApplyImportFolders")]
+    [InlineData("ApplyImportLocalFolders")]
+    [InlineData("MergeFolderSettings")]
+    public void Import_EnumerationFailure_DoesNotPublishPartialChanges(string mutation)
+    {
+        var store = NewStore();
+        var original = NewSession("original");
+        store.Add(original);
+        var imported = NewSession("imported");
+        var setting = new FolderSettings { Path = "Imported", IdentityId = Guid.NewGuid() };
+        Action mutate = mutation switch
+        {
+            "ApplyImportSessions" => () => store.ApplyImport(ThrowAfter(imported), [], []),
+            "ApplyImportFolders" => () => store.ApplyImport([imported], ThrowAfter("Imported"), []),
+            "ApplyImportLocalFolders" => () => store.ApplyImport(
+                [imported], ["Imported"], ThrowAfter("ImportedLocal")),
+            "MergeFolderSettings" => () => store.MergeFolderSettings(ThrowAfter(setting)),
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation)),
+        };
+
+        Assert.Throws<InvalidOperationException>(mutate);
+        Assert.Equal(new[] { original }, store.Sessions);
+        Assert.Empty(store.Folders);
+        Assert.Empty(store.FoldersOf(SessionKind.Local));
+        Assert.Empty(store.FolderSettings);
+
+        var committed = NewSession("committed");
+        store.Add(committed);
+        var reloaded = NewStore();
+        Assert.Equal(new[] { original, committed }, reloaded.Sessions);
+        Assert.Empty(reloaded.Folders);
+        Assert.Empty(reloaded.FoldersOf(SessionKind.Local));
+        Assert.Empty(reloaded.FolderSettings);
+    }
+
+    private static IEnumerable<T> ThrowAfter<T>(T item)
+    {
+        yield return item;
+        throw new InvalidOperationException("Import enumeration failed.");
+    }
+
     [Fact]
     public void Update_ReplacesSession()
     {

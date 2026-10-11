@@ -78,9 +78,10 @@ public sealed class SshKeyStore
             else if (!allowMissing)
                 throw new FileNotFoundException("The private-key file was not found.", normalized);
 
+            var candidate = new List<SshKeyReference>(_keys);
             var key = new SshKeyReference
             {
-                Name = UniqueName(string.IsNullOrWhiteSpace(name)
+                Name = UniqueName(candidate, string.IsNullOrWhiteSpace(name)
                     ? Path.GetFileName(normalized)
                     : name.Trim()),
                 Path = normalized,
@@ -90,8 +91,8 @@ public sealed class SshKeyStore
                 IsEncrypted = inspection?.IsEncrypted,
                 PublicKey = inspection?.PublicKey,
             };
-            _keys.Add(key);
-            Save();
+            candidate.Add(key);
+            Save(candidate);
             return key;
         }
     }
@@ -103,8 +104,9 @@ public sealed class SshKeyStore
         lock (_gate)
         {
             var index = IndexOf(id);
-            _keys[index] = _keys[index] with { Name = UniqueName(name.Trim(), id) };
-            Save();
+            var candidate = new List<SshKeyReference>(_keys);
+            candidate[index] = candidate[index] with { Name = UniqueName(candidate, name.Trim(), id) };
+            Save(candidate);
         }
     }
 
@@ -118,8 +120,9 @@ public sealed class SshKeyStore
             var current = _keys[index];
             EnsureFingerprintUnchanged(current, inspection);
             var updated = ApplyInspection(current with { Path = normalized }, inspection);
-            _keys[index] = updated;
-            Save();
+            var candidate = new List<SshKeyReference>(_keys);
+            candidate[index] = updated;
+            Save(candidate);
             return updated;
         }
     }
@@ -140,8 +143,9 @@ public sealed class SshKeyStore
             var updated = ApplyInspection(current, inspection);
             if (updated != current)
             {
-                _keys[IndexOf(id)] = updated;
-                Save();
+                var candidate = new List<SshKeyReference>(_keys);
+                candidate[IndexOf(id)] = updated;
+                Save(candidate);
             }
             return updated;
         }
@@ -151,9 +155,13 @@ public sealed class SshKeyStore
     {
         lock (_gate)
         {
-            var removed = _keys.RemoveAll(key => key.Id == id) > 0;
+            var removed = _keys.Any(key => key.Id == id);
             if (removed)
-                Save();
+            {
+                var candidate = new List<SshKeyReference>(_keys);
+                candidate.RemoveAll(key => key.Id == id);
+                Save(candidate);
+            }
             return removed;
         }
     }
@@ -165,12 +173,13 @@ public sealed class SshKeyStore
         {
             var map = new Dictionary<Guid, Guid>();
             var changed = false;
+            var candidate = _keys;
             foreach (var imported in importedKeys)
             {
-                var match = _keys.FirstOrDefault(key => key.Id == imported.Id)
-                    ?? _keys.FirstOrDefault(key => key.Fingerprint is { Length: > 0 }
+                var match = candidate.FirstOrDefault(key => key.Id == imported.Id)
+                    ?? candidate.FirstOrDefault(key => key.Fingerprint is { Length: > 0 }
                         && key.Fingerprint.Equals(imported.Fingerprint, StringComparison.Ordinal))
-                    ?? _keys.FirstOrDefault(key => TryPathsEqual(key.Path, imported.Path));
+                    ?? candidate.FirstOrDefault(key => TryPathsEqual(key.Path, imported.Path));
                 if (match is not null)
                 {
                     map[imported.Id] = match.Id;
@@ -179,15 +188,17 @@ public sealed class SshKeyStore
 
                 var target = imported with
                 {
-                    Id = _keys.Any(key => key.Id == imported.Id) ? Guid.NewGuid() : imported.Id,
-                    Name = UniqueName(imported.Name),
+                    Id = candidate.Any(key => key.Id == imported.Id) ? Guid.NewGuid() : imported.Id,
+                    Name = UniqueName(candidate, imported.Name),
                 };
-                _keys.Add(target);
+                if (!changed)
+                    candidate = new List<SshKeyReference>(_keys);
+                candidate.Add(target);
                 map[imported.Id] = target.Id;
                 changed = true;
             }
             if (changed)
-                Save();
+                Save(candidate);
             return map;
         }
     }
@@ -256,12 +267,12 @@ public sealed class SshKeyStore
         return index >= 0 ? index : throw new KeyNotFoundException($"SSH key {id} was not found.");
     }
 
-    private string UniqueName(string requested, Guid? except = null)
+    private static string UniqueName(List<SshKeyReference> keys, string requested, Guid? except = null)
     {
         var baseName = requested;
         var candidate = baseName;
         var suffix = 2;
-        while (_keys.Any(key => key.Id != except && key.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase)))
+        while (keys.Any(key => key.Id != except && key.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase)))
             candidate = $"{baseName} ({suffix++})";
         return candidate;
     }
@@ -292,10 +303,11 @@ public sealed class SshKeyStore
         }
     }
 
-    private void Save()
+    private void Save(List<SshKeyReference> candidate)
     {
-        var json = JsonSerializer.Serialize(new StoreData { Keys = _keys }, JsonOptions);
+        var json = JsonSerializer.Serialize(new StoreData { Keys = candidate }, JsonOptions);
         AtomicFile.Write(_path, json, _preserveBackup);
+        _keys = candidate;
         _preserveBackup = false;
     }
 

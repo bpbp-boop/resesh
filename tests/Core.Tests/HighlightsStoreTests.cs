@@ -85,6 +85,174 @@ public sealed class HighlightsStoreTests : IDisposable
         Assert.Contains(reloaded.AllRules, r => r.Id == "other-window");
     }
 
+    [Theory]
+    [InlineData("enable-builtin")]
+    [InlineData("reset-enabled-builtin")]
+    [InlineData("enable-custom")]
+    [InlineData("add-custom")]
+    [InlineData("replace-custom")]
+    [InlineData("remove-custom")]
+    [InlineData("add-override")]
+    [InlineData("replace-override")]
+    [InlineData("normalize-override")]
+    [InlineData("reset-builtin")]
+    [InlineData("merge-backup")]
+    [InlineData("commit-draft")]
+    public void Mutation_WhenSaveFails_KeepsStateAndLaterPersistsOnlySuccessfulChanges(string mutation)
+    {
+        var store = NewStore();
+        var custom = new HighlightRule { Id = "existing", Name = "Existing", Pattern = "existing" };
+        var builtin = BuiltinHighlights.Rules.Single(r => r.Id == "ipv4");
+        store.SetEnabled("number", true);
+        store.SaveCustom(custom);
+        store.SaveBuiltinOverride(builtin with { Color = "#123456" });
+        var before = store.ExportBackup();
+        var rulesBefore = store.AllRules;
+        var primaryBefore = File.ReadAllText(StorePath);
+        var backupBefore = File.ReadAllText(StorePath + ".bak");
+        var draft = store.CreateDraft();
+        draft.SetEnabled("state-negative", false);
+        draft.RemoveCustom(custom.Id);
+        draft.ResetBuiltin(builtin.Id);
+        draft.SaveCustom(new HighlightRule { Id = "draft-only", Name = "Draft", Pattern = "draft" });
+        var draftBefore = draft.ExportBackup();
+        Directory.CreateDirectory(StorePath + ".tmp");
+
+        var error = Record.Exception(() =>
+        {
+            switch (mutation)
+            {
+                case "enable-builtin":
+                    store.SetEnabled("state-negative", false);
+                    break;
+                case "reset-enabled-builtin":
+                    store.SetEnabled("number", false);
+                    break;
+                case "enable-custom":
+                    store.SetEnabled(custom.Id, false);
+                    break;
+                case "add-custom":
+                    store.SaveCustom(new HighlightRule { Id = "failed", Name = "Failed", Pattern = "failed" });
+                    break;
+                case "replace-custom":
+                    store.SaveCustom(custom with { Name = "Failed replacement", Pattern = "failed" });
+                    break;
+                case "remove-custom":
+                    store.RemoveCustom(custom.Id);
+                    break;
+                case "add-override":
+                    store.SaveBuiltinOverride(BuiltinHighlights.Rules.Single(r => r.Id == "mac") with { Color = "#abcdef" });
+                    break;
+                case "replace-override":
+                    store.SaveBuiltinOverride(builtin with { Color = "#abcdef" });
+                    break;
+                case "normalize-override":
+                    store.SaveBuiltinOverride(builtin);
+                    break;
+                case "reset-builtin":
+                    store.ResetBuiltin(builtin.Id);
+                    break;
+                case "merge-backup":
+                    store.MergeBackup(new HighlightBackupData
+                    {
+                        EnabledRules = ["ipv4"],
+                        DisabledRules = ["number"],
+                        CustomRules = [custom with { Name = "Failed import" },
+                            new HighlightRule { Id = "failed", Name = "Failed", Pattern = "failed" }],
+                        BuiltinOverrides = [builtin, BuiltinHighlights.Rules.Single(r => r.Id == "mac") with { Color = "#abcdef" }],
+                    });
+                    break;
+                case "commit-draft":
+                    store.CommitDraft(draft);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(mutation));
+            }
+        });
+
+        Assert.True(error is IOException or UnauthorizedAccessException, error?.ToString());
+        AssertStateEqual(before, store.ExportBackup());
+        Assert.Equal(rulesBefore, store.AllRules);
+        AssertStateEqual(draftBefore, draft.ExportBackup());
+        Assert.Equal(primaryBefore, File.ReadAllText(StorePath));
+        Assert.Equal(backupBefore, File.ReadAllText(StorePath + ".bak"));
+
+        Directory.Delete(StorePath + ".tmp");
+        var intended = new HighlightRule { Id = "intended", Name = "Intended", Pattern = "intended" };
+        store.SaveCustom(intended);
+        var expected = before with { CustomRules = [.. before.CustomRules, intended with { Pack = "custom" }] };
+        AssertStateEqual(expected, store.ExportBackup());
+        AssertStateEqual(expected, NewStore().ExportBackup());
+    }
+
+    [Fact]
+    public void CommitDraft_WhenSaveFails_RetryStillCommitsEditsAndPreservesUnrelatedChanges()
+    {
+        var store = NewStore();
+        store.SetEnabled("number", true);
+        var draft = store.CreateDraft();
+        draft.SetEnabled("state-negative", false);
+        draft.SaveCustom(new HighlightRule { Id = "draft-only", Name = "Draft", Pattern = "draft" });
+        var before = store.ExportBackup();
+        Directory.CreateDirectory(StorePath + ".tmp");
+
+        var error = Record.Exception(() => store.CommitDraft(draft));
+
+        Assert.True(error is IOException or UnauthorizedAccessException, error?.ToString());
+        AssertStateEqual(before, store.ExportBackup());
+        Directory.Delete(StorePath + ".tmp");
+        store.SaveCustom(new HighlightRule { Id = "other-window", Name = "Other", Pattern = "other" });
+        store.CommitDraft(draft);
+
+        var reloaded = NewStore();
+        Assert.False(reloaded.AllRules.Single(r => r.Id == "state-negative").Enabled);
+        Assert.True(reloaded.AllRules.Single(r => r.Id == "number").Enabled);
+        Assert.Contains(reloaded.AllRules, r => r.Id == "draft-only");
+        Assert.Contains(reloaded.AllRules, r => r.Id == "other-window");
+
+        store.SetEnabled("state-negative", true);
+        draft.SaveCustom(new HighlightRule { Id = "next-edit", Name = "Next", Pattern = "next" });
+        store.CommitDraft(draft);
+        Assert.True(NewStore().AllRules.Single(r => r.Id == "state-negative").Enabled);
+    }
+
+    [Fact]
+    public void RecoveredBackup_WhenSaveFails_PreservesBackupUntilSuccessfulSave()
+    {
+        var store = NewStore();
+        store.SaveCustom(new HighlightRule { Id = "recovered", Name = "Recovered", Pattern = "recovered" });
+        store.SetEnabled("number", true);
+        var backupBefore = File.ReadAllText(StorePath + ".bak");
+        File.WriteAllText(StorePath, "{ not json");
+        store = NewStore();
+        Assert.NotNull(store.LoadWarning);
+        var before = store.ExportBackup();
+        Directory.CreateDirectory(StorePath + ".tmp");
+
+        var error = Record.Exception(() => store.SetEnabled("state-negative", false));
+
+        Assert.True(error is IOException or UnauthorizedAccessException, error?.ToString());
+        AssertStateEqual(before, store.ExportBackup());
+        Assert.Equal("{ not json", File.ReadAllText(StorePath));
+        Assert.Equal(backupBefore, File.ReadAllText(StorePath + ".bak"));
+        Directory.Delete(StorePath + ".tmp");
+        store.SetEnabled("number", true);
+        Assert.Equal(backupBefore, File.ReadAllText(StorePath + ".bak"));
+        Assert.True(NewStore().AllRules.Single(r => r.Id == "state-negative").Enabled);
+
+        var firstSuccessfulSave = File.ReadAllText(StorePath);
+        store.SetEnabled("number", false);
+        Assert.Equal(firstSuccessfulSave, File.ReadAllText(StorePath + ".bak"));
+    }
+
+    private static void AssertStateEqual(HighlightBackupData expected, HighlightBackupData actual)
+    {
+        Assert.Equal(expected.EnabledRules, actual.EnabledRules);
+        Assert.Equal(expected.DisabledRules, actual.DisabledRules);
+        Assert.Equal(expected.CustomRules, actual.CustomRules);
+        Assert.Equal(expected.BuiltinOverrides, actual.BuiltinOverrides);
+    }
+
     [Fact]
     public void FreshStore_ExposesBuiltinsWithDefaults()
     {

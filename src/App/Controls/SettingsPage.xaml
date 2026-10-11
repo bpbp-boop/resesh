@@ -51,6 +51,9 @@
             <NavigationViewItem x:Name="GeneralItem" Content="General" Tag="General" AutomationProperties.AutomationId="SettingsGeneralTab">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE713;" /></NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem x:Name="IdentitiesItem" Content="Identities &amp; Keys" Tag="Identities" AutomationProperties.AutomationId="SettingsIdentitiesTab">
+                <NavigationViewItem.Icon><FontIcon Glyph="&#xE77B;" /></NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItem x:Name="RecordingItem" Content="Recording" Tag="Recording" AutomationProperties.AutomationId="SettingsRecordingTab">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE7C8;" /></NavigationViewItem.Icon>
             </NavigationViewItem>
@@ -198,6 +201,53 @@
                             AutomationProperties.Name="Write crash reports"
                             AutomationProperties.AutomationId="SettingsWriteCrashReports" />
                     </toolkit:SettingsCard>
+                </StackPanel>
+                </Grid>
+            </ScrollViewer>
+
+            <!-- ==== Identities and keys ==== -->
+            <ScrollViewer x:Name="IdentitiesSection" Style="{StaticResource SectionScroller}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MaxWidth="1000" />
+                    </Grid.ColumnDefinitions>
+                <StackPanel Style="{StaticResource SectionBody}">
+                    <TextBlock Text="Identities &amp; Keys" Style="{StaticResource SectionTitle}" />
+                    <TextBlock
+                        Style="{StaticResource GroupDescription}"
+                        Text="An identity is a username and how it signs in. Attach one to a folder (right-click the folder in the session tree and choose Set Identity) and every session inside that inherits its login uses it, including sessions added later." />
+                    <InfoBar x:Name="IdentityStatus" IsOpen="False" IsClosable="True" />
+
+                    <TextBlock Text="Identities" Style="{StaticResource GroupHeader}" />
+                    <toolkit:SettingsCard
+                        x:Name="DefaultIdentityCard"
+                        Header="Default identity"
+                        Description="Used by sessions that inherit their login when no folder above them has an identity.">
+                        <ComboBox
+                            x:Name="DefaultIdentityBox"
+                            MinWidth="240"
+                            DisplayMemberPath="Label"
+                            SelectionChanged="DefaultIdentityBox_SelectionChanged"
+                            AutomationProperties.Name="Default identity"
+                            AutomationProperties.AutomationId="SettingsDefaultIdentity" />
+                    </toolkit:SettingsCard>
+                    <StackPanel x:Name="IdentityRows" Spacing="4" />
+                    <Button
+                        Margin="0,6,0,0"
+                        Content="New identity…"
+                        Click="NewIdentity_Click"
+                        AutomationProperties.AutomationId="SettingsNewIdentity" />
+
+                    <TextBlock Text="SSH keys" Style="{StaticResource GroupHeader}" />
+                    <TextBlock
+                        Style="{StaticResource GroupDescription}"
+                        Text="resesh records where each private key is stored. It never copies, moves, or deletes key files." />
+                    <StackPanel x:Name="KeyRows" Spacing="4" />
+                    <Button
+                        Margin="0,6,0,0"
+                        Content="Add key…"
+                        Click="AddKey_Click"
+                        AutomationProperties.AutomationId="SettingsAddKey" />
                 </StackPanel>
                 </Grid>
             </ScrollViewer>

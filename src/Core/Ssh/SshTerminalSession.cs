@@ -130,6 +130,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             switch (verdict)
             {
                 case HostKeyVerdict.Match:
+                    _knownHosts.BackfillHostKey(session.Host, session.Port, e.HostKeyName, e.HostKey);
                     e.CanTrust = true;
                     break;
                 default:
@@ -142,7 +143,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
                     var trusted = HostKeyDecision?.Invoke(info) ?? false;
                     cancellationToken.ThrowIfCancellationRequested();
                     if (trusted)
-                        _knownHosts.Accept(session.Host, session.Port, e.HostKeyName, sha256);
+                        _knownHosts.Accept(session.Host, session.Port, e.HostKeyName, sha256, e.HostKey);
                     else
                         hostKeyFailure = verdict == HostKeyVerdict.Mismatch
                             ? new SshSessionException(
@@ -167,6 +168,10 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             if (hostKeyFailure is not null)
                 throw hostKeyFailure;
             throw SshConnectionFactory.Classify(ex);
+        }
+        finally
+        {
+            SshConnectionFactory.DisposeAuthMethods(auth);
         }
 
         _client = client;

@@ -2,6 +2,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Resesh.App.Interop;
 using Resesh.Core.Credentials;
+using Resesh.Core.Models;
 using Resesh.Core.Ssh;
 using Resesh.Core.Storage;
 using Windows.UI.ViewManagement;
@@ -16,6 +17,21 @@ public partial class App : Application
 
     public static SessionStore Store { get; } = new(StorePath("sessions.json", SessionStore.DefaultPath));
     public static SshKeyStore SshKeys { get; } = new(StorePath("ssh-keys.json", SshKeyStore.DefaultPath));
+    public static IdentityStore Identities { get; } = new(StorePath("identities.json", IdentityStore.DefaultPath));
+
+    /// <summary>Resolves session logins against the live session and identity stores.</summary>
+    public static Resesh.Core.Identities.LoginResolver Logins { get; } = new(Store, Identities);
+
+    /// <summary>Passwords typed for "ask every time" identities, until the app closes.</summary>
+    public static Resesh.Core.Identities.AskedSecretCache AskedSecrets { get; } = new();
+
+    /// <summary>Persistent shell ownership across every window and connect worker.</summary>
+    public static TmuxSlotReservations TmuxSlots { get; } = new();
+
+    /// <summary>The username a session logs in as: its own, or its identity's (with any
+    /// per-session override). Empty when it will be asked.</summary>
+    public static string LoginUsername(Session session) =>
+        session.Kind == SessionKind.Ssh ? Logins.Resolve(session).Username : session.Username;
     public static ICredentialService Credentials { get; } = DemoMode.CreateCredentialService();
     public static KnownHostsStore KnownHosts { get; } = new(StorePath("known_hosts.json", KnownHostsStore.DefaultPath));
     public static SettingsStore Settings { get; } = new(StorePath("settings.json", SettingsStore.DefaultPath));
@@ -134,6 +150,7 @@ public partial class App : Application
 
         Store.Load();
         SshKeys.Load();
+        Identities.Load();
         KnownHosts.Load();
         Highlights.Load();
         Workspaces.Load();
@@ -183,7 +200,7 @@ public partial class App : Application
 
         var loadMessages = new[]
             {
-                Settings.LoadWarning, Store.LoadWarning, SshKeys.LoadWarning, Highlights.LoadWarning,
+                Settings.LoadWarning, Store.LoadWarning, SshKeys.LoadWarning, Identities.LoadWarning, Highlights.LoadWarning,
                 Workspaces.LoadWarning, KnownHosts.LoadWarning, KnownHosts.LoadError,
             }
             .Where(message => message is not null).ToList();
@@ -228,6 +245,29 @@ public partial class App : Application
 
     internal static MainWindow? WindowFor(Resesh.App.ViewModels.TabViewModel tab) =>
         Current is App app ? app._windows.FirstOrDefault(window => window.ViewModel.AllTabs.Contains(tab)) : null;
+
+    internal static IEnumerable<ViewModels.TabViewModel> AllTabs =>
+        Current is App app ? app._windows.SelectMany(window => window.ViewModel.AllTabs) : [];
+
+    internal static void SavePinnedSessions()
+    {
+        if (Current is not App app)
+            return;
+        SaveSettings(Settings.Current with
+        {
+            PinnedSessionIds = app._windows.SelectMany(window => window.ViewModel.AllTabs)
+                .Where(tab => tab.IsPinned).Select(tab => tab.Session.Id).Distinct().ToList(),
+        });
+        RefreshJumpList();
+    }
+
+    internal static void RefreshSessionsInAllWindows(ViewModels.MainViewModel? source = null)
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.ViewModel.RefreshSessions(rebuildTree: !ReferenceEquals(window.ViewModel, source));
+    }
 
     internal static void RefreshWindowTitles()
     {

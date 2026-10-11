@@ -8,7 +8,8 @@ namespace Resesh.Core.Storage;
 /// overrides for built-in rules, plus full user-defined custom rules. Built-in rule
 /// definitions live in code (<see cref="BuiltinHighlights"/>) so app updates can fix or
 /// extend packs; only the user's deviations from the defaults are persisted. Writes are
-/// atomic with .bak rotation, mirroring SessionStore.
+/// atomic with .bak rotation, mirroring SessionStore; changes are published in memory
+/// only after their candidate state has been saved successfully.
 /// </summary>
 public sealed class HighlightsStore
 {
@@ -57,28 +58,23 @@ public sealed class HighlightsStore
         var edited = draft.ExportBackup();
         lock (_gate)
         {
-            var original = ExportBackup();
+            var candidate = CopyState();
             foreach (var id in baseline.EnabledRules.Concat(baseline.DisabledRules)
                          .Concat(edited.EnabledRules).Concat(edited.DisabledRules).Distinct(StringComparer.Ordinal))
             {
                 static int State(HighlightBackupData data, string id) =>
                     data.DisabledRules.Contains(id) ? -1 : data.EnabledRules.Contains(id) ? 1 : 0;
                 if (State(baseline, id) == State(edited, id)) continue;
-                _enabled.Remove(id);
-                _disabled.Remove(id);
-                if (State(edited, id) == 1) _enabled.Add(id);
-                if (State(edited, id) == -1) _disabled.Add(id);
+                candidate.Enabled.Remove(id);
+                candidate.Disabled.Remove(id);
+                if (State(edited, id) == 1) candidate.Enabled.Add(id);
+                if (State(edited, id) == -1) candidate.Disabled.Add(id);
             }
-            var custom = _custom.ToDictionary(r => r.Id, StringComparer.Ordinal);
+            var custom = candidate.Custom.ToDictionary(r => r.Id, StringComparer.Ordinal);
             MergeDraftRules(custom, baseline.CustomRules, edited.CustomRules);
-            _custom = custom.Values.ToList();
-            MergeDraftRules(_overrides, baseline.BuiltinOverrides, edited.BuiltinOverrides);
-            try { Save(); }
-            catch
-            {
-                SetState(original);
-                throw;
-            }
+            candidate.Custom = custom.Values.ToList();
+            MergeDraftRules(candidate.Overrides, baseline.BuiltinOverrides, edited.BuiltinOverrides);
+            Save(candidate);
         }
         draft._draftBaseline = edited;
     }
@@ -104,6 +100,22 @@ public sealed class HighlightsStore
         _disabled = new HashSet<string>(state.DisabledRules, StringComparer.Ordinal);
         _custom = state.CustomRules.ToList();
         _overrides = state.BuiltinOverrides.ToDictionary(r => r.Id, StringComparer.Ordinal);
+    }
+
+    private StoreState CopyState() => new()
+    {
+        Enabled = new HashSet<string>(_enabled, StringComparer.Ordinal),
+        Disabled = new HashSet<string>(_disabled, StringComparer.Ordinal),
+        Custom = _custom.ToList(),
+        Overrides = new Dictionary<string, HighlightRule>(_overrides, StringComparer.Ordinal),
+    };
+
+    private sealed class StoreState
+    {
+        public required HashSet<string> Enabled { get; init; }
+        public required HashSet<string> Disabled { get; init; }
+        public required List<HighlightRule> Custom { get; set; }
+        public required Dictionary<string, HighlightRule> Overrides { get; init; }
     }
 
     public static string DefaultPath =>
@@ -172,24 +184,25 @@ public sealed class HighlightsStore
     {
         lock (_gate)
         {
+            var candidate = CopyState();
             foreach (var id in imported.EnabledRules)
             {
-                _disabled.Remove(id);
-                _enabled.Add(id);
+                candidate.Disabled.Remove(id);
+                candidate.Enabled.Add(id);
             }
             foreach (var id in imported.DisabledRules)
             {
-                _enabled.Remove(id);
-                _disabled.Add(id);
+                candidate.Enabled.Remove(id);
+                candidate.Disabled.Add(id);
             }
             foreach (var rule in imported.CustomRules.Where(r => !string.IsNullOrWhiteSpace(r.Id)))
             {
                 var normalized = rule with { Pack = "custom" };
-                var index = _custom.FindIndex(r => r.Id == normalized.Id);
+                var index = candidate.Custom.FindIndex(r => r.Id == normalized.Id);
                 if (index >= 0)
-                    _custom[index] = normalized;
+                    candidate.Custom[index] = normalized;
                 else
-                    _custom.Add(normalized);
+                    candidate.Custom.Add(normalized);
             }
             foreach (var rule in imported.BuiltinOverrides.Where(r => !string.IsNullOrWhiteSpace(r.Id)))
             {
@@ -199,16 +212,16 @@ public sealed class HighlightsStore
                 {
                     var normalized = rule with { Id = builtin.Id, Pack = builtin.Pack, Enabled = builtin.Enabled };
                     if (normalized == builtin)
-                        _overrides.Remove(builtin.Id);
+                        candidate.Overrides.Remove(builtin.Id);
                     else
-                        _overrides[builtin.Id] = normalized;
+                        candidate.Overrides[builtin.Id] = normalized;
                 }
                 else
                 {
-                    _overrides[rule.Id] = rule;
+                    candidate.Overrides[rule.Id] = rule;
                 }
             }
-            Save();
+            Save(candidate);
         }
     }
 
@@ -219,22 +232,21 @@ public sealed class HighlightsStore
         lock (_gate)
         {
             var custom = _custom.FindIndex(r => r.Id == id);
+            var builtin = custom < 0 ? BuiltinHighlights.Rules.FirstOrDefault(r => r.Id == id) : null;
+            if (custom < 0 && builtin is null) return;
+            var candidate = CopyState();
             if (custom >= 0)
             {
-                _custom[custom] = _custom[custom] with { Enabled = enabled };
-            }
-            else if (BuiltinHighlights.Rules.FirstOrDefault(r => r.Id == id) is { } builtin)
-            {
-                _enabled.Remove(id);
-                _disabled.Remove(id);
-                if (enabled != builtin.Enabled)
-                    (enabled ? _enabled : _disabled).Add(id);
+                candidate.Custom[custom] = candidate.Custom[custom] with { Enabled = enabled };
             }
             else
             {
-                return;
+                candidate.Enabled.Remove(id);
+                candidate.Disabled.Remove(id);
+                if (enabled != builtin!.Enabled)
+                    (enabled ? candidate.Enabled : candidate.Disabled).Add(id);
             }
-            Save();
+            Save(candidate);
         }
     }
 
@@ -247,13 +259,14 @@ public sealed class HighlightsStore
             throw new ArgumentException("Custom rule needs an id.", nameof(rule));
         lock (_gate)
         {
+            var candidate = CopyState();
             rule = rule with { Pack = "custom" };
-            var index = _custom.FindIndex(r => r.Id == rule.Id);
+            var index = candidate.Custom.FindIndex(r => r.Id == rule.Id);
             if (index >= 0)
-                _custom[index] = rule;
+                candidate.Custom[index] = rule;
             else
-                _custom.Add(rule);
-            Save();
+                candidate.Custom.Add(rule);
+            Save(candidate);
         }
     }
 
@@ -261,10 +274,11 @@ public sealed class HighlightsStore
     {
         lock (_gate)
         {
-            var removed = _custom.RemoveAll(r => r.Id == id) > 0;
-            if (removed)
-                Save();
-            return removed;
+            if (!_custom.Any(r => r.Id == id)) return false;
+            var candidate = CopyState();
+            candidate.Custom.RemoveAll(r => r.Id == id);
+            Save(candidate);
+            return true;
         }
     }
 
@@ -278,12 +292,13 @@ public sealed class HighlightsStore
         {
             if (BuiltinHighlights.Rules.FirstOrDefault(r => r.Id == rule.Id) is not { } builtin)
                 throw new ArgumentException($"No built-in rule '{rule.Id}'.", nameof(rule));
+            var candidate = CopyState();
             var normalized = rule with { Id = builtin.Id, Pack = builtin.Pack, Enabled = builtin.Enabled };
             if (normalized == builtin)
-                _overrides.Remove(builtin.Id);
+                candidate.Overrides.Remove(builtin.Id);
             else
-                _overrides[builtin.Id] = normalized;
-            Save();
+                candidate.Overrides[builtin.Id] = normalized;
+            Save(candidate);
         }
     }
 
@@ -293,10 +308,11 @@ public sealed class HighlightsStore
     {
         lock (_gate)
         {
-            var removed = _overrides.Remove(id);
-            if (removed)
-                Save();
-            return removed;
+            if (!_overrides.ContainsKey(id)) return false;
+            var candidate = CopyState();
+            candidate.Overrides.Remove(id);
+            Save(candidate);
+            return true;
         }
     }
 
@@ -332,24 +348,48 @@ public sealed class HighlightsStore
             ? over with { Id = builtin.Id, Pack = builtin.Pack }
             : builtin;
 
-    private void Save()
+    private void Save(StoreState candidate)
     {
-        if (_path is null) return;
-        var data = new StoreData
+        if (_path is not null)
         {
-            EnabledRules = _enabled.OrderBy(s => s, StringComparer.Ordinal).ToList(),
-            DisabledRules = _disabled.OrderBy(s => s, StringComparer.Ordinal).ToList(),
-            CustomRules = _custom,
-            BuiltinOverrides = _overrides.Values.OrderBy(r => r.Id, StringComparer.Ordinal).ToList(),
-        };
-        var json = JsonSerializer.Serialize(data, JsonOptions);
+            var data = new StoreData
+            {
+                EnabledRules = candidate.Enabled.OrderBy(s => s, StringComparer.Ordinal).ToList(),
+                DisabledRules = candidate.Disabled.OrderBy(s => s, StringComparer.Ordinal).ToList(),
+                CustomRules = candidate.Custom,
+                BuiltinOverrides = candidate.Overrides.Values.OrderBy(r => r.Id, StringComparer.Ordinal).ToList(),
+            };
+            var json = JsonSerializer.Serialize(data, JsonOptions);
+            AtomicFile.Write(_path, json, _preserveBackup);
+        }
 
-        AtomicFile.Write(_path, json, _preserveBackup);
+        _enabled = candidate.Enabled;
+        _disabled = candidate.Disabled;
+        _custom = candidate.Custom;
+        _overrides = candidate.Overrides;
         _preserveBackup = false;
     }
 
-    private static StoreData? Read(string path) =>
-        JsonSerializer.Deserialize<StoreData>(File.ReadAllText(path), JsonOptions);
+    private static StoreData? Read(string path)
+    {
+        var data = JsonSerializer.Deserialize<StoreData>(File.ReadAllText(path), JsonOptions);
+        // Reject unusable rule collections inside the loader so .bak recovery remains available.
+        if (data?.CustomRules?.Any(rule => rule is null) == true
+            || data?.BuiltinOverrides?.Any(rule => rule is null) == true)
+        {
+            throw new InvalidDataException("The highlight payload contains a null rule.");
+        }
+        if (data?.CustomRules is { } custom)
+        {
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var rule in custom)
+            {
+                if (!string.IsNullOrWhiteSpace(rule.Id) && !ids.Add(rule.Id))
+                    throw new InvalidDataException("The highlight payload contains a duplicate custom rule id.");
+            }
+        }
+        return data;
+    }
 
     private sealed class StoreData
     {

@@ -105,45 +105,53 @@ internal sealed unsafe class TerminalCommandBuffer(Func<IntPtr> terminal) : ICom
         return marker;
     }
 
-    /// <summary>The terminal is about to be freed: markers must not touch it afterwards.</summary>
+    /// <summary>Releases this buffer's markers before the terminal is freed or reused.</summary>
     internal void Detach()
     {
+        var term = Terminal;
         foreach (var marker in _live)
-            marker.Orphan();
+            marker.Release(term);
         _live.Clear();
     }
 
     private sealed class NativeMarker(TerminalCommandBuffer owner, uint id) : ICommandMarker
     {
         private bool _disposed;
-        private bool _orphaned;
 
-        public bool IsDisposed => _disposed || _orphaned || Line < 0;
+        public bool IsDisposed => _disposed || Line < 0;
 
         public int Line
         {
             get
             {
-                if (_disposed || _orphaned)
+                if (_disposed)
                     return -1;
                 var term = owner.Terminal;
-                return term == IntPtr.Zero ? -1 : GhosttyNative.rvt_marker_line(term, id);
+                var line = term == IntPtr.Zero ? -1 : GhosttyNative.rvt_marker_line(term, id);
+                if (line < 0)
+                {
+                    owner._live.Remove(this);
+                    Release(term);
+                }
+                return line;
             }
         }
 
-        internal void Orphan() => _orphaned = true;
+        internal void Release(IntPtr term)
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            if (term != IntPtr.Zero)
+                GhosttyNative.rvt_marker_free(term, id);
+        }
 
         public void Dispose()
         {
             if (_disposed)
                 return;
-            _disposed = true;
             owner._live.Remove(this);
-            if (_orphaned)
-                return;
-            var term = owner.Terminal;
-            if (term != IntPtr.Zero)
-                GhosttyNative.rvt_marker_free(term, id);
+            Release(owner.Terminal);
         }
     }
 }

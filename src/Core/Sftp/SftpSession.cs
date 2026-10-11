@@ -63,6 +63,8 @@ public sealed class SftpSession : IDisposable
             var sha256 = Convert.ToBase64String(SHA256.HashData(e.HostKey)).TrimEnd('=');
             var verdict = _knownHosts.Check(session.Host, session.Port, e.HostKeyName, sha256);
             e.CanTrust = verdict == HostKeyVerdict.Match;
+            if (e.CanTrust)
+                _knownHosts.BackfillHostKey(session.Host, session.Port, e.HostKeyName, e.HostKey);
             if (!e.CanTrust)
                 hostKeyFailure = verdict == HostKeyVerdict.Mismatch
                     ? new SshSessionException(
@@ -84,6 +86,10 @@ public sealed class SftpSession : IDisposable
             if (hostKeyFailure is not null)
                 throw hostKeyFailure;
             throw SshConnectionFactory.Classify(ex);
+        }
+        finally
+        {
+            SshConnectionFactory.DisposeAuthMethods(auth);
         }
 
         _client = client;

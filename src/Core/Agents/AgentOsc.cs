@@ -42,6 +42,8 @@ public sealed record AgentEvent(
 ///
 /// Structured form (what adapters emit):
 /// <code>ESC ] 7377 ; agent ; id=claude ; state=needs-approval ; label=Run%20tests ST</code>
+/// Claude Code's allowlisted hook output carries the same fields in
+/// <c>ESC ] 777 ; notify ; resesh-agent ; id=claude ; state=working BEL</c>.
 /// Values are percent-encoded; unknown keys are ignored so the format can grow.
 /// </summary>
 public static class AgentOsc
@@ -56,6 +58,9 @@ public static class AgentOsc
 
     /// <summary>rxvt-unicode style "notify;title;body".</summary>
     public const int RxvtNotifyCode = 777;
+
+    /// <summary>Exact reserved OSC 777 notification title for allowlisted structured adapters.</summary>
+    public const string StructuredNotifyTitle = "resesh-agent";
 
     public const int MaxLabelLength = 80;
 
@@ -78,9 +83,13 @@ public static class AgentOsc
         // Namespaced so 7377 can carry other resesh subprotocols later.
         if (!parts[0].Trim().Equals("agent", StringComparison.OrdinalIgnoreCase))
             return null;
+        return ParseStructuredFields(parts, 1);
+    }
 
+    private static AgentEvent? ParseStructuredFields(string[] parts, int firstField)
+    {
         string? key = null, label = null, state = null;
-        for (var i = 1; i < parts.Length; i++)
+        for (var i = firstField; i < parts.Length; i++)
         {
             var split = parts[i].IndexOf('=');
             if (split <= 0)
@@ -130,7 +139,8 @@ public static class AgentOsc
         return Signal(text);
     }
 
-    /// <summary>OSC 777: <c>notify;title;body</c>.</summary>
+    /// <summary>OSC 777: <c>notify;title;body</c>. The exact reserved title
+    /// <c>resesh-agent</c> carries structured fields; every other title is generic.</summary>
     public static AgentEvent? ParseRxvtNotify(string? payload)
     {
         if (string.IsNullOrWhiteSpace(payload))
@@ -138,6 +148,8 @@ public static class AgentOsc
         var parts = payload.Split(';');
         if (!parts[0].Trim().Equals("notify", StringComparison.OrdinalIgnoreCase))
             return null;
+        if (parts.Length >= 2 && parts[1].Equals(StructuredNotifyTitle, StringComparison.Ordinal))
+            return ParseStructuredFields(parts, 2);
         var text = string.Join(" — ", parts.Skip(1).Where(p => !string.IsNullOrWhiteSpace(p)));
         return Signal(text);
     }

@@ -9,6 +9,19 @@ public enum AuthMethod
     None,
 }
 
+/// <summary>Where an SSH session's login comes from.</summary>
+public enum SessionLogin
+{
+    /// <summary>The session's own username, auth method, and stored secret.</summary>
+    Own,
+
+    /// <summary>The nearest folder identity, or a prompt when there is none.</summary>
+    Inherit,
+
+    /// <summary>A specific identity chosen by the session.</summary>
+    Identity,
+}
+
 /// <summary>
 /// Target kind tag for a saved profile. Absent from pre-6.1 JSON records, so the
 /// serializer default (<see cref="Ssh"/>) is also the migration rule: records with
@@ -145,8 +158,29 @@ public sealed record Session
 
     public int Port { get; init; } = 22;
 
+    /// <summary>The login name. With <see cref="Login"/> Own it is this session's username;
+    /// otherwise a non-empty value overrides the identity's username and keeps its proof.</summary>
     public string Username { get; init; } = "";
 
+    /// <summary>The identity this session logs in as (<see cref="SessionLogin.Identity"/>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? IdentityId { get; init; }
+
+    /// <summary>Logs in as the nearest folder identity (<see cref="SessionLogin.Inherit"/>).
+    /// Two plain fields instead of an enum: older builds ignore unknown properties but
+    /// reject unknown enum values, which would make the whole store unreadable.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool InheritLogin { get; init; }
+
+    /// <summary>Where this session's login comes from. Records without either field are Own,
+    /// so every session saved before identities keeps its own username and secret.</summary>
+    [JsonIgnore]
+    public SessionLogin Login =>
+        IdentityId is not null ? SessionLogin.Identity
+        : InheritLogin ? SessionLogin.Inherit
+        : SessionLogin.Own;
+
+    /// <summary>Username, auth method and key below; meaningful when <see cref="Login"/> is Own.</summary>
     public AuthMethod AuthMethod { get; init; } = AuthMethod.Password;
 
     /// <summary>The registered SSH key used by private-key authentication. The key registry

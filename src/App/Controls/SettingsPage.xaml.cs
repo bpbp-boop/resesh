@@ -12,7 +12,7 @@ namespace Resesh.App.Controls;
 /// </summary>
 public sealed partial class SettingsPage : UserControl
 {
-    private enum Section { General, Recording, Highlighting, Agents, Shortcuts }
+    private enum Section { General, Identities, Recording, Highlighting, Agents, Shortcuts }
 
     private readonly HighlightsStore _highlightDraft = App.Highlights.CreateDraft();
 
@@ -29,6 +29,7 @@ public sealed partial class SettingsPage : UserControl
         var highlightEditor = new HighlightRulesEditor(_highlightDraft);
         highlightEditor.Changed += CommitHighlights;
         HighlightEditorHost.Content = highlightEditor;
+        HookIdentityChanges();
         Show(Section.General);
     }
 
@@ -53,6 +54,7 @@ public sealed partial class SettingsPage : UserControl
             or GlobalSettingsTarget.RewindMegabytes or GlobalSettingsTarget.CommandHistory
             or GlobalSettingsTarget.CommandHistoryDays => Section.Recording,
         GlobalSettingsTarget.Highlighting => Section.Highlighting,
+        GlobalSettingsTarget.Identities => Section.Identities,
         GlobalSettingsTarget.Agents or GlobalSettingsTarget.ShowAgentIcons
             or GlobalSettingsTarget.AgentAlertFlash or GlobalSettingsTarget.AgentAlertSound => Section.Agents,
         _ => Section.General,
@@ -84,12 +86,14 @@ public sealed partial class SettingsPage : UserControl
     private void Show(Section section)
     {
         GeneralSection.Visibility = PresentationValues.Visible(section == Section.General);
+        IdentitiesSection.Visibility = PresentationValues.Visible(section == Section.Identities);
         RecordingSection.Visibility = PresentationValues.Visible(section == Section.Recording);
         HighlightingSection.Visibility = PresentationValues.Visible(section == Section.Highlighting);
         AgentsSection.Visibility = PresentationValues.Visible(section == Section.Agents);
         ShortcutsSection.Visibility = PresentationValues.Visible(section == Section.Shortcuts);
         var item = section switch
         {
+            Section.Identities => IdentitiesItem,
             Section.Recording => RecordingItem,
             Section.Highlighting => HighlightingItem,
             Section.Agents => AgentsItem,
@@ -100,6 +104,8 @@ public sealed partial class SettingsPage : UserControl
             Sections.SelectedItem = item;
         if (section == Section.Recording)
             ViewModel.RefreshHistoryUsage();
+        if (section == Section.Identities)
+            RefreshIdentities();
     }
 
     private void Sections_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)

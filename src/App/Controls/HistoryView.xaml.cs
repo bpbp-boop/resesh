@@ -144,6 +144,7 @@ public sealed partial class HistoryView : UserControl
         InitializeComponent();
         AddHandler(KeyDownEvent, new KeyEventHandler(View_KeyDown), handledEventsToo: true);
         BuildKeyHints();
+        Unloaded += (_, _) => Close();
     }
 
     public void Open(bool historyEnabled, Guid? sessionId = null, string? fontFamily = null)

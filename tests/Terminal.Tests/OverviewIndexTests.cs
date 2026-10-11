@@ -46,10 +46,17 @@ public class OverviewIndexTests
     {
         var (buffer, index) = Setup(100, i => i == 50 ? "error" : "fine");
         index.Advance();
+        var staleAnchor = Assert.Single(buffer.Markers);
         buffer.Trimmed = 20;                 // the top 20 lines left the scrollback
         Assert.Empty(Indexed(index));        // the anchor is gone: the index answers nothing
+        Assert.True(staleAnchor.Disposed);
+        Assert.Equal(0, buffer.LiveMarkerCount);
         index.Advance();                     // ... and rebuilds against the new top
         Assert.Equal([30], Indexed(index));
+        Assert.Equal(1, buffer.LiveMarkerCount);
+        index.Reset();
+        Assert.Equal(0, buffer.LiveMarkerCount);
+        Assert.All(buffer.Markers, marker => Assert.Equal(1, marker.ReleaseCount));
     }
 
     [Fact]
@@ -63,8 +70,32 @@ public class OverviewIndexTests
         buffer.Trimmed = 1000;
         index.Advance();
         Assert.Equal([4500], Indexed(index));
+        Assert.Equal(1, buffer.LiveMarkerCount);
+        Assert.True(buffer.Markers[0].Disposed); // reanchoring retired the old native reference
+        index.Reset();
+        Assert.Equal(0, buffer.LiveMarkerCount);
+        Assert.All(buffer.Markers, marker => Assert.Equal(1, marker.ReleaseCount));
     }
 
+
+    [Fact]
+    public void AdvanceRetiresLostAnchorWithoutAReadFirst()
+    {
+        var (buffer, index) = Setup(100, i => i == 50 ? "error" : "fine");
+        index.Advance();
+        var staleAnchor = Assert.Single(buffer.Markers);
+        buffer.Trimmed = 20;
+
+        index.Advance();
+
+        Assert.True(staleAnchor.Disposed);
+        Assert.Equal([30], Indexed(index));
+        Assert.Equal(1, buffer.LiveMarkerCount);
+        index.Reset();
+        index.Reset();
+        Assert.Equal(0, buffer.LiveMarkerCount);
+        Assert.All(buffer.Markers, marker => Assert.Equal(1, marker.ReleaseCount));
+    }
     [Fact]
     public void JoinsSoftWrappedLines()
     {

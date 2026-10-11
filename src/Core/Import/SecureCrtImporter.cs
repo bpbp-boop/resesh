@@ -18,6 +18,13 @@ public sealed record ImportCandidate
     public string Protocol { get; init; } = "";
     public string? PrivateKeyPath { get; init; }
 
+    /// <summary>
+    /// Opaque, in-memory-only token equal for sessions whose source stored the same password
+    /// (see <see cref="SecureCrtImporter.PasswordFingerprint"/>). Never decrypted, never saved;
+    /// null when no password is stored or the format can't be compared.
+    /// </summary>
+    public string? PasswordFingerprint { get; init; }
+
     /// <summary>Plain telnet (not SecureCRT's Telnet/SSL, which needs TLS we don't speak).</summary>
     public bool IsTelnet => Protocol == TelnetProtocol;
 
@@ -138,6 +145,7 @@ public static class SecureCrtImporter
                     candidate = candidate with
                     {
                         Username = GetStringValue(personalContent, "Username")?.Trim() ?? candidate.Username,
+                        PasswordFingerprint = PasswordFingerprint(GetStringValue(content, "Password V2")),
                         PrivateKeyPath = GetIdentity(personalContent) ?? candidate.PrivateKeyPath,
                     };
                 }
@@ -145,23 +153,15 @@ public static class SecureCrtImporter
             var configRoot = Path.GetFullPath(Path.Combine(sessionsDir, ".."));
             var personalRoot = personalSessionsDir is null ? configRoot
                 : Path.GetFullPath(Path.Combine(personalSessionsDir, ".."));
-            if (UsesGlobalKey(content))
-            {
-                var globalFile = Path.Combine(configRoot, "Global.ini");
-                var globalContent = File.Exists(globalFile) ? File.ReadAllText(globalFile) : "";
-                var personalGlobal = Path.Combine(personalRoot, "Global.ini");
-                if (personalRoot != configRoot && File.Exists(personalGlobal))
-                    globalContent += "\n" + File.ReadAllText(personalGlobal);
-                candidate = candidate with { PrivateKeyPath = GetIdentity(globalContent) };
-            }
+            if (!OffersPublicKey(content))
+                candidate = candidate with { PrivateKeyPath = null };
+            else if (UsesGlobalKey(content))
+                candidate = candidate with { PrivateKeyPath = GlobalIdentity(configRoot, personalRoot) };
             if (candidate.PrivateKeyPath is { } identity)
             {
                 identity = identity.Replace("${VDS_CONFIG_PATH}", configRoot)
                     .Replace("${VDS_USER_DATA_PATH}", personalRoot);
-                var resolved = ImportKeyPath.Resolve(identity, configRoot);
-                if (resolved?.EndsWith(".pub", StringComparison.OrdinalIgnoreCase) == true)
-                    resolved = resolved[..^4];
-                candidate = candidate with { PrivateKeyPath = resolved };
+                candidate = candidate with { PrivateKeyPath = PrivateKeyFor(ImportKeyPath.Resolve(identity, configRoot)) };
             }
             (candidate.IsSupported ? importable : skipped).Add(candidate);
         }
@@ -180,6 +180,8 @@ public static class SecureCrtImporter
     /// current protocol ("[SSH2] Port", "[SSH1] Port", or plain "Port" for telnet), never
     /// just the first port key in the file; a missing port falls back to the protocol default.
     /// </summary>
+    private const int RdpPort = 3389;
+
     public static ImportCandidate Parse(string iniContent, string name, string folderPath, string relativePath)
     {
         string host = "", username = "", protocol = "";
@@ -210,6 +212,14 @@ public static class SecureCrtImporter
             }
         }
 
+        // An RDP session can keep a stale "SSH2" protocol name; its current-protocol port
+        // (the plain key) then still says 3389. SSH sessions store theirs under "[SSH2] Port".
+        if (protocol is "SSH2" or "SSH1" && ports.GetValueOrDefault("Port") == RdpPort
+            && iniContent.Contains("\"RDP ", StringComparison.Ordinal))
+        {
+            protocol = "RDP";
+        }
+
         // SSH sessions fall back to the plain key, which older SecureCRT versions wrote.
         var port = protocol switch
         {
@@ -228,13 +238,77 @@ public static class SecureCrtImporter
             Username = protocol == ImportCandidate.TelnetProtocol ? "" : username.Trim(),
             Protocol = protocol,
             PrivateKeyPath = GetIdentity(iniContent),
+            PasswordFingerprint = protocol == ImportCandidate.TelnetProtocol
+                ? null
+                : PasswordFingerprint(GetStringValue(iniContent, "Password V2")),
         };
+    }
+
+    /// <summary>
+    /// Lets sessions be grouped by saved password without decrypting anything. SecureCRT's
+    /// "Password V2" is AES-CBC over [length][password][SHA-256 of it][random padding].
+    /// "03:" prepends a salt used to derive its key and IV; "02:" derives its key from the
+    /// config passphrase. Padding occupies 8–23 bytes, so omit the final two cipher blocks.
+    /// All remaining blocks are deterministic and include the entire password plus at least
+    /// eight checksum bytes. Comparing only two leading blocks would conflate long passwords
+    /// of the same length and prefix. The token never contains ciphertext or plaintext.
+    /// </summary>
+    internal static string? PasswordFingerprint(string? stored)
+    {
+        if (string.IsNullOrWhiteSpace(stored))
+            return null;
+        stored = stored.Trim();
+        var saltHex = stored.StartsWith("03:", StringComparison.Ordinal) ? 16 * 2
+            : stored.StartsWith("02:", StringComparison.Ordinal) ? 0
+            : -1;
+        var ciphertextHex = stored.Length - 3 - saltHex;
+        if (saltHex < 0 || ciphertextHex < 3 * 16 * 2 || ciphertextHex % (16 * 2) != 0
+            || stored.AsSpan(3).ContainsAnyExcept("0123456789abcdefABCDEF"))
+            return null;
+        var deterministicHex = stored.Length - 2 * 16 * 2;
+        var leading = System.Text.Encoding.ASCII.GetBytes(stored[..deterministicHex].ToLowerInvariant());
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(leading));
     }
 
     private static string? GetIdentity(string content) =>
         GetStringValue(content, "Identity Filename V2")
         ?? GetStringValue(content, "Identity Filename")
         ?? GetStringValue(content, "SSH1 Identity Filename V2");
+
+    /// <summary>
+    /// The key behind "Use global public key". SecureCRT keeps it in SSH2.ini (Global
+    /// Options › SSH2); older versions kept it in Global.ini. Personal data overrides config.
+    /// </summary>
+    private static string? GlobalIdentity(string configRoot, string personalRoot)
+    {
+        foreach (var root in new[] { personalRoot, configRoot }.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            foreach (var file in new[] { "SSH2.ini", "Global.ini" })
+            {
+                var path = Path.Combine(root, file);
+                if (File.Exists(path) && GetIdentity(File.ReadAllText(path)) is { Length: > 0 } identity)
+                    return identity;
+            }
+        }
+        return null;
+    }
+
+    private static readonly string[] PrivateKeyExtensions = ["", ".key", ".pem", ".ppk"];
+
+    /// <summary>SecureCRT records the public key file (*.pub); the private key sits beside it,
+    /// with no extension or as .key/.pem/.ppk. Falls back to the bare name when none exists.</summary>
+    internal static string? PrivateKeyFor(string? path)
+    {
+        if (path is null || !path.EndsWith(".pub", StringComparison.OrdinalIgnoreCase))
+            return path;
+        var stem = path[..^4];
+        return PrivateKeyExtensions.Select(extension => stem + extension).FirstOrDefault(File.Exists) ?? stem;
+    }
+
+    /// <summary>False when the session's SSH2 authentication list leaves out public keys.</summary>
+    private static bool OffersPublicKey(string content) =>
+        GetStringValue(content, "SSH2 Authentications V2") is not { Length: > 0 } methods
+        || methods.Split(',').Any(method => method.Trim().Equals("publickey", StringComparison.OrdinalIgnoreCase));
 
     private static bool UsesGlobalKey(string content)
     {
@@ -287,19 +361,51 @@ public static class SecureCrtImporter
     /// candidate whose name+host+port already
     /// exists is skipped. Returns (imported, duplicatesSkipped).
     /// </summary>
+    /// <summary>True when a session with the candidate's name, host, and port already exists.</summary>
+    public static bool IsDuplicate(SessionStore store, ImportCandidate candidate) =>
+        store.Sessions.Any(s =>
+            s.Name.Equals(candidate.Name, StringComparison.OrdinalIgnoreCase)
+            && s.Host.Equals(candidate.Host, StringComparison.OrdinalIgnoreCase)
+            && s.Port == candidate.Port);
+
+    /// <summary>Adds the selected candidates, skipping duplicates. With an identity plan,
+    /// sessions sharing a login use one identity (created or reused) instead of their own.</summary>
     public static (int Imported, int Duplicates) Commit(SessionStore store, IEnumerable<ImportCandidate> selected,
-        SshKeyStore? keys = null)
+        SshKeyStore? keys = null, Identities.ImportIdentityPlan? plan = null, IdentityStore? identities = null)
     {
         var imported = 0;
         var duplicates = 0;
+        var identityIds = new Dictionary<string, Guid>();
+
+        Guid IdentityFor(Identities.ImportLogin login)
+        {
+            if (identityIds.TryGetValue(login.Key, out var known))
+                return known;
+            var suggestion = plan!.Suggestions.First(s => s.Login.Key == login.Key);
+            Guid id;
+            if (suggestion.Existing is { } existing)
+                id = existing.Id;
+            else
+            {
+                var key = login.UsesKey
+                    ? (keys ?? throw new InvalidOperationException("An SSH key store is required to import keys."))
+                        .RegisterExternal(login.KeyPath, allowMissing: true)
+                    : null;
+                id = identities!.Add(new Identity
+                {
+                    Name = suggestion.Name,
+                    Username = login.Username,
+                    Proof = key is null ? IdentityProof.Password : IdentityProof.Key,
+                    KeyId = key?.Id,
+                }).Id;
+            }
+            identityIds[login.Key] = id;
+            return id;
+        }
 
         foreach (var candidate in selected)
         {
-            var isDuplicate = store.Sessions.Any(s =>
-                s.Name.Equals(candidate.Name, StringComparison.OrdinalIgnoreCase)
-                && s.Host.Equals(candidate.Host, StringComparison.OrdinalIgnoreCase)
-                && s.Port == candidate.Port);
-            if (isDuplicate)
+            if (IsDuplicate(store, candidate))
             {
                 duplicates++;
                 continue;
@@ -321,6 +427,25 @@ public static class SecureCrtImporter
                 continue;
             }
 
+            if (identities is not null && plan?.Choices.GetValueOrDefault(candidate) is
+                { Kind: not Identities.ImportLoginKind.Own } choice)
+            {
+                store.Add(new Session
+                {
+                    Name = candidate.Name,
+                    FolderPath = candidate.FolderPath,
+                    Host = candidate.Host,
+                    Port = candidate.Port,
+                    InheritLogin = choice.Kind == Identities.ImportLoginKind.Inherit,
+                    IdentityId = choice.Kind == Identities.ImportLoginKind.Identity ? IdentityFor(choice.Login!) : null,
+                });
+                if (choice.Kind == Identities.ImportLoginKind.Inherit && choice.Login is { } inherited
+                    && plan.Suggestions.Any(s => s.Login.Key == inherited.Key))
+                    IdentityFor(inherited);
+                imported++;
+                continue;
+            }
+
             var key = !string.IsNullOrWhiteSpace(candidate.PrivateKeyPath)
                 ? (keys ?? throw new InvalidOperationException("An SSH key store is required to import keys."))
                     .RegisterExternal(candidate.PrivateKeyPath, allowMissing: true)
@@ -338,6 +463,13 @@ public static class SecureCrtImporter
                 CredentialNeeded = key is null,
             });
             imported++;
+        }
+
+        // Attach only identities some imported session uses, and never over a folder's own.
+        foreach (var (folder, login) in plan?.Attachments ?? [])
+        {
+            if (identityIds.TryGetValue(login.Key, out var id) && store.FolderIdentity(folder) is null)
+                store.SetFolderIdentity(folder, id);
         }
 
         return (imported, duplicates);

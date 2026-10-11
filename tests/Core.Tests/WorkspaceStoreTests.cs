@@ -226,6 +226,162 @@ public sealed class WorkspaceStoreTests : IDisposable
         Assert.Equal(before, File.ReadAllBytes(path));
     }
 
+    [Theory]
+    [InlineData("SaveAs")]
+    [InlineData("Rename")]
+    [InlineData("Update")]
+    [InlineData("Delete")]
+    [InlineData("Reorder")]
+    [InlineData("SaveLastLayout")]
+    public void Mutation_FailedWriteDoesNotPublishOrLeakIntoNextSave(string mutation)
+    {
+        var path = Path.Combine(_dir.FullName, "failed-write-workspaces.json");
+        var sessionId = Guid.NewGuid();
+        var layout = new WorkspaceLayout
+        {
+            Groups =
+            [
+                new WorkspaceGroup
+                {
+                    Tabs = [new WorkspaceTabReference { SessionId = sessionId, Pinned = true }],
+                },
+            ],
+        };
+        var store = new WorkspaceStore(path);
+        store.Load();
+        var first = store.SaveAs("First", layout);
+        var second = store.SaveAs("Second", EmptyLayout());
+        store.SaveLastLayout(layout);
+        var before = store.Workspaces;
+        var lastLayout = store.LastLayout;
+        var primary = File.ReadAllBytes(path);
+        var backup = File.ReadAllBytes(path + ".bak");
+        Directory.CreateDirectory(path + ".tmp");
+
+        var exception = Record.Exception(() =>
+        {
+            switch (mutation)
+            {
+                case "SaveAs":
+                    store.SaveAs("Rejected", EmptyLayout());
+                    break;
+                case "Rename":
+                    store.Rename(first.Id, "Rejected");
+                    break;
+                case "Update":
+                    store.Update(first.Id, EmptyLayout());
+                    break;
+                case "Delete":
+                    store.Delete(first.Id);
+                    break;
+                case "Reorder":
+                    store.Reorder([second.Id, first.Id]);
+                    break;
+                case "SaveLastLayout":
+                    store.SaveLastLayout(EmptyLayout());
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(mutation));
+            }
+        });
+
+        Assert.True(exception is IOException or UnauthorizedAccessException);
+        Assert.Equal(before.Count, store.Workspaces.Count);
+        for (var index = 0; index < before.Count; index++)
+            Assert.Same(before[index], store.Workspaces[index]);
+        Assert.Same(lastLayout, store.LastLayout);
+        Assert.Equal(primary, File.ReadAllBytes(path));
+        Assert.Equal(backup, File.ReadAllBytes(path + ".bak"));
+
+        Directory.Delete(path + ".tmp");
+        store.Rename(second.Id, "Committed");
+
+        var loaded = new WorkspaceStore(path);
+        loaded.Load();
+        Assert.Equal([first.Id, second.Id], loaded.Workspaces.Select(workspace => workspace.Id));
+        Assert.Equal(["First", "Committed"], loaded.Workspaces.Select(workspace => workspace.Name));
+        var savedTab = Assert.Single(Assert.Single(loaded.Workspaces[0].Groups).Tabs);
+        Assert.Equal(sessionId, savedTab.SessionId);
+        Assert.True(savedTab.Pinned);
+        Assert.Empty(Assert.Single(loaded.Workspaces[1].Groups).Tabs);
+        var lastTab = Assert.Single(Assert.Single(loaded.LastLayout!.Groups).Tabs);
+        Assert.Equal(sessionId, lastTab.SessionId);
+        Assert.True(lastTab.Pinned);
+    }
+
+    [Fact]
+    public void Mutation_FailedRecoveryWritePreservesBackupUntilSuccessfulSave()
+    {
+        var path = Path.Combine(_dir.FullName, "recovered-workspaces.json");
+        var store = new WorkspaceStore(path);
+        store.Load();
+        var saved = store.SaveAs("Backup", EmptyLayout());
+        store.Rename(saved.Id, "Primary");
+        var backup = File.ReadAllBytes(path + ".bak");
+        File.WriteAllText(path, "not json");
+        var recovered = new WorkspaceStore(path);
+        recovered.Load();
+        var before = Assert.Single(recovered.Workspaces);
+        var warning = recovered.LoadWarning;
+        Assert.NotNull(warning);
+        Directory.CreateDirectory(path + ".tmp");
+
+        var exception = Record.Exception(() => recovered.Rename(saved.Id, "Rejected"));
+
+        Assert.True(exception is IOException or UnauthorizedAccessException);
+        Assert.Same(before, Assert.Single(recovered.Workspaces));
+        Assert.Equal(warning, recovered.LoadWarning);
+        Assert.Equal("not json", File.ReadAllText(path));
+        Assert.Equal(backup, File.ReadAllBytes(path + ".bak"));
+
+        Directory.Delete(path + ".tmp");
+        recovered.Rename(saved.Id, "Recovered");
+        Assert.Equal(backup, File.ReadAllBytes(path + ".bak"));
+        var loaded = new WorkspaceStore(path);
+        loaded.Load();
+        Assert.Equal("Recovered", Assert.Single(loaded.Workspaces).Name);
+
+        var primary = File.ReadAllBytes(path);
+        recovered.Rename(saved.Id, "Next");
+        Assert.Equal(primary, File.ReadAllBytes(path + ".bak"));
+    }
+
+    [Fact]
+    public void WriteImported_FailedWriteLeavesStoreAndFilesUnchanged()
+    {
+        var path = Path.Combine(_dir.FullName, "imported-workspaces.json");
+        var store = new WorkspaceStore(path);
+        store.Load();
+        var saved = store.SaveAs("Original", EmptyLayout());
+        store.SaveLastLayout(EmptyLayout());
+        var lastLayout = store.LastLayout;
+        var primary = File.ReadAllBytes(path);
+        var backup = File.ReadAllBytes(path + ".bak");
+        var imported = new WorkspaceStoreData
+        {
+            Workspaces = [saved with { Name = "Rejected" }],
+            LastLayout = new WorkspaceLayout(),
+        };
+        Directory.CreateDirectory(path + ".tmp");
+
+        var exception = Record.Exception(() => WorkspaceStore.WriteImported(path, imported));
+
+        Assert.True(exception is IOException or UnauthorizedAccessException);
+        Assert.Same(saved, Assert.Single(store.Workspaces));
+        Assert.Same(lastLayout, store.LastLayout);
+        Assert.Equal(primary, File.ReadAllBytes(path));
+        Assert.Equal(backup, File.ReadAllBytes(path + ".bak"));
+        Assert.Equal("Rejected", Assert.Single(imported.Workspaces!).Name);
+        Assert.Empty(imported.LastLayout!.Groups);
+
+        Directory.Delete(path + ".tmp");
+        store.Rename(saved.Id, "Committed");
+        var loaded = new WorkspaceStore(path);
+        loaded.Load();
+        Assert.Equal("Committed", Assert.Single(loaded.Workspaces).Name);
+        Assert.Single(loaded.LastLayout!.Groups);
+    }
+
     public void Dispose() => _dir.Delete(recursive: true);
 
     private static WorkspaceLayout EmptyLayout() => new()

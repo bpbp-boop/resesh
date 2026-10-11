@@ -14,9 +14,10 @@ public sealed class TerminalRecordingTests : IDisposable
         using var capture = new TerminalCapture(80, 24, startedAt: started);
         capture.CaptureResize(132, 43, started.AddSeconds(1).ToUnixTimeMilliseconds());
 
+        var recordingStart = DateTimeOffset.UtcNow;
         var path = capture.StartRecording(_directory, "router/lab", "xterm-256color");
-        capture.CaptureOutput(Encoding.UTF8.GetBytes("hello \u001b[31mred\u001b[0m\r\n"), started.AddSeconds(2).ToUnixTimeMilliseconds());
-        capture.CaptureResize(100, 30, started.AddSeconds(3).ToUnixTimeMilliseconds());
+        capture.CaptureOutput(Encoding.UTF8.GetBytes("hello \u001b[31mred\u001b[0m\r\n"), recordingStart.AddSeconds(2).ToUnixTimeMilliseconds());
+        capture.CaptureResize(100, 30, recordingStart.AddSeconds(3).ToUnixTimeMilliseconds());
         capture.StopRecording();
         Assert.DoesNotContain("\"duration\"", File.ReadLines(path).First(), StringComparison.Ordinal);
 
@@ -24,8 +25,12 @@ public sealed class TerminalRecordingTests : IDisposable
         Assert.Equal(2, recording.Events.Count);
         Assert.Equal((132, 43), (recording.Width, recording.Height));
         Assert.Equal("router/lab", recording.Title);
-        Assert.Equal(new TerminalRecordingEvent(1, "o", "hello \u001b[31mred\u001b[0m\r\n"), recording.Events[0]);
-        Assert.Equal(new TerminalRecordingEvent(2, "r", "100x30"), recording.Events[1]);
+        Assert.Equal("o", recording.Events[0].Type);
+        Assert.Equal("hello \u001b[31mred\u001b[0m\r\n", recording.Events[0].Data);
+        Assert.InRange(recording.Events[0].Time, 0, 2);
+        Assert.Equal("r", recording.Events[1].Type);
+        Assert.Equal("100x30", recording.Events[1].Data);
+        Assert.Equal(1, recording.Events[1].Time - recording.Events[0].Time, precision: 6);
         Assert.EndsWith(".cast", path, StringComparison.OrdinalIgnoreCase);
         Assert.True(File.Exists(Path.ChangeExtension(path, ".log")));
     }

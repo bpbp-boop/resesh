@@ -108,50 +108,167 @@ store key passphrases in Credential Manager.
 
 ---
 
-## Identities (design in progress)
+## Identities (Phase A built)
 
 Goal: describe who you log in as once, for a whole part of the session tree, instead of
-repeating a username and password in every session. Still being designed; the open
-questions below need answers before work starts.
+repeating a username and password in every session. The main pain is repetition: a new
+session dropped into a folder should need no credentials of its own.
 
 **Today:** each session carries its own username, auth method, and Credential Manager
 entry (keys are already shared through the key registry). With hundreds of imported
 sessions that means typing the same username repeatedly, retyping a rotated domain or
 TACACS password session by session, and no view of which sessions use which account.
 
-**Identity** = a username plus one way to prove it: a stored password (one Credential
-Manager entry), a registered key, the SSH agent (see Connectivity; also the path to
-password-manager agents in FUTURE.md), ask every time (never stored), and later GSSAPI.
+**Identity** = a name, a username, and one way to prove it: a stored password (one
+Credential Manager entry, `Resesh:identity:<id>`, read like key passphrases), a registered
+key, ask every time, and later the SSH agent (see Connectivity; also the path to
+password-manager agents in FUTURE.md) and GSSAPI. Stored in `identities.json`.
 
-**Attachment and resolution:** identities attach to folders and are inherited by every
-session inside, including ones added later. A session may override with a specific
-identity or "ask every time". Resolution: session override, then the nearest folder with
-an identity, then a prompt.
+**Model:** `Session.Login` = `Own | Inherit | Identity(id)`. A missing value means `Own`,
+so every existing session keeps its own username, auth method, and secret with zero
+migration; new sessions default to `Inherit`. A session may also override only the
+username while keeping the inherited proof (cloud images: `ubuntu` vs `ec2-user` on one
+key; per-device local accounts). Folder settings live in `sessions.json` as
+`folderSettings: [{ path, identityId }]`, keyed by normalized path and reparented by the
+same `SessionStore` rename and move code that reparents sessions (test-pinned). Deleting
+a folder drops its settings.
+
+**Resolution:** an ordered list of sources, evaluated at the one connect-time choke point
+(`ResolveSshCredentialAsync`; the SFTP pane reuses its result):
+1. The session's own credentials or explicit identity.
+2. The nearest folder (self, then ancestors) with an identity.
+3. A prompt for username and password with *"Use for every session in Branch/"*, which
+   creates the identity and attaches it to that folder.
+
+Folders only, no tags. NetBox lens attributes (role = firewall → TACACS identity) plug in
+later as another source in the list.
 
 **Behaviour:**
+- Moving a session into a folder changes its login immediately; the drop shows a
+  one-line note when it does.
 - A failed stored-password login offers "Update the password for *identity* (used by N
   sessions)"; one update fixes every session using it.
-- The session editor shows the effective identity and where it comes from; an Identities
-  manager lists each identity with its usage.
-- New sessions dropped into a folder need no credentials of their own.
+- Ask-every-time identities keep a typed password in memory, per identity, until the app
+  closes; never on disk.
+- The session editor has a Login section showing the effective identity and where it
+  comes from ("Inherited from Branch/ — tacacs-ops (password)"), with "This session
+  only" revealing today's fields. Folders get "Set identity…". Settings gains an
+  Identities tab listing each identity with its usage and a "Show sessions" link.
+- Telnet is out of scope: its login happens in the terminal. Auto-login there is a
+  separate feature.
 
-**Migration:** nothing changes until the user opts in. Existing sessions keep a private
-per-session identity. A tidy-up assistant proposes groupings (same username and same
-saved password, compared locally only) and folder assignments. Importers suggest
-identities from repeated usernames.
+**Migration:** nothing changes until the user opts in. A tidy-up assistant proposes
+groupings (same username and same saved password, compared locally only) and folder
+assignments. Importers suggest identities from repeated usernames.
 
-**Related:** jump hosts use the same folder inheritance but stay a separate concept (an
-identity is who you are; a jump host is how you reach the machine). Backups export
-identities without secrets unless the encrypted option is used.
+**Related:** jump hosts stay a separate piece of work (an identity is who you are; a jump
+host is how you reach the machine), but each hop resolves its login through the same
+resolver. Backups export identities without secrets unless the encrypted option is used.
 
-**Hard parts:** folders have no settings of their own today, so folder settings need a
-home that survives renames and moves. Per-host accounts need the override path. One
-stored secret now visibly unlocks many sessions (it usually did already).
+**Phases:**
+- A (built): store, resolver and connect path, first-connect "use for every session in
+  this folder" prompt, username override, editor Login section, folder "Set Identity…",
+  Settings › Identities & Keys (replaces the SSH Keys dialog; includes the default
+  identity for the tree root), failed-password update, in-memory cache for
+  ask-every-time, drop note when a move changes a login, backup.
+- B: tidy-up assistant for existing sessions. (Importer suggestions shipped with A: the import
+  review is a tab that groups repeated logins into identities, attached where they dominate;
+  key logins and directory accounts are pre-ticked, plain repeated usernames are offered
+  unticked because their passwords usually differ per host.)
+- Later: Agent (after SSH agent support), GSSAPI, lens attributes.
+
+**Accepted cost:** one stored secret now visibly unlocks many sessions (it usually did
+already).
+
+---
+
+## Inventory sources: NetBox (design)
+
+Goal: a team shares one up-to-date session tree because it comes from the NetBox they
+already maintain, not from everyone's hand-kept sessions.json. Read-only and one-way:
+NetBox says where and how to connect, never as whom.
+
+**Why it isn't a tag-mapping nightmare:** NetBox's core device fields are fixed (site,
+location, rack, region, role, device type and manufacturer, platform, tenant, status,
+primary/OOB IP), so grouping and filtering work on almost any install with no setup.
+Installs vary mainly in which address to connect to, the protocol and port, the jump
+host, and which devices count. Those are mapping rules, not data modelling.
+
+**Fit with the current tree:**
+- The virtual Local root already shows the pattern: a separate folder namespace
+  (`FolderScope`, the `ExpansionKey` prefix), plus a root that can't be renamed, moved or
+  deleted. A NetBox source becomes another such root ("NetBox: corp"). Generalize the
+  Local-only flags into a scope or source id instead of adding a second set of special cases.
+- Devices become real `Session` records with a **deterministic id** (UUIDv5 of source id
+  + object type + NetBox id). Everything already keys on `Session.Id` through
+  `Store.Find`: tabs, workspaces, recents, the jump list, history names and Credential
+  Manager entries. That keeps all of it working across resyncs and renames.
+- They live in a per-source cache file (`inventory-<source>.json`), not sessions.json, and
+  are replaced as a whole on sync. `Store.Find` and `VisibleSessions` consult both through
+  a small catalog in front of `SessionStore` (about ten call sites).
+- Each record carries an `Inventory` block (source, object id, site, region, location,
+  role, platform, manufacturer, device type, tenant, tags, status), and `SessionSearch`
+  matches on those fields too.
+
+**Tree lenses (tabs above the tree):** a lens is an ordered list of attributes. The
+inventory root's `FolderPath` is computed from them (`site/role`, `manufacturer/device type`,
+…), and the existing path-based `SessionTreeBuilder` builds the tree unchanged. Presets:
+Location (Region › Site › Location), Role, Platform, Device type, Tenant, Tag. Users can
+define their own. Expansion keys include the lens. Your own sessions stay folder-based.
+
+**Selecting devices:** paste a NetBox filter URL (`/dcim/devices/?status=active&role=core`).
+The UI and REST API share query parameters, so we need no filter builder. Virtual machines
+come from `/virtualization/virtual-machines/` the same way. Multiple filters per source are
+allowed.
+
+**Connection mapping, in precedence order:**
+1. NetBox **config context** under a `resesh` key, which NetBox itself merges by region,
+   site, role, platform and tag. Example: `{"resesh": {"protocol": "telnet", "port": 23,
+   "jump": "bastion-syd", "host": "oob"}}`. Admins set it once and every teammate gets it.
+2. Local source rules: host = `primary_ip` | `oob_ip` | a custom field | a template
+   (`{name}.mgmt.corp`), plus a platform-to-protocol map.
+3. Defaults: primary IP, device name, SSH on 22, active devices with a primary IP only.
+
+**Per-user layer:** NetBox entries are read-only. A local overlay file keyed by the
+deterministic id holds username, auth, icon, colour, notes and terminal overrides. Icons
+are auto-suggested from manufacturer or platform through `SessionIconCatalog` (Cisco,
+Juniper, Arista, …). The menu offers Connect, Open in NetBox and "Copy to my sessions";
+Edit, Rename and Delete are off. `SessionDropPlanner` rejects inventory nodes as move
+sources or targets.
+
+**Sync:**
+- Per-user read-only API token, stored in Credential Manager.
+- Sync runs on start and on a timer, fetching only devices changed since the last sync
+  (`last_updated__gte`), with a periodic full fetch to catch deletions.
+  `brief`/`fields` or GraphQL keep the payload small.
+- The cache serves offline use. A status line shows the last sync time and any error.
+- Devices gone from NetBox drop out of the tree. Open tabs and saved workspace entries for
+  them keep working until closed, as a deleted session does today.
+
+**Console ports (later):** NetBox models the cable from a device's console port to a
+console server port. Offer "Console" on a device, opening telnet or SSH to the console
+server's mapped port (`200x`-style). This builds directly on shipped telnet support.
+
+**Depends on / pairs with:**
+- **Jump hosts:** config-context `jump` needs them. Until then, ignore it with a visible
+  note.
+- **Identities:** this answers the "folder or tag" question. Identities should attach to
+  lens attributes too (role = firewall → TACACS identity), since inventory devices
+  have no hand-made folders.
+- **Backup:** export includes source settings and overlays, but never the token or the
+  device cache.
+
+**Build order:** (1) one source, one filter, primary IP + SSH, read-only root with a
+Site lens; (2) lens tabs plus custom lenses; (3) overlays and icon suggestion; (4) config
+context mapping; (5) console ports. Keep the source behind an `IInventorySource`
+interface. Nautobot's API is close to NetBox's, and Ansible inventory or CSV could follow.
 
 **Open questions:**
-- Is password rotation the main pain, or the repetition and lack of visibility?
-- Attach by folder only, or also by tag across folders (for example, all Juniper devices)?
-- Ship jump hosts in the same piece of work, or keep them separate?
+- Lens tabs over the whole tree, or only on inventory roots?
+- Should a lens be able to mix in your own sessions (by matching host or name to a device)?
+- Minimum NetBox version (4.x `fields=`, v2 tokens) vs. supporting 3.x installs still common
+  in the field.
+- Should "Copy to my sessions" stay linked, following host changes, or be a plain fork?
 
 ---
 
@@ -205,12 +322,86 @@ export archive.
 
 ---
 
+## Program status (OSC 7501) and the alerts list
+
+Programs report their own state through the terminal output: `idle`, `working`,
+`blocked` (`kind=permission|question|auth`), `done` or `error`, with an optional app name,
+message, progress and child records
+([spec](https://gist.github.com/mitchellh/7acae3abd8355c1c00287d67e96c913a), parsed by
+libghostty-vt since ghostty-org/ghostty#14560). Claude Code 2.1.295, Pi 1.1.0, Crush and
+Factory Droid already send it, but **only after the terminal answers the `OSC 7501 ; ?`
+probe** (sent together with DA1; a DA1 reply that arrives first means "unsupported" for the
+whole session). libghostty answers the probe only while the program-status callback is set.
+
+**Where we are:** our pin (`b699ea7`) already contains the parser, but the shim never sets
+`GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS`. Reports are now a known sequence, so they no longer
+reach the unknown-OSC path either: they're dropped, the probe goes unanswered, and agents
+stay silent in resesh.
+
+**Why it fits us better than most:** the report travels in the terminal output, so it
+works over SSH with nothing installed on the server, and it isn't agent-only: `brew`,
+`terraform`, deploy scripts and progress libraries (tqdm, indicatif) are picking it up.
+The states map almost one to one onto `AgentAttention`:
+
+| 7501 | `AgentAttention` |
+|---|---|
+| `working` | `Working` (+ progress into the tab's existing progress combiner) |
+| `blocked kind=permission` | `NeedsApproval` |
+| `blocked kind=question` / `auth` / none | `NeedsAnswer` (`auth` labelled "needs sign-in") |
+| `done` | `Complete` |
+| `error` | `Failed` |
+| `idle` | `Idle` |
+| `clear` | record removed; tracker falls back to the other evidence sources |
+
+### Steps
+1. **Shim (next reseshvt ABI bump):** register the program-status callback and emit a new
+   `RVT_EVENT_PROGRAM_STATUS` carrying state, kind, progress, id, app, title and message
+   (copied; libghostty's strings live only for the callback). Confirm the probe reply
+   leaves through `write_pty` ahead of the DA1 reply on both the SSH and ConPTY paths.
+2. **Core `ProgramStatusStore` (per tab, pure, unit-tested):** one record per id, each
+   report replaces its record, `clear` removes a subtree (no id clears all), `app` is
+   inherited from the nearest ancestor, 256 records with least-recently-updated eviction.
+   Lifetime: OSC 133 A and process/channel exit drop `working`/`blocked`; RIS drops
+   everything; `done`/`error` survive until the tab is viewed (`ClearsOnView`).
+3. **Tracker:** the root record feeds `AgentTracker` as `AgentSource.Structured` and
+   outranks 7377, titles and process detection while it is `working` or `blocked`.
+   Children are stored but not shown in the first cut (everyone else did the same).
+   Non-agent apps get the attention badge without claiming an agent identity; `app`
+   values for known agents (`claude-code`, `codex`, `pi`, …) map to `AgentIdentities` keys.
+4. **Display:** tooltip `app · message`, run through `AgentText.Sanitize` (the spec
+   requires plain text with invisible formatting removed).
+5. **Adapters:** the adapter dialog says Claude Code ≥ 2.1.295 needs no hooks; keep the
+   7377 snippets for agents that don't send 7501 yet. 7377 stays as our own protocol.
+
+### tmux-persistent sessions (open question)
+tmux answers DA1 itself and drops OSCs it doesn't know, so a program inside our tmux
+session gets no probe reply and stays silent. Options to test: `allow-passthrough on`
+(already set for new shell-integration shells) only helps programs that wrap reports in
+`DCS tmux;`, which none do; tmux's own 7501 support would fix it upstream. Until then,
+document that 7501 works in plain SSH, telnet and local tabs, and keep the hook snippets
+as the fallback for persistent sessions.
+
+### Alerts list (promoted from Deferred)
+Once 7501 gives real states, one place to see every tab that wants you: a flyout from the
+title bar plus a command-palette entry and shortcut, listing tabs that are `blocked`,
+`error` or unseen `done` (in that order) with app, message and age; click jumps to the tab.
+Taskbar overlay count of blocked tabs. Background `blocked`/`error`/`done` can raise a
+Windows notification through the plumbing command completion already uses
+(`CommandCompletionNotifications`), behind a setting and rate-limited.
+
+**Acceptance:** with no hooks configured, Claude Code 2.1.295+ in a local tab and in a
+plain SSH tab goes working → needs approval → finished; a `printf` script covers
+`brew`-style reports, invalid base64 (ignored), RIS (clears), and a new prompt (drops
+`working`); the alerts list jumps to a blocked background tab.
+
+---
+
 ## Deferred small items
 
 - Title-bar session icon (needs SVG→ICO rasterization).
-- Agent tabs: Windows toast notifications (needs package identity), taskbar count, an
-  alerts list to jump between waiting tabs, adapters beyond Codex / Claude Code / the
-  generic shell wrapper, richer ACP-style status.
+- Agent tabs: adapters beyond Codex / Claude Code / the generic shell wrapper, richer
+  ACP-style status. (Toasts now exist via command completion; the alerts list and taskbar
+  count moved to Program status above.)
 - Ruler: next/prev **error** jump (failed-exit marks only).
 - Live verification loose end: a real 2FA/Duo keyboard-interactive exchange is untested.
   Password and private-key auth are in daily use against real hosts.
@@ -251,12 +442,17 @@ have `synchronize-panes` if they truly want it.
 |---|------|------|------|
 | 1 | **GSSAPI spike** (parallel with anything) | S | **High — do early** |
 | 2 | Connectivity (tunnels → agent → jump hosts) | M–L | Medium |
-| 3 | Telnet & serial consoles (telnet → serial) | S–M | Low |
-| 4 | GSSAPI productization (path chosen by spike) | M | Depends on spike |
-| 5 | Backlog picks | — | — |
+| 3 | Program status (OSC 7501) → alerts list | S–M | Low |
+| 4 | Telnet & serial consoles (telnet → serial) | S–M | Low |
+| 5 | GSSAPI productization (path chosen by spike) | M | Depends on spike |
+| 6 | NetBox inventory source (read-only root → lenses → config context → console ports) | M–L | Medium |
+| 7 | Backlog picks | — | — |
 
 Within connectivity, tunnels come first (pure SSH.NET), then agent auth, then jump hosts
 (which build on the tunnel channel code). Telnet/serial rides directly behind connectivity:
 it reuses the backend contract as-is, telnet before serial (no new dependency vs. port
 enumeration + device-arrival plumbing), and together they close the console-cable objection
 cheaply. GSSAPI ships last only because its spike must settle the approach first.
+NetBox's first steps (read-only root, lenses, overlays) don't depend on anything above.
+Config-context jump hosts wait for connectivity, and attribute-based identities wait for
+Identities.

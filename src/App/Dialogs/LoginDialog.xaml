@@ -1,0 +1,35 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.LoginDialog"
+    Style="{StaticResource DefaultContentDialogStyle}"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    PrimaryButtonText="Connect"
+    CloseButtonText="Cancel"
+    DefaultButton="Primary">
+
+    <StackPanel MinWidth="380" MaxWidth="440" Spacing="12">
+        <InfoBar
+            x:Name="MissingBar"
+            IsOpen="False"
+            IsClosable="False"
+            Severity="Warning"
+            Message="The identity this session used was deleted." />
+        <TextBox x:Name="UsernameBox" Header="Username" AutomationProperties.AutomationId="LoginUsername" />
+        <PasswordBox x:Name="PasswordBox" Header="Password" AutomationProperties.AutomationId="LoginPassword" />
+        <ComboBox
+            x:Name="RememberBox"
+            Header="Remember"
+            HorizontalAlignment="Stretch"
+            AutomationProperties.AutomationId="LoginRemember" />
+        <CheckBox
+            x:Name="SaveBox"
+            Content="Save the password in Windows Credential Manager"
+            IsChecked="True"
+            AutomationProperties.AutomationId="LoginSavePassword" />
+        <TextBlock
+            x:Name="RememberHint"
+            Style="{ThemeResource CaptionTextBlockStyle}"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            TextWrapping="Wrap" />
+    </StackPanel>
+</ContentDialog>

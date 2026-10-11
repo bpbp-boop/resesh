@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Resesh.Core.Credentials;
+using Resesh.Core.Identities;
 using Resesh.Core.Models;
 using Resesh.Core.Ssh;
 using Resesh.Core.Storage;
@@ -74,6 +75,15 @@ public sealed record BackupPackage
     public required IReadOnlyList<SshKeyReference> SshKeys { get; init; }
     public required IReadOnlyDictionary<Guid, string> KeySecrets { get; init; }
     public byte[]? Workspaces { get; init; }
+
+    /// <summary>Identities (no secrets). Absent from backups made before identities.</summary>
+    public IReadOnlyList<Identity> Identities { get; init; } = [];
+
+    /// <summary>Saved identity passwords; only in encrypted backups that include secrets.</summary>
+    public IReadOnlyDictionary<Guid, string> IdentitySecrets { get; init; } = new Dictionary<Guid, string>();
+
+    /// <summary>Remote-tree folder settings (folder identities).</summary>
+    public IReadOnlyList<FolderSettings> FolderSettings { get; init; } = [];
 }
 
 /// <summary>Creates and merges versioned .reseshbackup archives (pre-rename .sessionsbackup files import unchanged).</summary>
@@ -110,15 +120,37 @@ public static class SessionsBackup
         HighlightsStore highlights,
         SshKeyStore sshKeys,
         ICredentialService credentials,
-        BackupExportOptions options)
+        BackupExportOptions options,
+        IdentityStore? identities = null)
     {
         if (options.IncludeSecrets && string.IsNullOrEmpty(options.Passphrase))
             throw new ArgumentException("A passphrase is required when secrets are included.", nameof(options));
 
         var selected = SelectSessions(sessions.Sessions, options.Scope).ToList();
+        if (options.Scope is { Kind: SessionKind.Ssh } exportScope && identities is not null)
+        {
+            var resolver = new LoginResolver(sessions, identities);
+            for (var index = 0; index < selected.Count; index++)
+            {
+                var session = selected[index];
+                if (session.Kind != SessionKind.Ssh || session.Login != SessionLogin.Inherit)
+                    continue;
+                var login = resolver.Resolve(session);
+                if (login.Source == LoginSource.Folder
+                    && !FolderPaths.IsSelfOrDescendant(login.FolderPath!, exportScope.FolderPath))
+                {
+                    // The ancestor is outside this archive; preserve its effective login
+                    // without attaching its identity to unrelated destination folders.
+                    selected[index] = session with { IdentityId = login.Identity!.Id, InheritLogin = false };
+                }
+            }
+        }
         var selectedIds = selected.Select(s => s.Id).ToHashSet();
+        var selectedFolderSettings = SelectFolderSettings(sessions.FolderSettings, options.Scope);
+        var selectedIdentities = SelectIdentities(identities, selected, selectedFolderSettings, options.Scope);
         var selectedKeyIds = selected.Where(session => session.PrivateKeyId is not null)
             .Select(session => session.PrivateKeyId!.Value)
+            .Concat(selectedIdentities.Where(identity => identity.KeyId is not null).Select(identity => identity.KeyId!.Value))
             .ToHashSet();
         var selectedKeys = sshKeys.Keys.Where(key => selectedKeyIds.Contains(key.Id)).ToList();
         var sessionData = new BackupSessionData
@@ -126,6 +158,7 @@ public static class SessionsBackup
             Sessions = selected,
             Folders = SelectFolders(sessions.Folders, options.Scope, SessionKind.Ssh),
             LocalFolders = SelectFolders(sessions.FoldersOf(SessionKind.Local), options.Scope, SessionKind.Local),
+            FolderSettings = selectedFolderSettings,
         };
         var manifest = new BackupManifest
         {
@@ -144,6 +177,8 @@ public static class SessionsBackup
             WriteJson(zip, "known_hosts.json", knownHosts.Entries);
             WriteJson(zip, "highlights.json", highlights.ExportBackup());
             WriteJson(zip, "ssh-keys.json", selectedKeys);
+            if (selectedIdentities.Count > 0)
+                WriteJson(zip, "identities.json", selectedIdentities);
 
             var iconsDirectory = Path.Combine(dataDirectory, "icons");
             if (Directory.Exists(iconsDirectory))
@@ -179,6 +214,13 @@ public static class SessionsBackup
                     .Where(item => item.Secret is not null)
                     .ToDictionary(item => item.Id, item => item.Secret!);
                 WriteJson(zip, "key-secrets.json", keySecretData);
+                var identitySecretData = selectedIdentities
+                    .Where(identity => identity.Proof == IdentityProof.Password)
+                    .Select(identity => (identity.Id, Secret: credentials.ReadIdentity(identity.Id)))
+                    .Where(item => item.Secret is not null)
+                    .ToDictionary(item => item.Id, item => item.Secret!);
+                if (identitySecretData.Count > 0)
+                    WriteJson(zip, "identity-secrets.json", identitySecretData);
             }
         }
 
@@ -234,6 +276,13 @@ public static class SessionsBackup
                 throw new InvalidDataException($"Backup schema {manifest.SchemaVersion} is not supported.");
 
             var sessionData = ReadRequired<BackupSessionData>(zip, "sessions.json");
+            if (sessionData.Sessions is null || sessionData.Folders is null || sessionData.LocalFolders is null
+                || sessionData.Sessions.Any(session => session is null || session.Name is null
+                    || session.Host is null || session.Username is null || session.FolderPath is null)
+                || sessionData.FolderSettings?.Any(setting => setting is null) == true)
+            {
+                throw new InvalidDataException("The backup contains invalid session or folder data.");
+            }
             if (sessionData.Sessions.Select(s => s.Id).Distinct().Count() != sessionData.Sessions.Count)
                 throw new InvalidDataException("The backup contains duplicate session ids.");
             var secrets = ReadOptional<Dictionary<Guid, string>>(zip, "secrets.json") ?? [];
@@ -260,6 +309,18 @@ public static class SessionsBackup
             }
             if (manifest.IncludesSecrets && !encrypted)
                 throw new InvalidDataException("A backup that contains secrets must be encrypted.");
+
+            var identities = ReadOptional<List<Identity>>(zip, "identities.json") ?? [];
+            if (identities.Select(identity => identity.Id).Distinct().Count() != identities.Count)
+                throw new InvalidDataException("The backup contains duplicate identity ids.");
+            if (identities.Any(identity => identity.KeyId is { } keyId && !sshKeyIds.Contains(keyId)))
+                throw new InvalidDataException("The backup contains an identity with an unknown SSH key.");
+            var identitySecrets = ReadOptional<Dictionary<Guid, string>>(zip, "identity-secrets.json") ?? [];
+            if (!manifest.IncludesSecrets && identitySecrets.Count > 0)
+                throw new InvalidDataException("The backup identity secret metadata is inconsistent.");
+            var identityIds = identities.Select(identity => identity.Id).ToHashSet();
+            if (identitySecrets.Keys.Any(id => !identityIds.Contains(id)))
+                throw new InvalidDataException("The backup contains a password for an unknown identity.");
 
             var icons = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in zip.Entries.Where(e => e.FullName.StartsWith("icons/", StringComparison.Ordinal)))
@@ -288,6 +349,9 @@ public static class SessionsBackup
                 SshKeys = sshKeys,
                 KeySecrets = keySecrets,
                 Workspaces = ReadOptionalBytes(zip, "workspaces.json"),
+                Identities = identities,
+                IdentitySecrets = identitySecrets,
+                FolderSettings = sessionData.FolderSettings ?? [],
             };
         }
         catch (InvalidDataException)
@@ -327,7 +391,7 @@ public static class SessionsBackup
                 match = existing.FirstOrDefault(s => s.Kind == imported.Kind
                     && s.Port == imported.Port
                     && s.Host.Equals(imported.Host, StringComparison.OrdinalIgnoreCase)
-                    && s.Username.Equals(imported.Username, StringComparison.OrdinalIgnoreCase));
+                    && s.Username.Equals(imported.Username, StringComparison.Ordinal));
                 if (match is not null)
                 {
                     conflicts.Add(new BackupConflict
@@ -351,19 +415,31 @@ public static class SessionsBackup
         HighlightsStore highlightsStore,
         SshKeyStore sshKeyStore,
         ICredentialService credentials,
-        IReadOnlyDictionary<Guid, BackupConflictResolution> resolutions)
+        IReadOnlyDictionary<Guid, BackupConflictResolution> resolutions,
+        IdentityStore? identityStore = null)
     {
         // Validate opaque archive content before any import-side mutation. Presence means
         // replacement; absence intentionally leaves the target workspace file untouched.
         var importedWorkspaceData = package.Workspaces is null
             ? null
             : WorkspaceStore.ParsePayload(package.Workspaces);
+        var existingKeyIds = sshKeyStore.Keys.Select(key => key.Id).ToHashSet();
         var keyIdMap = sshKeyStore.MergeImport(package.SshKeys);
+        // Identities that already exist keep their local definition and password; new ones
+        // arrive with their password when the backup includes secrets.
+        var existingIdentityIds = identityStore?.Identities.Select(identity => identity.Id).ToHashSet() ?? [];
+        var identityIdMap = identityStore?.MergeImport(package.Identities,
+            keyId => keyIdMap.TryGetValue(keyId, out var mapped) ? mapped : null)
+            ?? new Dictionary<Guid, Guid>();
+        Guid? MapIdentity(Guid? id) =>
+            id is { } value && identityIdMap.TryGetValue(value, out var mapped) ? mapped : id;
         var mappedPackage = package with
         {
-            Sessions = package.Sessions.Select(session => session.PrivateKeyId is { } keyId
-                ? session with { PrivateKeyId = keyIdMap.GetValueOrDefault(keyId, keyId) }
-                : session).ToList(),
+            Sessions = package.Sessions.Select(session => session with
+            {
+                PrivateKeyId = session.PrivateKeyId is { } keyId ? keyIdMap.GetValueOrDefault(keyId, keyId) : null,
+                IdentityId = MapIdentity(session.IdentityId),
+            }).ToList(),
         };
         var conflicts = FindConflicts(sessionStore, mappedPackage).ToDictionary(c => c.Imported.Id);
         var sessions = new List<Session>();
@@ -413,10 +489,28 @@ public static class SessionsBackup
         }
 
         sessionStore.ApplyImport(sessions, package.Folders, package.LocalFolders);
+        if (identityStore is not null)
+        {
+            sessionStore.MergeFolderSettings(package.FolderSettings
+                .Select(setting => setting with { IdentityId = MapIdentity(setting.IdentityId) })
+                .Where(setting => setting.IdentityId is { } id && identityStore.Find(id) is not null));
+            foreach (var (sourceId, secret) in package.IdentitySecrets)
+            {
+                if (!identityIdMap.TryGetValue(sourceId, out var targetId) || existingIdentityIds.Contains(targetId))
+                    continue;
+                credentials.WriteIdentity(targetId, secret);
+                secretsImported++;
+            }
+        }
 
         foreach (var (sourceKeyId, secret) in package.KeySecrets)
         {
-            credentials.WriteKey(keyIdMap.GetValueOrDefault(sourceKeyId, sourceKeyId), secret);
+            var targetKeyId = keyIdMap.GetValueOrDefault(sourceKeyId, sourceKeyId);
+            // A matched key retains its local file. Its encryption passphrase may differ
+            // from the imported copy even when both files have the same public key.
+            if (existingKeyIds.Contains(targetKeyId))
+                continue;
+            credentials.WriteKey(targetKeyId, secret);
             secretsImported++;
         }
 
@@ -464,6 +558,33 @@ public static class SessionsBackup
             ? sessions
             : sessions.Where(s => s.FolderScope == scope.Kind
                 && FolderPaths.IsSelfOrDescendant(s.FolderPath, scope.FolderPath));
+
+    private static IReadOnlyList<FolderSettings> SelectFolderSettings(
+        IEnumerable<FolderSettings> settings, BackupScope? scope) =>
+        scope is null
+            ? settings.ToList()
+            : scope.Kind == SessionKind.Local
+                ? []
+                : settings.Where(setting => setting.Path.Length > 0
+                    && FolderPaths.IsSelfOrDescendant(setting.Path, scope.FolderPath)).ToList();
+
+    /// <summary>A full backup carries every identity; a scoped one carries the identities its
+    /// sessions and folders reference.</summary>
+    private static IReadOnlyList<Identity> SelectIdentities(
+        IdentityStore? identities,
+        IReadOnlyList<Session> sessions,
+        IReadOnlyList<FolderSettings> folderSettings,
+        BackupScope? scope)
+    {
+        if (identities is null)
+            return [];
+        if (scope is null)
+            return identities.Identities;
+        var ids = sessions.Where(session => session.IdentityId is not null).Select(session => session.IdentityId!.Value)
+            .Concat(folderSettings.Where(setting => setting.IdentityId is not null).Select(setting => setting.IdentityId!.Value))
+            .ToHashSet();
+        return identities.Identities.Where(identity => ids.Contains(identity.Id)).ToList();
+    }
 
     private static IReadOnlyList<string> SelectFolders(
         IEnumerable<string> folders, BackupScope? scope, SessionKind kind)
@@ -617,5 +738,6 @@ public static class SessionsBackup
         public IReadOnlyList<Session> Sessions { get; init; } = [];
         public IReadOnlyList<string> Folders { get; init; } = [];
         public IReadOnlyList<string> LocalFolders { get; init; } = [];
+        public IReadOnlyList<FolderSettings>? FolderSettings { get; init; }
     }
 }

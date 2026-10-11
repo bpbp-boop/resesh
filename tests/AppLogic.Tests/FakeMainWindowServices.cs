@@ -41,6 +41,7 @@ internal sealed class FakeMainWindowServices : IMainWindowServices
     public Task EditSessionSettingsAsync(TabViewModel tab, SessionSettingsTarget target) =>
         RecordAsync($"EditSessionSettings {tab.Session.Name} {target}");
     public Task ImportSessionsAsync() => RecordAsync("ImportSessions");
+    public Task SetFolderIdentityAsync(string folderPath) => RecordAsync($"SetFolderIdentity:{folderPath}");
     public Task ExportBackupAsync() => RecordAsync("ExportBackup");
     public Task ImportBackupAsync() => RecordAsync("ImportBackup");
 

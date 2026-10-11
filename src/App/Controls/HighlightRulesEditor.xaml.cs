@@ -327,7 +327,7 @@ public sealed partial class HighlightRulesEditor : UserControl
                 Underline = UnderlineSwitch.IsOn,
                 MatchCase = MatchCaseSwitch.IsOn,
                 ShowInOverview = OverviewSwitch.IsOn,
-                Enabled = true,
+                Enabled = _editing?.Enabled ?? true,
             });
         }
         HideForm();

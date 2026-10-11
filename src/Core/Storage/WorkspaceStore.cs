@@ -44,8 +44,8 @@ public sealed record Workspace
 }
 
 /// <summary>
-/// JSON-backed workspace store. Writes use the same temp/swap/.bak scheme as the session
-/// store, and loading falls back to the backup when the primary file is invalid.
+/// JSON-backed workspace store. Candidate state is published only after the temp/swap/.bak
+/// write succeeds, and loading falls back to the backup when the primary file is invalid.
 /// </summary>
 public sealed class WorkspaceStore
 {

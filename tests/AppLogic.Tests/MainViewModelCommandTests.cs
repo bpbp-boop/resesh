@@ -317,7 +317,7 @@ public sealed class MainViewModelCommandTests : IDisposable
         window.TreeSelection.SelectOnly(folder);
         Assert.Equal(
             ["Connect in Tabs", "Open in new window", "-", "Expand All", "Collapse All", "-",
-             "New Session…", "New Folder…", "-", "Rename…", "Delete"],
+             "New Session…", "New Folder…", "-", "Set Identity…", "Rename…", "Delete"],
             MenuTexts(window));
 
         window.TreeSelection.Toggle(session);
