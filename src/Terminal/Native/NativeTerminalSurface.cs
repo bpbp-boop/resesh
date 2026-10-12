@@ -233,6 +233,10 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         };
         Unloaded += (_, _) =>
         {
+            // Re-parenting (a split, a tab moved between groups) raises Unloaded after the
+            // surface is already back in the tree; detaching then would leave it blank.
+            if (IsLoaded)
+                return;
             UnhookRendering();
             AttachSwapChain(detach: true);
         };
