@@ -19,7 +19,7 @@ namespace Resesh.Terminal.Native;
 /// the canvas to the back buffer, because flip-model buffers do not keep their contents.
 /// UI thread only.
 /// </summary>
-internal sealed unsafe class TerminalRenderer : IDisposable
+internal sealed unsafe partial class TerminalRenderer : IDisposable
 {
     // One device for every terminal: D2D objects are cheap per surface, devices are not.
     private static ID3D11Device? s_device;
@@ -230,6 +230,10 @@ internal sealed unsafe class TerminalRenderer : IDisposable
         CellWidth = Math.Max(1, (int)MathF.Round(advance));
         CellHeight = Math.Max(1, (int)MathF.Ceiling((metrics.Ascent + metrics.Descent + metrics.LineGap) * scale));
         _baseline = MathF.Round(metrics.Ascent * scale + metrics.LineGap * scale / 2);
+        // Rounded up as Ghostty does, which keeps lines from going thin as the font grows. A
+        // double line is three of these wide, so keep it to a fifth of the cell.
+        _boxThickness = Math.Clamp((int)MathF.Ceiling(metrics.UnderlineThickness * scale), 1, Math.Max(1, CellWidth / 5));
+        DisposeGlyphGeometries();
 
         _emojiFormat?.Dispose();
         _emojiFormat = s_dwrite.CreateTextFormat("Segoe UI Emoji", FontWeight.Normal, FontStyle.Normal, emPixels * 0.9f);
@@ -440,10 +444,17 @@ internal sealed unsafe class TerminalRenderer : IDisposable
                 x += c.Wide == TerminalCell.WideChar ? 2 : 1;
                 continue;
             }
-            var style = StyleOf(c.Flags);
-            var (face, _) = Lookup(c.Codepoint, style);
             var fg = c.Foreground;
             var faint = (c.Flags & TerminalCell.Faint) != 0;
+            if (BuiltinGlyphs.Covers(c.Codepoint))
+            {
+                DrawBuiltinGlyph(c.Codepoint, OriginX + x * CellWidth, top, fg,
+                    BackgroundOf(c, selectionColor) ?? defaultBackground, faint ? 0.55f : 1f);
+                x++;
+                continue;
+            }
+            var style = StyleOf(c.Flags);
+            var (face, _) = Lookup(c.Codepoint, style);
             var start = x;
             var n = 0;
             while (x < cols)
@@ -456,7 +467,7 @@ internal sealed unsafe class TerminalRenderer : IDisposable
                     break;
                 }
                 if (d.Foreground != fg || StyleOf(d.Flags) != style || ((d.Flags & TerminalCell.Faint) != 0) != faint
-                    || d.GraphemeLength > 1 || (d.Flags & TerminalCell.Invisible) != 0)
+                    || d.GraphemeLength > 1 || (d.Flags & TerminalCell.Invisible) != 0 || BuiltinGlyphs.Covers(d.Codepoint))
                     break;
                 var (f, g) = Lookup(d.Codepoint, style);
                 if (f != face || _isEmojiFace[f]) break;
@@ -605,6 +616,11 @@ internal sealed unsafe class TerminalRenderer : IDisposable
         if (cell->Codepoint is 0 or ' ')
             return;
         // Re-draw the covered glyph in the background color so it stays readable.
+        if (BuiltinGlyphs.Covers(cell->Codepoint))
+        {
+            DrawBuiltinGlyph(cell->Codepoint, left, top, info.DefaultBackground, info.CursorColor, 1f);
+            return;
+        }
         var style = StyleOf(cell->Flags);
         var (face, glyph) = Lookup(cell->Codepoint, style);
         if (_isEmojiFace[face] || cell->GraphemeLength > 1)
@@ -635,6 +651,7 @@ internal sealed unsafe class TerminalRenderer : IDisposable
     {
         ReleaseSwapChain();
         DisposeFaces();
+        DisposeGlyphGeometries();
         _emojiFormat?.Dispose();
         _emojiFormat = null;
         _clusterFormat?.Dispose();
