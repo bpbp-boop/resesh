@@ -43,6 +43,7 @@ public sealed class AgentTracker
     private string? _program;         // its name, "" when it gave none, null = no record
     private AgentAttention _programAttention = AgentAttention.None;
     private string? _programLabel;
+    private bool _programSinceInput;  // reported after the last keystroke
 
     public AgentTracker(string? sessionDefault = null)
     {
@@ -116,7 +117,13 @@ public sealed class AgentTracker
             return;
         var key = AgentDetection.FromCommand(commandLine);
         if (key is null)
-            DropUnfinishedProgramStatus();
+        {
+            // Without shell integration a command is noticed some time after Enter, by
+            // which time it may have reported. A report that came after the last keystroke
+            // is that command's own, not what the prompt just ended.
+            if (!_programSinceInput || string.IsNullOrEmpty(commandLine))
+                DropUnfinishedProgramStatus();
+        }
         else
             ClearProgramStatus(); // an agent is starting: an old result is not its news
         _structured = null; // back at a prompt: any adapter-reported agent is gone
@@ -264,6 +271,7 @@ public sealed class AgentTracker
             _program = AgentText.Sanitize(status.App, MaxProgramNameLength) ?? "";
             _programAttention = status.Attention;
             _programLabel = status.Label;
+            _programSinceInput = true;
             return;
         }
 
@@ -278,6 +286,7 @@ public sealed class AgentTracker
     /// so this is the signal that clears a sticky badge.</summary>
     public bool ObserveUserInput() => Change(() =>
     {
+        _programSinceInput = false;
         if (_programAttention.RequiresUser())
             _programAttention = AgentAttention.Working;
         else if (_programAttention != AgentAttention.Working)
@@ -322,6 +331,7 @@ public sealed class AgentTracker
         _program = null;
         _programAttention = AgentAttention.None;
         _programLabel = null;
+        _programSinceInput = false;
     }
 
     /// <summary>The program that reported is gone (a prompt came back, or the session

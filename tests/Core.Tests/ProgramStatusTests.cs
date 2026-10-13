@@ -167,6 +167,27 @@ public class ProgramStatusTests
     }
 
     [Fact]
+    public void ACommandNoticedLateKeepsTheStatusItReportedItself()
+    {
+        // Without shell integration the command is noticed some time after Enter.
+        var tracker = new AgentTracker();
+        tracker.ObserveUserInput(); // Enter
+        tracker.ObserveProgramStatus(Report(3, kind: 1, app: "terraform"));
+        tracker.ObserveCommand("terraform apply");
+        Assert.Equal(AgentAttention.NeedsApproval, tracker.Current.Attention);
+
+        // The next command typed ends it, and so does a prompt coming back.
+        tracker.ObserveUserInput();
+        tracker.ObserveCommand("ls");
+        Assert.Null(tracker.Current.Program);
+
+        tracker.ObserveUserInput();
+        tracker.ObserveProgramStatus(Report(1, app: "terraform"));
+        tracker.ObserveCommand("");
+        Assert.Null(tracker.Current.Program);
+    }
+
+    [Fact]
     public void AnOrdinaryProgramDoesNotTouchAnAgentThatIsShowing()
     {
         var tracker = new AgentTracker();
