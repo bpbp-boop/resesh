@@ -397,6 +397,9 @@ Codex and Claude Code hooks and the shell wrapper. Known gap: a program that die
 unsetting the option leaves it for the next non-shell program in that pane. Any script can
 use the option, so agents with extension systems (Pi, oh-my-pi) could get adapters too.
 
+This bridge stays for hosts on tmux. The longer fix is to take tmux out of the stream:
+see [Remote session agent](#remote-session-agent-spiked-2026-10-13).
+
 ### Alerts list (promoted from Deferred)
 Once 7501 gives real states, one place to see every tab that wants you: a flyout from the
 title bar plus a command-palette entry and shortcut, listing tabs that are `blocked`,
@@ -409,6 +412,89 @@ Windows notification through the plumbing command completion already uses
 plain SSH tab goes working → needs approval → finished; a `printf` script covers
 `brew`-style reports, invalid base64 (ignored), RIS (clears), and a new prompt (drops
 `working`); the alerts list jumps to a blocked background tab.
+
+---
+
+## Remote session agent (spiked 2026-10-13)
+
+**Problem.** tmux keeps a session alive, but it is a second terminal emulator in the
+stream. It redraws program output, drops the sequences it does not know, and answers
+terminal queries itself. Every new sequence we care about needs another bridge like
+`TmuxStatus`. We use very little of tmux: one session, one window, one pane, no status
+line, no prefix key.
+
+**Direction.** Put our own small binary on the host in tmux's place. One daemon per
+session holds the pty and forwards bytes untouched in both directions. A headless
+libghostty-vt beside the stream is used only to build a snapshot when a client attaches.
+shpool, zmx and VS Code's remote terminals all arrived at this design.
+
+**Spike.** Stock [zmx](https://github.com/neurosnap/zmx) 0.8.1 (MIT, Zig, libghostty-vt)
+against our tmux setup on Ubuntu 24.04. Scripts, raw output and the full tables are in
+[tools/session-probe](tools/session-probe/RESULTS.md).
+
+| | tmux | zmx |
+|---|---|---|
+| 21 output sequences unchanged | 0 | 20 |
+| 11 terminal queries answered by the terminal | 0 | 11 |
+| Kitty keys, focus, mouse, paste input | Ctrl+A and Shift+Enter degraded, focus lost | identical |
+| `seq 1 100000`, lines reaching the terminal live | 6,745 | all |
+| Reattach restores scrollback and output made while detached | yes | yes |
+| Reattach restores alternate screen and kitty keyboard mode | no | yes |
+| Reattach restores OSC 8 links | yes | no |
+| Reattach restores OSC 7501 status and OSC 133 marks | no | no |
+
+In the app, a plain OSC 7501 from inside a zmx session lit the tab icon and badge with no
+title bridge. After a reattach the badge was gone, as the last row predicts.
+
+### Decision
+Fork zmx and trim it, rather than write from nothing. It passed every passthrough test
+unmodified, and it already handles the pty and daemon cases that cost the most to find:
+answering DA1/DA2 while detached (fish waits about 10 seconds otherwise), one client owning
+the pty size, and the snapshot traps (tabstops, synchronized output, the title). It bundles
+the same libghostty-vt version we pin, and we already build with Zig.
+
+tmux stays as a fallback and is frozen: no new bridges. The ladder per host is agent, then
+tmux, then a plain session.
+
+### Steps
+1. **Fork and build.** Fork at v0.8.1, keep the licence notice. Build static musl binaries
+   for x86_64 and aarch64 Linux, stripped, from `eng/` next to `build-ghostty-vt.ps1`. Cut
+   the CLI down to what the app calls. Measure the size; the stock release is 15.7 MB with
+   debug info.
+2. **Snapshot.** Turn on hyperlinks in the formatter options, as `rvt_format_vt` does. Find
+   out whether prompt marks can be kept, and stop rewriting `OSC 133;A` if they can.
+3. **State the snapshot cannot hold.** The daemon remembers the last OSC 7501 report and
+   sends it after the snapshot. Decide the same way for progress (OSC 9;4).
+4. **Protocol.** Add a version exchange as the first message. Keep the tags frozen and
+   unknown tags ignored. Sessions outlive app upgrades, so an old daemon must keep working
+   with a new client; this is why it is one daemon per session and not one per host.
+5. **Side channel.** List sessions, and per session the working directory, foreground
+   command and client count, as structured replies. This replaces the `list-panes` parsing
+   in `TmuxPersistence`.
+6. **Getting it onto the host.** Upload over the SSH connection we already have, to a
+   versioned path under `~/.local/share/resesh/`, and check the hash. Pick the binary from
+   `uname`. Ask once per host: always, never, or ask each time. No download from the host
+   side.
+7. **App.** A second persistence backend beside `TmuxPersistence`, with the choice stored
+   per host. `TmuxStatus` stays in use for tmux sessions only.
+8. **Done when** `tools/session-probe` passes on the fork (21 of 21 sequences, 11 of 11
+   queries, identical input) and a reattach brings back links, prompt marks and status,
+   and the tab badge survives a dropped connection in the app.
+
+### Open questions
+- Memory per session with a 50,000-line scrollback, since each session is its own process
+  with its own emulator.
+- Two clients of different sizes on one session. zmx gives the size to one "leader".
+- Hosts where the home directory is mounted `noexec`, and hosts that are not Linux. macOS
+  is a build target for zmx; the BSDs are not.
+- Whether a session started by an old agent version can be handed to a new one, or only
+  kept alive until it ends.
+
+### Bug to fix now, separate from the above
+On tmux 3.4, `capture-pane -t =name` fails with `can't find pane`; `=name:` works.
+`TmuxPersistence` uses the failing form in both `BootstrapCommand` and `ResumeCommand`, so
+the reattach replay prints an error and only the visible screen comes back. Found with the
+command on the host; not yet confirmed through the app.
 
 ---
 
@@ -462,7 +548,8 @@ have `synchronize-panes` if they truly want it.
 | 4 | Telnet & serial consoles (telnet → serial) | S–M | Low |
 | 5 | GSSAPI productization (path chosen by spike) | M | Depends on spike |
 | 6 | NetBox inventory source (read-only root → lenses → config context → console ports) | M–L | Medium |
-| 7 | Backlog picks | — | — |
+| 7 | Remote session agent (zmx fork → snapshot and status → upload → app backend) | L | Medium |
+| 8 | Backlog picks | — | — |
 
 Within connectivity, tunnels come first (pure SSH.NET), then agent auth, then jump hosts
 (which build on the tunnel channel code). Telnet/serial rides directly behind connectivity:

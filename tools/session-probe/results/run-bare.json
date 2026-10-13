@@ -1,0 +1,89 @@
+{
+ "target": "bare",
+ "attach_bytes": 10,
+ "emit": {
+  "osc7501": "intact",
+  "osc7377": "intact",
+  "osc777": "intact",
+  "osc9": "intact",
+  "osc9_4": "intact",
+  "osc8": "intact",
+  "osc22": "intact",
+  "osc52": "intact",
+  "osc133A": "intact",
+  "osc133D": "intact",
+  "osc7": "intact",
+  "osc0": "intact",
+  "osc1337": "intact",
+  "osc3008": "intact",
+  "curly": "intact",
+  "ulcolor": "intact",
+  "truecolor": "intact",
+  "sync": "intact",
+  "kittygfx": "intact",
+  "decscusr": "intact",
+  "xtwinops": "intact"
+ },
+ "query": {
+  "xtversion": {
+   "reached_terminal": true,
+   "result": "end to end"
+  },
+  "da1": {
+   "reached_terminal": true,
+   "result": "end to end"
+  },
+  "da2": {
+   "reached_terminal": true,
+   "result": "end to end"
+  },
+  "osc11": {
+   "reached_terminal": true,
+   "result": "end to end"
+  },
+  "osc10": {
+   "reached_terminal": true,
+   "result": "end to end"
+  },
+  "kittykbd": {
+   "reached_terminal": true,
+   "result": "end to end"
+  },
+  "decrqm2026": {
+   "reached_terminal": true,
+   "result": "end to end"
+  },
+  "decrqm2027": {
+   "reached_terminal": true,
+   "result": "end to end"
+  },
+  "cpr": {
+   "reached_terminal": true,
+   "result": "end to end"
+  },
+  "xtgettcap": {
+   "reached_terminal": true,
+   "result": "end to end"
+  },
+  "osc52q": {
+   "reached_terminal": true,
+   "result": "end to end"
+  }
+ },
+ "keys": {
+  "sent": "b'\\x1b[97;5u\\x1b[13;2u\\x1b[I\\x1b[<0;10;5M\\x1b[200~paste\\x1b[201~'",
+  "received": "b'\\x1b[97;5u\\x1b[13;2u\\x1b[I\\x1b[<0;10;5M\\x1b[200~paste\\x1b[201~'",
+  "identical": true,
+  "modes_reaching_terminal": {
+   "kitty >1u": true,
+   "paste 2004": true,
+   "focus 1004": true,
+   "mouse 1000": true,
+   "mouse 1006": true
+  }
+ },
+ "throughput": {
+  "finished": true,
+  "seconds": 1.83
+ }
+}
