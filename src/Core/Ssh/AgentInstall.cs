@@ -4,17 +4,6 @@ using System.Text.RegularExpressions;
 
 namespace Resesh.Core.Ssh;
 
-/// <summary>Whether Resesh may put its session agent on a host. Kept per saved session.</summary>
-public enum AgentInstallChoice
-{
-    /// <summary>Ask each time the agent is missing or out of date.</summary>
-    Ask = 0,
-    /// <summary>Upload without asking.</summary>
-    Always = 1,
-    /// <summary>Never upload; persistence falls back to tmux, then to a plain shell.</summary>
-    Never = 2,
-}
-
 /// <summary>One agent binary the app carries, as listed in the manifest beside it.</summary>
 public sealed record AgentBinary(string Path, string Sha256, long Size);
 
@@ -93,9 +82,6 @@ public abstract record AgentInstallPlan
 
     /// <summary>Upload this binary.</summary>
     public sealed record Upload(string Architecture, AgentBinary Binary) : AgentInstallPlan;
-
-    /// <summary>Ask the user, then upload this binary if they agree.</summary>
-    public sealed record Ask(string Architecture, AgentBinary Binary) : AgentInstallPlan;
 
     /// <summary>No agent on this host; <paramref name="Reason"/> says why, for the tab.</summary>
     public sealed record Unavailable(string Reason) : AgentInstallPlan;
@@ -181,7 +167,10 @@ public static partial class AgentInstall
         return null;
     }
 
-    public static AgentInstallPlan Plan(AgentProbe probe, AgentPackage package, AgentInstallChoice choice)
+    /// <summary><paramref name="mayUpload"/> is the saved session's own setting
+    /// (<see cref="Models.Session.SessionAgent"/>): turning the agent on for a host is the
+    /// consent to put it there, so nothing asks again at connect time.</summary>
+    public static AgentInstallPlan Plan(AgentProbe probe, AgentPackage package, bool mayUpload)
     {
         if (Architecture(probe.Os, probe.Machine) is not { } architecture
             || !package.Binaries.TryGetValue(architecture, out var binary))
@@ -192,12 +181,9 @@ public static partial class AgentInstall
         if (probe.Runs && (probe.Hash == binary.Sha256 || probe.Hash.Length == 0))
             return new AgentInstallPlan.Ready(RemotePath(package.Version));
 
-        return choice switch
-        {
-            AgentInstallChoice.Always => new AgentInstallPlan.Upload(architecture, binary),
-            AgentInstallChoice.Never => new AgentInstallPlan.Unavailable("the session agent is not installed on this host"),
-            _ => new AgentInstallPlan.Ask(architecture, binary),
-        };
+        return mayUpload
+            ? new AgentInstallPlan.Upload(architecture, binary)
+            : new AgentInstallPlan.Unavailable("the session agent is not installed on this host");
     }
 
     /// <summary>

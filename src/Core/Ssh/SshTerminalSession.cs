@@ -311,15 +311,20 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         return null;
     }
 
-    public string CreatePersistentBootstrap(Guid sessionId, int slot, ShellIntegrationMode mode, CancellationToken token)
+    public string CreatePersistentBootstrap(Guid sessionId, int slot, ShellIntegrationMode mode, CancellationToken token,
+        PersistenceBackend? backend = null)
     {
         var directory = PrepareShellIntegrationDirectory(mode, token, tmux: true);
-        return BuildPersistentBootstrap(sessionId, slot, mode, directory);
+        return BuildPersistentBootstrap(sessionId, slot, mode, directory, backend);
     }
 
-    internal static string BuildPersistentBootstrap(Guid sessionId, int slot, ShellIntegrationMode mode, string? directory)
+    internal static string BuildPersistentBootstrap(Guid sessionId, int slot, ShellIntegrationMode mode, string? directory,
+        PersistenceBackend? backend = null)
     {
-        var launch = directory is null ? null : RemoteShellIntegration.LaunchCommand(mode, directory, tmux: true);
+        backend ??= PersistenceBackend.Tmux;
+        // Only tmux needs the integration scripts to know about it: they wrap what it
+        // would otherwise swallow. The agent forwards everything as it is.
+        var launch = directory is null ? null : RemoteShellIntegration.LaunchCommand(mode, directory, tmux: backend.StatusRidesOnTitle);
         var useExec = IntegratedShellStream.IsSupported && RemoteShellIntegration.IsSupported(mode) && mode != ShellIntegrationMode.PowerShell;
         // On tmux absence or option rejection, an exec-based bootstrap must start its
         // own interactive fallback; there is no parent interactive shell to return to.
@@ -329,7 +334,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         var fallback = directory is not null ? RemoteShellIntegration.LaunchCommand(mode, directory, tmux: false)
             : useExec ? "sh -c " + RemoteShellIntegration.QuotePosix(
                 "case \"${SHELL:-}\" in /*) if test -f \"$SHELL\" && test -x \"$SHELL\"; then exec \"$SHELL\" -l -i; fi;; esac; exec sh -i") : null;
-        return TmuxPersistence.BootstrapCommand(sessionId, slot, launch, fallback);
+        return backend.BootstrapCommand(sessionId, slot, launch, fallback);
     }
 
     private static string ReadSetupOutput(Stream stream, SshCommand command)

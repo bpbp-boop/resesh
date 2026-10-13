@@ -53,9 +53,60 @@ public sealed class AgentPersistenceTests
         Assert.Equal(new TmuxConnectPlan.Resume(0), plan);
     }
 
+    private const string Path = "\"$HOME/.local/share/resesh/0.8.1-resesh.1/resesh-agent\"";
+    private const string Agent = "env ZMX_DIR=\"$HOME/.local/share/resesh/sock\" ZMX_NO_DETACH_KEY=1 " + Path;
+
     [Fact]
-    public void ListCommand_KeepsSocketsUnderTheHomeDirectory() =>
+    public void Commands_KeepSocketsUnderTheHomeDirectoryAndTheDetachKeyOff()
+    {
+        var name = TmuxPersistence.SessionName(Id, 1);
+        Assert.Equal($"{Agent} list --json", AgentPersistence.ListCommand(Path));
+        Assert.Equal($"{Agent} kill {name}", AgentPersistence.KillCommand(Path, Id, 1));
         Assert.Equal(
-            "ZMX_DIR=\"$HOME/.local/share/resesh/sock\" ~/.local/share/resesh/0.8.1-resesh.1/resesh-agent list --json",
-            AgentPersistence.ListCommand("~/.local/share/resesh/0.8.1-resesh.1/resesh-agent"));
+            $"{Agent} kill {TmuxPersistence.SessionName(Id, 0)}; {Agent} kill {name}",
+            AgentPersistence.KillCommand(Path, Id, [1, 0, 1]));
+    }
+
+    [Fact]
+    public void Bootstrap_AttachesOrStartsAndFallsBackLikeTmux()
+    {
+        var name = TmuxPersistence.SessionName(Id, 0);
+        Assert.Equal(
+            $" printf '\\033[2J\\033[3J\\033[H'; exec {Agent} attach {name} # resesh-agent-bootstrap",
+            AgentPersistence.BootstrapCommand(Path, Id, 0));
+
+        var withShell = AgentPersistence.BootstrapCommand(Path, Id, 0, "exec bash -l", "sh -i");
+        Assert.Contains($"; {Agent} attach {name} sh -c 'exec bash -l'; resesh_result=$?", withShell);
+        Assert.DoesNotContain("exec env", withShell);
+        Assert.Contains("opening a non-persistent shell.\\n'; exec sh -i # resesh-agent-bootstrap", withShell);
+    }
+
+    [Fact]
+    public void Resume_NeverStartsAShellThatHasEnded()
+    {
+        var name = TmuxPersistence.SessionName(Id, 2);
+        var command = AgentPersistence.ResumeCommand(Path, Id, 2);
+        Assert.Contains($"if {Agent} list --short | grep -qx {name}; then exec {Agent} attach {name}; else", command);
+        Assert.EndsWith("exit 1; fi", command);
+    }
+
+    [Fact]
+    public void Backends_AnswerTheSameQuestions()
+    {
+        var name = TmuxPersistence.SessionName(Id, 0);
+        var agent = PersistenceBackend.Agent(Path);
+        Assert.False(agent.StatusRidesOnTitle);
+        Assert.True(PersistenceBackend.Tmux.StatusRidesOnTitle);
+
+        var listing = """{"name":"NAME","pid":1,"clients":0,"created":1700000000,"protocol":1,"fg":"vim","cwd":"/srv/app"}""".Replace("NAME", name);
+        Assert.Equal("vim", Assert.Single(agent.ParseManagedSessions(listing, Id)).CurrentCommand);
+        Assert.Equal("/srv/app", agent.ParseCurrentPath(listing, Id, 0));
+        Assert.Null(agent.ParseCurrentPath(listing, Id, 1));
+        // Nothing running is an empty list, not a failure to explain away.
+        Assert.False(agent.IsAbsent(new SshCommandResult(false, "", "no server running on /tmp/x")));
+        Assert.True(PersistenceBackend.Tmux.IsAbsent(new SshCommandResult(false, "", "no server running on /tmp/x")));
+
+        Assert.Equal(TmuxPersistence.ResumeCommand(Id, 0), PersistenceBackend.Tmux.ResumeCommand(Id, 0));
+        Assert.Equal(AgentPersistence.ResumeCommand(Path, Id, 0), agent.ResumeCommand(Id, 0));
+    }
 }

@@ -297,6 +297,16 @@
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Text="Runs the shell inside tmux on the host, so it survives dropped connections and app restarts — reconnecting resumes right where you left off. Requires tmux on the host."
                         TextWrapping="Wrap" />
+                    <ToggleSwitch
+                        x:Name="SessionAgentToggle"
+                        Margin="0,8,0,0"
+                        Header="Use the Resesh session agent instead of tmux"
+                        AutomationProperties.AutomationId="SessionAgentToggle" />
+                    <TextBlock
+                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="A small program that keeps the shell alive without changing what passes through it, so links, prompt marks and program status survive a reconnect. Turning this on lets Resesh upload it to your home directory on this host (about 2 MB, Linux only) when it is missing or out of date. Where it cannot be used, tmux is used instead."
+                        TextWrapping="Wrap" />
                     <ComboBox
                         x:Name="DetachedSessionsBox"
                         Margin="0,8,0,0"

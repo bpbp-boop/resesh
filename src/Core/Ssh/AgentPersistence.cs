@@ -25,8 +25,51 @@ public static class AgentPersistence
 
     /// <summary>Lists every session as one JSON object per line. Prints nothing when there
     /// are none. <paramref name="agentPath"/> is used as given, so quote it if needed.</summary>
-    public static string ListCommand(string agentPath) =>
-        $"ZMX_DIR=\"{SocketDirectory}\" {agentPath} list --json";
+    public static string ListCommand(string agentPath) => $"{Agent(agentPath)} list --json";
+
+    /// <summary>The agent with its environment. <c>env</c> rather than a shell assignment,
+    /// so the same text works typed into any login shell. The detach key is off: Ctrl+\
+    /// belongs to the program in the session, and the tab is how this app detaches.</summary>
+    private static string Agent(string agentPath) =>
+        $"env ZMX_DIR=\"{SocketDirectory}\" ZMX_NO_DETACH_KEY=1 {agentPath}";
+
+    /// <summary>
+    /// Typed into the login shell to start a session, or attach to it if it is already
+    /// running. The leading space and the screen wipe are as in
+    /// <see cref="TmuxPersistence.BootstrapCommand"/>. There is no replay here: on a
+    /// reattach the agent sends the screen itself.
+    /// </summary>
+    public static string BootstrapCommand(string agentPath, Guid id, int slot,
+        string? newShellCommand = null, string? fallbackCommand = null)
+    {
+        var name = TmuxPersistence.SessionName(id, slot);
+        var exec = fallbackCommand is null ? "exec " : "";
+        return " printf '\\033[2J\\033[3J\\033[H'; "
+            + $"{exec}{Agent(agentPath)} attach {name}"
+            + (newShellCommand is not null ? " sh -c " + ShellIntegration.RemoteShellIntegration.QuotePosix(newShellCommand) : "")
+            + (fallbackCommand is not null
+                ? "; resesh_result=$?; if test \"$resesh_result\" -eq 0; then exit 0; fi; "
+                  + "printf '\\n[resesh] Persistent startup failed; opening a non-persistent shell.\\n'; exec " + fallbackCommand
+                : "")
+            + " # resesh-agent-bootstrap";
+    }
+
+    /// <summary>Explicit resume never recreates a shell that ended after discovery: attach
+    /// would start a new one under the same name, so the name is checked first.</summary>
+    public static string ResumeCommand(string agentPath, Guid id, int slot)
+    {
+        var name = TmuxPersistence.SessionName(id, slot);
+        return " printf '\\033[2J\\033[3J\\033[H'; "
+            + $"if {Agent(agentPath)} list --short | grep -qx {name}; then exec {Agent(agentPath)} attach {name}; "
+            + "else printf '[resesh] That session has ended.\\n'; exit 1; fi";
+    }
+
+    public static string KillCommand(string agentPath, Guid id, int slot) =>
+        $"{Agent(agentPath)} kill {TmuxPersistence.SessionName(id, slot)}";
+
+    /// <summary>Each kill is its own command, so one vanished session cannot stop the rest.</summary>
+    public static string KillCommand(string agentPath, Guid id, IEnumerable<int> slots) =>
+        string.Join("; ", slots.Distinct().Order().Select(slot => KillCommand(agentPath, id, slot)));
 
     /// <summary>Reads the sessions that belong to one saved profile from
     /// <see cref="ListCommand"/> output. Lines that are not ours, did not answer, or do not

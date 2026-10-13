@@ -217,9 +217,11 @@ public sealed record Session
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public DetachedSessionAction DetachedSessions { get; init; } = DetachedSessionAction.Ask;
 
-    /// <summary>Whether Resesh may upload its session agent to this host.</summary>
+    /// <summary>Keep persistent shells alive with the Resesh session agent instead of tmux.
+    /// Turning it on allows the app to upload the agent to this host when it is missing or
+    /// out of date. Applies only with <see cref="Persistent"/>.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public Ssh.AgentInstallChoice AgentInstall { get; init; } = Ssh.AgentInstallChoice.Ask;
+    public bool SessionAgent { get; init; }
 
     /// <summary>Shell integration for new terminals; disabled for new and legacy profiles.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]

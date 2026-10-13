@@ -38,37 +38,36 @@ public sealed class AgentInstallTests
     [Fact]
     public void AnInstalledAgentThatMatchesIsUsed()
     {
-        var plan = AgentInstall.Plan(new AgentProbe("Linux", "x86_64", Sha, true), Package, AgentInstallChoice.Never);
+        var plan = AgentInstall.Plan(new AgentProbe("Linux", "x86_64", Sha, true), Package, mayUpload: false);
         Assert.Equal(new AgentInstallPlan.Ready($"\"$HOME/.local/share/resesh/{Version}/resesh-agent\""), plan);
 
         // No hashing tool on the host: an agent that runs is taken as it is.
         Assert.IsType<AgentInstallPlan.Ready>(
-            AgentInstall.Plan(new AgentProbe("Linux", "x86_64", "", true), Package, AgentInstallChoice.Never));
+            AgentInstall.Plan(new AgentProbe("Linux", "x86_64", "", true), Package, mayUpload: false));
     }
 
     [Fact]
-    public void AMissingStaleOrBrokenAgentFollowsTheHostsChoice()
+    public void AMissingStaleOrBrokenAgentIsUploadedOnlyWhenTheSessionAllowsIt()
     {
         var missing = new AgentProbe("Linux", "x86_64", "", false);
         var stale = new AgentProbe("Linux", "x86_64", new string('b', 64), true);
         var broken = new AgentProbe("Linux", "x86_64", Sha, false);
         foreach (var probe in new[] { missing, stale, broken })
         {
-            Assert.Equal(new AgentInstallPlan.Ask("x86_64", X64), AgentInstall.Plan(probe, Package, AgentInstallChoice.Ask));
-            Assert.Equal(new AgentInstallPlan.Upload("x86_64", X64), AgentInstall.Plan(probe, Package, AgentInstallChoice.Always));
-            Assert.IsType<AgentInstallPlan.Unavailable>(AgentInstall.Plan(probe, Package, AgentInstallChoice.Never));
+            Assert.Equal(new AgentInstallPlan.Upload("x86_64", X64), AgentInstall.Plan(probe, Package, mayUpload: true));
+            Assert.IsType<AgentInstallPlan.Unavailable>(AgentInstall.Plan(probe, Package, mayUpload: false));
         }
     }
 
     [Fact]
-    public void AHostWeHaveNoBuildForIsNeverAsked()
+    public void AHostWeHaveNoBuildForGetsNoUpload()
     {
-        var mac = AgentInstall.Plan(new AgentProbe("Darwin", "arm64", "", false), Package, AgentInstallChoice.Always);
+        var mac = AgentInstall.Plan(new AgentProbe("Darwin", "arm64", "", false), Package, mayUpload: true);
         Assert.Equal("there is no session agent for Darwin arm64", Assert.IsType<AgentInstallPlan.Unavailable>(mac).Reason);
 
         // Built for the architecture, but not carried by this copy of the app.
         Assert.IsType<AgentInstallPlan.Unavailable>(
-            AgentInstall.Plan(new AgentProbe("Linux", "aarch64", "", false), Package, AgentInstallChoice.Always));
+            AgentInstall.Plan(new AgentProbe("Linux", "aarch64", "", false), Package, mayUpload: true));
     }
 
     [Fact]

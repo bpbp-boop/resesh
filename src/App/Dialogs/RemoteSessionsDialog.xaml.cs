@@ -27,9 +27,12 @@ public sealed partial class RemoteSessionsDialog : ContentDialog
 
     public TmuxSessionInfo? Selected => (SessionList.SelectedItem as TmuxSessionItem)?.Session;
 
+    private readonly PersistenceBackend _backend;
+
     private RemoteSessionsDialog(string profileName, Guid profileId, IReadOnlySet<int> openSlots,
-        Func<Task<SshCommandResult?>> query, string? notice, int? selectedSlot)
+        PersistenceBackend backend, Func<Task<SshCommandResult?>> query, string? notice, int? selectedSlot)
     {
+        _backend = backend;
         _profileId = profileId;
         _openSlots = openSlots;
         _query = query;
@@ -43,7 +46,7 @@ public sealed partial class RemoteSessionsDialog : ContentDialog
     /// leaves them alone so a disconnected tab can still resume its own shell.</param>
     /// <returns>The slot to resume, or null when closed.</returns>
     public static async Task<int?> ManageAsync(XamlRoot root, string profileName, Guid profileId,
-        IReadOnlySet<int> openSlots, Func<Task<SshCommandResult?>> query,
+        IReadOnlySet<int> openSlots, PersistenceBackend backend, Func<Task<SshCommandResult?>> query,
         Func<IReadOnlyList<int>, Task<bool>> endSessions)
     {
         string? notice = null;
@@ -52,7 +55,7 @@ public sealed partial class RemoteSessionsDialog : ContentDialog
         // so the list closes, asks, and reopens with the result as its status.
         while (true)
         {
-            var dialog = new RemoteSessionsDialog(profileName, profileId, openSlots, query, notice, selectedSlot)
+            var dialog = new RemoteSessionsDialog(profileName, profileId, openSlots, backend, query, notice, selectedSlot)
             {
                 XamlRoot = root,
             };
@@ -123,7 +126,7 @@ public sealed partial class RemoteSessionsDialog : ContentDialog
             if (_closed) return;
             if (result is not { Success: true })
             {
-                if (result is not null && TmuxPersistence.IsServerAbsent(result))
+                if (result is not null && _backend.IsAbsent(result))
                 {
                     StatusText.Text = _notice ?? Summary(0, 0);
                     _notice = null;
@@ -133,7 +136,7 @@ public sealed partial class RemoteSessionsDialog : ContentDialog
                     + result?.Error.Trim();
                 return;
             }
-            var sessions = TmuxPersistence.ParseManagedSessions(result.Output, _profileId);
+            var sessions = _backend.ParseManagedSessions(result.Output, _profileId);
             foreach (var session in sessions)
             {
                 var open = _openSlots.Contains(session.Slot);

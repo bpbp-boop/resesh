@@ -553,12 +553,30 @@ the status the command had just reported.
   only then moved into place. `build-agent.ps1` writes a manifest of what it built, and the
   app project copies binaries and manifest to `Agent\` in its output. The per-host choice
   (`AgentInstall` on a saved session: ask, always, never) is stored, but nothing shows the
-  question or calls any of this yet; that comes with the app backend.
+  question or calls any of this yet; that comes with the app backend. (Step 7 replaced
+  the three-way choice with one toggle.)
   Run against Ubuntu 24.04 through the app's own SSH code: a copy with one byte changed was
   refused, the aarch64 binary arrived intact and was refused because it would not run,
   neither left a file behind, and the right binary went up in 0.24 s and was then found
   ready. Not tried: a home directory mounted `noexec`, a host with no hashing tool, a
   login shell that is not a Bourne shell, and the installer package.
+- **Step 7, the app backend: working, with gaps listed below.** The choice is one toggle in
+  the new and edit session dialog, under Persistent session: "Use the Resesh session agent
+  instead of tmux". Turning it on is the consent to upload, so nothing asks at connect
+  time (this replaced the ask/always/never setting from step 6). `PersistenceBackend` puts
+  tmux and the agent behind the same questions, and a tab picks one at each connect: the
+  agent when the session asks for it and it is there or can be put there, tmux otherwise,
+  with a line in the terminal saying why. Starting, resuming, ending, listing and the
+  current-directory query all go through the backend the tab picked, and so does the
+  remote sessions dialog, which looks for the agent but never uploads from there.
+  In the app against Ubuntu 24.04, on a host with no agent: the first connect uploaded it
+  and started a session; a `blocked` report showed the badge; the connection was killed on
+  the host; Enter reconnected, the same session was attached, and screen and badge came
+  back. The detach key (Ctrl+\) is turned off for the app's sessions.
+  Not done or not tried: the bulk edit dialog has no toggle; the remote sessions dialog and
+  the session picker were not exercised with the agent; a session moved from tmux to the
+  agent leaves its tmux shells running where neither list shows them; shell integration
+  inside an agent session; two tabs on one session; fish or csh as the login shell.
 - **Sockets must not stay in the default place.** The agent puts them under
   `/run/user/<uid>`, which systemd removes when the user's last login ends; the sessions
   would keep running with nothing able to reach them. The app will set `ZMX_DIR` to
