@@ -135,7 +135,9 @@ public static class TmuxPersistence
             // The overrides are re-asserted before attach so servers created by an older app
             // version (or with stale options) pick up the current value — the client's tty
             // capabilities are built at attach time.
-            + $"{tmux} capture-pane -e -p -t ={name} -S -; "
+            // The target ends in a colon: capture-pane wants a pane, and tmux 3.4 does not
+            // find one from "=name" alone ("can't find pane"), which loses the scrollback.
+            + $"{tmux} capture-pane -e -p -t ={name}: -S -; "
             + $"{exec}{tmux} {ClientSetup} \\; {TitleReporting} \\; attach-session -t ={name}; "
             + "else "
             + $"{exec}{tmux} -f /dev/null start-server \\; "
@@ -216,7 +218,7 @@ public static class TmuxPersistence
     {
         var target = $"={SessionName(id, slot)}";
         return " printf '\\033[2J\\033[3J\\033[H'; "
-            + $"tmux -L {Socket} capture-pane -e -p -t {target} -S -; "
+            + $"tmux -L {Socket} capture-pane -e -p -t {target}: -S -; "
             + $"exec tmux -L {Socket} {ClientSetup} \\; {TitleReporting} \\; attach-session -t {target}";
     }
 
