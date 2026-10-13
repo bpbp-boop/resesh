@@ -428,9 +428,29 @@ keyboard-interactive fallback.
   a key = default until something is observed).
 - Branded agent assets use the official Simple Icons paths: Claude, Google Gemini, Pi,
   and X for Grok from 16.28.0; OpenAI for Codex from 15.12.0 because the OpenAI mark is
-  absent from 16.28.0. They keep the existing agent accent colors so the monochrome marks
+  absent from 16.28.0. OpenCode (added 2026-10-13) also uses its 16.28.0 mark, in a warm
+  gray because the brand itself is monochrome. They keep the existing agent accent colors so the monochrome marks
   remain visible on light and dark tab strips. The generic agent glyph remains an app
   symbol because it does not represent a brand.
+- 2026-10-13: the renderer extends each edge cell's own background into the margin around
+  the grid (Ghostty's `window-padding-color = extend`), so a full-screen app that paints
+  its own background (OpenCode, vim) is not framed in the theme color. It applies on the
+  alternate screen and whenever both edge columns are painted on every row; the second
+  test exists because tmux persistence disables the outer alternate screen. A shell keeps
+  the theme color so a colored prompt segment at column 0 does not bleed out, and
+  selection/find highlights never extend. When the last column is one color on every row,
+  the surface background and ruler lane take it too, since they sit outside the swap chain.
+- 2026-10-13: the pointer follows the shape a program requests through OSC 22
+  (libghostty-vt parses it; the shim reports it in the frame info, ABI 6). A hovered link
+  still wins with the hand. tmux does not forward OSC 22, so tmux-persisted sessions keep
+  the I-beam.
+- 2026-10-13: persistent sessions add Smulx/Setulc, Smol, smxx, Sync and Hls to
+  `terminal-overrides`, and set `focus-events on` and `set-clipboard on`, before every
+  attach, so programs inside the invisible tmux get what they get without it.
+  `terminal-features` was tried first and rejected: on tmux 3.3a the attaching client's
+  feature list was already fixed when the commands ran. The two options use `set -sq` so
+  an older tmux skips an unknown one instead of aborting before `attach-session`. OSC 8
+  links still need tmux 3.4+.
 - All mapping lives in `AgentTracker` (Core, no UI): the page forwards raw evidence only —
   OSC payloads, titles, marked commands, bells — and every precedence rule is unit-tested.
   Order, strongest first: manual tab override, adapter events, live detection, session
