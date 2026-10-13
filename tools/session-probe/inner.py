@@ -104,6 +104,8 @@ def main():
         w(ESC + b"]7501;state=blocked:kind=permission:app=probe" + ST)
         w(ESC + b"]7;file://probehost/srv/fill" + ST)
         w(ESC + b"]133;A" + ST + b"prompt> " + ESC + b"]133;B" + ST + b"\r\n")
+        # The prompt above ends the blocked report. This one is still current at the detach.
+        w(ESC + b"]7501;state=working:app=probe:id=bg" + ST)
         w(b"FILL-DONE\r\n")
     elif mode == "hold":
         # A full-screen program with modes set, left running across the detach.

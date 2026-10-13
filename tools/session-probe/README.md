@@ -16,8 +16,9 @@ uses it.
 | `inner.py` | Runs inside the session. Prints the test sequences, asks the queries, reads keys, and has two reattach scenarios: `fill` (scrollback) and `hold` (a full-screen program). |
 | `throughput.py` | Counts how many lines of `seq 1 N` reach the terminal live, and how long it takes. |
 | `tmux_capture.py` | Tries each `capture-pane -t` target form against the private server. |
+| `detached_query.py` | Asks the status support query and DA1 from a session with no client, and saves what came back. |
 | `show.py`, `inject.py`, `step.sh` | In-app test: a stand-in agent that reports plain OSC 7501, and helpers to attach a real Resesh tab to a zmx session and drop its client. |
-| `results/` | Raw output of the spike runs. `tab.py` prints the three `run-*.json` side by side. |
+| `results/` | Raw output of the spike runs. `tab.py` prints the three spike `run-*.json` side by side. `run-fork.json` and `snap-fork-fill.bin` are from the patched build of 2026-10-14. |
 
 ## Running
 
@@ -40,9 +41,9 @@ change, update `TMUX_SETUP`.
 
 ## Things to know
 
-- `probe.py` resumes tmux with `capture-pane -t ={name}`, the same target the app uses.
-  On tmux 3.4 that form fails (see RESULTS.md). `results/snap-tmux-fill.bin` was taken with
-  the target changed to `={name}:`.
+- `probe.py` resumes tmux with `capture-pane -t ={name}:`, the same target the app uses.
+  During the spike both used `={name}`, which fails on tmux 3.4 (see RESULTS.md).
+  `results/snap-tmux-fill.bin` was taken with the colon form.
 - The tmux throughput figure in `results/run-tmux.json` is a timeout, not a time: tmux
   redraws the screen, so the end marker never arrives as plain text. `throughput.py`
   counts lines instead.

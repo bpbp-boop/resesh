@@ -123,8 +123,33 @@ On tmux 3.4, `capture-pane -t =name` fails with `can't find pane: =name`. `-t na
 
 `TmuxPersistence.BootstrapCommand` and `ResumeCommand` use the failing form for the replay,
 so on this host the replay prints the error and only the visible screen comes back: 30 of
-300 lines in the test. Checked with the command on the host, not through the app. Not
-fixed on this branch.
+300 lines in the test. Checked with the command on the host, not through the app. Fixed
+on 2026-10-14 by adding the colon. With it the probe's tmux reattach restores 300 of 300
+lines on the same tmux 3.4. The fix has not been run through the
+app. The bug has been seen there: the trace log of 2026-10-14 shows `can't find pane` on a
+reattach.
+
+## The patched build (2026-10-14)
+
+`eng/build-agent.ps1` output, x86_64, on rct-keep (Ubuntu 24.04.5, tmux 3.4). One run of
+each.
+
+| | stock zmx | patched |
+|---|---|---|
+| 21 output sequences unchanged | 20 | 20 |
+| 11 queries answered by the terminal | 11 | 11 |
+| Input identical | yes | yes |
+| Reattach restores OSC 8 link | no | yes |
+| Reattach restores a status that is still current | no | yes |
+| Reattach leaves out a status that a prompt ended | n/a | yes |
+| Reattach restores prompt marks (OSC 133) | no | yes, without the exit code |
+| Status support query answered with no client, before DA1 | no | yes |
+| `seq 1 400000`, seconds | 3.53 | 4.16 |
+
+Everything else in the two reattach scenarios is unchanged. The `fill` scenario gained a
+second status report after its prompt, because the first one is ended by that prompt and
+is rightly not sent again. The two times are single runs on different days, and the
+patched build is `ReleaseSmall` where the stock release is `ReleaseSafe`.
 
 ## Not tested
 

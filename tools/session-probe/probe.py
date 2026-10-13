@@ -33,7 +33,7 @@ def command(target, name, resume):
         return f"ZMX_DIR={ZDIR} {ZMX} attach {name} {SHELL}"
     if target == "tmux":
         if resume:
-            return (f"{TMUX} capture-pane -e -p -t ={name} -S -; "
+            return (f"{TMUX} capture-pane -e -p -t ={name}: -S -; "
                     f"exec {TMUX} {TMUX_SETUP} \\; attach-session -t ={name}")
         return (f"exec {TMUX} -f /dev/null start-server \\; set -g history-limit 50000 \\; "
                 f"set -g status off \\; set -g prefix None \\; set -s escape-time 25 \\; "
@@ -277,7 +277,8 @@ def reattach(target, scenario):
             "hyperlink kept": has(b"https://example.com/fill"),
             "title re-sent": has(b"fill-title-abc"),
             "cwd (OSC 7) re-sent": has(b"/srv/fill"),
-            "status (OSC 7501) re-sent": has(b"7501"),
+            "status (OSC 7501) re-sent": has(b"7501;state=working:app=probe:id=bg"),
+            "status ended by a prompt left out": not has(b"kind=permission"),
             "prompt marks (OSC 133) kept": has(b"]133;A"),
             "bracketed paste re-enabled": has(b"[?2004h"),
         })

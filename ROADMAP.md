@@ -481,6 +481,55 @@ tmux, then a plain session.
    queries, identical input) and a reattach brings back links, prompt marks and status,
    and the tab badge survives a dropped connection in the app.
 
+### Progress (2026-10-14)
+Built on Windows with `eng/build-agent.ps1`, from zmx v0.8.1 plus the two patches in
+`eng/agent`. The x86_64 binary was then run through `tools/session-probe` on rct-keep
+(Ubuntu 24.04.5): passthrough is the same as stock zmx, and a reattach now brings back
+links, prompt marks and status ([table](tools/session-probe/RESULTS.md#the-patched-build-2026-10-14)).
+In the app, with the session attached by hand in a plain SSH tab: a `blocked` report showed
+the badge, the connection was killed on the host, and after reconnecting and attaching again
+the screen and the badge came back. The aarch64 binary has not run anywhere.
+
+That test first failed for a reason in the app, now fixed in `AgentTracker`: without shell
+integration a command is noticed about 300 ms after Enter, and that late notice dropped
+the status the command had just reported.
+
+- **Step 1, build: done. CLI not cut down yet.** Static musl, stripped, `ReleaseSmall`:
+  1.80 MB for x86_64 and 1.50 MB for aarch64, against 15.7 MB for the stock release. Two
+  runs gave the same hashes. Speed against the stock `ReleaseSafe` build is not measured.
+  The fork is a patch on a pinned commit, like the Ghostty pin, and not a repository of
+  its own. That stops being practical once the CLI is cut down.
+- **Step 2, links: patched, and not where the plan expected.** There is no option to turn
+  on. The libghostty-vt formatter writes links only for HTML output; in VT output
+  `extra.screen.hyperlink` restores just the link the cursor is in, and zmx already asks for
+  that. `ghostty-vt-formatter.patch` makes the formatter write OSC 8 around linked cells (25
+  lines and one new test; the formatter's existing tests pass). The app has the same gap
+  wherever it uses `rvt_format_vt`, and the patch would fix it there too. Worth offering
+  upstream: the code carried a comment saying VT links were for later.
+- **Step 2, prompt marks: patched.** The same patch file makes the formatter write
+  `133;A`, `B` and `C` where prompt, input and output begin, from what rows and cells
+  already record, and one more mark for what the cursor is in. A second terminal reading it
+  back agrees cell for cell (new test; the whole libghostty-vt suite passes). The exit
+  code in `133;D` is not stored, so it does not come back. zmx still adds `redraw=0` to
+  `133;A`, live and in the snapshot: that is the one sequence of 21 the probe still shows
+  changed, and it is deliberate (the shell cannot redraw a prompt through the daemon).
+- **To settle before the app backend:** a reattach now replays the marks of every command
+  in the scrollback. Nothing tells the app they are old. Check what the command tracker
+  does with them (history entries, completion notices) and, if needed, bracket the
+  snapshot so the app can tell.
+- **Step 3, status: written.** `src/status.zig` in the patch keeps the latest report of
+  each record (64 at most) and sends them after the snapshot. It drops records as the app
+  does: `clear`, a full reset, a new prompt for `working` and `blocked`, and user input
+  for `done` and `error`. The daemon cannot know that a tab was only looked at, so a
+  `done` that was seen but not typed at shows its badge again after a reconnect. Progress
+  (OSC 9;4) is not handled.
+- **New gap, patched:** a program sends `OSC 7501 ; ?` once at startup, and takes silence
+  as "unsupported" for its whole run. With no client attached nothing answered. The daemon
+  now answers it then, ahead of its DA1 reply.
+- The fork still builds against the Ghostty commit zmx pins (`8af6897`), not ours
+  (`b699ea7`). Ours parses OSC 7501 and reports prompt marks to a callback, which could
+  replace the byte scanner in `status.zig`. Moving the pin is its own step.
+
 ### Open questions
 - Memory per session with a 50,000-line scrollback, since each session is its own process
   with its own emulator.
@@ -490,11 +539,14 @@ tmux, then a plain session.
 - Whether a session started by an old agent version can be handed to a new one, or only
   kept alive until it ends.
 
-### Bug to fix now, separate from the above
+### Bug in the tmux path, separate from the above
 On tmux 3.4, `capture-pane -t =name` fails with `can't find pane`; `=name:` works.
 `TmuxPersistence` uses the failing form in both `BootstrapCommand` and `ResumeCommand`, so
 the reattach replay prints an error and only the visible screen comes back. Found with the
-command on the host; not yet confirmed through the app.
+command on the host; not yet confirmed through the app. Changed to `=name:` on 2026-10-14,
+with a unit test for the command text. The probe's copy of the command then restored all
+300 lines on tmux 3.4; the fix has not been run through the app. The bug itself has: the
+app's trace log of 2026-10-14 shows `can't find pane: =sa100d35791f8-3` on a reattach.
 
 ---
 
