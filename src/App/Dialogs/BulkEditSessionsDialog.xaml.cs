@@ -73,6 +73,7 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
         ThemeBox.SelectedIndex = 0;
 
         PersistentBox.SelectedIndex = 0;
+        PersistenceBackendBox.SelectedIndex = 0;
         UpdateState();
     }
 
@@ -106,6 +107,12 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
                 2 => false,
                 _ => null,
             },
+            SessionAgent = PersistenceBackendBox.SelectedIndex switch
+            {
+                1 => false,
+                2 => true,
+                _ => null,
+            },
         };
     }
 
@@ -118,7 +125,7 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
     private void UpdateState()
     {
         // SelectionChanged fires mid-InitializeComponent, before later controls exist.
-        if (ImpactText is null || PersistentBox is null || KeepUsernamesBox is null)
+        if (ImpactText is null || PersistentBox is null || PersistenceBackendBox is null || KeepUsernamesBox is null)
             return;
         var edit = BuildEdit();
         KeepUsernamesBox.Visibility = edit.Login is null ? Visibility.Collapsed : Visibility.Visible;

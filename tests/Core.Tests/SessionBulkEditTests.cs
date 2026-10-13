@@ -72,6 +72,23 @@ public sealed class SessionBulkEditTests
     }
 
     [Fact]
+    public void SessionAgent_IsOnlyKeptOnAPersistentSession()
+    {
+        var persistent = Ssh() with { Persistent = true };
+        Assert.True(new SessionBulkEdit { SessionAgent = true }.Apply(persistent).SessionAgent);
+        Assert.False(new SessionBulkEdit { SessionAgent = false }.Apply(persistent with { SessionAgent = true }).SessionAgent);
+
+        // Chosen together with turning persistence on, or lost with turning it off.
+        Assert.True(new SessionBulkEdit { Persistent = true, SessionAgent = true }.Apply(Ssh()).SessionAgent);
+        Assert.False(new SessionBulkEdit { SessionAgent = true }.Apply(Ssh()).SessionAgent);
+        Assert.False(new SessionBulkEdit { Persistent = false }.Apply(persistent with { SessionAgent = true }).SessionAgent);
+
+        // Nothing asked, nothing changed.
+        var agent = persistent with { SessionAgent = true };
+        Assert.Same(agent, new SessionBulkEdit { Persistent = true }.Apply(agent));
+    }
+
+    [Fact]
     public void Persistent_IsNotTurnedOnWithPowerShellIntegration()
     {
         var session = Ssh() with { ShellIntegration = ShellIntegrationMode.PowerShell };

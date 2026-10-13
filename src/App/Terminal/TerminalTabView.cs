@@ -1004,6 +1004,8 @@ public sealed class TerminalTabView : Grid, IDisposable
     {
         token.ThrowIfCancellationRequested();
         _persistence = ResolvePersistenceBlocking(connected, mayUpload: true, token);
+        if (!isReconnect && !_persistence.StatusRidesOnTitle)
+            NoteLeftoverTmuxShells(connected, token);
         var result = connected.RunCommand(_persistence.ManagementCommand());
         token.ThrowIfCancellationRequested();
         var remoteSessions = result is { Success: true }
@@ -1130,7 +1132,7 @@ public sealed class TerminalTabView : Grid, IDisposable
                 return outcome switch
                 {
                     AgentInstallOutcome.Installed => PersistenceBackend.Agent(AgentInstall.RemotePath(package.Version)),
-                    AgentInstallOutcome.CannotRun => Fallback("the host would not run it (is the home directory mounted noexec?)"),
+                    AgentInstallOutcome.CannotRun => Fallback("the host would not run it; the home directory may be mounted noexec"),
                     AgentInstallOutcome.Mismatch => Fallback("the upload did not arrive intact"),
                     _ => Fallback("the upload failed"),
                 };
@@ -1142,7 +1144,14 @@ public sealed class TerminalTabView : Grid, IDisposable
 
         PersistenceBackend Fallback(string reason)
         {
-            Notice($"Session agent not used: {reason}. Using tmux.");
+            // In the window, not the terminal: the shell start that follows wipes the screen.
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_disposed && !token.IsCancellationRequested)
+                    App.WindowFor(_tab)?.ShowOperationNotice(
+                        $"{Session.Name}: using tmux, not the Resesh agent",
+                        char.ToUpperInvariant(reason[0]) + reason[1..] + ".");
+            });
             return PersistenceBackend.Tmux;
         }
 
@@ -1150,6 +1159,29 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             if (!_disposed && !token.IsCancellationRequested)
                 _terminal.WriteNotice(message);
+        });
+    }
+
+    /// <summary>
+    /// A session moved from tmux to the agent leaves its tmux shells running, and the
+    /// agent's lists do not show them. Say so, and how to reach them. Costs one command on
+    /// a first connect; a host with no tmux server answers at once.
+    /// </summary>
+    private void NoteLeftoverTmuxShells(SshTerminalSession connected, CancellationToken token)
+    {
+        var result = connected.RunCommand(TmuxPersistence.ManagementCommand());
+        token.ThrowIfCancellationRequested();
+        if (result is not { Success: true })
+            return;
+        var count = TmuxPersistence.ParseManagedSessions(result.Output, Session.Id).Count;
+        if (count == 0)
+            return;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_disposed && !token.IsCancellationRequested)
+                App.WindowFor(_tab)?.ShowOperationNotice(
+                    count == 1 ? $"{Session.Name}: 1 tmux shell is still running" : $"{Session.Name}: {count} tmux shells are still running",
+                    "Started before this session moved to the Resesh agent. Set \"Kept alive by\" to tmux to reach " + (count == 1 ? "it." : "them."));
         });
     }
 

@@ -573,10 +573,20 @@ the status the command had just reported.
   and started a session; a `blocked` report showed the badge; the connection was killed on
   the host; Enter reconnected, the same session was attached, and screen and badge came
   back. The detach key (Ctrl+\) is turned off for the app's sessions.
-  Not done or not tried: the bulk edit dialog does not have the setting; the remote sessions dialog and
-  the session picker were not exercised with the agent; a session moved from tmux to the
-  agent leaves its tmux shells running where neither list shows them; shell integration
-  inside an agent session; two tabs on one session; fish or csh as the login shell.
+  Tried since, in the app against the same host, with another copy of the app attached to
+  the same saved session at the time: the session picker listed three agent shells with
+  their directories and marked the one attached elsewhere; a fourth was started from it
+  with bash shell integration, and commands were recorded with exact marks and exit codes;
+  after a dropped connection the tab went back to its own shell without asking, the
+  history gained no duplicates, and the next command was tracked; the remote sessions
+  dialog listed all four; End Remote Session ended only that tab's shell.
+  Also added: bulk edit has "Kept alive by"; a window notice says why tmux is used when the
+  agent was chosen (the line in the terminal was wiped by the shell start that follows it);
+  and a window notice counts tmux shells left running by a session that has moved to the
+  agent, which the agent's lists do not show.
+  Still not tried: resuming a detached agent shell from the picker or the dialog, ending
+  several from the dialog, two tabs of one app on one session, the bulk edit dialog on
+  screen, and fish or csh as the login shell.
 - **Sockets must not stay in the default place.** The agent puts them under
   `/run/user/<uid>`, which systemd removes when the user's last login ends; the sessions
   would keep running with nothing able to reach them. The app will set `ZMX_DIR` to
