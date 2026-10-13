@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>osc sequences — resesh</title>
+<link rel="canonical" href="https://resesh.net/osc.html">
+<meta name="description" content="The OSC escape sequences the resesh terminal supports: titles, current folder, OSC 133 command marks, OSC 8 links, OSC 52 clipboard, OSC 9;4 progress, OSC 7501 program status, colours and pointer shapes, with what each one does in the app.">
+<link rel="icon" href="assets/favicon.ico">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script>
+  /* Applied before first paint so a stored light choice never flashes dark. */
+  (function () {
+    try {
+      var t = localStorage.getItem("resesh-theme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
+<script src="theme.js" defer></script>
+</head>
+<body>
+
+<header class="site-header">
+  <a class="logo" href="index.html">
+    <span class="logo__tile">./</span>
+    <span class="logo__word">resesh</span>
+  </a>
+  <nav class="nav">
+    <a class="nav__link" href="features.html">features</a>
+    <a class="nav__link" href="compare.html">compare</a>
+    <a class="nav__link nav__link--current" href="#table">osc</a>
+    <a class="nav__link" href="https://github.com/bpbp-boop/resesh">github</a>
+    <button class="theme-toggle" type="button" data-theme-toggle>light</button>
+    <a class="btn-fill btn-fill--sm" href="https://github.com/bpbp-boop/resesh/releases">download</a>
+  </nav>
+</header>
+
+<section class="container page-head">
+  <div class="breadcrumb"><a href="index.html">./resesh</a> <span class="breadcrumb__sep">/</span> osc</div>
+  <h1 class="h1-features">supported osc sequences</h1>
+  <p class="page-head__lede">osc sequences are how a program tells the terminal something other than text: its title, its folder, a link, a status. this is what resesh understands and what it does with each one.</p>
+  <div class="chips">
+    <span class="chip">esc ] number ; data bel</span>
+    <span class="chip">parsed by libghostty-vt</span>
+    <span class="chip">works over ssh, telnet and local shells</span>
+  </div>
+</section>
+
+<section class="section section--alt" id="table">
+  <div class="container list">
+    <p class="legend">a sequence starts with <span class="key">esc ]</span> and ends with <span class="key">bel</span> or <span class="key">esc \</span>. the last column says what changes inside a persistent session, where tmux sits between the program and resesh.</p>
+
+    <div class="cmp-wrap" tabindex="0" role="region" aria-label="Supported OSC sequences">
+      <table class="cmp cmp--ref">
+        <thead>
+          <tr><th scope="col" class="cmp__corner">osc</th><th scope="col">name</th><th scope="col">what resesh does</th><th scope="col">in a persistent session</th></tr>
+        </thead>
+        <tbody>
+          <tr class="cmp__group"><th scope="rowgroup" colspan="4">titles and folders</th></tr>
+          <tr><th scope="row"><span class="key">0, 1, 2</span></th><td class="ref__name">window and icon title</td><td>sets the tab subtitle. agents are also recognised from their titles.</td><td>tmux sends the title of the active pane.</td></tr>
+          <tr><th scope="row"><span class="key">7</span></th><td class="ref__name">current folder</td><td>file://host/path. the file pane follows it, and command history records it.</td><td>the folder is read from tmux instead.</td></tr>
+          <tr><th scope="row"><span class="key">9;9</span></th><td class="ref__name">current folder, windows form</td><td>the conemu form that powershell and cmd prompts use. treated like osc 7.</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">1337;CurrentDir</span></th><td class="ref__name">current folder, iterm2 form</td><td>treated like osc 7. other osc 1337 keys are ignored.</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr class="cmp__group"><th scope="rowgroup" colspan="4">commands</th></tr>
+          <tr><th scope="row"><span class="key">133</span></th><td class="ref__name">prompt and command marks</td><td>a, b, c and d marks give exact command boundaries and exit codes for the ruler, the command list, command history and the finished-command bell.</td><td>works for shells started with resesh shell integration.</td></tr>
+          <tr><th scope="row"><span class="key">3008</span></th><td class="ref__name">systemd context</td><td>start and end records from systemd 257 and newer supply the host, user, folder and exit result when the shell sends no osc 133.</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr class="cmp__group"><th scope="rowgroup" colspan="4">links and clipboard</th></tr>
+          <tr><th scope="row"><span class="key">8</span></th><td class="ref__name">hyperlinks</td><td>click to open in your browser. the real target shows on hover.</td><td>needs tmux 3.4 or newer.</td></tr>
+          <tr><th scope="row"><span class="key">52</span></th><td class="ref__name">clipboard write</td><td>a remote program copies text to the windows clipboard. reading is refused, so a host can never see your clipboard, and playback never touches it.</td><td>passes through.</td></tr>
+          <tr class="cmp__group"><th scope="rowgroup" colspan="4">status and notifications</th></tr>
+          <tr><th scope="row"><span class="key">7501</span></th><td class="ref__name">program status</td><td>idle, working, blocked, done and error, with an app name, a message and a percentage. shown as the tab badge and progress bar. the support probe (7501;?) is answered.</td><td>dropped by tmux. the codex, claude code and shell-wrapper adapters report through a tmux option instead.</td></tr>
+          <tr><th scope="row"><span class="key">9;4</span></th><td class="ref__name">progress</td><td>normal, error, paused and indeterminate progress on the tab and the taskbar button. cleared when the command ends.</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">9</span></th><td class="ref__name">notification</td><td>marks the tab with a grey attention badge. no windows notification is raised.</td><td>dropped by tmux.</td></tr>
+          <tr><th scope="row"><span class="key">777;notify</span></th><td class="ref__name">notification, rxvt form</td><td>the same grey badge. the reserved title resesh-agent carries agent state from the claude code adapter.</td><td>dropped by tmux.</td></tr>
+          <tr><th scope="row"><span class="key">7377</span></th><td class="ref__name">resesh agent events</td><td>resesh&#x27;s own form: agent;id=…;state=…;label=…. used by the adapter snippets in settings › agents.</td><td>dropped by tmux.</td></tr>
+          <tr class="cmp__group"><th scope="rowgroup" colspan="4">colours and pointer</th></tr>
+          <tr><th scope="row"><span class="key">4, 104</span></th><td class="ref__name">palette colours</td><td>set, query and reset any of the 256 palette colours.</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">10, 11, 12</span></th><td class="ref__name">foreground, background, cursor</td><td>set and query. programs use the query to tell a light theme from a dark one.</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">110, 111, 112</span></th><td class="ref__name">reset colours</td><td>return the foreground, background and cursor to the theme&#x27;s colours.</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">21</span></th><td class="ref__name">kitty colour protocol</td><td>set, query and reset the same colours by name.</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">22</span></th><td class="ref__name">pointer shape</td><td>the mouse pointer takes the shape a program asks for. a link under the pointer still shows the hand.</td><td>not forwarded by tmux.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="note">an osc that resesh does not know is ignored and never printed. the same holds in rewind and recording playback, which also never write to the clipboard.</p>
+  </div>
+</section>
+
+<section class="section" id="try">
+  <div class="container stack">
+    <div class="head-block">
+      <span class="eyebrow">./try-it</span>
+      <h2 class="h2-md">try one from a shell</h2>
+      <p class="lede">each line works in bash on a remote host or in a local tab.</p>
+    </div>
+    <div class="cards">
+      <div class="card">
+        <span class="card__tag">osc 7501</span>
+        <span class="card__name">report a status</span>
+        <div class="termblock">
+          <span><span class="termblock__prompt">$</span> printf '\e]7501;state=working\a'</span>
+          <span><span class="termblock__prompt">$</span> printf '\e]7501;state=done\a'</span>
+          <span class="termblock__out">the tab badge follows</span>
+        </div>
+      </div>
+      <div class="card">
+        <span class="card__tag">osc 9;4</span>
+        <span class="card__name">show progress</span>
+        <div class="termblock">
+          <span><span class="termblock__prompt">$</span> printf '\e]9;4;1;60\a'</span>
+          <span class="termblock__out">tab and taskbar at 60%</span>
+          <span><span class="termblock__prompt">$</span> printf '\e]9;4;0\a'</span>
+          <span class="termblock__out">cleared</span>
+        </div>
+      </div>
+      <div class="card">
+        <span class="card__tag">osc 52</span>
+        <span class="card__name">copy to windows</span>
+        <div class="termblock">
+          <span><span class="termblock__prompt">$</span> printf '\e]52;c;%s\a' \</span>
+          <span>&nbsp;&nbsp;"$(printf hi | base64)"</span>
+          <span class="termblock__out"><span class="termblock__ok">"hi" is on the clipboard</span></span>
+        </div>
+      </div>
+      <div class="card">
+        <span class="card__tag">osc 8</span>
+        <span class="card__name">print a link</span>
+        <div class="termblock">
+          <span><span class="termblock__prompt">$</span> printf '\e]8;;https://resesh.net\a'</span>
+          <span>&nbsp;&nbsp;printf 'site\e]8;;\a\n'</span>
+          <span class="termblock__out">"site" opens resesh.net</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section section--alt" id="not">
+  <div class="container nongoals">
+    <div class="head-block">
+      <h2 class="h2-sm">not supported</h2>
+      <p class="lede lede--tight">sequences you might expect that resesh ignores today.</p>
+    </div>
+    <div class="nongoals__list">
+      <div class="nongoal">
+        <span class="nongoal__title">osc 52 clipboard read</span>
+        <span class="nongoal__body">refused on purpose. a remote host should not be able to read what you copied.</span>
+      </div>
+      <div class="nongoal">
+        <span class="nongoal__title">osc 1337 images and the other iterm2 keys</span>
+        <span class="nongoal__body">only CurrentDir is read. inline images are not drawn.</span>
+      </div>
+      <div class="nongoal">
+        <span class="nongoal__title">osc 633, vs code shell integration</span>
+        <span class="nongoal__body">use osc 133, which resesh's own shell integration and most prompts already send.</span>
+      </div>
+      <div class="nongoal nongoal--soft">
+        <span class="nongoal__title">osc 7501 child records and an alerts list</span>
+        <span class="nongoal__body">only a program's root status is shown for now. the list of every tab that wants you is planned.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container cta">
+    <div class="head-block">
+      <h2 class="h2-lg">try the beta</h2>
+      <p class="lede lede--narrow">free and open source. x64 and arm64 installers, or a portable zip. windows 10 21h2 or newer.</p>
+    </div>
+    <div class="btn-row">
+      <a class="btn-fill btn-fill--cta" href="https://github.com/bpbp-boop/resesh/releases"><span class="btn-prompt">$</span> download resesh</a>
+      <a class="btn-outline btn-outline--cta" href="features.html">every feature →</a>
+    </div>
+  </div>
+</section>
+
+<footer class="site-footer">
+  <div class="site-footer__brand">
+    <span class="logo__tile logo__tile--sm">./</span>
+    <span>resesh · beta · windows</span>
+  </div>
+  <div class="site-footer__links">
+    <a href="features.html">features</a>
+    <a href="compare.html">compare</a>
+    <a href="https://github.com/bpbp-boop/resesh">github</a>
+    <a href="https://github.com/bpbp-boop/resesh/issues">issues</a>
+  </div>
+</footer>
+
+</body>
+</html>

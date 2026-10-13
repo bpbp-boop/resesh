@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>features — resesh</title>
 <link rel="canonical" href="https://resesh.net/features.html">
-<meta name="description" content="Current and planned resesh features: saved sessions, searchable command history, comparing command runs, telnet consoles, keyboard shortcuts, persistent tmux sessions, coding agents over SSH, GPU rendering, highlighting, recordings, workspaces, file transfers and backups.">
+<meta name="description" content="Current and planned resesh features: saved sessions, shared logins, bulk session editing, a native terminal, program status on tabs, searchable command history, comparing command runs, telnet consoles, keyboard shortcuts, persistent tmux sessions, coding agents over SSH, GPU rendering, highlighting, recordings, workspaces, file transfers and backups.">
 <link rel="icon" href="assets/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -34,6 +34,7 @@
     <a class="nav__link nav__link--current" href="#list">features</a>
     <a class="nav__link" href="#under-the-hood">under the hood</a>
     <a class="nav__link" href="#non-goals">non-goals</a>
+    <a class="nav__link" href="compare.html">compare</a>
     <a class="nav__link" href="https://github.com/bpbp-boop/resesh">github</a>
     <button class="theme-toggle" type="button" data-theme-toggle>light</button>
     <a class="btn-fill btn-fill--sm" href="https://github.com/bpbp-boop/resesh/releases">download</a>
@@ -71,7 +72,7 @@
           <p class="row__text">save sessions in folders, filter by name, and set terminal options for each host. choose an included icon or add your own.</p>
           <ul class="row__bullets">
             <li>local profiles for powershell, cmd, wsl and git bash</li>
-            <li>tab badges for claude code, codex and gemini cli</li>
+            <li>tab badges for claude code, codex, gemini cli, opencode, pi and oh-my-pi</li>
             <li>color tags carried onto the tab accent</li>
             <li>nokia, juniper, cisco, arista and vyos icons, suggested from the login banner</li>
           </ul>
@@ -87,13 +88,69 @@
         </div>
       </div>
 
-      <div class="row" id="history">
+      <div class="row" id="identities">
         <div class="row__head">
           <div class="row__label">
             <span class="row__index">02</span>
-            <span class="row__title">command history</span>
+            <span class="row__title">shared logins (identities)</span>
           </div>
           <span class="badge badge--new row__badge">new</span>
+        </div>
+        <div class="row__body">
+          <p class="row__text">an identity is a username and one proof: a saved password, a registered key, or a password asked once each time resesh runs. give a folder an identity and every session inside uses it, unless the session chooses another identity or keeps its own login.</p>
+          <ul class="row__bullets">
+            <li>set identity on any folder, or on the tree root as the default</li>
+            <li>a rotated password is changed once; a rejected one can be updated for every session that uses it</li>
+            <li>the session editor shows where a login comes from, and settings › identities &amp; keys shows what uses each identity</li>
+            <li>sessions saved before identities keep their own login unchanged</li>
+            <li>identities travel in backups; their passwords follow the same rule as other secrets</li>
+          </ul>
+        </div>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="identities-screenshot" aria-label="Enlarge the identities screenshot">
+            <img src="assets/identities.png" alt="Settings, Identities and Keys: three identities with the folders and number of sessions that use each one" width="1100" height="560" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="identities-screenshot" popover aria-label="Enlarged identities screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="identities-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/identities.png" alt="Settings, Identities and Keys: three identities with the folders and number of sessions that use each one" width="1100" height="560">
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="manage">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">03</span>
+            <span class="row__title">manage sessions in bulk</span>
+          </div>
+          <span class="badge badge--new row__badge">new</span>
+        </div>
+        <div class="row__body">
+          <p class="row__text">settings › sessions lists every saved session and local profile in one table. sort it, filter it, select the rows you want and change them together.</p>
+          <ul class="row__bullets">
+            <li>edit together: login, port, tab colour, icon, theme and persistent shells</li>
+            <li>move to a folder, set an identity, duplicate or delete</li>
+            <li>each change is one write to the session store, so it lands whole or not at all</li>
+            <li>in the session tree, select several sessions and open them in new splits, in one new split, or across the splits already open</li>
+          </ul>
+        </div>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="manage-screenshot" aria-label="Enlarge the bulk sessions screenshot">
+            <img src="assets/manage.png" alt="Settings, Sessions: a sortable table of saved sessions with five rows selected and Edit, Move to, Set identity, Duplicate and Delete buttons" width="1296" height="700" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="manage-screenshot" popover aria-label="Enlarged bulk sessions screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="manage-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/manage.png" alt="Settings, Sessions: a sortable table of saved sessions with five rows selected and Edit, Move to, Set identity, Duplicate and Delete buttons" width="1296" height="700">
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="history">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">04</span>
+            <span class="row__title">command history</span>
+          </div>
         </div>
         <div class="row__body">
           <p class="row__text">keep every finished command with its output, folder, session, time and exit result, then search it across all sessions with <span class="key">ctrl shift h</span>. insert a command at the prompt or reopen the session it ran in.</p>
@@ -119,10 +176,9 @@
       <div class="row" id="compare">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">03</span>
+            <span class="row__index">05</span>
             <span class="row__title">compare runs</span>
           </div>
-          <span class="badge badge--new row__badge">new</span>
         </div>
         <div class="row__body">
           <p class="row__text">when a command has run more than once on the same host, compare with previous shows what changed: added and removed lines, with the changed words marked, unified or side by side.</p>
@@ -147,7 +203,7 @@
       <div class="row" id="telnet">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">04</span>
+            <span class="row__index">06</span>
             <span class="row__title">telnet consoles</span>
           </div>
         </div>
@@ -159,6 +215,7 @@
             <li>send break (ctrl break) for boot interrupts and password recovery through a console server</li>
             <li>text encoding per session: automatic (utf-8, falling back to cp437 for bbs and ansi art), utf-8 or cp437; typed input is encoded to match</li>
             <li>report 80 × 25 to bbs servers: naws and screen-size probes get 80 × 25 while the tab keeps its real size</li>
+            <li>or keep the terminal itself at 80 columns, for bbs art and menus that assume it</li>
             <li>telnet is not encrypted; the session editor says so, and no password is stored for it</li>
           </ul>
         </div>
@@ -173,10 +230,71 @@
         </div>
       </div>
 
+      <div class="row" id="terminal">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">07</span>
+            <span class="row__title">native terminal</span>
+          </div>
+          <span class="badge badge--new row__badge">new</span>
+        </div>
+        <div class="row__body">
+          <p class="row__text">terminals are drawn natively, with no browser inside. ghostty's terminal core parses the output, and direct2d and directwrite draw it straight into the window.</p>
+          <ul class="row__bullets">
+            <li>a window with a terminal uses about 300 mb of memory, down from about 700 mb, and heavy ssh output takes well under half the cpu</li>
+            <li>ime input for japanese, chinese and korean, plus the emoji panel, voice typing and the touch keyboard</li>
+            <li>curly, double, dotted and dashed underlines, underline colours, overlines, and bold in bright colours</li>
+            <li>box drawing, block elements, braille and powerline separators are drawn as shapes, so cells join with no seams at any zoom</li>
+            <li>missing characters fall back to system fonts and a bundled symbols nerd font, so prompt icons need no patched font</li>
+            <li><span class="key">alt</span> drag selects a rectangle, shift click extends a selection, and the wheel scrolls inside less, man and other full-screen programs</li>
+            <li>full-screen programs paint their background to the window edge, and can set the mouse pointer shape</li>
+            <li>tabs you cannot see are parsed but not drawn, so a background flood costs no gpu time</li>
+          </ul>
+        </div>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="terminal-screenshot" aria-label="Enlarge the native terminal screenshot">
+            <img src="assets/terminal.png" alt="A terminal tab showing a rounded box, block progress bars, braille, curly, double, dotted and dashed underlines, Nerd Font icons and a Powerline prompt" width="1110" height="350" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="terminal-screenshot" popover aria-label="Enlarged native terminal screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="terminal-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/terminal.png" alt="A terminal tab showing a rounded box, block progress bars, braille, curly, double, dotted and dashed underlines, Nerd Font icons and a Powerline prompt" width="1110" height="350">
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="cli-mode">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">08</span>
+            <span class="row__title">network cli mode on the tab</span>
+          </div>
+        </div>
+        <div class="row__body">
+          <p class="row__text">on a router or switch, the tab shows the mode you are in and where you are in the configuration, so a tab left in configure mode is easy to spot before you type into it.</p>
+          <ul class="row__bullets">
+            <li>junos: operational or configure, with the [edit] hierarchy and the routing engine role</li>
+            <li>cisco ios, ios xe and ios xr: configure and its submode, such as interface, routing or bgp neighbor; ios xr adds the route processor</li>
+            <li>nokia sr os md-cli: global, exclusive, private or read-only, the path, and a star for uncommitted changes</li>
+            <li>read from the prompt on screen; nothing is sent to the device</li>
+            <li>a bare host# is only read as cisco when the login banner or the session icon says so, so a linux root prompt is left alone</li>
+          </ul>
+        </div>
+        <div class="row__media row__media--text">
+          <div class="termblock">
+            <span><span class="termblock__prompt">syd-pe-01</span> · junos</span>
+            <span class="termblock__out">&nbsp;&nbsp;configure · /protocols bgp</span>
+            <span><span class="termblock__prompt">bne-agg-01</span> · ios</span>
+            <span class="termblock__out">&nbsp;&nbsp;configure · interface</span>
+            <span><span class="termblock__prompt">mel-pe-01</span> · md-cli</span>
+            <span class="termblock__out">&nbsp;&nbsp;private* · configure router</span>
+          </div>
+        </div>
+      </div>
+
       <div class="row" id="highlighting">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">05</span>
+            <span class="row__index">09</span>
             <span class="row__title">keyword highlighting</span>
           </div>
         </div>
@@ -201,13 +319,14 @@
       <div class="row" id="scrollbar">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">06</span>
+            <span class="row__index">10</span>
             <span class="row__title">annotated scrollbar</span>
           </div>
         </div>
         <div class="row__body">
           <p class="row__text">the scrollbar shows search matches, highlighted text, bookmarks and command positions. command marks can show exit status; line timestamps show when output arrived.</p>
           <ul class="row__bullets">
+            <li>hover anywhere on the ruler to see that line, when it arrived, and the matches, bookmarks and highlights around it; click to jump there</li>
             <li>command detection from shell signals and terminal input</li>
             <li>terminal search on <span class="key">ctrl shift f</span></li>
             <li>jump between commands with <span class="key">ctrl shift ↑</span> <span class="key">ctrl shift ↓</span>, bookmark a line with <span class="key">ctrl shift m</span></li>
@@ -227,7 +346,7 @@
       <div class="row" id="commands">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">07</span>
+            <span class="row__index">11</span>
             <span class="row__title">command list</span>
           </div>
         </div>
@@ -266,7 +385,7 @@
       <div class="row" id="rewind">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">08</span>
+            <span class="row__index">12</span>
             <span class="row__title">recording and rewind</span>
           </div>
         </div>
@@ -285,7 +404,7 @@
       <div class="row" id="shortcuts">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">09</span>
+            <span class="row__index">13</span>
             <span class="row__title">keyboard shortcuts and command palette</span>
           </div>
         </div>
@@ -312,7 +431,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">10</span>
+            <span class="row__index">14</span>
             <span class="row__title">persistent remote sessions</span>
           </div>
         </div>
@@ -322,6 +441,7 @@
             <li>choose per connection: resume or ask, always start new, or end detached shells first</li>
             <li>the session manager lists each shell by folder and program, with end all detached</li>
             <li>shells open in another tab or client are never ended or resumed without asking</li>
+            <li>styled underlines, focus reports, clipboard copies and agent status pass through the tmux layer</li>
           </ul>
         </div>
         <div class="row__media row__media--text">
@@ -338,7 +458,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">11</span>
+            <span class="row__index">15</span>
             <span class="row__title">shell integration and command alerts</span>
           </div>
         </div>
@@ -362,12 +482,12 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">12</span>
+            <span class="row__index">16</span>
             <span class="row__title">coding agents over ssh</span>
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">claude code, codex and gemini cli work over ssh as they do in a local terminal. tab badges show when an agent is working or waiting for you.</p>
+          <p class="row__text">claude code, codex, gemini cli, opencode, pi and oh-my-pi work over ssh as they do in a local terminal, each with its own tab icon. badges show when an agent is working, waiting for you, finished or failed.</p>
           <ul class="row__bullets">
             <li>osc 52: remote programs copy to the windows clipboard. it is write-only, so a host can never read your clipboard, and playback never touches it</li>
             <li>shift enter sends esc cr, the new-line key claude code reads; full-screen programs such as vim still get a plain enter</li>
@@ -389,10 +509,40 @@
         </div>
       </div>
 
+      <div class="row" id="status">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">17</span>
+            <span class="row__title">program status on tabs</span>
+          </div>
+          <span class="badge badge--new row__badge">new</span>
+        </div>
+        <div class="row__body">
+          <p class="row__text">programs can report their own state through the terminal: idle, working, blocked, done or error. resesh reads these reports (osc 7501) and shows them on the tab, with nothing installed on the server.</p>
+          <ul class="row__bullets">
+            <li>a known agent gets its icon and state; any other program gets the badge alone</li>
+            <li>a done or failed result stays on the tab after the prompt returns, until you look at the tab or type in it</li>
+            <li>a percentage in a report drives the tab progress bar</li>
+            <li>every sequence resesh reads is listed on the <a href="osc.html">osc page</a></li>
+            <li>the agent icon or badge takes the place of the connection dot while the tab is connected, so there is one indicator, not two</li>
+            <li>inside a persistent session, where tmux drops these reports, the codex, claude code and shell-wrapper adapters pass status through a tmux option instead (tmux 3.0 or newer)</li>
+          </ul>
+        </div>
+        <div class="row__media row__media--text">
+          <div class="termblock">
+            <span><span class="termblock__prompt">osc 7501</span> — the program reports</span>
+            <span class="termblock__out">state=working → working badge</span>
+            <span class="termblock__out">state=blocked → <span class="termblock__ok">● needs you</span></span>
+            <span class="termblock__out">state=done&nbsp;&nbsp;&nbsp;&nbsp;→ kept until seen</span>
+            <span class="termblock__out">state=error&nbsp;&nbsp;&nbsp;→ failed badge</span>
+          </div>
+        </div>
+      </div>
+
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">13</span>
+            <span class="row__index">18</span>
             <span class="row__title">progress on tabs and the taskbar</span>
           </div>
         </div>
@@ -416,7 +566,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">14</span>
+            <span class="row__index">19</span>
             <span class="row__title">workspaces and layout restore</span>
           </div>
         </div>
@@ -438,10 +588,40 @@
         </div>
       </div>
 
+      <div class="row" id="windows">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">20</span>
+            <span class="row__title">small windows, settings and the taskbar</span>
+          </div>
+          <span class="badge badge--new row__badge">new</span>
+        </div>
+        <div class="row__body">
+          <p class="row__text">resesh stays usable in a narrow window or a small split, and the parts of the app that are not terminals behave like tabs too.</p>
+          <ul class="row__bullets">
+            <li>on a narrow window the sessions pane floats over the tabs, so terminals keep their width; choose automatic, float or dock in settings</li>
+            <li>quick connect folds into a search button, and <span class="key">ctrl shift k</span> still opens it</li>
+            <li>settings and welcome are tabs: reorder them, split them beside a terminal, or move them to another window</li>
+            <li>settings save as you change them and apply to every open window</li>
+            <li>right-click resesh on the taskbar for pinned and recent sessions and a new window</li>
+            <li>optionally start resesh when you sign in to windows</li>
+          </ul>
+        </div>
+        <div class="row__media row__media--text">
+          <div class="termblock">
+            <span><span class="termblock__prompt">taskbar › resesh</span></span>
+            <span class="termblock__out">pinned&nbsp;&nbsp;&nbsp;syd-pe-01</span>
+            <span class="termblock__out">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;syd-bastion-01</span>
+            <span class="termblock__out">recent&nbsp;&nbsp;&nbsp;lab-sw-01 · build-01</span>
+            <span class="termblock__out">tasks&nbsp;&nbsp;&nbsp;&nbsp;new window</span>
+          </div>
+        </div>
+      </div>
+
       <div class="row" id="files">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">15</span>
+            <span class="row__index">21</span>
             <span class="row__title">file transfer and browsing</span>
           </div>
         </div>
@@ -466,14 +646,14 @@
       <div class="row" id="keys">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">16</span>
+            <span class="row__index">22</span>
             <span class="row__title">keys, secrets and host keys</span>
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">name and reuse private-key references across sessions. view fingerprints and update the path if a key file moves. passwords and passphrases are stored in windows credential manager.</p>
+          <p class="row__text">name and reuse private-key references across sessions and identities, in settings › identities &amp; keys. view fingerprints and update the path if a key file moves. passwords and passphrases are stored in windows credential manager.</p>
           <ul class="row__bullets">
-            <li>explicit keyboard-interactive prompts</li>
+            <li>explicit keyboard-interactive prompts, and a fallback to them when a host refuses the key</li>
             <li>review changed host keys before accepting them</li>
           </ul>
         </div>
@@ -491,15 +671,17 @@
       <div class="row" id="backup">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">17</span>
+            <span class="row__index">23</span>
             <span class="row__title">backup, export, import</span>
           </div>
         </div>
         <div class="row__body">
           <p class="row__text">export a .reseshbackup archive and merge it into another installation. passwords and passphrases are excluded by default. including them requires an encrypted backup.</p>
           <ul class="row__bullets">
-            <li>review sessions before importing them</li>
-            <li>keep a previous copy of saved data</li>
+            <li>review an import in its own tab, as a folder tree, before anything is added</li>
+            <li>logins that repeat are proposed as identities and attached to the folders where they dominate</li>
+            <li>securecrt's global public key is picked up from its configuration</li>
+            <li>keep a previous copy of saved data; a file that cannot be read is set aside, never saved over</li>
           </ul>
         </div>
         <div class="row__media">
@@ -516,7 +698,7 @@
       <div class="row" id="themes">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">18</span>
+            <span class="row__index">24</span>
             <span class="row__title">themes</span>
           </div>
         </div>
@@ -535,7 +717,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">19</span>
+            <span class="row__index">25</span>
             <span class="row__title">gssapi / kerberos auth</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -553,7 +735,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">20</span>
+            <span class="row__index">26</span>
             <span class="row__title">tunnels, agent, jump hosts</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -571,7 +753,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">21</span>
+            <span class="row__index">27</span>
             <span class="row__title">serial consoles</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -589,7 +771,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">22</span>
+            <span class="row__index">28</span>
             <span class="row__title">other planned work</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -622,6 +804,16 @@
         <span class="card__note">output is parsed by libghostty-vt, the terminal core of ghostty, on the connection's own thread, and drawn with direct2d and directwrite straight into the window at the display's refresh rate. every glyph advances by whole cells, so text stays on the character grid at any display scaling.</span>
       </div>
       <div class="card">
+        <span class="card__tag">glyphs</span>
+        <span class="card__name">box drawing without seams</span>
+        <span class="card__note">font outlines for box, block and powerline characters only meet the cell edges at a few sizes. resesh draws them itself as whole-pixel rectangles and paths, following ghostty's sprite font, so they join at every zoom level.</span>
+      </div>
+      <div class="card">
+        <span class="card__tag">background tabs</span>
+        <span class="card__name">nothing drawn that nobody sees</span>
+        <span class="card__note">only the selected tab in each pane draws, and nothing draws while the window is minimized. output is still parsed, so command tracking, notifications and history keep working for background tabs.</span>
+      </div>
+      <div class="card">
         <span class="card__tag">rewind</span>
         <span class="card__name">seekable terminal history</span>
         <span class="card__note">every 10 seconds or 1 mib of output, the terminal serializes its full state as a keyframe. rewind jumps to the nearest keyframe and replays only what followed, so scrubbing is exact without replaying the whole session.</span>
@@ -649,7 +841,7 @@
       <div class="card">
         <span class="card__tag">storage</span>
         <span class="card__name">atomic json, secrets elsewhere</span>
-        <span class="card__note">sessions and workspaces are written atomically with a backup copy. passwords and passphrases live in windows credential manager and are never written to disk by resesh.</span>
+        <span class="card__note">sessions, identities and workspaces are written atomically with a backup copy, and an unreadable file is kept aside instead of replaced. passwords and passphrases live in windows credential manager and are never written to disk by resesh.</span>
       </div>
     </div>
   </div>
@@ -685,6 +877,10 @@
       <div class="path">
         <span class="path__label">sessions and folders</span>
         <span class="path__value">%APPDATA%\Resesh\sessions.json</span>
+      </div>
+      <div class="path">
+        <span class="path__label">identities</span>
+        <span class="path__value">%APPDATA%\Resesh\identities.json</span>
       </div>
       <div class="path">
         <span class="path__label">workspaces and layout</span>
@@ -727,6 +923,8 @@
   </div>
   <div class="site-footer__links">
     <a href="https://github.com/bpbp-boop/resesh">github</a>
+    <a href="compare.html">compare</a>
+    <a href="osc.html">osc sequences</a>
     <a href="https://github.com/bpbp-boop/resesh/blob/master/ROADMAP.md">roadmap.md</a>
     <a href="https://github.com/bpbp-boop/resesh/issues">issues</a>
   </div>
