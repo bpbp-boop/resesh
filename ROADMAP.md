@@ -513,10 +513,16 @@ the status the command had just reported.
   code in `133;D` is not stored, so it does not come back. zmx still adds `redraw=0` to
   `133;A`, live and in the snapshot: that is the one sequence of 21 the probe still shows
   changed, and it is deliberate (the shell cannot redraw a prompt through the daemon).
-- **To settle before the app backend:** a reattach now replays the marks of every command
-  in the scrollback. Nothing tells the app they are old. Check what the command tracker
-  does with them (history entries, completion notices) and, if needed, bracket the
-  snapshot so the app can tell.
+- **Replayed marks are old, and the app is told so.** A reattach replays the marks of every
+  command in the scrollback, and the command tracker would have recorded each one in the
+  history again and reported it as running. The daemon now puts
+  `OSC 7377 ; replay ; state=begin` and `state=end` around the snapshot, with status after
+  the end. Between them `CommandTracker` keeps the marks for the ruler and does nothing
+  else, then reports the command that is still running, once. In the app, a marked command
+  ran, the connection was dropped and the session attached again: the history still held it
+  once. That run was not repeated without the bracket to show the duplicate. A command
+  still running across the reattach is not recorded when it ends. A begin with no end
+  leaves the tracker quiet until the tab reconnects.
 - **Step 3, status: written.** `src/status.zig` in the patch keeps the latest report of
   each record (64 at most) and sends them after the snapshot. It drops records as the app
   does: `clear`, a full reset, a new prompt for `working` and `blocked`, and user input

@@ -26,7 +26,7 @@ index 81d3a33..a2c405a 100644
      },
      .paths = .{
 diff --git a/src/loop.zig b/src/loop.zig
-index 513d3f5..d0f496c 100644
+index 513d3f5..e6e5d0a 100644
 --- a/src/loop.zig
 +++ b/src/loop.zig
 @@ -3,6 +3,7 @@ const ghostty_vt = @import("ghostty-vt");
@@ -85,10 +85,37 @@ index 513d3f5..d0f496c 100644
          // client is leader, send entire payload (ansi escape codes + text)
          if (self.leader_client_fd == client.socket_fd) {
              self.queuePtyInput(gpa, payload);
-@@ -998,6 +1013,21 @@ pub const Daemon = struct {
+@@ -990,12 +1005,46 @@ pub const Daemon = struct {
+                 const restore_data = util.rewritePromptRedraw(gpa, term_output) orelse term_output;
+                 defer gpa.free(term_output);
+                 defer if (restore_data.ptr != term_output.ptr) gpa.free(restore_data);
++
++                // The screen is old news: its prompt marks are of commands
++                // that ran earlier. These tell a terminal that knows the
++                // sequence (Resesh) so; any other ignores an unknown OSC.
++                // The end is only sent if the start was, and always then.
++                const replay_begin = "\x1b]7377;replay;state=begin\x1b\\";
++                const replay_end = "\x1b]7377;replay;state=end\x1b\\";
++                const bracketed = if (ipc.appendMessage(gpa, &client.write_buf, .Output, replay_begin))
++                    true
++                else |_|
++                    false;
+                 ipc.appendMessage(gpa, &client.write_buf, .Output, restore_data) catch |err| {
+                     std.log.warn(
+                         "failed to buffer terminal state for client err={s}",
+                         .{@errorName(err)},
+                     );
                  };
-                 client.has_pending_output = true;
-             }
++                if (bracketed) {
++                    ipc.appendMessage(gpa, &client.write_buf, .Output, replay_end) catch |err| {
++                        std.log.warn(
++                            "failed to buffer replay end for client err={s}",
++                            .{@errorName(err)},
++                        );
++                    };
++                }
++                client.has_pending_output = true;
++            }
 +
 +            // Status reports are not screen state, so they follow the snapshot.
 +            var status_out: std.Io.Writer.Allocating = .init(gpa);
@@ -102,11 +129,9 @@ index 513d3f5..d0f496c 100644
 +                        .{@errorName(err)},
 +                    );
 +                };
-+                client.has_pending_output = true;
-+            }
+                 client.has_pending_output = true;
+             }
          }
- 
-         // only resize if leader
 diff --git a/src/status.zig b/src/status.zig
 new file mode 100644
 index 0000000..1c31c48

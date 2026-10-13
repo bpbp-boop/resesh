@@ -143,6 +143,7 @@ each.
 | Reattach restores a status that is still current | no | yes |
 | Reattach leaves out a status that a prompt ended | n/a | yes |
 | Reattach restores prompt marks (OSC 133) | no | yes, without the exit code |
+| Snapshot marked as a replay, status sent after it | no | yes |
 | Status support query answered with no client, before DA1 | no | yes |
 | `seq 1 400000`, seconds | 3.53 | 4.16 |
 

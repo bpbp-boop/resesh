@@ -17,6 +17,7 @@ uses it.
 | `throughput.py` | Counts how many lines of `seq 1 N` reach the terminal live, and how long it takes. |
 | `tmux_capture.py` | Tries each `capture-pane -t` target form against the private server. |
 | `detached_query.py` | Asks the status support query and DA1 from a session with no client, and saves what came back. |
+| `marked.py` | Plays a shell with prompt marks running one command. For checking in the app that a reattach does not record old commands again. |
 | `show.py`, `inject.py`, `step.sh` | In-app test: a stand-in agent that reports plain OSC 7501, and helpers to attach a real Resesh tab to a zmx session and drop its client. |
 | `results/` | Raw output of the spike runs. `tab.py` prints the three spike `run-*.json` side by side. `run-fork.json` and `snap-fork-fill.bin` are from the patched build of 2026-10-14. |
 

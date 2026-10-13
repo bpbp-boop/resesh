@@ -267,7 +267,11 @@ def reattach(target, scenario):
     def has(b):
         return b in snap
 
-    rep = {"target": target, "scenario": scenario, "first_attach_bytes": before, "snapshot_bytes": len(snap)}
+    # The agent tells the app where the old screen starts and ends, and sends status after it.
+    begin, end = snap.find(b"]7377;replay;state=begin"), snap.find(b"]7377;replay;state=end")
+    status = snap.find(b"]7501;")
+    rep = {"target": target, "scenario": scenario, "first_attach_bytes": before, "snapshot_bytes": len(snap),
+           "replay bracket, status after it": 0 <= begin < end < status}
     if scenario == "fill":
         rep.update({
             "LINE rows replayed": sum(1 for i in range(1, 301) if b"LINE-%d the" % i in snap),

@@ -48,6 +48,46 @@ public class CommandTrackerTests
     }
 
     [Fact]
+    public void ReplayedMarksAreKeptButNotRunOrRecorded()
+    {
+        var h = new Harness();
+        h.Tracker.SetExecutionReporting(true);
+        h.Tracker.SetHistoryCapture(true);
+
+        // A reattach sends two old commands again; the second is still running.
+        h.Tracker.SetReplaying(true);
+        foreach (var command in new[] { "make test", "sleep 600" })
+        {
+            h.Buffer.Add("user@host:~$ " + command);
+            h.Semantic(1);
+            h.Buffer.CursorX = 13;
+            h.Semantic(2);
+            h.Buffer.Add("output");
+            h.Semantic(3);
+        }
+        Assert.Empty(h.Running);
+        Assert.Empty(h.Marked);
+
+        h.Tracker.SetReplaying(false);
+        Assert.Equal([("sleep 600", true)], h.Running);
+        Assert.Equal(2, h.Tracker.Commands().Count);
+        Assert.Empty(h.Executions);
+        Assert.Empty(h.Records);
+
+        // What happens next is live again.
+        h.Semantic(4, exit: 0);
+        h.Buffer.Add("user@host:~$ ls");
+        h.Semantic(1);
+        h.Buffer.CursorX = 13;
+        h.Semantic(2);
+        h.Buffer.Add("file");
+        h.Semantic(3);
+        h.Semantic(4, exit: 0);
+        Assert.Equal("ls", Assert.Single(h.Records).CommandLine);
+        Assert.Equal(["ls"], h.Marked);
+    }
+
+    [Fact]
     public void Osc133LifecycleMarksCommandReportsExecutionAndRecordsHistory()
     {
         var h = new Harness();

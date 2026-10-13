@@ -1,4 +1,4 @@
-[2J[H$ python3 /root/.local/share/resesh-spike/inner.py fill
+[2J[H]7377;replay;state=begin\$ python3 /root/.local/share/resesh-spike/inner.py fill
 LINE-1 the quick brown fox
 LINE-2 the quick brown fox
 LINE-3 the quick brown fox
@@ -304,6 +304,6 @@ LINE-300 the quick brown fox
 ]133;A;redraw=0\]8;;\prompt> 
 ]133;B\FILL-DONE
 $ (sleep 3; echo WHILE-''DETACHED-1; echo WHILE-''DETACHED-2) &
-[1] 124452
+[1] 124894
 $ WHILE-DETACHED-1
-WHILE-DETACHED-2]133;B\[40;1H[0m]7;file://probehost/srv/fill\]2;fill-title-abc]7501;state=working:app=probe:id=bg\
+WHILE-DETACHED-2]133;B\[40;1H[0m]7;file://probehost/srv/fill\]2;fill-title-abc]7377;replay;state=end\]7501;state=working:app=probe:id=bg\
