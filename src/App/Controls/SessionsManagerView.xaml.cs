@@ -424,7 +424,7 @@ public sealed partial class SessionsManagerView : UserControl
             await EditOneAsync(selected[0]);
             return;
         }
-        if (await BulkEditSessionsDialog.ShowAsync(XamlRoot, selected) is not { } edit)
+        if (await BulkEditSessionsDialog.EditAsync(XamlRoot, selected) is not { } edit)
             return;
         var changed = edit.ApplyTo(selected);
         if (Save(owner => owner.UpdateSessions(changed)))

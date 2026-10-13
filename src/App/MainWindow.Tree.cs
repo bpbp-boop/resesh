@@ -431,6 +431,30 @@ public sealed partial class MainWindow
             window.ConnectSession(session);
     }
 
+    /// <summary>Opens the sessions to the right of the focused pane: one new pane holding
+    /// them all as tabs, or a pane each.</summary>
+    private void ConnectInNewSplits(IReadOnlyList<Session> sessions, bool together)
+    {
+        if (sessions.Count == 0)
+            return;
+        var group = ViewModel.FocusedGroup;
+        TabGroupViewModel? first = null;
+        foreach (var session in sessions)
+        {
+            // An empty pane is already a free split; fill it before making another.
+            if (group.Tabs.Count > 0 && !(together && first is not null))
+                group = CreateWorkspaceGroupAfter(group);
+            ConnectSession(session, group);
+            first ??= group;
+        }
+
+        SyncGroupOrder();
+        ViewModel.OnGroupsChanged();
+        RebuildGroupLayout();
+        FocusGroup(first!);
+        ViewModel.SyncGroupFocus();
+    }
+
     // ---- Tree expansion bookkeeping ----
 
     private void SessionTree_Expanding(TreeView sender, TreeViewExpandingEventArgs args)

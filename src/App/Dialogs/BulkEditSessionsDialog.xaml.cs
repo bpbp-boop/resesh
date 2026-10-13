@@ -77,7 +77,7 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
     }
 
     /// <summary>Shows the dialog; the chosen edit, or null when cancelled.</summary>
-    public static async Task<SessionBulkEdit?> ShowAsync(XamlRoot xamlRoot, IReadOnlyList<Session> sessions)
+    public static async Task<SessionBulkEdit?> EditAsync(XamlRoot xamlRoot, IReadOnlyList<Session> sessions)
     {
         var dialog = new BulkEditSessionsDialog(sessions) { XamlRoot = xamlRoot };
         return await dialog.ShowModalAsync() == ContentDialogResult.Primary ? dialog.Result : null;

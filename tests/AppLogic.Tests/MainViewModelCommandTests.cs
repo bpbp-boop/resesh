@@ -306,22 +306,83 @@ public sealed class MainViewModelCommandTests : IDisposable
         Assert.Empty(window.BuildSelectionMenu());
 
         window.TreeSelection.SelectOnly(session);
-        Assert.Equal(["Connect", "Connect in new window", "-", "Edit…", "Delete"], MenuTexts(window));
+        Assert.Equal(
+            ["Connect", "Connect in new window", "Connect in new split", "-", "Edit…", "Delete"],
+            MenuTexts(window));
 
         window.TreeSelection.SelectOnly(localRoot.Children.Single());
-        Assert.Equal(["Open", "Open in new window", "-", "Edit…", "Set as Default", "Delete"], MenuTexts(window));
+        Assert.Equal(
+            ["Open", "Open in new window", "Open in new split", "-", "Edit…", "Set as Default", "Delete"],
+            MenuTexts(window));
 
         window.TreeSelection.SelectOnly(localRoot);
         Assert.Equal(["New Local Profile…", "New Folder…", "-", "Expand All", "Collapse All"], MenuTexts(window));
 
         window.TreeSelection.SelectOnly(folder);
         Assert.Equal(
-            ["Connect in Tabs", "Open in new window", "-", "Expand All", "Collapse All", "-",
+            ["Connect in Tabs", "Open in new window", "Open in one new split", "Open in new splits",
+"Open in existing splits", "-",
+             "Expand All", "Collapse All", "-",
              "New Session…", "New Folder…", "-", "Set Identity…", "Rename…", "Delete"],
             MenuTexts(window));
 
         window.TreeSelection.Toggle(session);
-        Assert.Equal(["Connect in Tabs", "Open in new window", "-", "Delete"], MenuTexts(window));
+        Assert.Equal(
+            ["Connect in Tabs", "Open in new window", "Open in one new split", "Open in new splits",
+"Open in existing splits", "-", "Delete"],
+            MenuTexts(window));
+    }
+
+    [Fact]
+    public void OpenSelectionInNewSplitsHandsEverySessionToTheWindow()
+    {
+        var (window, _, folder, session) = Tree();
+        window.TreeSelection.SelectOnly(folder);
+        window.TreeSelection.Toggle(session);
+
+        window.OpenSelectionInNewSplitsCommand.Execute(null);
+
+        Assert.Equal(["ConnectInNewSplits edge,spine"], _window.Calls);
+    }
+
+    [Fact]
+    public void OpenSelectionInOneNewSplitHandsEverySessionToTheWindow()
+    {
+        var (window, _, folder, session) = Tree();
+        window.TreeSelection.SelectOnly(folder);
+        window.TreeSelection.Toggle(session);
+
+        window.OpenSelectionInOneNewSplitCommand.Execute(null);
+
+        Assert.Equal(["ConnectInNewSplit edge,spine"], _window.Calls);
+    }
+
+    [Fact]
+    public void OpenSelectionInExistingSplitsNeedsASplit()
+    {
+        var (window, _, folder, _) = Tree();
+        window.TreeSelection.SelectOnly(folder);
+
+        Assert.False(window.OpenSelectionInExistingSplitsCommand.CanExecute(null));
+
+        window.Groups.Add(new TabGroupViewModel());
+        Assert.True(window.OpenSelectionInExistingSplitsCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public void OpenSelectionInExistingSplitsDealsSessionsAcrossPanesInOrder()
+    {
+        var (window, localRoot, folder, session) = Tree();
+        window.Groups.Add(new TabGroupViewModel());
+        window.TreeSelection.SelectOnly(localRoot);
+        window.TreeSelection.Toggle(folder);
+        window.TreeSelection.Toggle(session);
+
+        window.OpenSelectionInExistingSplitsCommand.Execute(null);
+
+        Assert.Equal(
+            [("pwsh", window.Groups[0]), ("edge", window.Groups[1]), ("spine", window.Groups[0])],
+            _window.PaneConnections.Select(connection => (connection.Session.Name, connection.Group)));
     }
 
     [Fact]

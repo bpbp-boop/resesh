@@ -17,7 +17,14 @@ public interface IMainWindowServices
     // ---- Sessions ----
 
     void ConnectSession(Session session);
+    void ConnectSession(Session session, TabGroupViewModel group);
     void ConnectInNewWindow(IReadOnlyList<Session> sessions);
+
+    /// <summary>Opens each session in a new pane of its own, beside the focused pane.</summary>
+    void ConnectInNewSplits(IReadOnlyList<Session> sessions);
+
+    /// <summary>Opens the sessions as tabs of one new pane, beside the focused pane.</summary>
+    void ConnectInNewSplit(IReadOnlyList<Session> sessions);
     void OpenDefaultLocalProfile();
 
     /// <summary>Opens the session editor and saves the result.</summary>
