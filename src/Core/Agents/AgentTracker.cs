@@ -2,7 +2,10 @@ namespace Resesh.Core.Agents;
 
 /// <summary>What a tab currently shows for its agent: identity, attention, and the
 /// evidence behind it. Immutable so views can diff two snapshots cheaply.</summary>
-public sealed record AgentSnapshot(string? Key, AgentAttention Attention, string? Label, AgentSource Source)
+/// <paramref name="Program"/> is set instead of an agent identity when the state belongs to
+/// an ordinary program that reported it (OSC 7501): its name, or "" when it gave none.
+public sealed record AgentSnapshot(
+    string? Key, AgentAttention Attention, string? Label, AgentSource Source, string? Program = null)
 {
     public static readonly AgentSnapshot Empty = new(null, AgentAttention.None, null, AgentSource.Unknown);
 
@@ -35,6 +38,12 @@ public sealed class AgentTracker
     private AgentAttention _attention = AgentAttention.None;
     private string? _label;
 
+    // The status of a program that is not an agent (OSC 7501). Kept apart from the agent
+    // state: it claims no identity, and it shows only while no agent does.
+    private string? _program;         // its name, "" when it gave none, null = no record
+    private AgentAttention _programAttention = AgentAttention.None;
+    private string? _programLabel;
+
     public AgentTracker(string? sessionDefault = null)
     {
         _sessionDefault = Normalize(sessionDefault);
@@ -64,6 +73,8 @@ public sealed class AgentTracker
         {
             var key = ResolveKey();
             var isAgent = AgentIdentities.IsAgentKey(key);
+            if (!isAgent && _program is not null && !Suppressed)
+                return new AgentSnapshot(key, _programAttention, _programLabel, AgentSource.Structured, _program);
             return new AgentSnapshot(
                 key,
                 isAgent ? _attention : AgentAttention.None,
@@ -104,6 +115,10 @@ public sealed class AgentTracker
         if (Suppressed)
             return;
         var key = AgentDetection.FromCommand(commandLine);
+        if (key is null)
+            DropUnfinishedProgramStatus();
+        else
+            ClearProgramStatus(); // an agent is starting: an old result is not its news
         _structured = null; // back at a prompt: any adapter-reported agent is gone
         _detected = key ?? AgentIdentities.Shell;
         _detectedSource = AgentSource.Command;
@@ -123,6 +138,7 @@ public sealed class AgentTracker
         // structured identity whose SessionEnd hook did not run yet.
         if (AgentDetection.IsShellTitle(title))
         {
+            DropUnfinishedProgramStatus();
             _structured = null;
             _detected = AgentIdentities.Shell;
             _detectedSource = AgentSource.Title;
@@ -164,7 +180,8 @@ public sealed class AgentTracker
             return;
         }
 
-        // No agent process in the job: nothing is running here but a shell.
+        // No agent process in the job: nothing is running here but a shell. (A program's
+        // own status record is left alone: it ends at the next prompt, not on a poll.)
         if (_structured is null && _detected is null or AgentIdentities.Shell)
             return;
         _structured = null;
@@ -210,10 +227,62 @@ public sealed class AgentTracker
         _label = agentEvent.Label;
     });
 
+    /// <summary>
+    /// A program reported its own state (OSC 7501). Only the root record is shown. A report
+    /// naming an agent sets that agent's identity and state, and one naming no program
+    /// updates the agent already showing. Anything else is an ordinary program: it gets the
+    /// state without an identity, and is ignored while an agent is showing here.
+    /// </summary>
+    public bool ObserveProgramStatus(ProgramStatus? status) => Change(() =>
+    {
+        if (Suppressed || status is null || status.Id.Length > 0)
+            return;
+
+        if (status.State == ProgramStatusState.Clear)
+        {
+            ClearProgramStatus();
+            // The record is gone; whatever detection knows is what remains.
+            if (_structured is null)
+                return;
+            _structured = null;
+            _label = null;
+            _attention = AgentIdentities.IsAgentKey(_detected) ? AgentAttention.Idle : AgentAttention.None;
+            return;
+        }
+
+        var key = AgentDetection.FromProcessName(status.App);
+        var showing = _structured ?? (AgentIdentities.IsAgentKey(_detected) ? _detected : null);
+        if (status.App.Length > 0 ? key is null : showing is null)
+        {
+            if (showing is not null)
+                return;
+            if (status.Attention == AgentAttention.Idle)
+            {
+                ClearProgramStatus(); // at rest with nothing to say
+                return;
+            }
+            _program = AgentText.Sanitize(status.App, MaxProgramNameLength) ?? "";
+            _programAttention = status.Attention;
+            _programLabel = status.Label;
+            return;
+        }
+
+        ClearProgramStatus();
+        _structuredSeen = true;
+        _structured = key ?? showing;
+        _attention = status.Attention;
+        _label = status.Label;
+    });
+
     /// <summary>The user typed into this tab. Answering is what unblocks a waiting agent,
     /// so this is the signal that clears a sticky badge.</summary>
     public bool ObserveUserInput() => Change(() =>
     {
+        if (_programAttention.RequiresUser())
+            _programAttention = AgentAttention.Working;
+        else if (_programAttention != AgentAttention.Working)
+            ClearProgramStatus();
+
         if (_attention is AgentAttention.None or AgentAttention.Working)
             return;
         _attention = AgentIdentities.IsAgentKey(ResolveKey()) ? AgentAttention.Working : AgentAttention.None;
@@ -224,6 +293,9 @@ public sealed class AgentTracker
     /// a genuinely blocked agent keeps its badge until input arrives.</summary>
     public bool ObserveViewed() => Change(() =>
     {
+        if (_programAttention.ClearsOnView())
+            ClearProgramStatus();
+
         if (!_attention.ClearsOnView())
             return;
         _attention = AgentIdentities.IsAgentKey(ResolveKey()) ? AgentAttention.Idle : AgentAttention.None;
@@ -234,6 +306,7 @@ public sealed class AgentTracker
     /// override survives, since the tab can be restarted in place.</summary>
     public bool ObserveEnded() => Change(() =>
     {
+        DropUnfinishedProgramStatus();
         _structured = null;
         _structuredSeen = false;
         _detected = null;
@@ -241,6 +314,24 @@ public sealed class AgentTracker
         _attention = AgentAttention.None;
         _label = null;
     });
+
+    private const int MaxProgramNameLength = 40;
+
+    private void ClearProgramStatus()
+    {
+        _program = null;
+        _programAttention = AgentAttention.None;
+        _programLabel = null;
+    }
+
+    /// <summary>The program that reported is gone (a prompt came back, or the session
+    /// ended). "Working" and "blocked" went with it; a finished or failed result is the
+    /// news the user was waiting for, so it stays until they have seen it.</summary>
+    private void DropUnfinishedProgramStatus()
+    {
+        if (_programAttention is not (AgentAttention.Complete or AgentAttention.Failed))
+            ClearProgramStatus();
+    }
 
     private static string? Normalize(string? key)
     {

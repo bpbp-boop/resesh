@@ -61,8 +61,10 @@ public sealed class TerminalTabView : Grid, IDisposable
     private DispatcherQueueTimer? _agentPoll;
     private bool _agentPollBusy;
 
-    // Progress from OSC 9;4 in the terminal and from file-pane transfers, combined on the tab.
+    // Progress from OSC 9;4 and OSC 7501 in the terminal and from file-pane transfers,
+    // combined on the tab.
     private TerminalProgress _terminalProgress;
+    private TerminalProgress _statusProgress;
     private TerminalProgress _transferProgress;
 
     // File pane: local sessions use the Windows filesystem; SSH sessions keep the
@@ -412,7 +414,9 @@ public sealed class TerminalTabView : Grid, IDisposable
     private void WireAgentSignals()
     {
         _terminal.AgentOscReceived += (code, data) =>
-            ApplyAgent(tracker => tracker.ObserveEvent(AgentOsc.Parse(code, data)));
+            ApplyAgent(tracker => code == ProgramStatus.Code
+                ? tracker.ObserveProgramStatus(ProgramStatus.Parse(data))
+                : tracker.ObserveEvent(AgentOsc.Parse(code, data)));
         _terminal.BellReceived += () =>
             ApplyAgent(tracker => tracker.ObserveEvent(AgentOsc.Bell()));
         _terminal.TitleChanged += title => ApplyAgent(tracker => tracker.ObserveTitle(title));
@@ -442,24 +446,40 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             if (code == 9 && TerminalProgress.ParseOsc9(data, _terminalProgress) is { } progress)
                 SetTerminalProgress(progress);
+            // OSC 7501 carries a percentage of its own, whoever the program is.
+            else if (code == ProgramStatus.Code && ProgramStatus.Parse(data)?.AsTerminalProgress() is { } reported)
+                SetStatusProgress(reported);
         };
         _terminal.CommandChanged += (command, _) =>
         {
             if (command.Length == 0)
-                DispatcherQueue.TryEnqueue(() => SetTerminalProgress(TerminalProgress.None));
+                DispatcherQueue.TryEnqueue(ClearReportedProgress);
         };
         _terminal.PromptContextChanged += (_, _) =>
-            DispatcherQueue.TryEnqueue(() => SetTerminalProgress(TerminalProgress.None));
+            DispatcherQueue.TryEnqueue(ClearReportedProgress);
         _tab.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(TabViewModel.State) && _tab.State != TabConnectionState.Connected)
-                SetTerminalProgress(TerminalProgress.None);
+                ClearReportedProgress();
         };
     }
 
     private void SetTerminalProgress(TerminalProgress progress)
     {
         _terminalProgress = progress;
+        PushProgress();
+    }
+
+    private void SetStatusProgress(TerminalProgress progress)
+    {
+        _statusProgress = progress;
+        PushProgress();
+    }
+
+    private void ClearReportedProgress()
+    {
+        _terminalProgress = TerminalProgress.None;
+        _statusProgress = TerminalProgress.None;
         PushProgress();
     }
 
@@ -472,7 +492,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     private void PushProgress()
     {
         if (!_disposed)
-            _tab.Progress = TerminalProgress.Combine(_terminalProgress, _transferProgress);
+            _tab.Progress = TerminalProgress.Combine(_terminalProgress, _statusProgress, _transferProgress);
     }
 
     private void ApplyAgent(Func<AgentTracker, bool> observe)

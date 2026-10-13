@@ -101,6 +101,7 @@ public static class AgentAdapters
     public static AgentAdapterSnippet ClaudeCodePosix() => new(
         "Claude Code",
         "~/.claude/settings.json · Linux, macOS, WSL",
+        "For Claude Code before 2.1.295; later versions report their own status. " +
         "Reports working, approval, finished, and exit states via Claude Code's terminalSequence JSON output. " +
         "Interactive sessions only. In another terminal, the reserved resesh-agent title may appear as a desktop notification.",
         ClaudeCodeHooksJson(windows: false));
@@ -110,6 +111,7 @@ public static class AgentAdapters
     public static AgentAdapterSnippet ClaudeCodeWindows() => new(
         "Claude Code",
         "%USERPROFILE%\\.claude\\settings.json · Windows",
+        "For Claude Code before 2.1.295; later versions report their own status. " +
         "Reports the same lifecycle states via Claude Code's terminalSequence JSON output (Git Bash or PowerShell). " +
         "Interactive sessions only. In another terminal, the reserved resesh-agent title may appear as a desktop notification.",
         ClaudeCodeHooksJson(windows: true));

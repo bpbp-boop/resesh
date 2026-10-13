@@ -19,7 +19,7 @@ __declspec(dllimport) void __stdcall AcquireSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) uint64_t __stdcall GetTickCount64(void);
 
-#define RVT_ABI_VERSION 6
+#define RVT_ABI_VERSION 7
 
 // ---- events -------------------------------------------------------------------------------
 
@@ -301,6 +301,28 @@ static void on_progress(GhosttyTerminal term, void* user, const GhosttyTerminalP
   if (n > 0) emit((RvtTerm*)user, RVT_EVENT_OSC, (const uint8_t*)buf, (size_t)n);
 }
 
+// OSC 7501 program status. libghostty-vt hands over decoded fields, so the report travels as
+// "7501;state;kind;progress" followed by id, app, title and message, each behind a unit
+// separator (0x1F): the text fields never contain control characters, and the message goes
+// last so a report too long for the buffer loses only its tail.
+static void on_program_status(GhosttyTerminal term, void* user, const GhosttyTerminalProgramStatus* status) {
+  (void)term;
+  uint8_t buf[4096];
+  int head = snprintf((char*)buf, sizeof buf, "7501;%d;%d;%d",
+    (int)status->state, (int)status->kind, (int)status->progress);
+  if (head <= 0) return;
+  size_t n = (size_t)head;
+  const GhosttyString* fields[4] = { &status->id, &status->app, &status->title, &status->message };
+  for (int i = 0; i < 4 && n < sizeof buf; i++) {
+    buf[n++] = 0x1F;
+    size_t room = sizeof buf - n;
+    size_t len = fields[i]->len < room ? fields[i]->len : room;
+    memcpy(buf + n, fields[i]->ptr, len);
+    n += len;
+  }
+  emit((RvtTerm*)user, RVT_EVENT_OSC, buf, n);
+}
+
 // CSI > q: Claude Code enables synchronized output only for terminals that answer
 // (DECISIONS.md, "XTVERSION reply"); the page answered "Resesh".
 static GhosttyString on_xtversion(GhosttyTerminal term, void* user) {
@@ -357,6 +379,7 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT, (const void*)on_semantic);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_DESKTOP_NOTIFICATION, (const void*)on_notification);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT, (const void*)on_progress);
+  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS, (const void*)on_program_status);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_XTVERSION, (const void*)on_xtversion);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, (const void*)on_render_hold);
   return t;

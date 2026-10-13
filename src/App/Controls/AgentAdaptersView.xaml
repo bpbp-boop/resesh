@@ -20,6 +20,11 @@
             Opacity="0.75"
             TextWrapping="Wrap"
             Text="Claude Code adapters return terminalSequence JSON for Claude to emit in interactive sessions. The reserved resesh-agent title may show as a desktop notification in other terminals." />
+        <TextBlock
+            Margin="1,0,0,6"
+            Opacity="0.75"
+            TextWrapping="Wrap"
+            Text="Persistent (tmux) sessions show neither an agent's own status reports nor adapter events, because tmux discards both. Agents there are identified by command and title only." />
 
         <!-- One adapter per expander: its destination stays visible and Copy works without
              expanding; the explanation and code stay behind the chevron. -->

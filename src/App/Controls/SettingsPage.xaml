@@ -436,7 +436,7 @@
                     <TextBlock Text="Agent adapters" Style="{StaticResource GroupHeader}" />
                     <TextBlock
                         Style="{StaticResource GroupDescription}"
-                        Text="resesh identifies supported agents automatically. Add an adapter only for exact working, waiting, and finished states." />
+                        Text="resesh identifies supported agents automatically. Agents that report their own status need no adapter: Claude Code 2.1.295 or later, Pi 1.1.0 or later, oh-my-pi, Crush and Factory Droid. Add an adapter to get exact working, waiting, and finished states from the others." />
                     <controls:AgentAdaptersView />
                 </StackPanel>
                 </Grid>

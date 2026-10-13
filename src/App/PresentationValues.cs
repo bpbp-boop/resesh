@@ -77,8 +77,36 @@ public static class PresentationValues
 
     public static Visibility AgentIconVisibility(string? key) => Visible(AgentIcon(key) is not null);
 
-    public static Visibility AgentBadgeVisibility(string? key, AgentAttention attention) =>
-        Visible(AgentIcon(key) is not null && attention is not (AgentAttention.None or AgentAttention.Idle));
+    /// <summary>The tab's status slot: an agent icon, or a program's badge on its own. It
+    /// stands in for the connection dot, so it shows only while the tab is connected; in any
+    /// other state the connection is the news and the dot takes the slot back.</summary>
+    public static Visibility AgentSlotVisibility(string? key, bool programStatus, TabConnectionState state) =>
+        Visible(ShowsAgentSlot(key, programStatus, state));
+
+    public static Visibility StateDotVisibility(string? key, bool programStatus, TabConnectionState state) =>
+        Visible(!ShowsAgentSlot(key, programStatus, state));
+
+    /// <summary>The dots' container, collapsed with its margin when it holds neither dot.</summary>
+    public static Visibility StateDotsVisibility(
+        string? key, bool programStatus, TabConnectionState state, bool isRecording) =>
+        Visible(isRecording || !ShowsAgentSlot(key, programStatus, state));
+
+    private static bool ShowsAgentSlot(string? key, bool programStatus, TabConnectionState state) =>
+        state == TabConnectionState.Connected && (programStatus || AgentIcon(key) is not null);
+
+    public static Visibility AgentBadgeVisibility(string? key, AgentAttention attention, bool programStatus) =>
+        Visible(programStatus
+            || (AgentIcon(key) is not null && attention is not (AgentAttention.None or AgentAttention.Idle)));
+
+    // The badge hangs off the corner of an agent icon and sits centered when it is alone.
+    public static HorizontalAlignment AgentBadgeHorizontalAlignment(bool programStatus) =>
+        programStatus ? HorizontalAlignment.Center : HorizontalAlignment.Right;
+
+    public static VerticalAlignment AgentBadgeVerticalAlignment(bool programStatus) =>
+        programStatus ? VerticalAlignment.Center : VerticalAlignment.Bottom;
+
+    public static Thickness AgentBadgeMargin(bool programStatus) =>
+        programStatus ? new Thickness(0) : new Thickness(0, 0, -2, -2);
 
     public static Windows.UI.Color TabHeaderBackgroundColor(
         string appTheme,

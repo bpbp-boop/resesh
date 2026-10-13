@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using Resesh.Terminal.Native;
 
@@ -40,6 +41,50 @@ public sealed unsafe class NativeFrameTests
         terminal.Write("\u001b]22;default\u0007");
         terminal.ReadFrame();
         Assert.Equal(0, terminal.Info.MouseShape);
+    }
+
+    [ThreadStatic] private static List<(int Kind, byte[] Data)>? t_events;
+
+    [UnmanagedCallersOnly]
+    private static void CollectEvent(IntPtr user, int kind, byte* data, nuint length) =>
+        t_events?.Add((kind, new ReadOnlySpan<byte>(data, checked((int)length)).ToArray()));
+
+    [WindowsNativeFact]
+    public void ProgramStatusReportsReachTheHostAndTheProbeIsAnswered()
+    {
+        Assert.Null(GhosttyNative.TryLoad());
+        var events = t_events = [];
+        var handle = GhosttyNative.rvt_new(80, 24, 100, &CollectEvent, IntPtr.Zero);
+        try
+        {
+            void Write(string text)
+            {
+                var bytes = Encoding.UTF8.GetBytes(text);
+                fixed (byte* data = bytes)
+                    GhosttyNative.rvt_write(handle, data, (nuint)bytes.Length);
+            }
+            string[] Oscs() => events.Where(e => e.Kind == (int)GhosttyEventKind.Osc)
+                .Select(e => Encoding.UTF8.GetString(e.Data)).ToArray();
+
+            // What oh-my-pi 18 sends at startup, byte for byte.
+            Write("\u001b]7501;state=idle:app=omp\u001b\\");
+            Assert.Equal(["7501;0;0;-1\u001F\u001Fomp\u001F\u001F"], Oscs());
+
+            events.Clear();
+            Write("\u001b]7501;state=blocked:kind=permission:app=terraform:msg=QXBwbHk/\u0007");
+            Assert.Equal(["7501;3;1;-1\u001F\u001Fterraform\u001F\u001FApply?"], Oscs());
+
+            // Programs that wait for support before reporting ask first.
+            events.Clear();
+            Write("\u001b]7501;?\u001b\\");
+            var reply = Assert.Single(events, e => e.Kind == (int)GhosttyEventKind.Pty);
+            Assert.StartsWith("\u001b]7501;", Encoding.UTF8.GetString(reply.Data));
+        }
+        finally
+        {
+            GhosttyNative.rvt_free(handle);
+            t_events = null;
+        }
     }
 
     [WindowsNativeFact]

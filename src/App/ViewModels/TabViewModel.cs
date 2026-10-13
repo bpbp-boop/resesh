@@ -338,6 +338,7 @@ public sealed class TabViewModel : ObservableObject
     public void NotifyAgentVisuals()
     {
         OnPropertyChanged(nameof(AgentIconKey));
+        OnPropertyChanged(nameof(ShowsProgramStatus));
         OnPropertyChanged(nameof(AgentBadgeGlyph));
         OnPropertyChanged(nameof(AgentBadgeSize));
         OnPropertyChanged(nameof(AgentTooltip));
@@ -351,6 +352,12 @@ public sealed class TabViewModel : ObservableObject
     /// becomes null, which would leave the previous agent image visible after exit.</summary>
     public string AgentIconKey =>
         AgentIconsEnabled && Agent.IsAgent ? Agent.Key! : AgentIdentities.None;
+
+    /// <summary>True while an ordinary program's reported state (OSC 7501) shows as a badge
+    /// with no agent icon under it. Only states with a symbol qualify: a bare "working" dot
+    /// would be indistinguishable from the connection and unseen-output dots beside it.</summary>
+    public bool ShowsProgramStatus =>
+        AgentIconsEnabled && Agent.Program is not null && AgentBadgeGlyph.Length > 0;
 
     /// <summary>Meaningful states get a symbol as well as a colour, so the badge remains
     /// readable for users who cannot distinguish the colours.</summary>
@@ -371,14 +378,16 @@ public sealed class TabViewModel : ObservableObject
     {
         get
         {
-            if (!Agent.IsAgent)
+            if (!Agent.IsAgent && !ShowsProgramStatus)
                 return "";
-            var text = Agent.Name;
+            var text = Agent.IsAgent ? Agent.Name : Agent.Program is { Length: > 0 } program ? program : "Program";
             var state = AgentAttentionExtensions.Describe(Agent.Attention);
             if (state.Length > 0)
                 text += " — " + state;
             if (!string.IsNullOrEmpty(Agent.Label))
                 text += ": " + Agent.Label;
+            if (!Agent.IsAgent)
+                return text + " (reported by the program)";
             return text + Agent.Source switch
             {
                 AgentSource.Structured => " (reported by the agent)",
