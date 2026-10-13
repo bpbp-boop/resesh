@@ -36,6 +36,14 @@
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Symbols Nerd Font Mono (github.com/ryanoasis/nerd-fonts v3.4.0, MIT): the prompt and
+         status-line icons, for machines with no Nerd Font installed. -->
+    <None Include="Fonts\SymbolsNerdFontMono-Regular.ttf;Fonts\LICENSE.nerd-fonts.txt"
+          Link="Fonts\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <Target Name="RequireGhosttyVt" BeforeTargets="Build"
           Condition="'$(GhosttyVtArchitecture)'!='' and (!Exists('$(GhosttyVtDir)ghostty-vt.dll') or !Exists('$(GhosttyVtDir)reseshvt.dll'))">
     <Error Text="The terminal's native libraries are not built for $(GhosttyVtArchitecture). Run eng/build-ghostty-vt.ps1 -Architecture $(GhosttyVtArchitecture)." />

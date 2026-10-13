@@ -33,9 +33,16 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private static int s_generation;
     private static bool s_recovering;
 
+    // Shipped beside the app for the Nerd Font icons prompts and status lines use. An installed
+    // copy of the family wins; either way it sits ahead of Segoe UI Symbol, which has unrelated
+    // glyphs on some of the same private-use codepoints.
+    private const string SymbolsFamily = "Symbols Nerd Font Mono";
+    private static readonly string SymbolsFontPath =
+        Path.Combine(AppContext.BaseDirectory, "Fonts", "SymbolsNerdFontMono-Regular.ttf");
+
     private static readonly string[] FallbackFamilies =
     [
-        "Cascadia Mono", "Consolas", "Segoe UI Symbol", "Segoe UI Emoji", "Yu Gothic", "Microsoft YaHei",
+        "Cascadia Mono", "Consolas", SymbolsFamily, "Segoe UI Symbol", "Segoe UI Emoji", "Yu Gothic", "Microsoft YaHei",
         "Malgun Gothic", "Nirmala UI", "Ebrima", "Segoe UI Historic", "Cambria Math", "Segoe UI",
     ];
 
@@ -45,12 +52,23 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private ID3D11Texture2D? _canvas;
     private ID2D1Bitmap1? _canvasBitmap;
 
-    // Faces per style (0 regular, 1 bold, 2 italic, 3 bold italic), each a fallback chain.
-    private readonly IDWriteFontFace[][] _faces = new IDWriteFontFace[4][];
-    private bool[] _isEmojiFace = [];
+    private static readonly (FontWeight Weight, FontStyle Style)[] Styles =
+    [
+        (FontWeight.Normal, FontStyle.Normal), (FontWeight.Bold, FontStyle.Normal),
+        (FontWeight.Normal, FontStyle.Italic), (FontWeight.Bold, FontStyle.Italic),
+    ];
+
+    // Faces per style (0 regular, 1 bold, 2 italic, 3 bold italic), each a fallback chain. The
+    // chain starts as the configured families plus FallbackFamilies and grows by whatever the
+    // system's font fallback finds for characters none of those cover.
+    private readonly List<IDWriteFontFace>[] _faces = new List<IDWriteFontFace>[4];
+    private readonly List<string> _families = [];
+    private readonly List<bool> _isEmojiFace = [];
     private IDWriteTextFormat? _emojiFormat;
     private IDWriteTextFormat? _clusterFormat;
     private int _emojiFace = -1;
+    private int _symbolsFace = -1;
+    private IDWriteRenderingParams? _symbolParams;
     private readonly Dictionary<ulong, (int Face, ushort Glyph)> _glyphs = [];
     private ushort[] _runGlyphs = [];
     private float[] _runAdvances = [];
@@ -196,30 +214,31 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             .Where(f => f.Length > 0 && !f.Equals("monospace", StringComparison.OrdinalIgnoreCase));
         var families = requested.Concat(FallbackFamilies)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Where(f => collection.FindFamilyName(f, out _))
+            .Where(f => collection.FindFamilyName(f, out _) || (f == SymbolsFamily && File.Exists(SymbolsFontPath)))
             .ToArray();
         if (families.Length == 0)
             throw new InvalidOperationException("No usable terminal font installed.");
 
-        (FontWeight, FontStyle)[] styles =
-            [(FontWeight.Normal, FontStyle.Normal), (FontWeight.Bold, FontStyle.Normal),
-             (FontWeight.Normal, FontStyle.Italic), (FontWeight.Bold, FontStyle.Italic)];
-        for (var s = 0; s < 4; s++)
+        foreach (var name in families)
         {
-            _faces[s] = [.. families.Select(f =>
+            if (!collection.FindFamilyName(name, out var index))
             {
-                collection.FindFamilyName(f, out var index);
-                using var family = collection.GetFontFamily(index);
-                using var font = family.GetFirstMatchingFont(styles[s].Item1, FontStretch.Normal, styles[s].Item2);
-                return font.CreateFontFace();
-            })];
+                AddSymbolsFont();
+                continue;
+            }
+            using var family = collection.GetFontFamily(index);
+            AddFamily(name, family);
         }
-        _isEmojiFace = new bool[families.Length];
-        _emojiFace = -1;
-        for (var i = 0; i < families.Length && i < _isEmojiFace.Length; i++)
+        _emojiFace = _isEmojiFace.IndexOf(true);
+        _symbolsFace = _families.FindIndex(f => f.Equals(SymbolsFamily, StringComparison.OrdinalIgnoreCase));
+        if (_symbolParams is null)
         {
-            _isEmojiFace[i] = families[i].Equals("Segoe UI Emoji", StringComparison.OrdinalIgnoreCase);
-            if (_isEmojiFace[i]) _emojiFace = i;
+            // The icon font is unhinted, and at text sizes DirectWrite's default mode smooths
+            // only horizontally, which leaves icon curves and diagonals stair-stepped. Icons
+            // draw smoothed both ways, in grayscale: ClearType fringes their solid shapes.
+            using var defaults = s_dwrite.CreateRenderingParams();
+            _symbolParams = s_dwrite.CreateCustomRenderingParams(defaults.Gamma, defaults.EnhancedContrast,
+                defaults.ClearTypeLevel, defaults.PixelGeometry, RenderingMode.NaturalSymmetric);
         }
 
         var primary = _faces[0][0];
@@ -245,6 +264,41 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         _clusterFormat.TextAlignment = TextAlignment.Leading;
         _clusterFormat.ParagraphAlignment = ParagraphAlignment.Near;
         _clusterFormat.WordWrapping = WordWrapping.NoWrap;
+    }
+
+    private int AddFamily(string name, IDWriteFontFamily family)
+    {
+        for (var s = 0; s < Styles.Length; s++)
+        {
+            using var font = family.GetFirstMatchingFont(Styles[s].Weight, FontStretch.Normal, Styles[s].Style);
+            _faces[s].Add(font.CreateFontFace());
+        }
+        _families.Add(name);
+        _isEmojiFace.Add(name.Equals("Segoe UI Emoji", StringComparison.OrdinalIgnoreCase));
+        return _families.Count - 1;
+    }
+
+    /// <summary>The bundled icon font, loaded straight from its file. Icons have one design, so
+    /// every style uses it unchanged.</summary>
+    private void AddSymbolsFont()
+    {
+        using var file = s_dwrite!.CreateFontFileReference(SymbolsFontPath);
+        foreach (var chain in _faces)
+            chain.Add(s_dwrite.CreateFontFace(FontFaceType.Truetype, [file], 0, FontSimulations.None)!);
+        _families.Add(SymbolsFamily);
+        _isEmojiFace.Add(false);
+    }
+
+    /// <summary>The face for a character nothing in the chain covers: the font Windows itself
+    /// would fall back to, added to the chain on first use. -1 when no installed font has it.</summary>
+    private int FallbackFace(uint codepoint)
+    {
+        using var family = SystemFontFallback.Map(s_dwrite!, codepoint, _families[0]);
+        if (family is null)
+            return -1;
+        var name = SystemFontFallback.NameOf(family);
+        var index = _families.FindIndex(f => f.Equals(name, StringComparison.OrdinalIgnoreCase));
+        return index >= 0 ? index : AddFamily(name, family);
     }
 
     /// <summary>Sizes the swap chain and canvas in physical pixels. Returns true when the
@@ -334,10 +388,15 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 return (_emojiFace, glyph);
             }
         }
-        for (var i = 0; i < faces.Length; i++)
+        for (var i = 0; i < faces.Count; i++)
         {
             var glyph = faces[i].GetGlyphIndices([codepoint])[0];
             if (glyph != 0) { result = (i, glyph); break; }
+        }
+        if (result.Item2 == 0 && FallbackFace(codepoint) is >= 0 and var fallback)
+        {
+            var glyph = faces[fallback].GetGlyphIndices([codepoint])[0];
+            if (glyph != 0) result = (fallback, glyph);
         }
         _glyphs[key] = result;
         return result;
@@ -562,9 +621,23 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 Indices = _runGlyphs.AsSpan(0, n).ToArray(),
                 Advances = _runAdvances.AsSpan(0, n).ToArray(),
             };
-            _dc.DrawGlyphRun(new Vector2(OriginX + start * CellWidth, baseline), run, _brush, MeasuringMode.Natural);
+            DrawRun(new Vector2(OriginX + start * CellWidth, baseline), run, face);
         }
         DrawDecorations(row, cols, top, baseline);
+    }
+
+    private void DrawRun(Vector2 origin, GlyphRun run, int face)
+    {
+        if (face != _symbolsFace)
+        {
+            _dc.DrawGlyphRun(origin, run, _brush, MeasuringMode.Natural);
+            return;
+        }
+        _dc.TextRenderingParams = _symbolParams;
+        _dc.TextAntialiasMode = Vortice.Direct2D1.TextAntialiasMode.Grayscale;
+        _dc.DrawGlyphRun(origin, run, _brush, MeasuringMode.Natural);
+        _dc.TextAntialiasMode = Vortice.Direct2D1.TextAntialiasMode.Cleartype;
+        _dc.TextRenderingParams = null;
     }
 
     private const ushort DecorationFlags = TerminalCell.Underline | TerminalCell.Strike | TerminalCell.Overline;
@@ -715,7 +788,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             Indices = [glyph],
             Advances = [width],
         };
-        _dc.DrawGlyphRun(new Vector2(left, top + _baseline), run, _brush, MeasuringMode.Natural);
+        DrawRun(new Vector2(left, top + _baseline), run, face);
     }
 
     private void DisposeFaces()
@@ -727,6 +800,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                     face.Dispose();
             _faces[i] = [];
         }
+        _families.Clear();
+        _isEmojiFace.Clear();
     }
 
     private void DisposeDeviceResources()
@@ -738,9 +813,11 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         _emojiFormat = null;
         _clusterFormat?.Dispose();
         _clusterFormat = null;
+        _symbolParams?.Dispose();
+        _symbolParams = null;
         _glyphs.Clear();
-        _isEmojiFace = [];
         _emojiFace = -1;
+        _symbolsFace = -1;
         _brush?.Dispose();
         _brush = null!;
         _dc?.Dispose();

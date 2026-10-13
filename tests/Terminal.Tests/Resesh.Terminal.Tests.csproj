@@ -13,6 +13,8 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- DirectWrite only, for the system font fallback lookup; no device is created. -->
+    <PackageReference Include="Vortice.Direct2D1" Version="3.8.3" />
     <Using Include="Xunit" />
     <!-- The command tracker is plain C# over ICommandBuffer: test it without WinUI or the
          native terminal. -->
@@ -24,6 +26,7 @@
     <Compile Include="../../src/Terminal/Native/OverviewIndex.cs" Link="Native/OverviewIndex.cs" />
     <Compile Include="../../src/Terminal/Native/LineTimes.cs" Link="Native/LineTimes.cs" />
     <Compile Include="../../src/Terminal/Native/BuiltinGlyphs.cs" Link="Native/BuiltinGlyphs.cs" />
+    <Compile Include="../../src/Terminal/Native/SystemFontFallback.cs" Link="Native/SystemFontFallback.cs" />
     <Compile Include="../../src/Terminal/TerminalCommandExecution.cs" Link="TerminalCommandExecution.cs" />
     <Compile Include="../../src/Terminal/TerminalCommandRecord.cs" Link="TerminalCommandRecord.cs" />
   </ItemGroup>

@@ -1023,3 +1023,29 @@ timestamps (`GhosttyLineTimes`), and command marks during rewind and playback.
   skipping shells claimed since discovery. The pending new shell reserves a slot outside
   deletion targets, then atomically switches to a free slot after re-listing survivors.
   A stopped tab keeps its selected shell reserved for reconnect until it closes or switches.
+
+## 2026-10-13 - System font fallback for characters outside the terminal font chain
+- The renderer's chain was the configured families plus a fixed list, so any script outside
+  it (Thai, Lao, Tibetan, Khmer, Cherokee, Mongolian...) drew the primary font's missing-glyph
+  box. A lookup that finds no glyph in the chain now asks DirectWrite's system font fallback
+  (`IDWriteFontFallback::MapCharacters`, base family = the primary font, locale = the UI
+  culture) and appends the family it names to the chain for all four styles, so later lookups
+  and glyph runs treat it like any other face. Misses are cached per codepoint like hits.
+- Fallback glyphs keep their own metrics and advance whole cells, the same treatment the
+  fixed list already gets; proportional scripts can look tight. Private-use codepoints
+  (Nerd Font icons without the font installed) have no system mapping and stay a box.
+- Nerd Font icons: `Symbols Nerd Font Mono` (nerd-fonts v3.4.0, MIT, 2.5 MB) ships in
+  `Fonts/` beside the app, as Ghostty, WezTerm and kitty do, so oh-my-posh and starship
+  prompts draw without the user installing or selecting a patched font. It is loaded
+  from its file as a font face, with no font collection or install step. It sits after
+  the configured families, Cascadia Mono and Consolas and before Segoe UI Symbol, whose
+  own private-use glyphs would otherwise claim some icon codepoints. An installed family
+  of the same name is used instead of the bundled file, and a configured Nerd Font still
+  wins because it comes first. Bold and italic reuse the one face.
+- Icon runs draw with `NaturalSymmetric` rendering and grayscale antialiasing. The font is
+  unhinted, so DirectWrite's default at 12-13px smoothed horizontally only and the icons
+  looked stair-stepped; ClearType also put color fringes on their solid shapes. Text keeps
+  the default ClearType mode. Detail finer than a pixel (the gap in the Windows logo at
+  13px) stays soft.
+- The mapping lives in `SystemFontFallback` with no device dependency, so it is unit-tested
+  against the machine's installed fonts.
