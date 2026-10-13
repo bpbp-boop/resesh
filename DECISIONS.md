@@ -429,7 +429,9 @@ keyboard-interactive fallback.
 - Branded agent assets use the official Simple Icons paths: Claude, Google Gemini, Pi,
   and X for Grok from 16.28.0; OpenAI for Codex from 15.12.0 because the OpenAI mark is
   absent from 16.28.0. OpenCode (added 2026-10-13) also uses its 16.28.0 mark, in a warm
-  gray because the brand itself is monochrome. They keep the existing agent accent colors so the monochrome marks
+  gray because the brand itself is monochrome. oh-my-pi (`omp`, split from Pi into its own
+  identity 2026-10-13) uses the favicon from omp.sh unchanged, gradient and dark tile
+  included, at the user's request. The others keep the existing agent accent colors so the monochrome marks
   remain visible on light and dark tab strips. The generic agent glyph remains an app
   symbol because it does not represent a brand.
 - 2026-10-13: the renderer extends each edge cell's own background into the margin around

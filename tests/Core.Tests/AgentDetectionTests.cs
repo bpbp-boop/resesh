@@ -14,7 +14,10 @@ public class AgentDetectionTests
     [InlineData("npx @anthropic-ai/claude-code", "claude")]
     [InlineData("codex exec 'fix the build'", "codex")]
     [InlineData("gemini", "gemini")]
-    [InlineData("oh-my-pi", "pi")]
+    [InlineData("pi", "pi")]
+    [InlineData("oh-my-pi", "omp")]
+    [InlineData("omp", "omp")]
+    [InlineData("/root/.local/bin/omp --continue", "omp")]
     [InlineData("grok", "grok")]
     [InlineData("opencode", "opencode")]
     [InlineData("npx opencode-ai", "opencode")]
@@ -37,6 +40,10 @@ public class AgentDetectionTests
     [InlineData("✳ claude — building", "claude")]
     [InlineData("codex", "codex")]
     [InlineData("bpg@host | gemini", "gemini")]
+    [InlineData("π > tmp", "omp")]                   // oh-my-pi 18's default title
+    [InlineData("π >", "omp")]                       // ...before it knows the directory
+    [InlineData("π - resesh", "pi")]
+    [InlineData("π", "pi")]
     public void RecognizesAgentTitles(string title, string expected) =>
         Assert.Equal(expected, AgentDetection.FromTitle(title));
 
@@ -54,6 +61,7 @@ public class AgentDetectionTests
     [InlineData("bpg@host: ~/src/claude")]           // a directory, not a running agent
     [InlineData("C:\\tools\\gemini")]
     [InlineData("~/claude")]
+    [InlineData("πr² notes")]                        // π as part of a word, not Pi's mark
     [InlineData("bash")]
     [InlineData("")]
     public void PathShapedTitlesAreNotAgents(string title) =>
