@@ -1,4 +1,5 @@
 {
+  "revision": 1,
   "zmx": {
     "repository": "https://github.com/neurosnap/zmx",
     "commit": "8bab1f0173b07e79835ea372d749af3dbf0d0842",

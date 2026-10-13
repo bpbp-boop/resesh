@@ -1,5 +1,5 @@
 diff --git a/build.zig b/build.zig
-index 48ae536..e6208c1 100644
+index 48ae536..a1863dd 100644
 --- a/build.zig
 +++ b/build.zig
 @@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
@@ -11,6 +11,18 @@ index 48ae536..e6208c1 100644
      options.addOption([]const u8, "ghostty_version", ghostty_ver);
  
      const exe_mod = b.createModule(.{
+@@ -91,6 +91,11 @@ pub fn build(b: *std.Build) void {
+ 
+         const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
+         test_step.dependOn(&run_exe_unit_tests.step);
++
++        // The tests only run on the target, which is not where we build.
++        // This puts the test binary in the prefix to copy over and run.
++        const test_bin_step = b.step("test-bin", "Build the unit tests without running them");
++        test_bin_step.dependOn(&b.addInstallArtifact(exe_unit_tests, .{}).step);
+     }
+ 
+     // Check for LSP integration
 diff --git a/build.zig.zon b/build.zig.zon
 index 81d3a33..a2c405a 100644
 --- a/build.zig.zon
@@ -25,8 +37,94 @@ index 81d3a33..a2c405a 100644
          },
      },
      .paths = .{
+diff --git a/src/ipc.zig b/src/ipc.zig
+index c81d15a..f5a05cd 100644
+--- a/src/ipc.zig
++++ b/src/ipc.zig
+@@ -26,6 +26,12 @@ pub const Tag = enum(u8) {
+     EnvGet = 19,
+     EnvSet = 20,
+     EnvData = 21,
++    /// Asks for `StatData`: lines of `key=value` text about the daemon and
++    /// its session. New facts are new keys, and a reader skips the keys it
++    /// does not know, so this pair never needs another tag. A daemon from
++    /// before it ignores the request and sends nothing.
++    StatGet = 22,
++    StatData = 23,
+     // Non-exhaustive: this enum comes off the wire via bytesToValue and
+     // @enumFromInt, so out-of-range values are representable
+     // rather than UB. Switches must handle `_` (unknown tag).
+@@ -38,6 +44,14 @@ comptime {
+     );
+ }
+ 
++/// What this build speaks, sent as `protocol=` in `StatData`. Tags are never
++/// changed or reused, so this only says which additions a daemon has. Raise
++/// it when a client would otherwise have to guess.
++///
++/// 1: `StatGet`/`StatData`; the snapshot sent on attach is bracketed as a
++///    replay and followed by program status.
++pub const PROTOCOL = 1;
++
+ pub const Header = packed struct {
+     tag: Tag,
+     len: u32,
+@@ -256,10 +270,13 @@ const SessionProbeResult = struct {
+     fd: i32,
+     info: Info,
+     labels: ?[]const u8,
++    /// `StatData` as sent. Null from a daemon that predates it.
++    stat: ?[]const u8 = null,
+     alloc: std.mem.Allocator,
+ 
+     pub fn deinit(self: *const SessionProbeResult) void {
+         if (self.labels) |lbl| self.alloc.free(lbl);
++        if (self.stat) |s| self.alloc.free(s);
+         lib_posix.close(self.fd);
+     }
+ };
+@@ -274,6 +291,9 @@ pub fn probeSession(
+ 
+     send(fd, .Info, "") catch return error.Unexpected;
+     send(fd, .LabelGet, "") catch {};
++    // Last, so that a daemon that does not answer it costs one short wait
++    // after everything else has arrived.
++    send(fd, .StatGet, "") catch {};
+ 
+     var poll_fds = [_]lib_posix.pollfd{.{ .fd = fd, .events = lib_posix.POLL.IN, .revents = 0 }};
+     const poll_result = lib_posix.poll(&poll_fds, timeout_ms) catch return error.Unexpected;
+@@ -290,6 +310,8 @@ pub fn probeSession(
+     var info_result: ?Info = null;
+     var labels: ?[]const u8 = null;
+     errdefer if (labels) |lbl| alloc.free(lbl);
++    var stat: ?[]const u8 = null;
++    errdefer if (stat) |s| alloc.free(s);
+ 
+     while (true) {
+         if (sb.next()) |msg| {
+@@ -300,8 +322,11 @@ pub fn probeSession(
+             if (msg.header.tag == .LabelData) {
+                 labels = alloc.dupe(u8, msg.payload) catch null;
+             }
++            if (msg.header.tag == .StatData and stat == null) {
++                stat = alloc.dupe(u8, msg.payload) catch null;
++            }
+ 
+-            if (info_result != null and labels != null) break;
++            if (info_result != null and labels != null and stat != null) break;
+             continue;
+         }
+ 
+@@ -317,6 +342,7 @@ pub fn probeSession(
+             .fd = fd,
+             .info = info,
+             .labels = labels,
++            .stat = stat,
+             .alloc = alloc,
+         };
+     }
 diff --git a/src/loop.zig b/src/loop.zig
-index 513d3f5..e6e5d0a 100644
+index 513d3f5..76b4ced 100644
 --- a/src/loop.zig
 +++ b/src/loop.zig
 @@ -3,6 +3,7 @@ const ghostty_vt = @import("ghostty-vt");
@@ -37,7 +135,15 @@ index 513d3f5..e6e5d0a 100644
  const cross = @import("cross.zig");
  const socket = @import("socket.zig");
  const label = @import("label.zig");
-@@ -360,9 +361,18 @@ fn daemonLoop(daemon: *Daemon, gpa: std.mem.Allocator, io: std.Io, server_sock_f
+@@ -12,6 +13,7 @@ const signal = @import("signal.zig");
+ const assert = std.debug.assert;
+ const daemonize = @import("daemonize.zig");
+ const builtin = @import("builtin");
++const build_options = @import("build_options");
+ 
+ /// clientLoop sends ipc commands to its corresponding daemon.  It uses poll() as its non-blocking
+ /// mechanism. It will send stdin to the daemon and receive stdout from the daemon.
+@@ -360,9 +362,18 @@ fn daemonLoop(daemon: *Daemon, gpa: std.mem.Allocator, io: std.Io, server_sock_f
                      // This prevents fish from waiting 10s for unanswered queries.
                      // Only clients that sent .Init (a real zmx attach) count,
                      // not a `zmx run` tail-only client.
@@ -59,7 +165,17 @@ index 513d3f5..e6e5d0a 100644
                          util.respondToDeviceAttributes(gpa, &daemon.pty_write_buf, buf[0..n]);
                      }
  
-@@ -598,6 +608,8 @@ pub const Daemon = struct {
+@@ -491,7 +502,8 @@ fn daemonLoop(daemon: *Daemon, gpa: std.mem.Allocator, io: std.Io, server_sock_f
+                         .EnvSet => try daemon.handleEnvSet(gpa, client, msg.payload),
+                         .History => try daemon.handleHistory(gpa, client, &term, msg.payload),
+                         .Run => try daemon.handleRun(gpa, io, client, msg.payload),
+-                        .Ack, .TaskComplete, .LabelData, .EnvData => {},
++                        .StatGet => daemon.handleStat(gpa, client, pty_fd),
++                        .Ack, .TaskComplete, .LabelData, .EnvData, .StatData => {},
+                         .Write => try daemon.handleWrite(gpa, client, msg.payload),
+                         _ => std.log.warn(
+                             "ignoring unknown IPC tag={d}",
+@@ -598,6 +610,8 @@ pub const Daemon = struct {
      cwd_path_buf: [std.fs.max_path_bytes]u8 = undefined,
      has_pty_output: bool = false,
      has_had_client: bool = false,
@@ -68,7 +184,7 @@ index 513d3f5..e6e5d0a 100644
      created_at: u64, // unix timestamp (ns)
      is_task_mode: bool = false, // flag for when session is run as a task
      task_id: [4]u8 = undefined,
-@@ -626,6 +638,7 @@ pub const Daemon = struct {
+@@ -626,6 +640,7 @@ pub const Daemon = struct {
          }
          self.labels.deinit(gpa);
          self.pty_write_buf.deinit(gpa);
@@ -76,7 +192,7 @@ index 513d3f5..e6e5d0a 100644
          gpa.free(self.socket_path);
      }
  
-@@ -895,6 +908,8 @@ pub const Daemon = struct {
+@@ -895,6 +910,8 @@ pub const Daemon = struct {
          // NOTE: for local dev only
          // std.log.debug("buffering pty input data={x}", .{payload});
  
@@ -85,7 +201,7 @@ index 513d3f5..e6e5d0a 100644
          // client is leader, send entire payload (ansi escape codes + text)
          if (self.leader_client_fd == client.socket_fd) {
              self.queuePtyInput(gpa, payload);
-@@ -990,12 +1005,46 @@ pub const Daemon = struct {
+@@ -990,12 +1007,46 @@ pub const Daemon = struct {
                  const restore_data = util.rewritePromptRedraw(gpa, term_output) orelse term_output;
                  defer gpa.free(term_output);
                  defer if (restore_data.ptr != term_output.ptr) gpa.free(restore_data);
@@ -132,6 +248,127 @@ index 513d3f5..e6e5d0a 100644
                  client.has_pending_output = true;
              }
          }
+@@ -1076,6 +1127,52 @@ pub const Daemon = struct {
+         };
+     }
+ 
++    /// Answers `StatGet`. See `ipc.Tag.StatGet` for the format.
++    ///
++    /// - `protocol`: `ipc.PROTOCOL`.
++    /// - `agent`: the version of the binary this daemon was started from.
++    /// - `fg`: the name of the program in the foreground of the terminal.
++    /// - `cwd`: the directory that program is in, as a path.
++    ///
++    /// `fg` and `cwd` are read from /proc, so only Linux sends them, and a
++    /// value that could not be read or holds a newline is left out.
++    pub fn handleStat(self: *Daemon, gpa: std.mem.Allocator, client: *Client, pty_fd: i32) void {
++        _ = self;
++        var buf: [std.fs.max_path_bytes + 512]u8 = undefined;
++        var writer: std.Io.Writer = .fixed(&buf);
++        writer.print("protocol={d}\nagent={s}\n", .{ ipc.PROTOCOL, build_options.version }) catch {};
++
++        if (builtin.os.tag == .linux) foreground: {
++            var pgid: c_int = 0;
++            if (cross.c.ioctl(pty_fd, cross.c.TIOCGPGRP, &pgid) != 0 or pgid <= 0) break :foreground;
++            var path_buf: [64]u8 = undefined;
++            var value: [std.fs.max_path_bytes]u8 = undefined;
++
++            comm: {
++                const path = std.fmt.bufPrint(&path_buf, "/proc/{d}/comm", .{pgid}) catch break :comm;
++                const fd = lib_posix.open(path, .{ .ACCMODE = .RDONLY }, 0) catch break :comm;
++                defer lib_posix.close(fd);
++                const n = lib_posix.read(fd, &value) catch break :comm;
++                const name = std.mem.trimEnd(u8, value[0..n], "\n");
++                if (name.len == 0 or std.mem.indexOfScalar(u8, name, '\n') != null) break :comm;
++                writer.print("fg={s}\n", .{name}) catch {};
++            }
++
++            const path = std.fmt.bufPrintZ(&path_buf, "/proc/{d}/cwd", .{pgid}) catch break :foreground;
++            const n = cross.c.readlink(path.ptr, &value, value.len);
++            if (n <= 0) break :foreground;
++            const dir = value[0..@intCast(n)];
++            if (std.mem.indexOfScalar(u8, dir, '\n') != null) break :foreground;
++            writer.print("cwd={s}\n", .{dir}) catch {};
++        }
++
++        ipc.appendMessage(gpa, &client.write_buf, .StatData, writer.buffered()) catch |err| {
++            std.log.warn("failed to buffer stat for client err={s}", .{@errorName(err)});
++            return;
++        };
++        client.has_pending_output = true;
++    }
++
+     pub fn handleInfo(self: *Daemon, gpa: std.mem.Allocator, client: *Client, term: *ghostty_vt.Terminal) !void {
+         self.setPwd(term);
+ 
+diff --git a/src/main.zig b/src/main.zig
+index c54bd37..eb89761 100644
+--- a/src/main.zig
++++ b/src/main.zig
+@@ -61,7 +61,7 @@ pub fn main(init: std.process.Init) !void {
+     const shell_env = init.environ_map.get("SHELL") orelse "/bin/sh";
+ 
+     const cmd = args.next() orelse {
+-        return list(gpa, io, &cfg, false);
++        return list(gpa, io, &cfg, false, false);
+     };
+ 
+     if (std.mem.eql(u8, cmd, "version") or std.mem.eql(u8, cmd, "v") or std.mem.eql(u8, cmd, "-v") or std.mem.eql(u8, cmd, "--version")) {
+@@ -70,11 +70,13 @@ pub fn main(init: std.process.Init) !void {
+         return help(io);
+     } else if (std.mem.eql(u8, cmd, "list") or std.mem.eql(u8, cmd, "l") or std.mem.eql(u8, cmd, "ls")) {
+         var short = false;
++        var json = false;
+         while (args.next()) |arg| {
+             if (detectHelp(arg)) return help(io);
+             if (std.mem.eql(u8, arg, "--short")) short = true;
++            if (std.mem.eql(u8, arg, "--json")) json = true;
+         }
+-        return list(gpa, io, &cfg, short);
++        return list(gpa, io, &cfg, short, json);
+     } else if (std.mem.eql(u8, cmd, "get") or std.mem.eql(u8, cmd, "g")) {
+         const sesh_name = args.next() orelse {
+             return printError(io, "session name required (or run inside a zmx session)", .{});
+@@ -515,7 +517,7 @@ fn help(io: std.Io) !void {
+         \\  [p]rint <name> <text...>                    Inject text into session display
+         \\  [wr]ite <name> <file_path>                  Write stdin to file_path through the session
+         \\  [d]etach                                    Detach all clients (ctrl+\\ for current client)
+-        \\  [l]ist|ls [--short]                         List active sessions
++        \\  [l]ist|ls [--short|--json]                  List active sessions
+         \\  [g]et <name>                                Get session labels
+         \\  set <name> k=v ...                          Set session labels (k= to remove)
+         \\  [cl]ear <name>                              Clear all session labels
+@@ -1022,7 +1024,7 @@ fn wait(alloc: std.mem.Allocator, io: std.Io, cfg: *Cfg, matchers: std.ArrayList
+     std.process.exit(agg_exit_code);
+ }
+ 
+-fn list(alloc: std.mem.Allocator, io: std.Io, cfg: *Cfg, short: bool) !void {
++fn list(alloc: std.mem.Allocator, io: std.Io, cfg: *Cfg, short: bool, json: bool) !void {
+     const current_session = socket.getSeshNameFromEnv();
+     var buf: [4096]u8 = undefined;
+     var stdout = std.Io.File.stdout().writer(io, &buf);
+@@ -1035,7 +1037,7 @@ fn list(alloc: std.mem.Allocator, io: std.Io, cfg: *Cfg, short: bool) !void {
+     }
+ 
+     if (sessions.items.len == 0) {
+-        if (short) return;
++        if (short or json) return;
+         var errbuf: [4096]u8 = undefined;
+         var stderr = std.Io.File.stderr().writer(io, &errbuf);
+         try stderr.interface.print("no sessions found in {s}\n", .{cfg.socket_dir});
+@@ -1046,6 +1048,12 @@ fn list(alloc: std.mem.Allocator, io: std.Io, cfg: *Cfg, short: bool) !void {
+     std.mem.sort(util.SessionEntry, sessions.items, {}, util.SessionEntry.lessThan);
+ 
+     for (sessions.items) |session| {
++        if (json) {
++            try util.writeSessionJson(&stdout.interface, session);
++            try stdout.interface.flush();
++            continue;
++        }
++
+         if (session.is_error) {
+             try util.writeSessionLine(&stdout.interface, session, short, current_session);
+             try stdout.interface.flush();
 diff --git a/src/status.zig b/src/status.zig
 new file mode 100644
 index 0000000..1c31c48
@@ -534,3 +771,214 @@ index c68b806..924b48e 100644
      _ = @import("socket.zig");
      _ = @import("ipc.zig");
      _ = @import("label.zig");
+diff --git a/src/util.zig b/src/util.zig
+index d96f5a1..6c171a0 100644
+--- a/src/util.zig
++++ b/src/util.zig
+@@ -16,6 +16,8 @@ pub const SessionEntry = struct {
+     cmd: ?[]const u8 = null,
+     cwd: ?[]const u8 = null,
+     labels: ?[]const u8 = null,
++    /// `StatData` from the daemon, or null from one that predates it.
++    stat: ?[]const u8 = null,
+     created_at: u64,
+     task_ended_at: ?u64,
+     task_exit_code: ?u8,
+@@ -25,6 +27,7 @@ pub const SessionEntry = struct {
+         if (self.cmd) |cmd| alloc.free(cmd);
+         if (self.cwd) |cwd| alloc.free(cwd);
+         if (self.labels) |l| alloc.free(l);
++        if (self.stat) |s| alloc.free(s);
+     }
+ 
+     pub fn lessThan(_: void, a: SessionEntry, b: SessionEntry) bool {
+@@ -96,6 +99,11 @@ pub fn get_session_entries(
+             else
+                 null;
+ 
++            const stat = if (result.stat) |s|
++                alloc.dupe(u8, s) catch null
++            else
++                null;
++
+             try sessions.append(alloc, .{
+                 .name = name,
+                 .pid = result.info.pid,
+@@ -105,6 +113,7 @@ pub fn get_session_entries(
+                 .cmd = cmd,
+                 .cwd = cwd,
+                 .labels = labels,
++                .stat = stat,
+                 .created_at = result.info.created_at,
+                 .task_ended_at = result.info.task_ended_at,
+                 .task_exit_code = result.info.task_exit_code,
+@@ -943,6 +952,169 @@ pub fn serializeTerminal(
+ 
+ /// Formats a session entry for list output (only the name when `short` is
+ /// true), adding a prefix to indicate the current session, if there is one.
++/// One session as a JSON object on one line, for a program to read.
++///
++/// A session that answered has `name`, `pid`, `clients` and `created`, then
++/// what it could tell: `cmd`, `pwd` (as the program in the session last
++/// reported it, usually a file:// URL), `ended` and `exit_code` for a
++/// finished task, `labels`, and each key the daemon sent in `StatData`
++/// (see `Daemon.handleStat`), with `protocol` as a number. A daemon from
++/// before `StatData` has none of those keys, which is how to tell.
++///
++/// A session that did not answer has `name` and `error`.
++pub fn writeSessionJson(writer: *std.Io.Writer, session: SessionEntry) !void {
++    try writer.writeAll("{\"name\":");
++    try writeJsonString(writer, session.name);
++    if (session.is_error) {
++        try writer.writeAll(",\"error\":");
++        try writeJsonString(writer, session.error_name orelse "Unexpected");
++        try writer.writeAll("}\n");
++        return;
++    }
++
++    try writer.print(",\"pid\":{d},\"clients\":{d},\"created\":{d}", .{
++        session.pid orelse 0,
++        session.clients_len orelse 0,
++        session.created_at,
++    });
++    if (session.cmd) |cmd| {
++        try writer.writeAll(",\"cmd\":");
++        try writeJsonString(writer, cmd);
++    }
++    if (session.cwd) |pwd| {
++        try writer.writeAll(",\"pwd\":");
++        try writeJsonString(writer, pwd);
++    }
++    if (session.task_ended_at) |ended_at| {
++        if (ended_at > 0) {
++            try writer.print(",\"ended\":{d}", .{ended_at});
++            if (session.task_exit_code) |exit_code| {
++                try writer.print(",\"exit_code\":{d}", .{exit_code});
++            }
++        }
++    }
++    if (session.labels) |labels| {
++        try writer.writeAll(",\"labels\":{");
++        var kvs = label.LabelIterator.init(labels);
++        var first = true;
++        while (kvs.next()) |kv| {
++            if (!first) try writer.writeByte(',');
++            first = false;
++            try writeJsonString(writer, kv.key);
++            try writer.writeByte(':');
++            try writeJsonString(writer, kv.value);
++        }
++        try writer.writeByte('}');
++    }
++    if (session.stat) |stat| {
++        var lines = std.mem.splitScalar(u8, stat, '\n');
++        while (lines.next()) |line| {
++            const eq = std.mem.indexOfScalar(u8, line, '=') orelse continue;
++            const key = line[0..eq];
++            const value = line[eq + 1 ..];
++            // The keys above are this function's own.
++            if (key.len == 0 or isSessionJsonKey(key)) continue;
++            try writer.writeByte(',');
++            try writeJsonString(writer, key);
++            try writer.writeByte(':');
++            if (std.mem.eql(u8, key, "protocol") and isDigits(value)) {
++                try writer.writeAll(value);
++            } else {
++                try writeJsonString(writer, value);
++            }
++        }
++    }
++    try writer.writeAll("}\n");
++}
++
++fn isSessionJsonKey(key: []const u8) bool {
++    const own = [_][]const u8{ "name", "error", "pid", "clients", "created", "cmd", "pwd", "ended", "exit_code", "labels" };
++    for (own) |k| {
++        if (std.mem.eql(u8, key, k)) return true;
++    }
++    return false;
++}
++
++fn isDigits(value: []const u8) bool {
++    if (value.len == 0 or value.len > 9) return false;
++    for (value) |c| {
++        if (!std.ascii.isDigit(c)) return false;
++    }
++    return true;
++}
++
++/// Writes a JSON string. Bytes that are not valid UTF-8 (a path can hold
++/// any) become U+FFFD, so the line always parses.
++fn writeJsonString(writer: *std.Io.Writer, value: []const u8) !void {
++    try writer.writeByte('"');
++    var i: usize = 0;
++    while (i < value.len) {
++        const c = value[i];
++        if (c < 0x80) {
++            switch (c) {
++                '"' => try writer.writeAll("\\\""),
++                '\\' => try writer.writeAll("\\\\"),
++                '\n' => try writer.writeAll("\\n"),
++                '\r' => try writer.writeAll("\\r"),
++                '\t' => try writer.writeAll("\\t"),
++                0...8, 11, 12, 14...0x1f, 0x7f => try writer.print("\\u{x:0>4}", .{c}),
++                else => try writer.writeByte(c),
++            }
++            i += 1;
++            continue;
++        }
++        const len = std.unicode.utf8ByteSequenceLength(c) catch 0;
++        if (len > 1 and i + len <= value.len and std.unicode.utf8ValidateSlice(value[i..][0..len])) {
++            try writer.writeAll(value[i..][0..len]);
++            i += len;
++        } else {
++            try writer.writeAll("\u{fffd}");
++            i += 1;
++        }
++    }
++    try writer.writeByte('"');
++}
++
++test "writeSessionJson writes one object per session" {
++    var buf: [1024]u8 = undefined;
++    var writer: std.Io.Writer = .fixed(&buf);
++
++    try writeSessionJson(&writer, .{
++        .name = "s1",
++        .pid = 42,
++        .clients_len = 1,
++        .is_error = false,
++        .error_name = null,
++        .cmd = "bash -l",
++        .cwd = "file://host/home/a \"b\"",
++        .labels = null,
++        .stat = "protocol=1\nagent=0.8.1-resesh.1\nfg=vim\ncwd=/home/a\tb\xff\nname=spoof\nfuture=x\n",
++        .created_at = 1700000000,
++        .task_ended_at = 0,
++        .task_exit_code = 0,
++    });
++    try std.testing.expectEqualStrings(
++        "{\"name\":\"s1\",\"pid\":42,\"clients\":1,\"created\":1700000000," ++
++            "\"cmd\":\"bash -l\",\"pwd\":\"file://host/home/a \\\"b\\\"\"," ++
++            "\"protocol\":1,\"agent\":\"0.8.1-resesh.1\",\"fg\":\"vim\"," ++
++            "\"cwd\":\"/home/a\\tb\u{fffd}\",\"future\":\"x\"}\n",
++        writer.buffered(),
++    );
++
++    writer = .fixed(&buf);
++    try writeSessionJson(&writer, .{
++        .name = "gone",
++        .pid = null,
++        .clients_len = null,
++        .is_error = true,
++        .error_name = "Timeout",
++        .created_at = 0,
++        .task_ended_at = 0,
++        .task_exit_code = 1,
++    });
++    try std.testing.expectEqualStrings("{\"name\":\"gone\",\"error\":\"Timeout\"}\n", writer.buffered());
++}
++
+ pub fn writeSessionLine(
+     writer: *std.Io.Writer,
+     session: SessionEntry,

@@ -532,6 +532,25 @@ the status the command had just reported.
 - **New gap, patched:** a program sends `OSC 7501 ; ?` once at startup, and takes silence
   as "unsupported" for its whole run. With no client attached nothing answered. The daemon
   now answers it then, ahead of its DA1 reply.
+- **Step 4, protocol: done as far as it is needed now.** There is no handshake message.
+  The daemon answers a new request, `StatGet`, with `key=value` lines, the first being
+  `protocol=1`. New facts are new keys, so the pair never needs another tag, and a daemon
+  from before it ignores the request. The client asks last, so an old daemon costs one
+  50 ms wait and nothing else. Checked for real: a session started by the first patched
+  build was still running on the host, and the new client listed it beside a new one.
+  The agent now has its own version, `0.8.1-resesh.<revision>`, with the revision in
+  `eng/agent/agent.json`.
+- **Step 5, side channel: done.** `list --json` prints one object per session: name, pid,
+  client count, creation time, and from `StatData` the protocol, agent version, the
+  foreground command and its directory (both read from `/proc`, so Linux only).
+  `AgentPersistence.ParseSessions` reads it into the same `TmuxSessionInfo` that
+  `PlanConnect` already takes. Nothing in the app calls it yet.
+- **Sockets must not stay in the default place.** The agent puts them under
+  `/run/user/<uid>`, which systemd removes when the user's last login ends; the sessions
+  would keep running with nothing able to reach them. The app will set `ZMX_DIR` to
+  `~/.local/share/resesh/sock`. Not yet tested across a full logout.
+- **zmx's own unit tests now run.** `build-agent.ps1 -Tests` builds them for Linux, since
+  they cannot run where we build. All 104 pass on Ubuntu 24.04 with both patches applied.
 - The fork still builds against the Ghostty commit zmx pins (`8af6897`), not ours
   (`b699ea7`). Ours parses OSC 7501 and reports prompt marks to a callback, which could
   replace the byte scanner in `status.zig`. Moving the pin is its own step.

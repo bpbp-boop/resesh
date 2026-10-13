@@ -289,7 +289,7 @@ public static class TmuxPersistence
         return slot;
     }
 
-    private static bool TryParseSlot(string name, string primaryName, out int slot)
+    internal static bool TryParseSlot(string name, string primaryName, out int slot)
     {
         if (name == primaryName)
         {
