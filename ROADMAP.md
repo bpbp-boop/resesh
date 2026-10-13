@@ -385,9 +385,17 @@ Confirmed on a persistent session: tmux answers DA1 itself and never forwards th
 adapters are no fallback there either: plain OSC 7377 and OSC 777 are dropped the same way.
 With `allow-passthrough on`, a report or probe wrapped in `DCS tmux;` does arrive, and the
 probe reply comes back to the pane, but no program wraps on its own. So persistent
-sessions show agents by command and title only (the settings page says so). Ways out:
-make the adapter snippets wrap when `$TMUX` is set and always set `allow-passthrough on`
-(fixes adapters, not 7501), or wait for tmux to pass 7501 through itself.
+sessions cannot see native 7501 until tmux passes it through itself (declined upstream for
+now, tmux issue 5713).
+
+The adapters get around it without passthrough (`TmuxStatus`): inside tmux a hook stores a
+7501 report body in the pane option `@resesh_status`, our `set-titles-string` appends the
+option to the title unless a shell is in the foreground, and the tab view takes it off the
+title and feeds it to the same `ProgramStatus` path. tmux pushes the title within ~10 ms of
+the option changing. Needs tmux 3.0 for pane options. Verified on rct with the generated
+Codex and Claude Code hooks and the shell wrapper. Known gap: a program that dies without
+unsetting the option leaves it for the next non-shell program in that pane. Any script can
+use the option, so agents with extension systems (Pi, oh-my-pi) could get adapters too.
 
 ### Alerts list (promoted from Deferred)
 Once 7501 gives real states, one place to see every tab that wants you: a flyout from the

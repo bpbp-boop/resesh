@@ -38,10 +38,10 @@ test("TerminalTabView wires running command changes and prompt context to retire
     terminalTabView,
     /_terminal\.PromptContextChanged \+= \(_, _\) => ApplyAgent\(tracker => tracker\.ObserveCommand\(""\)\);/);
 
-  // TitleChanged and CommandObserved remain wired
+  // TitleChanged (minus any tmux status report riding behind it) and CommandObserved remain wired
   assert.match(
     terminalTabView,
-    /_terminal\.TitleChanged \+= title => ApplyAgent\(tracker => tracker\.ObserveTitle\(title\)\);/);
+    /ApplyAgent\(tracker => tracker\.ObserveTitle\(clean\)\);/);
   assert.match(
     terminalTabView,
     /_terminal\.CommandObserved \+= command => ApplyAgent\(tracker => tracker\.ObserveCommand\(command\)\);/);

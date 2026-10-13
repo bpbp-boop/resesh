@@ -1,3 +1,4 @@
+using System.Text;
 using Resesh.Core.Models;
 
 namespace Resesh.Core.Agents;
@@ -81,6 +82,96 @@ public sealed record ProgramStatus(
             ProgramStatusState.Blocked => new TerminalProgress(TerminalProgressState.Paused, Progress),
             _ => TerminalProgress.None,
         };
+    }
+
+    /// <summary>The report that removes the root record.</summary>
+    public static ProgramStatus Cleared { get; } =
+        new(ProgramStatusState.Clear, ProgramStatusKind.None, -1, "", "", null, null);
+
+    /// <summary>
+    /// Parses the body of a report as a program writes it
+    /// (<c>state=blocked:kind=permission:app=terraform:msg=QXBwbHk/</c>). Reports arriving
+    /// as OSC 7501 are parsed by libghostty-vt; this is for the copy an adapter leaves in a
+    /// tmux pane option (<see cref="TmuxStatus"/>). Unknown fields are ignored; a report
+    /// without a known state is rejected.
+    /// </summary>
+    public static ProgramStatus? ParseReport(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return null;
+        ProgramStatusState? state = null;
+        var kind = ProgramStatusKind.None;
+        var progress = -1;
+        string id = "", app = "";
+        string? title = null, message = null;
+        foreach (var field in body.Split(':'))
+        {
+            var split = field.IndexOf('=');
+            if (split <= 0)
+                continue;
+            var value = field[(split + 1)..].Trim();
+            switch (field[..split].Trim().ToLowerInvariant())
+            {
+                case "state":
+                    state = value.ToLowerInvariant() switch
+                    {
+                        "idle" => ProgramStatusState.Idle,
+                        "working" => ProgramStatusState.Working,
+                        "done" => ProgramStatusState.Done,
+                        "blocked" => ProgramStatusState.Blocked,
+                        "error" => ProgramStatusState.Error,
+                        "clear" => ProgramStatusState.Clear,
+                        _ => null,
+                    };
+                    break;
+                case "kind":
+                    kind = value.ToLowerInvariant() switch
+                    {
+                        "permission" => ProgramStatusKind.Permission,
+                        "question" => ProgramStatusKind.Question,
+                        "auth" => ProgramStatusKind.Auth,
+                        _ => ProgramStatusKind.None,
+                    };
+                    break;
+                case "progress":
+                    progress = int.TryParse(value, out var percent) && percent is >= 0 and <= 100 ? percent : -1;
+                    break;
+                case "id":
+                    id = value;
+                    break;
+                case "app":
+                    app = value.ToLowerInvariant();
+                    break;
+                case "title":
+                    title = DecodeText(value);
+                    break;
+                case "msg":
+                    message = DecodeText(value);
+                    break;
+            }
+        }
+
+        if (state is not { } known)
+            return null;
+        var blocked = known == ProgramStatusState.Blocked;
+        return new ProgramStatus(
+            known,
+            blocked ? kind : ProgramStatusKind.None,
+            blocked || known == ProgramStatusState.Working ? progress : -1,
+            id, app, title, message);
+    }
+
+    // Text fields travel as base64 so they can hold the separators.
+    private static string? DecodeText(string value)
+    {
+        try
+        {
+            return AgentText.Sanitize(Encoding.UTF8.GetString(Convert.FromBase64String(value)), AgentOsc.MaxLabelLength);
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Parses the shim's payload. Returns null for anything malformed or for a

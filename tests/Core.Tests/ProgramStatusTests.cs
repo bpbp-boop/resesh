@@ -54,6 +54,68 @@ public class ProgramStatusTests
         Assert.Null(ProgramStatus.Parse("1;0;40build/testcargo")!.AsTerminalProgress());
 
     [Fact]
+    public void ParsesAReportAsAProgramWritesIt()
+    {
+        var status = ProgramStatus.ParseReport("state=blocked:kind=permission:app=Terraform:progress=40:msg=QXBwbHk/:n=77");
+        Assert.NotNull(status);
+        Assert.Equal(ProgramStatusState.Blocked, status.State);
+        Assert.Equal(ProgramStatusKind.Permission, status.Kind);
+        Assert.Equal(40, status.Progress);
+        Assert.Equal("terraform", status.App);
+        Assert.Equal("Apply?", status.Label);
+        Assert.Equal("", status.Id);
+
+        Assert.Equal(ProgramStatusState.Clear, ProgramStatus.ParseReport("state=clear")!.State);
+        Assert.Equal("build/test", ProgramStatus.ParseReport("state=working:id=build/test")!.Id);
+        // Kind and progress belong to the states that can have them.
+        var done = ProgramStatus.ParseReport("state=done:kind=permission:progress=40")!;
+        Assert.Equal(ProgramStatusKind.None, done.Kind);
+        Assert.Equal(-1, done.Progress);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("app=terraform")]            // no state
+    [InlineData("state=exploding")]
+    [InlineData("working")]
+    public void RejectsReportsWithoutAKnownState(string? body) =>
+        Assert.Null(ProgramStatus.ParseReport(body));
+
+    [Fact]
+    public void AReportWithUnreadableTextKeepsItsState()
+    {
+        var status = ProgramStatus.ParseReport("state=error:msg=not base64!");
+        Assert.NotNull(status);
+        Assert.Equal(ProgramStatusState.Error, status.State);
+        Assert.Null(status.Message);
+    }
+
+    [Theory]
+    [InlineData("node [[resesh-status:state=working:app=claude:n=12]]", "node", "state=working:app=claude:n=12")]
+    [InlineData("✳ Fix the build [[resesh-status:state=done:app=claude]]", "✳ Fix the build", "state=done:app=claude")]
+    // A program can write a marker into its own title; the genuine one is appended last.
+    [InlineData("x [[resesh-status:state=error]] [[resesh-status:state=idle:app=codex]]",
+        "x [[resesh-status:state=error]]", "state=idle:app=codex")]
+    public void ATmuxTitleSplitsIntoTitleAndReport(string title, string expectedTitle, string expectedReport)
+    {
+        Assert.Equal(expectedTitle, TmuxStatus.SplitTitle(title, out var report));
+        Assert.Equal(expectedReport, report);
+    }
+
+    [Theory]
+    [InlineData("bash")]
+    [InlineData("root@host:~/src")]
+    [InlineData("notes [[draft]]")]
+    [InlineData("[[resesh-status:state=working")]   // cut off before its end
+    [InlineData("")]
+    public void ATitleWithoutAReportIsLeftAlone(string title)
+    {
+        Assert.Equal(title, TmuxStatus.SplitTitle(title, out var report));
+        Assert.Null(report);
+    }
+
+    [Fact]
     public void BlockedOnAuthWithoutAMessageSaysSo() =>
         Assert.Equal("needs sign-in", Report(3, 3).Label);
 

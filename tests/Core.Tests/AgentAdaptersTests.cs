@@ -61,6 +61,16 @@ public class AgentAdaptersTests
             Assert.Equal("command", handler.GetProperty("type").GetString());
             var command = handler.GetProperty("command").GetString()!;
             var prefix = windows ? "echo '" : "printf '%s\\n' '";
+            if (!windows)
+            {
+                // Inside tmux the hook first leaves the state in the pane option. That
+                // part prints nothing, so the JSON stays the hook's only output.
+                var tmux = command[..command.IndexOf(prefix, StringComparison.Ordinal)];
+                Assert.StartsWith("[ $TMUX_PANE ] && tmux set -p ", tmux, StringComparison.Ordinal);
+                Assert.EndsWith(" >/dev/null 2>&1; ", tmux, StringComparison.Ordinal);
+                Assert.DoesNotContain("'", tmux, StringComparison.Ordinal);
+                command = command[tmux.Length..];
+            }
             Assert.StartsWith(prefix, command, StringComparison.Ordinal);
             Assert.EndsWith("'", command, StringComparison.Ordinal);
             var json = command[prefix.Length..^1];
@@ -85,6 +95,36 @@ public class AgentAdaptersTests
         Assert.DoesNotContain("CONOUT$", adapter.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("EncodedCommand", adapter.Text, StringComparison.Ordinal);
         Assert.Contains("desktop notification", adapter.Description, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("working", AgentAttention.Working)]
+    [InlineData("needs-approval", AgentAttention.NeedsApproval)]
+    [InlineData("needs-answer", AgentAttention.NeedsAnswer)]
+    [InlineData("complete", AgentAttention.Complete)]
+    [InlineData("failed", AgentAttention.Failed)]
+    [InlineData("idle", AgentAttention.Idle)]
+    public void TmuxReportsCarryTheSameStatesAsTheSequences(string state, AgentAttention expected)
+    {
+        var report = AgentAdapters.TmuxReport("claude", state);
+        var status = ProgramStatus.ParseReport(report + ":n=4242");
+        Assert.NotNull(status);
+        Assert.Equal("claude", status.App);
+        Assert.Equal(expected, status.Attention);
+        Assert.Null(AgentAdapters.TmuxReport("claude", "exit"));
+    }
+
+    [Fact]
+    public void PosixAdaptersUseThePaneOptionInsideTmux()
+    {
+        foreach (var adapter in new[] { AgentAdapters.Codex(), AgentAdapters.ClaudeCodePosix(), AgentAdapters.ShellFunction() })
+        {
+            Assert.Contains("TMUX_PANE", adapter.Text, StringComparison.Ordinal);
+            Assert.Contains("tmux set -p ", adapter.Text, StringComparison.Ordinal);
+            Assert.Contains("tmux set -p -u ", adapter.Text, StringComparison.Ordinal); // exit unsets it
+            Assert.Contains(TmuxStatus.Option, adapter.Text, StringComparison.Ordinal);
+        }
+        Assert.DoesNotContain("tmux", AgentAdapters.ClaudeCodeWindows().Text, StringComparison.Ordinal);
     }
 
     private static void AssertState(JsonElement hooks, string eventName, string state)

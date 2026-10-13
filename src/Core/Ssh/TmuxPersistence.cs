@@ -108,7 +108,16 @@ public static class TmuxPersistence
         {
             format = $"#{{?#{{==:#{{pane_current_command}},{shell}}},#{{pane_current_command}},{format}}}";
         }
-        return format;
+
+        // An adapter's status report rides along behind the title (TmuxStatus). Not while a
+        // shell is in the foreground: the option is as sticky as a pane title, and a
+        // program that died without unsetting it must not keep reporting from the prompt.
+        var status = Agents.TmuxStatus.TitleSuffixFormat;
+        foreach (var shell in InteractiveShells)
+        {
+            status = $"#{{?#{{==:#{{pane_current_command}},{shell}}},,{status}}}";
+        }
+        return format + status;
     }
 
     public static string BootstrapCommand(Guid id, int slot, string? newShellCommand = null, string? fallbackCommand = null)
