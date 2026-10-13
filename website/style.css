@@ -1604,3 +1604,144 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
 
 /* Touch screens have no hover: keep the pause control reachable. */
 @media (hover: none) { .demo__toggle { opacity: 0.9; } }
+
+/* --------------------------------------------------- comparison table --- */
+
+/* Text for screen readers only; the table's marks are shapes. */
+.vh {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.cmp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  max-width: none;
+}
+
+/* The table is wider than most screens: it scrolls inside its own box and the
+   feature names stay in view. */
+.cmp-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.cmp-wrap:focus-visible { outline: 1px solid var(--accent); }
+
+.cmp {
+  width: 100%;
+  min-width: 1320px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.cmp th,
+.cmp td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+  font-weight: 300;
+}
+
+.cmp thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+  border-bottom-color: var(--line2);
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.cmp tbody th[scope="row"] {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 190px;
+  min-width: 190px;
+  background: var(--bg);
+  border-right: 1px solid var(--line);
+  color: var(--ink2);
+}
+
+.cmp thead .cmp__corner {
+  left: 0;
+  z-index: 3;
+  border-right: 1px solid var(--line);
+  font-weight: 300;
+  color: var(--ink3);
+}
+
+.cmp td { color: var(--ink3); }
+
+.cmp .cmp__us {
+  background: var(--panel);
+  border-left: 1px solid var(--line2);
+  border-right: 1px solid var(--line2);
+}
+
+.cmp thead .cmp__us { color: var(--accent); }
+
+.cmp__group th {
+  position: sticky;
+  left: 0;
+  padding-top: 22px;
+  background: var(--bg);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--accent);
+}
+
+.cmp tbody tr:last-child th,
+.cmp tbody tr:last-child td { border-bottom: 0; }
+
+.cmp__mark--yes { color: var(--accent); }
+.cmp__mark--partial { color: var(--amber); }
+.cmp__mark--no { color: var(--ink3); opacity: 0.7; }
+
+.cmp__mark--planned {
+  padding: 1px 6px;
+  border: 1px solid var(--amber);
+  font-size: 11px;
+  color: var(--amber);
+}
+
+.cmp__note {
+  display: block;
+  margin-top: 3px;
+  font-size: 11.5px;
+}
+
+.cmp__us .cmp__note,
+.cmp__us .cmp__text { color: var(--ink2); }
+
+a.card { color: var(--ink); }
+a.card:hover { border-color: var(--line2); }
+a.card:hover .card__name::after { content: " →"; color: var(--accent); }
+
+.cmp__mark--yes,
+.cmp__mark--partial { font-size: 15px; line-height: 1; }
+
+@media (max-width: 560px) {
+  .cmp tbody th[scope="row"] { width: 128px; min-width: 128px; }
+  .cmp th,
+  .cmp td { padding: 10px; }
+}
+
+/* Reference tables (osc.html) reuse the comparison table at reading width. */
+.cmp--ref { min-width: 820px; font-size: 13px; }
+.cmp--ref tbody th[scope="row"] { width: 170px; min-width: 150px; }
+.cmp--ref td { color: var(--ink2); }
+.cmp--ref .ref__name { color: var(--ink); white-space: nowrap; }
+.cmp--ref td:last-child { width: 26%; color: var(--ink3); }
+.card .termblock { margin-top: 6px; font-size: 12.5px; }
