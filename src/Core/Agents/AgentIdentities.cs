@@ -31,6 +31,7 @@ public static class AgentIdentities
         new("gemini", "Gemini CLI", "#4285F4"),
         new("pi", "Pi / oh-my-pi", "#8B5CF6"),
         new("grok", "Grok Build", "#7D8590"),
+        new("opencode", "OpenCode", "#8B8685"),
         new(Generic, "Agent", "#5B8DEF"),
         new(Shell, "Shell", "#8A8A8A", IsAgent: false),
     ];
