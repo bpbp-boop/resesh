@@ -1,0 +1,74 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.BulkEditSessionsDialog"
+    Style="{StaticResource DefaultContentDialogStyle}"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    PrimaryButtonText="Apply"
+    CloseButtonText="Cancel"
+    DefaultButton="Primary"
+    PrimaryButtonClick="OnPrimaryButtonClick">
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Width="460" Spacing="12" Padding="0,0,12,0">
+            <TextBlock x:Name="Description" TextWrapping="Wrap" />
+            <ComboBox
+                x:Name="LoginBox"
+                Header="Login"
+                DisplayMemberPath="Label"
+                HorizontalAlignment="Stretch"
+                AutomationProperties.AutomationId="BulkEditLogin"
+                SelectionChanged="Field_SelectionChanged" />
+            <CheckBox
+                x:Name="KeepUsernamesBox"
+                Content="Keep each session's username as an override"
+                Visibility="Collapsed"
+                AutomationProperties.AutomationId="BulkEditKeepUsernames"
+                Checked="KeepUsernames_Changed"
+                Unchecked="KeepUsernames_Changed" />
+            <NumberBox
+                x:Name="PortBox"
+                Header="Port"
+                PlaceholderText="No change"
+                Minimum="1"
+                Maximum="65535"
+                HorizontalAlignment="Stretch"
+                AutomationProperties.AutomationId="BulkEditPort"
+                ValueChanged="PortBox_ValueChanged" />
+            <ComboBox
+                x:Name="ColorBox"
+                Header="Tab color"
+                HorizontalAlignment="Stretch"
+                AutomationProperties.AutomationId="BulkEditColor"
+                SelectionChanged="Field_SelectionChanged" />
+            <ComboBox
+                x:Name="IconBox"
+                Header="Icon"
+                DisplayMemberPath="Label"
+                HorizontalAlignment="Stretch"
+                AutomationProperties.AutomationId="BulkEditIcon"
+                SelectionChanged="Field_SelectionChanged" />
+            <ComboBox
+                x:Name="ThemeBox"
+                Header="Terminal theme"
+                DisplayMemberPath="Label"
+                HorizontalAlignment="Stretch"
+                AutomationProperties.AutomationId="BulkEditTheme"
+                SelectionChanged="Field_SelectionChanged" />
+            <ComboBox
+                x:Name="PersistentBox"
+                Header="Persistent session (tmux)"
+                HorizontalAlignment="Stretch"
+                AutomationProperties.AutomationId="BulkEditPersistent"
+                SelectionChanged="Field_SelectionChanged">
+                <ComboBoxItem Content="No change" />
+                <ComboBoxItem Content="On" />
+                <ComboBoxItem Content="Off" />
+            </ComboBox>
+            <TextBlock
+                x:Name="ImpactText"
+                Style="{ThemeResource CaptionTextBlockStyle}"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                TextWrapping="Wrap" />
+        </StackPanel>
+    </ScrollViewer>
+</ContentDialog>

@@ -1,0 +1,224 @@
+<UserControl
+    x:Class="Resesh.App.Controls.SessionsManagerView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:app="using:Resesh.App"
+    xmlns:local="using:Resesh.App.Controls">
+
+    <UserControl.Resources>
+        <Style x:Key="Secondary" TargetType="TextBlock" BasedOn="{StaticResource BodyTextBlockStyle}">
+            <Setter Property="Foreground" Value="{ThemeResource SessionTreeMutedForegroundBrush}" />
+            <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+            <Setter Property="TextWrapping" Value="NoWrap" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <!-- A column header: looks like a label, sorts by its column when clicked. -->
+        <Style x:Key="ColumnHeader" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0,6" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid RowSpacing="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Floats beside the section title so reporting a change never moves the layout. -->
+        <InfoBar
+            x:Name="Status"
+            Grid.RowSpan="4"
+            Canvas.ZIndex="1"
+            MaxWidth="640"
+            HorizontalAlignment="Right"
+            VerticalAlignment="Top"
+            IsOpen="False"
+            IsClosable="True"
+            AutomationProperties.AutomationId="SessionsManagerStatus" />
+
+        <!-- The section header lives here so the notification can sit level with it. -->
+        <StackPanel>
+            <TextBlock Text="Sessions" Style="{StaticResource TitleTextBlockStyle}" Margin="0,0,0,4" />
+            <TextBlock
+                Margin="1,0,0,0"
+                TextWrapping="Wrap"
+                Opacity="0.75"
+                Text="Select rows with Ctrl or Shift, then edit, move, set an identity, duplicate, or delete them together. Changes are saved as you make them." />
+        </StackPanel>
+
+        <!-- Filters -->
+        <Grid Grid.Row="1" ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MaxWidth="360" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <TextBox
+                x:Name="FilterBox"
+                PlaceholderText="Filter by name, host, user, identity, folder, or notes"
+                TextChanged="FilterBox_TextChanged"
+                AutomationProperties.Name="Filter sessions"
+                AutomationProperties.AutomationId="SessionsManagerFilter" />
+            <ComboBox
+                x:Name="KindBox"
+                Grid.Column="1"
+                MinWidth="120"
+                SelectionChanged="Filter_SelectionChanged"
+                AutomationProperties.Name="Session type"
+                AutomationProperties.AutomationId="SessionsManagerKind">
+                <ComboBoxItem Content="All types" />
+                <ComboBoxItem Content="SSH" />
+                <ComboBoxItem Content="Telnet" />
+                <ComboBoxItem Content="Local" />
+            </ComboBox>
+            <ComboBox
+                x:Name="LoginBox"
+                Grid.Column="2"
+                MinWidth="160"
+                DisplayMemberPath="Label"
+                SelectionChanged="Filter_SelectionChanged"
+                AutomationProperties.Name="Login"
+                AutomationProperties.AutomationId="SessionsManagerLogin" />
+            <TextBlock
+                x:Name="CountText"
+                Grid.Column="3"
+                HorizontalAlignment="Right"
+                Style="{StaticResource Secondary}" />
+        </Grid>
+
+        <!-- Actions on the selection -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8">
+            <Button
+                x:Name="EditButton"
+                Content="Edit…"
+                Click="Edit_Click"
+                AutomationProperties.AutomationId="SessionsManagerEdit" />
+            <DropDownButton
+                x:Name="MoveButton"
+                Content="Move to"
+                AutomationProperties.AutomationId="SessionsManagerMove">
+                <DropDownButton.Flyout>
+                    <MenuFlyout Opening="MoveFlyout_Opening" Placement="BottomEdgeAlignedLeft" />
+                </DropDownButton.Flyout>
+            </DropDownButton>
+            <DropDownButton
+                x:Name="IdentityButton"
+                Content="Set identity"
+                AutomationProperties.AutomationId="SessionsManagerIdentity">
+                <DropDownButton.Flyout>
+                    <MenuFlyout Opening="IdentityFlyout_Opening" Placement="BottomEdgeAlignedLeft" />
+                </DropDownButton.Flyout>
+            </DropDownButton>
+            <Button
+                x:Name="DuplicateButton"
+                Content="Duplicate"
+                Click="Duplicate_Click"
+                AutomationProperties.AutomationId="SessionsManagerDuplicate" />
+            <Button
+                x:Name="DeleteButton"
+                Content="Delete"
+                Click="Delete_Click"
+                AutomationProperties.AutomationId="SessionsManagerDelete" />
+        </StackPanel>
+
+        <Border
+            Grid.Row="3"
+            Background="{ThemeResource SessionInputBrush}"
+            BorderBrush="{ThemeResource SessionChromeFrameBrush}"
+            BorderThickness="1"
+            CornerRadius="{ThemeResource OverlayCornerRadius}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Column widths and padding match the row template below. -->
+                <Grid
+                    Padding="16,0,16,0"
+                    ColumnSpacing="16"
+                    BorderBrush="{ThemeResource SessionChromeFrameBrush}"
+                    BorderThickness="0,0,0,1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="3*" />
+                        <ColumnDefinition Width="3*" />
+                        <ColumnDefinition Width="3*" />
+                        <ColumnDefinition Width="3*" />
+                        <ColumnDefinition Width="64" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="NameHeader" Grid.Column="1" Tag="Name" Style="{StaticResource ColumnHeader}" Click="Sort_Click" />
+                    <Button x:Name="FolderHeader" Grid.Column="2" Tag="Folder" Style="{StaticResource ColumnHeader}" Click="Sort_Click" />
+                    <Button x:Name="HostHeader" Grid.Column="3" Tag="Host" Style="{StaticResource ColumnHeader}" Click="Sort_Click" />
+                    <Button x:Name="LoginHeader" Grid.Column="4" Tag="Login" Style="{StaticResource ColumnHeader}" Click="Sort_Click" />
+                    <Button x:Name="TypeHeader" Grid.Column="5" Tag="Type" Style="{StaticResource ColumnHeader}" Click="Sort_Click" />
+                </Grid>
+
+                <ListView
+                    x:Name="SessionList"
+                    Grid.Row="1"
+                    SelectionMode="Extended"
+                    SelectionChanged="SessionList_SelectionChanged"
+                    DoubleTapped="SessionList_DoubleTapped"
+                    KeyDown="SessionList_KeyDown"
+                    ContextRequested="SessionList_ContextRequested"
+                    AutomationProperties.Name="Saved sessions"
+                    AutomationProperties.AutomationId="SessionsManagerList">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="MinHeight" Value="32" />
+                            <Setter Property="Padding" Value="16,0,16,0" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                    <ListView.ItemTemplate>
+                        <DataTemplate x:DataType="local:SessionRow">
+                            <Grid ColumnSpacing="16" AutomationProperties.Name="{x:Bind AccessibleName}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="10" />
+                                    <ColumnDefinition Width="3*" />
+                                    <ColumnDefinition Width="3*" />
+                                    <ColumnDefinition Width="3*" />
+                                    <ColumnDefinition Width="3*" />
+                                    <ColumnDefinition Width="64" />
+                                </Grid.ColumnDefinitions>
+                                <Ellipse Width="10" Height="10" VerticalAlignment="Center">
+                                    <Ellipse.Fill>
+                                        <SolidColorBrush Color="{x:Bind app:PresentationValues.ColorTag(ColorTag)}" />
+                                    </Ellipse.Fill>
+                                </Ellipse>
+                                <TextBlock Grid.Column="1" Text="{x:Bind Name}" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                           ToolTipService.ToolTip="{x:Bind Name}" />
+                                <TextBlock Grid.Column="2" Text="{x:Bind Folder}" Style="{StaticResource Secondary}"
+                                           ToolTipService.ToolTip="{x:Bind Folder}" />
+                                <TextBlock Grid.Column="3" Text="{x:Bind Host}" Style="{StaticResource Secondary}"
+                                           ToolTipService.ToolTip="{x:Bind Host}" />
+                                <TextBlock Grid.Column="4" Text="{x:Bind Login}" Style="{StaticResource Secondary}"
+                                           ToolTipService.ToolTip="{x:Bind Login}" />
+                                <TextBlock Grid.Column="5" Text="{x:Bind Type}" Style="{StaticResource Secondary}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+
+                <TextBlock
+                    x:Name="EmptyText"
+                    Grid.Row="1"
+                    Margin="16"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Visibility="Collapsed"
+                    Style="{StaticResource Secondary}" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

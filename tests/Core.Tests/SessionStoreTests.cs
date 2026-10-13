@@ -387,6 +387,40 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     [Fact]
+    public void Batches_AddUpdateAndRemoveSeveralSessionsAndPersist()
+    {
+        var store = NewStore();
+        var a = NewSession("a");
+        var b = NewSession("b");
+        var kept = NewSession("kept");
+        store.Add(kept);
+
+        store.AddMany([a, b]);
+        store.UpdateMany([a with { Port = 2222 }, b with { Port = 2200 }]);
+        var removed = store.RemoveMany([b.Id, Guid.NewGuid()]);
+
+        Assert.Equal([b.Id], removed.Select(s => s.Id));
+        var reloaded = NewStore();
+        Assert.Equal(2222, reloaded.Find(a.Id)!.Port);
+        Assert.Null(reloaded.Find(b.Id));
+        Assert.NotNull(reloaded.Find(kept.Id));
+    }
+
+    [Fact]
+    public void UpdateMany_MissingSession_ChangesNothing()
+    {
+        var store = NewStore();
+        var saved = NewSession("saved");
+        store.Add(saved);
+
+        Assert.Throws<InvalidOperationException>(
+            () => store.UpdateMany([saved with { Port = 2222 }, NewSession("never saved")]));
+
+        Assert.Equal(22, store.Find(saved.Id)!.Port);
+        Assert.Equal(22, NewStore().Find(saved.Id)!.Port);
+    }
+
+    [Fact]
     public void FolderPaths_NormalizeHandlesSlashesAndWhitespace()
     {
         Assert.Equal("A/B", FolderPaths.Normalize(@" A \ B "));

@@ -1217,6 +1217,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         settings.SettingChanged += property => App.ApplySettingChange(property, source: settings);
         var page = new SettingsPage(settings);
         page.ConnectRequested += session => App.WindowFor(tab)?.ConnectSession(session);
+        // Settings can be dragged to another window, so its sessions go through the window hosting it now.
+        page.SessionsView.Owner = () => App.WindowFor(tab)?.ViewModel;
+        page.SessionsView.EditSession = session => App.WindowFor(tab) is { } owner
+            ? session.IsLocal
+                ? owner.OpenLocalProfileEditorAsync(session, session.FolderPath)
+                : owner.OpenSessionEditorAsync(session, session.FolderPath)
+            : Task.CompletedTask;
+        page.SessionsView.ConnectRequested += session => App.WindowFor(tab)?.ConnectSession(session);
         return page;
     }
 
