@@ -31,8 +31,14 @@ internal sealed class FakeMainWindowServices : IMainWindowServices
     }
 
     public void ConnectSession(Session session) => Record($"Connect {session.Name}");
+    public List<(Session Session, TabGroupViewModel Group)> PaneConnections { get; } = [];
+    public void ConnectSession(Session session, TabGroupViewModel group) => PaneConnections.Add((session, group));
     public void ConnectInNewWindow(IReadOnlyList<Session> sessions) =>
         Record($"ConnectInNewWindow {string.Join(",", sessions.Select(s => s.Name))}");
+    public void ConnectInNewSplits(IReadOnlyList<Session> sessions) =>
+        Record($"ConnectInNewSplits {string.Join(",", sessions.Select(s => s.Name))}");
+    public void ConnectInNewSplit(IReadOnlyList<Session> sessions) =>
+        Record($"ConnectInNewSplit {string.Join(",", sessions.Select(s => s.Name))}");
     public void OpenDefaultLocalProfile() => Record("OpenDefaultLocalProfile");
     public Task EditSessionAsync(Session? existing, string defaultFolder, SessionKind newKind = SessionKind.Ssh) =>
         RecordAsync($"EditSession {existing?.Name ?? "(new " + newKind + ")"} in '{defaultFolder}'");

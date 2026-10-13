@@ -22,7 +22,15 @@ public sealed partial class MainWindow
 
     void IMainWindowServices.ConnectSession(Session session) => ConnectSession(session);
 
+    void IMainWindowServices.ConnectSession(Session session, TabGroupViewModel group) => ConnectSession(session, group);
+
     void IMainWindowServices.ConnectInNewWindow(IReadOnlyList<Session> sessions) => ConnectInNewWindow(sessions);
+
+    void IMainWindowServices.ConnectInNewSplits(IReadOnlyList<Session> sessions) =>
+        ConnectInNewSplits(sessions, together: false);
+
+    void IMainWindowServices.ConnectInNewSplit(IReadOnlyList<Session> sessions) =>
+        ConnectInNewSplits(sessions, together: true);
 
     void IMainWindowServices.OpenDefaultLocalProfile() => OpenDefaultLocalProfile();
 

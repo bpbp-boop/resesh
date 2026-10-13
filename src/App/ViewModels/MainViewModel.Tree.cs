@@ -94,8 +94,32 @@ public sealed partial class MainViewModel
     private void OpenSelectionInNewWindow(IReadOnlyList<TreeNodeViewModel>? nodes) =>
         Services.ConnectInNewWindow(SessionsOf(SelectionOrCurrent(nodes)).ToList());
 
+    /// <summary>Opens each session in a new pane of its own.</summary>
+    [RelayCommand(CanExecute = nameof(CanOpenSelection))]
+    private void OpenSelectionInNewSplits(IReadOnlyList<TreeNodeViewModel>? nodes) =>
+        Services.ConnectInNewSplits(SessionsOf(SelectionOrCurrent(nodes)).ToList());
+
+    /// <summary>Opens the sessions together, as the tabs of one new pane.</summary>
+    [RelayCommand(CanExecute = nameof(CanOpenSelection))]
+    private void OpenSelectionInOneNewSplit(IReadOnlyList<TreeNodeViewModel>? nodes) =>
+        Services.ConnectInNewSplit(SessionsOf(SelectionOrCurrent(nodes)).ToList());
+
+    /// <summary>Deals the sessions across the panes already open, one each in pane order,
+    /// starting over at the first pane when there are more sessions than panes.</summary>
+    [RelayCommand(CanExecute = nameof(CanOpenSelectionInExistingSplits))]
+    private void OpenSelectionInExistingSplits(IReadOnlyList<TreeNodeViewModel>? nodes)
+    {
+        var groups = Groups.ToList();
+        var sessions = SessionsOf(SelectionOrCurrent(nodes)).ToList();
+        for (var index = 0; index < sessions.Count; index++)
+            Services.ConnectSession(sessions[index], groups[index % groups.Count]);
+    }
+
     private bool CanOpenSelection(IReadOnlyList<TreeNodeViewModel>? nodes) =>
         SessionsOf(SelectionOrCurrent(nodes)).Any();
+
+    private bool CanOpenSelectionInExistingSplits(IReadOnlyList<TreeNodeViewModel>? nodes) =>
+        IsSplit && CanOpenSelection(nodes);
 
     /// <summary>Renames a folder or opens a session's editor, as the context menu does.</summary>
     [RelayCommand(CanExecute = nameof(CanEditSelection),
@@ -246,6 +270,7 @@ public sealed partial class MainViewModel
                 {
                     new("Open", OpenSelectionCommand, selection),
                     new("Open in new window", OpenSelectionInNewWindowCommand, selection),
+                    new("Open in new split", OpenSelectionInNewSplitsCommand, selection),
                     MenuEntry.Separator,
                     new("Edit…", EditSelectionCommand, selection),
                 };
@@ -260,6 +285,7 @@ public sealed partial class MainViewModel
                 [
                     new("Connect", OpenSelectionCommand, selection),
                     new("Connect in new window", OpenSelectionInNewWindowCommand, selection),
+                    new("Connect in new split", OpenSelectionInNewSplitsCommand, selection),
                     MenuEntry.Separator,
                     new("Edit…", EditSelectionCommand, selection),
                     new("Delete", DeleteSelectionCommand, selection),
@@ -282,6 +308,9 @@ public sealed partial class MainViewModel
                 {
                     new("Connect in Tabs", OpenSelectionCommand, selection),
                     new("Open in new window", OpenSelectionInNewWindowCommand, selection),
+                    new("Open in one new split", OpenSelectionInOneNewSplitCommand, selection),
+                    new("Open in new splits", OpenSelectionInNewSplitsCommand, selection),
+                    new("Open in existing splits", OpenSelectionInExistingSplitsCommand, selection),
                     MenuEntry.Separator,
                     new("Expand All", ExpandFolderCommand, folder),
                     new("Collapse All", CollapseFolderCommand, folder),
@@ -303,6 +332,9 @@ public sealed partial class MainViewModel
                 [
                     new("Connect in Tabs", OpenSelectionCommand, selection),
                     new("Open in new window", OpenSelectionInNewWindowCommand, selection),
+                    new("Open in one new split", OpenSelectionInOneNewSplitCommand, selection),
+                    new("Open in new splits", OpenSelectionInNewSplitsCommand, selection),
+                    new("Open in existing splits", OpenSelectionInExistingSplitsCommand, selection),
                     MenuEntry.Separator,
                     new("Delete", DeleteSelectionCommand, selection),
                 ];
