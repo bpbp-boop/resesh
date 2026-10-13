@@ -333,10 +333,16 @@ Factory Droid already send it, but **only after the terminal answers the `OSC 75
 probe** (sent together with DA1; a DA1 reply that arrives first means "unsupported" for the
 whole session). libghostty answers the probe only while the program-status callback is set.
 
-**Where we are:** our pin (`b699ea7`) already contains the parser, but the shim never sets
-`GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS`. Reports are now a known sequence, so they no longer
-reach the unknown-OSC path either: they're dropped, the probe goes unanswered, and agents
-stay silent in resesh.
+**Where we are (2026-10-13, shim ABI 7):** a first cut is in. The shim sets
+`GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS`, so the probe is answered, and forwards each report
+on the existing OSC event. `AgentTracker.ObserveProgramStatus` shows the root record: a
+known agent (`app` matched against the agent command names; a report naming no app updates
+the agent already showing) gets its identity and state, and any other program gets the
+badge alone, with no icon, for `blocked`, `done` and `error`. A program's `done`/`error`
+survives the prompt until the tab is viewed or typed into; an agent's still goes when the
+agent does. Still open from the steps below: the per-id record store and the
+alerts list. A root report's percentage drives the tab progress bar (filled while working,
+paused while blocked), and the adapter settings name the agents that need no hooks.
 
 **Why it fits us better than most:** the report travels in the terminal output, so it
 works over SSH with nothing installed on the server, and it isn't agent-only: `brew`,
@@ -373,13 +379,23 @@ The states map almost one to one onto `AgentAttention`:
 5. **Adapters:** the adapter dialog says Claude Code ≥ 2.1.295 needs no hooks; keep the
    7377 snippets for agents that don't send 7501 yet. 7377 stays as our own protocol.
 
-### tmux-persistent sessions (open question)
-tmux answers DA1 itself and drops OSCs it doesn't know, so a program inside our tmux
-session gets no probe reply and stays silent. Options to test: `allow-passthrough on`
-(already set for new shell-integration shells) only helps programs that wrap reports in
-`DCS tmux;`, which none do; tmux's own 7501 support would fix it upstream. Until then,
-document that 7501 works in plain SSH, telnet and local tabs, and keep the hook snippets
-as the fallback for persistent sessions.
+### tmux-persistent sessions (tested 2026-10-13, tmux 3.4)
+Confirmed on a persistent session: tmux answers DA1 itself and never forwards the
+`OSC 7501 ; ?` probe, so a program gets no reply, and a plain report is dropped. The hook
+adapters are no fallback there either: plain OSC 7377 and OSC 777 are dropped the same way.
+With `allow-passthrough on`, a report or probe wrapped in `DCS tmux;` does arrive, and the
+probe reply comes back to the pane, but no program wraps on its own. So persistent
+sessions cannot see native 7501 until tmux passes it through itself (declined upstream for
+now, tmux issue 5713).
+
+The adapters get around it without passthrough (`TmuxStatus`): inside tmux a hook stores a
+7501 report body in the pane option `@resesh_status`, our `set-titles-string` appends the
+option to the title unless a shell is in the foreground, and the tab view takes it off the
+title and feeds it to the same `ProgramStatus` path. tmux pushes the title within ~10 ms of
+the option changing. Needs tmux 3.0 for pane options. Verified on rct with the generated
+Codex and Claude Code hooks and the shell wrapper. Known gap: a program that dies without
+unsetting the option leaves it for the next non-shell program in that pane. Any script can
+use the option, so agents with extension systems (Pi, oh-my-pi) could get adapters too.
 
 ### Alerts list (promoted from Deferred)
 Once 7501 gives real states, one place to see every tab that wants you: a flyout from the

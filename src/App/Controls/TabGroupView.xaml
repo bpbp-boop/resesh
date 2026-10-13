@@ -320,11 +320,13 @@
                                         Orientation="Horizontal"
                                         Spacing="5"
                                         Margin="0,0,6,0"
-                                        VerticalAlignment="Center">
+                                        VerticalAlignment="Center"
+                                        Visibility="{x:Bind local:PresentationValues.StateDotsVisibility(AgentIconKey, ShowsProgramStatus, State, IsRecording), Mode=OneWay}">
                                         <Ellipse
                                             Width="7"
                                             Height="7"
                                             VerticalAlignment="Center"
+                                            Visibility="{x:Bind local:PresentationValues.StateDotVisibility(AgentIconKey, ShowsProgramStatus, State), Mode=OneWay}"
                                             ToolTipService.ToolTip="{x:Bind StateText, Mode=OneWay}">
                                             <Ellipse.Fill>
                                                 <SolidColorBrush Color="{x:Bind local:PresentationValues.StateColor(State, HasUnseenOutput), Mode=OneWay}" />
@@ -339,7 +341,9 @@
                                             ToolTipService.ToolTip="{x:Bind RecordingTooltip, Mode=OneWay}" />
                                     </StackPanel>
                                     <!-- Tabs stay icon-free unless an agent is active. The
-                                         attention badge stays attached to the agent icon. -->
+                                         attention badge stays attached to the agent icon; a
+                                         program that reports its own state shows the badge alone.
+                                         Either one replaces the connection dot while connected. -->
                                     <Grid
                                         Grid.Column="2"
                                         Width="16"
@@ -347,7 +351,7 @@
                                         Margin="0,0,6,0"
                                         VerticalAlignment="Center"
                                         ToolTipService.ToolTip="{x:Bind AgentTooltip, Mode=OneWay}"
-                                        Visibility="{x:Bind local:PresentationValues.AgentIconVisibility(AgentIconKey), Mode=OneWay}">
+                                        Visibility="{x:Bind local:PresentationValues.AgentSlotVisibility(AgentIconKey, ShowsProgramStatus, State), Mode=OneWay}">
                                         <Image
                                             Source="{x:Bind local:PresentationValues.AgentIcon(AgentIconKey), Mode=OneWay}"
                                             Width="16"
@@ -355,26 +359,32 @@
                                         <Border
                                             Width="{x:Bind AgentBadgeSize, Mode=OneWay}"
                                             Height="{x:Bind AgentBadgeSize, Mode=OneWay}"
-                                            Margin="0,0,-2,-2"
-                                            HorizontalAlignment="Right"
-                                            VerticalAlignment="Bottom"
-                                            CornerRadius="6"
+                                            Margin="{x:Bind local:PresentationValues.AgentBadgeMargin(ShowsProgramStatus), Mode=OneWay}"
+                                            HorizontalAlignment="{x:Bind local:PresentationValues.AgentBadgeHorizontalAlignment(ShowsProgramStatus), Mode=OneWay}"
+                                            VerticalAlignment="{x:Bind local:PresentationValues.AgentBadgeVerticalAlignment(ShowsProgramStatus), Mode=OneWay}"
+                                            CornerRadius="7"
                                             BorderThickness="1"
-                                            Visibility="{x:Bind local:PresentationValues.AgentBadgeVisibility(AgentIconKey, Agent.Attention), Mode=OneWay}">
+                                            Visibility="{x:Bind local:PresentationValues.AgentBadgeVisibility(AgentIconKey, Agent.Attention, ShowsProgramStatus), Mode=OneWay}">
                                             <Border.BorderBrush>
                                                 <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBackgroundColor(AppTheme, IsActive, IsPointerOver), Mode=OneWay}" />
                                             </Border.BorderBrush>
                                             <Border.Background>
                                                 <SolidColorBrush Color="{x:Bind local:PresentationValues.AgentBadgeColor(Agent.Attention), Mode=OneWay}" />
                                             </Border.Background>
-                                            <TextBlock
-                                                Text="{x:Bind AgentBadgeGlyph, Mode=OneWay}"
-                                                Foreground="White"
-                                                FontSize="8"
-                                                FontWeight="Bold"
-                                                IsTextScaleFactorEnabled="False"
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center" />
+                                            <!-- The symbol is drawn, not typed: a font glyph this
+                                                 small smears, and a dark stroke reads on every
+                                                 badge colour where white does not on amber. -->
+                                            <Viewbox Stretch="Uniform">
+                                                <Path
+                                                    Width="10"
+                                                    Height="10"
+                                                    Data="{x:Bind local:PresentationValues.AgentBadgeSymbol(Agent.Attention), Mode=OneWay}"
+                                                    Stroke="#1B1B1B"
+                                                    StrokeThickness="1.6"
+                                                    StrokeStartLineCap="Round"
+                                                    StrokeEndLineCap="Round"
+                                                    StrokeLineJoin="Round" />
+                                            </Viewbox>
                                         </Border>
                                     </Grid>
                                     <FontIcon

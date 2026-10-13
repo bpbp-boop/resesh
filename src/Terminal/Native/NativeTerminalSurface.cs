@@ -476,8 +476,9 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
                 if (separator <= 0 || !int.TryParse(content.AsSpan(0, separator), out var code))
                     break;
                 var payload = content[(separator + 1)..];
-                // 7377 agent state; 9 / 777 notifications and 9;4 progress (rebuilt by the shim).
-                if (code is 7377 or 9 or 777)
+                // 7377 agent state; 9 / 777 notifications, 9;4 progress and 7501 program status
+                // (rebuilt by the shim).
+                if (code is 7377 or 9 or 777 or 7501)
                     AgentOscReceived?.Invoke(code, payload.Length > 2048 ? payload[..2048] : payload);
                 else if (code == 3008)
                 {

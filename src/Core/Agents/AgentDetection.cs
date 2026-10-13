@@ -24,8 +24,9 @@ public static class AgentDetection
         ["gemini-cli"] = "gemini",
         ["@google/gemini-cli"] = "gemini",
         ["pi"] = "pi",
-        ["oh-my-pi"] = "pi",
-        ["ohmypi"] = "pi",
+        ["omp"] = "omp",
+        ["oh-my-pi"] = "omp",
+        ["ohmypi"] = "omp",
         ["grok"] = "grok",
         ["grok-build"] = "grok",
         ["opencode"] = "opencode",
@@ -36,6 +37,7 @@ public static class AgentDetection
         ["cursor-agent"] = AgentIdentities.Generic,
         ["amp"] = AgentIdentities.Generic,
         ["crush"] = AgentIdentities.Generic,
+        ["droid"] = AgentIdentities.Generic,
     };
 
     // Wrappers that run something else; the real command is the next token.
@@ -58,6 +60,10 @@ public static class AgentDetection
     // It does not contain the word "codex", which makes this the only title evidence
     // available when Codex runs on a remote host without the structured adapter.
     private const string CodexTitleSpinnerFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+
+    // Pi and oh-my-pi never spell out their name in a title: the leading π is the only
+    // evidence, and oh-my-pi's "π > project" is told from Pi's "π - project" by the ">".
+    private const char PiTitleMark = 'π';
 
     private static readonly Regex ShellPromptTitle =
         new(@"^[^@\s]+@[^:\s]+:\s*(?<cwd>\S.*)$", RegexOptions.Compiled);
@@ -106,6 +112,8 @@ public static class AgentDetection
         {
             return "codex";
         }
+        if (titleSpan[0] == PiTitleMark && (titleSpan.Length == 1 || char.IsWhiteSpace(titleSpan[1])))
+            return titleSpan[1..].TrimStart().StartsWith(">") ? "omp" : "pi";
 
         foreach (var raw in title.Split((char[])[' ', '\t', ':', ',', '|', '(', ')', '[', ']'],
                      StringSplitOptions.RemoveEmptyEntries))

@@ -8,8 +8,9 @@ const surfaceSource = fs.readFileSync(
   "utf8");
 
 test("the terminal surface forwards agent evidence with bounded payloads", () => {
-  // OSC 7377 (resesh structured events) plus the two generic notification sequences.
-  assert.match(surfaceSource, /if \(code is 7377 or 9 or 777\)/);
+  // OSC 7377 (resesh structured events), the two generic notification sequences, and
+  // OSC 7501 program status.
+  assert.match(surfaceSource, /if \(code is 7377 or 9 or 777 or 7501\)/);
   // Payloads from the wire are length-capped before they reach the host.
   assert.match(surfaceSource, /AgentOscReceived\?\.Invoke\(code, payload\.Length > 2048 \? payload\[\.\.2048\] : payload\)/);
   assert.match(surfaceSource, /private static string Cap\(string text\) => text\.Length > 512 \? text\[\.\.512\] : text;/);
@@ -37,10 +38,10 @@ test("TerminalTabView wires running command changes and prompt context to retire
     terminalTabView,
     /_terminal\.PromptContextChanged \+= \(_, _\) => ApplyAgent\(tracker => tracker\.ObserveCommand\(""\)\);/);
 
-  // TitleChanged and CommandObserved remain wired
+  // TitleChanged (minus any tmux status report riding behind it) and CommandObserved remain wired
   assert.match(
     terminalTabView,
-    /_terminal\.TitleChanged \+= title => ApplyAgent\(tracker => tracker\.ObserveTitle\(title\)\);/);
+    /ApplyAgent\(tracker => tracker\.ObserveTitle\(clean\)\);/);
   assert.match(
     terminalTabView,
     /_terminal\.CommandObserved \+= command => ApplyAgent\(tracker => tracker\.ObserveCommand\(command\)\);/);

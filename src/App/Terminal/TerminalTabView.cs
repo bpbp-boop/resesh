@@ -61,8 +61,11 @@ public sealed class TerminalTabView : Grid, IDisposable
     private DispatcherQueueTimer? _agentPoll;
     private bool _agentPollBusy;
 
-    // Progress from OSC 9;4 in the terminal and from file-pane transfers, combined on the tab.
+    // Progress from OSC 9;4 and OSC 7501 in the terminal and from file-pane transfers,
+    // combined on the tab.
     private TerminalProgress _terminalProgress;
+    private TerminalProgress _statusProgress;
+    private string? _tmuxStatusReport;   // last report a persistent session's title carried
     private TerminalProgress _transferProgress;
 
     // File pane: local sessions use the Windows filesystem; SSH sessions keep the
@@ -175,7 +178,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             ResizeBackend(cols, rows);
             CaptureResize(cols, rows);
         });
-        _terminal.TitleChanged += title => DispatcherQueue.TryEnqueue(() => _tab.ApplyTerminalTitle(title));
+        _terminal.TitleChanged += title => DispatcherQueue.TryEnqueue(() => _tab.ApplyTerminalTitle(SplitTmuxStatus(title, out _)));
         _terminal.CommandChanged += (text, exact) => DispatcherQueue.TryEnqueue(() => _tab.ApplyRunningCommand(text, exact));
         _terminal.CommandExecutionChanged += execution => DispatcherQueue.TryEnqueue(() =>
         {
@@ -412,10 +415,17 @@ public sealed class TerminalTabView : Grid, IDisposable
     private void WireAgentSignals()
     {
         _terminal.AgentOscReceived += (code, data) =>
-            ApplyAgent(tracker => tracker.ObserveEvent(AgentOsc.Parse(code, data)));
+            ApplyAgent(tracker => code == ProgramStatus.Code
+                ? tracker.ObserveProgramStatus(ProgramStatus.Parse(data))
+                : tracker.ObserveEvent(AgentOsc.Parse(code, data)));
         _terminal.BellReceived += () =>
             ApplyAgent(tracker => tracker.ObserveEvent(AgentOsc.Bell()));
-        _terminal.TitleChanged += title => ApplyAgent(tracker => tracker.ObserveTitle(title));
+        _terminal.TitleChanged += title =>
+        {
+            var clean = SplitTmuxStatus(title, out var report);
+            ApplyAgent(tracker => tracker.ObserveTitle(clean));
+            ObserveTmuxStatus(report, clean);
+        };
         _terminal.CommandChanged += (command, _) => ApplyAgent(tracker => tracker.ObserveCommand(command));
         _terminal.CommandObserved += command => ApplyAgent(tracker => tracker.ObserveCommand(command));
         _terminal.PromptContextChanged += (_, _) => ApplyAgent(tracker => tracker.ObserveCommand(""));
@@ -442,24 +452,43 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             if (code == 9 && TerminalProgress.ParseOsc9(data, _terminalProgress) is { } progress)
                 SetTerminalProgress(progress);
+            // OSC 7501 carries a percentage of its own, whoever the program is.
+            else if (code == ProgramStatus.Code && ProgramStatus.Parse(data)?.AsTerminalProgress() is { } reported)
+                SetStatusProgress(reported);
         };
         _terminal.CommandChanged += (command, _) =>
         {
             if (command.Length == 0)
-                DispatcherQueue.TryEnqueue(() => SetTerminalProgress(TerminalProgress.None));
+                DispatcherQueue.TryEnqueue(ClearReportedProgress);
         };
         _terminal.PromptContextChanged += (_, _) =>
-            DispatcherQueue.TryEnqueue(() => SetTerminalProgress(TerminalProgress.None));
+            DispatcherQueue.TryEnqueue(ClearReportedProgress);
         _tab.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(TabViewModel.State) && _tab.State != TabConnectionState.Connected)
-                SetTerminalProgress(TerminalProgress.None);
+            {
+                ClearReportedProgress();
+                _tmuxStatusReport = null; // a reattach repeats the report; let it count again
+            }
         };
     }
 
     private void SetTerminalProgress(TerminalProgress progress)
     {
         _terminalProgress = progress;
+        PushProgress();
+    }
+
+    private void SetStatusProgress(TerminalProgress progress)
+    {
+        _statusProgress = progress;
+        PushProgress();
+    }
+
+    private void ClearReportedProgress()
+    {
+        _terminalProgress = TerminalProgress.None;
+        _statusProgress = TerminalProgress.None;
         PushProgress();
     }
 
@@ -472,7 +501,36 @@ public sealed class TerminalTabView : Grid, IDisposable
     private void PushProgress()
     {
         if (!_disposed)
-            _tab.Progress = TerminalProgress.Combine(_terminalProgress, _transferProgress);
+            _tab.Progress = TerminalProgress.Combine(_terminalProgress, _statusProgress, _transferProgress);
+    }
+
+    /// <summary>A persistent session's title may carry an adapter's status report behind it
+    /// (<see cref="TmuxStatus"/>). Any other session's title is passed through untouched.</summary>
+    private string SplitTmuxStatus(string title, out string? report)
+    {
+        report = null;
+        return Session.Persistent ? TmuxStatus.SplitTitle(title, out report) : title;
+    }
+
+    /// <summary>
+    /// tmux repeats the report with every title change, so only a changed one is news:
+    /// observing the same "blocked" again would undo the user having answered it. A report
+    /// that disappears while its program still runs was withdrawn; one that disappears
+    /// because the shell is back simply went with the program, and the shell title has
+    /// already retired it.
+    /// </summary>
+    private void ObserveTmuxStatus(string? report, string title)
+    {
+        if (report == _tmuxStatusReport)
+            return;
+        var withdrawn = report is null && !AgentDetection.IsShellTitle(title);
+        _tmuxStatusReport = report;
+        var status = report is not null ? ProgramStatus.ParseReport(report) : withdrawn ? ProgramStatus.Cleared : null;
+        if (status is null)
+            return;
+        ApplyAgent(tracker => tracker.ObserveProgramStatus(status));
+        if (status.AsTerminalProgress() is { } progress)
+            SetStatusProgress(progress);
     }
 
     private void ApplyAgent(Func<AgentTracker, bool> observe)

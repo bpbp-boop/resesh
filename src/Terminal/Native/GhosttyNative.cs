@@ -42,7 +42,7 @@ internal enum GhosttyEventKind
 internal static unsafe partial class GhosttyNative
 {
     private const string Library = "reseshvt";
-    private const int ExpectedAbi = 6;
+    private const int ExpectedAbi = 7;
 
     private static readonly Lazy<string?> LoadError = new(Load);
 

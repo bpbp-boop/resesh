@@ -9,6 +9,18 @@ namespace Resesh.Core.Tests;
 /// </summary>
 public sealed class TmuxTitleReportingTests
 {
+    [Fact]
+    public void Bootstrap_AppendsTheAdapterStatusOption_ExceptAtAShell()
+    {
+        var command = TmuxPersistence.BootstrapCommand(Guid.NewGuid(), 0);
+
+        // The option rides behind the title, and only when it is set...
+        Assert.Contains("#{?#{@resesh_status}, [[resesh-status:#{@resesh_status}]],}", command);
+        // ...and never while a shell is in the foreground, where a stale value would lie.
+        Assert.Contains("#{?#{==:#{pane_current_command},bash},,", command);
+        Assert.Contains("#{?#{==:#{pane_current_command},zsh},,", command);
+    }
+
     private static readonly Guid Id = Guid.Parse("11111111-2222-3333-4444-555555555555");
 
     [Theory]

@@ -23,7 +23,10 @@ public static class AgentAdapters
         "values are percent-encoded; label is optional and shown only in the tab tooltip\n\n" +
         "Claude Code hooks return stdout JSON with terminalSequence containing:\n" +
         "ESC ] 777 ; notify ; resesh-agent ; id=<agent> ; state=<state> ; label=<text> BEL\n" +
-        "The exact title resesh-agent is reserved for structured status. Other terminals may show it as a desktop notification.";
+        "The exact title resesh-agent is reserved for structured status. Other terminals may show it as a desktop notification.\n\n" +
+        "Inside a persistent (tmux) session, set a pane option instead (tmux 3.0 or later):\n" +
+        "tmux set -p -t \"$TMUX_PANE\" @resesh_status state=<state>:app=<agent>\n" +
+        "states: working | blocked (with kind=permission or kind=question) | done | error | idle; unset the option on exit";
 
     public static IReadOnlyList<AgentAdapterSnippet> All =>
     [
@@ -88,7 +91,8 @@ public static class AgentAdapters
     }
 
     private static string CodexPosixCommand(string state) =>
-        $"sh -c \"cat >/dev/null; printf '\\033]7377;agent;id=codex;state={state}\\007' > /dev/tty\"";
+        $"sh -c \"cat >/dev/null; if [ $TMUX_PANE ]; then {TmuxCommand("codex", state)}; "
+        + $"else printf '\\033]7377;agent;id=codex;state={state}\\007' > /dev/tty; fi\"";
 
     private static string CodexWindowsCommand(string state) =>
         $"powershell -NoProfile -NonInteractive -Command \"$input | Out-Null; "
@@ -101,6 +105,7 @@ public static class AgentAdapters
     public static AgentAdapterSnippet ClaudeCodePosix() => new(
         "Claude Code",
         "~/.claude/settings.json · Linux, macOS, WSL",
+        "For Claude Code before 2.1.295; later versions report their own status. " +
         "Reports working, approval, finished, and exit states via Claude Code's terminalSequence JSON output. " +
         "Interactive sessions only. In another terminal, the reserved resesh-agent title may appear as a desktop notification.",
         ClaudeCodeHooksJson(windows: false));
@@ -110,6 +115,7 @@ public static class AgentAdapters
     public static AgentAdapterSnippet ClaudeCodeWindows() => new(
         "Claude Code",
         "%USERPROFILE%\\.claude\\settings.json · Windows",
+        "For Claude Code before 2.1.295; later versions report their own status. " +
         "Reports the same lifecycle states via Claude Code's terminalSequence JSON output (Git Bash or PowerShell). " +
         "Interactive sessions only. In another terminal, the reserved resesh-agent title may appear as a desktop notification.",
         ClaudeCodeHooksJson(windows: true));
@@ -132,7 +138,11 @@ public static class AgentAdapters
             // Literal JSON escapes keep control bytes off the shell command line.
             var json = "{\"terminalSequence\":\"\\u001b]777;notify;" +
                 AgentOsc.StructuredNotifyTitle + ";id=claude;state=" + state + "\\u0007\"}";
-            var command = windows ? $"echo '{json}'" : $"printf '%s\\n' '{json}'";
+            // Inside tmux the POSIX hook also leaves the state in the pane option; the
+            // JSON is still the hook's only output.
+            var command = windows
+                ? $"echo '{json}'"
+                : $"[ $TMUX_PANE ] && {TmuxCommand("claude", state)}; printf '%s\\n' '{json}'";
             hooks[eventName] = new[]
             {
                 new { hooks = new[] { new { type = "command", command } } },
@@ -142,6 +152,33 @@ public static class AgentAdapters
             new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
     }
 
+    // ---- persistent (tmux) sessions ----
+    //
+    // tmux discards the sequences above, so inside tmux an adapter stores an OSC 7501
+    // report body in the pane option the app's title format carries out (TmuxStatus).
+    // TMUX_PANE is set for every process in a pane and holds no spaces, so it is tested
+    // and passed unquoted: the commands sit inside quoted JSON strings already.
+
+    /// <summary>The report for one of the adapter states, or null for "exit".</summary>
+    internal static string? TmuxReport(string agent, string state) => state switch
+    {
+        "exit" => null,
+        "working" => $"state=working:app={agent}",
+        "needs-approval" => $"state=blocked:kind=permission:app={agent}",
+        "needs-answer" => $"state=blocked:kind=question:app={agent}",
+        "complete" => $"state=done:app={agent}",
+        "failed" => $"state=error:app={agent}",
+        _ => $"state=idle:app={agent}",
+    };
+
+    /// <summary>Sets or (on exit) unsets the pane option. The shell's pid makes each
+    /// report distinct, so tmux sends the title again when a state repeats.</summary>
+    private static string TmuxCommand(string agent, string state) =>
+        (TmuxReport(agent, state) is { } report
+            ? $"tmux set -p -t $TMUX_PANE {TmuxStatus.Option} {report}:n=$$"
+            : $"tmux set -p -u -t $TMUX_PANE {TmuxStatus.Option}")
+        + " >/dev/null 2>&1";
+
     /// <summary>A shell helper for agents with no hook system: wrap the run, and report
     /// its start, end and exit status by hand.</summary>
     public static AgentAdapterSnippet ShellFunction() => new(
@@ -150,7 +187,23 @@ public static class AgentAdapters
         "Reports working, finished, and failed states for an agent command that you wrap.",
         """
         # resesh agent status: resesh_agent <id> <state> [label]
-        resesh_agent() { printf '\033]7377;agent;id=%s;state=%s;label=%s\007' "$1" "$2" "${3:-}" > /dev/tty; }
+        # Inside tmux the state goes into a pane option that resesh reads through the title.
+        resesh_agent() {
+          if [ -z "$TMUX_PANE" ]; then
+            printf '\033]7377;agent;id=%s;state=%s;label=%s\007' "$1" "$2" "${3:-}" > /dev/tty
+            return
+          fi
+          case "$2" in
+            exit) tmux set -p -u -t "$TMUX_PANE" @resesh_status 2>/dev/null; return ;;
+            working) set -- "$1" state=working ;;
+            needs-approval) set -- "$1" state=blocked:kind=permission ;;
+            needs-answer) set -- "$1" state=blocked:kind=question ;;
+            complete) set -- "$1" state=done ;;
+            failed) set -- "$1" state=error ;;
+            *) set -- "$1" state=idle ;;
+          esac
+          tmux set -p -t "$TMUX_PANE" @resesh_status "$2:app=$1" 2>/dev/null
+        }
 
         # Example wrapper — `agentrun claude` reports the run's lifecycle to the tab.
         agentrun() {
