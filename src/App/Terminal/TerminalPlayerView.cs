@@ -277,6 +277,14 @@ public sealed class TerminalPlayerView : Grid, IDisposable
         }
     }
 
+    /// <summary>Stops the terminal drawing while this view is in the background or its
+    /// window is minimized.</summary>
+    public void SetRenderingPaused(bool paused)
+    {
+        if (!_disposed)
+            _terminal.SetRenderingPaused(paused);
+    }
+
     public void Dispose()
     {
         if (_disposed)

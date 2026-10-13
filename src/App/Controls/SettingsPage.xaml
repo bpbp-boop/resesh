@@ -51,6 +51,9 @@
             <NavigationViewItem x:Name="GeneralItem" Content="General" Tag="General" AutomationProperties.AutomationId="SettingsGeneralTab">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE713;" /></NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem x:Name="SessionsItem" Content="Sessions" Tag="Sessions" AutomationProperties.AutomationId="SettingsSessionsTab">
+                <NavigationViewItem.Icon><FontIcon Glyph="&#xE8FD;" /></NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItem x:Name="IdentitiesItem" Content="Identities &amp; Keys" Tag="Identities" AutomationProperties.AutomationId="SettingsIdentitiesTab">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE77B;" /></NavigationViewItem.Icon>
             </NavigationViewItem>
@@ -204,6 +207,14 @@
                 </StackPanel>
                 </Grid>
             </ScrollViewer>
+
+            <!-- ==== Sessions: the table scrolls within its own list. ==== -->
+            <Grid
+                x:Name="SessionsSection"
+                Padding="28,20,28,20"
+                Visibility="Collapsed">
+                <controls:SessionsManagerView x:Name="SessionsManager" />
+            </Grid>
 
             <!-- ==== Identities and keys ==== -->
             <ScrollViewer x:Name="IdentitiesSection" Style="{StaticResource SectionScroller}">

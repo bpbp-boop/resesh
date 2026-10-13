@@ -576,6 +576,16 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.ScrollToCommand(id);
     }
 
+    /// <summary>Stops the terminal drawing while this tab is in the background or its
+    /// window is minimized.</summary>
+    public void SetRenderingPaused(bool paused)
+    {
+        if (_disposed)
+            return;
+        _terminal.SetRenderingPaused(paused);
+        _rewindPlayer?.SetRenderingPaused(paused);
+    }
+
     /// <summary>Adjusts the annotated scrollbar for the current group layout and focus.</summary>
     public void SetRulerPresentation(bool isSplit, bool isGroupFocused) =>
         _terminal.SetRulerPresentation(isSplit, isGroupFocused);

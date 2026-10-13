@@ -90,6 +90,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private int _dirtyCapacity;
     private int _framePending;
     private bool _renderingHooked;
+    private bool _renderingPaused;
     private bool _forceFull = true;
     private bool _disposed;
     private bool _initialized;
@@ -604,10 +605,33 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             Volatile.Write(ref _framePending, 0);
             return;
         }
+        if (_renderingPaused)
+        {
+            // Nothing to draw, but command tracking still follows the output.
+            Volatile.Write(ref _framePending, 0);
+            QueueAnnotations();
+            return;
+        }
         if (_renderingHooked)
             return;
         _renderingHooked = true;
         CompositionTarget.Rendering += OnRendering;
+    }
+
+    public override void SetRenderingPaused(bool paused)
+    {
+        if (_renderingPaused == paused || _disposed)
+            return;
+        _renderingPaused = paused;
+        if (paused)
+        {
+            _blinkTimer.Stop(); // the next frame restarts it
+            _cursorBlinkOn = true;
+            UnhookRendering();
+            return;
+        }
+        _forceFull = true;
+        RequestFrame();
     }
 
     private void UnhookRendering()
@@ -637,7 +661,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void RenderFrame()
     {
-        if (_disposed || !IsLoaded || _replaying || _term == IntPtr.Zero || _cells == null || _renderer.SwapChain is null || Visibility != Visibility.Visible)
+        if (_disposed || !IsLoaded || _replaying || _renderingPaused || _term == IntPtr.Zero || _cells == null || _renderer.SwapChain is null || Visibility != Visibility.Visible)
             return;
         if ((long)Columns * Rows > _cellCapacity || Rows > _dirtyCapacity)
             return; // a failed resize must not read a frame into the previous, smaller buffers

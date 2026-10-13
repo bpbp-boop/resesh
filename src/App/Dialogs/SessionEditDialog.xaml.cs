@@ -22,7 +22,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         public string Label { get; init; } = "";
     }
 
-    private static readonly (string Name, string? Hex)[] ColorChoices =
+    internal static readonly (string Name, string? Hex)[] ColorChoices =
     [
         ("None", null),
         ("Red", "#E74856"),

@@ -50,6 +50,10 @@ public abstract class TerminalSurface : Grid, IDisposable
     public abstract void WriteNotice(string message);
     public abstract void FocusTerminal();
     public abstract void SetInputEnabled(bool enabled);
+
+    /// <summary>Stops drawing while nothing can show this terminal (a background tab, a
+    /// minimized window). Output is still parsed and tracked; resuming redraws in full.</summary>
+    public abstract void SetRenderingPaused(bool paused);
     public abstract void ToggleCommandsPanel();
 
     /// <summary>Pastes text as the user's input, honoring the shell's bracketed-paste mode.</summary>

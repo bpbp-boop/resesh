@@ -216,6 +216,57 @@ public sealed class SessionStore
         }
     }
 
+    // ---- Batches: one atomic write however many sessions change ----
+
+    public void AddMany(IEnumerable<Session> added)
+    {
+        lock (_gate)
+        {
+            var sessions = _sessions.ToList();
+            foreach (var session in added)
+            {
+                if (sessions.Any(s => s.Id == session.Id))
+                    throw new InvalidOperationException($"Session {session.Id} already exists.");
+                sessions.Add(session);
+            }
+            if (sessions.Count != _sessions.Count)
+                Save(sessions: sessions);
+        }
+    }
+
+    /// <summary>Replaces saved sessions. Nothing is written when any of them is missing.</summary>
+    public void UpdateMany(IEnumerable<Session> updated)
+    {
+        lock (_gate)
+        {
+            List<Session>? sessions = null;
+            foreach (var session in updated)
+            {
+                sessions ??= _sessions.ToList();
+                var index = sessions.FindIndex(s => s.Id == session.Id);
+                if (index < 0)
+                    throw new InvalidOperationException($"Session {session.Id} not found.");
+                sessions[index] = session;
+            }
+            if (sessions is not null)
+                Save(sessions: sessions);
+        }
+    }
+
+    /// <summary>Removes the sessions and returns the ones that existed, so the caller can
+    /// delete their credentials.</summary>
+    public IReadOnlyList<Session> RemoveMany(IEnumerable<Guid> ids)
+    {
+        lock (_gate)
+        {
+            var remove = ids.ToHashSet();
+            var removed = _sessions.Where(s => remove.Contains(s.Id)).ToList();
+            if (removed.Count > 0)
+                Save(sessions: _sessions.Where(s => !remove.Contains(s.Id)).ToList());
+            return removed;
+        }
+    }
+
     public void MoveToFolder(Guid id, string folderPath) =>
         MoveToFolder([id], folderPath);
 

@@ -267,7 +267,11 @@ public partial class App : Application
             return;
         foreach (var window in app._windows.ToList())
             window.ViewModel.RefreshSessions(rebuildTree: !ReferenceEquals(window.ViewModel, source));
+        SessionsChanged?.Invoke();
     }
+
+    /// <summary>Raised after saved sessions or folders change, for views outside the tree.</summary>
+    internal static event Action? SessionsChanged;
 
     internal static void RefreshWindowTitles()
     {

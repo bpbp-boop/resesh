@@ -50,6 +50,20 @@ jobs:
       - name: Run app logic tests
         run: dotnet test tests/AppLogic.Tests/Resesh.AppLogic.Tests.csproj --configuration Release
 
+      # The native frame tests drive the real libghostty-vt and reseshvt shim. Same cache
+      # as the x64 build job below.
+      - name: Cache libghostty-vt
+        id: ghostty-cache
+        uses: actions/cache@v5
+        with:
+          path: .artifacts/ghostty-vt/x64
+          key: ghostty-vt-x64-${{ hashFiles('eng/ghostty-vt.json', 'eng/build-ghostty-vt.ps1', 'src/Terminal/Native/Shim/**') }}
+
+      - name: Build libghostty-vt
+        if: steps.ghostty-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./eng/build-ghostty-vt.ps1 -Architecture x64 -BuildRoot "$env:RUNNER_TEMP/ghostty-build"
+
       - name: Run terminal surface tests
         run: dotnet test tests/Terminal.Tests/Resesh.Terminal.Tests.csproj --configuration Release
 

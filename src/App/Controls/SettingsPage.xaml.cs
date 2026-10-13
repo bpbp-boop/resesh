@@ -12,11 +12,14 @@ namespace Resesh.App.Controls;
 /// </summary>
 public sealed partial class SettingsPage : UserControl
 {
-    private enum Section { General, Identities, Recording, Highlighting, Agents, Shortcuts }
+    private enum Section { General, Sessions, Identities, Recording, Highlighting, Agents, Shortcuts }
 
     private readonly HighlightsStore _highlightDraft = App.Highlights.CreateDraft();
 
     public SettingsViewModel ViewModel { get; }
+
+    /// <summary>The Sessions section, for the window to connect to its view model and editors.</summary>
+    public SessionsManagerView SessionsView => SessionsManager;
 
     public SettingsPage(SettingsViewModel viewModel)
     {
@@ -37,6 +40,8 @@ public sealed partial class SettingsPage : UserControl
     public void Navigate(GlobalSettingsTarget target)
     {
         Show(SectionOf(target));
+        if (target == GlobalSettingsTarget.Sessions)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, SessionsManager.FocusFilter);
         if (FieldOf(target) is not var (card, control))
             return;
         // The section was collapsed until now; place and focus after its first layout pass.
@@ -55,6 +60,7 @@ public sealed partial class SettingsPage : UserControl
             or GlobalSettingsTarget.CommandHistoryDays => Section.Recording,
         GlobalSettingsTarget.Highlighting => Section.Highlighting,
         GlobalSettingsTarget.Identities => Section.Identities,
+        GlobalSettingsTarget.Sessions => Section.Sessions,
         GlobalSettingsTarget.Agents or GlobalSettingsTarget.ShowAgentIcons
             or GlobalSettingsTarget.AgentAlertFlash or GlobalSettingsTarget.AgentAlertSound => Section.Agents,
         _ => Section.General,
@@ -86,6 +92,7 @@ public sealed partial class SettingsPage : UserControl
     private void Show(Section section)
     {
         GeneralSection.Visibility = PresentationValues.Visible(section == Section.General);
+        SessionsSection.Visibility = PresentationValues.Visible(section == Section.Sessions);
         IdentitiesSection.Visibility = PresentationValues.Visible(section == Section.Identities);
         RecordingSection.Visibility = PresentationValues.Visible(section == Section.Recording);
         HighlightingSection.Visibility = PresentationValues.Visible(section == Section.Highlighting);
@@ -93,6 +100,7 @@ public sealed partial class SettingsPage : UserControl
         ShortcutsSection.Visibility = PresentationValues.Visible(section == Section.Shortcuts);
         var item = section switch
         {
+            Section.Sessions => SessionsItem,
             Section.Identities => IdentitiesItem,
             Section.Recording => RecordingItem,
             Section.Highlighting => HighlightingItem,
@@ -106,6 +114,8 @@ public sealed partial class SettingsPage : UserControl
             ViewModel.RefreshHistoryUsage();
         if (section == Section.Identities)
             RefreshIdentities();
+        if (section == Section.Sessions)
+            SessionsManager.Refresh();
     }
 
     private void Sections_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)

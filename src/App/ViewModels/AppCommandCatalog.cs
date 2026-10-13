@@ -101,6 +101,7 @@ public sealed class AppCommandCatalog
             commands.Add(new("Global Settings", Fixed(title), keywords, vm.OpenSettingsCommand, shortcut,
                 Parameter: () => target));
         Setting("Open Settings", "preferences options", GlobalSettingsTarget.General, ShortcutIds.Settings);
+        Setting("Manage Sessions", "bulk edit move duplicate delete identity sort filter", GlobalSettingsTarget.Sessions);
         Setting("Theme", "appearance color scheme", GlobalSettingsTarget.Theme);
         Setting("Terminal Font Family", "appearance typeface", GlobalSettingsTarget.FontFamily);
         Setting("Status Bar", "appearance interface bottom chrome", GlobalSettingsTarget.ShowStatusBar);

@@ -661,6 +661,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         // Re-assert regions on every activation: layout changes elsewhere in the window
         // (e.g. opening a second split group) can disturb the non-client drag region.
         Activated += (_, _) => UpdateTitleBarRegions();
+        // Changed reports minimize and restore; activation is the fallback for a restore.
+        AppWindow.Changed += (_, _) => UpdateWindowHidden();
+        Activated += (_, _) => UpdateWindowHidden();
         // The center/right blocks move without AppTitleBar itself resizing (e.g. the
         // MenuBar collapsing items), so track them individually too.
         TitleBarMenus.SizeChanged += (_, _) => UpdateTitleBarRegions();
@@ -1214,6 +1217,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         settings.SettingChanged += property => App.ApplySettingChange(property, source: settings);
         var page = new SettingsPage(settings);
         page.ConnectRequested += session => App.WindowFor(tab)?.ConnectSession(session);
+        // Settings can be dragged to another window, so its sessions go through the window hosting it now.
+        page.SessionsView.Owner = () => App.WindowFor(tab)?.ViewModel;
+        page.SessionsView.EditSession = session => App.WindowFor(tab) is { } owner
+            ? session.IsLocal
+                ? owner.OpenLocalProfileEditorAsync(session, session.FolderPath)
+                : owner.OpenSessionEditorAsync(session, session.FolderPath)
+            : Task.CompletedTask;
+        page.SessionsView.ConnectRequested += session => App.WindowFor(tab)?.ConnectSession(session);
         return page;
     }
 

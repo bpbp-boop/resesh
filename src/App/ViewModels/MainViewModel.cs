@@ -329,6 +329,47 @@ public sealed partial class MainViewModel : ObservableObject
         _environment.SessionsChanged(this);
     }
 
+    // ---- Bulk session changes (Settings > Sessions): one store write per action ----
+
+    /// <summary>Saves already-edited sessions. A session that stops using its own password
+    /// loses the stored copy, as it does when edited one at a time.</summary>
+    public void UpdateSessions(IReadOnlyList<Session> sessions)
+    {
+        if (sessions.Count == 0)
+            return;
+        var dropsPassword = sessions
+            .Where(session => UsesOwnPassword(_store.Find(session.Id)) && !UsesOwnPassword(session))
+            .ToList();
+        _store.UpdateMany(sessions);
+        foreach (var session in dropsPassword)
+            _credentials.Delete(session.Id);
+        RefreshSessions();
+        _environment.SessionsChanged(this);
+    }
+
+    public void DeleteSessions(IEnumerable<Session> sessions)
+    {
+        foreach (var removed in _store.RemoveMany(sessions.Select(session => session.Id)))
+            _credentials.Delete(removed.Id);
+        RebuildTree();
+        _environment.SessionsChanged(this);
+    }
+
+    /// <summary>Copies the sessions beside the originals, saved passwords included.</summary>
+    public IReadOnlyList<Session> DuplicateSessions(IEnumerable<Session> sessions)
+    {
+        var copies = SessionDuplicator.Duplicate(sessions, _store.Sessions);
+        _store.AddMany(copies.Select(pair => pair.Copy));
+        foreach (var (source, copy) in copies)
+        {
+            if (UsesOwnPassword(source) && _credentials.Read(source.Id) is { Length: > 0 } password)
+                _credentials.Write(copy.Id, password);
+        }
+        RebuildTree();
+        _environment.SessionsChanged(this);
+        return copies.Select(pair => pair.Copy).ToList();
+    }
+
     // ---- Folder CRUD (SSH and Local folders are separate namespaces) ----
 
     public void CreateFolder(string path, SessionKind kind = SessionKind.Ssh)

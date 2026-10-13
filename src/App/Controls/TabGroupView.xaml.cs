@@ -14,6 +14,9 @@ namespace Resesh.App.Controls;
 public interface ITabGroupHost
 {
     MainViewModel ViewModel { get; }
+
+    /// <summary>The window is minimized or hidden, so nothing in it is on screen.</summary>
+    bool IsWindowHidden { get; }
     void FocusGroup(TabGroupViewModel group);
     Task RequestCloseTabAsync(TabViewModel tab);
     Task RequestCloseManyAsync(IReadOnlyList<TabViewModel> tabs, string description);
@@ -658,17 +661,25 @@ public sealed partial class TabGroupView : UserControl
     }
 
     /// <summary>The selected tab's terminal is shown, every other one collapsed. Terminals draw
-    /// in-process, so a switch needs no hold or fade.</summary>
+    /// in-process, so a switch needs no hold or fade. A terminal nobody can see (a background
+    /// tab, a minimized window) also stops drawing: collapsing its parent does not tell it.</summary>
     public void SyncTerminalVisibility()
     {
         if (_terminalVisibilityDeferred)
             return;
         var selected = Group.SelectedTab?.View;
+        var windowHidden = _host.IsWindowHidden;
         foreach (var child in TerminalHost.Children)
         {
-            var visibility = ReferenceEquals(child, selected) ? Visibility.Visible : Visibility.Collapsed;
+            var shown = ReferenceEquals(child, selected);
+            var visibility = shown ? Visibility.Visible : Visibility.Collapsed;
             if (child.Visibility != visibility)
                 child.Visibility = visibility;
+            var paused = !shown || windowHidden;
+            if (child is Terminal.TerminalTabView terminal)
+                terminal.SetRenderingPaused(paused);
+            else if (child is Terminal.TerminalPlayerView player)
+                player.SetRenderingPaused(paused);
         }
     }
 
