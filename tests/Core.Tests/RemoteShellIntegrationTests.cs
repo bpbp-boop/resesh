@@ -101,9 +101,26 @@ public sealed class RemoteShellIntegrationTests
     {
         var bootstrap = TmuxPersistence.BootstrapCommand(Guid.Empty, 0);
         var attach = bootstrap[..bootstrap.IndexOf("else ", StringComparison.Ordinal)];
-        Assert.Contains("terminal-overrides '*:smcup@:rmcup@:indn@:Tc'", attach);
-        Assert.Contains("terminal-overrides '*:smcup@:rmcup@:indn@:Tc'", bootstrap[attach.Length..]);
-        Assert.Contains("terminal-overrides '*:smcup@:rmcup@:indn@:Tc'", TmuxPersistence.ResumeCommand(Guid.Empty, 0));
+        Assert.Contains("terminal-overrides '*:smcup@:rmcup@:indn@:Tc:", attach);
+        Assert.Contains("terminal-overrides '*:smcup@:rmcup@:indn@:Tc:", bootstrap[attach.Length..]);
+        Assert.Contains("terminal-overrides '*:smcup@:rmcup@:indn@:Tc:", TmuxPersistence.ResumeCommand(Guid.Empty, 0));
+    }
+
+    [Fact]
+    public void PersistentSessions_PassProgramFeaturesThroughTmux()
+    {
+        var bootstrap = TmuxPersistence.BootstrapCommand(Guid.Empty, 0);
+        var attach = bootstrap[..bootstrap.IndexOf("else ", StringComparison.Ordinal)];
+        foreach (var command in new[] { attach, bootstrap[attach.Length..], TmuxPersistence.ResumeCommand(Guid.Empty, 0) })
+        {
+            Assert.Contains(@":Smulx=\E[4::%p1%dm:Setulc=\E[58::2::", command);
+            Assert.Contains(@":Smol=\E[53m:Sync=\E[?2026%?%p1%{1}%-%tl%eh%;:Hls=\E]8;", command);
+            // tmux reads an argument ending in ';' as a command separator, so Sync is not last.
+            Assert.Contains(@"%p2%s\E\\:smxx=\E[9m' \; ", command);
+            // -q: an option an old tmux lacks must not stop the command list before the attach.
+            Assert.Contains(@"set -sq focus-events on \; ", command);
+            Assert.Contains(@"set -sq set-clipboard on \; ", command);
+        }
     }
 
     [Fact]
