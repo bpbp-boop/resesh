@@ -218,7 +218,7 @@ public sealed record Session
     public DetachedSessionAction DetachedSessions { get; init; } = DetachedSessionAction.Ask;
 
     /// <summary>Keep persistent shells alive with the Resesh session agent instead of tmux.
-    /// Turning it on allows the app to upload the agent to this host when it is missing or
+    /// Choosing it allows the app to upload the agent to this host when it is missing or
     /// out of date. Applies only with <see cref="Persistent"/>.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool SessionAgent { get; init; }

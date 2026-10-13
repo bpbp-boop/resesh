@@ -106,7 +106,7 @@ public sealed partial class SessionEditDialog : ContentDialog
                 // Editable ComboBox resets Text set before it loads; apply it after.
                 TerminalTypeBox.Loaded += (_, _) => TerminalTypeBox.Text = existing.TerminalType;
             PersistentToggle.IsOn = existing.Persistent;
-            SessionAgentToggle.IsOn = existing.SessionAgent;
+            PersistenceBackendBox.SelectedIndex = existing.SessionAgent ? 1 : 0;
             DetachedSessionsBox.SelectedIndex = (int)existing.DetachedSessions;
             ShellIntegrationBox.SelectedIndex = existing.ShellIntegration switch
             {
@@ -156,11 +156,13 @@ public sealed partial class SessionEditDialog : ContentDialog
         AuthBox.SelectionChanged += (_, _) => ClearFieldError(KeyBox, KeyError);
         if (DetachedSessionsBox.SelectedIndex < 0)
             DetachedSessionsBox.SelectedIndex = 0;
-        DetachedSessionsBox.IsEnabled = SessionAgentToggle.IsEnabled = PersistentToggle.IsOn;
+        if (PersistenceBackendBox.SelectedIndex < 0)
+            PersistenceBackendBox.SelectedIndex = 0;
+        DetachedSessionsBox.IsEnabled = PersistenceBackendBox.IsEnabled = PersistentToggle.IsOn;
         PersistentToggle.Toggled += (_, _) =>
         {
             ClearFieldError(PersistentToggle, PersistentError);
-            DetachedSessionsBox.IsEnabled = SessionAgentToggle.IsEnabled = PersistentToggle.IsOn;
+            DetachedSessionsBox.IsEnabled = PersistenceBackendBox.IsEnabled = PersistentToggle.IsOn;
         };
         if (initialTarget != SessionSettingsTarget.General)
             SectionBar.SelectedItem = TerminalSection;
@@ -502,7 +504,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             TelnetReport80x25 = telnet && TelnetReport80x25Toggle.IsOn,
             TelnetFixed80Columns = telnet && TelnetFixed80ColumnsToggle.IsOn,
             Persistent = !telnet && PersistentToggle.IsOn,
-            SessionAgent = !telnet && PersistentToggle.IsOn && SessionAgentToggle.IsOn,
+            SessionAgent = !telnet && PersistentToggle.IsOn && PersistenceBackendBox.SelectedIndex == 1,
             DetachedSessions = DetachedSessionsBox.SelectedIndex switch
             {
                 1 => DetachedSessionAction.StartNew,
