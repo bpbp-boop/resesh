@@ -155,6 +155,24 @@ public static class PresentationValues
                 _ => Rgb(0xE74856),
             };
 
+    /// <summary>The badge's symbol on a 10x10 grid: an exclamation mark, a question mark,
+    /// a tick or a cross. Null for the states that show a plain dot. A new geometry each
+    /// time, because one instance cannot belong to two tabs.</summary>
+    public static Geometry? AgentBadgeSymbol(AgentAttention attention)
+    {
+        var path = attention switch
+        {
+            AgentAttention.NeedsApproval => "M5,2 L5,5.6 M5,7.9 L5,8",
+            AgentAttention.NeedsAnswer => "M3.3,3.5 C3.3,1.5 6.7,1.5 6.7,3.5 C6.7,4.9 5,4.8 5,6 M5,7.9 L5,8",
+            AgentAttention.Complete => "M2.4,5.3 L4.3,7.1 L7.7,3.1",
+            AgentAttention.Failed => "M3,3 L7,7 M7,3 L3,7",
+            _ => null,
+        };
+        return path is null
+            ? null
+            : (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), path);
+    }
+
     public static Windows.UI.Color AgentBadgeColor(AgentAttention attention) => attention switch
     {
         AgentAttention.Working => Rgb(0x0078D4),

@@ -370,7 +370,9 @@ public sealed class TabViewModel : ObservableObject
         _ => "",
     };
 
-    public double AgentBadgeSize => AgentBadgeGlyph.Length == 0 ? 7 : 11;
+    /// <summary>A plain dot stays small. A symbol needs room: as much as fits beside an
+    /// agent icon without hiding it, and most of the slot when the badge stands alone.</summary>
+    public double AgentBadgeSize => AgentBadgeGlyph.Length == 0 ? 7 : ShowsProgramStatus ? 15 : 12;
 
     /// <summary>Names the agent, its state, and how we know — so a guess never reads like
     /// a report. Any label came off the wire and is already sanitized and truncated.</summary>
