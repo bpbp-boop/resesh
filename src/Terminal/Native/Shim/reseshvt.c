@@ -19,7 +19,7 @@ __declspec(dllimport) void __stdcall AcquireSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) uint64_t __stdcall GetTickCount64(void);
 
-#define RVT_ABI_VERSION 5
+#define RVT_ABI_VERSION 6
 
 // ---- events -------------------------------------------------------------------------------
 
@@ -98,6 +98,7 @@ typedef struct {
   uint64_t scroll_offset; // first viewport row within it
   uint64_t scroll_len;    // viewport rows
   uint8_t render_held;    // no frame published; keep polling until release or the 1s timeout
+  uint8_t mouse_shape;    // GhosttyMouseShape the program requested through OSC 22
 } RvtFrameInfo;
 
 typedef struct {
@@ -502,6 +503,9 @@ RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t row
   ghostty_render_state_begin_update(t->rs, t->term);
   ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &bar);
   info->alternate = alternate_active(t) ? 1 : 0;
+  GhosttyMouseShape shape = GHOSTTY_MOUSE_SHAPE_TEXT;
+  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_MOUSE_SHAPE, &shape);
+  info->mouse_shape = (uint8_t)shape;
   uint32_t old_hash = t->span_hash;
   collect_spans(t, rows);
   if (t->span_hash != old_hash) force_all = 1; // highlights moved: repaint every row

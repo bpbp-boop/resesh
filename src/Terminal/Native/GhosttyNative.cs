@@ -20,6 +20,7 @@ internal struct GhosttyFrameInfo
     public ulong ScrollOffset;
     public ulong ScrollLength;
     public byte RenderHeld; // no frame published; request another frame for release/timeout
+    public byte MouseShape; // GhosttyMouseShape the program requested through OSC 22
 }
 
 internal enum GhosttyEventKind
@@ -41,7 +42,7 @@ internal enum GhosttyEventKind
 internal static unsafe partial class GhosttyNative
 {
     private const string Library = "reseshvt";
-    private const int ExpectedAbi = 5;
+    private const int ExpectedAbi = 6;
 
     private static readonly Lazy<string?> LoadError = new(Load);
 
@@ -120,4 +121,6 @@ internal static unsafe partial class GhosttyNative
     public const int ModShift = 1, ModCtrl = 2, ModAlt = 4, ModSuper = 8;
     public const int KeyRelease = 0, KeyPress = 1, KeyRepeat = 2;
     public const int MousePress = 0, MouseRelease = 1, MouseMotion = 2;
+    /// <summary>GHOSTTY_MOUSE_SHAPE_TEXT: what a terminal reports until a program sends OSC 22.</summary>
+    public const byte MouseShapeText = 8;
 }

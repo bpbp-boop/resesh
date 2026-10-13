@@ -42,8 +42,40 @@ public static class TmuxPersistence
     /// which renders it; without it tmux quantizes every RGB colour to the 256-colour
     /// palette for xterm-256color clients. Plain `set -g` (not -ga): the private server has
     /// no user config to preserve, and overwrite is idempotent across re-asserts.
+    /// <para>
+    /// The rest are what tmux would otherwise strip from a program's output: Smulx/Setulc
+    /// (curly, dotted, dashed and colored underlines), Smol (overline), smxx (strikethrough),
+    /// Sync (synchronized output) and Hls (OSC 8 hyperlinks, tmux 3.4+). They are the
+    /// strings behind tmux's usstyle, overline, strikethrough, sync and hyperlinks terminal
+    /// features, copied from tty-features.c: "::" is this option's escape for a literal
+    /// colon. Overrides rather than terminal-features because the feature list of the
+    /// attaching client is already fixed when these commands run (seen on 3.3a, where
+    /// client_termfeatures never gained them), while overrides do reach it. A capability a
+    /// server does not know is ignored. Sync must not come last: tmux reads an argument
+    /// ending in ";" as a command separator.
+    /// </para>
     /// </summary>
-    private const string TerminalOverrides = "set -g terminal-overrides '*:smcup@:rmcup@:indn@:Tc'";
+    private const string TerminalOverrides =
+        "set -g terminal-overrides '*:smcup@:rmcup@:indn@:Tc"
+        + ":Smulx=\\E[4::%p1%dm"
+        + ":Setulc=\\E[58::2::%p1%{65536}%/%d::%p1%{256}%/%{255}%&%d::%p1%{255}%&%d%;m"
+        + ":Smol=\\E[53m"
+        + ":Sync=\\E[?2026%?%p1%{1}%-%tl%eh%;"
+        + ":Hls=\\E]8;%?%p1%l%tid=%p1%s%;;%p2%s\\E\\\\"
+        + ":smxx=\\E[9m'";
+
+    /// <summary>
+    /// What tmux otherwise withholds from programs in the pane: focus in/out reports, and
+    /// OSC 52 copies made by the program itself — set-clipboard defaults to "external",
+    /// which only lets tmux copy. -q: a tmux too old for an option must skip it, because an
+    /// error would stop the command list before attach-session.
+    /// </summary>
+    private const string ProgramFeatures =
+        "set -sq focus-events on \\; "
+        + "set -sq set-clipboard on";
+
+    /// <summary>Everything read when a client attaches, so it is asserted before each one.</summary>
+    private const string ClientSetup = TerminalOverrides + " \\; " + ProgramFeatures;
 
     /// <summary>
     /// tmux keeps OSC 0/2 from programs inside the pane to itself and emits a title to the
@@ -95,14 +127,14 @@ public static class TmuxPersistence
             // version (or with stale options) pick up the current value — the client's tty
             // capabilities are built at attach time.
             + $"{tmux} capture-pane -e -p -t ={name} -S -; "
-            + $"{exec}{tmux} {TerminalOverrides} \\; {TitleReporting} \\; attach-session -t ={name}; "
+            + $"{exec}{tmux} {ClientSetup} \\; {TitleReporting} \\; attach-session -t ={name}; "
             + "else "
             + $"{exec}{tmux} -f /dev/null start-server \\; "
             + $"set -g history-limit {HistoryLimit} \\; "
             + "set -g status off \\; "
             + "set -g prefix None \\; "
             + "set -s escape-time 25 \\; "
-            + $"{TerminalOverrides} \\; "
+            + $"{ClientSetup} \\; "
             + $"{TitleReporting} \\; "
             + (newShellCommand is not null ? "set -g allow-passthrough on \\; " : "")
             + $"new-session -s {name}"
@@ -176,7 +208,7 @@ public static class TmuxPersistence
         var target = $"={SessionName(id, slot)}";
         return " printf '\\033[2J\\033[3J\\033[H'; "
             + $"tmux -L {Socket} capture-pane -e -p -t {target} -S -; "
-            + $"exec tmux -L {Socket} {TerminalOverrides} \\; {TitleReporting} \\; attach-session -t {target}";
+            + $"exec tmux -L {Socket} {ClientSetup} \\; {TitleReporting} \\; attach-session -t {target}";
     }
 
     public static bool IsServerAbsent(SshCommandResult result) => !result.Success &&

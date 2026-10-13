@@ -28,10 +28,11 @@ public static class AgentDetection
         ["ohmypi"] = "pi",
         ["grok"] = "grok",
         ["grok-build"] = "grok",
+        ["opencode"] = "opencode",
+        ["opencode-ai"] = "opencode",
         // Recognized as agents, not named individually.
         ["aider"] = AgentIdentities.Generic,
         ["goose"] = AgentIdentities.Generic,
-        ["opencode"] = AgentIdentities.Generic,
         ["cursor-agent"] = AgentIdentities.Generic,
         ["amp"] = AgentIdentities.Generic,
         ["crush"] = AgentIdentities.Generic,

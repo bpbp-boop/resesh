@@ -16,6 +16,8 @@ public class AgentDetectionTests
     [InlineData("gemini", "gemini")]
     [InlineData("oh-my-pi", "pi")]
     [InlineData("grok", "grok")]
+    [InlineData("opencode", "opencode")]
+    [InlineData("npx opencode-ai", "opencode")]
     [InlineData("aider --model gpt", "agent")]
     public void RecognizesAgentCommands(string command, string expected) =>
         Assert.Equal(expected, AgentDetection.FromCommand(command));

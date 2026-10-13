@@ -102,7 +102,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private bool _isSplit;
     private bool _cursorBlinkOn = true;
     private int _lastCursorRow = -1;
-    private GhosttyFrameInfo _lastInfo;
+    private GhosttyFrameInfo _lastInfo = new() { MouseShape = GhosttyNative.MouseShapeText };
     private ushort _suppressCharactersForKey;
     private float _fontScale;
 
@@ -707,6 +707,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             if (blink) _blinkTimer.Start(); else { _blinkTimer.Stop(); _cursorBlinkOn = true; }
         }
         _lastInfo = info;
+        UpdatePointerCursor();
         if (cursorMoved)
             PlaceTextInput();
         UpdateScrollBar(info);
@@ -725,10 +726,18 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         if (!_renderer.Draw(_cells, Columns, Rows, _dirty, info, _cursorBlinkOn, _focused, _theme.Selection, full))
             return; // recovery requested a full frame; do not clear that request
         _forceFull = false;
+        if (_renderer.MarginColor != _marginColor)
+        {
+            _marginColor = _renderer.MarginColor;
+            var color = _marginColor ?? _theme.Background;
+            Background = new SolidColorBrush(ToColor(color));
+            _ruler.SetLaneBackground(color);
+        }
         _lastCursorRow = info.CursorVisible != 0 ? info.CursorY : -1;
     }
 
     private bool _cursorRowDirty;
+    private uint? _marginColor;
 
     /// <summary>Mirrors libghostty-vt's scroll state; it has no change event, so every frame
     /// compares against the last values.</summary>
@@ -790,6 +799,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         var b = _theme.Background;
         var luminance = ((b >> 16) & 0xFF) * 299 + ((b >> 8) & 0xFF) * 587 + (b & 0xFF) * 114;
         _ruler.SetTheme(dark: luminance < 128_000, _theme.Background, _theme.Selection);
+        _marginColor = null; // the next frame reapplies an extended margin over the new theme
         ApplyTextInputStyle();
     }
 
