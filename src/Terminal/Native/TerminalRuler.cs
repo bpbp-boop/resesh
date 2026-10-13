@@ -112,6 +112,16 @@ internal sealed class TerminalRuler : Grid
         Paint();
     }
 
+    /// <summary>Repaints the lane over a different background: a full-screen app's own color
+    /// while the terminal extends it into the margin, the theme's otherwise.</summary>
+    internal void SetLaneBackground(uint background)
+    {
+        if (background == _laneBackground)
+            return;
+        _laneBackground = background;
+        Paint();
+    }
+
     /// <summary>Calm presentation in split view: routine marks recede (more so in an unfocused
     /// group), failures and bookmarks stay strong; hovering the lane restores full detail.</summary>
     internal void SetPresentation(bool isSplit, bool isGroupFocused)

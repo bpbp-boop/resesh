@@ -34,10 +34,42 @@ public sealed unsafe partial class NativeTerminalSurface
             return;
         _hoverUri = hit?.Uri;
         _hoverSpans = hit?.Spans ?? [];
-        ProtectedCursor = InputSystemCursor.Create(_hoverUri is null ? InputSystemCursorShape.IBeam : InputSystemCursorShape.Hand);
+        UpdatePointerCursor();
         _forceFull = true; // re-read rows so the old underline goes and the new one shows
         RequestFrame();
     }
+
+    /// <summary>A hovered link shows the hand; otherwise the pointer is the shape the program
+    /// asked for through OSC 22 (the I-beam until it asks).</summary>
+    private void UpdatePointerCursor()
+    {
+        var shape = _hoverUri is not null ? InputSystemCursorShape.Hand : CursorShapeFor(_lastInfo.MouseShape);
+        if (shape == _pointerShape)
+            return;
+        _pointerShape = shape;
+        ProtectedCursor = InputSystemCursor.Create(shape);
+    }
+
+    private InputSystemCursorShape _pointerShape = InputSystemCursorShape.IBeam;
+
+    /// <summary>GhosttyMouseShape (the CSS cursor names OSC 22 carries) to the nearest system
+    /// cursor. Windows has no drag-and-drop or zoom cursors outside OLE, so those stay arrows.</summary>
+    private static InputSystemCursorShape CursorShapeFor(byte shape) => shape switch
+    {
+        2 => InputSystemCursorShape.Help,                                 // help
+        3 or 15 => InputSystemCursorShape.Hand,                           // pointer, grab
+        4 => InputSystemCursorShape.AppStarting,                          // progress
+        5 => InputSystemCursorShape.Wait,                                 // wait
+        6 or 7 => InputSystemCursorShape.Cross,                           // cell, crosshair
+        8 or 9 => InputSystemCursorShape.IBeam,                           // text, vertical-text
+        12 or 16 or 17 => InputSystemCursorShape.SizeAll,                 // move, grabbing, all-scroll
+        13 or 14 => InputSystemCursorShape.UniversalNo,                   // no-drop, not-allowed
+        18 or 21 or 23 or 28 => InputSystemCursorShape.SizeWestEast,      // col-, e-, w-, ew-resize
+        19 or 20 or 22 or 29 => InputSystemCursorShape.SizeNorthSouth,    // row-, n-, s-, ns-resize
+        24 or 27 or 30 => InputSystemCursorShape.SizeNortheastSouthwest,  // ne-, sw-, nesw-resize
+        25 or 26 or 31 => InputSystemCursorShape.SizeNorthwestSoutheast,  // nw-, se-, nwse-resize
+        _ => InputSystemCursorShape.Arrow, // default, context-menu, alias, copy, zoom-in, zoom-out
+    };
 
     /// <summary>Underlines the hovered link on rows just read.</summary>
     private void ApplyHoverLink()

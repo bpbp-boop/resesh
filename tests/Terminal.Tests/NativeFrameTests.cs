@@ -29,6 +29,20 @@ public sealed unsafe class NativeFrameTests
     }
 
     [WindowsNativeFact]
+    public void FrameReportsTheOsc22PointerShape()
+    {
+        using var terminal = new NativeTerminal();
+        terminal.ReadFrame();
+        Assert.Equal(GhosttyNative.MouseShapeText, terminal.Info.MouseShape);
+        terminal.Write("\u001b]22;pointer\u001b\\");
+        terminal.ReadFrame();
+        Assert.Equal(3, terminal.Info.MouseShape);
+        terminal.Write("\u001b]22;default\u0007");
+        terminal.ReadFrame();
+        Assert.Equal(0, terminal.Info.MouseShape);
+    }
+
+    [WindowsNativeFact]
     public void TrimmedNativeMarkersCanBeFreedAndReused()
     {
         using var terminal = new NativeTerminal();

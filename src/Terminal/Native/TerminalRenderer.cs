@@ -362,6 +362,13 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     /// <summary>Find highlight colors (terminal.html's search decorations).</summary>
     private const uint MatchColor = 0x515C6A, CurrentMatchColor = 0xF2CC60;
 
+    private bool _extendedMargin;
+
+    /// <summary>The one background the last column carries on every row while the margin is
+    /// extended, or null. The surface continues it across the ruler lane and scroll bar,
+    /// which sit outside the swap chain.</summary>
+    public uint? MarginColor { get; private set; }
+
     public bool Draw(TerminalCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
         bool cursorShown, bool focused, uint selectionColor, bool full)
     {
@@ -380,12 +387,44 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             SetBrush(Rgb(info.DefaultBackground));
             _dc.FillRectangle(new Rect(0, 0, PixelWidth, PixelHeight), _brush);
         }
+        // A full-screen app paints its own background on every cell, which leaves the margin
+        // around the grid as a frame in the theme color, so the edge cells extend into it
+        // instead. That applies on the alternate screen, and whenever both edge columns are
+        // painted on every row: tmux persistence keeps the outer alternate screen off, so a
+        // full-screen app inside it is only recognizable by what it paints. A shell keeps the
+        // theme color, so a colored prompt segment at column 0 does not bleed outward.
+        var extend = info.Alternate != 0;
+        uint? rightEdge = null;
+        if (rows > 0 && cols > 0)
+        {
+            var painted = true;
+            var uniform = true;
+            rightEdge = MarginBackgroundOf(cells[cols - 1]);
+            for (var y = 0; y < rows; y++)
+            {
+                var right = MarginBackgroundOf(cells[y * cols + cols - 1]);
+                painted &= right is not null && MarginBackgroundOf(cells[y * cols]) is not null;
+                uniform &= right == rightEdge;
+            }
+            extend |= painted;
+            if (!uniform)
+                rightEdge = null;
+        }
+        MarginColor = extend ? rightEdge : null;
+        if (extend != _extendedMargin)
+        {
+            // Starting or stopping the extension changes every row's margin.
+            _extendedMargin = extend;
+            full = true;
+        }
+        if (rows > 0 && (full || dirty[rows - 1] != 0))
+            DrawBottomMargin(cells + (rows - 1) * cols, cols, rows, info.DefaultBackground, extend);
         for (var y = 0; y < rows; y++)
         {
             if (dirty[y] == 0 && !full)
                 continue;
             dirty[y] = 0;
-            DrawRow(cells + y * cols, cols, y, info.DefaultBackground, selectionColor);
+            DrawRow(cells + y * cols, cols, y, info.DefaultBackground, selectionColor, extend);
         }
         if (cursorShown && info.CursorVisible != 0 && info.CursorY < rows && info.CursorX < cols)
             DrawCursor(cells + info.CursorY * cols + info.CursorX, info, focused);
@@ -411,11 +450,49 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         return true;
     }
 
-    private void DrawRow(TerminalCell* row, int cols, int y, uint defaultBackground, uint selectionColor)
+    /// <summary>The strip below the last row, which no row repaint covers. When extending,
+    /// each column continues the last row's background and the corners follow the end cells.</summary>
+    private void DrawBottomMargin(TerminalCell* row, int cols, int rows, uint defaultBackground, bool extend)
+    {
+        float top = rows * CellHeight, height = PixelHeight - top;
+        if (height <= 0)
+            return;
+        SetBrush(Rgb(defaultBackground));
+        _dc.FillRectangle(new Rect(0, top, PixelWidth, height), _brush);
+        if (!extend)
+            return;
+        for (var x = 0; x < cols;)
+        {
+            if (MarginBackgroundOf(row[x]) is not { } bg) { x++; continue; }
+            var start = x;
+            while (x < cols && MarginBackgroundOf(row[x]) == bg)
+                x++;
+            float left = start == 0 ? 0 : OriginX + start * CellWidth;
+            float right = x == cols ? PixelWidth : OriginX + x * CellWidth;
+            SetBrush(Rgb(bg));
+            _dc.FillRectangle(new Rect(left, top, right - left, height), _brush);
+        }
+    }
+
+    private void DrawRow(TerminalCell* row, int cols, int y, uint defaultBackground, uint selectionColor, bool extend)
     {
         float top = y * CellHeight;
         SetBrush(Rgb(defaultBackground));
         _dc.FillRectangle(new Rect(0, top, PixelWidth, CellHeight), _brush);
+        if (extend && cols > 0)
+        {
+            if (MarginBackgroundOf(row[0]) is { } leftBg)
+            {
+                SetBrush(Rgb(leftBg));
+                _dc.FillRectangle(new Rect(0, top, OriginX, CellHeight), _brush);
+            }
+            float gridRight = OriginX + cols * CellWidth;
+            if (gridRight < PixelWidth && MarginBackgroundOf(row[cols - 1]) is { } rightBg)
+            {
+                SetBrush(Rgb(rightBg));
+                _dc.FillRectangle(new Rect(gridRight, top, PixelWidth - gridRight, CellHeight), _brush);
+            }
+        }
 
         // Background runs: selection, then find matches, override the cell background.
         for (var x = 0; x < cols;)
@@ -563,6 +640,11 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         : (c.Flags & TerminalCell.Match) != 0 ? MatchColor
         : (c.Flags & TerminalCell.DefaultBackground) != 0 ? null
         : c.Background;
+
+    /// <summary>The background a cell lends to the margin beside it: the app's own color only,
+    /// so a selection or find match at the edge does not spill out of the grid.</summary>
+    private static uint? MarginBackgroundOf(in TerminalCell c) =>
+        (c.Flags & TerminalCell.DefaultBackground) != 0 ? null : c.Background;
 
     private bool IsEmojiCell(in TerminalCell c) =>
         IsEmojiPresentation(c.Codepoint) && _isEmojiFace[Lookup(c.Codepoint, 0).Face];
