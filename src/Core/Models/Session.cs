@@ -217,6 +217,10 @@ public sealed record Session
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public DetachedSessionAction DetachedSessions { get; init; } = DetachedSessionAction.Ask;
 
+    /// <summary>Whether Resesh may upload its session agent to this host.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public Ssh.AgentInstallChoice AgentInstall { get; init; } = Ssh.AgentInstallChoice.Ask;
+
     /// <summary>Shell integration for new terminals; disabled for new and legacy profiles.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public ShellIntegrationMode ShellIntegration { get; init; } = ShellIntegrationMode.Disabled;

@@ -472,6 +472,43 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         }
     }
 
+    /// <summary>
+    /// Runs a command on its own channel with <paramref name="input"/> as its standard
+    /// input, which is then closed: a script for <c>sh -s</c>, or a file for a command
+    /// that reads one. Null when the channel is unavailable or the command did not finish
+    /// within <paramref name="timeout"/>. Blocking.
+    /// </summary>
+    public SshCommandResult? RunCommand(string command, ReadOnlyMemory<byte> input, TimeSpan timeout)
+    {
+        try
+        {
+            var client = _client;
+            if (client?.IsConnected != true || _disposed)
+                return null;
+            using var deadline = new CancellationTokenSource(timeout);
+            using var cmd = client.CreateCommand(command);
+            cmd.CommandTimeout = timeout;
+            using var cancel = deadline.Token.Register(() => cmd.Dispose());
+            var execution = cmd.ExecuteAsync(deadline.Token);
+            // Read both streams while writing: a command that talks back before it has read
+            // everything must not block on a full window.
+            var output = Task.Run(() => new StreamReader(cmd.OutputStream, Encoding.UTF8).ReadToEnd(), CancellationToken.None);
+            var error = Task.Run(() => new StreamReader(cmd.ExtendedOutputStream, Encoding.UTF8).ReadToEnd(), CancellationToken.None);
+            using (var stdin = cmd.CreateInputStream())
+            {
+                stdin.Write(input.Span);
+            }
+            Task.WhenAll(execution, output, error).GetAwaiter().GetResult();
+            return new SshCommandResult(cmd.ExitStatus == 0, output.Result, error.Result);
+        }
+        catch (Exception e) when (e is SshException or IOException or ObjectDisposedException
+            or InvalidOperationException or OperationCanceledException)
+        {
+            TraceHook?.Invoke($"RunCommand with input failed: {e.GetType().Name}");
+            return null;
+        }
+    }
+
     /// <summary>Clean local disconnect: suppresses Closed, per the dispose-order plan.</summary>
     public void Disconnect()
     {

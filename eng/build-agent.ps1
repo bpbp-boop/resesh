@@ -51,6 +51,7 @@ $zmx = Sync-Source 'zmx' $pin.zmx 'zmx.patch'
 
 $env:ZIG_GLOBAL_CACHE_DIR = Join-Path (Resolve-Path $ZigRoot) 'zig-global-cache'
 $env:ZIG_LOCAL_CACHE_DIR = Join-Path $BuildRoot 'zig-local-cache'
+$binaries = [ordered]@{}
 foreach ($arch in $Architecture) {
     $prefix = Join-Path $BuildRoot "out-$arch"
     Push-Location $zmx
@@ -71,5 +72,11 @@ foreach ($arch in $Architecture) {
     Copy-Item (Join-Path $ghostty 'LICENSE') (Join-Path $out 'LICENSE.ghostty.txt') -Force
     $binary = Get-Item (Join-Path $out 'resesh-agent')
     $hash = (Get-FileHash $binary -Algorithm SHA256).Hash.ToLower()
+    $binaries[$arch] = [ordered]@{ file = "$arch/resesh-agent"; sha256 = $hash; size = $binary.Length }
     Write-Host "agent $version for $arch -> $out, $($binary.Length) bytes, sha256 $hash"
 }
+
+# What the app reads to know which agent it carries (AgentPackage). It lists the
+# architectures built by this run only, so build them all before packaging the app.
+$manifest = [ordered]@{ version = $version; binaries = $binaries } | ConvertTo-Json -Depth 4
+[IO.File]::WriteAllText((Join-Path $repo '.artifacts\agent\agent-manifest.json'), $manifest + "`n")

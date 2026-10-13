@@ -545,6 +545,20 @@ the status the command had just reported.
   foreground command and its directory (both read from `/proc`, so Linux only).
   `AgentPersistence.ParseSessions` reads it into the same `TmuxSessionInfo` that
   `PlanConnect` already takes. Nothing in the app calls it yet.
+- **Step 6, getting it onto the host: the mechanism is done, the question to the user is
+  not.** `AgentInstall` probes the host (`uname`, and the hash of an agent already there),
+  decides, and uploads over the open SSH connection to
+  `~/.local/share/resesh/<version>/resesh-agent`. The upload goes to a private temporary
+  file, is checked by hash (by size where the host has no hashing tool), is run once, and
+  only then moved into place. `build-agent.ps1` writes a manifest of what it built, and the
+  app project copies binaries and manifest to `Agent\` in its output. The per-host choice
+  (`AgentInstall` on a saved session: ask, always, never) is stored, but nothing shows the
+  question or calls any of this yet; that comes with the app backend.
+  Run against Ubuntu 24.04 through the app's own SSH code: a copy with one byte changed was
+  refused, the aarch64 binary arrived intact and was refused because it would not run,
+  neither left a file behind, and the right binary went up in 0.24 s and was then found
+  ready. Not tried: a home directory mounted `noexec`, a host with no hashing tool, a
+  login shell that is not a Bourne shell, and the installer package.
 - **Sockets must not stay in the default place.** The agent puts them under
   `/run/user/<uid>`, which systemd removes when the user's last login ends; the sessions
   would keep running with nothing able to reach them. The app will set `ZMX_DIR` to
