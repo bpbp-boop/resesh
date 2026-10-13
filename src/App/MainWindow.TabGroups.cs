@@ -32,6 +32,21 @@ public sealed partial class MainWindow
         Interop.WindowAlerts.BringToForeground(WinRT.Interop.WindowNative.GetWindowHandle(this));
     }
 
+    public bool IsWindowHidden { get; private set; }
+
+    /// <summary>A minimized or hidden window shows nothing, so its terminals stop drawing
+    /// until it is back on screen.</summary>
+    private void UpdateWindowHidden()
+    {
+        var hidden = !AppWindow.IsVisible
+            || AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized };
+        if (hidden == IsWindowHidden)
+            return;
+        IsWindowHidden = hidden;
+        foreach (var groupView in _groupViews.Values)
+            groupView.SyncTerminalVisibility();
+    }
+
     public void OpenWelcomeIfNeeded()
     {
         if (App.Settings.Current.OnboardingCompleted == false)

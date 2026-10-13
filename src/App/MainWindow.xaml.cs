@@ -661,6 +661,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         // Re-assert regions on every activation: layout changes elsewhere in the window
         // (e.g. opening a second split group) can disturb the non-client drag region.
         Activated += (_, _) => UpdateTitleBarRegions();
+        // Changed reports minimize and restore; activation is the fallback for a restore.
+        AppWindow.Changed += (_, _) => UpdateWindowHidden();
+        Activated += (_, _) => UpdateWindowHidden();
         // The center/right blocks move without AppTitleBar itself resizing (e.g. the
         // MenuBar collapsing items), so track them individually too.
         TitleBarMenus.SizeChanged += (_, _) => UpdateTitleBarRegions();
