@@ -1744,4 +1744,8 @@ a.card:hover .card__name::after { content: " →"; color: var(--accent); }
 .cmp--ref td { color: var(--ink2); }
 .cmp--ref .ref__name { color: var(--ink); white-space: nowrap; }
 .cmp--ref td:last-child { width: 26%; color: var(--ink3); }
+/* shortcuts.html: three columns, and a key column wide enough for two chords. */
+.cmp--keys { min-width: 720px; }
+.cmp--keys tbody th[scope="row"] { width: 270px; min-width: 190px; line-height: 2; }
+.cmp--keys td:last-child { width: 44%; }
 .card .termblock { margin-top: 6px; font-size: 12.5px; }

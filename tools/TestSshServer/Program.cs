@@ -4,19 +4,23 @@ using FxSsh.Algorithms;
 using FxSsh.Services;
 
 // Throwaway local SSH echo server for exercising the Sessions terminal end-to-end.
-// Listens on loopback:2200, accepts test/test123, echoes typed lines, and understands:
+// Listens on loopback:2200 (or the port given as the first argument), accepts test/test123,
+// echoes typed lines, and understands:
 //   big   -> streams ~10 MB of numbered lines (throughput/batching test)
 //   slow  -> ten ticks over ~6 s, first after 1.5 s (background-tab activity test)
 //   codex -> emits Codex's default animated OSC 2 title (SSH agent-icon test)
 //   shell -> emits a stock shell prompt OSC 2 title (agent-exit test)
 //   bye   -> closes the channel from the server side
 // Window-change requests are acknowledged in-band so resize plumbing is observable.
+// It also carries direct-tcpip channels, so one instance can be the jump host or the tunnel
+// end for another: run a second copy on another port and set the first as its jump host.
 
 // Persist the host key across restarts so the client's known_hosts entry stays valid.
-var keyPath = Path.Combine(AppContext.BaseDirectory, "hostkey.txt");
+var port = args.Length > 0 && int.TryParse(args[0], out var requested) ? requested : 2200;
+var keyPath = Path.Combine(AppContext.BaseDirectory, port == 2200 ? "hostkey.txt" : $"hostkey-{port}.txt");
 var hostKey = File.Exists(keyPath) ? new RsaKey(256, File.ReadAllText(keyPath)) : new RsaKey(256, null);
 File.WriteAllText(keyPath, hostKey.ExportKey());
-var server = new SshServer(new StartingInfo(System.Net.IPAddress.Loopback, 2200, "SSH-2.0-SessionsTestServer"));
+var server = new SshServer(new StartingInfo(System.Net.IPAddress.Loopback, port, "SSH-2.0-SessionsTestServer"));
 server.AddHostKey("rsa-sha2-256", hostKey.ExportKey());
 server.ExceptionRaised += (_, ex) => Console.WriteLine($"[server] exception: {ex.Message}");
 
@@ -41,6 +45,43 @@ server.ConnectionAccepted += (_, session) =>
             case ConnectionService connection:
                 connection.PtyReceived += (_, pty) =>
                     Console.WriteLine($"[server] pty {pty.Terminal} {pty.WidthChars}x{pty.HeightRows}");
+                connection.TcpForwardRequest += (_, e) =>
+                {
+                    Console.WriteLine($"[server] direct-tcpip to {e.Host}:{e.Port}");
+                    var forwardChannel = e.Channel;
+                    var socket = new System.Net.Sockets.Socket(
+                        System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+                    try
+                    {
+                        socket.Connect(e.Host, e.Port);
+                    }
+                    catch (System.Net.Sockets.SocketException ex)
+                    {
+                        // FxSsh has already confirmed the channel; closing it is the refusal.
+                        Console.WriteLine($"[server] direct-tcpip failed: {ex.Message}");
+                        socket.Dispose();
+                        _ = Task.Run(() => forwardChannel.SendClose());
+                        return;
+                    }
+                    forwardChannel.DataReceived += (_, data) =>
+                    {
+                        try { socket.Send(data.Span); }
+                        catch (Exception ex) when (ex is System.Net.Sockets.SocketException or ObjectDisposedException) { }
+                    };
+                    forwardChannel.CloseReceived += (_, _) => socket.Dispose();
+                    _ = Task.Run(() =>
+                    {
+                        var buffer = new byte[16 * 1024];
+                        try
+                        {
+                            int read;
+                            while ((read = socket.Receive(buffer)) > 0)
+                                forwardChannel.SendData(buffer.AsSpan(0, read).ToArray());
+                        }
+                        catch (Exception ex) when (ex is System.Net.Sockets.SocketException or ObjectDisposedException) { }
+                        try { forwardChannel.SendClose(); } catch (Exception) { }
+                    });
+                };
                 connection.CommandOpened += (_, e) =>
                 {
                     if (e.ShellType != "shell")
@@ -161,5 +202,5 @@ server.ConnectionAccepted += (_, session) =>
 };
 
 server.Start();
-Console.WriteLine("[server] listening on 127.0.0.1:2200 (test/test123). Ctrl+C to stop.");
+Console.WriteLine($"[server] listening on 127.0.0.1:{port} (test/test123). Ctrl+C to stop.");
 await Task.Delay(Timeout.Infinite);

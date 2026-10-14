@@ -196,6 +196,21 @@ public sealed record Session
     /// <summary>Legacy per-session encryption hint. The key registry now inspects the file.</summary>
     public bool PassphraseRequired { get; init; }
 
+    /// <summary>Another SSH session this one is reached through (ProxyJump). The jump logs
+    /// in with its own settings and may have a jump of its own. A reference by id, like
+    /// <see cref="IdentityId"/>: a missing session fails the connect with a clear message.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? JumpHostId { get; init; }
+
+    /// <summary>A proxy between this machine and <see cref="Host"/>. Ignored while
+    /// <see cref="JumpHostId"/> is set: the jump is then what reaches the host.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProxySettings? Proxy { get; init; }
+
+    /// <summary>Port forwards started with the connection. SSH sessions only.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<Tunnel>? Tunnels { get; init; }
+
     public string TerminalType { get; init; } = "xterm-256color";
 
     /// <summary>Telnet text encoding. Auto accepts UTF-8 and falls back to CP437 for BBS art.</summary>

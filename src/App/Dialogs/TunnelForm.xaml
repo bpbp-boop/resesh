@@ -1,0 +1,82 @@
+<UserControl
+    x:Class="Resesh.App.Dialogs.TunnelForm"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <StackPanel Spacing="8">
+        <Grid ColumnSpacing="8" RowSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="110" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <ComboBox
+                x:Name="KindBox"
+                Grid.Row="0"
+                Grid.Column="0"
+                Header="Add a tunnel"
+                SelectedIndex="0"
+                AutomationProperties.AutomationId="TunnelKindBox"
+                SelectionChanged="KindBox_SelectionChanged"
+                HorizontalAlignment="Stretch">
+                <ComboBoxItem Content="Local" />
+                <ComboBoxItem Content="Remote" />
+                <ComboBoxItem Content="Dynamic (SOCKS)" />
+            </ComboBox>
+            <TextBox
+                x:Name="BindAddressBox"
+                Grid.Row="0"
+                Grid.Column="1"
+                Header="Listen on"
+                Text="127.0.0.1"
+                AutomationProperties.AutomationId="TunnelBindAddressBox" />
+            <NumberBox
+                x:Name="BindPortBox"
+                Grid.Row="0"
+                Grid.Column="2"
+                Header="Port"
+                Minimum="1"
+                Maximum="65535"
+                AutomationProperties.AutomationId="TunnelBindPortBox" />
+            <TextBox
+                x:Name="DestinationHostBox"
+                Grid.Row="1"
+                Grid.Column="0"
+                Grid.ColumnSpan="2"
+                Header="Send to host"
+                AutomationProperties.AutomationId="TunnelDestinationHostBox" />
+            <NumberBox
+                x:Name="DestinationPortBox"
+                Grid.Row="1"
+                Grid.Column="2"
+                Header="Port"
+                Minimum="1"
+                Maximum="65535"
+                AutomationProperties.AutomationId="TunnelDestinationPortBox" />
+            <Button
+                x:Name="AddButton"
+                Grid.Row="1"
+                Grid.Column="3"
+                Content="Add"
+                VerticalAlignment="Bottom"
+                AutomationProperties.AutomationId="TunnelAddButton"
+                Click="Add_Click" />
+        </Grid>
+        <TextBlock
+            x:Name="ErrorText"
+            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+            TextWrapping="Wrap"
+            Visibility="Collapsed"
+            AutomationProperties.LiveSetting="Polite" />
+        <TextBlock
+            x:Name="HintText"
+            Style="{ThemeResource CaptionTextBlockStyle}"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            TextWrapping="Wrap" />
+    </StackPanel>
+</UserControl>

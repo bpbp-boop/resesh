@@ -21,6 +21,9 @@ public sealed partial class MainViewModel
     public bool ShowManageRemoteSessions => ActiveTab is { IsPlayback: false, IsAppPage: false } tab
         && tab.Capabilities.RemoteSession && tab.Session.Persistent;
 
+    public bool ShowManageTunnels => ActiveTab is { IsPlayback: false, IsAppPage: false } tab
+        && tab.Session.Kind == SessionKind.Ssh;
+
     public bool ShowEndRemoteSession => ActiveTab is not { } tab || tab.Capabilities.RemoteSession;
 
     public string PinTabTitle => ActiveTab?.IsPinned == true ? "Unpin Tab" : "Pin Tab";
@@ -29,7 +32,7 @@ public sealed partial class MainViewModel
 
     private IEnumerable<IRelayCommand> TabCommands =>
     [
-        ReconnectCommand, DisconnectCommand, SendBreakCommand, ManageRemoteSessionsCommand,
+        ReconnectCommand, DisconnectCommand, SendBreakCommand, ManageRemoteSessionsCommand, ManageTunnelsCommand,
         EndRemoteSessionCommand, CloneTabCommand, TogglePinCommand, EditSessionSettingsCommand,
         CloseTabCommand, SplitRightCommand, SplitDownCommand, MoveTabLeftCommand, MoveTabRightCommand,
         ToggleFilePaneCommand, ToggleCommandsPanelCommand, ToggleCompletionNotificationCommand,
@@ -44,6 +47,7 @@ public sealed partial class MainViewModel
         OnPropertyChanged(nameof(ActiveStopVerb));
         OnPropertyChanged(nameof(ShowSendBreak));
         OnPropertyChanged(nameof(ShowManageRemoteSessions));
+        OnPropertyChanged(nameof(ShowManageTunnels));
         OnPropertyChanged(nameof(ShowEndRemoteSession));
         OnPropertyChanged(nameof(PinTabTitle));
         OnPropertyChanged(nameof(CloseTabTitle));
@@ -82,6 +86,15 @@ public sealed partial class MainViewModel
     [RelayCommand(CanExecute = nameof(CanManageRemoteSessions),
         AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
     private Task ManageRemoteSessionsAsync(TabViewModel? tab) => Services.ManageRemoteSessionsAsync(Target(tab)!);
+
+    [RelayCommand(CanExecute = nameof(CanManageTunnels),
+        AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
+    private Task ManageTunnelsAsync(TabViewModel? tab) => Services.ManageTunnelsAsync(Target(tab)!);
+
+    /// <summary>Tunnels ride a live SSH connection, so there is nothing to manage without one.</summary>
+    private bool CanManageTunnels(TabViewModel? tab) =>
+        Target(tab) is { IsLocked: false, IsPlayback: false, IsAppPage: false, State: TabConnectionState.Connected } target
+        && target.Session.Kind == SessionKind.Ssh && HasTerminal(target);
 
     private bool CanManageRemoteSessions(TabViewModel? tab) =>
         Target(tab) is { IsLocked: false, IsPlayback: false, IsAppPage: false } target

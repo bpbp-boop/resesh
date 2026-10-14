@@ -1051,3 +1051,58 @@ timestamps (`GhosttyLineTimes`), and command marks during rewind and playback.
   13px) stays soft.
 - The mapping lives in `SystemFontFallback` with no device dependency, so it is unit-tested
   against the machine's installed fonts.
+
+## 2026-10-14 - Jump hosts, proxies and tunnels
+- A jump host is a reference to another saved SSH session (`Session.JumpHostId`), not a
+  host string. Each hop logs in through the same login resolver as any session (own
+  credentials, identity, folder identity, prompt) and has its own host-key decision, stored
+  under its real host and port. Chains resolve at connect time (`JumpRoute`) and refuse a
+  missing session, a non-SSH session, a loop, or more than eight hops. Deleting a session
+  leaves the sessions behind it pointing at nothing; they fail to connect with a message
+  naming the missing jump, and the editor shows "(deleted session)".
+- Mechanism: each jump opens an SSH.NET `ForwardedPortLocal` on 127.0.0.1 with port 0
+  (the system picks one) to the next host, and the next connection dials that port.
+  SSH.NET has no public way to run a handshake over a direct-tcpip channel; the
+  alternative was reflection into its session internals. The cost of the public route: the
+  loopback port stays open for the life of the connection, so another local process can
+  reach the next host's SSH port through the jump. It still has to authenticate there.
+- Every connection opens its own chain (terminal, file pane, session manager) and closes
+  it with itself. Sharing one chain between a tab's connections would save logins on the
+  jump but tie their lifetimes together; the file pane reuses the tab's resolved hop
+  credentials instead, so it does not prompt again.
+- The forwarded port always accepts, so the usual TCP preflight proves nothing behind a
+  jump. `SshJumpChain.Probe` connects through it and waits for the first byte of the
+  server's greeting: a closed connection means the jump could not reach the host (with the
+  jump's own reason when it gave one), and 20 seconds of silence is a failure. Without it
+  an unreachable host took the full two-minute handshake timeout to report.
+- Prompts go hop by hop: each host's login is asked for when the connect reaches it
+  (`resolveLogin`, marshalled to the UI thread like the host-key decision), then its host
+  key, then the next host. A jump that is unreachable or refuses its login stops before
+  anything is typed for the hosts behind it. Within one host the login comes before the
+  key, as on a direct connect: SSH.NET needs the credential before it dials. Jump prompts
+  are titled with their place on the route ("Jump host 1 of 2: bastion") and say which
+  session they are on the way to; the host-key dialog carries the same line. One dialog
+  for the whole route was rejected: later keys are not known until earlier hops are in,
+  and a host-key decision should not share a button with a password form. The file pane
+  and session manager still resolve the route up front; they reuse what the tab resolved.
+- A failure on the way carries `SshSessionException.JumpSessionId` and a message that names
+  the jump. The "update this identity's password" offer only follows a rejection by the
+  session's own host.
+- Telnet sessions can use a jump host: the chain carries the TCP connection and the telnet
+  session owns and closes it. The status line says it is unencrypted past the jump.
+- Proxies (SOCKS5, SOCKS4, HTTP CONNECT) use SSH.NET's built-in support, per session, with
+  the password in Credential Manager under `Resesh:Proxy:<session id>`. A session uses a
+  jump host or a proxy, never both; a jump host may itself be reached through a proxy.
+  SOCKS5 is handed the host name, so names only the proxy can resolve work (test-pinned).
+  Telnet has no proxy support. Backups do not carry proxy passwords.
+- Tunnels (local, remote, dynamic) are saved per session and belong to the terminal tab's
+  connection. They start after authentication and before the shell opens, so their notices
+  are not mixed into shell output; a tunnel that cannot start (port in use, refused by the
+  server) is reported and never fails the connect. A second tab of the same session finds
+  the ports taken and says so. The Tunnels dialog adds, stops and restarts them on a live
+  connection, optionally saving new ones with the session.
+- Explorer access through SSHFS-Win is refused for a session behind a jump host or proxy:
+  `sshfs.exe` dials the host itself. The file pane works.
+- Importers: OpenSSH `ProxyJump` (the last hop of a chain) and PuTTY's SSH proxy link to a
+  session of that name or host when one exists; PuTTY SOCKS and HTTP proxies import without
+  their passwords. Backup import remaps jump references with the session ids.

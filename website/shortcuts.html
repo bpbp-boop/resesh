@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>keyboard shortcuts — resesh</title>
+<link rel="canonical" href="https://resesh.net/shortcuts.html">
+<meta name="description" content="Every keyboard shortcut in the resesh terminal: the command palette, quick connect, tabs, split view, copy and paste, find, scrollback, command navigation, zoom and the session tree, with the keys that are left to the shell.">
+<link rel="icon" href="assets/favicon.ico">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script>
+  /* Applied before first paint so a stored light choice never flashes dark. */
+  (function () {
+    try {
+      var t = localStorage.getItem("resesh-theme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
+<script src="theme.js" defer></script>
+</head>
+<body>
+
+<header class="site-header">
+  <a class="logo" href="index.html">
+    <span class="logo__tile">./</span>
+    <span class="logo__word">resesh</span>
+  </a>
+  <nav class="nav">
+    <a class="nav__link" href="features.html">features</a>
+    <a class="nav__link" href="compare.html">compare</a>
+    <a class="nav__link nav__link--current" href="#table">shortcuts</a>
+    <a class="nav__link" href="https://github.com/bpbp-boop/resesh">github</a>
+    <button class="theme-toggle" type="button" data-theme-toggle>light</button>
+    <a class="btn-fill btn-fill--sm" href="https://github.com/bpbp-boop/resesh/releases">download</a>
+  </nav>
+</header>
+
+<section class="container page-head">
+  <div class="breadcrumb"><a href="index.html">./resesh</a> <span class="breadcrumb__sep">/</span> shortcuts</div>
+  <h1 class="h1-features">keyboard shortcuts</h1>
+  <p class="page-head__lede">every shortcut in resesh, grouped by where it works. the same list is in the app on <span class="key">ctrl shift /</span>, where you can search it.</p>
+  <div class="chips">
+    <span class="chip">ctrl shift p runs any action by name</span>
+    <span class="chip">plain ctrl and a letter stays with the shell</span>
+    <span class="chip">no ctrl alt chords</span>
+  </div>
+</section>
+
+<section class="section section--alt" id="table">
+  <div class="container list">
+    <p class="legend">application, tab and split view shortcuts work anywhere in the window, including while a terminal has focus. terminal shortcuts need a focused terminal, and session tree shortcuts need the focus in the tree. keys are named as on a us keyboard. the list in the app shows what your layout prints on them.</p>
+
+    <div class="cmp-wrap" tabindex="0" role="region" aria-label="Keyboard shortcuts">
+      <table class="cmp cmp--ref cmp--keys">
+        <thead>
+          <tr><th scope="col" class="cmp__corner">keys</th><th scope="col">action</th><th scope="col">notes</th></tr>
+        </thead>
+        <tbody>
+          <tr class="cmp__group"><th scope="rowgroup" colspan="3">application</th></tr>
+          <tr><th scope="row"><span class="key">ctrl shift p</span></th><td class="ref__name">command palette</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift k</span></th><td class="ref__name">quick connect</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift t</span></th><td class="ref__name">new local terminal</td><td>opens the default local profile.</td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift n</span></th><td class="ref__name">new window</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl ,</span></th><td class="ref__name">settings</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift /</span></th><td class="ref__name">keyboard shortcuts</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift h</span></th><td class="ref__name">search command history</td><td>commands and output from every session, when history is on.</td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift b</span></th><td class="ref__name">show or hide sessions pane</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl f</span></th><td class="ref__name">filter sessions</td><td>outside the terminal. in the terminal, ctrl f goes to the shell.</td></tr>
+          <tr><th scope="row"><span class="key">f11</span></th><td class="ref__name">full screen</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr class="cmp__group"><th scope="rowgroup" colspan="3">tabs</th></tr>
+          <tr><th scope="row"><span class="key">ctrl tab</span></th><td class="ref__name">next tab</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift tab</span></th><td class="ref__name">previous tab</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl 1</span> to <span class="key">ctrl 8</span></th><td class="ref__name">go to tab 1–8</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl 9</span></th><td class="ref__name">go to last tab</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift w</span> or <span class="key">ctrl f4</span></th><td class="ref__name">close tab</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift d</span></th><td class="ref__name">clone tab</td><td>opens the same session in a new tab.</td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift r</span></th><td class="ref__name">reconnect or restart tab</td><td>when the tab is disconnected or its shell has exited.</td></tr>
+          <tr><th scope="row"><span class="key">ctrl break</span></th><td class="ref__name">send break</td><td>telnet tabs. console servers pass it to the device as a serial break, for a boot interrupt or password recovery.</td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift pgup</span></th><td class="ref__name">move tab left</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift pgdn</span></th><td class="ref__name">move tab right</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift e</span></th><td class="ref__name">show or hide file pane</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr class="cmp__group"><th scope="rowgroup" colspan="3">split view</th></tr>
+          <tr><th scope="row"><span class="key">ctrl shift \</span></th><td class="ref__name">split right</td><td>moves the tab to a new group on the right.</td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift -</span></th><td class="ref__name">split down</td><td>moves the tab to a new group below.</td></tr>
+          <tr><th scope="row"><span class="key">alt ←</span></th><td class="ref__name">focus group on the left</td><td>when the window is split. otherwise the key goes to the shell.</td></tr>
+          <tr><th scope="row"><span class="key">alt →</span></th><td class="ref__name">focus group on the right</td><td>when the window is split. otherwise the key goes to the shell.</td></tr>
+          <tr><th scope="row"><span class="key">alt ↑</span></th><td class="ref__name">focus group above</td><td>when the window is split. otherwise the key goes to the shell.</td></tr>
+          <tr><th scope="row"><span class="key">alt ↓</span></th><td class="ref__name">focus group below</td><td>when the window is split. otherwise the key goes to the shell.</td></tr>
+          <tr class="cmp__group"><th scope="rowgroup" colspan="3">terminal</th></tr>
+          <tr><th scope="row"><span class="key">ctrl shift c</span> or <span class="key">ctrl insert</span></th><td class="ref__name">copy</td><td>when text is selected. otherwise the key goes to the shell.</td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift v</span> or <span class="key">shift insert</span></th><td class="ref__name">paste</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift a</span></th><td class="ref__name">select all</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift f</span></th><td class="ref__name">find</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift l</span></th><td class="ref__name">clear scrollback</td><td>keeps the current line. ctrl l still clears only the screen.</td></tr>
+          <tr><th scope="row"><span class="key">shift pgup</span></th><td class="ref__name">scroll up one page</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">shift pgdn</span></th><td class="ref__name">scroll down one page</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift home</span></th><td class="ref__name">scroll to top</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift end</span></th><td class="ref__name">scroll to bottom</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift ↑</span></th><td class="ref__name">previous command</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift ↓</span></th><td class="ref__name">next command</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift o</span></th><td class="ref__name">show or hide commands panel</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl shift m</span></th><td class="ref__name">toggle bookmark</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl =</span> or <span class="key">ctrl num +</span></th><td class="ref__name">zoom in</td><td>also ctrl and the mouse wheel. zoom applies to this tab only.</td></tr>
+          <tr><th scope="row"><span class="key">ctrl -</span> or <span class="key">ctrl num -</span></th><td class="ref__name">zoom out</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">ctrl 0</span> or <span class="key">ctrl num 0</span></th><td class="ref__name">reset zoom</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr class="cmp__group"><th scope="rowgroup" colspan="3">session tree</th></tr>
+          <tr><th scope="row"><span class="key">enter</span></th><td class="ref__name">connect or open</td><td>opens every selected session.</td></tr>
+          <tr><th scope="row"><span class="key">f2</span></th><td class="ref__name">rename folder or edit session</td><td><span class="cmp__mark cmp__mark--no" aria-hidden="true">—</span></td></tr>
+          <tr><th scope="row"><span class="key">delete</span></th><td class="ref__name">delete</td><td>asks before deleting.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="note">if you forget one, <span class="key">ctrl shift p</span> opens the command palette, where you can run an action by name.</p>
+  </div>
+</section>
+
+<section class="section" id="shell">
+  <div class="container nongoals">
+    <div class="head-block">
+      <h2 class="h2-sm">left to the shell</h2>
+      <p class="lede lede--tight">keys resesh does not take, so the programs you run still get them.</p>
+    </div>
+    <div class="nongoals__list">
+      <div class="nongoal">
+        <span class="nongoal__title">plain ctrl and a letter</span>
+        <span class="nongoal__body">ctrl w, ctrl r, the tmux prefix ctrl b and the rest always reach the shell. this is why most shortcuts here add shift.</span>
+      </div>
+      <div class="nongoal">
+        <span class="nongoal__title">ctrl alt</span>
+        <span class="nongoal__body">no shortcut uses it. on many european layouts ctrl alt is altgr, which types characters.</span>
+      </div>
+      <div class="nongoal">
+        <span class="nongoal__title">alt and an arrow in an unsplit window</span>
+        <span class="nongoal__body">resesh takes these only to move between split groups. with one group they go to the shell.</span>
+      </div>
+      <div class="nongoal">
+        <span class="nongoal__title">ctrl shift c with nothing selected</span>
+        <span class="nongoal__body">copy needs a selection. without one the key goes to the shell, and so does ctrl insert.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section section--alt">
+  <div class="container cta">
+    <div class="head-block">
+      <h2 class="h2-lg">try the beta</h2>
+      <p class="lede lede--narrow">free and open source. x64 and arm64 installers, or a portable zip. windows 10 21h2 or newer.</p>
+    </div>
+    <div class="btn-row">
+      <a class="btn-fill btn-fill--cta" href="https://github.com/bpbp-boop/resesh/releases"><span class="btn-prompt">$</span> download resesh</a>
+      <a class="btn-outline btn-outline--cta" href="features.html">every feature →</a>
+    </div>
+  </div>
+</section>
+
+<footer class="site-footer">
+  <div class="site-footer__brand">
+    <span class="logo__tile logo__tile--sm">./</span>
+    <span>resesh · beta · windows</span>
+  </div>
+  <div class="site-footer__links">
+    <a href="features.html">features</a>
+    <a href="compare.html">compare</a>
+    <a href="osc.html">osc sequences</a>
+    <a href="https://github.com/bpbp-boop/resesh">github</a>
+    <a href="https://github.com/bpbp-boop/resesh/issues">issues</a>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1423,6 +1423,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             ViewModel.AddSession(result, dialog.Password);
         else
             ViewModel.UpdateSession(result, dialog.Password);
+        dialog.SaveProxyPassword();
     }
 
     private Task<string?> PromptAsync(string title, string placeholder, string initial) =>

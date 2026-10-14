@@ -20,6 +20,7 @@ public sealed class SftpSession : IDisposable
 
     private readonly KnownHostsStore _knownHosts;
     private SftpClient? _client;
+    private SshJumpChain? _jumpChain;
     private volatile bool _disposed;
 
     public SftpSession(KnownHostsStore knownHosts)
@@ -38,18 +39,39 @@ public sealed class SftpSession : IDisposable
     /// instead of raising a second surprise dialog.
     /// </summary>
     public void Connect(Session session, string? secret,
-        Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder = null)
+        Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder = null,
+        IReadOnlyList<SshHop>? jumps = null,
+        string? proxyPassword = null)
     {
         if (_client is not null)
             throw new InvalidOperationException("Session already used; create a new instance per connection.");
 
-        SshConnectionFactory.PreflightTcp(session.Host, session.Port, TimeSpan.FromSeconds(10));
+        // Its own jump connections, like its own SSH connection. Their keys were accepted
+        // through the terminal too, so nothing here asks.
+        var via = jumps is { Count: > 0 }
+            ? SshJumpChain.Open(jumps, session.Host, session.Port, _knownHosts, interactiveResponder: interactiveResponder)
+            : null;
+        try
+        {
+            ConnectClient(session, secret, interactiveResponder, via, proxyPassword);
+        }
+        catch
+        {
+            via?.Dispose();
+            throw;
+        }
+        _jumpChain = via;
+    }
+
+    private void ConnectClient(Session session, string? secret,
+        Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder,
+        SshJumpChain? via, string? proxyPassword)
+    {
+        SshConnectionFactory.Preflight(session, via, TimeSpan.FromSeconds(10));
 
         var auth = SshConnectionFactory.BuildAuthMethods(session, secret, interactiveResponder);
-        var connectionInfo = new ConnectionInfo(session.Host, session.Port, session.Username, auth)
-        {
-            Timeout = TimeSpan.FromSeconds(30),
-        };
+        var connectionInfo = SshConnectionFactory.CreateConnectionInfo(
+            session, auth, TimeSpan.FromSeconds(30), via, proxyPassword);
 
         var client = new SftpClient(connectionInfo)
         {
@@ -85,7 +107,7 @@ public sealed class SftpSession : IDisposable
             client.Dispose();
             if (hostKeyFailure is not null)
                 throw hostKeyFailure;
-            throw SshConnectionFactory.Classify(ex);
+            throw SshConnectionFactory.Classify(ex, session, via);
         }
         finally
         {
@@ -194,6 +216,8 @@ public sealed class SftpSession : IDisposable
             catch (Exception e) when (e is SshConnectionException or ObjectDisposedException or IOException) { }
             client.Dispose();
         }
+        _jumpChain?.Dispose();
+        _jumpChain = null;
     }
 
     public void Dispose() => Disconnect();

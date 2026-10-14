@@ -755,7 +755,7 @@ public sealed partial class MainWindow
             return;
         }
         var notice = tab.State == TabConnectionState.Connected
-            ? "This tab is connected — changes to host, port, or authentication apply on the next connect."
+            ? "This tab is connected — changes to host, port, authentication, or network apply on the next connect."
             : null;
         var dialog = new SessionEditDialog(
             ViewModel.FolderPathsForPicker, current, current.FolderPath, App.SshKeys, notice, initialTarget)
@@ -764,7 +764,10 @@ public sealed partial class MainWindow
         };
         await dialog.ShowModalAsync();
         if (dialog.Result is { } result)
+        {
             ViewModel.UpdateSession(result, dialog.Password);
+            dialog.SaveProxyPassword();
+        }
     }
 
     public async Task LockSessionAsync(TabViewModel tab)
@@ -821,6 +824,23 @@ public sealed partial class MainWindow
     {
         if (tab.View is TerminalTabView view && tab.State == TabConnectionState.Connected)
             view.DisconnectLocal();
+    }
+
+    public async Task ManageTunnelsAsync(TabViewModel tab)
+    {
+        if (tab is not { IsLocked: false, State: TabConnectionState.Connected, View: TerminalTabView view }
+            || tab.Session.Kind != SessionKind.Ssh)
+            return;
+        await TunnelsDialog.ManageAsync(Root.XamlRoot, view, tab.Session.Name,
+            () => App.Store.Find(tab.Session.Id),
+            session =>
+            {
+                try { App.WindowFor(tab)?.ViewModel.UpdateSession(session, null); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    App.ReportRecoverableError(exception);
+                }
+            });
     }
 
     private static bool CanManageRemoteSessions(TabViewModel? tab) =>

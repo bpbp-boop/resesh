@@ -20,14 +20,16 @@ public sealed partial class HostKeyDialog : ContentDialog
     public string OfferedKeyLine { get; }
     public string ConfirmHeader { get; }
 
-    public HostKeyDialog(HostKeyInfo info)
+    public HostKeyDialog(HostKeyInfo info, string? routeStep = null)
     {
         IsMismatch = info.Verdict == HostKeyVerdict.Mismatch;
         Host = info.Host;
-        FirstContactMessage = $"First connection to {info.Host}:{info.Port}. Verify the host key fingerprint before trusting it.";
+        // A jump host's key is asked about mid-connect; say which host on the route it is.
+        var step = routeStep is null ? "" : $"{routeStep}. ";
+        FirstContactMessage = $"{step}First connection to {info.Host}:{info.Port}. Verify the host key fingerprint before trusting it.";
         KeyTypeLine = $"Key type: {info.KeyType}";
         OfferedFingerprint = $"SHA256:{info.Sha256Fingerprint}";
-        MismatchMessage = $"The host key for {info.Host}:{info.Port} does not match the one previously trusted. " +
+        MismatchMessage = $"{step}The host key for {info.Host}:{info.Port} does not match the one previously trusted. " +
                           "This can mean the server was reinstalled or its key rotated — but it can also mean " +
                           "a man-in-the-middle attack. Only continue if you can explain the change.";
         PreviousKeyLine = info.Previous is { } previous ? $"{previous.KeyType} SHA256:{previous.Sha256}" : "(unavailable)";

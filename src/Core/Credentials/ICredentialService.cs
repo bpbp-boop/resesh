@@ -29,4 +29,24 @@ public interface ICredentialService
 
     /// <summary>Deletes an identity password; no-op if absent.</summary>
     void DeleteIdentity(Guid identityId) => Delete(identityId);
+
+    /// <summary>Returns the password for the proxy a session connects through. It sits
+    /// beside the session's own secret, so the two never share an entry.</summary>
+    string? ReadProxy(Guid sessionId) => Read(ProxyEntry(sessionId));
+
+    void WriteProxy(Guid sessionId, string secret) => Write(ProxyEntry(sessionId), secret);
+
+    /// <summary>Deletes a proxy password; no-op if absent.</summary>
+    void DeleteProxy(Guid sessionId) => Delete(ProxyEntry(sessionId));
+
+    /// <summary>A stable id of its own for a session's proxy password, for stores that key
+    /// every secret by one id.</summary>
+    private static Guid ProxyEntry(Guid sessionId)
+    {
+        Span<byte> bytes = stackalloc byte[16];
+        sessionId.TryWriteBytes(bytes);
+        for (var index = 0; index < bytes.Length; index++)
+            bytes[index] ^= 0x5A;
+        return new Guid(bytes);
+    }
 }

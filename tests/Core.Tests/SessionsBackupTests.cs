@@ -115,6 +115,39 @@ public sealed class SessionsBackupTests : IDisposable
     }
 
     [Fact]
+    public void Import_JumpHostsFollowTheSessionTheyWereMergedInto()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "jump-source"));
+        var keptBastion = Ssh("Bastion", "bastion.example", "");
+        var copiedBastion = Ssh("Edge", "edge.example", "");
+        source.Sessions.Add(keptBastion);
+        source.Sessions.Add(copiedBastion);
+        source.Sessions.Add(Ssh("Behind kept", "db.example", "") with { JumpHostId = keptBastion.Id });
+        source.Sessions.Add(Ssh("Behind copy", "web.example", "") with { JumpHostId = copiedBastion.Id });
+        var path = Path.Combine(_dir.FullName, "jump.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials, new BackupExportOptions());
+        var package = SessionsBackup.Read(path);
+
+        var target = CreateStores(Path.Combine(_dir.FullName, "jump-target"));
+        var existingBastion = Ssh("My bastion", "bastion.example", "");
+        target.Sessions.Add(existingBastion);
+        target.Sessions.Add(Ssh("My edge", "edge.example", ""));
+
+        SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>
+            {
+                [keptBastion.Id] = BackupConflictResolution.Keep,
+                [copiedBastion.Id] = BackupConflictResolution.Duplicate,
+            });
+
+        var duplicate = Assert.Single(target.Sessions.Sessions, s => s.Name == "Edge");
+        Assert.Equal(existingBastion.Id, Assert.Single(target.Sessions.Sessions, s => s.Name == "Behind kept").JumpHostId);
+        Assert.Equal(duplicate.Id, Assert.Single(target.Sessions.Sessions, s => s.Name == "Behind copy").JumpHostId);
+    }
+
+    [Fact]
     public void Import_ResolvesIdAndEndpointConflictsAndMapsSecretsAndPinnedIds()
     {
         var source = CreateStores(Path.Combine(_dir.FullName, "merge-source"));

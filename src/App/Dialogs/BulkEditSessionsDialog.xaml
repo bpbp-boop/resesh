@@ -35,6 +35,13 @@
                 AutomationProperties.AutomationId="BulkEditPort"
                 ValueChanged="PortBox_ValueChanged" />
             <ComboBox
+                x:Name="JumpBox"
+                Header="Jump host"
+                DisplayMemberPath="Label"
+                HorizontalAlignment="Stretch"
+                AutomationProperties.AutomationId="BulkEditJumpHost"
+                SelectionChanged="Field_SelectionChanged" />
+            <ComboBox
                 x:Name="ColorBox"
                 Header="Tab color"
                 HorizontalAlignment="Stretch"

@@ -488,6 +488,14 @@ public static class SessionsBackup
             }
         }
 
+        // Jump hosts are references between sessions, so they follow whatever id each
+        // imported session ended up with (kept, replaced or duplicated).
+        for (var index = 0; index < sessions.Count; index++)
+        {
+            if (sessions[index].JumpHostId is { } jumpId && idMap.TryGetValue(jumpId, out var mappedJump))
+                sessions[index] = sessions[index] with { JumpHostId = mappedJump };
+        }
+
         sessionStore.ApplyImport(sessions, package.Folders, package.LocalFolders);
         if (identityStore is not null)
         {

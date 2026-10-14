@@ -22,6 +22,11 @@ public sealed record SessionBulkEdit
     /// <summary>SSH and telnet sessions only.</summary>
     public int? Port { get; init; }
 
+    /// <summary>With <see cref="SetJumpHost"/>, null connects without a jump host. SSH and
+    /// telnet sessions only; a session is never made its own jump.</summary>
+    public bool SetJumpHost { get; init; }
+    public Guid? JumpHostId { get; init; }
+
     public bool SetColor { get; init; }
     public string? ColorTag { get; init; }
 
@@ -41,7 +46,7 @@ public sealed record SessionBulkEdit
     public bool? SessionAgent { get; init; }
 
     public bool IsEmpty =>
-        Login is null && Port is null && !SetColor && !SetIcon && !SetTheme && Persistent is null
+        Login is null && Port is null && !SetJumpHost && !SetColor && !SetIcon && !SetTheme && Persistent is null
         && SessionAgent is null;
 
     /// <summary>The session with this edit applied; the same instance when nothing changes.</summary>
@@ -64,6 +69,8 @@ public sealed record SessionBulkEdit
         }
         if (Port is { } port && !session.IsLocal)
             edited = edited with { Port = Math.Clamp(port, 1, 65535) };
+        if (SetJumpHost && !session.IsLocal && JumpHostId != session.Id)
+            edited = edited with { JumpHostId = JumpHostId };
         if (SetColor)
             edited = edited with { ColorTag = ColorTag };
         if (SetIcon)

@@ -143,6 +143,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         }
 
         UpdateLoginFields();
+        PopulateNetwork(existing);
         UpdateProtocolVisibility();
         UpdateAdvancedHeader();
         ShellIntegrationBox.SelectionChanged += (_, _) =>
@@ -339,13 +340,157 @@ public sealed partial class SessionEditDialog : ContentDialog
         IconButtonText.Text = choice.Key is null ? "Auto-detect" : choice.Name;
     }
 
+    // ---- network: jump host, proxy, tunnels ----
+
+    private sealed class JumpChoice
+    {
+        public Guid Id { get; init; }
+        public string Label { get; init; } = "";
+    }
+
+    private readonly List<Tunnel> _tunnels = [];
+
+    /// <summary>New proxy password to store, or null to leave the stored one untouched.</summary>
+    public string? ProxyPassword { get; private set; }
+
+    private int ViaIndex => IsTelnet && ViaBox.SelectedIndex == 2 ? 0 : Math.Max(0, ViaBox.SelectedIndex);
+
+    private ProxyKind SelectedProxyKind => ProxyKindBox.SelectedIndex switch
+    {
+        1 => ProxyKind.Socks4,
+        2 => ProxyKind.Http,
+        _ => ProxyKind.Socks5,
+    };
+
+    private void PopulateNetwork(Session? existing)
+    {
+        // Any SSH session can be a jump host, except this one and those reached through it.
+        var choices = App.Store.Sessions
+            .Where(candidate => candidate.Kind == SessionKind.Ssh
+                && (existing is null || !Resesh.Core.Ssh.JumpRoute.WouldLoop(existing.Id, candidate.Id, App.Store.Find)))
+            .OrderBy(candidate => candidate.FolderPath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(candidate => new JumpChoice
+            {
+                Id = candidate.Id,
+                Label = (candidate.FolderPath.Length > 0 ? $"{candidate.FolderPath}/" : "") + $"{candidate.Name} ({candidate.Host})",
+            })
+            .ToList();
+        if (existing?.JumpHostId is { } jumpId && choices.All(choice => choice.Id != jumpId))
+        {
+            // Keep a jump that was deleted, or now loops, visible so saving does not silently drop it.
+            choices.Insert(0, new JumpChoice
+            {
+                Id = jumpId,
+                Label = App.Store.Find(jumpId) is { } loop ? $"{loop.Name} (reached through this session)" : "(deleted session)",
+            });
+        }
+        JumpBox.ItemsSource = choices;
+        JumpBox.SelectedItem = choices.FirstOrDefault(choice => choice.Id == existing?.JumpHostId);
+
+        if (existing?.Proxy is { } proxy)
+        {
+            ProxyKindBox.SelectedIndex = proxy.Kind switch
+            {
+                ProxyKind.Socks4 => 1,
+                ProxyKind.Http => 2,
+                _ => 0,
+            };
+            ProxyHostBox.Text = proxy.Host;
+            ProxyPortBox.Value = proxy.Port;
+            ProxyUsernameBox.Text = proxy.Username;
+            ProxyPasswordHint.Text = "The proxy password is stored in Windows Credential Manager. Leave it blank to keep the current one.";
+        }
+        ViaBox.SelectedIndex = existing?.JumpHostId is not null ? 1 : existing?.Proxy is not null ? 2 : 0;
+
+        _tunnels.AddRange(existing?.Tunnels ?? []);
+        RenderTunnels();
+        JumpBox.SelectionChanged += (_, _) => ClearFieldError(JumpBox, JumpError);
+        ProxyHostBox.TextChanged += (_, _) => ClearFieldError(ProxyHostBox, ProxyHostError);
+        UpdateNetworkFields();
+        TunnelFields.TunnelAdded += AddTunnel;
+    }
+
+    private void ViaBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateNetworkFields();
+
+    private void UpdateNetworkFields()
+    {
+        // SelectionChanged fires mid-InitializeComponent, before later controls exist.
+        if (JumpPanel is null || ProxyPanel is null || ViaDescription is null || TunnelsPanel is null || ViaProxyItem is null)
+            return;
+        // Telnet can ride a jump host's SSH connection; it has no proxy support or tunnels.
+        ViaProxyItem.IsEnabled = !IsTelnet;
+        if (IsTelnet && ViaBox.SelectedIndex == 2)
+            ViaBox.SelectedIndex = 0;
+        TunnelsPanel.Visibility = IsTelnet ? Visibility.Collapsed : Visibility.Visible;
+
+        var via = ViaIndex;
+        JumpPanel.Visibility = via == 1 ? Visibility.Visible : Visibility.Collapsed;
+        ProxyPanel.Visibility = via == 2 ? Visibility.Visible : Visibility.Collapsed;
+        ViaDescription.Text = via switch
+        {
+            1 when IsTelnet => "Connects to the jump host over SSH, then to this host from there. Telnet is "
+                + "still unencrypted between the jump host and this host.",
+            1 => "Connects to the jump host first, with its own login and host key, then to this host from "
+                + "there. The jump host can have a jump host of its own.",
+            2 => "Connects to the proxy, which connects on to this host.",
+            _ => "Connects straight from this computer.",
+        };
+    }
+
+    private void ProxyKindBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ProxyPortBox is null)
+            return;
+        // Follow the type's usual port unless the user typed a custom one.
+        var port = double.IsNaN(ProxyPortBox.Value) ? 0 : (int)ProxyPortBox.Value;
+        if (port is 0 or 1080 or 8080)
+            ProxyPortBox.Value = ProxySettings.DefaultPort(SelectedProxyKind);
+    }
+
+    private void AddTunnel(Tunnel tunnel)
+    {
+        if (TunnelForm.Conflict(tunnel, _tunnels) is { } conflict)
+        {
+            TunnelFields.ShowError(conflict);
+            return;
+        }
+        _tunnels.Add(tunnel);
+        TunnelFields.Reset();
+        RenderTunnels();
+    }
+
+    private void RenderTunnels()
+    {
+        TunnelList.Children.Clear();
+        foreach (var tunnel in _tunnels)
+            TunnelList.Children.Add(TunnelForm.Row(tunnel.Describe(), "Remove", () =>
+            {
+                _tunnels.Remove(tunnel);
+                RenderTunnels();
+            }));
+    }
+
+    /// <summary>Stores or clears the proxy password for the saved session. Called by the
+    /// owner after it saves <see cref="Result"/>.</summary>
+    internal void SaveProxyPassword()
+    {
+        if (Result is not { } saved)
+            return;
+        if (saved.Proxy is not { Username.Length: > 0 })
+            App.Credentials.DeleteProxy(saved.Id);
+        else if (ProxyPassword is not null)
+            App.Credentials.WriteProxy(saved.Id, ProxyPassword);
+    }
+
     private void SectionBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
         // Fires during InitializeComponent for the initially-selected item, before the panels exist.
-        if (ConnectionPanel is null || TerminalPanel is null || NotesBox is null)
+        if (ConnectionPanel is null || NetworkPanel is null || TerminalPanel is null || NotesBox is null)
             return;
 
         var selected = sender.SelectedItem;
+        NetworkPanel.Visibility = selected == NetworkSection ? Visibility.Visible : Visibility.Collapsed;
         ConnectionPanel.Visibility = selected == ConnectionSection ? Visibility.Visible : Visibility.Collapsed;
         TerminalPanel.Visibility = selected == TerminalSection ? Visibility.Visible : Visibility.Collapsed;
         NotesBox.Visibility = selected == NotesSection ? Visibility.Visible : Visibility.Collapsed;
@@ -378,6 +523,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         TelnetEncodingBox.Visibility = telnet ? Visibility.Visible : Visibility.Collapsed;
         TelnetSizePanel.Visibility = telnet ? Visibility.Visible : Visibility.Collapsed;
         TelnetNotice.IsOpen = telnet;
+        UpdateNetworkFields();
     }
 
     private void UpdateAuthFieldVisibility()
@@ -435,10 +581,26 @@ public sealed partial class SessionEditDialog : ContentDialog
         var auth = ownLogin ? SelectedAuth : AuthMethod.Password;
         Validate(KeyBox, KeyError, ownLogin && auth == AuthMethod.PrivateKey && SelectedKeyId is null, "Select an SSH key.");
 
+        var requiredInvalid = firstInvalid;
+        var via = ViaIndex;
+        Validate(JumpBox, JumpError, via == 1 && JumpBox.SelectedItem is null, "Select the session to connect through.");
+        Validate(ProxyHostBox, ProxyHostError, via == 2 && string.IsNullOrWhiteSpace(ProxyHostBox.Text), "Enter the proxy's host name or IP address.");
+        var proxy = via == 2
+            ? new ProxySettings
+            {
+                Kind = SelectedProxyKind,
+                Host = ProxyHostBox.Text.Trim(),
+                Port = double.IsNaN(ProxyPortBox.Value)
+                    ? ProxySettings.DefaultPort(SelectedProxyKind)
+                    : Math.Clamp((int)ProxyPortBox.Value, 1, 65535),
+                Username = ProxyUsernameBox.Text.Trim(),
+            }
+            : null;
+
         if (firstInvalid is not null)
         {
-            // Every required field lives on the Connection section.
-            SectionBar.SelectedItem = ConnectionSection;
+            // Required fields live on the Connection section; the route on Network.
+            SectionBar.SelectedItem = requiredInvalid is null ? NetworkSection : ConnectionSection;
             firstInvalid.Focus(FocusState.Programmatic);
             firstInvalid.StartBringIntoView();
             args.Cancel = true;
@@ -524,8 +686,12 @@ public sealed partial class SessionEditDialog : ContentDialog
             Icon = _selectedIcon,
             Agent = _existing?.Agent,
             CredentialNeeded = _existing?.CredentialNeeded ?? false,
+            JumpHostId = via == 1 ? (JumpBox.SelectedItem as JumpChoice)?.Id : null,
+            Proxy = proxy,
+            Tunnels = telnet || _tunnels.Count == 0 ? null : _tunnels.ToList(),
             Overrides = overrides.IsEmpty ? null : overrides,
         };
+        ProxyPassword = proxy is not null && ProxyPasswordBox.Password.Length > 0 ? ProxyPasswordBox.Password : null;
         Password = ownLogin && auth == AuthMethod.Password && PasswordBox.Password.Length > 0
             ? PasswordBox.Password
             : null;

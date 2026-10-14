@@ -25,6 +25,10 @@ public sealed class SshSessionException(SshFailureKind kind, string message, Exc
     : Exception(message, inner)
 {
     public SshFailureKind Kind { get; } = kind;
+
+    /// <summary>The jump host session that failed, when the failure was on the way to the
+    /// target rather than at it.</summary>
+    public Guid? JumpSessionId { get; init; }
 }
 
 /// <summary>Outcome of a one-off exec-channel command (see <see cref="SshTerminalSession.RunCommand"/>).</summary>
@@ -38,6 +42,8 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
 {
     private readonly KnownHostsStore _knownHosts;
     private SshClient? _client;
+    private SshJumpChain? _jumpChain;
+    private SshTunnelSet? _tunnels;
     private ShellStream? _shell;
     private CancellationTokenSource? _readerCts;
     private Task? _readerTask;
@@ -57,6 +63,10 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
     /// No handler = deny.
     /// </summary>
     public Func<HostKeyInfo, bool>? HostKeyDecision { get; set; }
+
+    /// <summary>Called (on the connect thread) before each host is dialled: every jump
+    /// host in order, then the session itself. Prompts that follow are about that host.</summary>
+    public Action<Session>? Connecting { get; set; }
 
     /// <summary>Diagnostic hook (DEBUG builds wire this to a trace log).</summary>
     public static Action<string>? TraceHook { get; set; }
@@ -100,7 +110,11 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         Func<SshTerminalSession, string?>? bootstrapCommandFactory = null,
         Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder = null,
         CancellationToken cancellationToken = default,
-        bool openShell = true)
+        bool openShell = true,
+        IReadOnlyList<SshHop>? jumps = null,
+        IReadOnlyList<Tunnel>? tunnels = null,
+        string? proxyPassword = null,
+        Func<SshHop, SshHop?>? resolveLogin = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (_client is not null)
@@ -108,76 +122,69 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         if (bootstrapCommand is not null && bootstrapCommandFactory is not null)
             throw new ArgumentException("Specify either a bootstrap command or a bootstrap factory, not both.");
 
-        // Fast pre-flight so unreachable hosts fail in seconds; the real connect then gets a
-        // generous timeout because the first-connect host key dialog sits inside the handshake.
-        SshConnectionFactory.PreflightTcp(session.Host, session.Port, TimeSpan.FromSeconds(10), cancellationToken);
-
-        var auth = SshConnectionFactory.BuildAuthMethods(session, secret, interactiveResponder);
-        var connectionInfo = new ConnectionInfo(session.Host, session.Port, session.Username, auth)
+        // Jump hosts connect first, each asking about its own host key and login.
+        var via = jumps is { Count: > 0 }
+            ? SshJumpChain.Open(jumps, session.Host, session.Port, _knownHosts, HostKeyDecision, interactiveResponder, cancellationToken, Connecting, resolveLogin)
+            : null;
+        SshClient client;
+        try
         {
-            Timeout = TimeSpan.FromMinutes(2),
-        };
-
-        var client = new SshClient(connectionInfo) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
-
-        SshSessionException? hostKeyFailure = null;
-        client.HostKeyReceived += (_, e) =>
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var sha256 = Convert.ToBase64String(SHA256.HashData(e.HostKey)).TrimEnd('=');
-            HostKeyFingerprint = $"{e.HostKeyName} SHA256:{sha256}";
-            var verdict = _knownHosts.Check(session.Host, session.Port, e.HostKeyName, sha256);
-            switch (verdict)
+            // Fast pre-flight so unreachable hosts fail in seconds; the real connect then gets a
+            // generous timeout because the first-connect host key dialog sits inside the handshake.
+            Connecting?.Invoke(session);
+            // The session's own login is asked for last, once the jump hosts are through.
+            if (resolveLogin is not null)
             {
-                case HostKeyVerdict.Match:
-                    _knownHosts.BackfillHostKey(session.Host, session.Port, e.HostKeyName, e.HostKey);
-                    e.CanTrust = true;
-                    break;
-                default:
-                    // Unknown key, or a changed key (the dialog demands typed confirmation
-                    // for the latter). Default-deny when no handler is wired.
-                    var previous = verdict == HostKeyVerdict.Mismatch
-                        ? _knownHosts.Lookup(session.Host, session.Port)
-                        : null;
-                    var info = new HostKeyInfo(session.Host, session.Port, e.HostKeyName, sha256, verdict, previous);
-                    var trusted = HostKeyDecision?.Invoke(info) ?? false;
-                    cancellationToken.ThrowIfCancellationRequested();
-                    if (trusted)
-                        _knownHosts.Accept(session.Host, session.Port, e.HostKeyName, sha256, e.HostKey);
-                    else
-                        hostKeyFailure = verdict == HostKeyVerdict.Mismatch
-                            ? new SshSessionException(
-                                SshFailureKind.HostKeyMismatch,
-                                $"Host key for {session.Host}:{session.Port} has CHANGED (now {e.HostKeyName} SHA256:{sha256}). " +
-                                "This may indicate a man-in-the-middle attack. Connection refused.")
-                            : new SshSessionException(
-                                SshFailureKind.HostKeyRejected, "Host key was not accepted.");
-                    e.CanTrust = trusted;
-                    break;
+                var login = resolveLogin(new SshHop(session, secret, proxyPassword))
+                    ?? throw new OperationCanceledException("No credential provided.");
+                (session, secret, proxyPassword) = (login.Session, login.Secret, login.ProxyPassword);
+                cancellationToken.ThrowIfCancellationRequested();
             }
-        };
+            SshConnectionFactory.Preflight(session, via, TimeSpan.FromSeconds(10), cancellationToken);
 
-        try
-        {
-            client.ConnectAsync(cancellationToken).GetAwaiter().GetResult();
+            var auth = SshConnectionFactory.BuildAuthMethods(session, secret, interactiveResponder);
+            var connectionInfo = SshConnectionFactory.CreateConnectionInfo(
+                session, auth, TimeSpan.FromMinutes(2), via, proxyPassword);
+
+            client = new SshClient(connectionInfo) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
+            var hostKey = SshConnectionFactory.VerifyHostKey(client, session, _knownHosts, HostKeyDecision, cancellationToken);
+            try
+            {
+                client.ConnectAsync(cancellationToken).GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                client.Dispose();
+                cancellationToken.ThrowIfCancellationRequested();
+                if (hostKey.Failure is { } hostKeyFailure)
+                    throw hostKeyFailure;
+                throw SshConnectionFactory.Classify(ex, session, via);
+            }
+            finally
+            {
+                HostKeyFingerprint = hostKey.Fingerprint;
+                SshConnectionFactory.DisposeAuthMethods(auth);
+            }
         }
-        catch (Exception ex)
+        catch
         {
-            client.Dispose();
-            cancellationToken.ThrowIfCancellationRequested();
-            if (hostKeyFailure is not null)
-                throw hostKeyFailure;
-            throw SshConnectionFactory.Classify(ex);
-        }
-        finally
-        {
-            SshConnectionFactory.DisposeAuthMethods(auth);
+            via?.Dispose();
+            throw;
         }
 
+        _jumpChain = via;
         _client = client;
+        _tunnels = new SshTunnelSet(client, status => TunnelChanged?.Invoke(status));
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            // Before the shell, so what the tunnels report is not mixed into its output.
+            // A connection without a shell (the session manager's) carries none.
+            foreach (var tunnel in (openShell ? tunnels : null) ?? [])
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                StartTunnel(tunnel);
+            }
             // A session manager needs authenticated exec channels without attaching or
             // creating a persistent shell, including when the originating tab is detached.
             if (!openShell)
@@ -529,6 +536,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         _shell = null;
         try { _readerTask?.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
 
+        _tunnels?.Dispose();
         var client = _client;
         _client = null;
         if (client is not null)
@@ -541,7 +549,31 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             catch (Exception e) when (e is SshConnectionException or ObjectDisposedException or IOException) { }
             client.Dispose();
         }
+        // After the client: the jumps carry its connection.
+        _jumpChain?.Dispose();
+        _jumpChain = null;
     }
+
+    // ---- tunnels ----
+
+    /// <summary>Raised on a background thread when a tunnel starts, fails or stops.</summary>
+    public event Action<TunnelStatus>? TunnelChanged;
+
+    /// <summary>Every tunnel started on this connection, in the order it was started.</summary>
+    public IReadOnlyList<TunnelStatus> Tunnels => _tunnels?.Snapshot() ?? [];
+
+    /// <summary>Starts a port forward on this connection. Never throws for a tunnel that
+    /// cannot start (port in use, refused by the server): the returned status says why. Blocking.</summary>
+    public TunnelStatus StartTunnel(Tunnel tunnel) =>
+        _tunnels is { } tunnels && !_disposed
+            ? tunnels.Start(tunnel)
+            : new TunnelStatus(tunnel, TunnelState.Failed, "The session is not connected.");
+
+    /// <summary>Stops a tunnel started here, closing the connections it carries. Blocking.</summary>
+    public void StopTunnel(Guid tunnelId) => _tunnels?.Stop(tunnelId);
+
+    /// <summary>Stops a tunnel and forgets it, so it no longer appears in <see cref="Tunnels"/>. Blocking.</summary>
+    public void RemoveTunnel(Guid tunnelId) => _tunnels?.Remove(tunnelId);
 
     /// <summary>ITerminalBackend: a user-initiated stop is a clean local disconnect.</summary>
     public void Stop() => Disconnect();

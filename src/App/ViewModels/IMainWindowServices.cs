@@ -51,6 +51,7 @@ public interface IMainWindowServices
     void DisconnectTab(TabViewModel tab);
     void SendBreak(TabViewModel tab);
     Task ManageRemoteSessionsAsync(TabViewModel tab);
+    Task ManageTunnelsAsync(TabViewModel tab);
     Task EndRemoteSessionAsync(TabViewModel tab);
     void CloneSession(TabViewModel tab);
     void TogglePin(TabViewModel tab);
