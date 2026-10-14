@@ -349,7 +349,16 @@
             IsClosable="True"
             IsOpen="False"
             Severity="Informational"
-            Title="Workspace note" />
+            Title="Workspace note">
+            <!-- It floats over the terminal, so it takes the dialogs' solid surface in place
+                 of the stock translucent fill, which lets the text beneath show through. -->
+            <InfoBar.Resources>
+                <StaticResource x:Key="InfoBarInformationalSeverityBackgroundBrush" ResourceKey="SessionShellBrush" />
+                <StaticResource x:Key="InfoBarBorderBrush" ResourceKey="SessionChromeFrameBrush" />
+                <StaticResource x:Key="InfoBarTitleForeground" ResourceKey="SessionTreeForegroundBrush" />
+                <StaticResource x:Key="InfoBarMessageForeground" ResourceKey="SessionTreeForegroundBrush" />
+            </InfoBar.Resources>
+        </InfoBar>
 
         <!-- Main area: tree | splitter | tabs -->
         <Grid x:Name="MainArea" Grid.Row="1" SizeChanged="MainArea_SizeChanged">
