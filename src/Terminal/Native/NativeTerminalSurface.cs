@@ -478,7 +478,11 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
                 var payload = content[(separator + 1)..];
                 // 7377 agent state; 9 / 777 notifications, 9;4 progress and 7501 program status
                 // (rebuilt by the shim).
-                if (code is 7377 or 9 or 777 or 7501)
+                // The remote session agent brackets the screen it sends again on a reattach:
+                // 7377;replay;state=begin and state=end.
+                if (code == 7377 && payload.StartsWith("replay;", StringComparison.Ordinal))
+                    RefreshCommands()?.SetReplaying(payload.AsSpan("replay;".Length).SequenceEqual("state=begin"));
+                else if (code is 7377 or 9 or 777 or 7501)
                     AgentOscReceived?.Invoke(code, payload.Length > 2048 ? payload[..2048] : payload);
                 else if (code == 3008)
                 {

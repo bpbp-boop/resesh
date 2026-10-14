@@ -55,6 +55,15 @@ public sealed class TmuxManagementTests
         Assert.DoesNotContain("attach-session -d", command);
     }
 
+    [Fact]
+    public void Replay_NamesAPaneTarget()
+    {
+        // tmux 3.4 rejects "capture-pane -t =name" with "can't find pane".
+        var name = TmuxPersistence.SessionName(Id, 1);
+        Assert.Contains($"capture-pane -e -p -t ={name}: -S -", TmuxPersistence.ResumeCommand(Id, 1));
+        Assert.Contains($"capture-pane -e -p -t ={name}: -S -", TmuxPersistence.BootstrapCommand(Id, 1));
+    }
+
     private static TmuxSessionInfo Shell(int slot, int attached = 0, int minutesAgo = 0) =>
         new(slot, TmuxPersistence.SessionName(Id, slot), "/home/me", attached,
             DateTimeOffset.UtcNow.AddMinutes(-minutesAgo), "bash");

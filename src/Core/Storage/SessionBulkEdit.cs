@@ -36,8 +36,13 @@ public sealed record SessionBulkEdit
     /// shell integration, which cannot run inside tmux.</summary>
     public bool? Persistent { get; init; }
 
+    /// <summary>What keeps a persistent shell alive: the Resesh agent (true) or tmux
+    /// (false). SSH sessions only, and only kept on a session that is persistent.</summary>
+    public bool? SessionAgent { get; init; }
+
     public bool IsEmpty =>
-        Login is null && Port is null && !SetColor && !SetIcon && !SetTheme && Persistent is null;
+        Login is null && Port is null && !SetColor && !SetIcon && !SetTheme && Persistent is null
+        && SessionAgent is null;
 
     /// <summary>The session with this edit applied; the same instance when nothing changes.</summary>
     public Session Apply(Session session)
@@ -73,6 +78,8 @@ public sealed record SessionBulkEdit
         {
             edited = edited with { Persistent = persistent };
         }
+        if (session.Kind == SessionKind.Ssh)
+            edited = edited with { SessionAgent = (SessionAgent ?? edited.SessionAgent) && edited.Persistent };
         return edited == session ? session : edited;
     }
 

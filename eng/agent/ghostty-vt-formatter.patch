@@ -1,0 +1,393 @@
+diff --git a/src/terminal/formatter.zig b/src/terminal/formatter.zig
+index 4feedda50..6cefef029 100644
+--- a/src/terminal/formatter.zig
++++ b/src/terminal/formatter.zig
+@@ -667,6 +667,7 @@ pub const ScreenFormatter = struct {
+         self: ScreenFormatter,
+         writer: *std.Io.Writer,
+     ) std.Io.Writer.Error!void {
++        var written: PageFormatter.TrailingState = .empty;
+         switch (self.content) {
+             .none => {},
+ 
+@@ -679,7 +680,7 @@ pub const ScreenFormatter = struct {
+                     list_formatter.bottom_right = sel.bottomRight(self.screen);
+                     list_formatter.rectangle = sel.rectangle;
+                 }
+-                try list_formatter.format(writer);
++                written = try list_formatter.formatWithState(writer);
+             },
+         }
+ 
+@@ -699,6 +700,20 @@ pub const ScreenFormatter = struct {
+         // pending wrap requires reprinting the cell at the right edge. That
+         // print uses and changes active screen state, so the requested style,
+         // hyperlink, protection, and charset must be restored afterwards.
++        // What is printed next is prompt, input or output (OSC 133). The
++        // content only says so where a cell of that kind was written, which
++        // misses a prompt with nothing typed yet and a command with no
++        // output yet.
++        if (self.extra.cursor and
++            self.screen.cursor.semantic_content != written.semantic)
++        {
++            try writer.writeAll(switch (self.screen.cursor.semantic_content) {
++                .prompt => "\x1b]133;P\x1b\\",
++                .input => "\x1b]133;B\x1b\\",
++                .output => "\x1b]133;C\x1b\\",
++            });
++        }
++
+         if (self.extra.cursor) cursor: {
+             const cursor = &self.screen.cursor;
+ 
+@@ -885,6 +900,14 @@ pub const PageListFormatter = struct {
+         self: PageListFormatter,
+         writer: *std.Io.Writer,
+     ) std.Io.Writer.Error!void {
++        _ = try self.formatWithState(writer);
++    }
++
++    /// Like format, and returns the state the last page ended in.
++    pub fn formatWithState(
++        self: PageListFormatter,
++        writer: *std.Io.Writer,
++    ) std.Io.Writer.Error!PageFormatter.TrailingState {
+         const tl: PageList.Pin = self.top_left orelse self.list.getTopLeft(.screen);
+         const br: PageList.Pin = self.bottom_right orelse self.list.getBottomRight(.screen).?;
+ 
+@@ -924,6 +947,7 @@ pub const PageListFormatter = struct {
+ 
+             page_state = try formatter.formatWithState(writer);
+         }
++        return page_state orelse .empty;
+     }
+ };
+ 
+@@ -996,6 +1020,10 @@ pub const PageFormatter = struct {
+         rows: usize = 0,
+         cells: usize = 0,
+ 
++        /// What the last cell written was: prompt, input or output. VT
++        /// output marks each change with OSC 133.
++        semantic: Cell.SemanticContent = .output,
++
+         pub const empty: TrailingState = .{ .rows = 0, .cells = 0 };
+     };
+ 
+@@ -1040,6 +1068,7 @@ pub const PageFormatter = struct {
+     ) std.Io.Writer.Error!TrailingState {
+         var blank_rows: usize = 0;
+         var blank_cells: usize = 0;
++        var semantic: Cell.SemanticContent = .output;
+ 
+         // Continue our prior trailing state if we have it, but only if we're
+         // starting from the beginning (start_y and start_x are both 0).
+@@ -1049,6 +1078,7 @@ pub const PageFormatter = struct {
+                 blank_rows = state.rows;
+                 blank_cells = state.cells;
+             }
++            semantic = state.semantic;
+         }
+ 
+         // Setup our starting column and perform some validation for overflows.
+@@ -1313,6 +1343,7 @@ pub const PageFormatter = struct {
+                         y,
+                         style_id,
+                         current_hyperlink_id,
++                        semantic,
+                         &blank_cells,
+                     );
+ 
+@@ -1373,6 +1404,36 @@ pub const PageFormatter = struct {
+                     blank_cells = 0;
+                 }
+ 
++                // Mark where prompt, input and output begin (OSC 133), so
++                // a terminal reading this back knows them again. The exit
++                // code of a finished command is not stored, so there is no
++                // D mark.
++                semantic: {
++                    if (comptime emit != .vt) break :semantic;
++                    if (cell.semantic_content == semantic) break :semantic;
++                    semantic = cell.semantic_content;
++
++                    const mark: []const u8 = switch (semantic) {
++                        .prompt => switch (row.semantic_prompt) {
++                            .prompt_continuation => "\x1b]133;P;k=c\x1b\\",
++                            // A starts a fresh line first, which must not
++                            // move anything here.
++                            .prompt, .none => if (x == 0)
++                                "\x1b]133;A\x1b\\"
++                            else
++                                "\x1b]133;P\x1b\\",
++                        },
++                        .input => "\x1b]133;B\x1b\\",
++                        .output => "\x1b]133;C\x1b\\",
++                    };
++                    try writer.writeAll(mark);
++                    if (self.point_map) |*map| map.map.appendNTimes(
++                        map.alloc,
++                        .{ .x = x, .y = y },
++                        mark.len,
++                    ) catch return error.WriteFailed;
++                }
++
+                 style: {
+                     // If we aren't emitting styled output then we don't
+                     // have to worry about styles.
+@@ -1456,10 +1517,8 @@ pub const PageFormatter = struct {
+ 
+                 // Hyperlink state
+                 hyperlink: {
+-                    // We currently only emit hyperlinks for HTML. In the
+-                    // future we can support emitting OSC 8 hyperlinks for
+-                    // VT output as well.
+-                    if (comptime emit != .html) break :hyperlink;
++                    // Plain text has nowhere to put a hyperlink.
++                    if (comptime emit == .plain) break :hyperlink;
+ 
+                     // Get the hyperlink ID. This ID is our internal ID,
+                     // not necessarily the OSC8 ID.
+@@ -1484,17 +1543,20 @@ pub const PageFormatter = struct {
+                     current_hyperlink_id = link_id;
+ 
+                     // Emit the opening hyperlink tag
+-                    const uri = uri: {
+-                        const link = self.page.hyperlink_set.get(
+-                            self.page.memory,
+-                            link_id,
+-                        );
+-                        break :uri link.uri.offset.ptr(self.page.memory)[0..link.uri.len];
++                    const link = self.page.hyperlink_set.get(
++                        self.page.memory,
++                        link_id,
++                    );
++                    const uri = link.uri.offset.ptr(self.page.memory)[0..link.uri.len];
++                    const explicit_id: ?[]const u8 = switch (link.id) {
++                        .explicit => |v| v.offset.ptr(self.page.memory)[0..v.len],
++                        .implicit => null,
+                     };
+                     try self.formatHyperlinkOpen(
+                         emit,
+                         writer,
+                         uri,
++                        explicit_id,
+                     );
+ 
+                     // If we have a point map, we map the hyperlink to
+@@ -1505,6 +1567,7 @@ pub const PageFormatter = struct {
+                             emit,
+                             &discarding.writer,
+                             uri,
++                            explicit_id,
+                         );
+                         map.map.appendNTimes(
+                             map.alloc,
+@@ -1577,7 +1640,7 @@ pub const PageFormatter = struct {
+             if (blank_rows >= 1) blank_rows -= 1;
+         }
+ 
+-        return .{ .rows = blank_rows, .cells = blank_cells };
++        return .{ .rows = blank_rows, .cells = blank_cells, .semantic = semantic };
+     }
+ 
+     /// Fast path for writing runs of simple cells: single-codepoint cells
+@@ -1615,6 +1678,7 @@ pub const PageFormatter = struct {
+         run_y: size.CellCountInt,
+         run_style_id: u32,
+         run_hyperlink_id: ?hyperlink.Id,
++        run_semantic: Cell.SemanticContent,
+         blank_cells: *usize,
+     ) std.Io.Writer.Error!usize {
+         assert(track_points == (self.point_map != null));
+@@ -1679,7 +1743,7 @@ pub const PageFormatter = struct {
+             // cell must belong to the currently open hyperlink (or none).
+             // Transitions take the slow path. This is checked after blank
+             // accounting because blank cells never touch hyperlink state.
+-            if (comptime emit == .html) {
++            if (comptime emit != .plain) {
+                 if (cell.hyperlink) {
+                     const run_id = run_hyperlink_id orelse break;
+                     const cell_id = self.page.lookupHyperlink(cell) orelse break;
+@@ -1687,6 +1751,12 @@ pub const PageFormatter = struct {
+                 } else if (run_hyperlink_id != null) break;
+             }
+ 
++            // A change between prompt, input and output is marked, which
++            // the slow path does.
++            if (comptime emit == .vt) {
++                if (cell.semantic_content != run_semantic) break;
++            }
++
+             // The page coordinate of this cell, for point tracking.
+             const x: size.CellCountInt = @intCast(run_x + i);
+ 
+@@ -2078,9 +2148,17 @@ pub const PageFormatter = struct {
+         comptime emit: Format,
+         writer: *std.Io.Writer,
+         uri: []const u8,
++        explicit_id: ?[]const u8,
+     ) std.Io.Writer.Error!void {
+         switch (emit) {
+-            .plain, .vt => unreachable,
++            .plain => unreachable,
++
++            // OSC 8. The ID is only written when the program gave one, so
++            // that links without one stay separate links when read back.
++            .vt => if (explicit_id) |id|
++                try writer.print("\x1b]8;id={s};{s}\x1b\\", .{ id, uri })
++            else
++                try writer.print("\x1b]8;;{s}\x1b\\", .{uri}),
+ 
+             // layout since we're primarily using it as a CSS wrapper.
+             .html => {
+@@ -2102,7 +2180,8 @@ pub const PageFormatter = struct {
+     ) std.Io.Writer.Error!void {
+         const str: []const u8 = switch (emit) {
+             .html => "</a>",
+-            .plain, .vt => return,
++            .vt => "\x1b]8;;\x1b\\",
++            .plain => return,
+         };
+ 
+         try writer.writeAll(str);
+@@ -6804,6 +6883,139 @@ test "Page VT background color on trailing blank cells" {
+     try testing.expect(has_red_bg_line1);
+ }
+ 
++test "Screen vt with prompt marks" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    const io = testing.io;
++
++    var builder: std.Io.Writer.Allocating = .init(alloc);
++    defer builder.deinit();
++
++    var t = try Terminal.init(io, alloc, .{
++        .cols = 80,
++        .rows = 24,
++    });
++    defer t.deinit(alloc);
++
++    var s = t.vtStream();
++    defer s.deinit();
++
++    // A command with output, then a prompt with nothing typed yet
++    s.nextSlice("\x1b]133;A\x1b\\$ \x1b]133;B\x1b\\ls\r\n" ++
++        "\x1b]133;C\x1b\\file\r\n" ++
++        "\x1b]133;D;0\x1b\\\x1b]133;A\x1b\\$ \x1b]133;B\x1b\\");
++
++    var formatter: ScreenFormatter = .init(t.screens.active, .vt);
++    formatter.extra.cursor = true;
++    try formatter.format(&builder.writer);
++    const output = builder.writer.buffered();
++
++    try testing.expectEqualStrings(
++        "\x1b]133;A\x1b\\$ \x1b]133;B\x1b\\ls\r\n" ++
++            "\x1b]133;C\x1b\\file\r\n" ++
++            "\x1b]133;A\x1b\\$ " ++
++            "\x1b]133;B\x1b\\\x1b[3;3H",
++        output,
++    );
++
++    // Read back by a second terminal, the cells and the cursor agree
++    var t2 = try Terminal.init(io, alloc, .{
++        .cols = 80,
++        .rows = 24,
++    });
++    defer t2.deinit(alloc);
++
++    var s2 = t2.vtStream();
++    defer s2.deinit();
++    s2.nextSlice(output);
++
++    const page = t.screens.active.pages.pages.last.?.page();
++    const page2 = t2.screens.active.pages.pages.last.?.page();
++    for (0..3) |y| {
++        const row = page.getRow(y);
++        const row2 = page2.getRow(y);
++        try testing.expectEqual(row.semantic_prompt, row2.semantic_prompt);
++        const cells = page.getCells(row);
++        const cells2 = page2.getCells(row2);
++        for (cells, cells2) |cell, cell2| {
++            if (!cell.hasText()) continue;
++            try testing.expectEqual(cell.semantic_content, cell2.semantic_content);
++        }
++    }
++    try testing.expectEqual(
++        t.screens.active.cursor.semantic_content,
++        t2.screens.active.cursor.semantic_content,
++    );
++    try testing.expect(t2.cursorIsAtPrompt());
++}
++
++test "Page VT with hyperlinks" {
++    const testing = std.testing;
++    const alloc = testing.allocator;
++    const io = testing.io;
++
++    var builder: std.Io.Writer.Allocating = .init(alloc);
++    defer builder.deinit();
++
++    var t = try Terminal.init(io, alloc, .{
++        .cols = 80,
++        .rows = 24,
++    });
++    defer t.deinit(alloc);
++
++    var s = t.vtStream();
++    defer s.deinit();
++
++    // One link without an ID, one with, and one left open at the end
++    s.nextSlice("\x1b]8;;https://example.com\x1b\\one\x1b]8;;\x1b\\ " ++
++        "\x1b]8;id=x;https://example.org\x1b\\two\x1b]8;;\x1b\\ plain " ++
++        "\x1b]8;;https://example.net\x1b\\open");
++
++    const pages = &t.screens.active.pages;
++    const page = pages.pages.last.?.page();
++    var formatter: PageFormatter = .init(page, .{ .emit = .vt });
++
++    try formatter.format(&builder.writer);
++    const output = builder.writer.buffered();
++
++    try testing.expectEqualStrings(
++        "\x1b]8;;https://example.com\x1b\\one\x1b]8;;\x1b\\ " ++
++            "\x1b]8;id=x;https://example.org\x1b\\two\x1b]8;;\x1b\\ plain " ++
++            "\x1b]8;;https://example.net\x1b\\open\x1b]8;;\x1b\\",
++        output,
++    );
++
++    // Read back by a second terminal, the cells carry the same links
++    var t2 = try Terminal.init(io, alloc, .{
++        .cols = 80,
++        .rows = 24,
++    });
++    defer t2.deinit(alloc);
++
++    var s2 = t2.vtStream();
++    defer s2.deinit();
++    s2.nextSlice(output);
++
++    const page2 = t2.screens.active.pages.pages.last.?.page();
++    const cells = page2.getCells(page2.getRow(0));
++    try testing.expect(cells[0].hyperlink);
++    try testing.expect(!cells[3].hyperlink);
++    try testing.expect(cells[4].hyperlink);
++    const link = page2.hyperlink_set.get(
++        page2.memory,
++        page2.lookupHyperlink(&cells[4]).?,
++    );
++    try testing.expectEqualStrings(
++        "https://example.org",
++        link.uri.offset.ptr(page2.memory)[0..link.uri.len],
++    );
++    try testing.expectEqualStrings(
++        "x",
++        link.id.explicit.offset.ptr(page2.memory)[0..link.id.explicit.len],
++    );
++    try testing.expect(t2.screens.active.cursor.hyperlink == null);
++}
++
+ test "Page HTML with hyperlinks" {
+     const testing = std.testing;
+     const alloc = testing.allocator;

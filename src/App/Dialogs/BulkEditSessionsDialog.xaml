@@ -56,13 +56,23 @@
                 SelectionChanged="Field_SelectionChanged" />
             <ComboBox
                 x:Name="PersistentBox"
-                Header="Persistent session (tmux)"
+                Header="Persistent session"
                 HorizontalAlignment="Stretch"
                 AutomationProperties.AutomationId="BulkEditPersistent"
                 SelectionChanged="Field_SelectionChanged">
                 <ComboBoxItem Content="No change" />
                 <ComboBoxItem Content="On" />
                 <ComboBoxItem Content="Off" />
+            </ComboBox>
+            <ComboBox
+                x:Name="PersistenceBackendBox"
+                Header="Kept alive by"
+                HorizontalAlignment="Stretch"
+                AutomationProperties.AutomationId="BulkEditPersistenceBackend"
+                SelectionChanged="Field_SelectionChanged">
+                <ComboBoxItem Content="No change" />
+                <ComboBoxItem Content="tmux" />
+                <ComboBoxItem Content="Resesh agent" />
             </ComboBox>
             <TextBlock
                 x:Name="ImpactText"

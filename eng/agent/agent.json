@@ -1,0 +1,11 @@
+{
+  "revision": 2,
+  "zmx": {
+    "repository": "https://github.com/bpbp-boop/zmx",
+    "branch": "resesh",
+    "commit": "3ca79a0c11697bef4cb3f46d3bae6b9694fe03c8",
+    "version": "0.8.1",
+    "upstream": "https://github.com/neurosnap/zmx",
+    "license": "MIT"
+  }
+}

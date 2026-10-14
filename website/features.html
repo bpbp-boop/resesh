@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>features — resesh</title>
 <link rel="canonical" href="https://resesh.net/features.html">
-<meta name="description" content="Current and planned resesh features: saved sessions, shared logins, bulk session editing, a native terminal, program status on tabs, searchable command history, comparing command runs, telnet consoles, keyboard shortcuts, persistent tmux sessions, coding agents over SSH, GPU rendering, highlighting, recordings, workspaces, file transfers and backups.">
+<meta name="description" content="Current and planned resesh features: saved sessions, shared logins, bulk session editing, a native terminal, program status on tabs, searchable command history, comparing command runs, telnet consoles, keyboard shortcuts, persistent remote sessions, coding agents over SSH, GPU rendering, highlighting, recordings, workspaces, file transfers and backups.">
 <link rel="icon" href="assets/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -436,12 +436,17 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">remote shells run inside a private tmux server, so closing a tab or losing the connection detaches the shell instead of ending it. reconnect and you're back where you were.</p>
+          <p class="row__text">remote shells keep running on the host, so closing a tab or losing the connection detaches the shell instead of ending it. reconnect and you're back where you were. each session chooses what keeps its shells alive: the resesh agent, or tmux.</p>
           <ul class="row__bullets">
+            <li>the resesh agent is a small program that resesh uploads to your home directory on a linux host (about 2 mb). nothing else is installed, and nothing is downloaded by the host</li>
+            <li>the agent passes everything between the program and the terminal through unchanged, so every sequence on the <a href="osc.html">osc page</a> works as it does in a plain session</li>
+            <li>after a reconnect the agent brings back the screen and the last 10,000 lines of scrollback, with their links, prompt marks and program status</li>
+            <li>tmux needs no upload: resesh runs the host's own tmux as a private server with no status bar or prefix key</li>
             <li>choose per connection: resume or ask, always start new, or end detached shells first</li>
             <li>the session manager lists each shell by folder and program, with end all detached</li>
             <li>shells open in another tab or client are never ended or resumed without asking</li>
-            <li>styled underlines, focus reports, clipboard copies and agent status pass through the tmux layer</li>
+            <li>with tmux, styled underlines, focus reports, clipboard copies and agent status pass through; some other sequences do not</li>
+            <li>the agent is built on <a href="https://github.com/neurosnap/zmx">zmx</a> and libghostty-vt</li>
           </ul>
         </div>
         <div class="row__media row__media--text">
@@ -525,7 +530,8 @@
             <li>a percentage in a report drives the tab progress bar</li>
             <li>every sequence resesh reads is listed on the <a href="osc.html">osc page</a></li>
             <li>the agent icon or badge takes the place of the connection dot while the tab is connected, so there is one indicator, not two</li>
-            <li>inside a persistent session, where tmux drops these reports, the codex, claude code and shell-wrapper adapters pass status through a tmux option instead (tmux 3.0 or newer)</li>
+            <li>in a persistent session kept alive by the resesh agent, reports arrive as they are, and the badge comes back after a reconnect</li>
+            <li>tmux drops these reports, so there the codex, claude code and shell-wrapper adapters pass status through a tmux option instead (tmux 3.0 or newer)</li>
           </ul>
         </div>
         <div class="row__media row__media--text">
@@ -777,7 +783,7 @@
           <span class="badge row__badge">planned</span>
         </div>
         <div class="row__body">
-          <p class="row__text">saved command snippets, mremoteng import, and automatic reconnect with tmux reattach. priorities may change.</p>
+          <p class="row__text">saved command snippets, mremoteng import, and automatic reconnect with reattach. priorities may change.</p>
         </div>
         <div class="row__media row__media--empty">
           <div class="placeholder placeholder--empty">

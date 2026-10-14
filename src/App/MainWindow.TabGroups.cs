@@ -839,9 +839,11 @@ public sealed partial class MainWindow
             using var connection = await view.CreateRemoteManagementConnectionAsync();
             if (connection is null) return;
             var openSlots = App.TmuxSlots.ReservedSlots(tab.Session.Id);
+            // Looks for the session agent on the host, but never uploads it from here.
+            var persistence = await Task.Run(() => view.ResolvePersistenceBlocking(connection, mayUpload: false, CancellationToken.None));
             slot = await RemoteSessionsDialog.ManageAsync(Root.XamlRoot, tab.Session.Name,
-                tab.Session.Id, openSlots,
-                () => Task.Run(() => connection.RunCommand(Resesh.Core.Ssh.TmuxPersistence.ManagementCommand())),
+                tab.Session.Id, openSlots, persistence,
+                () => Task.Run(() => connection.RunCommand(persistence.ManagementCommand())),
                 selected => Task.Run(() =>
                 {
                     // Each target is held while it ends; one claimed by a tab since discovery is skipped.
@@ -850,7 +852,7 @@ public sealed partial class MainWindow
                     {
                         var ending = selected.Where((target, index) => guards[index].TryReserve(target)).ToList();
                         return ending.Count > 0
-                            && connection.TryRunCommand(Resesh.Core.Ssh.TmuxPersistence.KillCommand(tab.Session.Id, ending));
+                            && connection.TryRunCommand(persistence.KillCommand(tab.Session.Id, ending));
                     }
                     finally
                     {

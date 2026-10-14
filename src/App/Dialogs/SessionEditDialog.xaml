@@ -295,7 +295,21 @@
                     <TextBlock
                         Style="{ThemeResource CaptionTextBlockStyle}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Runs the shell inside tmux on the host, so it survives dropped connections and app restarts — reconnecting resumes right where you left off. Requires tmux on the host."
+                        Text="The shell keeps running on the host when the connection drops or the app closes."
+                        TextWrapping="Wrap" />
+                    <ComboBox
+                        x:Name="PersistenceBackendBox"
+                        Margin="0,8,0,0"
+                        MinWidth="320"
+                        Header="Kept alive by"
+                        AutomationProperties.AutomationId="PersistenceBackendBox">
+                        <x:String>tmux</x:String>
+                        <x:String>Resesh agent</x:String>
+                    </ComboBox>
+                    <TextBlock
+                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="tmux must already be on the host. The agent is uploaded to your home directory (2 MB, Linux)."
                         TextWrapping="Wrap" />
                     <ComboBox
                         x:Name="DetachedSessionsBox"

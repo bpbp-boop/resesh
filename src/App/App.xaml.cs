@@ -25,6 +25,11 @@ public partial class App : Application
     /// <summary>Passwords typed for "ask every time" identities, until the app closes.</summary>
     public static Resesh.Core.Identities.AskedSecretCache AskedSecrets { get; } = new();
 
+    /// <summary>The session agent binaries this copy of the app carries, or null when it was
+    /// built without them (eng/build-agent.ps1). Persistence then uses tmux everywhere.</summary>
+    public static Resesh.Core.Ssh.AgentPackage? AgentPackage { get; } =
+        Resesh.Core.Ssh.AgentPackage.Load(Path.Combine(AppContext.BaseDirectory, "Agent"));
+
     /// <summary>Persistent shell ownership across every window and connect worker.</summary>
     public static TmuxSlotReservations TmuxSlots { get; } = new();
 

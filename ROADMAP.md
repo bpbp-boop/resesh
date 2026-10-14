@@ -397,6 +397,9 @@ Codex and Claude Code hooks and the shell wrapper. Known gap: a program that die
 unsetting the option leaves it for the next non-shell program in that pane. Any script can
 use the option, so agents with extension systems (Pi, oh-my-pi) could get adapters too.
 
+This bridge stays for hosts on tmux. The longer fix is to take tmux out of the stream:
+see [Remote session agent](#remote-session-agent-spiked-2026-10-13).
+
 ### Alerts list (promoted from Deferred)
 Once 7501 gives real states, one place to see every tab that wants you: a flyout from the
 title bar plus a command-palette entry and shortcut, listing tabs that are `blocked`,
@@ -409,6 +412,224 @@ Windows notification through the plumbing command completion already uses
 plain SSH tab goes working → needs approval → finished; a `printf` script covers
 `brew`-style reports, invalid base64 (ignored), RIS (clears), and a new prompt (drops
 `working`); the alerts list jumps to a blocked background tab.
+
+---
+
+## Remote session agent (spiked 2026-10-13)
+
+**Problem.** tmux keeps a session alive, but it is a second terminal emulator in the
+stream. It redraws program output, drops the sequences it does not know, and answers
+terminal queries itself. Every new sequence we care about needs another bridge like
+`TmuxStatus`. We use very little of tmux: one session, one window, one pane, no status
+line, no prefix key.
+
+**Direction.** Put our own small binary on the host in tmux's place. One daemon per
+session holds the pty and forwards bytes untouched in both directions. A headless
+libghostty-vt beside the stream is used only to build a snapshot when a client attaches.
+shpool, zmx and VS Code's remote terminals all arrived at this design.
+
+**Spike.** Stock [zmx](https://github.com/neurosnap/zmx) 0.8.1 (MIT, Zig, libghostty-vt)
+against our tmux setup on Ubuntu 24.04. Scripts, raw output and the full tables are in
+[tools/session-probe](tools/session-probe/RESULTS.md).
+
+| | tmux | zmx |
+|---|---|---|
+| 21 output sequences unchanged | 0 | 20 |
+| 11 terminal queries answered by the terminal | 0 | 11 |
+| Kitty keys, focus, mouse, paste input | Ctrl+A and Shift+Enter degraded, focus lost | identical |
+| `seq 1 100000`, lines reaching the terminal live | 6,745 | all |
+| Reattach restores scrollback and output made while detached | yes | yes |
+| Reattach restores alternate screen and kitty keyboard mode | no | yes |
+| Reattach restores OSC 8 links | yes | no |
+| Reattach restores OSC 7501 status and OSC 133 marks | no | no |
+
+In the app, a plain OSC 7501 from inside a zmx session lit the tab icon and badge with no
+title bridge. After a reattach the badge was gone, as the last row predicts.
+
+### Decision
+Fork zmx and trim it, rather than write from nothing. It passed every passthrough test
+unmodified, and it already handles the pty and daemon cases that cost the most to find:
+answering DA1/DA2 while detached (fish waits about 10 seconds otherwise), one client owning
+the pty size, and the snapshot traps (tabstops, synchronized output, the title). It bundles
+the same libghostty-vt version we pin, and we already build with Zig.
+
+tmux stays as a fallback and is frozen: no new bridges. The ladder per host is agent, then
+tmux, then a plain session.
+
+### Steps
+1. **Fork and build.** Fork at v0.8.1, keep the licence notice. Build static musl binaries
+   for x86_64 and aarch64 Linux, stripped, from `eng/` next to `build-ghostty-vt.ps1`. Cut
+   the CLI down to what the app calls. Measure the size; the stock release is 15.7 MB with
+   debug info.
+2. **Snapshot.** Turn on hyperlinks in the formatter options, as `rvt_format_vt` does. Find
+   out whether prompt marks can be kept, and stop rewriting `OSC 133;A` if they can.
+3. **State the snapshot cannot hold.** The daemon remembers the last OSC 7501 report and
+   sends it after the snapshot. Decide the same way for progress (OSC 9;4).
+4. **Protocol.** Add a version exchange as the first message. Keep the tags frozen and
+   unknown tags ignored. Sessions outlive app upgrades, so an old daemon must keep working
+   with a new client; this is why it is one daemon per session and not one per host.
+5. **Side channel.** List sessions, and per session the working directory, foreground
+   command and client count, as structured replies. This replaces the `list-panes` parsing
+   in `TmuxPersistence`.
+6. **Getting it onto the host.** Upload over the SSH connection we already have, to a
+   versioned path under `~/.local/share/resesh/`, and check the hash. Pick the binary from
+   `uname`. Ask once per host: always, never, or ask each time. No download from the host
+   side.
+7. **App.** A second persistence backend beside `TmuxPersistence`, with the choice stored
+   per host. `TmuxStatus` stays in use for tmux sessions only.
+8. **Done when** `tools/session-probe` passes on the fork (21 of 21 sequences, 11 of 11
+   queries, identical input) and a reattach brings back links, prompt marks and status,
+   and the tab badge survives a dropped connection in the app.
+
+### Progress (2026-10-14)
+Built on Windows with `eng/build-agent.ps1`. The agent's source is the `resesh` branch of
+our zmx fork, [bpbp-boop/zmx](https://github.com/bpbp-boop/zmx), two commits on v0.8.1;
+`eng/agent/agent.json` pins the commit. It builds against the Ghostty commit the app pins,
+with `eng/agent/ghostty-vt-formatter.patch` applied. (Until later on the 14th the zmx
+changes were a patch file too, against the Ghostty commit zmx pins; the notes below say
+"patch" for both.) The x86_64 binary was then run through `tools/session-probe` on rct-keep
+(Ubuntu 24.04.5): passthrough is the same as stock zmx, and a reattach now brings back
+links, prompt marks and status ([table](tools/session-probe/RESULTS.md#the-patched-build-2026-10-14)).
+In the app, with the session attached by hand in a plain SSH tab: a `blocked` report showed
+the badge, the connection was killed on the host, and after reconnecting and attaching again
+the screen and the badge came back. The aarch64 binary has not run anywhere.
+
+That test first failed for a reason in the app, now fixed in `AgentTracker`: without shell
+integration a command is noticed about 300 ms after Enter, and that late notice dropped
+the status the command had just reported.
+
+- **Step 1, build: done. CLI not cut down yet.** Static musl, stripped, `ReleaseSmall`:
+  1.80 MB for x86_64 and 1.50 MB for aarch64, against 15.7 MB for the stock release. Two
+  runs gave the same hashes. Speed against the stock `ReleaseSafe` build is not measured.
+  With our Ghostty pin they are 1.83 MB and 1.52 MB.
+- **Step 2, links: patched, and not where the plan expected.** There is no option to turn
+  on. The libghostty-vt formatter writes links only for HTML output; in VT output
+  `extra.screen.hyperlink` restores just the link the cursor is in, and zmx already asks for
+  that. `ghostty-vt-formatter.patch` makes the formatter write OSC 8 around linked cells (25
+  lines and one new test; the formatter's existing tests pass). The app has the same gap
+  wherever it uses `rvt_format_vt`, and the patch would fix it there too. Worth offering
+  upstream: the code carried a comment saying VT links were for later.
+- **Step 2, prompt marks: patched.** The same patch file makes the formatter write
+  `133;A`, `B` and `C` where prompt, input and output begin, from what rows and cells
+  already record, and one more mark for what the cursor is in. A second terminal reading it
+  back agrees cell for cell (new test; the whole libghostty-vt suite passes). The exit
+  code in `133;D` is not stored, so it does not come back. zmx still adds `redraw=0` to
+  `133;A`, live and in the snapshot: that is the one sequence of 21 the probe still shows
+  changed, and it is deliberate (the shell cannot redraw a prompt through the daemon).
+- **Replayed marks are old, and the app is told so.** A reattach replays the marks of every
+  command in the scrollback, and the command tracker would have recorded each one in the
+  history again and reported it as running. The daemon now puts
+  `OSC 7377 ; replay ; state=begin` and `state=end` around the snapshot, with status after
+  the end. Between them `CommandTracker` keeps the marks for the ruler and does nothing
+  else, then reports the command that is still running, once. In the app, a marked command
+  ran, the connection was dropped and the session attached again: the history still held it
+  once. That run was not repeated without the bracket to show the duplicate. A command
+  still running across the reattach is not recorded when it ends. A begin with no end
+  leaves the tracker quiet until the tab reconnects.
+- **Step 3, status: written.** `src/status.zig` in the patch keeps the latest report of
+  each record (64 at most) and sends them after the snapshot. It drops records as the app
+  does: `clear`, a full reset, a new prompt for `working` and `blocked`, and user input
+  for `done` and `error`. The daemon cannot know that a tab was only looked at, so a
+  `done` that was seen but not typed at shows its badge again after a reconnect. Progress
+  (OSC 9;4) is not handled.
+- **New gap, patched:** a program sends `OSC 7501 ; ?` once at startup, and takes silence
+  as "unsupported" for its whole run. With no client attached nothing answered. The daemon
+  now answers it then, ahead of its DA1 reply.
+- **Step 4, protocol: done as far as it is needed now.** There is no handshake message.
+  The daemon answers a new request, `StatGet`, with `key=value` lines, the first being
+  `protocol=1`. New facts are new keys, so the pair never needs another tag, and a daemon
+  from before it ignores the request. The client asks last, so an old daemon costs one
+  50 ms wait and nothing else. Checked for real: a session started by the first patched
+  build was still running on the host, and the new client listed it beside a new one.
+  The agent now has its own version, `0.8.1-resesh.<revision>`, with the revision in
+  `eng/agent/agent.json`.
+- **Step 5, side channel: done.** `list --json` prints one object per session: name, pid,
+  client count, creation time, and from `StatData` the protocol, agent version, the
+  foreground command and its directory (both read from `/proc`, so Linux only).
+  `AgentPersistence.ParseSessions` reads it into the same `TmuxSessionInfo` that
+  `PlanConnect` already takes. Nothing in the app calls it yet.
+- **Step 6, getting it onto the host: the mechanism is done, the question to the user is
+  not.** `AgentInstall` probes the host (`uname`, and the hash of an agent already there),
+  decides, and uploads over the open SSH connection to
+  `~/.local/share/resesh/<version>/resesh-agent`. The upload goes to a private temporary
+  file, is checked by hash (by size where the host has no hashing tool), is run once, and
+  only then moved into place. `build-agent.ps1` writes a manifest of what it built, and the
+  app project copies binaries and manifest to `Agent\` in its output. The per-host choice
+  (`AgentInstall` on a saved session: ask, always, never) is stored, but nothing shows the
+  question or calls any of this yet; that comes with the app backend. (Step 7 replaced
+  the three-way choice with one setting.)
+  Run against Ubuntu 24.04 through the app's own SSH code: a copy with one byte changed was
+  refused, the aarch64 binary arrived intact and was refused because it would not run,
+  neither left a file behind, and the right binary went up in 0.24 s and was then found
+  ready. Not tried: a home directory mounted `noexec`, a host with no hashing tool, a
+  login shell that is not a Bourne shell, and the installer package.
+- **Step 7, the app backend: working, with gaps listed below.** The choice is a dropdown in
+  the new and edit session dialog, under Persistent session: "Kept alive by", tmux or
+  Resesh agent. Choosing the agent is the consent to upload, so nothing asks at connect
+  time (this replaced the ask/always/never setting from step 6). `PersistenceBackend` puts
+  tmux and the agent behind the same questions, and a tab picks one at each connect: the
+  agent when the session asks for it and it is there or can be put there, tmux otherwise,
+  with a line in the terminal saying why. Starting, resuming, ending, listing and the
+  current-directory query all go through the backend the tab picked, and so does the
+  remote sessions dialog, which looks for the agent but never uploads from there.
+  In the app against Ubuntu 24.04, on a host with no agent: the first connect uploaded it
+  and started a session; a `blocked` report showed the badge; the connection was killed on
+  the host; Enter reconnected, the same session was attached, and screen and badge came
+  back. The detach key (Ctrl+\) is turned off for the app's sessions.
+  Tried since, in the app against the same host, with another copy of the app attached to
+  the same saved session at the time: the session picker listed three agent shells with
+  their directories and marked the one attached elsewhere; a fourth was started from it
+  with bash shell integration, and commands were recorded with exact marks and exit codes;
+  after a dropped connection the tab went back to its own shell without asking, the
+  history gained no duplicates, and the next command was tracked; the remote sessions
+  dialog listed all four; End Remote Session ended only that tab's shell.
+  Also added: bulk edit has "Kept alive by"; a window notice says why tmux is used when the
+  agent was chosen (the line in the terminal was wiped by the shell start that follows it);
+  and a window notice counts tmux shells left running by a session that has moved to the
+  agent, which the agent's lists do not show.
+  Still not tried: resuming a detached agent shell from the picker or the dialog, ending
+  several from the dialog, two tabs of one app on one session, the bulk edit dialog on
+  screen, and fish or csh as the login shell.
+- **Sockets must not stay in the default place.** The agent puts them under
+  `/run/user/<uid>`, which systemd removes when the user's last login ends; the sessions
+  would keep running with nothing able to reach them. The app will set `ZMX_DIR` to
+  `~/.local/share/resesh/sock`. Not yet tested across a full logout.
+- **zmx's own unit tests now run.** `build-agent.ps1 -Tests` builds them for Linux, since
+  they cannot run where we build. All 104 pass on Ubuntu 24.04 with both patches applied.
+- **One Ghostty pin.** The agent now builds against the commit in `eng/ghostty-vt.json`,
+  not the one zmx pins. Nothing in the agent had to change, the formatter patch applies as
+  it is, the 104 unit tests pass and the probe results are the same. The agent's checkout
+  is separate from the app's, which stays unpatched. That commit parses OSC 7501 and
+  reports prompt marks to a callback, which could replace the byte scanner in
+  `status.zig`; not done.
+- **Releases carry the agent.** The installer packages everything in the app's build
+  output, so `Agent\` goes in when it is there. The release workflow did not build it,
+  so a released app would have shipped without it and fallen back to tmux everywhere.
+  The workflow now builds and caches it, checks the app output for it, and the installer
+  project refuses a payload without it. `build-agent.ps1` downloads Zig itself, since the
+  workflow skips the Ghostty build on a cache hit. The signing step lists its files by
+  name, so the Linux binaries are left alone. The workflow change has not run on GitHub.
+- **To change the agent:** commit to the fork's `resesh` branch, move the commit in
+  `agent.json`, and raise its revision. The fork's `main` is 10 commits ahead of v0.8.1; the branch
+  has not been rebased onto it.
+
+### Open questions
+- Memory per session with a 50,000-line scrollback, since each session is its own process
+  with its own emulator.
+- Two clients of different sizes on one session. zmx gives the size to one "leader".
+- Hosts where the home directory is mounted `noexec`, and hosts that are not Linux. macOS
+  is a build target for zmx; the BSDs are not.
+- Whether a session started by an old agent version can be handed to a new one, or only
+  kept alive until it ends.
+
+### Bug in the tmux path, separate from the above
+On tmux 3.4, `capture-pane -t =name` fails with `can't find pane`; `=name:` works.
+`TmuxPersistence` uses the failing form in both `BootstrapCommand` and `ResumeCommand`, so
+the reattach replay prints an error and only the visible screen comes back. Found with the
+command on the host; not yet confirmed through the app. Changed to `=name:` on 2026-10-14,
+with a unit test for the command text. The probe's copy of the command then restored all
+300 lines on tmux 3.4; the fix has not been run through the app. The bug itself has: the
+app's trace log of 2026-10-14 shows `can't find pane: =sa100d35791f8-3` on a reattach.
 
 ---
 
@@ -462,7 +683,8 @@ have `synchronize-panes` if they truly want it.
 | 4 | Telnet & serial consoles (telnet → serial) | S–M | Low |
 | 5 | GSSAPI productization (path chosen by spike) | M | Depends on spike |
 | 6 | NetBox inventory source (read-only root → lenses → config context → console ports) | M–L | Medium |
-| 7 | Backlog picks | — | — |
+| 7 | Remote session agent (zmx fork → snapshot and status → upload → app backend) | L | Medium |
+| 8 | Backlog picks | — | — |
 
 Within connectivity, tunnels come first (pure SSH.NET), then agent auth, then jump hosts
 (which build on the tunnel channel code). Telnet/serial rides directly behind connectivity:

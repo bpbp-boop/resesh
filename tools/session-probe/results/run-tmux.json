@@ -1,0 +1,89 @@
+{
+ "target": "tmux",
+ "attach_bytes": 893,
+ "emit": {
+  "osc7501": "DROPPED",
+  "osc7377": "DROPPED",
+  "osc777": "DROPPED",
+  "osc9": "DROPPED",
+  "osc9_4": "DROPPED",
+  "osc8": "changed: b'\\x1b]8;id=tmux1;https://example.com/probe\\x1b\\\\link\\x1b]8;;\\x1b\\\\'",
+  "osc22": "DROPPED",
+  "osc52": "DROPPED",
+  "osc133A": "DROPPED",
+  "osc133D": "DROPPED",
+  "osc7": "DROPPED",
+  "osc0": "DROPPED",
+  "osc1337": "DROPPED",
+  "osc3008": "DROPPED",
+  "curly": "changed: b'\\x1b[4:3mu\\x1b(B\\x1b[m'",
+  "ulcolor": "changed: b'\\x1b[58:2:255:0:128m\\x1b[4mc\\x1b(B\\x1b[m'",
+  "truecolor": "changed: b'\\x1b[38;2;1;2;3mt\\x1b[39m'",
+  "sync": "changed: b's'",
+  "kittygfx": "DROPPED",
+  "decscusr": "intact (moved)",
+  "xtwinops": "DROPPED"
+ },
+ "query": {
+  "xtversion": {
+   "reached_terminal": false,
+   "result": "answered by middle: b'\\x1bP>|tmux 3.4\\x1b\\\\'"
+  },
+  "da1": {
+   "reached_terminal": false,
+   "result": "answered by middle: b'\\x1b[?1;2;4c'"
+  },
+  "da2": {
+   "reached_terminal": false,
+   "result": "answered by middle: b'\\x1b[>84;0;0c'"
+  },
+  "osc11": {
+   "reached_terminal": false,
+   "result": "no answer"
+  },
+  "osc10": {
+   "reached_terminal": false,
+   "result": "no answer"
+  },
+  "kittykbd": {
+   "reached_terminal": false,
+   "result": "no answer"
+  },
+  "decrqm2026": {
+   "reached_terminal": false,
+   "result": "no answer"
+  },
+  "decrqm2027": {
+   "reached_terminal": false,
+   "result": "no answer"
+  },
+  "cpr": {
+   "reached_terminal": false,
+   "result": "answered by middle: b'\\x1b[25;1R'"
+  },
+  "xtgettcap": {
+   "reached_terminal": false,
+   "result": "no answer"
+  },
+  "osc52q": {
+   "reached_terminal": false,
+   "result": "answered by middle: b'\\x1b]52;;cHJvYmU=\\x1b\\\\'"
+  }
+ },
+ "keys": {
+  "sent": "b'\\x1b[97;5u\\x1b[13;2u\\x1b[I\\x1b[<0;10;5M\\x1b[200~paste\\x1b[201~'",
+  "received": "b'\\x01\\x1b[<0;10;5M\\x1b[200~paste\\x1b[201~'",
+  "identical": false,
+  "modes_reaching_terminal": {
+   "kitty >1u": false,
+   "paste 2004": false,
+   "focus 1004": false,
+   "mouse 1000": true,
+   "mouse 1006": true
+  }
+ },
+ "throughput": {
+  "finished": false,
+  "seconds": 120.0
+ }
+}

@@ -311,15 +311,20 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         return null;
     }
 
-    public string CreatePersistentBootstrap(Guid sessionId, int slot, ShellIntegrationMode mode, CancellationToken token)
+    public string CreatePersistentBootstrap(Guid sessionId, int slot, ShellIntegrationMode mode, CancellationToken token,
+        PersistenceBackend? backend = null)
     {
         var directory = PrepareShellIntegrationDirectory(mode, token, tmux: true);
-        return BuildPersistentBootstrap(sessionId, slot, mode, directory);
+        return BuildPersistentBootstrap(sessionId, slot, mode, directory, backend);
     }
 
-    internal static string BuildPersistentBootstrap(Guid sessionId, int slot, ShellIntegrationMode mode, string? directory)
+    internal static string BuildPersistentBootstrap(Guid sessionId, int slot, ShellIntegrationMode mode, string? directory,
+        PersistenceBackend? backend = null)
     {
-        var launch = directory is null ? null : RemoteShellIntegration.LaunchCommand(mode, directory, tmux: true);
+        backend ??= PersistenceBackend.Tmux;
+        // Only tmux needs the integration scripts to know about it: they wrap what it
+        // would otherwise swallow. The agent forwards everything as it is.
+        var launch = directory is null ? null : RemoteShellIntegration.LaunchCommand(mode, directory, tmux: backend.StatusRidesOnTitle);
         var useExec = IntegratedShellStream.IsSupported && RemoteShellIntegration.IsSupported(mode) && mode != ShellIntegrationMode.PowerShell;
         // On tmux absence or option rejection, an exec-based bootstrap must start its
         // own interactive fallback; there is no parent interactive shell to return to.
@@ -329,7 +334,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         var fallback = directory is not null ? RemoteShellIntegration.LaunchCommand(mode, directory, tmux: false)
             : useExec ? "sh -c " + RemoteShellIntegration.QuotePosix(
                 "case \"${SHELL:-}\" in /*) if test -f \"$SHELL\" && test -x \"$SHELL\"; then exec \"$SHELL\" -l -i; fi;; esac; exec sh -i") : null;
-        return TmuxPersistence.BootstrapCommand(sessionId, slot, launch, fallback);
+        return backend.BootstrapCommand(sessionId, slot, launch, fallback);
     }
 
     private static string ReadSetupOutput(Stream stream, SshCommand command)
@@ -468,6 +473,43 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         catch (Exception e) when (e is SshException or IOException or ObjectDisposedException or InvalidOperationException)
         {
             TraceHook?.Invoke($"RunCommand failed: {e.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Runs a command on its own channel with <paramref name="input"/> as its standard
+    /// input, which is then closed: a script for <c>sh -s</c>, or a file for a command
+    /// that reads one. Null when the channel is unavailable or the command did not finish
+    /// within <paramref name="timeout"/>. Blocking.
+    /// </summary>
+    public SshCommandResult? RunCommand(string command, ReadOnlyMemory<byte> input, TimeSpan timeout)
+    {
+        try
+        {
+            var client = _client;
+            if (client?.IsConnected != true || _disposed)
+                return null;
+            using var deadline = new CancellationTokenSource(timeout);
+            using var cmd = client.CreateCommand(command);
+            cmd.CommandTimeout = timeout;
+            using var cancel = deadline.Token.Register(() => cmd.Dispose());
+            var execution = cmd.ExecuteAsync(deadline.Token);
+            // Read both streams while writing: a command that talks back before it has read
+            // everything must not block on a full window.
+            var output = Task.Run(() => new StreamReader(cmd.OutputStream, Encoding.UTF8).ReadToEnd(), CancellationToken.None);
+            var error = Task.Run(() => new StreamReader(cmd.ExtendedOutputStream, Encoding.UTF8).ReadToEnd(), CancellationToken.None);
+            using (var stdin = cmd.CreateInputStream())
+            {
+                stdin.Write(input.Span);
+            }
+            Task.WhenAll(execution, output, error).GetAwaiter().GetResult();
+            return new SshCommandResult(cmd.ExitStatus == 0, output.Result, error.Result);
+        }
+        catch (Exception e) when (e is SshException or IOException or ObjectDisposedException
+            or InvalidOperationException or OperationCanceledException)
+        {
+            TraceHook?.Invoke($"RunCommand with input failed: {e.GetType().Name}");
             return null;
         }
     }

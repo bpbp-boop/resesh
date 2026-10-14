@@ -129,6 +129,9 @@ internal sealed class CommandTracker
     private long _executionNextId;
     private TerminalCommandExecution? _executionPending;
 
+    private bool _replaying;
+    private string? _replayRunning;
+
     private bool _historyEnabled;
     private Mark? _historyOpen;
     private int _historyIdleGeneration;
@@ -215,7 +218,7 @@ internal sealed class CommandTracker
                     _pending = Commit(line, null, exact: true, null, text);
                     if (_pending is not null)
                         _pending.FullText = command.Length > 0 ? Truncate(command.Trim(), HistoryMaxCommand) : CmdText(line, _promptCol, HistoryMaxCommand);
-                    if (_executionReporting && text.Length > 0 && !ControlCharsRe.IsMatch(text) && _executionNextId < long.MaxValue)
+                    if (_executionReporting && !_replaying && text.Length > 0 && !ControlCharsRe.IsMatch(text) && _executionNextId < long.MaxValue)
                     {
                         FinishExecution(null);
                         var execution = new TerminalCommandExecution(++_executionNextId, Truncate(text, 256), false, null);
@@ -433,8 +436,34 @@ internal sealed class CommandTracker
         return Truncate(full[col..].Trim(), maxLength);
     }
 
+    /// <summary>
+    /// A persistent session is sending its screen again after a reattach. The marks in it
+    /// are old: they are kept for the ruler, but nothing in them is run, finished or
+    /// recorded now. When it ends, the running command is reported once, as it stands.
+    /// A command still running at that point is not recorded when it finishes.
+    /// </summary>
+    public void SetReplaying(bool replaying)
+    {
+        if (_replaying == replaying)
+            return;
+        _replaying = replaying;
+        if (replaying)
+        {
+            _replayRunning = null;
+            return;
+        }
+        if (_replayRunning is { } running)
+            RunningCommand?.Invoke(running, true);
+        _replayRunning = null;
+    }
+
     private void FireCommand(string text, int? epoch, bool exact)
     {
+        if (_replaying)
+        {
+            _replayRunning = text;
+            return;
+        }
         // A discovered command loses to a title that arrived after its Enter: the command
         // already finished, or the program titled itself.
         if (epoch is { } e && e != _titlesSeen)
@@ -588,7 +617,7 @@ internal sealed class CommandTracker
         var text = (_buffer.LineText(line) ?? "").Trim();
         var match = CmdSplitRe.Match(text);
         var command = match.Success ? match.Groups[2].Value : text;
-        if (command.Length > 0)
+        if (command.Length > 0 && !_replaying)
             CommandMarked?.Invoke(command);
     }
 
@@ -783,7 +812,7 @@ internal sealed class CommandTracker
 
     private void HistoryBegin(Mark entry)
     {
-        if (!_historyEnabled)
+        if (!_historyEnabled || _replaying)
             return;
         var previous = _historyOpen;
         if (previous is not null && previous != entry && !previous.HistoryDone)

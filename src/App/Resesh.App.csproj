@@ -29,6 +29,14 @@
     <Content Include="Assets\AgentIcons\*.svg" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup Condition="Exists('..\..\.artifacts\agent\agent-manifest.json')">
+    <!-- The remote session agent for Linux hosts, built by eng/build-agent.ps1 and read
+         through AgentPackage. Optional: without it persistence falls back to tmux. -->
+    <Content Include="..\..\.artifacts\agent\**\*" Exclude="..\..\.artifacts\agent\**\resesh-agent-tests"
+             Link="Agent\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.6" />
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.4.0" GeneratePathProperty="true" />

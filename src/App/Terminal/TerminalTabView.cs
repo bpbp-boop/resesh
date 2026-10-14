@@ -36,6 +36,8 @@ public sealed class TerminalTabView : Grid, IDisposable
     private readonly TmuxSlotReservations.Owner _tmuxReservation;
     private int? _resumeTmuxSlot;
     private bool _hasTmuxTarget;
+    /// <summary>What keeps this tab's persistent shell alive, chosen at each connect.</summary>
+    private PersistenceBackend _persistence = PersistenceBackend.Tmux;
     private readonly TerminalSurface _terminal = TerminalSurfaceFactory.CreateLive();
     private readonly ProgressRing _spinner = new() { IsActive = false, Width = 48, Height = 48 };
 
@@ -509,7 +511,7 @@ public sealed class TerminalTabView : Grid, IDisposable
     private string SplitTmuxStatus(string title, out string? report)
     {
         report = null;
-        return Session.Persistent ? TmuxStatus.SplitTitle(title, out report) : title;
+        return Session.Persistent && _persistence.StatusRidesOnTitle ? TmuxStatus.SplitTitle(title, out report) : title;
     }
 
     /// <summary>
@@ -1001,10 +1003,13 @@ public sealed class TerminalTabView : Grid, IDisposable
     private string SelectTmuxBootstrapBlocking(SshTerminalSession connected, bool isReconnect, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        var result = connected.RunCommand(TmuxPersistence.ManagementCommand());
+        _persistence = ResolvePersistenceBlocking(connected, mayUpload: true, token);
+        if (!isReconnect && !_persistence.StatusRidesOnTitle)
+            NoteLeftoverTmuxShells(connected, token);
+        var result = connected.RunCommand(_persistence.ManagementCommand());
         token.ThrowIfCancellationRequested();
         var remoteSessions = result is { Success: true }
-            ? TmuxPersistence.ParseManagedSessions(result.Output, Session.Id)
+            ? _persistence.ParseManagedSessions(result.Output, Session.Id)
             : [];
 
         if (_resumeTmuxSlot is { } requestedSlot)
@@ -1012,7 +1017,7 @@ public sealed class TerminalTabView : Grid, IDisposable
             if (!remoteSessions.Any(remote => remote.Slot == requestedSlot))
                 throw new InvalidOperationException("That remote session is no longer available. Refresh the remote sessions list.");
             ClaimSlot(requestedSlot);
-            return TmuxPersistence.ResumeCommand(Session.Id, requestedSlot);
+            return _persistence.ResumeCommand(Session.Id, requestedSlot);
         }
 
         // A reconnect may retain its target only while no other tab has claimed it.
@@ -1045,7 +1050,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         {
             _tab.TmuxSlot = resumePlan.Slot;
             _hasTmuxTarget = true;
-            return TmuxPersistence.ResumeCommand(Session.Id, resumePlan.Slot);
+            return _persistence.ResumeCommand(Session.Id, resumePlan.Slot);
         }
 
         var start = (TmuxConnectPlan.StartNew)plan;
@@ -1059,17 +1064,17 @@ public sealed class TerminalTabView : Grid, IDisposable
                 // Another tab may have claimed this shell since the plan/picker was built.
                 using var ending = App.TmuxSlots.CreateOwner(Session.Id);
                 if (ending.TryReserve(slot, token))
-                    connected.TryRunCommand(TmuxPersistence.KillCommand(Session.Id, slot));
+                    connected.TryRunCommand(_persistence.KillCommand(Session.Id, slot));
             }
             token.ThrowIfCancellationRequested();
             // Trust the server, not the kill's exit status. When the listing fails for
             // another reason, keep avoiding every earlier slot so the new shell can never
             // attach to a survivor.
-            var after = connected.RunCommand(TmuxPersistence.ManagementCommand());
+            var after = connected.RunCommand(_persistence.ManagementCommand());
             token.ThrowIfCancellationRequested();
             if (after is { Success: true })
-                remoteSessions = TmuxPersistence.ParseManagedSessions(after.Output, Session.Id);
-            else if (after is not null && TmuxPersistence.IsServerAbsent(after))
+                remoteSessions = _persistence.ParseManagedSessions(after.Output, Session.Id);
+            else if (after is not null && _persistence.IsAbsent(after))
                 remoteSessions = [];
             selectedSlot = ((TmuxConnectPlan.StartNew)_tmuxReservation.PlanConnect(
                 remoteSessions, DetachedSessionAction.StartNew, token)).Slot;
@@ -1089,9 +1094,95 @@ public sealed class TerminalTabView : Grid, IDisposable
         string BuildTmuxBootstrap(int slot)
         {
             if (remoteSessions.Any(remote => remote.Slot == slot))
-                return TmuxPersistence.ResumeCommand(Session.Id, slot);
-            return connected.CreatePersistentBootstrap(Session.Id, slot, Session.ShellIntegration, token);
+                return _persistence.ResumeCommand(Session.Id, slot);
+            return connected.CreatePersistentBootstrap(Session.Id, slot, Session.ShellIntegration, token, _persistence);
         }
+    }
+
+    /// <summary>
+    /// Picks what keeps this session's shells alive on the host behind
+    /// <paramref name="connected"/>: the session agent when the saved session asks for it
+    /// and it is there, or can be put there; tmux otherwise. Says why in the terminal when
+    /// the agent was asked for and is not used. Runs on an SSH worker.
+    /// </summary>
+    internal PersistenceBackend ResolvePersistenceBlocking(SshTerminalSession connected, bool mayUpload, CancellationToken token)
+    {
+        if (!Session.SessionAgent)
+            return PersistenceBackend.Tmux;
+        if (App.AgentPackage is not { } package)
+            return Fallback("this copy of Resesh was built without it");
+
+        var timeout = TimeSpan.FromSeconds(60);
+        var probed = connected.RunCommand("sh -s", System.Text.Encoding.UTF8.GetBytes(AgentInstall.ProbeScript(package.Version)), timeout);
+        token.ThrowIfCancellationRequested();
+        if (AgentInstall.ParseProbe(probed?.Output ?? "") is not { } probe)
+            return Fallback("the host did not answer the check for it");
+
+        switch (AgentInstall.Plan(probe, package, mayUpload))
+        {
+            case AgentInstallPlan.Ready ready:
+                return PersistenceBackend.Agent(ready.RemotePath);
+            case AgentInstallPlan.Upload upload:
+                if (AgentPackage.ReadVerified(upload.Binary) is not { } bytes)
+                    return Fallback("its file in the Resesh folder is missing or damaged");
+                Notice($"Uploading the Resesh session agent ({upload.Architecture}, {bytes.Length / 1024} KB) …");
+                var outcome = AgentInstall.ParseInstall(
+                    connected.RunCommand(AgentInstall.InstallCommand(package.Version, upload.Binary), bytes, timeout));
+                token.ThrowIfCancellationRequested();
+                return outcome switch
+                {
+                    AgentInstallOutcome.Installed => PersistenceBackend.Agent(AgentInstall.RemotePath(package.Version)),
+                    AgentInstallOutcome.CannotRun => Fallback("the host would not run it; the home directory may be mounted noexec"),
+                    AgentInstallOutcome.Mismatch => Fallback("the upload did not arrive intact"),
+                    _ => Fallback("the upload failed"),
+                };
+            case AgentInstallPlan.Unavailable unavailable:
+                return Fallback(unavailable.Reason);
+            default:
+                return PersistenceBackend.Tmux;
+        }
+
+        PersistenceBackend Fallback(string reason)
+        {
+            // In the window, not the terminal: the shell start that follows wipes the screen.
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_disposed && !token.IsCancellationRequested)
+                    App.WindowFor(_tab)?.ShowOperationNotice(
+                        $"{Session.Name}: using tmux, not the Resesh agent",
+                        char.ToUpperInvariant(reason[0]) + reason[1..] + ".");
+            });
+            return PersistenceBackend.Tmux;
+        }
+
+        void Notice(string message) => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_disposed && !token.IsCancellationRequested)
+                _terminal.WriteNotice(message);
+        });
+    }
+
+    /// <summary>
+    /// A session moved from tmux to the agent leaves its tmux shells running, and the
+    /// agent's lists do not show them. Say so, and how to reach them. Costs one command on
+    /// a first connect; a host with no tmux server answers at once.
+    /// </summary>
+    private void NoteLeftoverTmuxShells(SshTerminalSession connected, CancellationToken token)
+    {
+        var result = connected.RunCommand(TmuxPersistence.ManagementCommand());
+        token.ThrowIfCancellationRequested();
+        if (result is not { Success: true })
+            return;
+        var count = TmuxPersistence.ParseManagedSessions(result.Output, Session.Id).Count;
+        if (count == 0)
+            return;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_disposed && !token.IsCancellationRequested)
+                App.WindowFor(_tab)?.ShowOperationNotice(
+                    count == 1 ? $"{Session.Name}: 1 tmux shell is still running" : $"{Session.Name}: {count} tmux shells are still running",
+                    "Started before this session moved to the Resesh agent. Set \"Kept alive by\" to tmux to reach " + (count == 1 ? "it." : "them."));
+        });
     }
 
     /// <summary>Marshals tmux selection onto the UI thread while the SSH worker waits.</summary>
@@ -1516,7 +1607,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         return Session.Persistent
             && session is not null
             && await Task.Run(() => session.TryRunCommand(
-                TmuxPersistence.KillCommand(Session.Id, _tab.TmuxSlot)));
+                _persistence.KillCommand(Session.Id, _tab.TmuxSlot)));
     }
 
     /// <summary>Sends a break signal when the live backend has one (telnet). Returns false
@@ -1714,7 +1805,7 @@ public sealed class TerminalTabView : Grid, IDisposable
         var session = _ssh;
         if (Session.Persistent && session is not null && session.IsConnected)
         {
-            var result = await Task.Run(() => session.RunCommand(TmuxPersistence.CurrentPathCommand()));
+            var result = await Task.Run(() => session.RunCommand(_persistence.CurrentPathCommand()));
             if (result is null)
                 failure = "the connection did not accept the query";
             else if (!result.Success)
@@ -1723,7 +1814,7 @@ public sealed class TerminalTabView : Grid, IDisposable
                     : $"persistent session: {result.Error.Trim()}";
             else
             {
-                path = TmuxPersistence.ParseCurrentPath(result.Output, Session.Id, _tab.TmuxSlot);
+                path = _persistence.ParseCurrentPath(result.Output, Session.Id, _tab.TmuxSlot);
                 if (path is null)
                     failure = "no matching persistent session in the reply";
             }
