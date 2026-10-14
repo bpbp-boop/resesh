@@ -56,6 +56,8 @@ function Sync-Source($name, $source, $patch) {
         if ($LASTEXITCODE -ne 0) { throw "clone of $name failed" }
     }
     git -C $dir remote set-url origin $source.repository
+    # Sources as committed, whatever this machine's line-ending setting is.
+    git -C $dir config core.autocrlf false
     git -C $dir cat-file -e "$($source.commit)^{commit}" 2>$null
     if ($LASTEXITCODE -ne 0) { git -C $dir fetch --depth 1 origin $source.commit }
     git -C $dir checkout --detach --force $source.commit

@@ -1,0 +1,3 @@
+# A patch must reach git apply with the line endings of the files it changes. Ghostty's
+# are LF; a Windows checkout would otherwise turn this one into CRLF and it would not apply.
+*.patch text eol=lf
