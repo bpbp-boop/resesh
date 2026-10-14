@@ -1,15 +1,11 @@
 {
-  "revision": 1,
+  "revision": 2,
   "zmx": {
-    "repository": "https://github.com/neurosnap/zmx",
-    "commit": "8bab1f0173b07e79835ea372d749af3dbf0d0842",
+    "repository": "https://github.com/bpbp-boop/zmx",
+    "branch": "resesh",
+    "commit": "3ca79a0c11697bef4cb3f46d3bae6b9694fe03c8",
     "version": "0.8.1",
-    "license": "MIT"
-  },
-  "ghostty": {
-    "repository": "https://github.com/ghostty-org/ghostty",
-    "commit": "8af6897c0afc63037a8a3efee4162a380e3a4572",
-    "version": "1.3.2-dev",
+    "upstream": "https://github.com/neurosnap/zmx",
     "license": "MIT"
   }
 }

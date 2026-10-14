@@ -482,8 +482,12 @@ tmux, then a plain session.
    and the tab badge survives a dropped connection in the app.
 
 ### Progress (2026-10-14)
-Built on Windows with `eng/build-agent.ps1`, from zmx v0.8.1 plus the two patches in
-`eng/agent`. The x86_64 binary was then run through `tools/session-probe` on rct-keep
+Built on Windows with `eng/build-agent.ps1`. The agent's source is the `resesh` branch of
+our zmx fork, [bpbp-boop/zmx](https://github.com/bpbp-boop/zmx), two commits on v0.8.1;
+`eng/agent/agent.json` pins the commit. It builds against the Ghostty commit the app pins,
+with `eng/agent/ghostty-vt-formatter.patch` applied. (Until later on the 14th the zmx
+changes were a patch file too, against the Ghostty commit zmx pins; the notes below say
+"patch" for both.) The x86_64 binary was then run through `tools/session-probe` on rct-keep
 (Ubuntu 24.04.5): passthrough is the same as stock zmx, and a reattach now brings back
 links, prompt marks and status ([table](tools/session-probe/RESULTS.md#the-patched-build-2026-10-14)).
 In the app, with the session attached by hand in a plain SSH tab: a `blocked` report showed
@@ -497,8 +501,7 @@ the status the command had just reported.
 - **Step 1, build: done. CLI not cut down yet.** Static musl, stripped, `ReleaseSmall`:
   1.80 MB for x86_64 and 1.50 MB for aarch64, against 15.7 MB for the stock release. Two
   runs gave the same hashes. Speed against the stock `ReleaseSafe` build is not measured.
-  The fork is a patch on a pinned commit, like the Ghostty pin, and not a repository of
-  its own. That stops being practical once the CLI is cut down.
+  With our Ghostty pin they are 1.83 MB and 1.52 MB.
 - **Step 2, links: patched, and not where the plan expected.** There is no option to turn
   on. The libghostty-vt formatter writes links only for HTML output; in VT output
   `extra.screen.hyperlink` restores just the link the cursor is in, and zmx already asks for
@@ -593,9 +596,15 @@ the status the command had just reported.
   `~/.local/share/resesh/sock`. Not yet tested across a full logout.
 - **zmx's own unit tests now run.** `build-agent.ps1 -Tests` builds them for Linux, since
   they cannot run where we build. All 104 pass on Ubuntu 24.04 with both patches applied.
-- The fork still builds against the Ghostty commit zmx pins (`8af6897`), not ours
-  (`b699ea7`). Ours parses OSC 7501 and reports prompt marks to a callback, which could
-  replace the byte scanner in `status.zig`. Moving the pin is its own step.
+- **One Ghostty pin.** The agent now builds against the commit in `eng/ghostty-vt.json`,
+  not the one zmx pins. Nothing in the agent had to change, the formatter patch applies as
+  it is, the 104 unit tests pass and the probe results are the same. The agent's checkout
+  is separate from the app's, which stays unpatched. That commit parses OSC 7501 and
+  reports prompt marks to a callback, which could replace the byte scanner in
+  `status.zig`; not done.
+- **To change the agent:** commit to the fork's `resesh` branch, move the commit in
+  `agent.json`, and raise its revision. The fork's `main` is 10 commits ahead of v0.8.1; the branch
+  has not been rebased onto it.
 
 ### Open questions
 - Memory per session with a 50,000-line scrollback, since each session is its own process
