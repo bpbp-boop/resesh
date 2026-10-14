@@ -19,6 +19,7 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
         public string? Value { get; init; }
         public SessionLogin Login { get; init; }
         public Guid? IdentityId { get; init; }
+        public Guid? JumpHostId { get; init; }
     }
 
     private static readonly Choice NoChange = new() { Label = "No change" };
@@ -51,6 +52,22 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
         }));
         LoginBox.ItemsSource = logins;
         LoginBox.SelectedIndex = 0;
+
+        // A selected session cannot be the jump for the rest of the selection, itself included.
+        var selected = sessions.Select(session => session.Id).ToHashSet();
+        var jumps = new List<Choice> { NoChange, new() { Change = true, Label = "None (connect directly or through the session's proxy)" } };
+        jumps.AddRange(App.Store.Sessions
+            .Where(candidate => candidate.Kind == SessionKind.Ssh && !selected.Contains(candidate.Id))
+            .OrderBy(candidate => candidate.FolderPath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(candidate => new Choice
+            {
+                Change = true,
+                JumpHostId = candidate.Id,
+                Label = (candidate.FolderPath.Length > 0 ? $"{candidate.FolderPath}/" : "") + $"{candidate.Name} ({candidate.Host})",
+            }));
+        JumpBox.ItemsSource = jumps;
+        JumpBox.SelectedIndex = 0;
 
         ColorBox.Items.Add("No change");
         foreach (var (name, _) in SessionEditDialog.ColorChoices)
@@ -89,12 +106,15 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
         var login = LoginBox.SelectedItem as Choice ?? NoChange;
         var icon = IconBox.SelectedItem as Choice ?? NoChange;
         var theme = ThemeBox.SelectedItem as Choice ?? NoChange;
+        var jump = JumpBox?.SelectedItem as Choice ?? NoChange;
         return new SessionBulkEdit
         {
             Login = login.Change ? login.Login : null,
             IdentityId = login.IdentityId,
             KeepUsernames = KeepUsernamesBox.IsChecked == true,
             Port = double.IsNaN(PortBox.Value) ? null : (int)PortBox.Value,
+            SetJumpHost = jump.Change,
+            JumpHostId = jump.JumpHostId,
             SetColor = ColorBox.SelectedIndex > 0,
             ColorTag = ColorBox.SelectedIndex > 0 ? SessionEditDialog.ColorChoices[ColorBox.SelectedIndex - 1].Hex : null,
             SetIcon = icon.Change,

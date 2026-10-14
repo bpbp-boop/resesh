@@ -63,6 +63,8 @@ public static class ConnectDialogs
             .ChooseAsync(dialog => dialog.ShowModalAsync());
 
     /// <summary>Host key confirmation: first connect, or a changed key (typed confirmation required).</summary>
-    public static async Task<bool> ConfirmHostKeyAsync(XamlRoot xamlRoot, HostKeyInfo info) =>
-        await new HostKeyDialog(info) { XamlRoot = xamlRoot }.ShowModalAsync() == ContentDialogResult.Primary;
+    /// <param name="routeStep">Which jump host on the route is presenting the key, when it
+    /// is not the session's own host.</param>
+    public static async Task<bool> ConfirmHostKeyAsync(XamlRoot xamlRoot, HostKeyInfo info, string? routeStep = null) =>
+        await new HostKeyDialog(info, routeStep) { XamlRoot = xamlRoot }.ShowModalAsync() == ContentDialogResult.Primary;
 }

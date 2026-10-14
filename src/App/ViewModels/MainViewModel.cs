@@ -318,6 +318,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         _store.Remove(session.Id);
         _credentials.Delete(session.Id);
+        _credentials.DeleteProxy(session.Id);
         RebuildTree();
         _environment.SessionsChanged(this);
     }
@@ -350,7 +351,10 @@ public sealed partial class MainViewModel : ObservableObject
     public void DeleteSessions(IEnumerable<Session> sessions)
     {
         foreach (var removed in _store.RemoveMany(sessions.Select(session => session.Id)))
-            _credentials.Delete(removed.Id);
+            {
+                _credentials.Delete(removed.Id);
+                _credentials.DeleteProxy(removed.Id);
+            }
         RebuildTree();
         _environment.SessionsChanged(this);
     }
@@ -362,6 +366,8 @@ public sealed partial class MainViewModel : ObservableObject
         _store.AddMany(copies.Select(pair => pair.Copy));
         foreach (var (source, copy) in copies)
         {
+            if (source.Proxy is not null && _credentials.ReadProxy(source.Id) is { Length: > 0 } proxyPassword)
+                _credentials.WriteProxy(copy.Id, proxyPassword);
             if (UsesOwnPassword(source) && _credentials.Read(source.Id) is { Length: > 0 } password)
                 _credentials.Write(copy.Id, password);
         }
@@ -399,7 +405,10 @@ public sealed partial class MainViewModel : ObservableObject
     public void DeleteFolder(string path, SessionKind kind = SessionKind.Ssh)
     {
         foreach (var removed in _store.DeleteFolder(path, kind))
-            _credentials.Delete(removed.Id);
+            {
+                _credentials.Delete(removed.Id);
+                _credentials.DeleteProxy(removed.Id);
+            }
         RebuildTree();
         _environment.SessionsChanged(this);
     }

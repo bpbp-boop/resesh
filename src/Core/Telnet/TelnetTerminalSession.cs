@@ -25,6 +25,7 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
     private readonly object _gate = new();
     private readonly System.Collections.Concurrent.BlockingCollection<byte[]> _outgoing = new();
     private Socket? _socket;
+    private IDisposable? _route;
     private TelnetProtocol? _protocol;
     private TelnetTextCodec? _textCodec;
     private TelnetBbsSizeFilter? _bbsSizeFilter;
@@ -50,8 +51,10 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
     /// <summary>Opens the connection and starts negotiation. Blocks; run off the UI thread.</summary>
     public void Connect(string host, int port, string terminalType, int columns, int rows,
         CancellationToken cancellationToken = default, TelnetTextEncoding textEncoding = TelnetTextEncoding.Auto,
-        bool report80x25 = false)
+        bool report80x25 = false, IDisposable? route = null)
     {
+        // Whatever carries this connection (jump hosts) ends with it, connected or not.
+        lock (_gate) _route = route;
         if (string.IsNullOrWhiteSpace(host))
             throw new TelnetSessionException("No host set for this session.");
 
@@ -148,18 +151,26 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
     public void Dispose()
     {
         Socket? socket;
+        IDisposable? route;
         lock (_gate)
         {
+            route = _route;
+            _route = null;
             if (_stopped)
+            {
+                route?.Dispose();
                 return;
+            }
             _stopped = true;
             socket = _socket;
             _outgoing.CompleteAdding();
         }
-        if (socket is null)
-            return;
-        try { socket.Shutdown(SocketShutdown.Both); } catch (Exception ex) when (ex is SocketException or ObjectDisposedException) { }
-        socket.Dispose(); // unblocks the reader's Receive
+        if (socket is not null)
+        {
+            try { socket.Shutdown(SocketShutdown.Both); } catch (Exception ex) when (ex is SocketException or ObjectDisposedException) { }
+            socket.Dispose(); // unblocks the reader's Receive
+        }
+        route?.Dispose();
     }
 
     private void ReadLoop()

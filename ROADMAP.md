@@ -56,6 +56,12 @@ and the git history.
 - **Workspaces & layout restore** — named ordered tab-group layouts with pinned and active
   tab state, replace or additive opening that adopts live connections, clean-exit startup
   restore, and conflict-aware workspace remapping through backup import.
+- **Jump hosts, proxies and tunnels** — reach a session through another saved SSH session
+  (chains allowed, each hop with its own login and host key; telnet too), or through a
+  SOCKS5, SOCKS4 or HTTP proxy. Local, remote and dynamic (SOCKS) port forwards saved per
+  session and started with the connection, with a Tunnels dialog to add, stop and restart
+  them on a live tab. OpenSSH `ProxyJump` and PuTTY proxy settings import; bulk edit sets
+  a jump host for many sessions.
 
 ---
 
@@ -84,21 +90,11 @@ Needs testing against a real AD-joined host — the local `TestSshServer` can't 
 
 ---
 
-## Connectivity: tunnels, jump hosts, SSH agent
+## Connectivity: SSH agent
 
-### Port forwarding
-SSH.NET has `ForwardedPortLocal/Remote/Dynamic` built in. Per-session tunnel list in the
-session editor (type, bind address/port, destination), started with the connection, with
-live status/error indicators in the tab and a quick "add tunnel" action on a running
-session. Dynamic (SOCKS) covers the browser-proxy use case.
-
-### Jump hosts (ProxyJump)
-Chain through one or more intermediate sessions: a `JumpHost` reference (another session id)
-on the model, connected via SSH.NET's port-forwarding channel (connect to jump, open a
-direct-tcpip channel, run the target handshake over it). Each hop uses its own auth —
-pairs naturally with GSSAPI credential delegation. UI: dropdown in the session
-editor picking an existing session as the jump; chains resolve recursively with a cycle
-check.
+Tunnels, jump hosts and proxies are shipped (see above and DECISIONS.md). Still open
+there: a jump host inherited from a folder, the way identities are (today it is set per
+session or with bulk edit); proxy passwords in encrypted backups; proxies for telnet.
 
 ### SSH agent support
 New auth option `Agent`: talk to the Windows OpenSSH agent named pipe
@@ -250,8 +246,8 @@ console server port. Offer "Console" on a device, opening telnet or SSH to the c
 server's mapped port (`200x`-style). This builds directly on shipped telnet support.
 
 **Depends on / pairs with:**
-- **Jump hosts:** config-context `jump` needs them. Until then, ignore it with a visible
-  note.
+- **Jump hosts:** config-context `jump` maps to a session's jump host (shipped); an unknown
+  name is ignored with a visible note.
 - **Identities:** this answers the "folder or tag" question. Identities should attach to
   lens attributes too (role = firewall → TACACS identity), since inventory devices
   have no hand-made folders.
@@ -678,7 +674,7 @@ have `synchronize-panes` if they truly want it.
 | # | Item | Size | Risk |
 |---|------|------|------|
 | 1 | **GSSAPI spike** (parallel with anything) | S | **High — do early** |
-| 2 | Connectivity (tunnels → agent → jump hosts) | M–L | Medium |
+| 2 | Connectivity (SSH agent; tunnels, jump hosts and proxies shipped) | M | Medium |
 | 3 | Program status (OSC 7501) → alerts list | S–M | Low |
 | 4 | Telnet & serial consoles (telnet → serial) | S–M | Low |
 | 5 | GSSAPI productization (path chosen by spike) | M | Depends on spike |
@@ -686,11 +682,11 @@ have `synchronize-panes` if they truly want it.
 | 7 | Remote session agent (zmx fork → snapshot and status → upload → app backend) | L | Medium |
 | 8 | Backlog picks | — | — |
 
-Within connectivity, tunnels come first (pure SSH.NET), then agent auth, then jump hosts
-(which build on the tunnel channel code). Telnet/serial rides directly behind connectivity:
+Within connectivity, tunnels, jump hosts and proxies are done; agent auth is what remains.
+Telnet/serial rides directly behind connectivity:
 it reuses the backend contract as-is, telnet before serial (no new dependency vs. port
 enumeration + device-arrival plumbing), and together they close the console-cable objection
 cheaply. GSSAPI ships last only because its spike must settle the approach first.
 NetBox's first steps (read-only root, lenses, overlays) don't depend on anything above.
-Config-context jump hosts wait for connectivity, and attribute-based identities wait for
+Config-context jump hosts can use the shipped jump hosts, and attribute-based identities wait for
 Identities.

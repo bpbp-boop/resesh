@@ -98,6 +98,8 @@ public static class PuttyRegistryImporter
         var protocol = (GetString(values, "Protocol") ?? "ssh").ToUpperInvariant();
         var port = GetInt(values, "PortNumber") ?? ImportCandidate.DefaultPort(protocol);
         var telnet = protocol == ImportCandidate.TelnetProtocol;
+        var proxyMethod = values.TryGetValue("ProxyMethod", out var method) && method is int methodValue ? methodValue : 0;
+        var proxyHost = (GetString(values, "ProxyHost") ?? "").Trim();
 
         // PuTTY allows HostName to be "user@host"
         var username = rawUser;
@@ -125,8 +127,29 @@ public static class PuttyRegistryImporter
             Username = username.Trim(),
             Protocol = protocol == "SSH" ? "SSH2" : protocol,
             PrivateKeyPath = telnet ? null : ImportKeyPath.Resolve(GetString(values, "PublicKeyFile")),
+            JumpHostName = telnet ? null : proxyMethod == PuttySshProxy && proxyHost.Length > 0 ? proxyHost : null,
+            Proxy = telnet || proxyHost.Length == 0 ? null : proxyMethod switch
+            {
+                1 => PuttyProxy(Models.ProxyKind.Socks4, proxyHost, values),
+                2 => PuttyProxy(Models.ProxyKind.Socks5, proxyHost, values),
+                3 => PuttyProxy(Models.ProxyKind.Http, proxyHost, values),
+                _ => null,
+            },
         };
     }
+
+    /// <summary>ProxyMethod 6: "SSH to proxy and use port forwarding", PuTTY's jump host.
+    /// Its ProxyHost is a host name or another saved session's name.</summary>
+    private const int PuttySshProxy = 6;
+
+    private static Models.ProxySettings PuttyProxy(
+        Models.ProxyKind kind, string host, IReadOnlyDictionary<string, object?> values) => new()
+    {
+        Kind = kind,
+        Host = host,
+        Port = GetInt(values, "ProxyPort") ?? Models.ProxySettings.DefaultPort(kind),
+        Username = (GetString(values, "ProxyUsername") ?? "").Trim(),
+    };
 
     public static string DecodeSessionName(string encoded)
     {

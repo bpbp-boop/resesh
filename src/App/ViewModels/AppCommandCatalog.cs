@@ -164,6 +164,8 @@ public sealed class AppCommandCatalog
                 vm.SendBreakCommand, ShortcutIds.SendBreak),
             new("Tab", Fixed("Manage Remote Sessions"), "tmux persistent shells resume end close command running age",
                 vm.ManageRemoteSessionsCommand),
+            new("Tab", Fixed("Tunnels"), "port forward forwarding local remote dynamic socks proxy listen ssh -L -R -D",
+                vm.ManageTunnelsCommand),
             new("Tab", Fixed("Clone Tab"), "duplicate copy current active session next adjacent",
                 vm.CloneTabCommand, ShortcutIds.CloneTab),
             new("Tab", () => vm.PinTabTitle, "current active keep", vm.TogglePinCommand),

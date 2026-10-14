@@ -18,6 +18,13 @@ public sealed record ImportCandidate
     public string Protocol { get; init; } = "";
     public string? PrivateKeyPath { get; init; }
 
+    /// <summary>The name of another candidate or saved session this one is reached through
+    /// (OpenSSH ProxyJump, PuTTY's SSH proxy). Linked after import when a session has that name.</summary>
+    public string? JumpHostName { get; init; }
+
+    /// <summary>A SOCKS or HTTP proxy the source connects through. Its password is not imported.</summary>
+    public ProxySettings? Proxy { get; init; }
+
     /// <summary>
     /// Opaque, in-memory-only token equal for sessions whose source stored the same password
     /// (see <see cref="SecureCrtImporter.PasswordFingerprint"/>). Never decrypted, never saved;
@@ -376,6 +383,14 @@ public static class SecureCrtImporter
         var imported = 0;
         var duplicates = 0;
         var identityIds = new Dictionary<string, Guid>();
+        var added = new List<(Session Session, string? JumpHostName)>();
+
+        void Add(ImportCandidate candidate, Session session)
+        {
+            session = session with { Proxy = session.Kind == SessionKind.Ssh ? candidate.Proxy : null };
+            store.Add(session);
+            added.Add((session, candidate.JumpHostName));
+        }
 
         Guid IdentityFor(Identities.ImportLogin login)
         {
@@ -414,7 +429,7 @@ public static class SecureCrtImporter
             if (candidate.IsTelnet)
             {
                 // Telnet carries no credentials: the server prompts in the terminal.
-                store.Add(new Session
+                Add(candidate, new Session
                 {
                     Kind = SessionKind.Telnet,
                     Name = candidate.Name,
@@ -430,7 +445,7 @@ public static class SecureCrtImporter
             if (identities is not null && plan?.Choices.GetValueOrDefault(candidate) is
                 { Kind: not Identities.ImportLoginKind.Own } choice)
             {
-                store.Add(new Session
+                Add(candidate, new Session
                 {
                     Name = candidate.Name,
                     FolderPath = candidate.FolderPath,
@@ -451,7 +466,7 @@ public static class SecureCrtImporter
                     .RegisterExternal(candidate.PrivateKeyPath, allowMissing: true)
                 : null;
 
-            store.Add(new Session
+            Add(candidate, new Session
             {
                 Name = candidate.Name,
                 FolderPath = candidate.FolderPath,
@@ -464,6 +479,29 @@ public static class SecureCrtImporter
             });
             imported++;
         }
+
+        // A jump host is named by the source, so it can only be linked once every session
+        // exists: one imported just now, or one saved earlier under that name.
+        var linked = new List<Session>();
+        foreach (var (session, jumpName) in added)
+        {
+            if (jumpName is null || session.Kind == SessionKind.Local)
+                continue;
+            var jump = added.Select(entry => entry.Session).Concat(store.Sessions).FirstOrDefault(other =>
+                other.Kind == SessionKind.Ssh && other.Id != session.Id
+                && (other.Name.Equals(jumpName, StringComparison.OrdinalIgnoreCase)
+                    || other.Host.Equals(jumpName, StringComparison.OrdinalIgnoreCase)));
+            if (jump is not null)
+                linked.Add(session with { JumpHostId = jump.Id });
+        }
+        // Checked against each other as well: a source can name two hosts as each other's jump.
+        var byId = store.Sessions.ToDictionary(session => session.Id);
+        foreach (var session in linked)
+        {
+            if (!Ssh.JumpRoute.WouldLoop(session.Id, session.JumpHostId!.Value, byId.GetValueOrDefault))
+                byId[session.Id] = session;
+        }
+        store.UpdateMany(linked.Where(session => byId[session.Id].JumpHostId is not null));
 
         // Attach only identities some imported session uses, and never over a folder's own.
         foreach (var (folder, login) in plan?.Attachments ?? [])

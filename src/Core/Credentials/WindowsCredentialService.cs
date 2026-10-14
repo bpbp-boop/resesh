@@ -15,6 +15,7 @@ public sealed class WindowsCredentialService : ICredentialService
 {
     private const string SessionTargetPrefix = "Resesh:";
     private const string KeyTargetPrefix = "Resesh:Key:";
+    private const string ProxyTargetPrefix = "Resesh:Proxy:";
     private const string LegacySessionTargetPrefix = "Sessions:";
     private const string LegacyKeyTargetPrefix = "Sessions:Key:";
     private const int CredTypeGeneric = 1;
@@ -88,6 +89,14 @@ public sealed class WindowsCredentialService : ICredentialService
         DeleteTarget(SessionTarget(sessionId));
         DeleteTarget(LegacySessionTargetPrefix + sessionId.ToString("D"));
     }
+
+    public string? ReadProxy(Guid sessionId) => ReadTarget(ProxyTarget(sessionId));
+
+    public void WriteProxy(Guid sessionId, string secret) => WriteTarget(ProxyTarget(sessionId), sessionId, secret);
+
+    public void DeleteProxy(Guid sessionId) => DeleteTarget(ProxyTarget(sessionId));
+
+    private static string ProxyTarget(Guid sessionId) => ProxyTargetPrefix + sessionId.ToString("D");
 
     public void DeleteKey(Guid keyId)
     {

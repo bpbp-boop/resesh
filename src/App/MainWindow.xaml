@@ -222,6 +222,12 @@
                         AutomationProperties.AutomationId="ManageRemoteSessionsMenu"
                         Visibility="{x:Bind ViewModel.ShowManageRemoteSessions, Mode=OneWay}"
                         Command="{x:Bind ViewModel.ManageRemoteSessionsCommand}" />
+                    <MenuFlyoutItem
+                        x:Name="TunnelsMenuItem"
+                        Text="Tunnels…"
+                        AutomationProperties.AutomationId="TunnelsMenu"
+                        Visibility="{x:Bind ViewModel.ShowManageTunnels, Mode=OneWay}"
+                        Command="{x:Bind ViewModel.ManageTunnelsCommand}" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem x:Name="CloneMenuItem" Text="Clone" Command="{x:Bind ViewModel.CloneTabCommand}" />
                     <MenuFlyoutItem

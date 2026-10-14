@@ -82,10 +82,140 @@ internal static class SshConnectionFactory
     {
         SshAuthenticationException => new SshSessionException(
             SshFailureKind.AuthenticationFailed, "Authentication failed — check the username and credential.", ex),
+        ProxyException => new SshSessionException(
+            SshFailureKind.HostUnreachable, $"The proxy refused the connection: {ex.Message}", ex),
         SshConnectionException or System.Net.Sockets.SocketException => new SshSessionException(
             SshFailureKind.HostUnreachable, $"Could not reach the host: {ex.Message}", ex),
         _ => new SshSessionException(SshFailureKind.Other, ex.Message, ex),
     };
+
+    /// <summary>Like <see cref="Classify(Exception)"/>, but a connection made through a jump
+    /// that never got as far as the host reports what the jump said about reaching it.</summary>
+    internal static SshSessionException Classify(Exception ex, Session session, SshJumpChain? via)
+    {
+        if (via is not null && ex is (SshConnectionException or System.Net.Sockets.SocketException))
+        {
+            var reason = via.ForwardFailure ?? ex.Message;
+            return new SshSessionException(
+                SshFailureKind.HostUnreachable,
+                $"The jump host could not reach {session.Host}:{session.Port}: {reason}", ex);
+        }
+        return Classify(ex);
+    }
+
+    /// <summary>The address SSH.NET dials: the jump chain's forwarded port, the proxy (which
+    /// is told the real host), or the host itself.</summary>
+    internal static ConnectionInfo CreateConnectionInfo(
+        Session session, AuthenticationMethod[] auth, TimeSpan timeout, SshJumpChain? via, string? proxyPassword)
+    {
+        ConnectionInfo info;
+        if (via is not null)
+            info = new ConnectionInfo(via.Host, via.Port, session.Username, auth);
+        else if (ActiveProxy(session) is { } proxy)
+        {
+            var type = proxy.Kind switch
+            {
+                Models.ProxyKind.Socks4 => ProxyTypes.Socks4,
+                Models.ProxyKind.Http => ProxyTypes.Http,
+                _ => ProxyTypes.Socks5,
+            };
+            // SSH.NET sends a login to the proxy only when it has a username.
+            var proxyUser = string.IsNullOrWhiteSpace(proxy.Username) ? null : proxy.Username.Trim();
+            info = new ConnectionInfo(session.Host, session.Port, session.Username, type,
+                proxy.Host, proxy.Port, proxyUser, proxyUser is null ? null : proxyPassword ?? "", auth);
+        }
+        else
+            info = new ConnectionInfo(session.Host, session.Port, session.Username, auth);
+        info.Timeout = timeout;
+        return info;
+    }
+
+    /// <summary>The proxy a session connects through, or null when it has none, it is
+    /// incomplete, or a jump host reaches the session instead.</summary>
+    internal static Models.ProxySettings? ActiveProxy(Session session) =>
+        session.JumpHostId is null && session.Proxy is { Host.Length: > 0, Port: > 0 and <= 65535 } proxy ? proxy : null;
+
+    /// <summary>Fast check that the first thing dialled answers, so an unreachable host or
+    /// proxy fails in seconds. Behind a jump the check goes through its forwarded port.</summary>
+    internal static void Preflight(Session session, SshJumpChain? via, TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        if (via is not null)
+        {
+            via.Probe(session, timeout + timeout, cancellationToken);
+            return;
+        }
+        if (ActiveProxy(session) is { } proxy)
+        {
+            try
+            {
+                PreflightTcp(proxy.Host, proxy.Port, timeout, cancellationToken);
+            }
+            catch (SshSessionException ex)
+            {
+                throw new SshSessionException(ex.Kind, $"Proxy: {ex.Message}", ex);
+            }
+            return;
+        }
+        PreflightTcp(session.Host, session.Port, timeout, cancellationToken);
+    }
+
+    /// <summary>What a host-key check decided, read after the connect attempt.</summary>
+    internal sealed class HostKeyCheck
+    {
+        /// <summary>Set when the key was refused; the connect then fails with this.</summary>
+        public SshSessionException? Failure { get; set; }
+
+        /// <summary>"keytype SHA256:fingerprint" of the key the server presented.</summary>
+        public string? Fingerprint { get; set; }
+    }
+
+    /// <summary>
+    /// Checks the server's key against the keys trusted for the session's real host and
+    /// port, whatever address was dialled to reach it. An unknown or changed key is put to
+    /// <paramref name="decision"/> (deny when there is none) and saved when trusted.
+    /// </summary>
+    internal static HostKeyCheck VerifyHostKey(
+        BaseClient client, Session session, KnownHostsStore knownHosts,
+        Func<HostKeyInfo, bool>? decision, CancellationToken cancellationToken)
+    {
+        var check = new HostKeyCheck();
+        client.HostKeyReceived += (_, e) =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var sha256 = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(e.HostKey)).TrimEnd('=');
+            check.Fingerprint = $"{e.HostKeyName} SHA256:{sha256}";
+            var verdict = knownHosts.Check(session.Host, session.Port, e.HostKeyName, sha256);
+            switch (verdict)
+            {
+                case HostKeyVerdict.Match:
+                    knownHosts.BackfillHostKey(session.Host, session.Port, e.HostKeyName, e.HostKey);
+                    e.CanTrust = true;
+                    break;
+                default:
+                    // Unknown key, or a changed key (the dialog demands typed confirmation
+                    // for the latter). Default-deny when no handler is wired.
+                    var previous = verdict == HostKeyVerdict.Mismatch
+                        ? knownHosts.Lookup(session.Host, session.Port)
+                        : null;
+                    var info = new HostKeyInfo(session.Host, session.Port, e.HostKeyName, sha256, verdict, previous);
+                    var trusted = decision?.Invoke(info) ?? false;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (trusted)
+                        knownHosts.Accept(session.Host, session.Port, e.HostKeyName, sha256, e.HostKey);
+                    else
+                        check.Failure = verdict == HostKeyVerdict.Mismatch
+                            ? new SshSessionException(
+                                SshFailureKind.HostKeyMismatch,
+                                $"Host key for {session.Host}:{session.Port} has CHANGED (now {e.HostKeyName} SHA256:{sha256}). " +
+                                "This may indicate a man-in-the-middle attack. Connection refused.")
+                            : new SshSessionException(
+                                SshFailureKind.HostKeyRejected, "Host key was not accepted.");
+                    e.CanTrust = trusted;
+                    break;
+            }
+        };
+        return check;
+    }
 
     internal static void PreflightTcp(string host, int port, TimeSpan timeout, CancellationToken cancellationToken = default)
     {

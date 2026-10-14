@@ -81,7 +81,7 @@ public static class OpenSshConfigImporter
     private static ImportCandidate ResolveOptions(string content, ImportCandidate candidate)
     {
         var matches = true;
-        string? hostName = null, username = null, identity = null;
+        string? hostName = null, username = null, identity = null, proxyJump = null;
         int? port = null;
         foreach (var rawLine in content.Split('\n'))
         {
@@ -108,6 +108,8 @@ public static class OpenSshConfigImporter
                 else if (directive.Equals("Port", StringComparison.OrdinalIgnoreCase) && port is null
                     && int.TryParse(Unquote(value), out var parsedPort) && parsedPort is > 0 and <= 65535)
                     port = parsedPort;
+                else if (directive.Equals("ProxyJump", StringComparison.OrdinalIgnoreCase) && proxyJump is null)
+                    proxyJump = Unquote(value);
                 else if (directive.Equals("IdentityFile", StringComparison.OrdinalIgnoreCase) && identity is null)
                     identity = Unquote(value);
             }
@@ -119,6 +121,7 @@ public static class OpenSshConfigImporter
                     match.Value == "%%" ? "%" : candidate.Name),
             Username = string.IsNullOrWhiteSpace(username) ? Environment.UserName : username,
             Port = port ?? 22,
+            JumpHostName = JumpAlias(proxyJump),
         };
         if (identity is not null)
         {
@@ -131,6 +134,25 @@ public static class OpenSshConfigImporter
             candidate = candidate with { PrivateKeyPath = ImportKeyPath.Resolve(identity) };
         }
         return candidate;
+    }
+
+    /// <summary>The host a ProxyJump value reaches the target from: the last of a
+    /// comma-separated chain, without its user or port, which the jump's own Host block
+    /// supplies. Earlier hops are imported only when that block names them in turn.</summary>
+    internal static string? JumpAlias(string? proxyJump)
+    {
+        var last = proxyJump?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
+        if (string.IsNullOrEmpty(last) || last.Equals("none", StringComparison.OrdinalIgnoreCase)
+            || last.Contains("://", StringComparison.Ordinal))
+            return null;
+        last = last[(last.LastIndexOf('@') + 1)..];
+        // A bracketed IPv6 literal keeps its colons; otherwise a single colon is the port.
+        if (last.StartsWith('['))
+            return last.IndexOf(']') is > 0 and var close ? last[1..close] : null;
+        var colon = last.IndexOf(':');
+        if (colon >= 0 && colon == last.LastIndexOf(':'))
+            last = last[..colon];
+        return last.Length == 0 ? null : last;
     }
 
     private static bool Matches(string pattern, string host) =>

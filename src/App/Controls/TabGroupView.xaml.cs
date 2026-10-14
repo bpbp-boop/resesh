@@ -37,6 +37,7 @@ public interface ITabGroupHost
     Task LockSessionAsync(TabViewModel tab);
     void ReconnectTab(TabViewModel tab);
     Task ManageRemoteSessionsAsync(TabViewModel tab);
+    Task ManageTunnelsAsync(TabViewModel tab);
     void DisconnectTab(TabViewModel tab);
     void SendBreak(TabViewModel tab);
     Task EndRemoteSessionAsync(TabViewModel tab);
@@ -974,7 +975,7 @@ public sealed partial class TabGroupView : UserControl
     private MenuFlyoutItem _rename = null!, _resetName = null!, _reconnect = null!, _disconnect = null!, _sendBreak = null!, _endRemote = null!,
         _close = null!, _closeDisconnected = null!, _closeOthers = null!, _closeRight = null!,
         _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _splitDown = null!,
-        _options = null!, _manageRemote = null!,
+        _options = null!, _manageRemote = null!, _tunnels = null!,
         _filePane = null!, _filePaneCwd = null!, _workingFolder = null!, _recordingsLocation = null!;
     private MenuFlyoutSubItem _highlight = null!, _agent = null!;
 
@@ -999,6 +1000,7 @@ public sealed partial class TabGroupView : UserControl
         _sendBreak = Item("Send Break", tab => _host.SendBreak(tab));
         _sendBreak.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SendBreak);
         _manageRemote = Item("Manage Remote Sessions…", tab => _ = _host.ManageRemoteSessionsAsync(tab));
+        _tunnels = Item("Tunnels…", tab => _ = _host.ManageTunnelsAsync(tab));
         _endRemote = Item("End Remote Session…", tab => _ = _host.EndRemoteSessionAsync(tab));
         _filePane = Item("File Pane", tab => _host.ToggleFilePane(tab));
         _filePane.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.FilePane);
@@ -1039,6 +1041,7 @@ public sealed partial class TabGroupView : UserControl
         menu.Items.Add(_sendBreak);
         menu.Items.Add(_endRemote);
         menu.Items.Add(_manageRemote);
+        menu.Items.Add(_tunnels);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_close);
         menu.Items.Add(_closeDisconnected);
@@ -1087,6 +1090,9 @@ public sealed partial class TabGroupView : UserControl
         _endRemote.IsEnabled = endRemote && tab.State == TabConnectionState.Connected;
         _manageRemote.Visibility = endRemote ? Visibility.Visible : Visibility.Collapsed;
         _manageRemote.IsEnabled = endRemote && !tab.IsLocked && tab.State != TabConnectionState.Connecting;
+        var ssh = tab.Session.Kind == SessionKind.Ssh && !isAppPage && !tab.IsPlayback;
+        _tunnels.Visibility = ssh ? Visibility.Visible : Visibility.Collapsed;
+        _tunnels.IsEnabled = ssh && !tab.IsLocked && tab.State == TabConnectionState.Connected;
         // Bulk closes skip pinned tabs, so they're only offered when an unpinned tab qualifies.
         _closeDisconnected.IsEnabled = Group.Tabs.Any(t => IsStopped(t) && !t.IsPinned);
         _closeOthers.IsEnabled = Group.Tabs.Any(t => t != tab && !t.IsPinned);
