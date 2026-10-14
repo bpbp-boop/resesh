@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>features — resesh</title>
 <link rel="canonical" href="https://resesh.net/features.html">
-<meta name="description" content="Current and planned resesh features: saved sessions, shared logins, bulk session editing, a native terminal, program status on tabs, searchable command history, comparing command runs, telnet consoles, keyboard shortcuts, persistent remote sessions, coding agents over SSH, GPU rendering, highlighting, recordings, workspaces, file transfers and backups.">
+<meta name="description" content="Current and planned resesh features: saved sessions, shared logins, bulk session editing, a native terminal, program status on tabs, searchable command history, comparing command runs, telnet consoles, jump hosts, proxies and tunnels, keyboard shortcuts, persistent remote sessions, coding agents over SSH, GPU rendering, highlighting, recordings, workspaces, file transfers and backups.">
 <link rel="icon" href="assets/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -216,6 +216,7 @@
             <li>text encoding per session: automatic (utf-8, falling back to cp437 for bbs and ansi art), utf-8 or cp437; typed input is encoded to match</li>
             <li>report 80 × 25 to bbs servers: naws and screen-size probes get 80 × 25 while the tab keeps its real size</li>
             <li>or keep the terminal itself at 80 columns, for bbs art and menus that assume it</li>
+            <li>reach a console behind a bastion through an SSH <a href="#network">jump host</a></li>
             <li>telnet is not encrypted; the session editor says so, and no password is stored for it</li>
           </ul>
         </div>
@@ -415,6 +416,7 @@
             <li>panes: split right or down, and <span class="key">alt ←</span> <span class="key">→</span> <span class="key">↑</span> <span class="key">↓</span> between split groups</li>
             <li>terminal: per-tab zoom, select all, clear scrollback, <span class="key">ctrl insert</span> and <span class="key">shift insert</span></li>
             <li>plain ctrl and letter keys always reach the shell, including the tmux prefix</li>
+            <li>every shortcut is listed on the <a href="shortcuts.html">shortcuts page</a></li>
           </ul>
         </div>
         <div class="row__media">
@@ -720,10 +722,37 @@
         </div>
       </div>
 
-      <div class="row row--planned">
+      <div class="row" id="network">
         <div class="row__head">
           <div class="row__label">
             <span class="row__index">25</span>
+            <span class="row__title">jump hosts, proxies and tunnels</span>
+          </div>
+        </div>
+        <div class="row__body">
+          <p class="row__text">reach hosts that sit behind a bastion or a proxy, and carry other connections through an SSH session. it is all set in the network section of the session editor.</p>
+          <ul class="row__bullets">
+            <li>pick another saved SSH session as the jump host; jump hosts can be chained, and telnet sessions can use one too</li>
+            <li>each jump host logs in with its own login and has its own host key check, asked for one host at a time as the connection reaches it</li>
+            <li>or connect through a SOCKS5, SOCKS4 or HTTP proxy</li>
+            <li>local, remote and dynamic (SOCKS) tunnels are saved with the session and open when it connects</li>
+            <li>the tunnels dialog adds, stops and restarts tunnels on a connected tab, and shows why one failed</li>
+            <li>bulk edit sets a jump host for many sessions at once</li>
+            <li>OpenSSH ProxyJump and PuTTY proxy settings come across on import</li>
+            <li>the file pane follows the jump host or proxy; opening a folder in file explorer does not</li>
+          </ul>
+        </div>
+        <div class="row__media row__media--empty">
+          <div class="placeholder placeholder--empty">
+            <span class="placeholder__none">no screenshot yet</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="row row--planned">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">26</span>
             <span class="row__title">gssapi / kerberos auth</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -741,13 +770,13 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">26</span>
-            <span class="row__title">tunnels, agent, jump hosts</span>
+            <span class="row__index">27</span>
+            <span class="row__title">ssh agent</span>
           </div>
           <span class="badge row__badge">planned</span>
         </div>
         <div class="row__body">
-          <p class="row__text">planned support for local, remote and SOCKS tunnels, SSH agent authentication, and connections through jump hosts.</p>
+          <p class="row__text">planned SSH agent authentication through the windows OpenSSH agent and pageant, so key passphrases need not be stored.</p>
         </div>
         <div class="row__media row__media--empty">
           <div class="placeholder placeholder--empty">
@@ -759,7 +788,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">27</span>
+            <span class="row__index">28</span>
             <span class="row__title">serial consoles</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -777,7 +806,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">28</span>
+            <span class="row__index">29</span>
             <span class="row__title">other planned work</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -931,6 +960,7 @@
     <a href="https://github.com/bpbp-boop/resesh">github</a>
     <a href="compare.html">compare</a>
     <a href="osc.html">osc sequences</a>
+    <a href="shortcuts.html">shortcuts</a>
     <a href="https://github.com/bpbp-boop/resesh/blob/master/ROADMAP.md">roadmap.md</a>
     <a href="https://github.com/bpbp-boop/resesh/issues">issues</a>
   </div>
