@@ -52,12 +52,12 @@
 
 <section class="section section--alt" id="table">
   <div class="container list">
-    <p class="legend">a sequence starts with <span class="key">esc ]</span> and ends with <span class="key">bel</span> or <span class="key">esc \</span>. the last column says what changes inside a persistent session, where tmux sits between the program and resesh.</p>
+    <p class="legend">a sequence starts with <span class="key">esc ]</span> and ends with <span class="key">bel</span> or <span class="key">esc \</span>. the last column says what changes in a persistent session kept alive by tmux, which sits between the program and resesh. with the resesh agent nothing in this table changes, and links, prompt marks and program status come back after a reconnect.</p>
 
     <div class="cmp-wrap" tabindex="0" role="region" aria-label="Supported OSC sequences">
       <table class="cmp cmp--ref">
         <thead>
-          <tr><th scope="col" class="cmp__corner">osc</th><th scope="col">name</th><th scope="col">what resesh does</th><th scope="col">in a persistent session</th></tr>
+          <tr><th scope="col" class="cmp__corner">osc</th><th scope="col">name</th><th scope="col">what resesh does</th><th scope="col">with tmux persistence</th></tr>
         </thead>
         <tbody>
           <tr class="cmp__group"><th scope="rowgroup" colspan="4">titles and folders</th></tr>
