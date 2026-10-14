@@ -26,5 +26,9 @@
     <!-- The terminal's native libraries (libghostty-vt and the reseshvt shim): no terminal works without them. -->
     <Error Condition="!Exists('$(PayloadDir)\GhosttyVt\ghostty-vt.dll') Or !Exists('$(PayloadDir)\GhosttyVt\reseshvt.dll')"
            Text="PayloadDir has no GhosttyVt libraries. Run eng/build-ghostty-vt.ps1 for this architecture before building the app." />
+    <!-- The session agent for Linux hosts. The app runs without it, falling back to tmux,
+         so only a package that left it out by accident is refused here. -->
+    <Error Condition="!Exists('$(PayloadDir)\Agent\agent-manifest.json') Or !Exists('$(PayloadDir)\Agent\x86_64\resesh-agent') Or !Exists('$(PayloadDir)\Agent\aarch64\resesh-agent')"
+           Text="PayloadDir has no session agent. Run eng/build-agent.ps1 before building the app." />
   </Target>
 </Project>

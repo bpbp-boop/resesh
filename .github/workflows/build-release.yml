@@ -134,6 +134,21 @@ jobs:
         shell: pwsh
         run: ./eng/build-ghostty-vt.ps1 -Architecture "${{ matrix.asset_architecture }}" -BuildRoot "$env:RUNNER_TEMP/ghostty-build"
 
+      # The session agent the app uploads to Linux hosts: our zmx fork, pinned in
+      # eng/agent/agent.json, for x86_64 and aarch64. The same files go into both Windows
+      # builds. The installer refuses to build without them.
+      - name: Cache session agent
+        id: agent-cache
+        uses: actions/cache@v5
+        with:
+          path: .artifacts/agent
+          key: agent-${{ hashFiles('eng/agent/**', 'eng/ghostty-vt.json', 'eng/build-agent.ps1') }}
+
+      - name: Build session agent
+        if: steps.agent-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: ./eng/build-agent.ps1 -BuildRoot "$env:RUNNER_TEMP/agent-build" -ZigRoot "$env:RUNNER_TEMP/ghostty-build"
+
       - name: Build self-contained app
         shell: pwsh
         run: |
@@ -174,6 +189,12 @@ jobs:
 
           if (-not (Test-Path (Join-Path $appExe.Directory.FullName "LICENSE"))) {
             throw "Build output is missing the GPLv2 LICENSE file."
+          }
+
+          foreach ($fileName in @("agent-manifest.json", "x86_64/resesh-agent", "aarch64/resesh-agent")) {
+            if (-not (Test-Path (Join-Path $appExe.Directory.FullName "Agent/$fileName"))) {
+              throw "Build output is missing the session agent file Agent/$fileName."
+            }
           }
 
           $unexpectedFiles = @(

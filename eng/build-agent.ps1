@@ -11,8 +11,9 @@
 #
 # -Tests also builds the unit tests as resesh-agent-tests, to copy to a Linux host and run.
 #
-# Zig comes from the build root of build-ghostty-vt.ps1; run that script first. The
-# Ghostty checkout made here is separate from that script's, which stays unpatched.
+# Zig is shared with build-ghostty-vt.ps1 (-ZigRoot is that script's -BuildRoot) and is
+# downloaded here when it is not there yet. The Ghostty checkout made here is separate
+# from that script's, which stays unpatched.
 param(
     [ValidateSet('x86_64', 'aarch64')]
     [string[]]$Architecture = @('x86_64', 'aarch64'),
@@ -27,8 +28,21 @@ $pin = Get-Content (Join-Path $PSScriptRoot 'agent\agent.json') -Raw | ConvertFr
 $ghosttyPin = (Get-Content (Join-Path $PSScriptRoot 'ghostty-vt.json') -Raw | ConvertFrom-Json)
 $version = "$($pin.zmx.version)-resesh.$($pin.revision)"
 $ghosttyVersion = "ghostty-$($ghosttyPin.ghostty.version)-$($ghosttyPin.ghostty.commit.Substring(0, 8))"
-$zig = Join-Path (Resolve-Path $ZigRoot) "zig-x86_64-windows-$($ghosttyPin.zig.version)\zig.exe"
-if (-not (Test-Path $zig)) { throw "Zig $($ghosttyPin.zig.version) not found under $ZigRoot; run build-ghostty-vt.ps1 first" }
+
+# Zig runs on the build machine, which is x64 here. Same download and check as
+# build-ghostty-vt.ps1.
+New-Item -ItemType Directory -Force $ZigRoot | Out-Null
+$ZigRoot = Resolve-Path $ZigRoot
+$zigVersion = $ghosttyPin.zig.version
+$zig = Join-Path $ZigRoot "zig-x86_64-windows-$zigVersion\zig.exe"
+if (-not (Test-Path $zig)) {
+    $zip = Join-Path $ZigRoot 'zig.zip'
+    Invoke-WebRequest "https://ziglang.org/download/$zigVersion/zig-x86_64-windows-$zigVersion.zip" -OutFile $zip
+    $expected = $ghosttyPin.zig.sha256.'x86_64-windows'
+    if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'Zig archive hash mismatch' }
+    Expand-Archive $zip -DestinationPath $ZigRoot
+    Remove-Item $zip
+}
 
 New-Item -ItemType Directory -Force $BuildRoot | Out-Null
 $BuildRoot = Resolve-Path $BuildRoot
@@ -57,7 +71,7 @@ function Sync-Source($name, $source, $patch) {
 $ghostty = Sync-Source 'ghostty' $ghosttyPin.ghostty 'ghostty-vt-formatter.patch'
 $zmx = Sync-Source 'zmx' $pin.zmx $null
 
-$env:ZIG_GLOBAL_CACHE_DIR = Join-Path (Resolve-Path $ZigRoot) 'zig-global-cache'
+$env:ZIG_GLOBAL_CACHE_DIR = Join-Path $ZigRoot 'zig-global-cache'
 $env:ZIG_LOCAL_CACHE_DIR = Join-Path $BuildRoot 'zig-local-cache'
 $binaries = [ordered]@{}
 foreach ($arch in $Architecture) {

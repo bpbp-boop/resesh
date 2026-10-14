@@ -602,6 +602,13 @@ the status the command had just reported.
   is separate from the app's, which stays unpatched. That commit parses OSC 7501 and
   reports prompt marks to a callback, which could replace the byte scanner in
   `status.zig`; not done.
+- **Releases carry the agent.** The installer packages everything in the app's build
+  output, so `Agent\` goes in when it is there. The release workflow did not build it,
+  so a released app would have shipped without it and fallen back to tmux everywhere.
+  The workflow now builds and caches it, checks the app output for it, and the installer
+  project refuses a payload without it. `build-agent.ps1` downloads Zig itself, since the
+  workflow skips the Ghostty build on a cache hit. The signing step lists its files by
+  name, so the Linux binaries are left alone. The workflow change has not run on GitHub.
 - **To change the agent:** commit to the fork's `resesh` branch, move the commit in
   `agent.json`, and raise its revision. The fork's `main` is 10 commits ahead of v0.8.1; the branch
   has not been rebased onto it.
