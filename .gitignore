@@ -10,3 +10,4 @@ Properties/PublishProfiles/
 .wrangler/
 .artifacts/
 .tmp/
+artifacts/
