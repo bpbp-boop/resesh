@@ -448,6 +448,7 @@ public sealed partial class MainWindow
         if (ReferenceEquals(sourceGroup, targetGroup) && sourceGroup.Tabs.Count <= 1)
             return;
 
+        CapturePaneMotion();
         var newGroup = new TabGroupViewModel();
         _groupLayout.Split(targetGroup, newGroup, direction);
         ViewModel.Groups.Add(newGroup);
@@ -455,7 +456,10 @@ public sealed partial class MainWindow
         AttachGroupView(newGroup);
         ViewModel.OnGroupsChanged();
 
-        // The tab jumps to its new pane and the layout is rebuilt; nothing slides or fades.
+        // Splitting the tab a pane shows: its new pane starts where the tab was shown.
+        if (ReferenceEquals(sourceGroup, targetGroup) && ReferenceEquals(sourceGroup.SelectedTab, tab))
+            StepPaneAside(_groupViews[newGroup], _groupViews[sourceGroup]);
+        // The tab strip snaps; the panes move once the layout is rebuilt.
         _groupViews[sourceGroup].SuppressTabMotion();
         MoveTabBetweenGroups(tab, newGroup, 0);
         RebuildGroupLayout();
@@ -532,6 +536,7 @@ public sealed partial class MainWindow
         if (!ViewModel.IsSplit || group.Tabs.Count > 0)
             return;
 
+        CapturePaneMotion();
         if (!_groupLayout.Remove(group))
             return;
         if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(_groupViews[group]) is Panel parent)
@@ -577,6 +582,7 @@ public sealed partial class MainWindow
         RefreshTabGroupActions();
         // Re-assert once the rebuilt groups settle into their new rows and columns.
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
+        PlayPaneMotion();
     }
 
     private FrameworkElement BuildGroupLayoutElement(SplitLayoutNode<TabGroupViewModel> node)

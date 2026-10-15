@@ -49,6 +49,7 @@ public sealed partial class MainWindow
         var layout = CaptureWorkspaceLayoutNode(
             _groupLayout.Root, indices, GroupArea.Children.FirstOrDefault() as FrameworkElement);
 
+        CapturePaneMotion();
         foreach (var groupView in _groupViews.Values)
             groupView.SuppressTabMotion();
         var merged = TabZoom.Merge(snapshot.Groups, candidate => candidate.IsPinned);
@@ -70,6 +71,7 @@ public sealed partial class MainWindow
     {
         if (_zoom is not { } zoom)
             return;
+        CapturePaneMotion();
         EndZoomState();
 
         var zoomed = zoom.Group;
