@@ -22,11 +22,21 @@ internal static class CommandCompletionNotifications
     private static string? _owner;
     internal static Action<string>? TraceHook { get; set; }
 
-    // Must precede AppInstance.GetActivatedEventArgs for unpackaged COM activation.
-    internal static void Register(string? owner)
+    // Windows starts an unpackaged app with this argument when one of its notifications is clicked.
+    private const string ActivationArgument = "----AppNotificationActivated:";
+
+    /// <summary>True when Windows started this process for a notification click. Only then must
+    /// <see cref="Register"/> precede AppInstance.GetActivatedEventArgs; any other launch can
+    /// register once its window is up, keeping COM registration off the startup path.</summary>
+    internal static bool IsActivationLaunch(IEnumerable<string> args) =>
+        args.Any(arg => arg.StartsWith(ActivationArgument, StringComparison.Ordinal));
+
+    internal static void SetOwner(string? owner) => _owner = owner;
+
+    internal static void Register()
     {
-        _owner = owner;
-        if (owner is null) return; // demo mode has no persistent instance identity
+        // Demo mode has no persistent instance identity.
+        if (_owner is null || _manager is not null) return;
         try
         {
             var manager = AppNotificationManager.Default;
@@ -189,9 +199,13 @@ internal static class CommandCompletionNotifications
         catch (Exception error) { Trace("unregister", error); }
     }
 
+    // Conditional: the trace sink only exists in DEBUG builds, and some messages query the
+    // notification platform (manager.Setting), which costs tens of milliseconds at launch.
+    [Conditional("DEBUG")]
     private static void Trace(string operation, Exception error) =>
         TraceStatus($"{operation}: {error.GetType().Name} (0x{error.HResult:X8})");
 
+    [Conditional("DEBUG")]
     private static void TraceStatus(string message)
     {
         var text = "Command completion notification " + message;

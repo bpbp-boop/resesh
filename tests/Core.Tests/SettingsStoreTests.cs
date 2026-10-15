@@ -38,6 +38,52 @@ public sealed class SettingsStoreTests
     }
 
     [Fact]
+    public void Load_SettingsFromAnOlderVersionKeepDefaultsForMissingValues()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"sessions-settings-{Guid.NewGuid():N}.json");
+        try
+        {
+            File.WriteAllText(path, """{ "theme": "light", "fontSize": 16, "pinnedSessionIds": [], "recentSessionIds": [] }""");
+
+            var store = new SettingsStore(path);
+            store.Load();
+
+            // Lists compare by reference in a record; everything else must equal the defaults.
+            var expected = new AppSettings { Theme = "light", FontSize = 16 };
+            Assert.Null(store.LoadWarning);
+            Assert.Empty(store.Current.PinnedSessionIds);
+            Assert.Equal(expected, store.Current with
+            {
+                PinnedSessionIds = expected.PinnedSessionIds,
+                RecentSessionIds = expected.RecentSessionIds,
+            });
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Save_WritesCamelCaseNamesAndNullValues()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"sessions-settings-{Guid.NewGuid():N}.json");
+        try
+        {
+            new SettingsStore(path).Save(new AppSettings());
+
+            var json = File.ReadAllText(path);
+            Assert.Contains("\"showStatusBar\": true", json);
+            Assert.Contains("\"windowPlacement\": null", json);
+            Assert.Contains("\n  \"theme\": \"dark\"", json);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void NewSettingsDefaultToShowingStatusBar()
     {
         Assert.True(new AppSettings().ShowStatusBar);
