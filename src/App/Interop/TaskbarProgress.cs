@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.Marshalling;
 using Resesh.Core.Models;
 
 namespace Resesh.App.Interop;
@@ -8,7 +9,7 @@ namespace Resesh.App.Interop;
 /// Windows Terminal does. The shell draws the state colours: green, red for error,
 /// yellow for paused, and a marquee for indeterminate.
 /// </summary>
-internal static class TaskbarProgress
+internal static partial class TaskbarProgress
 {
     private const int NoProgress = 0;
     private const int IndeterminateFlag = 1;
@@ -44,7 +45,7 @@ internal static class TaskbarProgress
             return _taskbar;
         try
         {
-            var taskbar = (ITaskbarList3)new TaskbarListRcw();
+            var taskbar = ComObjects.Create<ITaskbarList3>(TaskbarListClass);
             taskbar.HrInit();
             _taskbar = taskbar;
         }
@@ -55,12 +56,11 @@ internal static class TaskbarProgress
         return _taskbar;
     }
 
-    [ComImport, Guid("56FDF344-FD6D-11d0-958A-006097C9A090")]
-    private class TaskbarListRcw { }
+    private static readonly Guid TaskbarListClass = new("56FDF344-FD6D-11d0-958A-006097C9A090");
 
     // Only the vtable prefix up to SetProgressState is declared.
-    [ComImport, Guid("EA1AFB91-9E28-4B86-90E9-9E9F8A5EEFAF"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface ITaskbarList3
+    [GeneratedComInterface, Guid("EA1AFB91-9E28-4B86-90E9-9E9F8A5EEFAF")]
+    internal partial interface ITaskbarList3
     {
         // ITaskbarList
         void HrInit();

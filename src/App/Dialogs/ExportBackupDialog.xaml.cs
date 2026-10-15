@@ -5,7 +5,9 @@ using Resesh.Core.Models;
 
 namespace Resesh.App.Dialogs;
 
-public sealed class BackupScopeChoice
+// DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial class BackupScopeChoice
 {
     public string Label { get; set; } = "";
     public BackupScope? Scope { get; set; }

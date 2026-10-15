@@ -13,11 +13,11 @@ namespace Resesh.Core.Storage;
 /// </summary>
 public sealed class HighlightsStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly JsonSerializerOptions JsonOptions = CoreJson.With(new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
+    });
 
     private readonly string? _path;
     private bool _preserveBackup;
@@ -359,7 +359,7 @@ public sealed class HighlightsStore
                 CustomRules = candidate.Custom,
                 BuiltinOverrides = candidate.Overrides.Values.OrderBy(r => r.Id, StringComparer.Ordinal).ToList(),
             };
-            var json = JsonSerializer.Serialize(data, JsonOptions);
+            var json = JsonSerializer.Serialize(data, JsonOptions.Info<StoreData>());
             AtomicFile.Write(_path, json, _preserveBackup);
         }
 
@@ -372,7 +372,7 @@ public sealed class HighlightsStore
 
     private static StoreData? Read(string path)
     {
-        var data = JsonSerializer.Deserialize<StoreData>(File.ReadAllText(path), JsonOptions);
+        var data = JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<StoreData>());
         // Reject unusable rule collections inside the loader so .bak recovery remains available.
         if (data?.CustomRules?.Any(rule => rule is null) == true
             || data?.BuiltinOverrides?.Any(rule => rule is null) == true)
@@ -391,7 +391,7 @@ public sealed class HighlightsStore
         return data;
     }
 
-    private sealed class StoreData
+    internal sealed class StoreData
     {
         public List<string>? EnabledRules { get; set; }
         public List<string>? DisabledRules { get; set; }
@@ -402,8 +402,8 @@ public sealed class HighlightsStore
 
 public sealed record HighlightBackupData
 {
-    public IReadOnlyList<string> EnabledRules { get; init; } = [];
-    public IReadOnlyList<string> DisabledRules { get; init; } = [];
-    public IReadOnlyList<HighlightRule> CustomRules { get; init; } = [];
-    public IReadOnlyList<HighlightRule> BuiltinOverrides { get; init; } = [];
+    public IReadOnlyList<string> EnabledRules { get; set; } = [];
+    public IReadOnlyList<string> DisabledRules { get; set; } = [];
+    public IReadOnlyList<HighlightRule> CustomRules { get; set; } = [];
+    public IReadOnlyList<HighlightRule> BuiltinOverrides { get; set; } = [];
 }

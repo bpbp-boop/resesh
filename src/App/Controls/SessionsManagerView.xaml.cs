@@ -76,7 +76,9 @@ public sealed partial class SessionsManagerView : UserControl
 {
     private enum LoginFilterKind { Any, Own, Asks, Identity }
 
-    private sealed class LoginFilter
+    // DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+    [WinRT.GeneratedBindableCustomProperty]
+    private sealed partial class LoginFilter
     {
         public LoginFilterKind Kind { get; init; }
         public Guid? IdentityId { get; init; }

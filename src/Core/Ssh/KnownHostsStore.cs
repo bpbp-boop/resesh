@@ -47,7 +47,7 @@ public sealed record KnownHostEntry(string KeyType, string Sha256, string? Publi
 /// </summary>
 public sealed class KnownHostsStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = CoreJson.With(new() { WriteIndented = true });
 
     private readonly string _path;
     private readonly object _gate = new();
@@ -194,7 +194,7 @@ public sealed class KnownHostsStore
 
     private void Save(Dictionary<string, KnownHostEntry> entries)
     {
-        AtomicFile.Write(_path, JsonSerializer.Serialize(entries, JsonOptions), _preserveBackup);
+        AtomicFile.Write(_path, JsonSerializer.Serialize(entries, JsonOptions.Info<Dictionary<string, KnownHostEntry>>()), _preserveBackup);
         _entries = entries;
         _preserveBackup = false;
     }
@@ -206,8 +206,8 @@ public sealed class KnownHostsStore
 
     private static Dictionary<string, KnownHostEntry> Read(string path)
     {
-        var entries = JsonSerializer.Deserialize<Dictionary<string, KnownHostEntry>>(
-            File.ReadAllText(path), JsonOptions) ?? throw new JsonException("The host-key file is empty.");
+        var entries = JsonSerializer.Deserialize(
+            File.ReadAllText(path), JsonOptions.Info<Dictionary<string, KnownHostEntry>>()) ?? throw new JsonException("The host-key file is empty.");
         if (entries.Any(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null
             || string.IsNullOrWhiteSpace(pair.Value.KeyType) || string.IsNullOrWhiteSpace(pair.Value.Sha256)))
             throw new JsonException("The host-key file contains an invalid entry.");

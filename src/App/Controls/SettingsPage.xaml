@@ -92,7 +92,6 @@
                             x:Name="ThemeBox"
                             MinWidth="220"
                             ItemsSource="{x:Bind ViewModel.Themes}"
-                            DisplayMemberPath="Name"
                             SelectedItem="{x:Bind ViewModel.Theme, Mode=TwoWay}"
                             AutomationProperties.Name="Theme"
                             AutomationProperties.AutomationId="SettingsTheme" />

@@ -87,7 +87,9 @@ public sealed partial class HistoryItemTemplateSelector : DataTemplateSelector
         SelectTemplateCore(item);
 }
 
-public sealed record HistorySessionChoice(Guid? Id, string Label);
+// DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial record HistorySessionChoice(Guid? Id, string Label);
 
 /// <summary>
 /// Search over saved command history: a search box that understands host:, in:, and exit:

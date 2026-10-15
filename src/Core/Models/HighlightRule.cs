@@ -9,17 +9,17 @@ namespace Resesh.Core.Models;
 /// </summary>
 public sealed record HighlightRule
 {
-    public string Id { get; init; } = "";
+    public string Id { get; set; } = "";
 
-    public string Name { get; init; } = "";
+    public string Name { get; set; } = "";
 
     /// <summary>"builtin:&lt;pack&gt;" for shipped rules, "custom" for user-defined ones.</summary>
-    public string Pack { get; init; } = "custom";
+    public string Pack { get; set; } = "custom";
 
-    public string Pattern { get; init; } = "";
+    public string Pattern { get; set; } = "";
 
     /// <summary>Foreground color for matches, #RRGGBB.</summary>
-    public string Color { get; init; } = "#ffffff";
+    public string Color { get; set; } = "#ffffff";
 
     /// <summary>Extra emphasis. The decorations API cannot re-weight glyphs, so the page
     /// renders bold as a translucent background tint of the rule color.</summary>
@@ -35,7 +35,7 @@ public sealed record HighlightRule
     public bool ShowInOverview { get; init; }
 
     /// <summary>Global enabled state (session overrides layer on top of this).</summary>
-    public bool Enabled { get; init; } = true;
+    public bool Enabled { get; set; } = true;
 
     [JsonIgnore]
     public bool IsBuiltin => Pack.StartsWith("builtin:", StringComparison.Ordinal);

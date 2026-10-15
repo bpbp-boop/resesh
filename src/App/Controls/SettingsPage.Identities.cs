@@ -13,7 +13,9 @@ namespace Resesh.App.Controls;
 /// identity for the tree root, and the registered SSH keys (formerly the SSH Keys dialog).</summary>
 public sealed partial class SettingsPage
 {
-    private sealed class DefaultChoice
+    // DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+    [WinRT.GeneratedBindableCustomProperty]
+    private sealed partial class DefaultChoice
     {
         public Identity? Identity { get; init; }
         public string Label { get; init; } = "";

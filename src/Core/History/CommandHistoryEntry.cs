@@ -16,25 +16,25 @@ public sealed record CommandHistoryEntry
     /// <summary>Longest command line kept.</summary>
     public const int MaxCommandLength = 4096;
 
-    public string Id { get; init; } = Guid.NewGuid().ToString("N");
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
     /// <summary>The saved session the tab was opened from; null for ad-hoc quick connects.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? SessionId { get; init; }
 
     /// <summary>The session's display name when the command ran.</summary>
-    public string SessionName { get; init; } = "";
+    public string SessionName { get; set; } = "";
 
-    public SessionKind Kind { get; init; } = SessionKind.Ssh;
+    public SessionKind Kind { get; set; } = SessionKind.Ssh;
 
     /// <summary>"user@host" for remote sessions, the shell executable for local profiles.</summary>
-    public string Target { get; init; } = "";
+    public string Target { get; set; } = "";
 
     /// <summary>The shell's working directory as last reported before the command, if known.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? WorkingDirectory { get; init; }
 
-    public string Command { get; init; } = "";
+    public string Command { get; set; } = "";
 
     /// <summary>Null when the shell did not report a result (commands found without shell integration).</summary>
     public int? ExitCode { get; init; }
@@ -44,7 +44,7 @@ public sealed record CommandHistoryEntry
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTimeOffset? EndedAt { get; init; }
 
-    public string Output { get; init; } = "";
+    public string Output { get; set; } = "";
 
     /// <summary>The output was longer than <see cref="MaxOutputLength"/>; only its start is kept.</summary>
     public bool OutputTruncated { get; init; }

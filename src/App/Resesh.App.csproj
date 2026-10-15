@@ -14,12 +14,14 @@
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
-    <!-- Releases are published with precompiled (ReadyToRun) code: launch skips most JIT
-         work, which roughly halves time to first frame. Applies to dotnet publish only. -->
-    <PublishReadyToRun>true</PublishReadyToRun>
+    <!-- Releases are published as native code (Native AOT): no JIT at launch, and the
+         install is a third the size of a ReadyToRun build. Applies to dotnet publish only;
+         it also turns on the trimming and AOT analyzers for this project. -->
+    <PublishAot>true</PublishAot>
   </PropertyGroup>
 
   <ItemGroup>

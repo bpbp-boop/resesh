@@ -9,7 +9,7 @@ namespace Resesh.App.Controls;
 public sealed class KeyToken
 {
     public string Text { get; private init; } = "";
-    public IReadOnlyList<string> Keys { get; private init; } = [];
+    public List<string> Keys { get; private init; } = [];
     public bool IsSeparator => Keys.Count == 0;
     public bool IsChord => !IsSeparator;
 
@@ -40,7 +40,7 @@ public sealed class ShortcutEntry
     public string Title => Binding.Title;
     public string Note => Binding.Note;
     public bool HasNote => Binding.Note.Length > 0;
-    public IReadOnlyList<KeyToken> Tokens { get; }
+    public List<KeyToken> Tokens { get; }
     public string AutomationName { get; }
     public string AutomationId => "Shortcut_" + Binding.Id;
 }
@@ -49,7 +49,7 @@ public sealed class ShortcutEntry
 public sealed class ShortcutGroup(string category, IReadOnlyList<ShortcutEntry> entries)
 {
     public string Category { get; } = category;
-    public IReadOnlyList<ShortcutEntry> Entries { get; } = entries;
+    public List<ShortcutEntry> Entries { get; } = [.. entries];
 }
 
 /// <summary>Read-only reference of every shortcut in <see cref="KeyBindings"/>, grouped and searchable.</summary>

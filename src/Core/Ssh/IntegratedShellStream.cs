@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using Renci.SshNet;
@@ -18,7 +19,8 @@ internal static class IntegratedShellStream
             p[0].ParameterType == SessionProperty?.PropertyType && p[1].ParameterType == typeof(int) &&
             p[2].ParameterType == typeof(bool));
     private static readonly FieldInfo? ChannelField = typeof(ShellStream).GetField("_channel", InstanceMembers);
-    private static readonly Type? ChannelType = typeof(SshClient).Assembly.GetType("Renci.SshNet.Channels.ChannelSession");
+    [DynamicallyAccessedMembers(ChannelMembers)]
+    private static readonly Type? ChannelType = FindChannelType();
     private static readonly MethodInfo? OpenMethod = ChannelType?.GetMethod("Open", InstanceMembers, []);
     private static readonly MethodInfo? PtyMethod = ChannelType?.GetMethod("SendPseudoTerminalRequest", InstanceMembers,
         [typeof(string), typeof(uint), typeof(uint), typeof(uint), typeof(uint), typeof(IDictionary<TerminalModes, uint>)]);
@@ -26,6 +28,18 @@ internal static class IntegratedShellStream
     private static readonly MethodInfo? ShellMethod = ChannelType?.GetMethod("SendShellRequest", InstanceMembers, []);
     private static readonly MethodInfo? EnvironmentMethod = ChannelType?.GetMethod("SendEnvironmentVariableRequest", InstanceMembers,
         [typeof(string), typeof(string)]);
+
+    internal const string ChannelTypeName = "Renci.SshNet.Channels.ChannelSession";
+    internal const DynamicallyAccessedMemberTypes ChannelMembers =
+        DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.NonPublicMethods;
+
+    // The channel type is internal to SSH.NET; DynamicDependency keeps its methods when the
+    // app is trimmed or compiled ahead of time, which a lookup by name cannot express.
+    [DynamicDependency(ChannelMembers, ChannelTypeName, "Renci.SshNet")]
+    [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "DynamicDependency keeps the named type.")]
+    [UnconditionalSuppressMessage("Trimming", "IL2073", Justification = "DynamicDependency keeps the type's methods.")]
+    [return: DynamicallyAccessedMembers(ChannelMembers)]
+    private static Type? FindChannelType() => typeof(SshClient).Assembly.GetType(ChannelTypeName);
 
     /// <summary>Offered on every session channel. SSH forwards TERM but not COLORTERM, and
     /// the terminal renders 24-bit colour. Servers only accept names listed in AcceptEnv;

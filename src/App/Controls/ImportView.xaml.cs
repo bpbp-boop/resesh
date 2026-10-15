@@ -12,7 +12,7 @@ namespace Resesh.App.Controls;
 public sealed record ImportOutcome(int Imported, int Duplicates, IReadOnlyList<string> CreatedIdentities);
 
 /// <summary>A row in the review list: a folder or a session, indented by its depth.</summary>
-public abstract class ImportRow : ObservableObject
+public abstract partial class ImportRow : ObservableObject
 {
     public int Depth { get; set; }
 
@@ -20,7 +20,7 @@ public abstract class ImportRow : ObservableObject
 }
 
 /// <summary>One importable session in the review list.</summary>
-public sealed class ImportCandidateVm : ImportRow
+public sealed partial class ImportCandidateVm : ImportRow
 {
     private bool _isSelected = true;
     private string _loginDetail = "";
@@ -83,7 +83,7 @@ public sealed class ImportCandidateVm : ImportRow
 
 /// <summary>A folder in the review list. Its checkbox covers every session below it,
 /// subfolders included; its chevron shows or hides what is inside.</summary>
-public sealed class ImportFolderRow : ImportRow
+public sealed partial class ImportFolderRow : ImportRow
 {
     private readonly ImportView _owner;
 

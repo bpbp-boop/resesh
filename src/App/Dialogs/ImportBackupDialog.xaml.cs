@@ -5,7 +5,9 @@ using Resesh.Core.Backup;
 
 namespace Resesh.App.Dialogs;
 
-public sealed class BackupResolutionChoice
+// DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial class BackupResolutionChoice
 {
     public string Label { get; set; } = "";
     public BackupConflictResolution Resolution { get; set; }
@@ -19,12 +21,12 @@ public sealed class BackupResolutionChoice
     }
 }
 
-public sealed class BackupConflictViewModel : ObservableObject
+public sealed partial class BackupConflictViewModel : ObservableObject
 {
     private BackupResolutionChoice _selectedChoice;
 
     public BackupConflict Conflict { get; }
-    public IReadOnlyList<BackupResolutionChoice> Choices { get; }
+    public List<BackupResolutionChoice> Choices { get; }
 
     public BackupConflictViewModel(BackupConflict conflict)
     {

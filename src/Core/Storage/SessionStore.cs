@@ -12,12 +12,12 @@ namespace Resesh.Core.Storage;
 /// </summary>
 public sealed class SessionStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly JsonSerializerOptions JsonOptions = CoreJson.With(new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
-    };
+        Converters = { CamelCaseEnumConverter.Instance },
+    });
 
     private readonly string _path;
     private readonly object _gate = new();
@@ -471,7 +471,7 @@ public sealed class SessionStore
             LocalFolders = localFolders.Count > 0 ? localFolders : null,
             FolderSettings = folderSettings.Count > 0 ? folderSettings : null,
         };
-        var json = JsonSerializer.Serialize(data, JsonOptions);
+        var json = JsonSerializer.Serialize(data, JsonOptions.Info<StoreData>());
 
         AtomicFile.Write(_path, json, _preserveBackup);
         _sessions = sessions;
@@ -483,7 +483,7 @@ public sealed class SessionStore
 
     private static StoreData? Read(string path)
     {
-        var data = JsonSerializer.Deserialize<StoreData>(File.ReadAllText(path), JsonOptions);
+        var data = JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<StoreData>());
         if (data?.Sessions?.Any(session => session is null || session.Name is null
                 || session.Host is null || session.Username is null || session.FolderPath is null) == true
             || data?.FolderSettings?.Any(setting => setting is null) == true)
@@ -493,7 +493,7 @@ public sealed class SessionStore
         return data;
     }
 
-    private sealed class StoreData
+    internal sealed class StoreData
     {
         public List<Session>? Sessions { get; set; }
         public List<string>? Folders { get; set; }

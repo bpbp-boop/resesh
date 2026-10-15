@@ -27,7 +27,7 @@ namespace Resesh.App.Terminal;
 /// restart). The live shell is an
 /// <see cref="ITerminalBackend"/>; SSH-only surfaces keep a typed reference beside it.
 /// </summary>
-public sealed class TerminalTabView : Grid, IDisposable
+public sealed partial class TerminalTabView : Grid, IDisposable
 {
     private readonly TabViewModel _tab;
     private readonly ICredentialService _credentials;
@@ -1775,19 +1775,10 @@ public sealed class TerminalTabView : Grid, IDisposable
         _terminal.ApplyHighlights(BuildHighlightPayload());
     }
 
-    private IReadOnlyList<object> BuildHighlightPayload() =>
+    private IReadOnlyList<Resesh.Terminal.TerminalHighlight> BuildHighlightPayload() =>
         (_highlightPreview ?? App.Highlights).ResolveForSession(Session.Overrides)
-            .Select(r => (object)new
-            {
-                id = r.Id,
-                name = r.Name,
-                pattern = r.Pattern,
-                color = r.Color,
-                bold = r.Bold,
-                underline = r.Underline,
-                matchCase = r.MatchCase,
-                showInOverview = r.ShowInOverview,
-            })
+            .Select(r => new Resesh.Terminal.TerminalHighlight(
+                r.Id, r.Pattern, r.Color, r.Bold, r.Underline, r.MatchCase, r.ShowInOverview))
             .ToList();
 
     /// <summary>Reconnects a stopped tab to an explicitly selected existing shell.</summary>

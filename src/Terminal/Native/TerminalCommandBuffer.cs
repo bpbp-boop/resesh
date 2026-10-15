@@ -35,7 +35,7 @@ internal struct GhosttySemanticEvent
 /// line reads are cached until <see cref="Refresh"/>, which the surface calls before each
 /// tracker entry point, so one pass sees one consistent snapshot of positions.
 /// </summary>
-internal sealed unsafe class TerminalCommandBuffer(Func<IntPtr> terminal) : ICommandBuffer
+internal sealed unsafe partial class TerminalCommandBuffer(Func<IntPtr> terminal) : ICommandBuffer
 {
     private GhosttyBufferInfo _info;
     private IntPtr Terminal => terminal();
@@ -114,7 +114,7 @@ internal sealed unsafe class TerminalCommandBuffer(Func<IntPtr> terminal) : ICom
         _live.Clear();
     }
 
-    private sealed class NativeMarker(TerminalCommandBuffer owner, uint id) : ICommandMarker
+    private sealed partial class NativeMarker(TerminalCommandBuffer owner, uint id) : ICommandMarker
     {
         private bool _disposed;
 

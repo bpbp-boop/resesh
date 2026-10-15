@@ -5,7 +5,7 @@ using Resesh.Core.Models;
 namespace Resesh.App.ViewModels;
 
 /// <summary>A node in the session tree: either a folder or a session leaf.</summary>
-public sealed class TreeNodeViewModel : ObservableObject
+public sealed partial class TreeNodeViewModel : ObservableObject
 {
     private bool _isExpanded;
     private bool _isSelected;

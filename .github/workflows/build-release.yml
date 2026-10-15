@@ -152,7 +152,9 @@ jobs:
       - name: Build self-contained app
         shell: pwsh
         run: |
-          # Publish, not build: only publish compiles ReadyToRun code, which launch depends on.
+          # Publish, not build: only publish compiles the app to native code (Native AOT).
+          # The AOT linker finds the Visual C++ tools through vswhere.
+          $env:PATH = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer;$env:PATH"
           $publishDir = Join-Path $env:RUNNER_TEMP "app-publish"
           dotnet publish src/App/Resesh.App.csproj `
             --configuration Release `
@@ -167,25 +169,21 @@ jobs:
             throw "Build failed with exit code $LASTEXITCODE."
           }
 
-          $appExe = Get-ChildItem $publishDir -Filter Resesh.App.exe -File |
-            Where-Object {
-              Test-Path (Join-Path $_.Directory.FullName "Resesh.App.runtimeconfig.json")
-            } |
-            Select-Object -First 1
+          $appExe = Get-ChildItem $publishDir -Filter Resesh.App.exe -File | Select-Object -First 1
 
           if ($null -eq $appExe) {
             throw "Build did not produce Resesh.App.exe."
           }
 
-          # Self-contained markers: coreclr.dll (.NET) and Microsoft.ui.xaml.dll (Windows App SDK).
-          $requiredFiles = @(
-            "coreclr.dll",
-            "Microsoft.ui.xaml.dll"
-          )
+          # The Windows App SDK ships beside the app (self-contained).
+          if (-not (Test-Path (Join-Path $appExe.Directory.FullName "Microsoft.ui.xaml.dll"))) {
+            throw "Self-contained build is missing runtime file Microsoft.ui.xaml.dll."
+          }
 
-          foreach ($fileName in $requiredFiles) {
-            if (-not (Test-Path (Join-Path $appExe.Directory.FullName $fileName))) {
-              throw "Self-contained build is missing runtime file $fileName."
+          # Native AOT leaves no managed app assembly or .NET runtime; either means a JIT build.
+          foreach ($fileName in @("Resesh.App.dll", "coreclr.dll")) {
+            if (Test-Path (Join-Path $appExe.Directory.FullName $fileName)) {
+              throw "Build output contains $fileName; the app was not compiled with Native AOT."
             }
           }
 
@@ -403,10 +401,8 @@ jobs:
 
           $appOutputDir = Join-Path $env:GITHUB_WORKSPACE "app-output"
           $files = @(
+            # Native AOT compiles the app and its libraries into Resesh.App.exe.
             "Resesh.App.exe",
-            "Resesh.App.dll",
-            "Resesh.Core.dll",
-            "Resesh.Terminal.dll",
             "GhosttyVt\ghostty-vt.dll",
             "GhosttyVt\reseshvt.dll"
           ) | ForEach-Object { Join-Path $appOutputDir $_ }

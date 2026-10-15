@@ -13,33 +13,33 @@ public sealed record WorkspaceTabReference
 /// <summary>One ordered tab group and its selected tab.</summary>
 public sealed record WorkspaceGroup
 {
-    public IReadOnlyList<WorkspaceTabReference> Tabs { get; init; } = [];
+    public IReadOnlyList<WorkspaceTabReference> Tabs { get; set; } = [];
     public int ActiveTabIndex { get; init; }
 }
 
 /// <summary>The group arrangement shared by saved workspaces and the clean-exit layout.</summary>
 public sealed record WorkspaceLayout
 {
-    public IReadOnlyList<WorkspaceGroup> Groups { get; init; } = [];
+    public IReadOnlyList<WorkspaceGroup> Groups { get; set; } = [];
     public WorkspaceLayoutNode? Layout { get; init; }
 }
 
 /// <summary>A leaf group or recursive equal-size split in a saved workspace.</summary>
 public sealed record WorkspaceLayoutNode
 {
-    public int GroupIndex { get; init; } = -1;
+    public int GroupIndex { get; set; } = -1;
     public SplitOrientation? Orientation { get; init; }
-    public IReadOnlyList<WorkspaceLayoutNode> Children { get; init; } = [];
+    public IReadOnlyList<WorkspaceLayoutNode> Children { get; set; } = [];
     /// <summary>Arranged width or height of each child pane, in DIPs.</summary>
-    public IReadOnlyList<double> Sizes { get; init; } = [];
+    public IReadOnlyList<double> Sizes { get; set; } = [];
 }
 
 /// <summary>A named, stable saved layout.</summary>
 public sealed record Workspace
 {
     public Guid Id { get; init; }
-    public string Name { get; init; } = "";
-    public IReadOnlyList<WorkspaceGroup> Groups { get; init; } = [];
+    public string Name { get; set; } = "";
+    public IReadOnlyList<WorkspaceGroup> Groups { get; set; } = [];
     public WorkspaceLayoutNode? Layout { get; init; }
 }
 
@@ -49,11 +49,11 @@ public sealed record Workspace
 /// </summary>
 public sealed class WorkspaceStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly JsonSerializerOptions JsonOptions = CoreJson.With(new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
+    });
 
     private readonly string _path;
     private readonly object _gate = new();
@@ -213,7 +213,7 @@ public sealed class WorkspaceStore
     {
         try
         {
-            var data = JsonSerializer.Deserialize<WorkspaceStoreData>(payload, JsonOptions)
+            var data = JsonSerializer.Deserialize(payload, JsonOptions.Info<WorkspaceStoreData>())
                 ?? throw new InvalidDataException("The workspace payload is empty.");
             return NormalizeData(data);
         }
@@ -425,7 +425,7 @@ public sealed class WorkspaceStore
     }
 
     private static void WriteAtomic(string path, WorkspaceStoreData data, bool preserveBackup = false) =>
-        AtomicFile.Write(path, JsonSerializer.Serialize(data, JsonOptions), preserveBackup);
+        AtomicFile.Write(path, JsonSerializer.Serialize(data, JsonOptions.Info<WorkspaceStoreData>()), preserveBackup);
 
 }
 

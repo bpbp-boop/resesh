@@ -29,6 +29,7 @@
     <Compile Include="../../src/Terminal/Native/SystemFontFallback.cs" Link="Native/SystemFontFallback.cs" />
     <Compile Include="../../src/Terminal/TerminalCommandExecution.cs" Link="TerminalCommandExecution.cs" />
     <Compile Include="../../src/Terminal/TerminalCommandRecord.cs" Link="TerminalCommandRecord.cs" />
+    <Compile Include="../../src/Terminal/TerminalHighlight.cs" Link="TerminalHighlight.cs" />
   </ItemGroup>
   <ItemGroup Condition="Exists('$(GhosttyVtDir)ghostty-vt.dll') and Exists('$(GhosttyVtDir)reseshvt.dll')">
     <None Include="$(GhosttyVtDir)ghostty-vt.dll;$(GhosttyVtDir)reseshvt.dll"

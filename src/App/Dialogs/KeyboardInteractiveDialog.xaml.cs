@@ -15,7 +15,7 @@ public sealed class ChallengeResponse(KeyboardInteractivePrompt prompt)
 /// <summary>Shows each keyboard-interactive challenge of one authentication round.</summary>
 public sealed partial class KeyboardInteractiveDialog : ContentDialog
 {
-    public IReadOnlyList<ChallengeResponse> Challenges { get; }
+    public List<ChallengeResponse> Challenges { get; }
 
     public KeyboardInteractiveDialog(string title, IReadOnlyList<KeyboardInteractivePrompt> prompts)
     {

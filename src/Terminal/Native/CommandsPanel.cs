@@ -11,7 +11,7 @@ namespace Resesh.Terminal.Native;
 /// <summary>Floating list of the terminal's command marks (terminal.html's commands panel):
 /// an exit-status dot, the command, when it ran, and a copy-output button. Clicking a row
 /// jumps to the command. Adapted from the parked native-terminal branch.</summary>
-internal sealed class CommandsPanel : Grid
+internal sealed partial class CommandsPanel : Grid
 {
     internal const double PreferredWidth = 420;
     internal const double MaximumHeight = 520;
@@ -159,14 +159,16 @@ internal sealed class CommandsPanel : Grid
             _list.ScrollIntoView(items[^1]);
     }
 
-    private sealed class DelegateCommand(Action<object?> execute) : ICommand
+    private sealed partial class DelegateCommand(Action<object?> execute) : ICommand
     {
         public event EventHandler? CanExecuteChanged { add { } remove { } }
         public bool CanExecute(object? parameter) => true;
         public void Execute(object? parameter) => execute(parameter);
     }
 
-    private sealed class CommandItem(CommandMarkInfo mark, ICommand copyCommand, Brush success, Brush failure, Brush unknown)
+    // {Binding} reads these by name; the attribute generates the lookup for AOT builds.
+    [WinRT.GeneratedBindableCustomProperty]
+    private sealed partial class CommandItem(CommandMarkInfo mark, ICommand copyCommand, Brush success, Brush failure, Brush unknown)
     {
         public long Id => mark.Id;
         public string Text => string.IsNullOrWhiteSpace(mark.Text) ? $"Line {mark.Line + 1}" : mark.Text;

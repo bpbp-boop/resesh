@@ -8,9 +8,9 @@ namespace Resesh.Core.Models;
 /// </summary>
 public sealed record SshKeyReference
 {
-    public Guid Id { get; init; } = Guid.NewGuid();
-    public string Name { get; init; } = "";
-    public string Path { get; init; } = "";
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = "";
+    public string Path { get; set; } = "";
     public string? Algorithm { get; init; }
     public int? KeyLength { get; init; }
     public string? Fingerprint { get; init; }

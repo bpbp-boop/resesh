@@ -14,7 +14,9 @@ public sealed partial class FolderIdentityDialog : ContentDialog
 {
     private enum ChoiceKind { None, Existing, New }
 
-    private sealed class Choice
+    // DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+    [WinRT.GeneratedBindableCustomProperty]
+    private sealed partial class Choice
     {
         public ChoiceKind Kind { get; init; }
         public Identity? Identity { get; init; }

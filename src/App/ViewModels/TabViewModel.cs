@@ -25,7 +25,7 @@ public enum TabConnectionState
 }
 
 /// <summary>One open tab: a session plus its terminal view and connection state.</summary>
-public sealed class TabViewModel : ObservableObject
+public sealed partial class TabViewModel : ObservableObject
 {
     private readonly ViewModelEnvironment _environment;
     private readonly Guid _tabInstanceId = Guid.NewGuid();

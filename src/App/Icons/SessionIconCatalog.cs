@@ -7,7 +7,9 @@ namespace Resesh.App.Icons;
 
 /// <summary>One entry in the icon picker: a key plus its display name and image.
 /// Key is null for the "Auto-detect" choice and <see cref="SessionIcons.None"/> for "No icon".</summary>
-public sealed record IconChoice(string? Key, string Name, ImageSource? Image, string Glyph = "");
+// DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial record IconChoice(string? Key, string Name, ImageSource? Image, string Glyph = "");
 
 /// <summary>
 /// Resolves icon keys to renderable images: built-in badges bundled under
