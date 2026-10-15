@@ -249,6 +249,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         KeyboardShortcutsMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.KeyboardShortcuts);
         SplitRightMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SplitRight);
         SplitDownMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SplitDown);
+        ZoomTabMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.ZoomTab);
         FilePaneMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.FilePane);
         ReconnectMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.ReconnectTab);
         SendBreakMenuItem.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SendBreak);

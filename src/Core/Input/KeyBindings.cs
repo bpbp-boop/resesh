@@ -104,6 +104,7 @@ public static class ShortcutIds
 
     public const string SplitRight = "group.splitRight";
     public const string SplitDown = "group.splitDown";
+    public const string ZoomTab = "group.zoomTab";
     public const string FocusGroupLeft = "group.focusLeft";
     public const string FocusGroupRight = "group.focusRight";
     public const string FocusGroupUp = "group.focusUp";
@@ -237,6 +238,8 @@ public static class KeyBindings
             [Chord(CtrlShift, VirtualKeys.Backslash, "\\")], "Moves the tab to a new group on the right");
         Add(ShortcutIds.SplitDown, Split, "Split Down", ShortcutScope.App,
             [Chord(CtrlShift, VirtualKeys.Minus, "-")], "Moves the tab to a new group below");
+        Add(ShortcutIds.ZoomTab, Split, "Zoom Tab or Restore Split Layout", ShortcutScope.App, [Letter(CtrlShift, 'Z')],
+            "Shows every tab in one full-window pane; press again to put the panes back");
         const string SplitOnly = "When the window is split. Otherwise the key goes to the shell";
         Add(ShortcutIds.FocusGroupLeft, Split, "Focus Group on the Left", ShortcutScope.App,
             [Chord(Alt, VirtualKeys.Left, "←")], SplitOnly, ShortcutCondition.Split);

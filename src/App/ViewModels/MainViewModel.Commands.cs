@@ -28,13 +28,15 @@ public sealed partial class MainViewModel
 
     public string PinTabTitle => ActiveTab?.IsPinned == true ? "Unpin Tab" : "Pin Tab";
 
+    public string ZoomTabTitle => IsZoomed ? "Restore Split Layout" : "Zoom Tab";
+
     public string CloseTabTitle => ActiveTab is { IsAppPage: true } page ? $"Close {page.Header}" : "Close Tab";
 
     private IEnumerable<IRelayCommand> TabCommands =>
     [
         ReconnectCommand, DisconnectCommand, SendBreakCommand, ManageRemoteSessionsCommand, ManageTunnelsCommand,
         EndRemoteSessionCommand, CloneTabCommand, TogglePinCommand, EditSessionSettingsCommand,
-        CloseTabCommand, SplitRightCommand, SplitDownCommand, MoveTabLeftCommand, MoveTabRightCommand,
+        CloseTabCommand, SplitRightCommand, SplitDownCommand, ToggleZoomCommand, MoveTabLeftCommand, MoveTabRightCommand,
         ToggleFilePaneCommand, ToggleCommandsPanelCommand, ToggleCompletionNotificationCommand,
         ShowSessionHistoryCommand,
     ];
@@ -142,6 +144,12 @@ public sealed partial class MainViewModel
     /// <summary>A split moves the tab into a new group, so its own group must keep one.</summary>
     private bool CanSplit(TabViewModel? tab) =>
         Target(tab) is { } target && Groups.FirstOrDefault(g => g.Tabs.Contains(target))?.Tabs.Count > 1;
+
+    /// <summary>Zooms the tab to fill the window, or brings the split layout back.</summary>
+    [RelayCommand(CanExecute = nameof(CanToggleZoom))]
+    private void ToggleZoom(TabViewModel? tab) => Services.ToggleZoom(Target(tab)!);
+
+    private bool CanToggleZoom(TabViewModel? tab) => Target(tab) is not null && (IsSplit || IsZoomed);
 
     [RelayCommand(CanExecute = nameof(HasTab))]
     private void MoveTabLeft(TabViewModel? tab) => Services.MoveTab(Target(tab)!, -1);

@@ -171,6 +171,8 @@ public sealed class AppCommandCatalog
             new("Tab", () => vm.PinTabTitle, "current active keep", vm.TogglePinCommand),
             new("Tab", Fixed("Split Right"), "current active move group", vm.SplitRightCommand, ShortcutIds.SplitRight),
             new("Tab", Fixed("Split Down"), "current active move group", vm.SplitDownCommand, ShortcutIds.SplitDown),
+            new("Tab", () => vm.ZoomTabTitle, "maximize full window pane split focus restore unzoom layout",
+                vm.ToggleZoomCommand, ShortcutIds.ZoomTab),
             new("Tab", Fixed("Move Tab Left"), "reorder", vm.MoveTabLeftCommand, ShortcutIds.MoveTabLeft, InPalette: false),
             new("Tab", Fixed("Move Tab Right"), "reorder", vm.MoveTabRightCommand, ShortcutIds.MoveTabRight, InPalette: false),
             new("Tab", Fixed("Search This Session's History"), "command history output past previous current active",

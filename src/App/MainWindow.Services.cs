@@ -55,6 +55,8 @@ public sealed partial class MainWindow
 
     void IMainWindowServices.MoveTab(TabViewModel tab, int delta) => MoveTab(tab, delta);
 
+    void IMainWindowServices.ToggleZoom(TabViewModel tab) => ToggleZoom(tab);
+
     bool IMainWindowServices.IsFilePaneOpen(TabViewModel tab) => tab.View is TerminalTabView { IsFilePaneOpen: true };
 
     void IMainWindowServices.ToggleCommandsPanel(TabViewModel tab) => (tab.View as TerminalTabView)?.ToggleCommandsPanel();

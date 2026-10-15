@@ -197,6 +197,10 @@
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem x:Name="SplitRightMenuItem" Text="Split Right" Command="{x:Bind ViewModel.SplitRightCommand}" />
                     <MenuFlyoutItem x:Name="SplitDownMenuItem" Text="Split Down" Command="{x:Bind ViewModel.SplitDownCommand}" />
+                    <MenuFlyoutItem
+                        x:Name="ZoomTabMenuItem"
+                        Text="{x:Bind ViewModel.ZoomTabTitle, Mode=OneWay}"
+                        Command="{x:Bind ViewModel.ToggleZoomCommand}" />
                     <MenuFlyoutItem x:Name="FilePaneMenuItem" Text="File Pane" Command="{x:Bind ViewModel.ToggleFilePaneCommand}" />
                 </MenuBarItem>
                 <!-- Verbs and remote-only entries follow the active tab's kind

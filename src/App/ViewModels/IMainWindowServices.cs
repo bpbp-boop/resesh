@@ -57,6 +57,9 @@ public interface IMainWindowServices
     void TogglePin(TabViewModel tab);
     void SplitRight(TabViewModel tab);
     void SplitDown(TabViewModel tab);
+
+    /// <summary>Zooms the tab to fill the window, or ends the zoom and restores the panes.</summary>
+    void ToggleZoom(TabViewModel tab);
     void MoveTab(TabViewModel tab, int delta);
     void ToggleFilePane(TabViewModel tab);
     bool IsFilePaneOpen(TabViewModel tab);

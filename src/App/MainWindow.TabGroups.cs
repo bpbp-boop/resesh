@@ -427,6 +427,7 @@ public sealed partial class MainWindow
 
     public void SplitRight(TabViewModel tab)
     {
+        EndZoomForLayoutChange();
         var sourceGroup = ViewModel.GroupOf(tab);
         if (sourceGroup.Tabs.Count > 1)
             SplitTab(tab, sourceGroup, SplitDirection.Right);
@@ -434,6 +435,7 @@ public sealed partial class MainWindow
 
     public void SplitDown(TabViewModel tab)
     {
+        EndZoomForLayoutChange();
         var sourceGroup = ViewModel.GroupOf(tab);
         if (sourceGroup.Tabs.Count > 1)
             SplitTab(tab, sourceGroup, SplitDirection.Down);
@@ -441,6 +443,7 @@ public sealed partial class MainWindow
 
     public void SplitTab(TabViewModel tab, TabGroupViewModel targetGroup, SplitDirection direction)
     {
+        EndZoomForLayoutChange();
         var sourceGroup = ViewModel.GroupOf(tab);
         if (ReferenceEquals(sourceGroup, targetGroup) && sourceGroup.Tabs.Count <= 1)
             return;
@@ -525,6 +528,7 @@ public sealed partial class MainWindow
 
     private void CollapseGroupIfEmpty(TabGroupViewModel group)
     {
+        EndZoomIfEmpty(group);
         if (!ViewModel.IsSplit || group.Tabs.Count > 0)
             return;
 
@@ -570,6 +574,7 @@ public sealed partial class MainWindow
         _paneBoundaries.Clear();
         GroupArea.Children.Add(BuildGroupLayoutElement(_groupLayout.Root));
         UpdateRulerPresentations();
+        RefreshTabGroupActions();
         // Re-assert once the rebuilt groups settle into their new rows and columns.
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
     }
@@ -582,6 +587,7 @@ public sealed partial class MainWindow
         var branch = (SplitLayoutBranch<TabGroupViewModel>)node;
         var grid = new Grid();
         var isColumns = branch.Orientation == SplitOrientation.Columns;
+        // Saved sizes become star weights, so panes keep their shares as the window resizes.
         var hasSavedSizes = _savedPaneSizes.TryGetValue(branch, out var savedSizes)
             && savedSizes.Count == branch.Children.Count;
 
@@ -591,16 +597,12 @@ public sealed partial class MainWindow
             if (isColumns)
                 grid.ColumnDefinitions.Add(new ColumnDefinition
                 {
-                    Width = hasSavedSizes
-                        ? new GridLength(savedSizes![index])
-                        : new GridLength(1, GridUnitType.Star),
+                    Width = new GridLength(hasSavedSizes ? savedSizes![index] : 1, GridUnitType.Star),
                 });
             else
                 grid.RowDefinitions.Add(new RowDefinition
                 {
-                    Height = hasSavedSizes
-                        ? new GridLength(savedSizes![index])
-                        : new GridLength(1, GridUnitType.Star),
+                    Height = new GridLength(hasSavedSizes ? savedSizes![index] : 1, GridUnitType.Star),
                 });
 
             var child = BuildGroupLayoutElement(branch.Children[index]);

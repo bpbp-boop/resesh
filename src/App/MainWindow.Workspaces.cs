@@ -22,42 +22,47 @@ public sealed partial class MainWindow
 
     private WorkspaceLayout CaptureWorkspaceLayout()
     {
+        if (_zoom is { } zoom)
+            return CaptureZoomedWorkspaceLayout(zoom);
+
         var groups = _groupLayout.Values.ToList();
         var groupIndices = groups
             .Select((group, index) => (group, index))
             .ToDictionary(item => item.group, item => item.index);
         return new WorkspaceLayout
         {
-            Groups = groups.Select(group =>
-            {
-                var originalActiveIndex = group.SelectedTab is null ? -1 : group.Tabs.IndexOf(group.SelectedTab);
-                var captured = group.Tabs
-                    .Select((tab, originalIndex) => (Tab: tab, OriginalIndex: originalIndex))
-                    .Where(item => !item.Tab.IsPlayback && App.Store.Find(item.Tab.Session.Id) is not null)
-                    .ToList();
-                var activeIndex = captured.FindIndex(item => item.OriginalIndex == originalActiveIndex);
-                if (activeIndex < 0 && captured.Count > 0 && originalActiveIndex >= 0)
-                {
-                    activeIndex = Math.Clamp(
-                        captured.Count(item => item.OriginalIndex < originalActiveIndex),
-                        0,
-                        captured.Count - 1);
-                }
-
-                return new WorkspaceGroup
-                {
-                    Tabs = captured.Select(item => new WorkspaceTabReference
-                    {
-                        SessionId = item.Tab.Session.Id,
-                        Pinned = item.Tab.IsPinned,
-                    }).ToList(),
-                    ActiveTabIndex = Math.Max(activeIndex, 0),
-                };
-            }).ToList(),
+            Groups = groups.Select(group => CaptureWorkspaceGroup(group.Tabs, group.SelectedTab)).ToList(),
             Layout = CaptureWorkspaceLayoutNode(
                 _groupLayout.Root,
                 groupIndices,
                 GroupArea.Children.FirstOrDefault() as FrameworkElement),
+        };
+    }
+
+    private static WorkspaceGroup CaptureWorkspaceGroup(IReadOnlyList<TabViewModel> tabs, TabViewModel? selected)
+    {
+        var originalActiveIndex = selected is null ? -1 : tabs.ToList().IndexOf(selected);
+        var captured = tabs
+            .Select((tab, originalIndex) => (Tab: tab, OriginalIndex: originalIndex))
+            .Where(item => !item.Tab.IsPlayback && App.Store.Find(item.Tab.Session.Id) is not null)
+            .ToList();
+        var activeIndex = captured.FindIndex(item => item.OriginalIndex == originalActiveIndex);
+        if (activeIndex < 0 && captured.Count > 0 && originalActiveIndex >= 0)
+        {
+            activeIndex = Math.Clamp(
+                captured.Count(item => item.OriginalIndex < originalActiveIndex),
+                0,
+                captured.Count - 1);
+        }
+
+        return new WorkspaceGroup
+        {
+            Tabs = captured.Select(item => new WorkspaceTabReference
+            {
+                SessionId = item.Tab.Session.Id,
+                Pinned = item.Tab.IsPinned,
+            }).ToList(),
+            ActiveTabIndex = Math.Max(activeIndex, 0),
         };
     }
 
@@ -271,6 +276,7 @@ public sealed partial class MainWindow
 
     private void ApplyWorkspaceLayout(WorkspaceLayout layout, bool additive)
     {
+        EndZoomForLayoutChange();
         // Tabs are placed, moved and closed wholesale; the strips snap to the result.
         foreach (var groupView in _groupViews.Values)
             groupView.SuppressTabMotion();

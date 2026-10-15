@@ -23,6 +23,7 @@ public interface ITabGroupHost
     void SplitRight(TabViewModel tab);
     void SplitDown(TabViewModel tab);
     void SplitTab(TabViewModel tab, TabGroupViewModel targetGroup, SplitDirection direction);
+    void ToggleZoom(TabViewModel tab);
     void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex);
     void TransferTabToGroup(
         TabViewModel tab,
@@ -723,12 +724,29 @@ public sealed partial class TabGroupView : UserControl
 
     private void ActionButtonView_StateChanged() => UpdateTabActionButtons();
 
+    /// <summary>The window split, zoomed or restored: the zoom button follows.</summary>
+    public void RefreshLayoutActions() => UpdateTabActionButtons();
+
     private void UpdateTabActionButtons()
     {
         // An empty group has nothing the buttons could act on: hide the whole cluster.
-        TabStripActions.Visibility = Group.Tabs.Count > 0 && Group.SelectedTab is { IsAppPage: false }
+        // App pages get no terminal actions, only zoom while the window has panes.
+        var zoomAvailable = _host.ViewModel.IsSplit || _host.ViewModel.IsZoomed;
+        var terminalTab = Group.SelectedTab is { IsAppPage: false };
+        TabStripActions.Visibility = Group.Tabs.Count > 0 && (terminalTab || zoomAvailable)
             ? Visibility.Visible
             : Visibility.Collapsed;
+        RecordButton.Visibility = RewindButton.Visibility = ShowCommandsButton.Visibility =
+            FilePaneToggle.Visibility = terminalTab ? Visibility.Visible : Visibility.Collapsed;
+        ZoomButton.Visibility = ZoomOverflowItem.Visibility =
+            zoomAvailable ? Visibility.Visible : Visibility.Collapsed;
+        var zoomed = _host.ViewModel.IsZoomed;
+        ZoomButton.IsChecked = ZoomOverflowItem.IsChecked = zoomed;
+        ZoomGlyph.Glyph = zoomed ? "\uE73F" : "\uE740";
+        var zoomLabel = zoomed ? "Restore split layout" : "Zoom tab";
+        ToolTipService.SetToolTip(ZoomButton, $"{zoomLabel} ({AppShortcuts.Label(ShortcutIds.ZoomTab)})");
+        AutomationProperties.SetName(ZoomButton, zoomLabel);
+        ZoomOverflowItem.Text = zoomLabel;
         TabStripActions.Opacity = Group.SelectedTab?.IsGroupFocused == false ? 0.55 : 1.0;
         UpdateTabActionLayout();
 
@@ -800,6 +818,14 @@ public sealed partial class TabGroupView : UserControl
         ExpandedTabActions.Visibility = expandedVisibility;
         TabActionsOverflowButton.Visibility = useOverflow ? Visibility.Visible : Visibility.Collapsed;
         QueueTabWidthRefresh();
+    }
+
+    private void ZoomButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (Group.SelectedTab is { } tab)
+            _host.ToggleZoom(tab);
+        // A toggle the window did not carry out must not stay flipped.
+        UpdateTabActionButtons();
     }
 
     private async void RecordButton_Click(object sender, RoutedEventArgs e)
@@ -974,7 +1000,7 @@ public sealed partial class TabGroupView : UserControl
 
     private MenuFlyoutItem _rename = null!, _resetName = null!, _reconnect = null!, _disconnect = null!, _sendBreak = null!, _endRemote = null!,
         _close = null!, _closeDisconnected = null!, _closeOthers = null!, _closeRight = null!,
-        _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _splitDown = null!,
+        _closeGroup = null!, _closeAll = null!, _pin = null!, _lock = null!, _clone = null!, _split = null!, _splitDown = null!, _zoomTab = null!,
         _options = null!, _manageRemote = null!, _tunnels = null!,
         _filePane = null!, _filePaneCwd = null!, _workingFolder = null!, _recordingsLocation = null!;
     private MenuFlyoutSubItem _highlight = null!, _agent = null!;
@@ -1029,6 +1055,8 @@ public sealed partial class TabGroupView : UserControl
         _split.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SplitRight);
         _splitDown = Item("Split Down", tab => _host.SplitDown(tab));
         _splitDown.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SplitDown);
+        _zoomTab = Item("Zoom Tab", tab => _host.ToggleZoom(tab));
+        _zoomTab.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.ZoomTab);
         _options = Item("Session Options…", tab => _ = _host.OpenSessionOptionsAsync(tab));
         _highlight = new MenuFlyoutSubItem { Text = "Highlighting" };
         _agent = new MenuFlyoutSubItem { Text = "Agent" };
@@ -1056,6 +1084,7 @@ public sealed partial class TabGroupView : UserControl
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_split);
         menu.Items.Add(_splitDown);
+        menu.Items.Add(_zoomTab);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(_filePane);
         menu.Items.Add(_filePaneCwd);
@@ -1104,6 +1133,10 @@ public sealed partial class TabGroupView : UserControl
         // Splitting a lone tab would leave an empty group that immediately collapses — pointless.
         _split.IsEnabled = Group.Tabs.Count > 1;
         _splitDown.IsEnabled = Group.Tabs.Count > 1;
+        _zoomTab.Text = _host.ViewModel.ZoomTabTitle;
+        _zoomTab.Visibility = _host.ViewModel.IsSplit || _host.ViewModel.IsZoomed
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         _filePane.Visibility = caps.FilePane ? Visibility.Visible : Visibility.Collapsed;
         _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
         var filePaneCwd = caps.FilePane;
