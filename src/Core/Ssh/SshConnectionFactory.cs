@@ -217,6 +217,49 @@ internal static class SshConnectionFactory
         return check;
     }
 
+    /// <summary>
+    /// Connects <paramref name="client"/>. A connection made straight to the host has no
+    /// separate TCP preflight, which saves a round trip: instead it must reach the host and
+    /// exchange versions within <paramref name="reachTimeout"/>, so an unreachable host still
+    /// fails in seconds with the same message. SSH.NET stops watching the token once versions
+    /// are exchanged, so the key exchange and login, which can wait on the user, keep the
+    /// connection's own timeout. Connections through a jump host or proxy keep their preflight,
+    /// which reports on the hop that failed.
+    /// </summary>
+    internal static void Connect(BaseClient client, Session session, SshJumpChain? via, TimeSpan reachTimeout,
+        CancellationToken cancellationToken)
+    {
+        if (via is not null || ActiveProxy(session) is not null)
+        {
+            Preflight(session, via, reachTimeout, cancellationToken);
+            client.ConnectAsync(cancellationToken).GetAwaiter().GetResult();
+            return;
+        }
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(reachTimeout);
+        var reached = false;
+        void Reached(object? sender, HostKeyEventArgs e) => reached = true;
+        client.HostKeyReceived += Reached;
+        try
+        {
+            client.ConnectAsync(deadline.Token).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException ex) when (!reached && !cancellationToken.IsCancellationRequested)
+        {
+            throw new SshSessionException(
+                SshFailureKind.HostUnreachable, $"Could not reach {session.Host}:{session.Port} (connection timed out).", ex);
+        }
+        catch (System.Net.Sockets.SocketException ex) when (!reached)
+        {
+            throw new SshSessionException(
+                SshFailureKind.HostUnreachable, $"Could not reach {session.Host}:{session.Port}: {ex.Message}", ex);
+        }
+        finally
+        {
+            client.HostKeyReceived -= Reached;
+        }
+    }
+
     internal static void PreflightTcp(string host, int port, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         using var socket = new System.Net.Sockets.Socket(

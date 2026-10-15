@@ -38,6 +38,18 @@ public class HighlighterTests
         new(pattern, pattern, color, bold, underline, matchCase, showInOverview);
 
     [Fact]
+    public void CompiledPatternsAreSharedAcrossTerminals()
+    {
+        var pattern = "shared-" + Guid.NewGuid().ToString("N");
+        Highlighter.Precompile([Rule(pattern)]);
+
+        var first = Highlighter.Compile(pattern, matchCase: false);
+        Assert.NotNull(first);
+        Assert.Same(first, Highlighter.Compile(pattern, matchCase: false));
+        Assert.NotSame(first, Highlighter.Compile(pattern, matchCase: true));
+    }
+
+    [Fact]
     public void RecolorsOnlyMatchedCells()
     {
         var row = Row("disk error on sda");

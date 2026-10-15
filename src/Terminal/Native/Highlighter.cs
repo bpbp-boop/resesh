@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -18,6 +19,13 @@ internal sealed class Highlighter
     private const double TintAlpha = 0.22;
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(50);
 
+    // Compiling the built-in rules takes 20-30 ms (the non-backtracking engine builds its
+    // automaton up front), and every tab uses the same rules, so compiled patterns are shared:
+    // a Regex is immutable and safe to use from any thread. Editing a rule previews each draft
+    // pattern, so the cache is bounded.
+    private const int MaxCompiledPatterns = 256;
+    private static readonly ConcurrentDictionary<(string Pattern, bool MatchCase), Regex?> Compiled = new();
+
     internal sealed record Rule(string Id, Regex Pattern, uint Color, bool Tint, bool Underline, bool ShowInOverview);
 
     private IReadOnlyList<Rule> _rules = [];
@@ -34,9 +42,8 @@ internal sealed class Highlighter
     internal IReadOnlyList<int> ColumnEnds => _ends;
     public bool HasRules => _rules.Count > 0;
 
-    /// <summary>Replaces the rule set from the host payload (anonymous objects with pattern,
-    /// color, bold, underline, matchCase, showInOverview). Patterns this engine rejects are
-    /// skipped, as the page skips patterns its RegExp rejects.</summary>
+    /// <summary>Replaces the rule set. Patterns this engine rejects are skipped, as the page
+    /// skips patterns its RegExp rejects.</summary>
     public void SetRules(IReadOnlyList<TerminalHighlight>? payload)
     {
         var rules = new List<Rule>();
@@ -54,7 +61,27 @@ internal sealed class Highlighter
 
     /// <summary>Output is untrusted, so prefer the non-backtracking engine; patterns it cannot
     /// run (lookarounds, backreferences) fall back to the backtracking engine with a timeout.</summary>
+    /// <summary>Compiles <paramref name="rules"/> before a terminal needs them, so opening a
+    /// tab does not wait for it. Call off the UI thread.</summary>
+    public static void Precompile(IEnumerable<TerminalHighlight> rules)
+    {
+        foreach (var rule in rules)
+        {
+            if (!string.IsNullOrEmpty(rule.Pattern))
+                _ = Compile(rule.Pattern, rule.MatchCase);
+        }
+    }
+
     internal static Regex? Compile(string pattern, bool matchCase)
+    {
+        if (Compiled.TryGetValue((pattern, matchCase), out var cached))
+            return cached;
+        if (Compiled.Count >= MaxCompiledPatterns)
+            Compiled.Clear();
+        return Compiled.GetOrAdd((pattern, matchCase), CompileUncached(pattern, matchCase));
+    }
+
+    private static Regex? CompileUncached(string pattern, bool matchCase)
     {
         var options = RegexOptions.CultureInvariant | (matchCase ? RegexOptions.None : RegexOptions.IgnoreCase);
         try

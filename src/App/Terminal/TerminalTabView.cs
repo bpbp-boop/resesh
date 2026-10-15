@@ -1776,7 +1776,12 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     }
 
     private IReadOnlyList<Resesh.Terminal.TerminalHighlight> BuildHighlightPayload() =>
-        (_highlightPreview ?? App.Highlights).ResolveForSession(Session.Overrides)
+        HighlightPayload(_highlightPreview ?? App.Highlights, Session.Overrides);
+
+    /// <summary>The enabled highlight rules for a session, as the terminal applies them.</summary>
+    internal static IReadOnlyList<Resesh.Terminal.TerminalHighlight> HighlightPayload(
+        HighlightsStore store, TerminalOverrides? overrides) =>
+        store.ResolveForSession(overrides)
             .Select(r => new Resesh.Terminal.TerminalHighlight(
                 r.Id, r.Pattern, r.Color, r.Bold, r.Underline, r.MatchCase, r.ShowInOverview))
             .ToList();
