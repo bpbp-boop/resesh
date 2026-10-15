@@ -437,6 +437,7 @@ public sealed partial class MainWindow
     {
         if (sessions.Count == 0)
             return;
+        EndZoomForLayoutChange();
         var group = ViewModel.FocusedGroup;
         TabGroupViewModel? first = null;
         foreach (var session in sessions)

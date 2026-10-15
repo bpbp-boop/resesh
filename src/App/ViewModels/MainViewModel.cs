@@ -116,9 +116,23 @@ public sealed partial class MainViewModel : ObservableObject
 
     public bool IsSplit => Groups.Count > 1;
 
+    private bool _isZoomed;
+
+    /// <summary>One tab fills the window while the split layout waits to come back.</summary>
+    public bool IsZoomed
+    {
+        get => _isZoomed;
+        set
+        {
+            if (SetProperty(ref _isZoomed, value))
+                OnGroupsChanged();
+        }
+    }
+
     public void OnGroupsChanged()
     {
         OnPropertyChanged(nameof(IsSplit));
+        OnPropertyChanged(nameof(ZoomTabTitle));
         OnPropertyChanged(nameof(StatusText));
         OnActiveTabStateChanged();
     }

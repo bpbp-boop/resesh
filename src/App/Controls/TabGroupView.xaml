@@ -574,6 +574,11 @@
                     Margin="0,0,6,0"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">
+                    <ToggleButton x:Name="ZoomButton" Width="32" Height="32" Padding="0"
+                                  Click="ZoomButton_Click" Visibility="Collapsed"
+                                  AutomationProperties.AutomationId="ZoomTabButton">
+                            <FontIcon x:Name="ZoomGlyph" Glyph="&#xE740;" FontSize="14" />
+                    </ToggleButton>
                     <ToggleButton x:Name="RecordButton" Width="32" Height="32" Padding="0"
                                   Click="RecordButton_Click" ToolTipService.ToolTip="Start recording">
                             <Grid Width="10" Height="10" VerticalAlignment="Center">
@@ -618,6 +623,11 @@
                     <FontIcon Glyph="&#xE712;" FontSize="14" />
                     <Button.Flyout>
                         <MenuFlyout>
+                            <ToggleMenuFlyoutItem
+                                x:Name="ZoomOverflowItem"
+                                Text="Zoom tab"
+                                Visibility="Collapsed"
+                                Click="ZoomButton_Click" />
                             <ToggleMenuFlyoutItem
                                 x:Name="RecordOverflowItem"
                                 Text="Start recording"

@@ -63,6 +63,7 @@ internal sealed class FakeMainWindowServices : IMainWindowServices
     public void TogglePin(TabViewModel tab) => Record($"TogglePin {tab.Header}");
     public void SplitRight(TabViewModel tab) => Record($"SplitRight {tab.Header}");
     public void SplitDown(TabViewModel tab) => Record($"SplitDown {tab.Header}");
+    public void ToggleZoom(TabViewModel tab) => Record($"ToggleZoom {tab.Header}");
     public void MoveTab(TabViewModel tab, int delta) => Record($"MoveTab {tab.Header} {delta}");
     public void ToggleFilePane(TabViewModel tab) => Record($"ToggleFilePane {tab.Header}");
     public bool IsFilePaneOpen(TabViewModel tab) => false;
