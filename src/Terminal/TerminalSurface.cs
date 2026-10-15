@@ -12,6 +12,11 @@ public abstract partial class TerminalSurface : Grid, IDisposable
     /// <summary>Debug diagnostics sink (same pattern as SshTerminalSession.TraceHook).</summary>
     public static Action<string>? TraceHook { get; set; }
 
+    /// <summary>Compiles highlight rules ahead of the terminals that use them, so opening a tab
+    /// does not wait for it. Call off the UI thread.</summary>
+    public static void PrecompileHighlights(IEnumerable<TerminalHighlight> rules) =>
+        Native.Highlighter.Precompile(rules);
+
     public abstract event Action<byte[]>? InputReceived;
     public abstract event Action<int, int>? Resized;
     public abstract event TerminalOutputObservedHandler? OutputObserved;

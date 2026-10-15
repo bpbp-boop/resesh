@@ -67,8 +67,6 @@ public sealed class SftpSession : IDisposable
         Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder,
         SshJumpChain? via, string? proxyPassword)
     {
-        SshConnectionFactory.Preflight(session, via, TimeSpan.FromSeconds(10));
-
         var auth = SshConnectionFactory.BuildAuthMethods(session, secret, interactiveResponder);
         var connectionInfo = SshConnectionFactory.CreateConnectionInfo(
             session, auth, TimeSpan.FromSeconds(30), via, proxyPassword);
@@ -100,14 +98,14 @@ public sealed class SftpSession : IDisposable
 
         try
         {
-            client.Connect();
+            SshConnectionFactory.Connect(client, session, via, TimeSpan.FromSeconds(10), CancellationToken.None);
         }
         catch (Exception ex)
         {
             client.Dispose();
             if (hostKeyFailure is not null)
                 throw hostKeyFailure;
-            throw SshConnectionFactory.Classify(ex, session, via);
+            throw ex as SshSessionException ?? SshConnectionFactory.Classify(ex, session, via);
         }
         finally
         {

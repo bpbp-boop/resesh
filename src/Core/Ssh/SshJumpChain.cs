@@ -127,7 +127,6 @@ public sealed class SshJumpChain : IDisposable
         // Only the first jump is dialled from this machine; later ones go through the
         // forward opened by the jump before them.
         var via = first ? null : this;
-        SshConnectionFactory.Preflight(session, via, TimeSpan.FromSeconds(10), cancellationToken);
 
         var auth = SshConnectionFactory.BuildAuthMethods(session, hop.Secret, interactiveResponder);
         var connectionInfo = SshConnectionFactory.CreateConnectionInfo(
@@ -136,7 +135,7 @@ public sealed class SshJumpChain : IDisposable
         var hostKey = SshConnectionFactory.VerifyHostKey(client, session, knownHosts, hostKeyDecision, cancellationToken);
         try
         {
-            client.ConnectAsync(cancellationToken).GetAwaiter().GetResult();
+            SshConnectionFactory.Connect(client, session, via, TimeSpan.FromSeconds(10), cancellationToken);
             return client;
         }
         catch (Exception ex)
@@ -145,7 +144,7 @@ public sealed class SshJumpChain : IDisposable
             cancellationToken.ThrowIfCancellationRequested();
             if (hostKey.Failure is { } hostKeyFailure)
                 throw hostKeyFailure;
-            throw SshConnectionFactory.Classify(ex, session, via);
+            throw ex as SshSessionException ?? SshConnectionFactory.Classify(ex, session, via);
         }
         finally
         {

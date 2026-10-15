@@ -233,6 +233,13 @@ public partial class App : Application
         // Registering for notification clicks takes ~70 ms of COM work; do it once the
         // first frame is up rather than before the window can appear.
         _dispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, CommandCompletionNotifications.Register);
+        // Every terminal compiles the highlight rules (20-30 ms); do it once, in the background,
+        // so opening the first tab does not wait for it.
+        _dispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            var rules = Terminal.TerminalTabView.HighlightPayload(Highlights, null);
+            _ = Task.Run(() => Resesh.Terminal.TerminalSurface.PrecompileHighlights(rules));
+        });
     }
 
 

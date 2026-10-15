@@ -16,6 +16,21 @@ public sealed class IntegratedShellStreamTests
             "SSH.NET private API changed: plain shells would silently stop offering COLORTERM.");
 
     [Fact]
+    public void PinnedSshNetVersion_SendsEnvironmentWithoutWaitingForAReply() =>
+        Assert.True(IntegratedShellStream.CanSendWithoutReply,
+            "SSH.NET private API changed: every shell would wait an extra round trip for the COLORTERM reply.");
+
+    [Fact]
+    public void EnvironmentRequest_MatchesSshNetFormatButWantsNoReply()
+    {
+        var internalType = typeof(SshClient).Assembly.GetType("Renci.SshNet.Messages.Connection.EnvironmentVariableRequestInfo")!;
+        var reference = (Renci.SshNet.Common.SshData)Activator.CreateInstance(internalType, "COLORTERM", "truecolor")!;
+        var expected = reference.GetBytes();
+        expected[0] = 0; // want_reply
+        Assert.Equal(expected, new EnvironmentRequest("COLORTERM", "truecolor").GetBytes());
+    }
+
+    [Fact]
     public void EverySessionOffersTruecolor() =>
         Assert.Contains(new KeyValuePair<string, string>("COLORTERM", "truecolor"), IntegratedShellStream.SessionEnvironment);
 

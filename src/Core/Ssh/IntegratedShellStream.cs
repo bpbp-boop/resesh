@@ -1,8 +1,11 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
+using System.Text;
 using Renci.SshNet;
 using Renci.SshNet.Common;
+using Renci.SshNet.Messages;
+using Renci.SshNet.Messages.Connection;
 
 namespace Resesh.Core.Ssh;
 
@@ -28,14 +31,19 @@ internal static class IntegratedShellStream
     private static readonly MethodInfo? ShellMethod = ChannelType?.GetMethod("SendShellRequest", InstanceMembers, []);
     private static readonly MethodInfo? EnvironmentMethod = ChannelType?.GetMethod("SendEnvironmentVariableRequest", InstanceMembers,
         [typeof(string), typeof(string)]);
+    // Sends a request without waiting for its reply (the channel's protected SendMessage).
+    private static readonly MethodInfo? SendMessageMethod = ChannelType?.GetMethod("SendMessage", InstanceMembers, [typeof(Message)]);
+    private static readonly PropertyInfo? RemoteChannelProperty = ChannelType?.GetProperty("RemoteChannelNumber", BindingFlags.Instance | BindingFlags.Public);
 
     internal const string ChannelTypeName = "Renci.SshNet.Channels.ChannelSession";
     internal const DynamicallyAccessedMemberTypes ChannelMembers =
-        DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.NonPublicMethods;
+        DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.NonPublicMethods |
+        DynamicallyAccessedMemberTypes.PublicProperties;
 
     // The channel type is internal to SSH.NET; DynamicDependency keeps its methods when the
     // app is trimmed or compiled ahead of time, which a lookup by name cannot express.
     [DynamicDependency(ChannelMembers, ChannelTypeName, "Renci.SshNet")]
+    [DynamicDependency(ChannelMembers, "Renci.SshNet.Channels.Channel", "Renci.SshNet")]
     [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "DynamicDependency keeps the named type.")]
     [UnconditionalSuppressMessage("Trimming", "IL2073", Justification = "DynamicDependency keeps the type's methods.")]
     [return: DynamicallyAccessedMembers(ChannelMembers)]
@@ -52,6 +60,9 @@ internal static class IntegratedShellStream
 
     /// <summary>Whether a plain interactive shell can be started with the environment request.</summary>
     public static bool IsShellSupported => IsSupported && ShellMethod is not null && EnvironmentMethod is not null;
+
+    /// <summary>Whether environment requests can be sent without waiting for the reply.</summary>
+    internal static bool CanSendWithoutReply => SendMessageMethod is not null && RemoteChannelProperty is not null;
 
     /// <summary>Starts <paramref name="command"/> with exec, or the account's login shell
     /// when it is null.</summary>
@@ -70,13 +81,15 @@ internal static class IntegratedShellStream
             using var cancellation = token.Register(() => stream.Dispose());
             OpenMethod!.Invoke(channel, null);
             token.ThrowIfCancellationRequested();
-            if (EnvironmentMethod is not null)
+            foreach (var (name, value) in SessionEnvironment)
             {
-                foreach (var (name, value) in SessionEnvironment)
-                {
-                    EnvironmentMethod.Invoke(channel, [name, value]); // false = not in AcceptEnv
-                    token.ThrowIfCancellationRequested();
-                }
+                // The reply only says whether the server's AcceptEnv allowed it, and nothing
+                // depends on that, so don't wait a round trip for it.
+                if (CanSendWithoutReply && RemoteChannelProperty!.GetValue(channel) is uint remoteChannel)
+                    SendMessageMethod!.Invoke(channel, [new ChannelRequestMessage(remoteChannel, new EnvironmentRequest(name, value))]);
+                else
+                    EnvironmentMethod?.Invoke(channel, [name, value]);
+                token.ThrowIfCancellationRequested();
             }
             if (PtyMethod!.Invoke(channel,
                     [terminalType, (uint)columns, (uint)rows, 0u, 0u, new Dictionary<TerminalModes, uint>()]) is not true)
@@ -100,5 +113,33 @@ internal static class IntegratedShellStream
                 ExceptionDispatchInfo.Capture(inner).Throw();
             throw;
         }
+    }
+}
+
+/// <summary>An SSH "env" channel request that wants no reply. Same wire format as SSH.NET's
+/// internal EnvironmentVariableRequestInfo, which always asks for one.</summary>
+internal sealed class EnvironmentRequest : RequestInfo
+{
+    private readonly byte[] _name;
+    private readonly byte[] _value;
+
+    public EnvironmentRequest(string name, string value)
+    {
+        _name = Encoding.UTF8.GetBytes(name);
+        _value = Encoding.UTF8.GetBytes(value);
+        WantReply = false;
+    }
+
+    public override string RequestName => "env";
+
+    protected override int BufferCapacity => base.BufferCapacity + 4 + _name.Length + 4 + _value.Length;
+
+    protected override void LoadData() => throw new NotSupportedException("Only sent, never received.");
+
+    protected override void SaveData()
+    {
+        base.SaveData();
+        WriteBinaryString(_name);
+        WriteBinaryString(_value);
     }
 }

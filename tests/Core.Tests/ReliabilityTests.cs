@@ -79,6 +79,43 @@ public sealed class ReliabilityTests : IDisposable
     }
 
     [Fact]
+    public void DirectConnect_ServerThatNeverGreets_FailsAsUnreachableWithinTheReachTimeout()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+        using var client = new Renci.SshNet.SshClient("127.0.0.1", port, "test", "test");
+        var session = new Resesh.Core.Models.Session { Host = "127.0.0.1", Port = port, Username = "test" };
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+
+        var error = Assert.Throws<SshSessionException>(() =>
+            SshConnectionFactory.Connect(client, session, null, TimeSpan.FromMilliseconds(300), CancellationToken.None));
+
+        Assert.Equal(SshFailureKind.HostUnreachable, error.Kind);
+        Assert.Equal($"Could not reach 127.0.0.1:{port} (connection timed out).", error.Message);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+    }
+
+    [Fact]
+    public void DirectConnect_RefusedPort_FailsAsUnreachable()
+    {
+        int port;
+        using (var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0))
+        {
+            probe.Start();
+            port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
+        }
+        using var client = new Renci.SshNet.SshClient("127.0.0.1", port, "test", "test");
+        var session = new Resesh.Core.Models.Session { Host = "127.0.0.1", Port = port, Username = "test" };
+
+        var error = Assert.Throws<SshSessionException>(() =>
+            SshConnectionFactory.Connect(client, session, null, TimeSpan.FromSeconds(5), CancellationToken.None));
+
+        Assert.Equal(SshFailureKind.HostUnreachable, error.Kind);
+        Assert.StartsWith($"Could not reach 127.0.0.1:{port}: ", error.Message);
+    }
+
+    [Fact]
     public async Task CancellingSshHandshakeReleasesConnectionToAnUnresponsiveServer()
     {
         using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
@@ -93,7 +130,7 @@ public sealed class ReliabilityTests : IDisposable
         }, "test", "xterm", 80, 24, cancellationToken: cancellation.Token));
         try
         {
-            using var preflight = await listener.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            // One connection: a direct connect has no separate TCP preflight.
             using var handshake = await listener.AcceptTcpClientAsync().WaitAsync(TimeSpan.FromSeconds(5));
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connection.WaitAsync(TimeSpan.FromSeconds(5)));

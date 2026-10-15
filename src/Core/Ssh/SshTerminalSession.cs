@@ -129,8 +129,6 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         SshClient client;
         try
         {
-            // Fast pre-flight so unreachable hosts fail in seconds; the real connect then gets a
-            // generous timeout because the first-connect host key dialog sits inside the handshake.
             Connecting?.Invoke(session);
             // The session's own login is asked for last, once the jump hosts are through.
             if (resolveLogin is not null)
@@ -140,17 +138,17 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
                 (session, secret, proxyPassword) = (login.Session, login.Secret, login.ProxyPassword);
                 cancellationToken.ThrowIfCancellationRequested();
             }
-            SshConnectionFactory.Preflight(session, via, TimeSpan.FromSeconds(10), cancellationToken);
-
             var auth = SshConnectionFactory.BuildAuthMethods(session, secret, interactiveResponder);
             var connectionInfo = SshConnectionFactory.CreateConnectionInfo(
                 session, auth, TimeSpan.FromMinutes(2), via, proxyPassword);
 
+            // Unreachable hosts fail in seconds; the rest of the connect gets a generous timeout
+            // because the first-connect host key dialog sits inside the handshake.
             client = new SshClient(connectionInfo) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
             var hostKey = SshConnectionFactory.VerifyHostKey(client, session, _knownHosts, HostKeyDecision, cancellationToken);
             try
             {
-                client.ConnectAsync(cancellationToken).GetAwaiter().GetResult();
+                SshConnectionFactory.Connect(client, session, via, TimeSpan.FromSeconds(10), cancellationToken);
             }
             catch (Exception ex)
             {
@@ -158,7 +156,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
                 cancellationToken.ThrowIfCancellationRequested();
                 if (hostKey.Failure is { } hostKeyFailure)
                     throw hostKeyFailure;
-                throw SshConnectionFactory.Classify(ex, session, via);
+                throw ex as SshSessionException ?? SshConnectionFactory.Classify(ex, session, via);
             }
             finally
             {
