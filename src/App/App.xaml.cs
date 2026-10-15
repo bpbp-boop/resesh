@@ -70,12 +70,11 @@ public partial class App : Application
 
     public App()
     {
-        if (!DemoMode.IsEnabled)
-            MigrateLegacyDataDir();
+        StartLoadingStores();
+        _settingsLoad!.GetAwaiter().GetResult();
 
         // Application-level theme must be set before any UI exists; it also themes
         // popups/dialogs, which don't inherit element-level RequestedTheme.
-        Settings.Load();
         RequestedTheme = ThemeCatalog.IsLight(ResolveTheme(Settings.Current.Theme))
             ? ApplicationTheme.Light
             : ApplicationTheme.Dark;
@@ -89,6 +88,30 @@ public partial class App : Application
         };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => LogCrash(e.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, e) => LogCrash(e.Exception);
+    }
+
+    private static Task? _settingsLoad;
+    private static Task? _storesLoad;
+
+    /// <summary>Starts reading settings and the stores on worker threads. Main calls this once it
+    /// knows the process will run the app, so the reads (mostly one-time JSON serializer work)
+    /// overlap WinUI's own startup; the UI thread waits only where it first needs the data.</summary>
+    internal static void StartLoadingStores()
+    {
+        if (_settingsLoad is not null)
+            return;
+        if (!DemoMode.IsEnabled)
+            MigrateLegacyDataDir();
+        _settingsLoad = Task.Run(() => Settings.Load());
+        _storesLoad = Task.Run(() =>
+        {
+            Store.Load();
+            SshKeys.Load();
+            Identities.Load();
+            KnownHosts.Load();
+            Highlights.Load();
+            Workspaces.Load();
+        });
     }
 
     /// <summary>One-time rename migration: %APPDATA%\Sessions → %APPDATA%\Resesh.
@@ -153,12 +176,7 @@ public partial class App : Application
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         CommandCompletionNotifications.SetDispatcher(_dispatcherQueue);
 
-        Store.Load();
-        SshKeys.Load();
-        Identities.Load();
-        KnownHosts.Load();
-        Highlights.Load();
-        Workspaces.Load();
+        _storesLoad!.GetAwaiter().GetResult();
         if (DemoMode.IsEnabled)
         {
             DemoMode.Seed(Store);
@@ -212,6 +230,9 @@ public partial class App : Application
         if (loadMessages.Count > 0)
             window.ShowOperationNotice("Stored data needs attention", string.Join("\n", loadMessages));
         Program.SetActivationTarget(this);
+        // Registering for notification clicks takes ~70 ms of COM work; do it once the
+        // first frame is up rather than before the window can appear.
+        _dispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, CommandCompletionNotifications.Register);
     }
 
 

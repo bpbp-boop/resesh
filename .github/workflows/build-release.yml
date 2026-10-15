@@ -152,11 +152,14 @@ jobs:
       - name: Build self-contained app
         shell: pwsh
         run: |
-          dotnet build src/App/Resesh.App.csproj `
+          # Publish, not build: only publish compiles ReadyToRun code, which launch depends on.
+          $publishDir = Join-Path $env:RUNNER_TEMP "app-publish"
+          dotnet publish src/App/Resesh.App.csproj `
             --configuration Release `
             --runtime "${{ matrix.runtime }}" `
             --self-contained true `
             -p:Platform="${{ matrix.platform }}" `
+            -p:PublishDir="$publishDir/" `
             -p:DebugSymbols=false `
             -p:DebugType=None
 
@@ -164,8 +167,7 @@ jobs:
             throw "Build failed with exit code $LASTEXITCODE."
           }
 
-          $searchRoot = "src/App/bin/${{ matrix.platform }}/Release"
-          $appExe = Get-ChildItem $searchRoot -Recurse -Filter Resesh.App.exe -File |
+          $appExe = Get-ChildItem $publishDir -Filter Resesh.App.exe -File |
             Where-Object {
               Test-Path (Join-Path $_.Directory.FullName "Resesh.App.runtimeconfig.json")
             } |

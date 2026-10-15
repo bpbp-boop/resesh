@@ -22,7 +22,11 @@ internal static class Program
         TaskbarIntegration.SetProcessIdentity();
         var key = ActivationKey();
         CommandCompletionNotifications.TraceHook = message => MainWindow.Trace(message);
-        CommandCompletionNotifications.Register(key);
+        CommandCompletionNotifications.SetOwner(key);
+        // A notification launch must register before GetActivatedEventArgs; any other
+        // launch registers after its first window is up (App.OnLaunched).
+        if (CommandCompletionNotifications.IsActivationLaunch(args))
+            CommandCompletionNotifications.Register();
         try
         {
             var activationArgs = AppInstance.GetCurrent().GetActivatedEventArgs();
@@ -53,6 +57,7 @@ internal static class Program
                 registered.Activated += OnActivated;
             }
 
+            App.StartLoadingStores();
             Application.Start(_ =>
             {
                 SynchronizationContext.SetSynchronizationContext(

@@ -17,6 +17,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <!-- Releases are published with precompiled (ReadyToRun) code: launch skips most JIT
+         work, which roughly halves time to first frame. Applies to dotnet publish only. -->
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>
