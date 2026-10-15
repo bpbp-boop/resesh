@@ -27,6 +27,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private const double ScrollBarWidth = 14;
 
     private readonly SwapChainPanel _panel = new();
+    private readonly RectangleGeometry _panelClip = new();
     private readonly Microsoft.UI.Xaml.Controls.Primitives.ScrollBar _scrollBar = new()
     {
         Orientation = Orientation.Vertical,
@@ -169,6 +170,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         UseSystemFocusVisuals = false;
         Background = new SolidColorBrush(ToColor(_theme.Background));
         _panel.IsHitTestVisible = false;
+        _panel.Clip = _panelClip;
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TerminalRuler.LaneWidth) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(ScrollBarWidth) });
@@ -230,6 +232,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
                 return;
             AttachSwapChain();
             Relayout();
+            PrimeSwapChain();
             RequestFrame();
         };
         Unloaded += (_, _) =>
@@ -245,6 +248,10 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         {
             _forceFull = true;
             RequestFrame();
+            // A hidden surface never draws, so its buffers hold whatever was last shown.
+            // Draw before the frame that reveals it (a tab switch, a split).
+            if (Visibility == Visibility.Visible)
+                DrawFrame();
         });
 
         PreviewKeyDown += OnKeyDown;
@@ -507,10 +514,16 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _renderer.SetFont(_fontFamily, EffectiveFontSize * scale);
             ApplyTextInputStyle();
         }
+        // The swap chain is window-sized and always shown whole; the clip, which commits with
+        // this layout pass, cuts it to the pane (see TerminalRenderer.Resize).
+        _panelClip.Rect = new Windows.Foundation.Rect(0, 0, _panel.ActualWidth, _panel.ActualHeight);
         var pixelWidth = (int)Math.Round(_panel.ActualWidth * scale);
         var pixelHeight = (int)Math.Round(_panel.ActualHeight * scale);
-        if (_renderer.Resize(pixelWidth, pixelHeight))
-            AttachSwapChain();
+        var buffersResized = pixelWidth != _renderer.PixelWidth || pixelHeight != _renderer.PixelHeight;
+        // Buffers sized for the whole window: a split or zoom then never reallocates them.
+        var window = XamlRoot?.Size ?? default;
+        var created = _renderer.Resize(pixelWidth, pixelHeight,
+            (int)Math.Ceiling(window.Width * scale), (int)Math.Ceiling(window.Height * scale));
         _renderer.SetCompositionScale(scale, scale);
 
         _renderer.OriginX = (int)Math.Round(6 * scale);
@@ -528,6 +541,13 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         }
         _forceFull = true;
         RequestFrame();
+        // Resized buffers are black until drawn. Draw them in this layout pass so the
+        // frame that shows the new size (a split, a zoom, a window resize) has content,
+        // and give a new swap chain to the panel only once it has presented a frame.
+        if (buffersResized)
+            DrawFrame();
+        if (created)
+            AttachSwapChain();
         PlaceTextInput();
 
         if (!_initialized)
@@ -541,6 +561,25 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         {
             Resized?.Invoke(cols, rows);
         }
+    }
+
+    /// <summary>A surface loaded hidden (a background tab) has no size, so Relayout made no
+    /// swap chain. Make a window-sized one now and present the background into it: the frame
+    /// that first shows the tab then only changes the chain's source size, and a chain with
+    /// nothing presented yet would show black.</summary>
+    private void PrimeSwapChain()
+    {
+        if (_disposed || _renderer.SwapChain is not null || XamlRoot is not { } root)
+            return;
+        var scale = (float)root.RasterizationScale;
+        var width = (int)Math.Ceiling(root.Size.Width * scale);
+        var height = (int)Math.Ceiling(root.Size.Height * scale);
+        if (width <= 0 || height <= 0)
+            return;
+        _renderer.Resize(width, height, width, height);
+        _renderer.SetCompositionScale(scale, scale);
+        _renderer.Clear(_theme.Background);
+        AttachSwapChain();
     }
 
     private void EnsureCellBuffers()
@@ -653,6 +692,11 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     {
         // Unhook first: leaving Rendering subscribed makes XAML draw every frame even when idle.
         UnhookRendering();
+        DrawFrame();
+    }
+
+    private void DrawFrame()
+    {
         try
         {
             RenderFrame();
