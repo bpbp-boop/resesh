@@ -86,6 +86,10 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     public int CellHeight { get; private set; } = 17;
     public int PixelWidth { get; private set; }
     public int PixelHeight { get; private set; }
+    private int _bufferWidth;
+    private int _bufferHeight;
+    private int _capacityWidth;
+    private int _capacityHeight;
     public IDXGISwapChain1? SwapChain => _swapChain;
     public event Action? SwapChainChanged;
 
@@ -301,35 +305,57 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         return index >= 0 ? index : AddFamily(name, family);
     }
 
-    /// <summary>Sizes the swap chain and canvas in physical pixels. Returns true when the
-    /// swap chain was created (the caller must attach it to the panel).</summary>
-    public bool Resize(int pixelWidth, int pixelHeight)
+    /// <summary>Sizes the drawn area in physical pixels. Returns true when the swap chain
+    /// was created (the caller must attach it to the panel once a frame has been presented).</summary>
+    /// <remarks>Buffers only grow, to at least <paramref name="capacityWidth"/> by
+    /// <paramref name="capacityHeight"/> (the window), and the whole buffer is always shown;
+    /// the panel clips it to the pane. Nothing about the chain's on-screen size then changes
+    /// with the layout: ResizeBuffers and SetSourceSize both reach the screen apart from the
+    /// XAML commit that moves the pane, which showed black for a frame on splits and zooms.
+    /// Full frames fill the whole buffer, so the part past the grid is always background.</remarks>
+    public bool Resize(int pixelWidth, int pixelHeight, int capacityWidth = 0, int capacityHeight = 0)
     {
         pixelWidth = Math.Max(1, pixelWidth);
         pixelHeight = Math.Max(1, pixelHeight);
+        _capacityWidth = Math.Max(_capacityWidth, capacityWidth);
+        _capacityHeight = Math.Max(_capacityHeight, capacityHeight);
         if (pixelWidth == PixelWidth && pixelHeight == PixelHeight && _swapChain is not null)
             return false;
         PixelWidth = pixelWidth;
         PixelHeight = pixelHeight;
+        if (_swapChain is not null && pixelWidth <= _bufferWidth && pixelHeight <= _bufferHeight)
+            return false;
+        var bufferWidth = RoundUpBuffer(Math.Max(Math.Max(pixelWidth, _capacityWidth), _bufferWidth));
+        var bufferHeight = RoundUpBuffer(Math.Max(Math.Max(pixelHeight, _capacityHeight), _bufferHeight));
+        var created = AllocateBuffers(bufferWidth, bufferHeight);
+        ApplyTransform();
+        return created;
+    }
 
+    // Window-resize drags grow in small steps; round up so they reallocate rarely.
+    private static int RoundUpBuffer(int pixels) => (pixels + 255) / 256 * 256;
+
+    private bool AllocateBuffers(int bufferWidth, int bufferHeight)
+    {
+        _bufferWidth = bufferWidth;
+        _bufferHeight = bufferHeight;
         _dc.Target = null;
         _canvasBitmap?.Dispose();
         _canvas?.Dispose();
         _canvas = s_device!.CreateTexture2D(new Texture2DDescription(Format.B8G8R8A8_UNorm,
-            (uint)pixelWidth, (uint)pixelHeight, 1, 1, BindFlags.RenderTarget | BindFlags.ShaderResource));
+            (uint)bufferWidth, (uint)bufferHeight, 1, 1, BindFlags.RenderTarget | BindFlags.ShaderResource));
         using (var surface = _canvas.QueryInterface<IDXGISurface>())
             _canvasBitmap = _dc.CreateBitmapFromDxgiSurface(surface, new BitmapProperties1(
                 new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Ignore), 96, 96,
                 BitmapOptions.Target | BitmapOptions.CannotDraw));
         _dc.Target = _canvasBitmap;
 
-        var created = false;
         if (_swapChain is null)
         {
             _swapChain = s_dxgiFactory!.CreateSwapChainForComposition(s_device, new SwapChainDescription1
             {
-                Width = (uint)pixelWidth,
-                Height = (uint)pixelHeight,
+                Width = (uint)bufferWidth,
+                Height = (uint)bufferHeight,
                 Format = Format.B8G8R8A8_UNorm,
                 SampleDescription = new SampleDescription(1, 0),
                 BufferUsage = Usage.RenderTargetOutput,
@@ -338,13 +364,25 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 SwapEffect = SwapEffect.FlipSequential,
                 AlphaMode = DxgiAlphaMode.Ignore,
             });
-            created = true;
+            return true;
         }
-        else
-        {
-            _swapChain.ResizeBuffers(2, (uint)pixelWidth, (uint)pixelHeight, Format.B8G8R8A8_UNorm, SwapChainFlags.None).CheckError();
-        }
-        return created;
+        _swapChain.ResizeBuffers(2, (uint)bufferWidth, (uint)bufferHeight, Format.B8G8R8A8_UNorm, SwapChainFlags.None).CheckError();
+        return false;
+    }
+
+    /// <summary>Presents a frame of one color: what the chain shows before its first real draw.</summary>
+    public void Clear(uint color)
+    {
+        if (_disposed || _swapChain is null || _canvas is null)
+            return;
+        _dc.BeginDraw();
+        SetBrush(Rgb(color));
+        _dc.FillRectangle(new Rect(0, 0, _bufferWidth, _bufferHeight), _brush);
+        if (_dc.EndDraw().Failure)
+            return; // the next real draw recovers the device
+        using (var backBuffer = _swapChain.GetBuffer<ID3D11Texture2D>(0))
+            s_context!.CopyResource(backBuffer, _canvas);
+        _swapChain.Present(1, PresentFlags.None);
     }
 
     /// <summary>Maps the physical-pixel swap chain onto the panel's DIP layout.</summary>
@@ -352,10 +390,15 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     {
         _compositionScaleX = scaleX;
         _compositionScaleY = scaleY;
-        if (_swapChain is null)
+        ApplyTransform();
+    }
+
+    private void ApplyTransform()
+    {
+        if (_swapChain is null || _compositionScaleX <= 0 || _compositionScaleY <= 0)
             return;
         using var chain2 = _swapChain.QueryInterface<IDXGISwapChain2>();
-        chain2.MatrixTransform = Matrix3x2.CreateScale(1 / scaleX, 1 / scaleY);
+        chain2.MatrixTransform = Matrix3x2.CreateScale(1 / _compositionScaleX, 1 / _compositionScaleY);
     }
 
     private void ReleaseSwapChain()
@@ -368,6 +411,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         _canvas = null;
         _swapChain?.Dispose();
         _swapChain = null;
+        _bufferWidth = 0;
+        _bufferHeight = 0;
     }
 
     private (int Face, ushort Glyph) Lookup(uint codepoint, int style)
@@ -443,8 +488,9 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         _dc.BeginDraw();
         if (full)
         {
+            // The whole buffer: the panel shows past the grid while a resize settles.
             SetBrush(Rgb(info.DefaultBackground));
-            _dc.FillRectangle(new Rect(0, 0, PixelWidth, PixelHeight), _brush);
+            _dc.FillRectangle(new Rect(0, 0, _bufferWidth, _bufferHeight), _brush);
         }
         // A full-screen app paints its own background on every cell, which leaves the margin
         // around the grid as a frame in the theme color, so the edge cells extend into it
