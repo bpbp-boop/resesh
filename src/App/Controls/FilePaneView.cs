@@ -71,6 +71,10 @@ public sealed partial class FilePaneView : UserControl, IDisposable
 
     public event Action? CloseRequested;
 
+    /// <summary>The header asked to jump to the terminal's current folder; the owning
+    /// terminal resolves it, since only it knows the shell's working directory.</summary>
+    public event Action? TerminalFolderRequested;
+
     /// <summary>Transfer progress for the owning tab's header and the taskbar. Raised at the
     /// strip's sampling rate, and with <see cref="TerminalProgress.None"/> when it ends.</summary>
     public event Action<TerminalProgress>? TransferProgressChanged;
@@ -208,12 +212,15 @@ public sealed partial class FilePaneView : UserControl, IDisposable
         var bar = new Grid { Padding = new Thickness(4), ColumnSpacing = 2 };
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         bar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         var up = IconButton("", "Up one folder", () => _ = NavigateAsync(ParentPath(_currentPath)));
         var home = IconButton("", "Home folder", () => _ = NavigateAsync(null));
         Grid.SetColumn(home, 1);
+        var terminalFolder = IconButton("", "Go to terminal folder", () => TerminalFolderRequested?.Invoke());
+        Grid.SetColumn(terminalFolder, 2);
         _pathBox.KeyDown += (_, e) =>
         {
             if (e.Key == Windows.System.VirtualKey.Enter && !string.IsNullOrWhiteSpace(_pathBox.Text))
@@ -222,7 +229,7 @@ public sealed partial class FilePaneView : UserControl, IDisposable
                 _ = NavigateAsync(_pathBox.Text.Trim());
             }
         };
-        Grid.SetColumn(_pathBox, 2);
+        Grid.SetColumn(_pathBox, 3);
 
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2 };
         actions.Children.Add(IconButton("", "Refresh", () => _ = NavigateAsync(_currentPath)));
@@ -235,10 +242,11 @@ public sealed partial class FilePaneView : UserControl, IDisposable
             actions.Children.Add(IconButton("", tooltip, () => _ = OpenInExplorerAsync()));
         }
         actions.Children.Add(IconButton("", "Close file pane", () => CloseRequested?.Invoke()));
-        Grid.SetColumn(actions, 3);
+        Grid.SetColumn(actions, 4);
 
         bar.Children.Add(up);
         bar.Children.Add(home);
+        bar.Children.Add(terminalFolder);
         bar.Children.Add(_pathBox);
         bar.Children.Add(actions);
         return bar;
@@ -255,6 +263,7 @@ public sealed partial class FilePaneView : UserControl, IDisposable
             VerticalAlignment = VerticalAlignment.Center,
         };
         ToolTipService.SetToolTip(button, tooltip);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(button, tooltip);
         button.Click += (_, _) => action();
         return button;
     }

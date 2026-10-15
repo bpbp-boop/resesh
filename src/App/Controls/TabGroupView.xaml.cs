@@ -100,7 +100,6 @@ public sealed partial class TabGroupView : UserControl
     private TabViewModel? _filePaneButtonTab;
     private Terminal.TerminalTabView? _filePaneButtonView;
     private double _expandedTabActionsWidth = ExpandedTabActionsFallbackWidth;
-    private bool _syncingFilePaneToggle;
     private bool _terminalVisibilityDeferred;
 
     public TabGroupViewModel Group { get; }
@@ -112,11 +111,6 @@ public sealed partial class TabGroupView : UserControl
         _tabBackgroundBrush = new SolidColorBrush(_themePalette.InactiveTab);
         _tabDividerBrush = new SolidColorBrush(_themePalette.Divider);
         InitializeComponent();
-        FilePaneToggle.IsCheckedChanged += (_, _) =>
-        {
-            if (!_syncingFilePaneToggle)
-                ToggleSelectedFilePane();
-        };
         _tabMenu = BuildTabMenu();
         ObserveFilePaneButtonTab();
 
@@ -500,6 +494,7 @@ public sealed partial class TabGroupView : UserControl
         TabStripActions.Background = background;
         LeftTabStripDivider.Fill = divider;
         RightTabStripDivider.Fill = divider;
+        FilePaneDivider.Fill = divider;
         Resources["TabViewBackground"] = background;
         Resources["TabViewBorderBrush"] = divider;
         Resources["CodeTabSeparatorBrush"] = divider;
@@ -737,7 +732,7 @@ public sealed partial class TabGroupView : UserControl
             ? Visibility.Visible
             : Visibility.Collapsed;
         RecordButton.Visibility = RewindButton.Visibility = ShowCommandsButton.Visibility =
-            FilePaneToggle.Visibility = terminalTab ? Visibility.Visible : Visibility.Collapsed;
+            FilePaneDivider.Visibility = FilePaneToggle.Visibility = terminalTab ? Visibility.Visible : Visibility.Collapsed;
         ZoomButton.Visibility = ZoomOverflowItem.Visibility =
             zoomAvailable ? Visibility.Visible : Visibility.Collapsed;
         var zoomed = _host.ViewModel.IsZoomed;
@@ -759,22 +754,18 @@ public sealed partial class TabGroupView : UserControl
         FilePaneToggle.IsEnabled = tab?.Capabilities.FilePane == true
             && !tab.IsLocked
             && tab.View is Terminal.TerminalTabView;
-        CurrentFolderMenuItem.IsEnabled = tab?.Capabilities.FilePane == true &&
+        CurrentFolderOverflowItem.IsEnabled = tab?.Capabilities.FilePane == true &&
             tab.State == TabConnectionState.Connected && !tab.IsLocked;
         var explorerAvailable = tab?.View is Terminal.TerminalTabView { HasFileExplorer: true };
-        OpenInExplorerMenuItem.Visibility = OpenInExplorerOverflowItem.Visibility =
-            explorerAvailable ? Visibility.Visible : Visibility.Collapsed;
-        OpenInExplorerMenuItem.IsEnabled = OpenInExplorerOverflowItem.IsEnabled = CurrentFolderMenuItem.IsEnabled;
+        OpenInExplorerOverflowItem.Visibility = explorerAvailable ? Visibility.Visible : Visibility.Collapsed;
+        OpenInExplorerOverflowItem.IsEnabled = CurrentFolderOverflowItem.IsEnabled;
         RecordButton.IsEnabled = tab?.View is Terminal.TerminalTabView { CanRecord: true } && !tab.IsLocked;
         RewindButton.IsEnabled = tab?.View is Terminal.TerminalTabView { CanRewind: true } && !tab.IsLocked;
         RecordOverflowItem.IsEnabled = RecordButton.IsEnabled;
         RewindOverflowItem.IsEnabled = RewindButton.IsEnabled;
         ShowCommandsOverflowItem.IsEnabled = ShowCommandsButton.IsEnabled;
-        CurrentFolderOverflowItem.IsEnabled = CurrentFolderMenuItem.IsEnabled;
         FilePaneOverflowItem.IsEnabled = FilePaneToggle.IsEnabled;
-        _syncingFilePaneToggle = true;
-        try { FilePaneToggle.IsChecked = isOpen; }
-        finally { _syncingFilePaneToggle = false; }
+        FilePaneToggle.IsChecked = isOpen;
         ShowCommandsButton.IsChecked = commandsOpen;
         RecordButton.IsChecked = recording;
         RecordStartIcon.Visibility = recording ? Visibility.Collapsed : Visibility.Visible;
@@ -788,7 +779,6 @@ public sealed partial class TabGroupView : UserControl
         var label = isOpen ? "Hide File Pane" : "Show File Pane";
         ToolTipService.SetToolTip(FilePaneToggle, $"{label} (Ctrl+Shift+E)");
         AutomationProperties.SetName(FilePaneToggle, label);
-        AutomationProperties.SetName(CurrentFolderMenuItem, "Open at Terminal Folder");
         var commandsLabel = commandsOpen ? "Hide commands" : "Show commands";
         ToolTipService.SetToolTip(ShowCommandsButton, $"{commandsLabel} (Ctrl+Shift+O)");
         AutomationProperties.SetName(ShowCommandsButton, commandsLabel);

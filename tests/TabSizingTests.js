@@ -136,9 +136,11 @@ test("each tab bar reserves the measured width of every action button", () => {
     assert.match(button, /Width="32" Height="32"/);
     assert.doesNotMatch(button, /<TextBlock/);
   }
-  assert.match(strip, /<ToggleSplitButton x:Name="FilePaneToggle"/);
-  assert.match(strip, /Text="Files"/);
-  assert.match(strip, /x:Name="CurrentFolderMenuItem"[\s\S]*?Click="CurrentFolderButton_Click"/);
+  const filesToggle = strip.match(/<ToggleButton x:Name="FilePaneToggle"[\s\S]*?<\/ToggleButton>/)?.[0] ?? "";
+  assert.match(filesToggle, /Text="Files"/);
+  assert.doesNotMatch(filesToggle, /Flyout/);
+  assert.doesNotMatch(strip, /ToggleSplitButton/);
+  assert.match(strip, /x:Name="FilePaneDivider"[\s\S]*?x:Name="FilePaneToggle"/);
   assert.match(code, /ExpandedTabActions\.ActualWidth \+ 6/);
   assert.match(code, /recording \? "Stop recording" : "Start recording"/);
   assert.match(code, /RecordStartIcon\.Visibility = recording \? Visibility\.Collapsed : Visibility\.Visible/);
@@ -172,9 +174,9 @@ test("tab actions collapse into an overflow menu before minimum-width tabs scrol
 
 test("record controls follow the button foreground instead of using warning red", () => {
   const recordButton = xaml.match(/x:Name="RecordButton"[\s\S]*?<\/ToggleButton>/)?.[0] ?? "";
-  assert.equal(
-    recordButton.match(/Fill="\{Binding Foreground, ElementName=RecordButton\}"/g)?.length,
-    2);
+  // An outlined ring at rest keeps the idle button as quiet as its neighbours.
+  assert.match(recordButton, /x:Name="RecordStartIcon"[^>]*Stroke="\{Binding Foreground, ElementName=RecordButton\}"/);
+  assert.match(recordButton, /x:Name="RecordStopIcon"[\s\S]*?Fill="\{Binding Foreground, ElementName=RecordButton\}"/);
   assert.doesNotMatch(recordButton, /#E74856/);
 });
 test("action buttons dim with their inactive tab group", () => {
@@ -182,14 +184,18 @@ test("action buttons dim with their inactive tab group", () => {
   assert.match(code, /nameof\(TabViewModel\.IsGroupFocused\)[\s\S]{0,80}?UpdateTabActionButtons\(\)/);
 });
 
-test("the current-folder menu item is connected-only and uses the host action", () => {
-  assert.match(code, /CurrentFolderMenuItem\.IsEnabled = tab\?\.Capabilities\.FilePane == true[\s\S]*?TabConnectionState\.Connected[\s\S]*?!tab\.IsLocked/);
+test("the current-folder action is connected-only and uses the host action", () => {
+  assert.match(code, /CurrentFolderOverflowItem\.IsEnabled = tab\?\.Capabilities\.FilePane == true[\s\S]*?TabConnectionState\.Connected[\s\S]*?!tab\.IsLocked/);
   assert.match(code, /CurrentFolderButton_Click[\s\S]*?await _host\.OpenFilePaneAtCurrentFolderAsync\(tab\)/);
+});
+
+test("the file pane header jumps to the terminal folder", () => {
+  assert.match(filePaneView, /IconButton\([^)]*"Go to terminal folder", \(\) => TerminalFolderRequested\?\.Invoke\(\)\)/);
+  assert.match(terminalView, /TerminalFolderRequested \+= \(\) => _ = OpenFilePaneAtCurrentFolderAsync\(\)/);
 });
 
 test("file options use consistent title casing", () => {
   for (const label of [
-    "Open at Terminal Folder",
     "Open File Pane at Terminal Folder",
     "Open in File Explorer",
     "Show File Pane",
