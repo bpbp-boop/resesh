@@ -1912,6 +1912,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 ? new FilePaneView(() => Session, OpenInExplorerAsync)
                 : new FilePaneView(() => Session, CreateSftpSessionAsync, OpenInExplorerAsync);
             _filePane.CloseRequested += HideFilePane;
+            _filePane.TerminalFolderRequested += () => _ = OpenFilePaneAtCurrentFolderAsync();
             _filePane.TransferProgressChanged += SetTransferProgress;
             Grid.SetColumn(_filePane, 2);
             Children.Add(_filePane);

@@ -496,14 +496,18 @@
                 Height="44"
                 Background="{ThemeResource TabViewBackground}">
                 <Grid.Resources>
-                    <!-- Tab-bar actions are Fluent subtle buttons: flat at rest, with the stock
-                         subtle fills on hover and press. Checked toggles use an accent glyph
+                    <!-- Tab-bar actions are Fluent subtle buttons: flat with secondary-text glyphs
+                         at rest, brightening with the stock subtle fills on hover and press. Checked toggles use an accent glyph
                          without a persistent box. Theme-local aliases keep those states
                          consistent in both themes. -->
                     <ResourceDictionary>
                         <ResourceDictionary.ThemeDictionaries>
                             <ResourceDictionary x:Key="Dark">
                                 <SolidColorBrush x:Key="TabActionButtonRestBrush" Color="Transparent" />
+                                <StaticResource x:Key="ButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
+                                <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ToggleButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
+                                <StaticResource x:Key="ToggleButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="TabActionButtonHoverBrush" ResourceKey="SubtleFillColorSecondaryBrush" />
                                 <StaticResource x:Key="TabActionButtonPressedBrush" ResourceKey="SubtleFillColorTertiaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundChecked" ResourceKey="AccentTextFillColorPrimaryBrush" />
@@ -521,6 +525,10 @@
                             </ResourceDictionary>
                             <ResourceDictionary x:Key="Light">
                                 <SolidColorBrush x:Key="TabActionButtonRestBrush" Color="Transparent" />
+                                <StaticResource x:Key="ButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
+                                <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
+                                <StaticResource x:Key="ToggleButtonForeground" ResourceKey="TextFillColorSecondaryBrush" />
+                                <StaticResource x:Key="ToggleButtonForegroundPointerOver" ResourceKey="TextFillColorPrimaryBrush" />
                                 <StaticResource x:Key="TabActionButtonHoverBrush" ResourceKey="SubtleFillColorSecondaryBrush" />
                                 <StaticResource x:Key="TabActionButtonPressedBrush" ResourceKey="SubtleFillColorTertiaryBrush" />
                                 <StaticResource x:Key="ToggleButtonForegroundChecked" ResourceKey="AccentTextFillColorPrimaryBrush" />
@@ -570,44 +578,61 @@
                 <StackPanel
                     x:Name="ExpandedTabActions"
                     Orientation="Horizontal"
-                    Spacing="6"
+                    Spacing="2"
                     Margin="0,0,6,0"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center">
                     <ToggleButton x:Name="ZoomButton" Width="32" Height="32" Padding="0"
                                   Click="ZoomButton_Click" Visibility="Collapsed"
                                   AutomationProperties.AutomationId="ZoomTabButton">
-                            <FontIcon x:Name="ZoomGlyph" Glyph="&#xE740;" FontSize="14" />
+                            <FontIcon x:Name="ZoomGlyph" Glyph="&#xE740;" FontSize="10" />
                     </ToggleButton>
                     <ToggleButton x:Name="RecordButton" Width="32" Height="32" Padding="0"
                                   Click="RecordButton_Click" ToolTipService.ToolTip="Start recording">
                             <Grid Width="10" Height="10" VerticalAlignment="Center">
-                                <Ellipse x:Name="RecordStartIcon" Width="10" Height="10" Fill="{Binding Foreground, ElementName=RecordButton}" />
+                                <Ellipse x:Name="RecordStartIcon" Width="10" Height="10" StrokeThickness="1.5" Stroke="{Binding Foreground, ElementName=RecordButton}" />
                                 <Rectangle x:Name="RecordStopIcon" Width="10" Height="10" RadiusX="1" RadiusY="1"
                                            Fill="{Binding Foreground, ElementName=RecordButton}" Visibility="Collapsed" />
                             </Grid>
                     </ToggleButton>
                     <ToggleButton x:Name="RewindButton" Width="32" Height="32" Padding="0"
                                   Click="RewindButton_Click" ToolTipService.ToolTip="Instant rewind">
-                            <FontIcon Glyph="&#xE81C;" FontSize="14" />
+                            <FontIcon Glyph="&#xE81C;" FontSize="10" />
                     </ToggleButton>
                     <ToggleButton x:Name="ShowCommandsButton" Width="32" Height="32" Padding="0"
                                   Click="ShowCommandsButton_Click" ToolTipService.ToolTip="Show commands (Ctrl+Shift+O)">
-                            <FontIcon Glyph="&#xE756;" FontSize="14" />
+                            <FontIcon Glyph="&#xE756;" FontSize="10" />
                     </ToggleButton>
-                    <ToggleSplitButton x:Name="FilePaneToggle" MinWidth="100" Height="32" Padding="8,0"
-                                       ToolTipService.ToolTip="Show File Pane (Ctrl+Shift+E)">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon Glyph="&#xE8B7;" FontSize="14" />
-                            <TextBlock Text="Files" />
+                    <Rectangle x:Name="FilePaneDivider" Width="1" Height="18" Margin="2,0"
+                               VerticalAlignment="Center" Fill="{ThemeResource CodeTabSeparatorBrush}" />
+                    <!-- A quiet panel toggle: label and glyph only, tinted while the pane is
+                         open. Folder actions live in the file pane's own header. -->
+                    <ToggleButton x:Name="FilePaneToggle" Height="28" Padding="8,0,10,0"
+                                  Click="FilePaneToggle_Click"
+                                  ToolTipService.ToolTip="Show File Pane (Ctrl+Shift+E)">
+                        <ToggleButton.Resources>
+                            <ResourceDictionary>
+                                <ResourceDictionary.ThemeDictionaries>
+                                    <ResourceDictionary x:Key="Default">
+                                        <SolidColorBrush x:Key="FilePaneToggleCheckedBrush" Color="{ThemeResource SystemAccentColor}" Opacity="0.16" />
+                                        <SolidColorBrush x:Key="FilePaneToggleCheckedHoverBrush" Color="{ThemeResource SystemAccentColor}" Opacity="0.24" />
+                                        <StaticResource x:Key="ToggleButtonBackgroundChecked" ResourceKey="FilePaneToggleCheckedBrush" />
+                                        <StaticResource x:Key="ToggleButtonBackgroundCheckedPointerOver" ResourceKey="FilePaneToggleCheckedHoverBrush" />
+                                        <StaticResource x:Key="ToggleButtonBackgroundCheckedPressed" ResourceKey="FilePaneToggleCheckedBrush" />
+                                    </ResourceDictionary>
+                                    <ResourceDictionary x:Key="HighContrast">
+                                        <SolidColorBrush x:Key="ToggleButtonBackgroundChecked" Color="{ThemeResource SystemColorHighlightColor}" />
+                                        <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
+                                        <SolidColorBrush x:Key="ToggleButtonBackgroundCheckedPressed" Color="{ThemeResource SystemColorHighlightColor}" />
+                                    </ResourceDictionary>
+                                </ResourceDictionary.ThemeDictionaries>
+                            </ResourceDictionary>
+                        </ToggleButton.Resources>
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE90D;" FontSize="12" />
+                            <TextBlock Text="Files" FontSize="13" VerticalAlignment="Center" />
                         </StackPanel>
-                        <ToggleSplitButton.Flyout>
-                            <MenuFlyout>
-                                <MenuFlyoutItem x:Name="CurrentFolderMenuItem" Text="Open at Terminal Folder" Click="CurrentFolderButton_Click" />
-                                <MenuFlyoutItem x:Name="OpenInExplorerMenuItem" Text="Open in File Explorer" Click="OpenInExplorer_Click" />
-                            </MenuFlyout>
-                        </ToggleSplitButton.Flyout>
-                    </ToggleSplitButton>
+                    </ToggleButton>
                 </StackPanel>
                 <Button
                     x:Name="TabActionsOverflowButton"
