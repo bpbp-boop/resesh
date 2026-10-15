@@ -5,7 +5,7 @@ obj/
 TestResults/
 .dotnet-*/
 installer/prereqs/
-Properties/PublishProfiles/
+**/Properties/PublishProfiles/
 .env
 .wrangler/
 .artifacts/
