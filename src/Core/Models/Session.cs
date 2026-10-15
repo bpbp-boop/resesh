@@ -122,14 +122,14 @@ public sealed record TerminalOverrides
 /// </summary>
 public sealed record Session
 {
-    public Guid Id { get; init; } = Guid.NewGuid();
+    public Guid Id { get; set; } = Guid.NewGuid();
 
     // Note: no `required` members — the WinUI XAML type-info generator needs a
     // parameterless activator for types used as x:DataType.
-    public string Name { get; init; } = "";
+    public string Name { get; set; } = "";
 
     /// <summary>Which target this profile carries. Missing in pre-6.1 JSON → Ssh.</summary>
-    public SessionKind Kind { get; init; } = SessionKind.Ssh;
+    public SessionKind Kind { get; set; } = SessionKind.Ssh;
 
     /// <summary>The local shell target; set exactly when <see cref="Kind"/> is Local.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -152,15 +152,15 @@ public sealed record Session
 
     /// <summary>Forward-slash separated folder path, e.g. "Datacenter/Rack 4". Empty = root.
     /// Local profiles are rooted under the virtual Local node, in their own namespace.</summary>
-    public string FolderPath { get; init; } = "";
+    public string FolderPath { get; set; } = "";
 
-    public string Host { get; init; } = "";
+    public string Host { get; set; } = "";
 
-    public int Port { get; init; } = 22;
+    public int Port { get; set; } = 22;
 
     /// <summary>The login name. With <see cref="Login"/> Own it is this session's username;
     /// otherwise a non-empty value overrides the identity's username and keeps its proof.</summary>
-    public string Username { get; init; } = "";
+    public string Username { get; set; } = "";
 
     /// <summary>The identity this session logs in as (<see cref="SessionLogin.Identity"/>).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -181,7 +181,7 @@ public sealed record Session
         : SessionLogin.Own;
 
     /// <summary>Username, auth method and key below; meaningful when <see cref="Login"/> is Own.</summary>
-    public AuthMethod AuthMethod { get; init; } = AuthMethod.Password;
+    public AuthMethod AuthMethod { get; set; } = AuthMethod.Password;
 
     /// <summary>The registered SSH key used by private-key authentication. The key registry
     /// owns the file reference and public fingerprint; sessions only keep this stable id.</summary>
@@ -211,11 +211,11 @@ public sealed record Session
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<Tunnel>? Tunnels { get; init; }
 
-    public string TerminalType { get; init; } = "xterm-256color";
+    public string TerminalType { get; set; } = "xterm-256color";
 
     /// <summary>Telnet text encoding. Auto accepts UTF-8 and falls back to CP437 for BBS art.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public TelnetTextEncoding TelnetEncoding { get; init; } = TelnetTextEncoding.Auto;
+    public TelnetTextEncoding TelnetEncoding { get; set; } = TelnetTextEncoding.Auto;
 
     /// <summary>Report 80 columns and 25 rows to Telnet BBS servers without resizing the display.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
@@ -230,7 +230,7 @@ public sealed record Session
 
     /// <summary>Connect-time handling of persistent shells left running by closed tabs.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public DetachedSessionAction DetachedSessions { get; init; } = DetachedSessionAction.Ask;
+    public DetachedSessionAction DetachedSessions { get; set; } = DetachedSessionAction.Ask;
 
     /// <summary>Keep persistent shells alive with the Resesh session agent instead of tmux.
     /// Choosing it allows the app to upload the agent to this host when it is missing or
@@ -240,9 +240,9 @@ public sealed record Session
 
     /// <summary>Shell integration for new terminals; disabled for new and legacy profiles.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public ShellIntegrationMode ShellIntegration { get; init; } = ShellIntegrationMode.Disabled;
+    public ShellIntegrationMode ShellIntegration { get; set; } = ShellIntegrationMode.Disabled;
 
-    public string Notes { get; init; } = "";
+    public string Notes { get; set; } = "";
 
     /// <summary>Optional accent color for the tab, as #RRGGBB. Null = none.</summary>
     public string? ColorTag { get; init; }

@@ -1,5 +1,6 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Resesh.Core.Agents;
 
@@ -58,36 +59,23 @@ public static class AgentAdapters
             ("SessionEnd", "exit"),
         };
 
-        var hooks = new Dictionary<string, object>();
+        var hooks = new JsonObject();
         foreach (var (eventName, state) in eventStates)
         {
-            hooks[eventName] = new[]
+            hooks[eventName] = HookGroup(new JsonObject
             {
-                new
-                {
-                    hooks = new[]
-                    {
-                        new
-                        {
-                            type = "command",
-                            command = CodexPosixCommand(state),
-                            commandWindows = CodexWindowsCommand(state),
-                            timeout = 3,
-                        },
-                    },
-                },
-            };
+                ["type"] = "command",
+                ["command"] = CodexPosixCommand(state),
+                ["commandWindows"] = CodexWindowsCommand(state),
+                ["timeout"] = 3,
+            });
         }
 
-        return JsonSerializer.Serialize(
-            new
-            {
-                description = "resesh tab status for Codex. Reports state only; never approves or sends input.",
-                hooks,
-            },
-            // Relaxed escaping so the quotes inside the commands stay readable (\" instead
-            // of ") — this text is copied into a config file the user should review.
-            new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        return Snippet(new JsonObject
+        {
+            ["description"] = "resesh tab status for Codex. Reports state only; never approves or sends input.",
+            ["hooks"] = hooks,
+        });
     }
 
     private static string CodexPosixCommand(string state) =>
@@ -130,7 +118,7 @@ public static class AgentAdapters
             ("Stop", "complete"),
             ("SessionEnd", "exit"),
         };
-        var hooks = new Dictionary<string, object>();
+        var hooks = new JsonObject();
         foreach (var (eventName, state) in eventStates)
         {
             // The payload is constant and never inspects tool input or returns decisions.
@@ -143,14 +131,20 @@ public static class AgentAdapters
             var command = windows
                 ? $"echo '{json}'"
                 : $"[ $TMUX_PANE ] && {TmuxCommand("claude", state)}; printf '%s\\n' '{json}'";
-            hooks[eventName] = new[]
-            {
-                new { hooks = new[] { new { type = "command", command } } },
-            };
+            hooks[eventName] = HookGroup(new JsonObject { ["type"] = "command", ["command"] = command });
         }
-        return JsonSerializer.Serialize(new { hooks },
-            new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        return Snippet(new JsonObject { ["hooks"] = hooks });
     }
+
+    /// <summary>[{ "hooks": [hook] }], the shape both agents' hook settings use per event.</summary>
+    private static JsonArray HookGroup(JsonObject hook) => new(new JsonObject { ["hooks"] = new JsonArray(hook) });
+
+    // Relaxed escaping so the quotes inside the commands stay readable (\" instead of
+    // ") — this text is copied into a config file the user should review.
+    private static readonly JsonSerializerOptions SnippetOptions =
+        new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    private static string Snippet(JsonObject root) => root.ToJsonString(SnippetOptions);
 
     // ---- persistent (tmux) sessions ----
     //

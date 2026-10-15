@@ -32,11 +32,11 @@ public sealed class CommandHistoryStore
     /// matched with a scan instead.</summary>
     private const int MinimumIndexedTermLength = 3;
 
-    private static readonly JsonSerializerOptions LegacyJsonOptions = new()
+    private static readonly JsonSerializerOptions LegacyJsonOptions = CoreJson.With(new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
-    };
+        Converters = { CamelCaseEnumConverter.Instance },
+    });
 
     private readonly string _directory;
     private readonly string _databasePath;
@@ -683,7 +683,7 @@ public sealed class CommandHistoryStore
                     CommandHistoryEntry? entry;
                     try
                     {
-                        entry = JsonSerializer.Deserialize<CommandHistoryEntry>(line, LegacyJsonOptions);
+                        entry = JsonSerializer.Deserialize(line, LegacyJsonOptions.Info<CommandHistoryEntry>());
                     }
                     catch (JsonException)
                     {

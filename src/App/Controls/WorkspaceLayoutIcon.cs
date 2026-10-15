@@ -7,11 +7,11 @@ namespace Resesh.App.Controls;
 public sealed class WorkspaceLayoutIconNode
 {
     public bool SplitIntoColumns { get; set; }
-    public IReadOnlyList<WorkspaceLayoutIconNode> Children { get; set; } = [];
+    public List<WorkspaceLayoutIconNode> Children { get; set; } = [];
 }
 
 /// <summary>A fixed square thumbnail of a saved workspace split tree.</summary>
-public sealed class WorkspaceLayoutIcon : Grid
+public sealed partial class WorkspaceLayoutIcon : Grid
 {
     public static readonly DependencyProperty LayoutProperty = DependencyProperty.Register(
         nameof(Layout),

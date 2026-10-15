@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace Resesh.Core.Recording;
 
@@ -446,20 +447,20 @@ internal sealed class TerminalDiskRecorder : IDisposable
                 bufferSize: 16 * 1024);
             _cast = cast;
 
-            var header = new
+            var header = new JsonObject
             {
-                version = 2,
-                width,
-                height,
-                timestamp = startedAt.ToUnixTimeSeconds(),
-                title,
-                env = new Dictionary<string, string>
+                ["version"] = 2,
+                ["width"] = width,
+                ["height"] = height,
+                ["timestamp"] = startedAt.ToUnixTimeSeconds(),
+                ["title"] = title,
+                ["env"] = new JsonObject
                 {
                     ["TERM"] = string.IsNullOrWhiteSpace(terminalType) ? "xterm-256color" : terminalType,
                     ["SHELL"] = "resesh",
                 },
             };
-            _cast.Write(JsonSerializer.SerializeToUtf8Bytes(header, JsonOptions));
+            _cast.Write(Encoding.UTF8.GetBytes(header.ToJsonString(JsonOptions)));
             _cast.Write(NewLine);
             _cast.Flush();
             _castJson = new Utf8JsonWriter(_castLine, new JsonWriterOptions { Encoder = JsonOptions.Encoder });

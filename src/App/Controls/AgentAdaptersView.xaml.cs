@@ -25,7 +25,7 @@ public sealed class AgentAdapterItem(AgentAdapterSnippet snippet, int index)
 /// </summary>
 public sealed partial class AgentAdaptersView : UserControl
 {
-    public IReadOnlyList<AgentAdapterItem> Adapters { get; } =
+    public List<AgentAdapterItem> Adapters { get; } =
         AgentAdapters.All.Select((snippet, index) => new AgentAdapterItem(snippet, index)).ToList();
 
     public string ProtocolReference => AgentAdapters.SequenceReference;

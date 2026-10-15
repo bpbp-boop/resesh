@@ -8,7 +8,9 @@ namespace Resesh.App.Dialogs;
 /// identity editor and the folder identity dialog.</summary>
 public sealed partial class IdentityForm : UserControl
 {
-    private sealed class KeyChoice
+    // DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+    [WinRT.GeneratedBindableCustomProperty]
+    private sealed partial class KeyChoice
     {
         public Guid Id { get; init; }
         public string Label { get; init; } = "";

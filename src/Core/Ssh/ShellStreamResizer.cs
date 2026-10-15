@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using Renci.SshNet;
 
@@ -22,6 +23,10 @@ public static class ShellStreamResizer
 
     public static bool IsSupported => ChannelField is not null;
 
+    // The channel's runtime type is SSH.NET's internal ChannelSession, kept for trimming by
+    // the DynamicDependency below; the lookup cannot be annotated statically.
+    [DynamicDependency(IntegratedShellStream.ChannelMembers, IntegratedShellStream.ChannelTypeName, "Renci.SshNet")]
+    [UnconditionalSuppressMessage("Trimming", "IL2075", Justification = "DynamicDependency keeps the channel's methods.")]
     public static bool TryResize(ShellStream? shell, int columns, int rows)
     {
         if (shell is null || ChannelField is null || columns <= 0 || rows <= 0)

@@ -8,7 +8,7 @@ using Resesh.Core.Ssh;
 namespace Resesh.App.Interop;
 
 /// <summary>A foreground sshfs process and its private host-key file, owned by the tab.</summary>
-internal sealed class SshfsMount : IDisposable
+internal sealed partial class SshfsMount : IDisposable
 {
     private readonly Process _process;
     private readonly string _knownHostsDirectory;

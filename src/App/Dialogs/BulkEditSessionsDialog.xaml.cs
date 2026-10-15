@@ -12,7 +12,9 @@ namespace Resesh.App.Dialogs;
 public sealed partial class BulkEditSessionsDialog : ContentDialog
 {
     /// <summary>A choice in one of the pickers; <see cref="Change"/> is false for "No change".</summary>
-    private sealed class Choice
+    // DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+    [WinRT.GeneratedBindableCustomProperty]
+    private sealed partial class Choice
     {
         public bool Change { get; init; }
         public string Label { get; init; } = "";

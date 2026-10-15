@@ -9,12 +9,12 @@ namespace Resesh.Core.Storage;
 /// <summary>Atomic JSON store for external SSH private-key references and public metadata.</summary>
 public sealed class SshKeyStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly JsonSerializerOptions JsonOptions = CoreJson.With(new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
-    };
+        Converters = { CamelCaseEnumConverter.Instance },
+    });
 
     private readonly string _path;
     private bool _preserveBackup;
@@ -305,16 +305,16 @@ public sealed class SshKeyStore
 
     private void Save(List<SshKeyReference> candidate)
     {
-        var json = JsonSerializer.Serialize(new StoreData { Keys = candidate }, JsonOptions);
+        var json = JsonSerializer.Serialize(new StoreData { Keys = candidate }, JsonOptions.Info<StoreData>());
         AtomicFile.Write(_path, json, _preserveBackup);
         _keys = candidate;
         _preserveBackup = false;
     }
 
     private static StoreData? Read(string path) =>
-        JsonSerializer.Deserialize<StoreData>(File.ReadAllText(path), JsonOptions);
+        JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<StoreData>());
 
-    private sealed class StoreData
+    internal sealed class StoreData
     {
         public List<SshKeyReference>? Keys { get; set; }
     }

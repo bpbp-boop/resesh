@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.Marshalling;
 
 namespace Resesh.App.Interop;
 
@@ -40,7 +41,8 @@ internal static partial class TaskbarIntegration
         IPropertyStore store;
         try
         {
-            Marshal.ThrowExceptionForHR(SHGetPropertyStoreForWindow(hwnd, PropertyStoreId, out store));
+            Marshal.ThrowExceptionForHR(SHGetPropertyStoreForWindow(hwnd, PropertyStoreId, out var pointer));
+            store = ComObjects.Wrap<IPropertyStore>(pointer);
         }
         catch (Exception ex) when (ex is COMException or ArgumentException)
         {
@@ -62,7 +64,7 @@ internal static partial class TaskbarIntegration
         }
         finally
         {
-            Marshal.ReleaseComObject(store);
+            ComObjects.Release(store);
         }
     }
 
@@ -89,12 +91,12 @@ internal static partial class TaskbarIntegration
         }
         finally
         {
-            PropVariantClear(property);
+            Marshal.ThrowExceptionForHR(PropVariantClear(ref property));
         }
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
-    private readonly struct PropertyKey
+    internal readonly struct PropertyKey
     {
         public PropertyKey(string formatId, uint propertyId)
         {
@@ -109,7 +111,7 @@ internal static partial class TaskbarIntegration
     // PROPVARIANT's union occupies 16 bytes on both supported 64-bit targets.
     // PropVariantClear zeros the full native structure, including the unused tail.
     [StructLayout(LayoutKind.Explicit, Size = 24)]
-    private sealed class PropVariant
+    internal struct PropVariant
     {
         [FieldOffset(0)]
         private ushort _variantType;
@@ -124,10 +126,9 @@ internal static partial class TaskbarIntegration
         };
     }
 
-    [ComImport]
+    [GeneratedComInterface]
     [Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IPropertyStore
+    internal partial interface IPropertyStore
     {
         [PreserveSig]
         int GetCount(out uint propertyCount);
@@ -136,25 +137,21 @@ internal static partial class TaskbarIntegration
         int GetAt(uint propertyIndex, out PropertyKey key);
 
         [PreserveSig]
-        int GetValue(in PropertyKey key, [Out] PropVariant value);
+        int GetValue(in PropertyKey key, out PropVariant value);
 
         [PreserveSig]
-        int SetValue(in PropertyKey key, [In] PropVariant value);
+        int SetValue(in PropertyKey key, in PropVariant value);
 
         [PreserveSig]
         int Commit();
     }
 
-    [DllImport("shell32.dll", PreserveSig = true)]
-    private static extern int SetCurrentProcessExplicitAppUserModelID(
-        [MarshalAs(UnmanagedType.LPWStr)] string appId);
+    [LibraryImport("shell32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int SetCurrentProcessExplicitAppUserModelID(string appId);
 
-    [DllImport("shell32.dll", PreserveSig = true)]
-    private static extern int SHGetPropertyStoreForWindow(
-        IntPtr hwnd,
-        in Guid interfaceId,
-        [MarshalAs(UnmanagedType.Interface)] out IPropertyStore propertyStore);
+    [LibraryImport("shell32.dll")]
+    private static partial int SHGetPropertyStoreForWindow(IntPtr hwnd, in Guid interfaceId, out IntPtr propertyStore);
 
-    [DllImport("ole32.dll", PreserveSig = false)]
-    private static extern void PropVariantClear([In, Out] PropVariant property);
+    [LibraryImport("ole32.dll")]
+    private static partial int PropVariantClear(ref PropVariant property);
 }

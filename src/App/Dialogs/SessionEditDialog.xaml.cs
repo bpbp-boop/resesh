@@ -9,13 +9,17 @@ namespace Resesh.App.Dialogs;
 
 public sealed partial class SessionEditDialog : ContentDialog
 {
-    private sealed class KeyChoice
+    // DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+    [WinRT.GeneratedBindableCustomProperty]
+    private sealed partial class KeyChoice
     {
         public Guid Id { get; init; }
         public string Label { get; init; } = "";
     }
 
-    private sealed class LoginChoice
+    // DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+    [WinRT.GeneratedBindableCustomProperty]
+    private sealed partial class LoginChoice
     {
         public SessionLogin Login { get; init; }
         public Identity? Identity { get; init; }
@@ -342,7 +346,9 @@ public sealed partial class SessionEditDialog : ContentDialog
 
     // ---- network: jump host, proxy, tunnels ----
 
-    private sealed class JumpChoice
+    // DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+    [WinRT.GeneratedBindableCustomProperty]
+    private sealed partial class JumpChoice
     {
         public Guid Id { get; init; }
         public string Label { get; init; } = "";

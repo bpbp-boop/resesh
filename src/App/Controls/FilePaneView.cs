@@ -16,7 +16,7 @@ namespace Resesh.App.Controls;
 /// sessions use a lazily connected SFTP channel and optional SSHFS Explorer access.
 /// One operation runs at a time.
 /// </summary>
-public sealed class FilePaneView : UserControl, IDisposable
+public sealed partial class FilePaneView : UserControl, IDisposable
 {
     private readonly Func<Session> _session;
     private readonly Func<Task<SftpSession>>? _connectFactory;

@@ -45,7 +45,9 @@ public sealed partial class DiffRowTemplateSelector : DataTemplateSelector
         SelectTemplateCore(item);
 }
 
-public sealed record HistoryRunChoice(CommandHistoryEntry Entry, string Label);
+// DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial record HistoryRunChoice(CommandHistoryEntry Entry, string Label);
 
 /// <summary>Compare mode: two runs of one command on one host, line by line.</summary>
 public sealed partial class HistoryView

@@ -17,22 +17,22 @@ public sealed record AppSettings
     public double? FilePaneWidth { get; init; }
 
     /// <summary>Sessions pinned in the tab strip, in display order; reopened automatically on launch.</summary>
-    public IReadOnlyList<Guid> PinnedSessionIds { get; init; } = [];
+    public IReadOnlyList<Guid> PinnedSessionIds { get; set; } = [];
     /// <summary>Saved sessions opened most recently, newest first.</summary>
-    public IReadOnlyList<Guid> RecentSessionIds { get; init; } = [];
+    public IReadOnlyList<Guid> RecentSessionIds { get; set; } = [];
 
     /// <summary>Whether the bottom status bar is visible.</summary>
-    public bool ShowStatusBar { get; init; } = true;
+    public bool ShowStatusBar { get; set; } = true;
 
     /// <summary>Whether the content pane beside the compact sessions rail is open.</summary>
-    public bool SessionsPaneOpen { get; init; } = true;
+    public bool SessionsPaneOpen { get; set; } = true;
 
     /// <summary>The selected compact-rail tab: sessions, recent, or recordings.</summary>
-    public string SessionsRailTab { get; init; } = "sessions";
+    public string SessionsRailTab { get; set; } = "sessions";
 
     /// <summary>Whether the sessions pane floats over the tabs or docks beside them; see
     /// <see cref="SessionsPaneLayouts"/>.</summary>
-    public string SessionsPaneLayout { get; init; } = SessionsPaneLayouts.Automatic;
+    public string SessionsPaneLayout { get; set; } = SessionsPaneLayouts.Automatic;
 
 
     /// <summary>Restore the clean-exit tab-group layout when the app next launches.</summary>
@@ -43,26 +43,26 @@ public sealed record AppSettings
     public bool? OnboardingCompleted { get; init; }
 
     /// <summary>Ask before closing a running, unpinned terminal session.</summary>
-    public bool ConfirmCloseActiveSessions { get; init; } = true;
+    public bool ConfirmCloseActiveSessions { get; set; } = true;
 
     /// <summary>Write unhandled exception details to the local crash log. Nothing is uploaded.</summary>
-    public bool WriteCrashReports { get; init; } = true;
+    public bool WriteCrashReports { get; set; } = true;
 
     /// <summary>The local profile "+ Session" / Ctrl+Shift+T opens; null = highest-priority
     /// discovered shell (see LocalShellDiscovery.DefaultProfile).</summary>
     public Guid? DefaultLocalProfileId { get; init; }
 
-    public string Theme { get; init; } = "dark";
-    public string FontFamily { get; init; } = "Cascadia Mono, Consolas, monospace";
-    public int FontSize { get; init; } = 14;
-    public int Scrollback { get; init; } = 10000;
-    public bool CopyOnSelect { get; init; } = true;
-    public bool RightClickPaste { get; init; } = true;
+    public string Theme { get; set; } = "dark";
+    public string FontFamily { get; set; } = "Cascadia Mono, Consolas, monospace";
+    public int FontSize { get; set; } = 14;
+    public int Scrollback { get; set; } = 10000;
+    public bool CopyOnSelect { get; set; } = true;
+    public bool RightClickPaste { get; set; } = true;
 
     /// <summary>Automatically start a disk recording for each new terminal tab.</summary>
     public bool AlwaysRecord { get; init; }
 
-    public string RecordingDirectory { get; init; } = Path.Combine(
+    public string RecordingDirectory { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Resesh Recordings");
 
 
@@ -71,17 +71,17 @@ public sealed record AppSettings
     public bool KeepCommandHistory { get; init; }
 
     /// <summary>Days command history is kept before it is deleted.</summary>
-    public int CommandHistoryDays { get; init; } = 90;
+    public int CommandHistoryDays { get; set; } = 90;
 
     /// <summary>Age and memory caps for each tab's always-on in-memory rewind stream.</summary>
-    public int RewindMinutes { get; init; } = 30;
-    public int RewindMegabytes { get; init; } = 32;
+    public int RewindMinutes { get; set; } = 30;
+    public int RewindMegabytes { get; set; } = 32;
 
     /// <summary>Show the agent icon and attention badge on tabs (Phase 6.2).</summary>
-    public bool ShowAgentIcons { get; init; } = true;
+    public bool ShowAgentIcons { get; set; } = true;
 
     /// <summary>Flash the taskbar button when a background tab's agent needs the user.</summary>
-    public bool AgentAlertFlash { get; init; } = true;
+    public bool AgentAlertFlash { get; set; } = true;
 
     /// <summary>Also play the system notification sound for those alerts.</summary>
     public bool AgentAlertSound { get; init; }
@@ -117,12 +117,12 @@ public static class SessionsPaneLayouts
 
 public sealed class SettingsStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly JsonSerializerOptions JsonOptions = CoreJson.With(new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
-    };
+    });
 
     private readonly string _path;
     private readonly object _gate = new();
@@ -159,7 +159,7 @@ public sealed class SettingsStore
     {
         lock (_gate)
         {
-            AtomicFile.Write(_path, JsonSerializer.Serialize(settings, JsonOptions), _preserveBackup);
+            AtomicFile.Write(_path, JsonSerializer.Serialize(settings, JsonOptions.Info<AppSettings>()), _preserveBackup);
             Current = settings;
             _preserveBackup = false;
         }
@@ -167,7 +167,7 @@ public sealed class SettingsStore
 
     private static AppSettings? Read(string path)
     {
-        var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions);
+        var settings = JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<AppSettings>());
         // Validate before AtomicFile.Load accepts the primary, so recovery can use .bak.
         if (settings is not null
             && (settings.PinnedSessionIds is null || settings.RecentSessionIds is null))

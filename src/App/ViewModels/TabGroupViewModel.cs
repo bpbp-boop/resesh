@@ -4,7 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace Resesh.App.ViewModels;
 
 /// <summary>One tab group (SecureCRT-style): its tabs and selection.</summary>
-public sealed class TabGroupViewModel : ObservableObject
+public sealed partial class TabGroupViewModel : ObservableObject
 {
     private TabViewModel? _selectedTab;
 

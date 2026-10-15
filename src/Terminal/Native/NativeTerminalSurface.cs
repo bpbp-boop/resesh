@@ -814,7 +814,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     // ---- options --------------------------------------------------------------------------
 
     public override void SetInitialOptions(int fontSize, string fontFamily, string theme, bool copyOnSelect,
-        bool rightClickPaste, int scrollback, IReadOnlyList<object>? highlights = null, bool readOnly = false,
+        bool rightClickPaste, int scrollback, IReadOnlyList<TerminalHighlight>? highlights = null, bool readOnly = false,
         bool fixed80Columns = false)
     {
         _fontSize = fontSize > 0 ? fontSize : 14;
@@ -1592,7 +1592,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         RefreshCommands()?.SetPromptPlatform(platform);
     }
 
-    public override void ApplyHighlights(IReadOnlyList<object> rules)
+    public override void ApplyHighlights(IReadOnlyList<TerminalHighlight> rules)
     {
         _highlighter.SetRules(rules);
         _overview?.Reset();

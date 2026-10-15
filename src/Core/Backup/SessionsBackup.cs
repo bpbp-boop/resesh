@@ -97,12 +97,12 @@ public static class SessionsBackup
     private const long MaxArchiveBytes = 200L * 1024 * 1024;
     private static readonly byte[] EncryptedMagic = "SESSBKP1"u8.ToArray();
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly JsonSerializerOptions JsonOptions = CoreJson.With(new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
-    };
+        Converters = { CamelCaseEnumConverter.Instance },
+    });
 
     public static bool IsEncrypted(string path)
     {
@@ -626,7 +626,7 @@ public static class SessionsBackup
     {
         var entry = archive.CreateEntry(name, CompressionLevel.Optimal);
         using var stream = entry.Open();
-        JsonSerializer.Serialize(stream, value, JsonOptions);
+        JsonSerializer.Serialize(stream, value, JsonOptions.Info<T>());
     }
 
     private static T ReadRequired<T>(ZipArchive archive, string name) =>
@@ -639,7 +639,7 @@ public static class SessionsBackup
         if (entry is null)
             return default;
         using var stream = entry.Open();
-        return JsonSerializer.Deserialize<T>(stream, JsonOptions);
+        return JsonSerializer.Deserialize(stream, JsonOptions.Info<T>());
     }
 
     private static byte[]? ReadOptionalBytes(ZipArchive archive, string name)
@@ -741,11 +741,11 @@ public static class SessionsBackup
         }
     }
 
-    private sealed record BackupSessionData
+    internal sealed record BackupSessionData
     {
-        public IReadOnlyList<Session> Sessions { get; init; } = [];
-        public IReadOnlyList<string> Folders { get; init; } = [];
-        public IReadOnlyList<string> LocalFolders { get; init; } = [];
+        public IReadOnlyList<Session> Sessions { get; set; } = [];
+        public IReadOnlyList<string> Folders { get; set; } = [];
+        public IReadOnlyList<string> LocalFolders { get; set; } = [];
         public IReadOnlyList<FolderSettings>? FolderSettings { get; init; }
     }
 }

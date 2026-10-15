@@ -15,7 +15,7 @@ public sealed partial class TmuxSessionPickerDialog : ContentDialog
     private bool _doubleTapped;
     private bool _endRequested;
 
-    public IReadOnlyList<TmuxSessionItem> Items { get; }
+    public List<TmuxSessionItem> Items { get; }
     public string Summary { get; }
     public bool HasDetached => _detached > 0;
     public string EndDetachedText => _detached == 1

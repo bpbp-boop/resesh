@@ -9,7 +9,7 @@ namespace Resesh.Terminal.Native;
 /// Windows' own font fallback, for characters the terminal's font chain has no glyph for. The
 /// chain is a short fixed list; this covers every other script an installed font can draw.
 /// </summary>
-internal static class SystemFontFallback
+internal static partial class SystemFontFallback
 {
     /// <summary>The installed family DirectWrite would draw <paramref name="codepoint"/> with
     /// next to <paramref name="baseFamily"/>, or null when no installed font has it (private-use
@@ -45,7 +45,7 @@ internal static class SystemFontFallback
 
     /// <summary>The one character being mapped, as the text source DirectWrite reads from. The
     /// locale is the user's, which is what picks between the CJK fonts for shared ideographs.</summary>
-    private sealed class Source : CallbackBase, IDWriteTextAnalysisSource
+    private sealed partial class Source : CallbackBase, IDWriteTextAnalysisSource
     {
         private readonly IntPtr _text;
         private readonly IntPtr _locale;

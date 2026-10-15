@@ -80,7 +80,8 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     // ---- General ----
 
-    public IReadOnlyList<ThemeChoice> Themes => ThemeCatalog.All;
+    // Bound to ItemsSource: a concrete List lets CsWinRT generate its WinRT marshalling for AOT.
+    public List<ThemeChoice> Themes { get; } = [.. ThemeCatalog.All];
 
     public ThemeChoice Theme
     {
@@ -124,7 +125,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         set => Save(value, s => s with { ShowStatusBar = value }, () => ShowStatusBar);
     }
 
-    public IReadOnlyList<SessionsPaneLayoutChoice> SessionsPaneLayoutChoices { get; } =
+    public List<SessionsPaneLayoutChoice> SessionsPaneLayoutChoices { get; } =
     [
         new(SessionsPaneLayouts.Automatic, "Automatic"),
         new(SessionsPaneLayouts.Float, "Float over tabs"),
@@ -285,4 +286,6 @@ public sealed partial class SettingsViewModel : ObservableObject
 }
 
 /// <summary>One option in the Settings sessions pane layout list.</summary>
-public sealed record SessionsPaneLayoutChoice(string Id, string Name);
+// DisplayMemberPath reads properties by name; this generates that lookup for AOT.
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial record SessionsPaneLayoutChoice(string Id, string Name);

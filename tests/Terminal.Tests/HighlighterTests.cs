@@ -26,16 +26,16 @@ public class HighlighterTests
         return [.. cells];
     }
 
-    private static Highlighter With(params object[] rules)
+    private static Highlighter With(params TerminalHighlight[] rules)
     {
         var h = new Highlighter();
         h.SetRules(rules);
         return h;
     }
 
-    private static object Rule(string pattern, string color = "#ff5555", bool bold = false, bool underline = false,
+    private static TerminalHighlight Rule(string pattern, string color = "#ff5555", bool bold = false, bool underline = false,
         bool matchCase = false, bool showInOverview = false) =>
-        new { id = pattern, pattern, color, bold, underline, matchCase, showInOverview };
+        new(pattern, pattern, color, bold, underline, matchCase, showInOverview);
 
     [Fact]
     public void RecolorsOnlyMatchedCells()

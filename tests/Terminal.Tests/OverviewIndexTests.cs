@@ -12,8 +12,8 @@ public class OverviewIndexTests
             buffer.Add(text(i));
         var highlighter = new Highlighter();
         highlighter.SetRules([
-            new { id = "err", pattern = "error", color = "#ff5555", bold = false, underline = false, matchCase = false, showInOverview = true },
-            new { id = "warn", pattern = "warn", color = "#f1fa8c", bold = false, underline = false, matchCase = false, showInOverview = false },
+            new TerminalHighlight("err", "error", "#ff5555", ShowInOverview: true),
+            new TerminalHighlight("warn", "warn", "#f1fa8c"),
         ]);
         return (buffer, new OverviewIndex(buffer, highlighter));
     }

@@ -202,7 +202,7 @@ public sealed partial class MainWindow
         return null;
     }
 
-    private sealed class CompactTreeIndentationConverter : Microsoft.UI.Xaml.Data.IValueConverter
+    private sealed partial class CompactTreeIndentationConverter : Microsoft.UI.Xaml.Data.IValueConverter
     {
         public static CompactTreeIndentationConverter Instance { get; } = new();
 

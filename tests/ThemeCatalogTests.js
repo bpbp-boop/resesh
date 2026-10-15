@@ -149,7 +149,7 @@ test("the status bar takes a themed chrome surface, not a translucent Fluent lay
 });
 
 test("global and per-session theme pickers use the shared catalog", () => {
-  assert.match(settingsViewModel, /Themes => ThemeCatalog\.All/);
+  assert.match(settingsViewModel, /List<ThemeChoice> Themes \{ get; \} = \[\.\. ThemeCatalog\.All\]/);
   assert.match(settingsPage, /ItemsSource="\{x:Bind ViewModel\.Themes\}"/);
   assert.match(sessionDialog, /Concat\(ThemeCatalog\.All\)/);
   assert.match(localDialog, /Concat\(ThemeCatalog\.All\)/);

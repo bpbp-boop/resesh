@@ -8,12 +8,12 @@ namespace Resesh.Core.Storage;
 /// Credential Manager under each identity's id.</summary>
 public sealed class IdentityStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly JsonSerializerOptions JsonOptions = CoreJson.With(new()
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
-    };
+        Converters = { CamelCaseEnumConverter.Instance },
+    });
 
     private readonly string _path;
     private bool _preserveBackup;
@@ -164,16 +164,16 @@ public sealed class IdentityStore
 
     private void Save(List<Identity> candidate)
     {
-        var json = JsonSerializer.Serialize(new StoreData { Identities = candidate }, JsonOptions);
+        var json = JsonSerializer.Serialize(new StoreData { Identities = candidate }, JsonOptions.Info<StoreData>());
         AtomicFile.Write(_path, json, _preserveBackup);
         _identities = candidate;
         _preserveBackup = false;
     }
 
     private static StoreData? Read(string path) =>
-        JsonSerializer.Deserialize<StoreData>(File.ReadAllText(path), JsonOptions);
+        JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<StoreData>());
 
-    private sealed class StoreData
+    internal sealed class StoreData
     {
         public List<Identity>? Identities { get; set; }
     }

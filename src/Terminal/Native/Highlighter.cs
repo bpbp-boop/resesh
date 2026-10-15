@@ -37,30 +37,19 @@ internal sealed class Highlighter
     /// <summary>Replaces the rule set from the host payload (anonymous objects with pattern,
     /// color, bold, underline, matchCase, showInOverview). Patterns this engine rejects are
     /// skipped, as the page skips patterns its RegExp rejects.</summary>
-    public void SetRules(IReadOnlyList<object>? payload)
+    public void SetRules(IReadOnlyList<TerminalHighlight>? payload)
     {
         var rules = new List<Rule>();
         foreach (var item in payload ?? [])
         {
-            if (item is null)
+            if (item is null || string.IsNullOrEmpty(item.Pattern) || ParseColor(item.Color ?? "#ffffff") is not { } color)
                 continue;
-            var pattern = Read<string>(item, "pattern");
-            if (string.IsNullOrEmpty(pattern) || ParseColor(Read<string>(item, "color") ?? "#ffffff") is not { } color)
+            if (Compile(item.Pattern, item.MatchCase) is not { } regex)
                 continue;
-            if (Compile(pattern, Read<bool?>(item, "matchCase") ?? false) is not { } regex)
-                continue;
-            rules.Add(new Rule(Read<string>(item, "id") ?? pattern, regex, color, Read<bool?>(item, "bold") ?? false,
-                Read<bool?>(item, "underline") ?? false, Read<bool?>(item, "showInOverview") ?? false));
+            rules.Add(new Rule(item.Id ?? item.Pattern, regex, color, item.Bold, item.Underline, item.ShowInOverview));
         }
         _rules = rules;
         _matches.Clear();
-    }
-
-    private static T? Read<T>(object item, string name)
-    {
-        var property = item.GetType().GetProperty(name)
-            ?? item.GetType().GetProperty(char.ToUpperInvariant(name[0]) + name[1..]);
-        return property?.GetValue(item) is T value ? value : default;
     }
 
     /// <summary>Output is untrusted, so prefer the non-backtracking engine; patterns it cannot

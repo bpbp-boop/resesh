@@ -1,5 +1,5 @@
 using System.Runtime.InteropServices;
-using System.Text;
+using System.Runtime.InteropServices.Marshalling;
 
 namespace Resesh.App.Interop;
 
@@ -19,18 +19,19 @@ internal static partial class TaskbarIntegration
         ICustomDestinationList? list = null;
         try
         {
-            list = (ICustomDestinationList)new DestinationList();
+            list = ComObjects.Create<ICustomDestinationList>(DestinationListClass);
             list.SetAppID(AppUserModelId);
             var removedId = typeof(IObjectArray).GUID;
-            list.BeginList(out _, ref removedId, out var removedObjects);
-            var removed = RemovedArguments((IObjectArray)removedObjects);
-            Marshal.ReleaseComObject(removedObjects);
+            list.BeginList(out _, removedId, out var removedPointer);
+            var removedObjects = ComObjects.Wrap<IObjectArray>(removedPointer);
+            var removed = RemovedArguments(removedObjects);
+            ComObjects.Release(removedObjects);
 
             AppendCategory(list, "Pinned sessions", plan.Pinned, removed, executablePath);
             AppendCategory(list, "Recent sessions", plan.Recent, removed, executablePath);
             var tasks = Collection([new JumpListItem("New window", "", "Open another resesh window")], executablePath);
             list.AddUserTasks((IObjectArray)tasks);
-            Marshal.ReleaseComObject(tasks);
+            ComObjects.Release(tasks);
             list.CommitList();
             return removed.ToList();
         }
@@ -43,8 +44,7 @@ internal static partial class TaskbarIntegration
         }
         finally
         {
-            if (list is not null)
-                Marshal.ReleaseComObject(list);
+            ComObjects.Release(list);
         }
     }
 
@@ -67,16 +67,16 @@ internal static partial class TaskbarIntegration
         }
         finally
         {
-            Marshal.ReleaseComObject(collection);
+            ComObjects.Release(collection);
         }
     }
 
     private static IObjectCollection Collection(IEnumerable<JumpListItem> items, string executablePath)
     {
-        var collection = (IObjectCollection)new EnumerableObjectCollection();
+        var collection = ComObjects.Create<IObjectCollection>(EnumerableObjectCollectionClass);
         foreach (var item in items)
         {
-            var link = (IShellLinkW)new ShellLink();
+            var link = ComObjects.Create<IShellLinkW>(ShellLinkClass);
             link.SetPath(executablePath);
             link.SetArguments(item.Arguments);
             link.SetDescription(item.Description);
@@ -85,7 +85,7 @@ internal static partial class TaskbarIntegration
             SetString(store, Title, item.Title);
             Marshal.ThrowExceptionForHR(store.Commit());
             collection.AddObject(link);
-            Marshal.ReleaseComObject(link);
+            ComObjects.Release(link);
         }
         return collection;
     }
@@ -95,94 +95,77 @@ internal static partial class TaskbarIntegration
         var arguments = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         removed.GetCount(out var count);
         var linkId = typeof(IShellLinkW).GUID;
+        var buffer = new char[1024];
         for (uint i = 0; i < count; i++)
         {
-            removed.GetAt(i, ref linkId, out var item);
-            if (item is IShellLinkW link)
-            {
-                var buffer = new StringBuilder(1024);
-                link.GetArguments(buffer, buffer.Capacity);
-                arguments.Add(buffer.ToString());
-            }
-            Marshal.ReleaseComObject(item);
+            removed.GetAt(i, linkId, out var pointer);
+            var link = ComObjects.Wrap<IShellLinkW>(pointer);
+            link.GetArguments(buffer, buffer.Length);
+            arguments.Add(new string(buffer, 0, Array.IndexOf(buffer, '\0') is var end and >= 0 ? end : buffer.Length));
+            ComObjects.Release(link);
         }
         return arguments;
     }
 
-    [ComImport]
-    [Guid("77F10CF0-3DB5-4966-B520-B7C54FD35ED6")]
-    private class DestinationList;
+    private static readonly Guid DestinationListClass = new("77F10CF0-3DB5-4966-B520-B7C54FD35ED6");
+    private static readonly Guid EnumerableObjectCollectionClass = new("2D3468C1-36A7-43B6-AC24-D3F02FD9607A");
+    private static readonly Guid ShellLinkClass = new("00021401-0000-0000-C000-000000000046");
 
-    [ComImport]
-    [Guid("2D3468C1-36A7-43B6-AC24-D3F02FD9607A")]
-    private class EnumerableObjectCollection;
-
-    [ComImport]
-    [Guid("00021401-0000-0000-C000-000000000046")]
-    private class ShellLink;
-
-    [ComImport]
+    [GeneratedComInterface(StringMarshalling = StringMarshalling.Utf16)]
     [Guid("6332DEBF-87B5-4670-90C0-5E57B408A49E")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface ICustomDestinationList
+    internal partial interface ICustomDestinationList
     {
-        void SetAppID([MarshalAs(UnmanagedType.LPWStr)] string appId);
-        void BeginList(out uint minSlots, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out object removed);
-        void AppendCategory([MarshalAs(UnmanagedType.LPWStr)] string category, IObjectArray items);
+        void SetAppID(string appId);
+        void BeginList(out uint minSlots, in Guid riid, out IntPtr removed);
+        void AppendCategory(string category, IObjectArray items);
         void AppendKnownCategory(int category);
         void AddUserTasks(IObjectArray tasks);
         void CommitList();
-        void GetRemovedDestinations(ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out object removed);
-        void DeleteList([MarshalAs(UnmanagedType.LPWStr)] string? appId);
+        void GetRemovedDestinations(in Guid riid, out IntPtr removed);
+        void DeleteList(string? appId);
         void AbortList();
     }
 
-    [ComImport]
+    [GeneratedComInterface]
     [Guid("92CA9DCD-5622-4BBA-A805-5E9F541BD8C9")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IObjectArray
+    internal partial interface IObjectArray
     {
         void GetCount(out uint count);
-        void GetAt(uint index, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out object item);
+        void GetAt(uint index, in Guid riid, out IntPtr item);
     }
 
-    [ComImport]
+    [GeneratedComInterface]
     [Guid("5632B1A4-E38A-400A-928A-D4CD63230295")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IObjectCollection
+    internal partial interface IObjectCollection : IObjectArray
     {
-        // IObjectArray
-        void GetCount(out uint count);
-        void GetAt(uint index, ref Guid riid, [MarshalAs(UnmanagedType.Interface)] out object item);
-
-        void AddObject([MarshalAs(UnmanagedType.Interface)] object item);
+        void AddObject(IShellLinkW item);
         void AddFromArray(IObjectArray items);
         void RemoveObjectAt(uint index);
         void Clear();
     }
 
-    [ComImport]
+    // Only the vtable prefix up to SetPath is declared; unused methods take raw pointers.
+    [GeneratedComInterface(StringMarshalling = StringMarshalling.Utf16)]
     [Guid("000214F9-0000-0000-C000-000000000046")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IShellLinkW
+    internal partial interface IShellLinkW
     {
-        void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder file, int maxPath, IntPtr findData, uint flags);
+        void GetPath(IntPtr file, int maxPath, IntPtr findData, uint flags);
         void GetIDList(out IntPtr idList);
         void SetIDList(IntPtr idList);
-        void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder name, int maxName);
-        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string name);
-        void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder directory, int maxPath);
-        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string directory);
-        void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder arguments, int maxPath);
-        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string arguments);
+        void GetDescription(IntPtr name, int maxName);
+        void SetDescription(string name);
+        void GetWorkingDirectory(IntPtr directory, int maxPath);
+        void SetWorkingDirectory(string directory);
+        void GetArguments([Out, MarshalUsing(CountElementName = nameof(maxPath))] char[] arguments, int maxPath);
+        void SetArguments(string arguments);
         void GetHotkey(out short hotkey);
         void SetHotkey(short hotkey);
         void GetShowCmd(out int showCommand);
         void SetShowCmd(int showCommand);
-        void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder iconPath, int maxPath, out int iconIndex);
-        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string iconPath, int iconIndex);
-        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string relativePath, uint reserved);
+        void GetIconLocation(IntPtr iconPath, int maxPath, out int iconIndex);
+        void SetIconLocation(string iconPath, int iconIndex);
+        void SetRelativePath(string relativePath, uint reserved);
         void Resolve(IntPtr hwnd, uint flags);
-        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string file);
+        void SetPath(string file);
     }
 }

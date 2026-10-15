@@ -10,7 +10,7 @@ using Resesh.Terminal;
 namespace Resesh.App.Terminal;
 
 /// <summary>Read-only terminal player shared by live rewind and asciicast playback.</summary>
-public sealed class TerminalPlayerView : Grid, IDisposable
+public sealed partial class TerminalPlayerView : Grid, IDisposable
 {
     private readonly TerminalSurface _terminal = TerminalSurfaceFactory.CreatePlayback();
     private readonly TerminalCapture? _capture;

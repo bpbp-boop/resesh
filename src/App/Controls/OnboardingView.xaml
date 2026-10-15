@@ -302,7 +302,7 @@
                                         </Grid>
                                     </StackPanel>
 
-                                    <ComboBox x:Name="ThemePicker" Header="Color theme" DisplayMemberPath="Name"
+                                    <ComboBox x:Name="ThemePicker" Header="Color theme"
                                               HorizontalAlignment="Stretch" SelectionChanged="ThemePicker_SelectionChanged"
                                               AutomationProperties.AutomationId="ThemePicker"
                                               AutomationProperties.Name="Color theme" />

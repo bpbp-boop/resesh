@@ -18,7 +18,7 @@ namespace Resesh.Terminal.Native;
 /// the command and Jump / Copy output actions (terminal.html's ruler popover). Ticks are painted
 /// into one bitmap: the lane repaints with every batch of output, too often for an element per tick.
 /// </summary>
-internal sealed class TerminalRuler : Grid
+internal sealed partial class TerminalRuler : Grid
 {
     internal const double LaneWidth = 8;
     private const double TickHeight = 3;

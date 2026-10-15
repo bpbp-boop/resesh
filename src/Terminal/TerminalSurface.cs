@@ -7,7 +7,7 @@ namespace Resesh.Terminal;
 /// Live terminal surface contract. Backends remain responsible for transport and emit raw bytes;
 /// the selected surface owns parsing, rendering, input, and viewport sizing.
 /// </summary>
-public abstract class TerminalSurface : Grid, IDisposable
+public abstract partial class TerminalSurface : Grid, IDisposable
 {
     /// <summary>Debug diagnostics sink (same pattern as SshTerminalSession.TraceHook).</summary>
     public static Action<string>? TraceHook { get; set; }
@@ -105,7 +105,7 @@ public abstract class TerminalSurface : Grid, IDisposable
         bool copyOnSelect,
         bool rightClickPaste,
         int scrollback,
-        IReadOnlyList<object>? highlights = null,
+        IReadOnlyList<TerminalHighlight>? highlights = null,
         bool readOnly = false,
         bool fixed80Columns = false);
     public abstract void ApplyOptions(
@@ -115,7 +115,7 @@ public abstract class TerminalSurface : Grid, IDisposable
         bool? copyOnSelect = null,
         bool? rightClickPaste = null,
         int? scrollback = null);
-    public abstract void ApplyHighlights(IReadOnlyList<object> rules);
+    public abstract void ApplyHighlights(IReadOnlyList<TerminalHighlight> rules);
     public abstract Task<(string Context, string? Platform)?> RequestPromptContextAsync();
     public abstract Task ShowReplayAsync(int columns, int rows, ReadOnlyMemory<byte> keyframe, IReadOnlyList<TerminalReplayEvent> events);
     public abstract Task LoadPlaybackAsync(int columns, int rows, IReadOnlyList<TerminalTimedReplayEvent> events);
