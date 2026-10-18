@@ -153,7 +153,8 @@ public sealed class CoreJsonTests
         public static IEnumerable<PropertyInfo> Properties(Type type) =>
             type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
                 .Where(property => property.GetIndexParameters().Length == 0
-                    && property.GetCustomAttribute<JsonIgnoreAttribute>() is null
+                    // A conditional ignore (WhenWritingDefault, WhenWritingNull) still persists the value.
+                    && property.GetCustomAttribute<JsonIgnoreAttribute>() is not { Condition: JsonIgnoreCondition.Always }
                     && property.GetMethod is { IsPublic: true });
 
         public static object? Create(Type type, int depth = 0)

@@ -15,14 +15,14 @@ public enum ProxyKind
 /// </summary>
 public sealed record ProxySettings
 {
-    public ProxyKind Kind { get; init; } = ProxyKind.Socks5;
+    public ProxyKind Kind { get; set; } = ProxyKind.Socks5;
 
-    public string Host { get; init; } = "";
+    public string Host { get; set; } = "";
 
-    public int Port { get; init; } = DefaultPort(ProxyKind.Socks5);
+    public int Port { get; set; } = DefaultPort(ProxyKind.Socks5);
 
     /// <summary>Empty = the proxy needs no login.</summary>
-    public string Username { get; init; } = "";
+    public string Username { get; set; } = "";
 
     public static int DefaultPort(ProxyKind kind) => kind == ProxyKind.Http ? 8080 : 1080;
 
@@ -52,18 +52,18 @@ public sealed record Tunnel
 {
     public const string Loopback = "127.0.0.1";
 
-    public Guid Id { get; init; } = Guid.NewGuid();
+    public Guid Id { get; set; } = Guid.NewGuid();
 
-    public TunnelKind Kind { get; init; } = TunnelKind.Local;
+    public TunnelKind Kind { get; set; } = TunnelKind.Local;
 
     /// <summary>The address listened on: this machine's for Local and Dynamic, the SSH
     /// host's for Remote. Loopback unless the user chose to expose the port.</summary>
-    public string BindAddress { get; init; } = Loopback;
+    public string BindAddress { get; set; } = Loopback;
 
     public int BindPort { get; init; }
 
     /// <summary>Where connections are sent; unused for Dynamic, whose clients choose.</summary>
-    public string DestinationHost { get; init; } = "";
+    public string DestinationHost { get; set; } = "";
 
     public int DestinationPort { get; init; }
 

@@ -67,14 +67,14 @@ public sealed record LocalTarget
 {
     /// <summary>Full path or PATH-resolvable name of the shell executable. May contain
     /// environment variables (%SystemRoot% etc.), expanded at launch.</summary>
-    public string Executable { get; init; } = "";
+    public string Executable { get; set; } = "";
 
     /// <summary>Arguments passed to the process, one entry per argument.</summary>
-    public IReadOnlyList<string> Arguments { get; init; } = [];
+    public IReadOnlyList<string> Arguments { get; set; } = [];
 
     /// <summary>Working directory for the process; empty = the user profile folder.
     /// May contain environment variables, expanded at launch.</summary>
-    public string StartingDirectory { get; init; } = "";
+    public string StartingDirectory { get; set; } = "";
 
     /// <summary>Environment variable overrides layered onto the inherited environment.
     /// An empty value removes the variable.</summary>
