@@ -47,6 +47,7 @@
                     x:Name="KeyBox"
                     Header="SSH key"
                     DisplayMemberPath="Label"
+                    x:SuppressXamlTrimWarnings="True"
                     PlaceholderText="Select a registered key"
                     HorizontalAlignment="Stretch"
                     AutomationProperties.AutomationId="IdentityKey" />

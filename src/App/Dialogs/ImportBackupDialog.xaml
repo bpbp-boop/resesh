@@ -41,6 +41,7 @@
                             Grid.Column="1"
                             ItemsSource="{x:Bind Choices}"
                             DisplayMemberPath="Label"
+                            x:SuppressXamlTrimWarnings="True"
                             SelectedItem="{x:Bind SelectedChoice, Mode=TwoWay}"
                             HorizontalAlignment="Stretch" />
                     </Grid>

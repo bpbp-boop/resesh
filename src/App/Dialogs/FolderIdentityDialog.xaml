@@ -16,6 +16,7 @@
             x:Name="ChoiceBox"
             Header="Identity"
             DisplayMemberPath="Label"
+            x:SuppressXamlTrimWarnings="True"
             HorizontalAlignment="Stretch"
             AutomationProperties.AutomationId="FolderIdentityChoice"
             SelectionChanged="ChoiceBox_SelectionChanged" />

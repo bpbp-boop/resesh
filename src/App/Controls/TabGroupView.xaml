@@ -590,9 +590,9 @@
                     <ToggleButton x:Name="RecordButton" Width="32" Height="32" Padding="0"
                                   Click="RecordButton_Click" ToolTipService.ToolTip="Start recording">
                             <Grid Width="10" Height="10" VerticalAlignment="Center">
-                                <Ellipse x:Name="RecordStartIcon" Width="10" Height="10" StrokeThickness="1.5" Stroke="{Binding Foreground, ElementName=RecordButton}" />
+                                <Ellipse x:Name="RecordStartIcon" Width="10" Height="10" StrokeThickness="1.5" Stroke="{x:Bind RecordButton.Foreground, Mode=OneWay}" />
                                 <Rectangle x:Name="RecordStopIcon" Width="10" Height="10" RadiusX="1" RadiusY="1"
-                                           Fill="{Binding Foreground, ElementName=RecordButton}" Visibility="Collapsed" />
+                                           Fill="{x:Bind RecordButton.Foreground, Mode=OneWay}" Visibility="Collapsed" />
                             </Grid>
                     </ToggleButton>
                     <ToggleButton x:Name="RewindButton" Width="32" Height="32" Padding="0"

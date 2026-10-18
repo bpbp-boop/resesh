@@ -46,7 +46,7 @@
                 TextWrapping="Wrap"
                 Style="{StaticResource CaptionTextBlockStyle}" />
 
-            <ComboBox x:Name="IconBox" Header="Icon" DisplayMemberPath="Name" HorizontalAlignment="Stretch" />
+            <ComboBox x:Name="IconBox" Header="Icon" DisplayMemberPath="Name" x:SuppressXamlTrimWarnings="True" HorizontalAlignment="Stretch" />
             <ComboBox x:Name="ColorBox" Header="Color tag" HorizontalAlignment="Stretch" />
 
             <ComboBox x:Name="OverrideThemeBox" Header="Theme override" HorizontalAlignment="Stretch" />

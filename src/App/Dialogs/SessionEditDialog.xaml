@@ -102,6 +102,7 @@
                             x:Name="LoginBox"
                             Header="Login"
                             DisplayMemberPath="Label"
+                            x:SuppressXamlTrimWarnings="True"
                             AutomationProperties.AutomationId="SessionLoginBox"
                             SelectionChanged="LoginBox_SelectionChanged"
                             HorizontalAlignment="Stretch" />
@@ -140,6 +141,7 @@
                             Grid.Column="0"
                             Header="SSH key"
                             DisplayMemberPath="Label"
+                            x:SuppressXamlTrimWarnings="True"
                             PlaceholderText="Select a registered key"
                             HorizontalAlignment="Stretch" />
                         <Button
@@ -225,6 +227,7 @@
                             x:Name="JumpBox"
                             Header="Jump host"
                             DisplayMemberPath="Label"
+                            x:SuppressXamlTrimWarnings="True"
                             PlaceholderText="Select an SSH session"
                             AutomationProperties.AutomationId="SessionJumpBox"
                             HorizontalAlignment="Stretch" />

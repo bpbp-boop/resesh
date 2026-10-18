@@ -84,6 +84,7 @@
                 Grid.Column="2"
                 MinWidth="160"
                 DisplayMemberPath="Label"
+                x:SuppressXamlTrimWarnings="True"
                 SelectionChanged="Filter_SelectionChanged"
                 AutomationProperties.Name="Login"
                 AutomationProperties.AutomationId="SessionsManagerLogin" />

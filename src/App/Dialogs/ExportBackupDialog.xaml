@@ -17,6 +17,7 @@
             Header="Sessions to export"
             ItemsSource="{x:Bind Scopes}"
             DisplayMemberPath="Label"
+            x:SuppressXamlTrimWarnings="True"
             HorizontalAlignment="Stretch" />
         <CheckBox
             x:Name="IncludeSecretsCheck"

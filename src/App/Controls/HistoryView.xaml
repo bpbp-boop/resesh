@@ -216,6 +216,7 @@
                         MaxWidth="260"
                         SelectionChanged="Filter_Changed"
                         DisplayMemberPath="Label"
+                        x:SuppressXamlTrimWarnings="True"
                         AutomationProperties.Name="Session"
                         AutomationProperties.AutomationId="HistorySessionFilter" />
                     <ComboBox
@@ -640,6 +641,7 @@
                                 x:Name="OlderRunBox"
                                 MinWidth="240"
                                 DisplayMemberPath="Label"
+                                x:SuppressXamlTrimWarnings="True"
                                 SelectionChanged="CompareRun_Changed"
                                 AutomationProperties.Name="Earlier run"
                                 AutomationProperties.AutomationId="HistoryCompareOlder" />
@@ -650,6 +652,7 @@
                                 Grid.Column="2"
                                 MinWidth="240"
                                 DisplayMemberPath="Label"
+                                x:SuppressXamlTrimWarnings="True"
                                 SelectionChanged="CompareRun_Changed"
                                 AutomationProperties.Name="Later run"
                                 AutomationProperties.AutomationId="HistoryCompareNewer" />

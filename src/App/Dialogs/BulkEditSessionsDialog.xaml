@@ -15,6 +15,7 @@
                 x:Name="LoginBox"
                 Header="Login"
                 DisplayMemberPath="Label"
+                x:SuppressXamlTrimWarnings="True"
                 HorizontalAlignment="Stretch"
                 AutomationProperties.AutomationId="BulkEditLogin"
                 SelectionChanged="Field_SelectionChanged" />
@@ -38,6 +39,7 @@
                 x:Name="JumpBox"
                 Header="Jump host"
                 DisplayMemberPath="Label"
+                x:SuppressXamlTrimWarnings="True"
                 HorizontalAlignment="Stretch"
                 AutomationProperties.AutomationId="BulkEditJumpHost"
                 SelectionChanged="Field_SelectionChanged" />
@@ -51,6 +53,7 @@
                 x:Name="IconBox"
                 Header="Icon"
                 DisplayMemberPath="Label"
+                x:SuppressXamlTrimWarnings="True"
                 HorizontalAlignment="Stretch"
                 AutomationProperties.AutomationId="BulkEditIcon"
                 SelectionChanged="Field_SelectionChanged" />
@@ -58,6 +61,7 @@
                 x:Name="ThemeBox"
                 Header="Terminal theme"
                 DisplayMemberPath="Label"
+                x:SuppressXamlTrimWarnings="True"
                 HorizontalAlignment="Stretch"
                 AutomationProperties.AutomationId="BulkEditTheme"
                 SelectionChanged="Field_SelectionChanged" />

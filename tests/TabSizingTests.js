@@ -175,8 +175,8 @@ test("tab actions collapse into an overflow menu before minimum-width tabs scrol
 test("record controls follow the button foreground instead of using warning red", () => {
   const recordButton = xaml.match(/x:Name="RecordButton"[\s\S]*?<\/ToggleButton>/)?.[0] ?? "";
   // An outlined ring at rest keeps the idle button as quiet as its neighbours.
-  assert.match(recordButton, /x:Name="RecordStartIcon"[^>]*Stroke="\{Binding Foreground, ElementName=RecordButton\}"/);
-  assert.match(recordButton, /x:Name="RecordStopIcon"[\s\S]*?Fill="\{Binding Foreground, ElementName=RecordButton\}"/);
+  assert.match(recordButton, /x:Name="RecordStartIcon"[^>]*Stroke="\{x:Bind RecordButton\.Foreground, Mode=OneWay\}"/);
+  assert.match(recordButton, /x:Name="RecordStopIcon"[\s\S]*?Fill="\{x:Bind RecordButton\.Foreground, Mode=OneWay\}"/);
   assert.doesNotMatch(recordButton, /#E74856/);
 });
 test("action buttons dim with their inactive tab group", () => {

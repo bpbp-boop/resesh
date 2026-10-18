@@ -161,6 +161,7 @@
                             MinWidth="220"
                             ItemsSource="{x:Bind ViewModel.SessionsPaneLayoutChoices}"
                             DisplayMemberPath="Name"
+                            x:SuppressXamlTrimWarnings="True"
                             SelectedItem="{x:Bind ViewModel.SessionsPaneLayout, Mode=TwoWay}"
                             AutomationProperties.Name="Sessions pane"
                             AutomationProperties.AutomationId="SettingsSessionsPaneLayout" />
@@ -237,6 +238,7 @@
                             x:Name="DefaultIdentityBox"
                             MinWidth="240"
                             DisplayMemberPath="Label"
+                            x:SuppressXamlTrimWarnings="True"
                             SelectionChanged="DefaultIdentityBox_SelectionChanged"
                             AutomationProperties.Name="Default identity"
                             AutomationProperties.AutomationId="SettingsDefaultIdentity" />
