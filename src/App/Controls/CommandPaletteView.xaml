@@ -40,7 +40,7 @@
                     Margin="12"
                     PlaceholderText="Search commands and settings"
                     Foreground="{StaticResource SessionTreeForegroundBrush}"
-                    PlaceholderForeground="{StaticResource SessionTreeMutedForegroundBrush}"
+                    PlaceholderForeground="{StaticResource SessionPlaceholderForegroundBrush}"
                     SelectionHighlightColor="{StaticResource SessionAccentBrush}"
                     TextChanged="SearchBox_TextChanged"
                     AutomationProperties.Name="Search commands and settings">
@@ -55,9 +55,9 @@
                         <StaticResource x:Key="TextControlForeground" ResourceKey="SessionTreeForegroundBrush" />
                         <StaticResource x:Key="TextControlForegroundPointerOver" ResourceKey="SessionTreeForegroundBrush" />
                         <StaticResource x:Key="TextControlForegroundFocused" ResourceKey="SessionTreeForegroundBrush" />
-                        <StaticResource x:Key="TextControlPlaceholderForeground" ResourceKey="SessionTreeMutedForegroundBrush" />
-                        <StaticResource x:Key="TextControlPlaceholderForegroundPointerOver" ResourceKey="SessionTreeMutedForegroundBrush" />
-                        <StaticResource x:Key="TextControlPlaceholderForegroundFocused" ResourceKey="SessionTreeMutedForegroundBrush" />
+                        <StaticResource x:Key="TextControlPlaceholderForeground" ResourceKey="SessionPlaceholderForegroundBrush" />
+                        <StaticResource x:Key="TextControlPlaceholderForegroundPointerOver" ResourceKey="SessionPlaceholderForegroundBrush" />
+                        <StaticResource x:Key="TextControlPlaceholderForegroundFocused" ResourceKey="SessionPlaceholderForegroundBrush" />
                     </TextBox.Resources>
                 </TextBox>
 

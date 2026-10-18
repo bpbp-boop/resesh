@@ -1356,6 +1356,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionChromeFrameBrush"]).Color = palette.Frame;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeForegroundBrush"]).Color = palette.TreeForeground;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeMutedForegroundBrush"]).Color = palette.TreeMutedForeground;
+        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionPlaceholderForegroundBrush"]).Color = palette.Placeholder;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeSelectionBrush"]).Color = palette.TreeSelection;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeSelectionForegroundBrush"]).Color = palette.TreeSelectionForeground;
         ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SettingsCardBorderBrush"]).Color = palette.Frame;

@@ -509,7 +509,7 @@
                                 VerticalAlignment="Center"
                                 PlaceholderText="Filter sessions"
                                 Foreground="{StaticResource SessionTreeForegroundBrush}"
-                                PlaceholderForeground="{StaticResource SessionTreeMutedForegroundBrush}"
+                                PlaceholderForeground="{StaticResource SessionPlaceholderForegroundBrush}"
                                 Background="Transparent"
                                 BorderThickness="0"
                                 VerticalContentAlignment="Center"

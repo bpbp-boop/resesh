@@ -80,7 +80,7 @@ test("the command palette is built from theme surfaces, not Fluent defaults", ()
   assert.match(commandPalette, /x:Name="PaletteCard"[\s\S]*?Background="\{StaticResource SessionShellBrush\}"[\s\S]*?BorderBrush="\{StaticResource SessionChromeFrameBrush\}"/);
   const searchBox = commandPalette.match(/<TextBox\s+x:Name="SearchBox"[\s\S]*?<\/TextBox>/)?.[0] ?? "";
   assert.match(searchBox, /x:Key="TextControlBackground" ResourceKey="SessionInputBrush"/);
-  assert.match(searchBox, /x:Key="TextControlPlaceholderForeground" ResourceKey="SessionTreeMutedForegroundBrush"/);
+  assert.match(searchBox, /x:Key="TextControlPlaceholderForeground" ResourceKey="SessionPlaceholderForegroundBrush"/);
   // Focus is the one place the palette spends the theme accent.
   assert.match(searchBox, /x:Key="TextControlBorderBrushFocused" ResourceKey="SessionAccentBrush"/);
   // Rows select with the session tree's selection color.
@@ -320,4 +320,20 @@ test("XAML dialogs opt in to the Fluent ContentDialog style", () => {
         && !/Style="\{StaticResource DefaultContentDialogStyle\}"/.test(xaml);
     });
   assert.deepEqual(missing, []);
+});
+
+test("placeholder text is a step dimmer than captions, app-wide and in dialogs", () => {
+  // Fluent's secondary text color sits too close to typed text to read as a hint.
+  assert.match(visualPalette, /Placeholder => IsHighContrast\s*\? TreeForeground\s*: Mix\(TreeForeground, Input, 0\.45\)/);
+  assert.match(mainWindow, /SessionPlaceholderForegroundBrush"\]\)\.Color = palette\.Placeholder/);
+  for (const key of ["TextControlPlaceholderForeground", "TextControlPlaceholderForegroundFocused", "ComboBoxPlaceHolderForeground"]) {
+    assert.match(appXaml, new RegExp(`x:Key="${key}" ResourceKey="SessionPlaceholderForegroundBrush"`), key);
+  }
+  assert.match(dialogTheme, /Set\(dialog, placeholder,[\s\S]*?"TextControlPlaceholderForeground"/);
+  const appSource = fs.readdirSync(path.join(__dirname, "..", "src", "App"), { recursive: true })
+    .filter(name => name.endsWith(".xaml") && !/^(?:bin|obj)[\\/]/.test(name))
+    .map(name => fs.readFileSync(path.join(__dirname, "..", "src", "App", name), "utf8"))
+    .join("\n");
+  assert.doesNotMatch(appSource, /Placeholder\w*="\{StaticResource SessionTreeMutedForegroundBrush\}"/);
+  assert.doesNotMatch(appSource, /x:Key="TextControlPlaceholderForeground\w*" ResourceKey="SessionTreeMutedForegroundBrush"/);
 });

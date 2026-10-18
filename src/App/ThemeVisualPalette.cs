@@ -23,6 +23,20 @@ internal sealed record ThemeVisualPalette(
     Windows.UI.Color PaneFocusBorder,
     bool IsHighContrast)
 {
+    /// <summary>Placeholder text in entry fields. The muted caption color sits only a third
+    /// of the way from the text toward the surface, which reads as a typed value; this goes
+    /// nearly halfway, still about 3:1 on the input surface. High Contrast keeps the system text.</summary>
+    public Windows.UI.Color Placeholder => IsHighContrast
+        ? TreeForeground
+        : Mix(TreeForeground, Input, 0.45);
+
+    private static Windows.UI.Color Mix(Windows.UI.Color from, Windows.UI.Color to, double weight) =>
+        Windows.UI.Color.FromArgb(
+            255,
+            (byte)Math.Round(from.R + ((to.R - from.R) * weight)),
+            (byte)Math.Round(from.G + ((to.G - from.G) * weight)),
+            (byte)Math.Round(from.B + ((to.B - from.B) * weight)));
+
     private static Windows.UI.Color Hex(uint rgb) => Windows.UI.Color.FromArgb(
         255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 

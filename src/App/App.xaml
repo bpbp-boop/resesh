@@ -16,6 +16,13 @@
             <SolidColorBrush x:Key="SessionChromeFrameBrush" Color="#2B2B2B" />
             <SolidColorBrush x:Key="SessionTreeForegroundBrush" Color="#CCCCCC" />
             <SolidColorBrush x:Key="SessionTreeMutedForegroundBrush" Color="#959595" />
+            <SolidColorBrush x:Key="SessionPlaceholderForegroundBrush" Color="#777777" />
+            <!-- Fluent draws placeholders in its secondary text color, a near match for typed text.
+                 Every field app-wide takes the dimmer placeholder brush instead. -->
+            <StaticResource x:Key="TextControlPlaceholderForeground" ResourceKey="SessionPlaceholderForegroundBrush" />
+            <StaticResource x:Key="TextControlPlaceholderForegroundPointerOver" ResourceKey="SessionPlaceholderForegroundBrush" />
+            <StaticResource x:Key="TextControlPlaceholderForegroundFocused" ResourceKey="SessionPlaceholderForegroundBrush" />
+            <StaticResource x:Key="ComboBoxPlaceHolderForeground" ResourceKey="SessionPlaceholderForegroundBrush" />
             <SolidColorBrush x:Key="SessionTreeSelectionBrush" Color="#264F78" />
             <SolidColorBrush x:Key="SessionTreeSelectionForegroundBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="SettingsCardBorderBrush" Color="#2B2B2B" />

@@ -21,6 +21,7 @@ internal static class DialogTheme
         var frame = Brush("SessionChromeFrameBrush");
         var text = Brush("SessionTreeForegroundBrush");
         var muted = Brush("SessionTreeMutedForegroundBrush");
+        var placeholder = Brush("SessionPlaceholderForegroundBrush");
         var selection = Brush("SessionTreeSelectionBrush");
         var selectionText = Brush("SessionTreeSelectionForegroundBrush");
         var accent = Brush("SessionAccentBrush");
@@ -79,7 +80,7 @@ internal static class DialogTheme
             "ToggleSwitchContentForeground",
             "CheckBoxForegroundUnchecked",
             "CheckBoxForegroundChecked");
-        Set(dialog, muted,
+        Set(dialog, placeholder,
             "TextControlPlaceholderForeground",
             "TextControlPlaceholderForegroundPointerOver",
             "TextControlPlaceholderForegroundFocused",
