@@ -1123,3 +1123,14 @@ timestamps (`GhosttyLineTimes`), and command marks during rewind and playback.
   target pane and its ancestor grids raised (ZIndex) so it draws over its neighbours. When
   the tab was the group's last, the group collapses and the existing pane motion plays instead;
   sliding the tab as well would fight the growing pane's clip.
+
+## 2026-10-19 - Bind lists, not arrays of nested types, under Native AOT
+
+Opening the commands panel crashed AOT builds with `ArgumentException: Value does not fall
+within the expected range` from `ItemsControl.ItemsSource`. The panel bound a
+`CommandItem[]`, where `CommandItem` is nested in `CommandsPanel`. CsWinRT's AOT vtable
+lookup keys that array as `CommandsPanel.CommandItem[]`, but the runtime type name is
+`CommandsPanel+CommandItem[]`, so the lookup misses, the object reaches XAML without
+`IBindableIterable`, and the setter fails with E_INVALIDARG. `List<CommandItem>` is keyed with
+the `+` form and works, even for a private nested type. Bind a `List<T>` (or a top-level
+type) rather than an array of a nested type. JIT (Debug) builds don't show the problem.

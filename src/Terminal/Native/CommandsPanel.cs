@@ -143,9 +143,9 @@ internal sealed partial class CommandsPanel : Grid
         if (fingerprint == _fingerprint)
             return;
         _fingerprint = fingerprint;
-        var items = marks.Select(m => new CommandItem(m, _copyCommand, _successBrush, _failureBrush, _mutedBrush)).ToArray();
-        _count.Text = items.Length == 0 ? string.Empty : items.Length.ToString();
-        _list.Header = items.Length == 0
+        var items = marks.Select(m => new CommandItem(m, _copyCommand, _successBrush, _failureBrush, _mutedBrush)).ToList();
+        _count.Text = items.Count == 0 ? string.Empty : items.Count.ToString();
+        _list.Header = items.Count == 0
             ? new TextBlock
             {
                 Text = "No commands yet",
@@ -154,8 +154,11 @@ internal sealed partial class CommandsPanel : Grid
                 Foreground = _mutedBrush,
             }
             : null;
+        // A List, not an array: CsWinRT's AOT lookup keys arrays of nested types by the wrong
+        // name ("Outer.Inner[]" rather than "Outer+Inner[]"), so an array gets no list
+        // interface and ItemsSource throws E_INVALIDARG.
         _list.ItemsSource = items;
-        if (items.Length > 0)
+        if (items.Count > 0)
             _list.ScrollIntoView(items[^1]);
     }
 
