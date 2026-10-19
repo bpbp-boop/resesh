@@ -1106,3 +1106,20 @@ timestamps (`GhosttyLineTimes`), and command marks during rewind and playback.
 - Importers: OpenSSH `ProxyJump` (the last hop of a chain) and PuTTY's SSH proxy link to a
   session of that name or host when one exists; PuTTY SOCKS and HTTP proxies import without
   their passwords. Backup import remaps jump references with the session ids.
+
+## 2026-10-19 - Moving a tab between split groups from the keyboard
+
+- Alt+Shift+arrow moves the active tab to the neighbouring group, the one Alt+arrow would
+  focus. Ctrl+Alt+arrow was the obvious pick but is AltGr on many European layouts; Ctrl+Shift
+  up and down are already Previous/Next Command. Like Alt+arrow, the keys go to the shell
+  when the window is not split, since shells and editors use them for word motion.
+- Going left or right into a stack of groups, the tab goes to the topmost one that shares the
+  edge (`preferTopmost`), not the most centered one Alt+arrow focuses, so where it lands
+  does not depend on the panes' heights.
+- The tab goes to the end of the target group. Pinned tabs stay put, as they do when dragged.
+  With no group in that direction the key does nothing; it does not create a split.
+- Animation: when the tab's old group keeps other tabs, the layout does not change, so only
+  the tab's own view slides from the old pane to the new one at its final size, with the
+  target pane and its ancestor grids raised (ZIndex) so it draws over its neighbours. When
+  the tab was the group's last, the group collapses and the existing pane motion plays instead;
+  sliding the tab as well would fight the growing pane's clip.

@@ -55,12 +55,16 @@ public static class GroupNavigation
     private const double Tolerance = 2;
 
     /// <summary>The nearest candidate on the <paramref name="direction"/> side that shares some
-    /// of the current group's edge. Ties go to the candidate most centered on that edge.</summary>
+    /// of the current group's edge. Ties go to the candidate most centered on that edge, or,
+    /// with <paramref name="preferTopmost"/>, going left or right, to the topmost one: a tab
+    /// moved into a stack of groups lands somewhere predictable.</summary>
     public static T? FindNeighbor<T>(
         IReadOnlyList<(T Item, LayoutBounds Bounds)> groups,
         LayoutBounds current,
-        NavigationDirection direction) where T : class
+        NavigationDirection direction,
+        bool preferTopmost = false) where T : class
     {
+        var horizontal = direction is NavigationDirection.Left or NavigationDirection.Right;
         T? best = null;
         var bestDistance = double.MaxValue;
         var bestOffset = double.MaxValue;
@@ -83,6 +87,8 @@ public static class GroupNavigation
             };
             if (distance < -Tolerance || !overlaps)
                 continue;
+            if (preferTopmost && horizontal)
+                offset = bounds.Y;
             if (distance < bestDistance - Tolerance
                 || (Math.Abs(distance - bestDistance) <= Tolerance && offset < bestOffset))
             {

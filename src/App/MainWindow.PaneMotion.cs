@@ -16,7 +16,8 @@ namespace Resesh.App;
 //   - a shrinking pane snaps, and its neighbours cover the space it gave up;
 //   - a split's new pane steps aside: the tab that moved starts where it was shown and
 //     slides over into its new slot, uncovering the pane it left;
-//   - other new panes (an unzoom) slide in from the side away from the panes that stayed.
+//   - other new panes (an unzoom) slide in from the side away from the panes that stayed;
+//   - a tab moved into a pane that was already open slides across from the pane it left.
 // Panes are never resized mid-animation: the terminal reflows once, at its final size, and
 // composition only moves and clips what is already drawn. Nothing fades: a terminal's swap
 // chain composes near-black under partial opacity.
@@ -34,6 +35,9 @@ public sealed partial class MainWindow
     private readonly HashSet<TabGroupView> _movedPanes = [];
     // A split's new pane, and the pane its tab was shown in before the split.
     private readonly Dictionary<TabGroupView, TabGroupView> _steppingAside = [];
+    // A tab sliding into a pane that was already open, and what was raised to draw it on top.
+    private UIElement? _slidingTab;
+    private readonly List<(UIElement Element, int ZIndex)> _slideRaised = [];
     private bool _paneMotionCaptured;
     private bool _paneMotionWaiting;
     private int _paneSettlePasses;
@@ -261,6 +265,79 @@ public sealed partial class MainWindow
         return Math.Abs(direction.X) >= Math.Abs(direction.Y)
             ? new Vector2(Math.Sign(direction.X), 0)
             : new Vector2(0, Math.Sign(direction.Y));
+    }
+
+    // ---- a tab moving between panes ----
+
+    /// <summary>Where a pane's terminals are drawn, or null when motion is off or the pane
+    /// is not laid out.</summary>
+    private Rect? TerminalRect(TabGroupView view)
+    {
+        var area = view.TerminalArea;
+        if (!PaneMotionEnabled || !area.IsLoaded || area.ActualWidth <= 0 || area.ActualHeight <= 0)
+            return null;
+        try
+        {
+            return area.TransformToVisual(GroupArea)
+                .TransformBounds(new Rect(0, 0, area.ActualWidth, area.ActualHeight));
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    // A tab moved into a pane that was already open: its content starts where it was shown
+    // and slides over into its new pane, uncovering the tab its old pane shows next. The
+    // layout does not change, so only the tab's own view moves, at its final size. Its pane
+    // and that pane's ancestors draw above the rest of the layout until the slide ends.
+    private void SlideTabAcross(UIElement content, TabGroupView target, Rect from, Rect to)
+    {
+        StopTabSlide();
+        var offset = new Vector3((float)(from.X - to.X), (float)(from.Y - to.Y), 0);
+        if (offset.LengthSquared() < 0.25f)
+            return;
+
+        for (var element = (DependencyObject)target;
+            element is UIElement raised && !ReferenceEquals(element, GroupArea);
+            element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element))
+        {
+            _slideRaised.Add((raised, Microsoft.UI.Xaml.Controls.Canvas.GetZIndex(raised)));
+            Microsoft.UI.Xaml.Controls.Canvas.SetZIndex(raised, 2);
+        }
+
+        ElementCompositionPreview.SetIsTranslationEnabled(content, true);
+        _slidingTab = content;
+        var visual = ElementCompositionPreview.GetElementVisual(content);
+        var compositor = visual.Compositor;
+        var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+        var move = compositor.CreateVector3KeyFrameAnimation();
+        move.InsertKeyFrame(0f, offset);
+        move.InsertKeyFrame(1f, Vector3.Zero, PaneEaseOut(compositor));
+        move.Duration = PaneMoveDuration;
+        visual.StartAnimation("Translation", move);
+        batch.End();
+        batch.Completed += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        {
+            // A later move may have started its own slide in the meantime.
+            if (ReferenceEquals(_slidingTab, content))
+                StopTabSlide();
+        });
+    }
+
+    /// <summary>Puts a sliding tab in its slot and the layout's draw order back.</summary>
+    private void StopTabSlide()
+    {
+        if (_slidingTab is { } content)
+        {
+            var visual = ElementCompositionPreview.GetElementVisual(content);
+            visual.StopAnimation("Translation");
+            visual.Properties.InsertVector3("Translation", Vector3.Zero);
+            _slidingTab = null;
+        }
+        foreach (var (element, zIndex) in _slideRaised)
+            Microsoft.UI.Xaml.Controls.Canvas.SetZIndex(element, zIndex);
+        _slideRaised.Clear();
     }
 
     private void StopPaneMotion(TabGroupView view)

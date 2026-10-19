@@ -57,9 +57,10 @@ public class KeyBindingsTests
     [Fact]
     public void AltArrowOnlyTakesTheKeyWhileSplit()
     {
+        // Alt+arrow and Alt+Shift+arrow are word motion and selection in shells and editors.
         var altChords = KeyBindings.All.Where(binding =>
             binding.Scope != ShortcutScope.SessionTree
-            && binding.Chords.Any(chord => chord.Modifiers == KeyModifiers.Alt));
+            && binding.Chords.Any(chord => chord.Modifiers is KeyModifiers.Alt or (KeyModifiers.Alt | KeyModifiers.Shift)));
         Assert.All(altChords, binding => Assert.Equal(ShortcutCondition.Split, binding.Condition));
     }
 
@@ -71,6 +72,7 @@ public class KeyBindingsTests
         Assert.Equal("Ctrl+F4", KeyBindings.Get(ShortcutIds.CloseTab).Chords[1].Label);
         Assert.Equal("Ctrl+Shift+\\", KeyBindings.Get(ShortcutIds.SplitRight).Label);
         Assert.Equal("Alt+←", KeyBindings.Get(ShortcutIds.FocusGroupLeft).Label);
+        Assert.Equal("Alt+Shift+→", KeyBindings.Get(ShortcutIds.MoveTabToGroupRight).Label);
         Assert.Equal("Ctrl+1 … Ctrl+8", KeyBindings.Get(ShortcutIds.GoToTab).Label);
     }
 
@@ -196,5 +198,31 @@ public class ShortcutNavigationTests
         ];
         Assert.Equal("a", GroupNavigation.FindNeighbor(layout, layout[2].Bounds, NavigationDirection.Up));
         Assert.Equal("c", GroupNavigation.FindNeighbor(layout, layout[1].Bounds, NavigationDirection.Down));
+    }
+
+    [Fact]
+    public void PreferTopmostPicksTheTopOfAStackGoingLeftOrRight()
+    {
+        //  +-----+-----+-----+
+        //  |  a  |  b  |  e  |
+        //  |     +-----+     |
+        //  |     |  c  |     |
+        //  |     +-----+     |
+        //  |     |  d  |     |
+        //  +-----+-----+-----+
+        (string Item, LayoutBounds Bounds)[] layout =
+        [
+            ("a", new LayoutBounds(0, 0, 300, 600)),
+            ("b", new LayoutBounds(302, 0, 300, 198)),
+            ("c", new LayoutBounds(302, 200, 300, 200)),
+            ("d", new LayoutBounds(302, 402, 300, 198)),
+            ("e", new LayoutBounds(604, 0, 300, 600)),
+        ];
+        // Without it, the most centered group wins.
+        Assert.Equal("c", GroupNavigation.FindNeighbor(layout, layout[0].Bounds, NavigationDirection.Right));
+        Assert.Equal("b", GroupNavigation.FindNeighbor(layout, layout[0].Bounds, NavigationDirection.Right, preferTopmost: true));
+        Assert.Equal("b", GroupNavigation.FindNeighbor(layout, layout[4].Bounds, NavigationDirection.Left, preferTopmost: true));
+        // Going up or down is unchanged, and only groups that share the edge count.
+        Assert.Equal("c", GroupNavigation.FindNeighbor(layout, layout[3].Bounds, NavigationDirection.Up, preferTopmost: true));
     }
 }

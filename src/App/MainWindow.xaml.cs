@@ -298,6 +298,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
                 return tab is not null && FocusNeighborGroup(group, NavigationDirection.Up);
             case ShortcutIds.FocusGroupDown:
                 return tab is not null && FocusNeighborGroup(group, NavigationDirection.Down);
+            case ShortcutIds.MoveTabToGroupLeft:
+                return tab is not null && MoveTabToNeighborGroup(tab, NavigationDirection.Left);
+            case ShortcutIds.MoveTabToGroupRight:
+                return tab is not null && MoveTabToNeighborGroup(tab, NavigationDirection.Right);
+            case ShortcutIds.MoveTabToGroupUp:
+                return tab is not null && MoveTabToNeighborGroup(tab, NavigationDirection.Up);
+            case ShortcutIds.MoveTabToGroupDown:
+                return tab is not null && MoveTabToNeighborGroup(tab, NavigationDirection.Down);
         }
 
         // Everything else runs the command the menus and palette run. It runs only where
@@ -380,6 +388,44 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         if (!ViewModel.IsSplit)
             return false;
+        if (FindNeighborGroup(current, direction) is { } target)
+        {
+            FocusGroup(target);
+            if (target.SelectedTab is { } selected)
+                FocusTabContent(selected);
+        }
+        return true;
+    }
+
+    /// <summary>Moves a tab to the end of the group next to its own on screen, and focuses it
+    /// there. Pinned tabs stay at the front of their group, as they do when dragged.</summary>
+    private bool MoveTabToNeighborGroup(TabViewModel tab, NavigationDirection direction)
+    {
+        if (!ViewModel.IsSplit)
+            return false;
+        var source = ViewModel.GroupOf(tab);
+        if (tab.IsPinned || FindNeighborGroup(source, direction, preferTopmost: true) is not { } target)
+            return true;
+
+        var sourceView = _groupViews[source];
+        var targetView = _groupViews[target];
+        // A lone tab's group collapses and the panes animate into its space instead.
+        var slideFrom = source.Tabs.Count > 1 && ReferenceEquals(source.SelectedTab, tab)
+            ? TerminalRect(sourceView)
+            : null;
+        var slideTo = TerminalRect(targetView);
+
+        MoveTabBetweenGroups(tab, target, target.Tabs.Count);
+        if (slideFrom is { } from && slideTo is { } to && tab.View is UIElement view)
+            SlideTabAcross(view, targetView, from, to);
+        FocusTabContent(tab);
+        return true;
+    }
+
+    /// <summary>The group next to <paramref name="current"/> on screen, or null when none is.</summary>
+    private TabGroupViewModel? FindNeighborGroup(
+        TabGroupViewModel current, NavigationDirection direction, bool preferTopmost = false)
+    {
         var groups = new List<(TabGroupViewModel Item, LayoutBounds Bounds)>();
         LayoutBounds? origin = null;
         foreach (var (group, view) in _groupViews)
@@ -393,15 +439,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             if (ReferenceEquals(group, current))
                 origin = bounds;
         }
-        if (origin is null)
-            return false;
-        if (GroupNavigation.FindNeighbor(groups, origin.Value, direction) is { } target)
-        {
-            FocusGroup(target);
-            if (target.SelectedTab is { } selected)
-                FocusTabContent(selected);
-        }
-        return true;
+        return origin is null ? null : GroupNavigation.FindNeighbor(groups, origin.Value, direction, preferTopmost);
     }
 
     private void FocusTabContent(TabViewModel tab)

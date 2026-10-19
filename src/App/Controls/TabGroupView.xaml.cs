@@ -421,6 +421,9 @@ public sealed partial class TabGroupView : UserControl
 
     // ---- terminal hosting ----
 
+    /// <summary>Where this group's terminals are drawn, below the tab strip.</summary>
+    public FrameworkElement TerminalArea => TerminalHost;
+
     public void AddTerminal(UIElement view)
     {
         TerminalHost.Children.Add(view);

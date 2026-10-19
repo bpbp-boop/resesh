@@ -109,6 +109,10 @@ public static class ShortcutIds
     public const string FocusGroupRight = "group.focusRight";
     public const string FocusGroupUp = "group.focusUp";
     public const string FocusGroupDown = "group.focusDown";
+    public const string MoveTabToGroupLeft = "group.moveTabLeft";
+    public const string MoveTabToGroupRight = "group.moveTabRight";
+    public const string MoveTabToGroupUp = "group.moveTabUp";
+    public const string MoveTabToGroupDown = "group.moveTabDown";
 
     public const string Copy = "terminal.copy";
     public const string Paste = "terminal.paste";
@@ -144,6 +148,7 @@ public static class KeyBindings
     private const KeyModifiers Shift = KeyModifiers.Shift;
     private const KeyModifiers Alt = KeyModifiers.Alt;
     private const KeyModifiers CtrlShift = KeyModifiers.Ctrl | KeyModifiers.Shift;
+    private const KeyModifiers AltShift = KeyModifiers.Alt | KeyModifiers.Shift;
 
     public const string ApplicationCategory = "Application";
     public const string TabsCategory = "Tabs";
@@ -249,6 +254,14 @@ public static class KeyBindings
             [Chord(Alt, VirtualKeys.Up, "↑")], SplitOnly, ShortcutCondition.Split);
         Add(ShortcutIds.FocusGroupDown, Split, "Focus Group Below", ShortcutScope.App,
             [Chord(Alt, VirtualKeys.Down, "↓")], SplitOnly, ShortcutCondition.Split);
+        Add(ShortcutIds.MoveTabToGroupLeft, Split, "Move Tab to Group on the Left", ShortcutScope.App,
+            [Chord(AltShift, VirtualKeys.Left, "←")], SplitOnly, ShortcutCondition.Split);
+        Add(ShortcutIds.MoveTabToGroupRight, Split, "Move Tab to Group on the Right", ShortcutScope.App,
+            [Chord(AltShift, VirtualKeys.Right, "→")], SplitOnly, ShortcutCondition.Split);
+        Add(ShortcutIds.MoveTabToGroupUp, Split, "Move Tab to Group Above", ShortcutScope.App,
+            [Chord(AltShift, VirtualKeys.Up, "↑")], SplitOnly, ShortcutCondition.Split);
+        Add(ShortcutIds.MoveTabToGroupDown, Split, "Move Tab to Group Below", ShortcutScope.App,
+            [Chord(AltShift, VirtualKeys.Down, "↓")], SplitOnly, ShortcutCondition.Split);
 
         const string Term = TerminalCategory;
         Add(ShortcutIds.Copy, Term, "Copy", ShortcutScope.Terminal,
