@@ -1,4 +1,4 @@
-using Renci.SshNet;
+﻿using Renci.SshNet;
 using Renci.SshNet.Common;
 using Session = Resesh.Core.Models.Session;
 
@@ -9,7 +9,7 @@ public sealed record KeyboardInteractivePrompt(string Text, bool IsSecret);
 /// <summary>
 /// Connection plumbing shared by the terminal (SshClient) and the file pane (SftpClient):
 /// auth-method construction, failure classification, and the fast TCP preflight.
-/// Auth methods are stateful in SSH.NET — build a fresh set per client, never share them.
+/// Auth methods are stateful in SSH.NET â€” build a fresh set per client, never share them.
 /// </summary>
 internal static class SshConnectionFactory
 {
@@ -81,7 +81,7 @@ internal static class SshConnectionFactory
     internal static SshSessionException Classify(Exception ex) => ex switch
     {
         SshAuthenticationException => new SshSessionException(
-            SshFailureKind.AuthenticationFailed, "Authentication failed — check the username and credential.", ex),
+            SshFailureKind.AuthenticationFailed, "Authentication failed â€” check the username and credential.", ex),
         ProxyException => new SshSessionException(
             SshFailureKind.HostUnreachable, $"The proxy refused the connection: {ex.Message}", ex),
         SshConnectionException or System.Net.Sockets.SocketException => new SshSessionException(
@@ -266,8 +266,7 @@ internal static class SshConnectionFactory
             System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
         try
         {
-            socket.ConnectAsync(host, port, cancellationToken).AsTask()
-                .WaitAsync(timeout, cancellationToken).GetAwaiter().GetResult();
+            WaitObserved(socket.ConnectAsync(host, port, cancellationToken).AsTask(), timeout, cancellationToken);
         }
         catch (TimeoutException)
         {
@@ -280,4 +279,42 @@ internal static class SshConnectionFactory
                 SshFailureKind.HostUnreachable, $"Could not reach {host}:{port}: {se.Message}", se);
         }
     }
+
+    /// <summary>
+    /// Waits for a socket operation with a timeout. When the wait gives up first, disposing the
+    /// socket later fails the abandoned operation (SocketException 995); nothing else reads that
+    /// failure, so the finalizer would report it as an unobserved task exception.
+    /// </summary>
+    internal static void WaitObserved(Task task, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        try
+        {
+            task.WaitAsync(timeout, cancellationToken).GetAwaiter().GetResult();
+        }
+        catch when (!task.IsCompleted)
+        {
+            Observe(task);
+            throw;
+        }
+    }
+
+    /// <inheritdoc cref="WaitObserved(Task, TimeSpan, CancellationToken)"/>
+    internal static T WaitObserved<T>(Task<T> task, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return task.WaitAsync(timeout, cancellationToken).GetAwaiter().GetResult();
+        }
+        catch when (!task.IsCompleted)
+        {
+            Observe(task);
+            throw;
+        }
+    }
+
+    private static void Observe(Task task) => task.ContinueWith(
+        static t => _ = t.Exception,
+        CancellationToken.None,
+        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+        TaskScheduler.Default);
 }

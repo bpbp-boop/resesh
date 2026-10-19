@@ -167,8 +167,9 @@ public sealed class SshJumpChain : IDisposable
         {
             socket.Connect(System.Net.IPAddress.Loopback, Port);
             var greeting = new byte[1];
-            answered = socket.ReceiveAsync(greeting, System.Net.Sockets.SocketFlags.None, cancellationToken).AsTask()
-                .WaitAsync(timeout, cancellationToken).GetAwaiter().GetResult() > 0;
+            answered = SshConnectionFactory.WaitObserved(
+                socket.ReceiveAsync(greeting, System.Net.Sockets.SocketFlags.None, cancellationToken).AsTask(),
+                timeout, cancellationToken) > 0;
         }
         catch (TimeoutException)
         {
