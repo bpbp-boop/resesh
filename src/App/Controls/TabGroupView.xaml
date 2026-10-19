@@ -335,7 +335,7 @@
                                         <Ellipse
                                             Width="7"
                                             Height="7"
-                                            Fill="#E74856"
+                                            Fill="{ThemeResource SessionRecordingBrush}"
                                             VerticalAlignment="Center"
                                             Visibility="{x:Bind local:PresentationValues.Visible(IsRecording), Mode=OneWay}"
                                             ToolTipService.ToolTip="{x:Bind RecordingTooltip, Mode=OneWay}" />
@@ -379,7 +379,7 @@
                                                     Width="10"
                                                     Height="10"
                                                     Data="{x:Bind local:PresentationValues.AgentBadgeSymbol(Agent.Attention), Mode=OneWay}"
-                                                    Stroke="#1B1B1B"
+                                                    Stroke="{StaticResource SessionBadgeGlyphBrush}"
                                                     StrokeThickness="1.6"
                                                     StrokeStartLineCap="Round"
                                                     StrokeEndLineCap="Round"

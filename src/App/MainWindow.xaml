@@ -980,7 +980,7 @@
                 Grid.Column="1"
                 Grid.ColumnSpan="3"
                 Canvas.ZIndex="3"
-                Background="#33000000"
+                Background="{ThemeResource SessionScrimSubtleBrush}"
                 Visibility="Collapsed"
                 PointerPressed="PaneDismissLayer_PointerPressed" />
         </Grid>

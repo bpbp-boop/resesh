@@ -141,7 +141,7 @@
             x:Name="Backdrop"
             HorizontalAlignment="Stretch"
             VerticalAlignment="Stretch"
-            Background="#66000000"
+            Background="{ThemeResource SessionScrimBrush}"
             BorderThickness="0"
             IsTabStop="False"
             Click="Backdrop_Click"

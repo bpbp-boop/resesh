@@ -27,6 +27,9 @@
             <SolidColorBrush x:Key="SessionTreeSelectionForegroundBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="SettingsCardBorderBrush" Color="#2B2B2B" />
             <SolidColorBrush x:Key="SettingsCardBackgroundBrush" Color="#121212" />
+            <!-- PresentationValues.AgentBadgeColor fills the agent badge the same in every theme,
+                 so the symbol drawn on it stays dark in every theme too. -->
+            <SolidColorBrush x:Key="SessionBadgeGlyphBrush" Color="#1B1B1B" />
             <!-- A recessed surface for sample output and code on the Settings page. -->
             <Style x:Key="PreviewSurfaceStyle" TargetType="Border">
                 <Setter Property="Padding" Value="12,10" />
@@ -41,18 +44,30 @@
                     <SolidColorBrush x:Key="SessionFrameBrush" Color="#3C3C3C" />
                     <SolidColorBrush x:Key="SessionDividerBrush" Color="#424242" />
                     <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="#0078D4" />
+                    <!-- Dims what sits behind an overlay: the strong scrim behind a modal panel,
+                         the subtle one behind the floating sessions pane. -->
+                    <SolidColorBrush x:Key="SessionScrimBrush" Color="#66000000" />
+                    <SolidColorBrush x:Key="SessionScrimSubtleBrush" Color="#33000000" />
+                    <SolidColorBrush x:Key="SessionRecordingBrush" Color="#E74856" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="SessionSurfaceBrush" Color="#F3F3F3" />
                     <SolidColorBrush x:Key="SessionFrameBrush" Color="#C8C8C8" />
                     <SolidColorBrush x:Key="SessionDividerBrush" Color="#E6E6E6" />
                     <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="#0078D4" />
+                    <SolidColorBrush x:Key="SessionScrimBrush" Color="#66000000" />
+                    <SolidColorBrush x:Key="SessionScrimSubtleBrush" Color="#33000000" />
+                    <SolidColorBrush x:Key="SessionRecordingBrush" Color="#E74856" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <SolidColorBrush x:Key="SessionSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="SessionFrameBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
                     <SolidColorBrush x:Key="SessionDividerBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
                     <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <!-- High Contrast never dims content behind an overlay. -->
+                    <SolidColorBrush x:Key="SessionScrimBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="SessionScrimSubtleBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="SessionRecordingBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>
