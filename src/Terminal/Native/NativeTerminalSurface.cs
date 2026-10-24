@@ -1603,7 +1603,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     {
         if (_disposed || _readOnly || !_connected || !_inputEnabled || _term == IntPtr.Zero || string.IsNullOrEmpty(text))
             return;
-        if (text.Contains('\r') || text.Contains('\n'))
+        text = TerminalPaste.Normalize(text);
+        if (text.Contains('\n'))
             RefreshCommands()?.NotifyEnter();
         var bytes = Encoding.UTF8.GetBytes(text);
         fixed (byte* p = bytes)

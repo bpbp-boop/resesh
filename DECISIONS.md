@@ -1142,3 +1142,17 @@ The URI still opens correctly with a row-only hit, which hid the missing underli
 other rows. Resolve the run in `TerminalCommandBuffer`, crossing a row boundary only when
 it is soft-wrapped and the next cell has the same URI. Hard line breaks, different URIs,
 unlinked cells and viewport edges stop the run. Plain-text URL detection is unchanged.
+
+## 2026-10-21 - Paste Windows line endings as LF
+
+libghostty-vt's paste encoder (pinned b699ea7) turns each LF into CR when bracketed paste is
+off, as xterm does, so Windows clipboard text with CR LF line endings arrived as CR CR: two
+Enters per line. With bracketed paste on, the program saw CR LF as written.
+`TerminalPaste.Normalize` turns CR LF and lone CR into LF before `rvt_paste`, giving one
+Enter per line unbracketed and plain newlines bracketed.
+
+Copy already joins soft-wrapped rows (`unwrap = true`). Inbox ConPTY on Windows 11 26200
+leaves cmd and PowerShell long lines soft-wrapped, including after a resize. Line breaks in
+copied text come from programs that wrap text themselves and write real line breaks
+(full-screen apps such as Claude Code, tmux, vim). The terminal cannot tell those breaks
+from intended ones.
