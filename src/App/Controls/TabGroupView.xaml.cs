@@ -429,8 +429,10 @@ public sealed partial class TabGroupView : UserControl
         TerminalHost.Children.Add(view);
         SyncTerminalVisibility();
         // A new tab is selected before its view exists, so the selection change had
-        // nothing to focus. Focus it now if it is the focused group's active tab.
-        if (Group.SelectedTab is { IsGroupFocused: true } tab && ReferenceEquals(tab.View, view))
+        // nothing to focus. Focus it now if it is the focused group's active tab, unless
+        // the user is typing in the palette or session search.
+        if (Group.SelectedTab is { IsGroupFocused: true } tab && ReferenceEquals(tab.View, view)
+            && (view as Terminal.TerminalTabView)?.IsFocusHeldElsewhere?.Invoke() != true)
             FocusTerminal(tab);
     }
 
