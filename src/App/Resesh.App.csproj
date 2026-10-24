@@ -22,7 +22,16 @@
          install is a third the size of a ReadyToRun build. Applies to dotnet publish only;
          it also turns on the trimming and AOT analyzers for this project. -->
     <PublishAot>true</PublishAot>
+    <WindowsAppSdkRuntimeVersion>2.4.0</WindowsAppSdkRuntimeVersion>
+    <GhosttyVtManifest>$(MSBuildThisFileDirectory)..\..\eng\ghostty-vt.json</GhosttyVtManifest>
   </PropertyGroup>
+
+  <!-- Shown on the About page. The first "version" in ghostty-vt.json is Ghostty's. -->
+  <ItemGroup>
+    <AssemblyMetadata Include="WindowsAppSdkVersion" Value="$(WindowsAppSdkRuntimeVersion)" />
+    <AssemblyMetadata Include="GhosttyVersion" Condition="Exists('$(GhosttyVtManifest)')"
+                      Value="$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(GhosttyVtManifest)')), '&quot;version&quot;:\s*&quot;([^&quot;]+)&quot;').Groups[1].Value)" />
+  </ItemGroup>
 
   <ItemGroup>
     <Content Include="..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
@@ -44,7 +53,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.6" />
-    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.4.0" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="$(WindowsAppSdkRuntimeVersion)" GeneratePathProperty="true" />
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.6" />
     <!-- CommunityToolkit.WinUI still declares the old monolithic SDK package. Keep its
          dependency satisfied without importing that package's assets or build targets. -->

@@ -236,6 +236,9 @@ public sealed partial class MainViewModel
     private Task OpenSettingsAsync(GlobalSettingsTarget? target) =>
         Services.ShowSettingsAsync(target ?? GlobalSettingsTarget.General);
 
+    [RelayCommand(AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
+    private Task ShowAboutAsync() => Services.ShowSettingsAsync(GlobalSettingsTarget.About);
+
     [RelayCommand]
     private void Exit() => Services.CloseWindow();
 

@@ -79,7 +79,7 @@ public sealed partial class TabGroupView : UserControl
     private int _dragTargetIndex;
     private int _previewVersion;
     private ScrollViewer? _tabScrollViewer;
-    private ScrollContentPresenter? _tabViewport;
+    private ContentPresenter? _tabViewport;
     private double _dragInitialScrollOffset;
     private double _dragPointerX;
     private readonly DispatcherTimer _dragScrollTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
@@ -463,10 +463,15 @@ public sealed partial class TabGroupView : UserControl
         // WinUI's TabViewListView template inserts a fixed 4px ItemsPresenter header
         // and another 1px on its ScrollContentPresenter. Keep the header object alive
         // because TabView visual states target its named border, but collapse its width.
-        if (FindDescendant(Tabs, "TabsItemsPresenter") is ItemsPresenter { Header: FrameworkElement header })
+        // Match these parts by base type and reach the header through the visual tree:
+        // under Native AOT the template's ItemsPresenter and ScrollContentPresenter come
+        // back as plain FrameworkElement and ContentPresenter, so exact-type checks fail.
+        if (FindDescendant(Tabs, "TabsItemsPresenter") is { } itemsPresenter &&
+            VisualTreeHelper.GetChildrenCount(itemsPresenter) > 0 &&
+            VisualTreeHelper.GetChild(itemsPresenter, 0) is ContentControl header)
             header.Width = 0;
 
-        if (FindDescendant(Tabs, "ScrollContentPresenter") is ScrollContentPresenter scrollContent)
+        if (FindDescendant(Tabs, "ScrollContentPresenter") is ContentPresenter scrollContent)
         {
             _tabViewport = scrollContent;
             scrollContent.Padding = new Thickness(0);

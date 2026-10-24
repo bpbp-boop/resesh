@@ -1,0 +1,173 @@
+<UserControl
+    x:Class="Resesh.App.Controls.AboutView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Resesh.App.Controls"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <UserControl.Resources>
+        <Style x:Key="AboutGroupHeader" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+            <Setter Property="Margin" Value="1,20,0,4" />
+        </Style>
+        <Style x:Key="AboutValue" TargetType="TextBlock">
+            <Setter Property="IsTextSelectionEnabled" Value="True" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="TextAlignment" Value="Right" />
+            <Setter Property="Foreground" Value="{StaticResource SessionTreeMutedForegroundBrush}" />
+        </Style>
+    </UserControl.Resources>
+
+    <StackPanel Spacing="4">
+        <!-- Identity: icon, name, version, and the one action people come here for. -->
+        <Grid ColumnSpacing="18" Margin="0,4,0,8" ColumnDefinitions="Auto,*,Auto">
+            <Image
+                x:Name="AppIcon"
+                Width="64"
+                Height="64"
+                VerticalAlignment="Center"
+                AutomationProperties.AccessibilityView="Raw" />
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                <TextBlock Text="resesh" Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock
+                    Text="A tabbed SSH and local terminal client for Windows."
+                    TextWrapping="Wrap"
+                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                <TextBlock
+                    x:Name="VersionLine"
+                    Margin="0,4,0,0"
+                    IsTextSelectionEnabled="True"
+                    AutomationProperties.AutomationId="AboutVersion" />
+            </StackPanel>
+            <Button
+                x:Name="CopyDetailsButton"
+                Grid.Column="2"
+                VerticalAlignment="Center"
+                Click="CopyDetails_Click"
+                AutomationProperties.AutomationId="AboutCopyDetails"
+                ToolTipService.ToolTip="Copy the version and system details, for a bug report">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon x:Name="CopyDetailsIcon" Glyph="&#xE8C8;" FontSize="14" />
+                    <TextBlock x:Name="CopyDetailsText" Text="Copy details" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <TextBlock Text="Links" Style="{StaticResource AboutGroupHeader}" />
+        <toolkit:SettingsCard
+            Header="Website"
+            Description="resesh.net"
+            IsClickEnabled="True"
+            Tag="https://resesh.net/"
+            Click="Link_Click">
+            <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
+            <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE774;" /></toolkit:SettingsCard.HeaderIcon>
+        </toolkit:SettingsCard>
+        <toolkit:SettingsCard
+            Header="Release notes"
+            Description="What changed in each version, and downloads for the latest one"
+            IsClickEnabled="True"
+            Tag="https://github.com/bpbp-boop/resesh/releases"
+            Click="Link_Click">
+            <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
+            <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE8FD;" /></toolkit:SettingsCard.HeaderIcon>
+        </toolkit:SettingsCard>
+        <toolkit:SettingsCard
+            Header="Report a problem"
+            Description="Open an issue on GitHub. Copy details above first and paste them in."
+            IsClickEnabled="True"
+            Tag="https://github.com/bpbp-boop/resesh/issues"
+            Click="Link_Click">
+            <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
+            <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xEBE8;" /></toolkit:SettingsCard.HeaderIcon>
+        </toolkit:SettingsCard>
+        <toolkit:SettingsCard
+            Header="Source code"
+            Description="github.com/bpbp-boop/resesh"
+            IsClickEnabled="True"
+            Tag="https://github.com/bpbp-boop/resesh"
+            Click="Link_Click">
+            <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
+            <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE943;" /></toolkit:SettingsCard.HeaderIcon>
+        </toolkit:SettingsCard>
+
+        <TextBlock Text="System" Style="{StaticResource AboutGroupHeader}" />
+        <toolkit:SettingsCard Header="Windows">
+            <TextBlock x:Name="WindowsValue" Style="{StaticResource AboutValue}" />
+        </toolkit:SettingsCard>
+        <toolkit:SettingsCard Header="Runtime">
+            <TextBlock x:Name="RuntimeValue" Style="{StaticResource AboutValue}" />
+        </toolkit:SettingsCard>
+        <toolkit:SettingsCard x:Name="WindowsAppSdkCard" Header="Windows App SDK">
+            <TextBlock x:Name="WindowsAppSdkValue" Style="{StaticResource AboutValue}" />
+        </toolkit:SettingsCard>
+        <toolkit:SettingsCard x:Name="GhosttyCard" Header="Terminal engine">
+            <TextBlock x:Name="GhosttyValue" Style="{StaticResource AboutValue}" />
+        </toolkit:SettingsCard>
+
+        <TextBlock Text="Files on this computer" Style="{StaticResource AboutGroupHeader}" />
+        <toolkit:SettingsCard
+            x:Name="DataFolderCard"
+            Header="Data folder"
+            IsClickEnabled="True"
+            Click="DataFolder_Click"
+            AutomationProperties.AutomationId="AboutOpenDataFolder">
+            <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
+            <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE8B7;" /></toolkit:SettingsCard.HeaderIcon>
+        </toolkit:SettingsCard>
+        <toolkit:SettingsCard
+            x:Name="LogsFolderCard"
+            Header="Logs and crash reports"
+            IsClickEnabled="True"
+            Click="LogsFolder_Click"
+            AutomationProperties.AutomationId="AboutOpenLogsFolder">
+            <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
+            <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE9F9;" /></toolkit:SettingsCard.HeaderIcon>
+        </toolkit:SettingsCard>
+
+        <TextBlock Text="License" Style="{StaticResource AboutGroupHeader}" />
+        <toolkit:SettingsCard
+            Header="GNU General Public License, version 2"
+            Description="resesh is free software: you can use, study, share, and change it under the terms of the GPL."
+            IsClickEnabled="True"
+            Tag="https://github.com/bpbp-boop/resesh/blob/master/LICENSE"
+            Click="Link_Click">
+            <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
+            <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE8A5;" /></toolkit:SettingsCard.HeaderIcon>
+        </toolkit:SettingsCard>
+
+        <TextBlock Text="Built with" Style="{StaticResource AboutGroupHeader}" />
+        <Border
+            Padding="16,8"
+            CornerRadius="{ThemeResource ControlCornerRadius}"
+            BorderThickness="1"
+            BorderBrush="{StaticResource SettingsCardBorderBrush}"
+            Background="{StaticResource SettingsCardBackgroundBrush}">
+            <ItemsControl x:Name="CreditsList">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="local:AboutCredit">
+                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Padding="0,6">
+                            <StackPanel Spacing="1">
+                                <HyperlinkButton
+                                    Padding="0"
+                                    Content="{x:Bind Name}"
+                                    NavigateUri="{x:Bind Uri}"
+                                    ToolTipService.ToolTip="{x:Bind Url}" />
+                                <TextBlock
+                                    Text="{x:Bind Purpose}"
+                                    TextWrapping="Wrap"
+                                    FontSize="12"
+                                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                            </StackPanel>
+                            <TextBlock
+                                Grid.Column="1"
+                                Text="{x:Bind License}"
+                                VerticalAlignment="Center"
+                                FontSize="12"
+                                Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
+    </StackPanel>
+</UserControl>

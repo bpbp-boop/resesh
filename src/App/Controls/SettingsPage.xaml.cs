@@ -12,7 +12,7 @@ namespace Resesh.App.Controls;
 /// </summary>
 public sealed partial class SettingsPage : UserControl
 {
-    private enum Section { General, Sessions, Identities, Recording, Highlighting, Agents, Shortcuts }
+    private enum Section { General, Sessions, Identities, Recording, Highlighting, Agents, Shortcuts, About }
 
     private readonly HighlightsStore _highlightDraft = App.Highlights.CreateDraft();
 
@@ -63,6 +63,7 @@ public sealed partial class SettingsPage : UserControl
         GlobalSettingsTarget.Sessions => Section.Sessions,
         GlobalSettingsTarget.Agents or GlobalSettingsTarget.ShowAgentIcons
             or GlobalSettingsTarget.AgentAlertFlash or GlobalSettingsTarget.AgentAlertSound => Section.Agents,
+        GlobalSettingsTarget.About => Section.About,
         _ => Section.General,
     };
 
@@ -98,6 +99,7 @@ public sealed partial class SettingsPage : UserControl
         HighlightingSection.Visibility = PresentationValues.Visible(section == Section.Highlighting);
         AgentsSection.Visibility = PresentationValues.Visible(section == Section.Agents);
         ShortcutsSection.Visibility = PresentationValues.Visible(section == Section.Shortcuts);
+        AboutSection.Visibility = PresentationValues.Visible(section == Section.About);
         var item = section switch
         {
             Section.Sessions => SessionsItem,
@@ -106,6 +108,7 @@ public sealed partial class SettingsPage : UserControl
             Section.Highlighting => HighlightingItem,
             Section.Agents => AgentsItem,
             Section.Shortcuts => ShortcutsItem,
+            Section.About => AboutItem,
             _ => GeneralItem,
         };
         if (!ReferenceEquals(Sections.SelectedItem, item))

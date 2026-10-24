@@ -1156,3 +1156,14 @@ leaves cmd and PowerShell long lines soft-wrapped, including after a resize. Lin
 copied text come from programs that wrap text themselves and write real line breaks
 (full-screen apps such as Claude Code, tmux, vim). The terminal cannot tell those breaks
 from intended ones.
+## 2026-10-24 - Match WinUI template parts by base type under Native AOT
+
+Release (AOT) builds showed a ~6px strip-coloured gap before the first tab that Debug builds
+didn't. `NormalizeTabStripTemplate` trims WinUI's built-in tab-strip insets by finding named
+template parts and casting them, but under AOT CsWinRT hands back some parts as their nearest
+projected base type: `TabsItemsPresenter` arrives as `FrameworkElement`,
+`ScrollContentPresenter` as `ContentPresenter`, `ItemsStackPanel` as `Panel`, and
+`TabViewListView` as `ListView`. The `is ItemsPresenter` / `is ScrollContentPresenter` checks
+silently failed, so the 4px header, 1px padding and 2px column stayed. Cast template parts
+to a base type that has the members you need (and reach children through
+`VisualTreeHelper`), and check template tweaks in an AOT build, not only Debug.
