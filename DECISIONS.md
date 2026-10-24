@@ -1134,3 +1134,15 @@ lookup keys that array as `CommandsPanel.CommandItem[]`, but the runtime type na
 `IBindableIterable`, and the setter fails with E_INVALIDARG. `List<CommandItem>` is keyed with
 the `+` form and works, even for a private nested type. Bind a `List<T>` (or a top-level
 type) rather than an array of a nested type. JIT (Debug) builds don't show the problem.
+
+## 2026-10-24 - Match WinUI template parts by base type under Native AOT
+
+Release (AOT) builds showed a ~6px strip-coloured gap before the first tab that Debug builds
+didn't. `NormalizeTabStripTemplate` trims WinUI's built-in tab-strip insets by finding named
+template parts and casting them, but under AOT CsWinRT hands back some parts as their nearest
+projected base type: `TabsItemsPresenter` arrives as `FrameworkElement`,
+`ScrollContentPresenter` as `ContentPresenter`, `ItemsStackPanel` as `Panel`, and
+`TabViewListView` as `ListView`. The `is ItemsPresenter` / `is ScrollContentPresenter` checks
+silently failed, so the 4px header, 1px padding and 2px column stayed. Cast template parts
+to a base type that has the members you need (and reach children through
+`VisualTreeHelper`), and check template tweaks in an AOT build, not only Debug.
