@@ -349,6 +349,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             FocusActiveTerminal();
     }
 
+    /// <summary>True while the user is typing in the command palette or the session filter,
+    /// so tabs that finish opening in the background leave keyboard focus there.</summary>
+    internal bool IsTypingInSearch =>
+        CommandPalette.IsOpen || FilterBox.FocusState != FocusState.Unfocused;
+
     private void FocusSessionFilter()
     {
         if (!SessionsPaneShown || _selectedRailTab != "sessions")

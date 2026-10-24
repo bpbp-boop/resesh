@@ -86,6 +86,62 @@ internal sealed unsafe partial class TerminalCommandBuffer(Func<IntPtr> terminal
 
     public bool IsWrapped(int line) => Line(line).Wrapped;
 
+    /// <summary>Finds the visible OSC 8 run, crossing soft wraps but not hard line breaks.</summary>
+    internal (string Uri, (int Row, int Start, int End)[] Spans)? HyperlinkAt(int x, int y)
+    {
+        var term = Terminal;
+        if (term == IntPtr.Zero || x < 0 || x >= _info.Cols || y < 0 || y >= Rows)
+            return null;
+        string? UriAt(int column, int row)
+        {
+            var bytes = stackalloc byte[2048];
+            var length = GhosttyNative.rvt_cell_hyperlink(term, (ushort)column, (ushort)row, bytes, 2048);
+            return length > 0 ? Encoding.UTF8.GetString(bytes, length) : null;
+        }
+        if (UriAt(x, y) is not { } uri)
+            return null;
+        var top = y;
+        var start = x;
+        while (true)
+        {
+            if (start > 0)
+            {
+                if (UriAt(start - 1, top) != uri)
+                    break;
+                start--;
+            }
+            else
+            {
+                if (top == 0 || !IsWrapped(ViewportTop + top) || UriAt(_info.Cols - 1, top - 1) != uri)
+                    break;
+                top--;
+                start = _info.Cols - 1;
+            }
+        }
+        var bottom = y;
+        var end = x + 1;
+        while (true)
+        {
+            if (end < _info.Cols)
+            {
+                if (UriAt(end, bottom) != uri)
+                    break;
+                end++;
+            }
+            else
+            {
+                if (bottom == Rows - 1 || !IsWrapped(ViewportTop + bottom + 1) || UriAt(0, bottom + 1) != uri)
+                    break;
+                bottom++;
+                end = 1;
+            }
+        }
+        var spans = new (int Row, int Start, int End)[bottom - top + 1];
+        for (var row = top; row <= bottom; row++)
+            spans[row - top] = (row, row == top ? start : 0, row == bottom ? end : _info.Cols);
+        return (uri, spans);
+    }
+
     public ICommandMarker? CreateMarker(int line)
     {
         var term = terminal();

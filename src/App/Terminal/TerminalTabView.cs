@@ -123,6 +123,11 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     /// <summary>Raised when recording or rewind availability changes.</summary>
     public event Action? CaptureStateChanged;
 
+    /// <summary>True while the user is typing somewhere the window should not take focus
+    /// from (the command palette or session search). A connection can finish seconds after
+    /// the tab opened, and focusing the terminal then would swallow what they are typing.</summary>
+    public Func<bool>? IsFocusHeldElsewhere { get; set; }
+
     public bool IsRecording => _capture?.IsRecording == true;
     public bool CanRecord => _capture is not null && !_disposed;
     public bool IsRewinding => _rewindPlayer is not null;
@@ -611,6 +616,14 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         ApplyAgent(tracker => tracker.ObserveEnded());
     }
 
+    /// <summary>A finished connection focuses its terminal, unless the user has moved on
+    /// to typing in the palette or session search meanwhile.</summary>
+    private void FocusTerminalOnConnect()
+    {
+        if (IsFocusHeldElsewhere?.Invoke() != true)
+            _terminal.FocusTerminal();
+    }
+
     /// <summary>Moves keyboard focus to this tab's terminal when the tab is selected.</summary>
     public void FocusTerminal()
     {
@@ -705,7 +718,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             {
                 _terminal.SetInputEnabled(true);
                 if (_tab.State == TabConnectionState.Connected)
-                    _terminal.FocusTerminal();
+                    FocusTerminalOnConnect();
             }
         }
     }
@@ -756,7 +769,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             _tab.State = TabConnectionState.Connected;
             _tab.ConnectionSummary = $"pid {local.ProcessId}";
             _terminal.NotifyConnected();
-            _terminal.FocusTerminal();
+            FocusTerminalOnConnect();
             StartAgentPolling();
         }
         catch (OperationCanceledException) when (connection.Token.IsCancellationRequested) { }
@@ -842,7 +855,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 ? $"telnet • {telnet.RemoteEndPoint} • unencrypted"
                 : $"telnet • {Session.Host}:{Session.Port} via {jumpSessions[^1].Name} • unencrypted past the jump host";
             _terminal.NotifyConnected();
-            _terminal.FocusTerminal();
+            FocusTerminalOnConnect();
         }
         catch (Exception ex) when (ex is TelnetSessionException or SshSessionException)
         {
@@ -980,7 +993,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             UpdateSshSummary();
             TunnelsChanged?.Invoke();
             _terminal.NotifyConnected();
-            _terminal.FocusTerminal();
+            FocusTerminalOnConnect();
 
             // Icon auto-suggest: only for sessions where the user never chose anything
             // (null; an explicit "none" also blocks this).

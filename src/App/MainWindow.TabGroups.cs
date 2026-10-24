@@ -162,6 +162,7 @@ public sealed partial class MainWindow
                 owner.Root.ActualWidth < 1200 && owner._sessionsPaneOpen && !owner._paneOverlay)
                 owner.SetSessionsPaneOpen(false);
         };
+        view.IsFocusHeldElsewhere = () => App.WindowFor(tab)?.IsTypingInSearch == true;
         view.UnlockRequested += () => { if (App.WindowFor(tab) is { } owner) _ = owner.HandleUnlockAsync(tab, view); };
         view.IconSuggested += key =>
         {

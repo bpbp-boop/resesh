@@ -1135,6 +1135,27 @@ lookup keys that array as `CommandsPanel.CommandItem[]`, but the runtime type na
 the `+` form and works, even for a private nested type. Bind a `List<T>` (or a top-level
 type) rather than an array of a nested type. JIT (Debug) builds don't show the problem.
 
+## 2026-10-20 - Underline OSC 8 links across soft wraps
+
+OSC 8 hover detection must collect the whole visible link run, not just the pointer's row.
+The URI still opens correctly with a row-only hit, which hid the missing underline on the
+other rows. Resolve the run in `TerminalCommandBuffer`, crossing a row boundary only when
+it is soft-wrapped and the next cell has the same URI. Hard line breaks, different URIs,
+unlinked cells and viewport edges stop the run. Plain-text URL detection is unchanged.
+
+## 2026-10-21 - Paste Windows line endings as LF
+
+libghostty-vt's paste encoder (pinned b699ea7) turns each LF into CR when bracketed paste is
+off, as xterm does, so Windows clipboard text with CR LF line endings arrived as CR CR: two
+Enters per line. With bracketed paste on, the program saw CR LF as written.
+`TerminalPaste.Normalize` turns CR LF and lone CR into LF before `rvt_paste`, giving one
+Enter per line unbracketed and plain newlines bracketed.
+
+Copy already joins soft-wrapped rows (`unwrap = true`). Inbox ConPTY on Windows 11 26200
+leaves cmd and PowerShell long lines soft-wrapped, including after a resize. Line breaks in
+copied text come from programs that wrap text themselves and write real line breaks
+(full-screen apps such as Claude Code, tmux, vim). The terminal cannot tell those breaks
+from intended ones.
 ## 2026-10-24 - Match WinUI template parts by base type under Native AOT
 
 Release (AOT) builds showed a ~6px strip-coloured gap before the first tab that Debug builds
