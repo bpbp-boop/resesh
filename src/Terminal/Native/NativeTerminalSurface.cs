@@ -1437,8 +1437,11 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _lastPointer = position;
         var (x, y) = cell ?? CellAt(position.X, position.Y);
         var nanoseconds = (ulong)(System.Diagnostics.Stopwatch.GetTimestamp() * (1_000_000_000.0 / System.Diagnostics.Stopwatch.Frequency));
-        // Alt+drag selects a rectangle (columns of show output); Shift+click extends.
-        var flags = (Down(0x12) ? 1 : 0) | (kind == GestureKind.Press && Down(0x10) ? 2 : 0);
+        // Alt+drag selects a rectangle (columns of show output); Shift+click extends, except
+        // while the app tracks the mouse: there Shift is what selects at all, so every new
+        // selection would otherwise merge into the last one.
+        var extend = kind == GestureKind.Press && Down(0x10) && GhosttyNative.rvt_mouse_tracking(_term) == 0;
+        var flags = (Down(0x12) ? 1 : 0) | (extend ? 2 : 0);
         GhosttyNative.rvt_gesture(_term, (int)kind, position.X, position.Y, (ushort)x, (ushort)y, nanoseconds,
             (uint)_renderer.OriginX, flags, out var autoscroll, out var clicks, out var dragged);
         SetAutoscroll(kind is GestureKind.Drag or GestureKind.AutoscrollTick ? autoscroll : 0);
