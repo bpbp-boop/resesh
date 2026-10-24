@@ -69,6 +69,10 @@
             <NavigationViewItem x:Name="ShortcutsItem" Content="Keyboard Shortcuts" Tag="Shortcuts" AutomationProperties.AutomationId="SettingsShortcutsTab">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE765;" /></NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItemSeparator />
+            <NavigationViewItem x:Name="AboutItem" Content="About" Tag="About" AutomationProperties.AutomationId="SettingsAboutTab">
+                <NavigationViewItem.Icon><FontIcon Glyph="&#xE946;" /></NavigationViewItem.Icon>
+            </NavigationViewItem>
         </NavigationView.MenuItems>
 
         <!-- One section shows at a time; each keeps its own scroll position. -->
@@ -456,6 +460,19 @@
                 <TextBlock Text="Keyboard Shortcuts" Style="{StaticResource SectionTitle}" />
                 <controls:ShortcutsReference x:Name="Shortcuts" Grid.Row="1" />
             </Grid>
+
+            <!-- ==== About ==== -->
+            <ScrollViewer x:Name="AboutSection" Style="{StaticResource SectionScroller}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MaxWidth="1000" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Style="{StaticResource SectionBody}">
+                        <TextBlock Text="About" Style="{StaticResource SectionTitle}" />
+                        <controls:AboutView />
+                    </StackPanel>
+                </Grid>
+            </ScrollViewer>
         </Grid>
     </NavigationView>
 </UserControl>

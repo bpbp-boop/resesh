@@ -161,6 +161,7 @@ jobs:
             --runtime "${{ matrix.runtime }}" `
             --self-contained true `
             -p:Platform="${{ matrix.platform }}" `
+            -p:Version="$env:VERSION" `
             -p:PublishDir="$publishDir/" `
             -p:DebugSymbols=false `
             -p:DebugType=None
