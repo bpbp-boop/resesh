@@ -1134,3 +1134,11 @@ lookup keys that array as `CommandsPanel.CommandItem[]`, but the runtime type na
 `IBindableIterable`, and the setter fails with E_INVALIDARG. `List<CommandItem>` is keyed with
 the `+` form and works, even for a private nested type. Bind a `List<T>` (or a top-level
 type) rather than an array of a nested type. JIT (Debug) builds don't show the problem.
+
+## 2026-10-20 - Underline OSC 8 links across soft wraps
+
+OSC 8 hover detection must collect the whole visible link run, not just the pointer's row.
+The URI still opens correctly with a row-only hit, which hid the missing underline on the
+other rows. Resolve the run in `TerminalCommandBuffer`, crossing a row boundary only when
+it is soft-wrapped and the next cell has the same URI. Hard line breaks, different URIs,
+unlinked cells and viewport edges stop the run. Plain-text URL detection is unchanged.

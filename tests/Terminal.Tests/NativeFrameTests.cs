@@ -8,6 +8,42 @@ namespace Resesh.Terminal.Tests;
 public sealed unsafe class NativeFrameTests
 {
     [WindowsNativeFact]
+    public void HyperlinkHoverCoversEverySoftWrappedRow()
+    {
+        using var terminal = new NativeTerminal();
+        const string uri = "https://example.com/login";
+        terminal.Write("pre\u001b]8;;" + uri + "\u001b\\" + new string('x', 34) + "\u001b]8;;\u001b\\suffix");
+        terminal.ReadFrame(forceAll: true);
+        var buffer = new TerminalCommandBuffer(() => terminal.Handle);
+        buffer.Refresh();
+        foreach (var (x, y) in new[] { (3, 0), (8, 1), (4, 2) })
+        {
+            var hit = buffer.HyperlinkAt(x, y)!.Value;
+            Assert.Equal(uri, hit.Uri);
+            Assert.Equal([(0, 3, 16), (1, 0, 16), (2, 0, 5)], hit.Spans);
+        }
+        Assert.Null(buffer.HyperlinkAt(2, 0));
+        Assert.Null(buffer.HyperlinkAt(5, 2));
+    }
+
+    [WindowsNativeFact]
+    public void HyperlinkHoverStopsAtHardBreaksAndDifferentLinks()
+    {
+        using var terminal = new NativeTerminal();
+        const string open = "\u001b]8;;https://example.com\u001b\\";
+        const string close = "\u001b]8;;\u001b\\";
+        terminal.Write(open + new string('a', 16) + close + "\r\n"
+            + open + new string('b', 16) + close
+            + "\u001b]8;;https://other.example\u001b\\next" + close);
+        terminal.ReadFrame(forceAll: true);
+        var buffer = new TerminalCommandBuffer(() => terminal.Handle);
+        buffer.Refresh();
+        Assert.Equal([(0, 0, 16)], buffer.HyperlinkAt(0, 0)!.Value.Spans);
+        Assert.Equal([(1, 0, 16)], buffer.HyperlinkAt(0, 1)!.Value.Spans);
+        Assert.Equal([(2, 0, 4)], buffer.HyperlinkAt(0, 2)!.Value.Spans);
+    }
+
+    [WindowsNativeFact]
     public void MarkersGrowBeyond4096AndKeepTheirIds()
     {
         using var terminal = new NativeTerminal();

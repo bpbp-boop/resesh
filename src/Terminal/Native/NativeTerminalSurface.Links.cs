@@ -90,25 +90,11 @@ public sealed unsafe partial class NativeTerminalSurface
         return HyperlinkAt(x, y) ?? UrlAt(x, y);
     }
 
-    private string? HyperlinkUri(int x, int y)
-    {
-        var buffer = stackalloc byte[2048];
-        var n = GhosttyNative.rvt_cell_hyperlink(_term, (ushort)x, (ushort)y, buffer, 2048);
-        return n > 0 ? Encoding.UTF8.GetString(buffer, n) : null;
-    }
-
-    /// <summary>An OSC 8 hyperlink: the run of cells on this row that share its URI.</summary>
     private LinkHit? HyperlinkAt(int x, int y)
     {
-        if (HyperlinkUri(x, y) is not { } uri)
+        if (RefreshCommands() is null || _commandBuffer is not { } buffer)
             return null;
-        var start = x;
-        while (start > 0 && HyperlinkUri(start - 1, y) == uri)
-            start--;
-        var end = x + 1;
-        while (end < Columns && HyperlinkUri(end, y) == uri)
-            end++;
-        return new LinkHit(uri, [(y, start, end)]);
+        return buffer.HyperlinkAt(x, y) is { } hit ? new LinkHit(hit.Uri, hit.Spans) : null;
     }
 
     /// <summary>A plain URL in the logical line under the pointer: soft-wrapped rows on
