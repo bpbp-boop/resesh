@@ -120,6 +120,7 @@ public sealed class AppCommandCatalog
         Setting("Agent Display", "icons tab coding agents", GlobalSettingsTarget.ShowAgentIcons);
         Setting("Agent Taskbar Alerts", "flash notification", GlobalSettingsTarget.AgentAlertFlash);
         Setting("Agent Notification Sound", "alert audio", GlobalSettingsTarget.AgentAlertSound);
+        Setting("About resesh", "version build license credits help report bug", GlobalSettingsTarget.About);
 
         commands.Add(new("Workspaces", Fixed("Save Current Layout as Workspace"), "tabs groups layout save as",
             vm.SaveWorkspaceAsCommand));

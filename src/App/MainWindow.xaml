@@ -191,6 +191,7 @@
                         Text="Keyboard Shortcuts…"
                         Command="{x:Bind ViewModel.ShowKeyboardShortcutsCommand}" />
                     <MenuFlyoutItem Text="Welcome" Command="{x:Bind ViewModel.OpenWelcomeCommand}" />
+                    <MenuFlyoutItem Text="About resesh" Command="{x:Bind ViewModel.ShowAboutCommand}" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="Expand All" Command="{x:Bind ViewModel.ExpandAllCommand}" />
                     <MenuFlyoutItem Text="Collapse All" Command="{x:Bind ViewModel.CollapseAllCommand}" />
