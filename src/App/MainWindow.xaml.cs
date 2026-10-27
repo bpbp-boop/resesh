@@ -115,6 +115,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             {
                 ApplyTaskbarProgress();
             }
+            else if (e.PropertyName == nameof(MainViewModel.ActiveSessionTheme))
+            {
+                UpdatePaneFocusFrame(); // the focused pane's outline follows its session theme
+            }
         };
         ScheduleExpansionSync();
         SyncEmptyState();
@@ -214,6 +218,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         // The initial app-wide theme pass has already run when a user creates a split.
         // Apply the live palette now so the new strip does not start with Fluent defaults.
         view.ApplyTheme(_themePalette);
+        // Resizing a pane (dragging a gutter, the window, or the sessions pane) moves the
+        // focus frame drawn around it.
+        view.SizeChanged += (_, _) => UpdatePaneFocusFrame();
         _groupViews[group] = view;
         return view;
     }

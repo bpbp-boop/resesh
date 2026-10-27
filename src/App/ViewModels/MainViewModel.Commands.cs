@@ -45,6 +45,7 @@ public sealed partial class MainViewModel
     /// and every tab command's availability.</summary>
     private void OnActiveTabStateChanged()
     {
+        OnPropertyChanged(nameof(ActiveSessionTheme));
         OnPropertyChanged(nameof(ActiveStartAgainVerb));
         OnPropertyChanged(nameof(ActiveStopVerb));
         OnPropertyChanged(nameof(ShowSendBreak));

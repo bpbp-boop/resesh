@@ -97,6 +97,8 @@ public sealed partial class TabGroupView : UserControl
     private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.ResolveTheme(App.Settings.Current.Theme));
     private readonly SolidColorBrush _tabBackgroundBrush;
     private readonly SolidColorBrush _tabDividerBrush;
+    private readonly SolidColorBrush _focusEdgeBrush = new(Microsoft.UI.Colors.Transparent);
+    private bool _showsFocusEdge;
     private TabViewModel? _filePaneButtonTab;
     private Terminal.TerminalTabView? _filePaneButtonView;
     private double _expandedTabActionsWidth = ExpandedTabActionsFallbackWidth;
@@ -502,12 +504,32 @@ public sealed partial class TabGroupView : UserControl
         var divider = _tabDividerBrush;
         Tabs.Background = background;
         TabStripActions.Background = background;
-        LeftTabStripDivider.Fill = divider;
-        RightTabStripDivider.Fill = divider;
+        ApplyStripEdge();
         FilePaneDivider.Fill = divider;
         Resources["TabViewBackground"] = background;
         Resources["TabViewBorderBrush"] = divider;
         Resources["CodeTabSeparatorBrush"] = divider;
+    }
+
+    /// <summary>Where the line under the tab strip sits: the top of the pane's content.</summary>
+    internal double ContentEdgeTop => Math.Max(0, TabStripHost.ActualHeight - 1);
+
+    /// <summary>Draws the line under the tab strip in the pane-focus color, or the plain
+    /// divider when null. With the window's focus frame down the pane's sides, this closes
+    /// a folder-shaped outline whose only opening is the selected tab.</summary>
+    internal void SetFocusEdge(Windows.UI.Color? color)
+    {
+        _showsFocusEdge = color is not null;
+        if (color is { } focus)
+            _focusEdgeBrush.Color = focus;
+        ApplyStripEdge();
+    }
+
+    private void ApplyStripEdge()
+    {
+        var edge = _showsFocusEdge ? _focusEdgeBrush : _tabDividerBrush;
+        LeftTabStripDivider.Fill = edge;
+        RightTabStripDivider.Fill = edge;
     }
 
     private void QueueTabTemplateRefresh()

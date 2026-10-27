@@ -280,6 +280,7 @@ public sealed partial class MainWindow
     {
         foreach (var (splitter, line) in _splitterLines)
             line.Background = SplitterBrush(line, _activeSplitters.Contains(splitter));
+        UpdatePaneFocusFrame();
     }
 
     /// <summary>THE close pathway: X button, Ctrl+F4, context menu, and middle-click all land here.</summary>
@@ -577,12 +578,13 @@ public sealed partial class MainWindow
         GroupArea.Children.Clear();
         foreach (var splitter in _splitterLines.Keys.Where(splitter => splitter != TreeSplitter).ToList())
             _splitterLines.Remove(splitter);
-        _paneBoundaries.Clear();
+        _paneGutters.Clear();
         GroupArea.Children.Add(BuildGroupLayoutElement(_groupLayout.Root));
         UpdateRulerPresentations();
         RefreshTabGroupActions();
         // Re-assert once the rebuilt groups settle into their new rows and columns.
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdatePaneFocusFrame);
         PlayPaneMotion();
     }
 
@@ -665,8 +667,7 @@ public sealed partial class MainWindow
                 Grid.SetRow(splitterLine, gridIndex + 1);
                 Grid.SetRow(splitter, gridIndex + 1);
             }
-            _paneBoundaries[splitterLine] =
-                [.. branch.Children[index].Values, .. branch.Children[index + 1].Values];
+            _paneGutters.Add(splitterLine);
             grid.Children.Add(splitterLine);
             grid.Children.Add(splitter);
             ConfigureSplitter(splitter, splitterLine);
