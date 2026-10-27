@@ -1167,3 +1167,13 @@ projected base type: `TabsItemsPresenter` arrives as `FrameworkElement`,
 silently failed, so the 4px header, 1px padding and 2px column stayed. Cast template parts
 to a base type that has the members you need (and reach children through
 `VisualTreeHelper`), and check template tweaks in an AOT build, not only Debug.
+
+## 2026-10-27 - A session's theme override colors its tab
+
+Session theme overrides used to stay inside the terminal so a tab strip never mixed themes.
+Now the override colors the session's tab header too, so a production host given Crimson,
+for example, stands out from the rest. A separate opt-in checkbox was tried first and
+dropped: it was easy to miss, and a theme override is already a deliberate choice to make
+a session look different. The choice lives on `TabViewModel.TabTheme`, and every tab-header
+color binds to it, so `PresentationValues` still never reads session overrides. The tab
+strip, splitters and other window chrome keep the app theme.

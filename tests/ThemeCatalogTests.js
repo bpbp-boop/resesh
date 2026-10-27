@@ -49,13 +49,22 @@ test("Phthalo Green uses its green shell and terminal palette", () => {
   assert.match(visualPalette, /"phthalo-green" => New\(0x123524, 0x0B2118, 0x2D5A48, 0xD7EEE5, 0x245A46\)/);
 });
 
+test("Crimson pairs a wine-red terminal with a matching tab and a bold red accent", () => {
+  assert.match(catalog, /new\("crimson", "Crimson"\)/);
+  assert.match(terminalThemes, /\["crimson"\] = New\(\s*0x330B12, 0xF4E4E6,/);
+  // The active tab is the terminal background, so tab and terminal read as one surface.
+  assert.match(visualPalette, /"crimson" => New\(0x330B12, [\s\S]*?Accent = Hex\(0xFF4D5E\),\s*AccentBarThickness = 3/);
+  // Unselected crimson tabs stay visibly red instead of fading into the tab strip.
+  assert.match(visualPalette, /"crimson"[\s\S]*?InactiveTab = Hex\(0x4A101A\),\s*HoverTab = Hex\(0x5C1622\)/);
+});
+
 test("the active tab and the focused pane are a full step, not a nudge", () => {
   // Active tab: its own background step plus the theme accent bar above it.
   assert.match(presentation, /FocusedTabBorderColor[\s\S]*?parsed\.A > 0 \? parsed : palette\.Accent/);
   assert.match(presentation, /FocusedTabAccentThickness[\s\S]*?For\(appTheme\)\.AccentBarThickness/);
   assert.match(
     tabGroupXaml,
-    /Height="\{x:Bind local:PresentationValues\.FocusedTabAccentThickness\(AppTheme\), Mode=OneWay\}"/,
+    /Height="\{x:Bind local:PresentationValues\.FocusedTabAccentThickness\(TabTheme\), Mode=OneWay\}"/,
   );
   // Focused pane: the gutter the two panes already share IS the border, so the seam
   // between panes stays exactly one pixel instead of stacking a border on each side.

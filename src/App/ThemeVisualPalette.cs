@@ -71,6 +71,18 @@ internal sealed record ThemeVisualPalette(
             PaneBorder = Hex(0x43465F),
             PaneFocusBorder = Hex(0x55E7EF),
         },
+        // The tab takes the terminal's wine red and a bold red accent, so a crimson
+        // tab is unmistakable even among tabs drawn with another theme. Inactive and
+        // hovered tabs are a clear red rather than the near-black strip, so a production
+        // tab still stands out when it isn't selected.
+        "crimson" => New(0x330B12, 0x1F060A, 0x5A1C26, 0xF4E4E6, 0x6B1F2C) with
+        {
+            InactiveTab = Hex(0x4A101A),
+            HoverTab = Hex(0x5C1622),
+            Accent = Hex(0xFF4D5E),
+            AccentBarThickness = 3,
+            PaneFocusBorder = Hex(0xE0384A),
+        },
         "light" => New(0xFFFFFF, 0xF3F3F3, 0xD8D8D8, 0x383A42, 0xBFCEFF),
             _ => New(0x0C0C0C, 0x181818, 0x2B2B2B, 0xCCCCCC, 0x264F78),
         };
