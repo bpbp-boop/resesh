@@ -124,6 +124,27 @@ public sealed unsafe class NativeFrameTests
     }
 
     [WindowsNativeFact]
+    public void KittyGraphicsProbeGetsNoReply()
+    {
+        Assert.Null(GhosttyNative.TryLoad());
+        var events = t_events = [];
+        var handle = GhosttyNative.rvt_new(80, 24, 100, &CollectEvent, IntPtr.Zero);
+        try
+        {
+            // The query kitty's icat and chafa send to detect image support.
+            var bytes = Encoding.UTF8.GetBytes("\u001b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\u001b\\");
+            fixed (byte* data = bytes)
+                GhosttyNative.rvt_write(handle, data, (nuint)bytes.Length);
+            Assert.DoesNotContain(events, e => e.Kind == (int)GhosttyEventKind.Pty);
+        }
+        finally
+        {
+            GhosttyNative.rvt_free(handle);
+            t_events = null;
+        }
+    }
+
+    [WindowsNativeFact]
     public void TrimmedNativeMarkersCanBeFreedAndReused()
     {
         using var terminal = new NativeTerminal();

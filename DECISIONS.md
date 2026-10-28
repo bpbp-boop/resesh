@@ -1167,3 +1167,22 @@ projected base type: `TabsItemsPresenter` arrives as `FrameworkElement`,
 silently failed, so the 4px header, 1px padding and 2px column stayed. Cast template parts
 to a base type that has the members you need (and reach children through
 `VisualTreeHelper`), and check template tweaks in an AOT build, not only Debug.
+
+## 2026-10-28 - libghostty-vt 1.4.0, with Kitty graphics off
+
+Moved the pin from b699ea7 (1.3.2-dev) to the v1.4.0 tag (83fb956), which needs Zig 0.17.
+Between those commits the C API only gained things (render-state images, compression,
+snapshot images, `CSI 19 t`); nothing the shim calls was renamed or renumbered, so it built
+unchanged and the shim ABI stays at 7. The 1.4 security fixes include crashes, hangs and
+file reads in Kitty graphics handling.
+
+libghostty-vt accepts Kitty images by default (10 MB per terminal) but the renderer never
+draws them, so a program would see the probe answered and send images that only cost
+memory. `rvt_new` sets `GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT` to 0, which turns the
+protocol off; programs fall back to other image formats or none. Since 1.4 a full reset
+keeps the limit. Drawing images would mean re-enabling it and walking
+`GHOSTTY_RENDER_STATE_DATA_IMAGE_ITERATOR`.
+
+1.4's scrollback compression (70-90% less memory) is caller-driven in libghostty-vt: the
+host watches `ghostty_terminal_compression_activity` and calls `ghostty_terminal_compress`
+when idle. Resesh doesn't do that yet, so it doesn't get the saving.

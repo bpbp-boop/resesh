@@ -367,6 +367,10 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
   // Ghostty itself; programs can still turn mode 2027 off.
   GhosttyTerminalModeConfig grapheme = { GHOSTTY_MODE_GRAPHEME_CLUSTER, true };
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_MODE_DEFAULT, &grapheme);
+  // The renderer doesn't draw Kitty images, so turn the protocol off: programs then see it
+  // unsupported and fall back, rather than spending up to 10 MB a tab on invisible images.
+  uint64_t kitty_images = 0;
+  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &kitty_images);
   size_t unknown_max = 4096;
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_UNKNOWN_MAX_BYTES, &unknown_max);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_USERDATA, t);
