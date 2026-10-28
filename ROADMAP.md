@@ -666,6 +666,13 @@ have `synchronize-panes` if they truly want it.
   nested children (make → cc) and survives fancy prompts; Linux/procfs only, adds polling,
   and assumes one shell per connection. Back pocket unless discovery + stock context data
   prove insufficient.
+- **Session agent on current zmx and Ghostty 1.4** — the agent stays on Ghostty 1.3.2 and
+  Zig 0.16 (`eng/agent/agent.json` pins them) because our zmx fork predates upstream's Zig
+  0.17 port, which came after a breaking IPC change. Rebase the fork onto upstream zmx,
+  make reattach use the agent version that started each session (see DECISIONS
+  2026-10-28), port `ghostty-vt-formatter.patch` (already done on the local
+  `agent-ghostty-1.4` branch), drop the override and raise the revision. Gains: upstream
+  zmx fixes, and 1.4's speed and crash fixes in the reattach snapshot.
 - **Kitty clipboard paste events (mode 5522)** — on a user paste, a remote program gets
   the clipboard's MIME types and reads the one it wants, so a screenshot could be pasted
   into a TUI over SSH. libghostty-vt 1.4 implements the protocol; we'd install its
