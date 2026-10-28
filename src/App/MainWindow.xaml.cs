@@ -28,7 +28,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private readonly Dictionary<TabGroupViewModel, TabGroupView> _groupViews = [];
     private SplitLayout<TabGroupViewModel> _groupLayout;
-    private Guid? _workspaceId;
     private bool _closeConfirmed;
     private bool _closePromptOpen;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
@@ -125,6 +124,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         ApplySettingsToApp();
         RegisterAccelerators();
         InitializeSessionsRail();
+        InitializeWorkspaceRail();
         RefreshWorkspaceMenu();
         _uiSettings.ColorValuesChanged += SystemColorsChanged;
         AppWindow.Closing += AppWindow_Closing;
@@ -133,7 +133,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             _uiSettings.ColorValuesChanged -= SystemColorsChanged;
             Resesh.Core.Backend.CleanupActions.Run(App.ReportRecoverableError,
                 SaveTreePaneWidth,
-                () => WorkspaceOperations.SaveLastLayout(),
+                SaveWorkspacesOnClose,
                 ViewModel.CloseAllTabs);
         };
     }
@@ -146,16 +146,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             return;
         }
 
-        var workspaceName = _workspaceId is { } workspaceId
+        var workspaceName = ShownWorkspaceId is { } workspaceId
             ? App.Workspaces.Workspaces.FirstOrDefault(workspace => workspace.Id == workspaceId)?.Name
             : null;
         Title = workspaceName ?? ViewModel.ActiveTab?.Session.Name ?? "resesh";
-    }
-
-    private void SetWorkspaceContext(Guid? workspaceId)
-    {
-        _workspaceId = workspaceId;
-        App.RefreshWindowTitles();
     }
 
     private void SystemColorsChanged(UISettings sender, object args)
@@ -297,6 +291,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
                 return SelectTab(group, TabNavigation.GoTo(chord + 1, group.Tabs.Count));
             case ShortcutIds.LastTab:
                 return SelectTab(group, TabNavigation.GoTo(9, group.Tabs.Count));
+            case ShortcutIds.GoToWorkspace:
+                return GoToWorkspaceAt(chord + 1);
             case ShortcutIds.FocusGroupLeft:
                 return tab is not null && FocusNeighborGroup(group, NavigationDirection.Left);
             case ShortcutIds.FocusGroupRight:
@@ -1134,7 +1130,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     private void OnCommandCompletion(TabViewModel tab, Resesh.Core.Backend.CommandCompletion completion)
     {
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        if (Interop.WindowAlerts.IsForeground(hwnd) && tab.IsActive && !tab.IsLocked
+        if (Interop.WindowAlerts.IsForeground(hwnd) && tab.IsOnScreen && !tab.IsLocked
             && tab.View is TerminalTabView { IsRewinding: false })
             return; // The tab's completion tooltip is enough when its output is visible.
 
@@ -1180,7 +1176,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         if (!settings.ShowAgentIcons)
             return;
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        if (Interop.WindowAlerts.IsForeground(hwnd) && tab.IsActive)
+        if (Interop.WindowAlerts.IsForeground(hwnd) && tab.IsOnScreen)
             return;
         if (!Interop.WindowAlerts.IsForeground(hwnd))
         {
@@ -1388,6 +1384,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         foreach (var groupView in _groupViews.Values)
             groupView.ApplyTheme(palette);
         ApplyTitleBarButtonColors(theme); // caption buttons don't follow XAML theming
+        RefreshWorkspaceRailTheme();
         foreach (var tab in ViewModel.AllTabs)
         {
             if (tab.View is TerminalTabView view)

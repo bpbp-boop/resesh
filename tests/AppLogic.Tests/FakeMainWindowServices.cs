@@ -84,6 +84,12 @@ internal sealed class FakeMainWindowServices : IMainWindowServices
     public Task UpdateWorkspaceAsync(Workspace workspace) => RecordAsync($"UpdateWorkspace {workspace.Name}");
     public Task RenameWorkspaceAsync(Workspace workspace) => RecordAsync($"RenameWorkspace {workspace.Name}");
     public Task DeleteWorkspaceAsync(Workspace workspace) => RecordAsync($"DeleteWorkspace {workspace.Name}");
+    public Task CustomizeWorkspaceAsync(Workspace workspace) => RecordAsync($"CustomizeWorkspace {workspace.Name}");
+    public Task CloseWorkspaceAsync(Workspace workspace) => RecordAsync($"CloseWorkspace {workspace.Name}");
+    public HashSet<Guid> OpenWorkspaces { get; } = [];
+    public bool IsWorkspaceOpen(Guid workspaceId) => OpenWorkspaces.Contains(workspaceId);
+    public Guid? ShownWorkspaceId { get; set; }
+    public void ShowHomeWorkspace() => Record("ShowHomeWorkspace");
 
     public void OpenNewWindow() => Record("OpenNewWindow");
     public void CloseWindow() => Record("CloseWindow");

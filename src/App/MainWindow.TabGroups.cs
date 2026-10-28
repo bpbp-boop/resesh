@@ -260,6 +260,10 @@ public sealed partial class MainWindow
 
     public void FocusGroup(TabGroupViewModel group)
     {
+        // Revealing a tab in a background workspace (a notification, an app page that is
+        // already open there) brings its workspace back first.
+        if (ViewModel.IsBackgroundGroup(group) && ParkedWorkspaceOf(group) is { } workspace)
+            ShowWorkspace(workspace, focusTerminal: false);
         ViewModel.FocusedGroup = group;
         ViewModel.NotifyActiveTabChanged();
         UpdateRulerPresentations();
@@ -534,6 +538,11 @@ public sealed partial class MainWindow
 
     private void CollapseGroupIfEmpty(TabGroupViewModel group)
     {
+        if (ViewModel.IsBackgroundGroup(group))
+        {
+            PruneParkedGroup(group);
+            return;
+        }
         EndZoomIfEmpty(group);
         if (!ViewModel.IsSplit || group.Tabs.Count > 0)
             return;

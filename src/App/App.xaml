@@ -30,6 +30,9 @@
             <!-- PresentationValues.AgentBadgeColor fills the agent badge the same in every theme,
                  so the symbol drawn on it stays dark in every theme too. -->
             <SolidColorBrush x:Key="SessionBadgeGlyphBrush" Color="#1B1B1B" />
+            <!-- Workspace tiles are mid-tone in every theme, so their initials stay white.
+                 High Contrast draws tiles with the selection brushes instead. -->
+            <SolidColorBrush x:Key="WorkspaceTileForegroundBrush" Color="#FFFFFF" />
             <!-- A recessed surface for sample output and code on the Settings page. -->
             <Style x:Key="PreviewSurfaceStyle" TargetType="Border">
                 <Setter Property="Padding" Value="12,10" />

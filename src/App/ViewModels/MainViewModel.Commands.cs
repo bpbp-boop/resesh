@@ -318,5 +318,16 @@ public sealed partial class MainViewModel
         AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
     private Task DeleteWorkspaceAsync(Workspace? workspace) => Services.DeleteWorkspaceAsync(workspace!);
 
+    [RelayCommand(CanExecute = nameof(IsWorkspace),
+        AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
+    private Task CustomizeWorkspaceAsync(Workspace? workspace) => Services.CustomizeWorkspaceAsync(workspace!);
+
+    [RelayCommand(CanExecute = nameof(IsWorkspace),
+        AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
+    private Task CloseWorkspaceAsync(Workspace? workspace) => Services.CloseWorkspaceAsync(workspace!);
+
+    [RelayCommand]
+    private void ShowHomeWorkspace() => Services.ShowHomeWorkspace();
+
     private static bool IsWorkspace(Workspace? workspace) => workspace is not null;
 }

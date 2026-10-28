@@ -138,20 +138,24 @@ public sealed partial class MainWindow
             {
                 MenuFlyoutItem Item(string text, System.Windows.Input.ICommand command) =>
                     new() { Text = text, Command = command, CommandParameter = workspace };
-                menuItems.Add(new MenuFlyoutSubItem
+                var submenu = new MenuFlyoutSubItem
                 {
                     Text = workspace.Name,
                     Items =
                     {
-                        Item("Open", ViewModel.OpenWorkspaceCommand),
+                        Item("Show", ViewModel.OpenWorkspaceCommand),
                         Item("Open in new window", ViewModel.OpenWorkspaceInNewWindowCommand),
-                        Item("Open additively", ViewModel.OpenWorkspaceAdditivelyCommand),
+                        Item("Add to current layout", ViewModel.OpenWorkspaceAdditivelyCommand),
                         new MenuFlyoutSeparator(),
                         Item("Update from current layout…", ViewModel.UpdateWorkspaceCommand),
+                        Item("Icon and color…", ViewModel.CustomizeWorkspaceCommand),
                         Item("Rename…", ViewModel.RenameWorkspaceCommand),
                         Item("Delete…", ViewModel.DeleteWorkspaceCommand),
                     },
-                });
+                };
+                if (IsWorkspaceOpen(workspace.Id))
+                    submenu.Items.Insert(3, Item("Close", ViewModel.CloseWorkspaceCommand));
+                menuItems.Add(submenu);
             }
         }
 
@@ -159,6 +163,7 @@ public sealed partial class MainWindow
             WorkspacesMenu.Items.RemoveAt(WorkspacesMenu.Items.Count - 1);
         foreach (var menuItem in menuItems)
             WorkspacesMenu.Items.Add(menuItem);
+        RefreshWorkspaceRail();
     }
     private void WorkspaceList_ItemClick(object sender, ItemClickEventArgs e)
     {
@@ -183,6 +188,7 @@ public sealed partial class MainWindow
             "newWindow" => ViewModel.OpenWorkspaceInNewWindowCommand,
             "additive" => ViewModel.OpenWorkspaceAdditivelyCommand,
             "update" => ViewModel.UpdateWorkspaceCommand,
+            "customize" => ViewModel.CustomizeWorkspaceCommand,
             "rename" => ViewModel.RenameWorkspaceCommand,
             "delete" => ViewModel.DeleteWorkspaceCommand,
             _ => throw new ArgumentOutOfRangeException(nameof(sender), action, "Unknown workspace action."),
@@ -191,13 +197,18 @@ public sealed partial class MainWindow
     }
 
 
+    /// <summary>Home's tabs become the new workspace, as the rail's + button does. A saved
+    /// workspace's layout is copied into a new one, which opens its own connections.</summary>
     private async Task SaveCurrentWorkspaceAsAsync()
     {
         var name = (await PromptAsync("Save Workspace", "Workspace name", ""))?.Trim();
         if (string.IsNullOrEmpty(name))
             return;
 
-        WorkspaceOperations.SaveAs(name);
+        if (_shownWorkspace == HomeWorkspace)
+            AdoptShownTabsAsWorkspace(name);
+        else
+            WorkspaceOperations.SaveAs(name);
     }
 
     private async Task RenameWorkspaceAsync(Workspace workspace)
@@ -224,54 +235,61 @@ public sealed partial class MainWindow
 
     private async Task DeleteWorkspaceAsync(Workspace workspace)
     {
+        var open = App.WindowWithWorkspace(workspace.Id, except: null) is not null;
         if (!await ConfirmAsync(
             "Delete Workspace?",
-            $"Delete \"{workspace.Name}\"? Saved sessions are not deleted.",
+            $"Delete \"{workspace.Name}\"? Saved sessions are not deleted."
+                + (open ? " Its open tabs close." : ""),
             "Delete"))
         {
             return;
         }
 
+        App.DiscardWorkspaceInAllWindows(workspace.Id);
         WorkspaceOperations.Delete(workspace.Id);
     }
 
-    private async Task OpenWorkspaceAsync(Workspace workspace, bool additive)
+    /// <summary>Shows the workspace, or adds its tabs to the shown layout. Showing keeps the
+    /// current workspace's tabs connected in the background, so nothing needs confirming.</summary>
+    private Task OpenWorkspaceAsync(Workspace workspace, bool additive)
     {
-        if (!additive
-            && ViewModel.AllTabs.Any()
-            && !await ConfirmAsync(
-                "Replace Current Layout?",
-                $"Opening \"{workspace.Name}\" will close tabs that are not part of the workspace.",
-                "Replace"))
+        if (!additive)
         {
-            return;
+            ShowWorkspace(workspace.Id);
+            return Task.CompletedTask;
         }
 
         ApplyWorkspaceLayout(new WorkspaceLayout
         {
             Groups = workspace.Groups,
             Layout = workspace.Layout,
-        }, additive);
-        SetWorkspaceContext(additive ? null : workspace.Id);
+        }, additive: true);
+        return Task.CompletedTask;
     }
 
+    /// <summary>A workspace already open somewhere is shown where it is, rather than opening
+    /// a second copy of its connections.</summary>
     private static void OpenWorkspaceInNewWindow(Workspace workspace)
     {
-        var window = App.OpenNewWindow();
-        window.ApplyWorkspaceLayout(new WorkspaceLayout
+        if (App.WindowWithWorkspace(workspace.Id, except: null) is { } owner)
         {
-            Groups = workspace.Groups,
-            Layout = workspace.Layout,
-        }, additive: false);
-        window.SetWorkspaceContext(workspace.Id);
+            owner.ShowWorkspace(workspace.Id);
+            owner.BringToFront();
+            return;
+        }
+        App.OpenNewWindow().ShowWorkspace(workspace.Id);
     }
 
-    /// <summary>Launch-time restoration. The setting guard keeps direct callers honest.</summary>
+    /// <summary>Launch-time restoration: the Home layout, then the workspace the window was
+    /// showing when it closed. Home's tabs connect when Home is first shown.</summary>
     public void RestoreLastLayout()
     {
-        if (!App.Settings.Current.ReopenLastLayoutAtStartup || App.Workspaces.LastLayout is not { } layout)
+        if (!App.Settings.Current.ReopenLastLayoutAtStartup)
             return;
-        ApplyWorkspaceLayout(layout, additive: false);
+        if (App.Workspaces.LastLayout is { } layout)
+            ApplyWorkspaceLayout(layout, additive: false);
+        if (App.Workspaces.LastActiveWorkspaceId is { } active)
+            ShowWorkspace(active, saveCurrent: false);
     }
 
     private void ApplyWorkspaceLayout(WorkspaceLayout layout, bool additive)
@@ -286,7 +304,8 @@ public sealed partial class MainWindow
             : layout.Groups.ToList();
         var originalLayout = additive ? CaptureWorkspaceLayout().Layout : null;
         var originalGroups = _groupLayout.Values.ToList();
-        var originalTabs = ViewModel.AllTabs.ToList();
+        // Only the shown workspace's tabs are adopted or replaced; parked ones stay put.
+        var originalTabs = ViewModel.ShownTabs.ToList();
         var availableTabs = originalTabs
             .Where(tab => !tab.IsPlayback)
             .GroupBy(tab => tab.Session.Id)

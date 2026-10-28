@@ -260,7 +260,7 @@ public sealed partial class TabViewModel : ObservableObject
         {
             if (SetProperty(ref _isActive, value))
             {
-                if (value)
+                if (IsOnScreen)
                     HasUnseenOutput = false; // selecting the tab means the output has been seen
                 NotifyTabVisuals();
             }
@@ -289,9 +289,26 @@ public sealed partial class TabViewModel : ObservableObject
     /// A tab selected in an unfocused split group is still on screen, so IsActive is the gate.</summary>
     public void NotifyOutputActivity()
     {
-        if (!IsActive)
+        if (!IsOnScreen)
             HasUnseenOutput = true;
     }
+
+    private bool _isInBackgroundWorkspace;
+
+    /// <summary>The tab belongs to a workspace its window is not showing. It stays connected
+    /// but nobody can see it, even when it is its group's selected tab.</summary>
+    public bool IsInBackgroundWorkspace
+    {
+        get => _isInBackgroundWorkspace;
+        set
+        {
+            if (SetProperty(ref _isInBackgroundWorkspace, value) && IsOnScreen)
+                HasUnseenOutput = false; // its workspace came back with it on show
+        }
+    }
+
+    /// <summary>The tab's content is on screen: its group's selected tab in the shown workspace.</summary>
+    public bool IsOnScreen => IsActive && !IsInBackgroundWorkspace;
 
     // ---- progress: OSC 9;4 from the terminal and file-pane transfers ----
 

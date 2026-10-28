@@ -129,14 +129,22 @@ public sealed class AppCommandCatalog
 
     private IEnumerable<CommandDescriptor> WorkspaceCommands()
     {
-        foreach (var workspace in _vm.WindowServices.Workspaces)
+        var services = _vm.WindowServices;
+        if (services.Workspaces.Count > 0 && services.ShownWorkspaceId is not null)
+            yield return new("Workspaces", Fixed("Switch to Home"), "workspace unsaved tabs rail",
+                _vm.ShowHomeWorkspaceCommand);
+        foreach (var workspace in services.Workspaces)
         {
-            yield return new("Workspaces", Fixed($"Open {workspace.Name}"), "tabs groups layout replace",
-                _vm.OpenWorkspaceCommand, Parameter: () => workspace);
+            if (services.ShownWorkspaceId != workspace.Id)
+                yield return new("Workspaces", Fixed($"Switch to {workspace.Name}"), "workspace open show tabs groups layout rail",
+                    _vm.OpenWorkspaceCommand, Parameter: () => workspace);
             yield return new("Workspaces", Fixed($"Open {workspace.Name} in New Window"), "tabs groups layout separate",
                 _vm.OpenWorkspaceInNewWindowCommand, Parameter: () => workspace);
             yield return new("Workspaces", Fixed($"Open {workspace.Name} Additively"), "tabs groups layout add",
                 _vm.OpenWorkspaceAdditivelyCommand, Parameter: () => workspace);
+            if (services.IsWorkspaceOpen(workspace.Id))
+                yield return new("Workspaces", Fixed($"Close {workspace.Name}"), "workspace disconnect tabs",
+                    _vm.CloseWorkspaceCommand, Parameter: () => workspace);
         }
     }
 

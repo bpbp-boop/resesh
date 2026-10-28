@@ -84,6 +84,21 @@ public interface IMainWindowServices
     Task RenameWorkspaceAsync(Workspace workspace);
     Task DeleteWorkspaceAsync(Workspace workspace);
 
+    /// <summary>Chooses the icon and colour of the workspace's rail button.</summary>
+    Task CustomizeWorkspaceAsync(Workspace workspace);
+
+    /// <summary>Closes the workspace's tabs in this window, after saving its layout.</summary>
+    Task CloseWorkspaceAsync(Workspace workspace);
+
+    /// <summary>True when this window holds the workspace's tabs, shown or in the background.</summary>
+    bool IsWorkspaceOpen(Guid workspaceId);
+
+    /// <summary>The workspace this window shows, or null for Home.</summary>
+    Guid? ShownWorkspaceId { get; }
+
+    /// <summary>Shows the tabs that belong to no saved workspace.</summary>
+    void ShowHomeWorkspace();
+
     // ---- Window ----
 
     void OpenNewWindow();

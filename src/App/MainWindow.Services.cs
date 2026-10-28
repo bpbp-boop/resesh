@@ -87,6 +87,16 @@ public sealed partial class MainWindow
 
     Task IMainWindowServices.DeleteWorkspaceAsync(Workspace workspace) => DeleteWorkspaceAsync(workspace);
 
+    Task IMainWindowServices.CustomizeWorkspaceAsync(Workspace workspace) => CustomizeWorkspaceAsync(workspace);
+
+    Task IMainWindowServices.CloseWorkspaceAsync(Workspace workspace) => CloseWorkspaceAsync(workspace);
+
+    bool IMainWindowServices.IsWorkspaceOpen(Guid workspaceId) => IsWorkspaceOpen(workspaceId);
+
+    Guid? IMainWindowServices.ShownWorkspaceId => ShownWorkspaceId;
+
+    void IMainWindowServices.ShowHomeWorkspace() => ShowWorkspace(HomeWorkspace);
+
     // ---- Window ----
 
     void IMainWindowServices.OpenNewWindow() => App.OpenNewWindow();

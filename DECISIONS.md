@@ -1289,3 +1289,30 @@ The session editor's Terminal tab held about 770 px of fields in a 480 px host, 
 showed a scrollbar (a full one, for anyone with "Always show scrollbars" on). Appearance
 overrides, icon and color moved to their own Appearance tab, which the local profile editor
 now shares.
+
+## 2026-10-28 - Workspaces switch on the rail and stay connected
+
+A window now holds every workspace it opens. The one it shows is laid out as before; the
+others are *parked*: their tab groups move to `MainViewModel.BackgroundGroups`, their group
+views leave the visual tree with `TabGroupView.IsParked` set (terminals stop drawing, never
+take focus), and their tabs are flagged `IsInBackgroundWorkspace`. `AllTabs` and `GroupOf`
+include parked tabs, so `App.WindowFor`, the close prompt, pinned-tab saving and settings
+still reach them; `ShownTabs` and `Groups` are what is on screen. Anything that reveals a tab
+goes through `FocusGroup`, which brings a parked workspace back first.
+
+- Home is the workspace with no id: the tabs that belong to no saved workspace. It is always
+  open. The rail shows Home and the workspaces only once one exists; + is always there.
+- Leaving a workspace, closing it, and closing the window save its layout (`AutoSave`), so a
+  rail button reopens what was there. An all-empty layout or a deleted workspace is not
+  saved over. "Update from current layout" stays for Home and for explicit copies.
+- New workspace from Home *moves* Home's tabs into it instead of copying the layout, because
+  a copy would open every connection a second time when its button is clicked. For the same
+  reason a workspace is open in one window at most: its button in another window goes there.
+- Showing a workspace no longer asks to replace the current layout; nothing closes. "Open
+  additively" remains, as "Add to current layout".
+- A terminal still connects on its first `Loaded`. Startup restores Home's layout and then
+  shows the last workspace, so Home's tabs connect when Home is first shown.
+- Ctrl+Shift+1…9 pick rail positions (1 is Home) and pass to the shell when there are no
+  workspaces. Ctrl+Alt stays unused because it is AltGr on many layouts.
+- `SplitOrientation` is not on the camel-case enum list, so it persists as a number
+  (`0` = columns). Changing that now would need a reader for both forms.

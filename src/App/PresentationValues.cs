@@ -197,6 +197,59 @@ public static class PresentationValues
     public static double FocusedTabAccentThickness(string appTheme) =>
         ThemeVisualPalette.For(appTheme).AccentBarThickness;
 
+    // ---- workspace rail buttons ----
+
+    public const double WorkspaceIconSize = 20;
+
+    /// <summary>A tile takes its workspace's colour. An icon sits on a neutral tile so a
+    /// coloured logo is not drawn on another colour; Home has no colour; High Contrast uses
+    /// its selection colour for every tile.</summary>
+    public static Brush WorkspaceTileBrush(string colorTag, string iconKey)
+    {
+        if (App.IsHighContrast)
+            return ResourceBrush("SessionTreeSelectionBrush");
+        var color = ParseColor(colorTag);
+        return color.A == 0 || WorkspaceIcon(iconKey) is not null
+            ? ResourceBrush("SessionChromeFrameBrush")
+            : new SolidColorBrush(color);
+    }
+
+    public static Brush WorkspaceTileForeground(string colorTag)
+    {
+        if (App.IsHighContrast)
+            return ResourceBrush("SessionTreeSelectionForegroundBrush");
+        return ParseColor(colorTag).A == 0
+            ? ResourceBrush("SessionTreeForegroundBrush")
+            : ResourceBrush("WorkspaceTileForegroundBrush");
+    }
+
+    public static ImageSource? WorkspaceIcon(string iconKey) =>
+        iconKey.Length == 0 ? null : App.Icons.GetImage(iconKey, WorkspaceIconSize);
+
+    public static Visibility WorkspaceIconVisibility(string iconKey) => Visible(WorkspaceIcon(iconKey) is not null);
+
+    public static Visibility WorkspaceMonogramVisibility(string iconKey, bool isHome) =>
+        Visible(!isHome && WorkspaceIcon(iconKey) is null);
+
+    /// <summary>The alert dot's colour: amber when an agent waits, red for a dropped
+    /// session, the accent for unseen output — the tab strip's own meanings.</summary>
+    public static Windows.UI.Color WorkspaceAlertColor(WorkspaceAlert alert) => alert switch
+    {
+        WorkspaceAlert.Attention => AgentBadgeColor(AgentAttention.NeedsApproval),
+        WorkspaceAlert.Disconnected => Rgb(0xE74856),
+        _ => Rgb(0x0078D4),
+    };
+
+    public static double WorkspaceAlertSize(WorkspaceAlert alert) => alert == WorkspaceAlert.Activity ? 8 : 12;
+
+    /// <summary>A symbol on the urgent alerts, so they read without telling the colours apart.</summary>
+    public static Geometry? WorkspaceAlertSymbol(WorkspaceAlert alert) => alert switch
+    {
+        WorkspaceAlert.Attention => AgentBadgeSymbol(AgentAttention.NeedsApproval),
+        WorkspaceAlert.Disconnected => AgentBadgeSymbol(AgentAttention.Failed),
+        _ => null,
+    };
+
     private static Brush ResourceBrush(string key) =>
         (Brush)Application.Current.Resources[key];
 

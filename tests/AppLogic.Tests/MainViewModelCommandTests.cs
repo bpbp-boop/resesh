@@ -300,8 +300,43 @@ public sealed class MainViewModelCommandTests : IDisposable
         var titles = window.Commands.PaletteCommands().Where(d => d.Category == "Workspaces").Select(d => d.Title());
 
         Assert.Equal(
-            ["Save Current Layout as Workspace", "Open Lab", "Open Lab in New Window", "Open Lab Additively"],
+            ["Save Current Layout as Workspace", "Switch to Lab", "Open Lab in New Window", "Open Lab Additively"],
             titles);
+    }
+
+    [Fact]
+    public void PaletteOffersHomeAndCloseOnlyWhileAWorkspaceIsOpen()
+    {
+        var window = Window();
+        var lab = new Workspace { Id = Guid.NewGuid(), Name = "Lab" };
+        var prod = new Workspace { Id = Guid.NewGuid(), Name = "Prod" };
+        _window.WorkspaceList.AddRange([lab, prod]);
+        _window.OpenWorkspaces.Add(lab.Id);
+        _window.ShownWorkspaceId = lab.Id;
+
+        var titles = window.Commands.PaletteCommands().Where(d => d.Category == "Workspaces").Select(d => d.Title());
+
+        Assert.Equal(
+            [
+                "Save Current Layout as Workspace", "Switch to Home",
+                "Open Lab in New Window", "Open Lab Additively", "Close Lab",
+                "Switch to Prod", "Open Prod in New Window", "Open Prod Additively",
+            ],
+            titles);
+    }
+
+    [Fact]
+    public void WorkspaceCommandsForwardToTheWindow()
+    {
+        var window = Window();
+        var lab = new Workspace { Id = Guid.NewGuid(), Name = "Lab" };
+
+        window.CustomizeWorkspaceCommand.Execute(lab);
+        window.CloseWorkspaceCommand.Execute(lab);
+        window.ShowHomeWorkspaceCommand.Execute(null);
+
+        Assert.Equal(["CustomizeWorkspace Lab", "CloseWorkspace Lab", "ShowHomeWorkspace"], _window.Calls);
+        Assert.False(window.CloseWorkspaceCommand.CanExecute(null));
     }
 
     // ---- Session tree ----

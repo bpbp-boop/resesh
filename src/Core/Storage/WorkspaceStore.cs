@@ -41,6 +41,14 @@ public sealed record Workspace
     public string Name { get; set; } = "";
     public IReadOnlyList<WorkspaceGroup> Groups { get; set; } = [];
     public WorkspaceLayoutNode? Layout { get; init; }
+
+    /// <summary>A session icon catalog key drawn on the workspace's rail button. Null draws
+    /// the name's initials instead.</summary>
+    public string? Icon { get; set; }
+
+    /// <summary>The rail button's colour as #RRGGBB. Null takes a colour derived from the id,
+    /// so neighbouring workspaces differ without anyone choosing.</summary>
+    public string? ColorTag { get; set; }
 }
 
 /// <summary>
@@ -59,6 +67,7 @@ public sealed class WorkspaceStore
     private readonly object _gate = new();
     private List<Workspace> _workspaces = [];
     private WorkspaceLayout? _lastLayout;
+    private Guid? _lastActiveWorkspaceId;
     private bool _preserveBackup;
     public string? LoadWarning { get; private set; }
 
@@ -79,6 +88,12 @@ public sealed class WorkspaceStore
         get { lock (_gate) return _lastLayout; }
     }
 
+    /// <summary>The workspace the last window to close was showing, reopened with the last layout.</summary>
+    public Guid? LastActiveWorkspaceId
+    {
+        get { lock (_gate) return _lastActiveWorkspaceId; }
+    }
+
     public void Load()
     {
         lock (_gate)
@@ -89,6 +104,7 @@ public sealed class WorkspaceStore
             var data = load.Data ?? new WorkspaceStoreData { Workspaces = [] };
             _workspaces = data.Workspaces!;
             _lastLayout = data.LastLayout;
+            _lastActiveWorkspaceId = data.LastActiveWorkspaceId;
         }
     }
 
@@ -108,7 +124,7 @@ public sealed class WorkspaceStore
                 Groups = normalized.Groups,
                 Layout = normalized.Layout,
             };
-            Commit([.. _workspaces, workspace], _lastLayout);
+            Commit([.. _workspaces, workspace]);
             return workspace;
         }
     }
@@ -127,7 +143,7 @@ public sealed class WorkspaceStore
             var index = FindIndex(id);
             var updated = _workspaces.ToList();
             updated[index] = updated[index] with { Name = name };
-            Commit(updated, _lastLayout);
+            Commit(updated);
         }
     }
 
@@ -143,7 +159,7 @@ public sealed class WorkspaceStore
                 Groups = normalized.Groups,
                 Layout = normalized.Layout,
             };
-            Commit(updated, _lastLayout);
+            Commit(updated);
         }
     }
 
@@ -154,7 +170,7 @@ public sealed class WorkspaceStore
             var updated = _workspaces.Where(workspace => workspace.Id != id).ToList();
             var removed = updated.Count != _workspaces.Count;
             if (removed)
-                Commit(updated, _lastLayout);
+                Commit(updated);
             return removed;
         }
     }
@@ -173,15 +189,31 @@ public sealed class WorkspaceStore
             if (_workspaces.Select(workspace => workspace.Id).SequenceEqual(orderedIds))
                 return;
 
-            Commit(orderedIds.Select(id => byId[id]).ToList(), _lastLayout);
+            Commit(orderedIds.Select(id => byId[id]).ToList());
         }
     }
 
-    public void SaveLastLayout(WorkspaceLayout layout)
+    public void SetAppearance(Guid id, string? icon, string? colorTag)
     {
         lock (_gate)
         {
-            Commit(_workspaces, NormalizeLayout(layout));
+            var index = FindIndex(id);
+            var updated = _workspaces.ToList();
+            updated[index] = updated[index] with
+            {
+                Icon = string.IsNullOrWhiteSpace(icon) ? null : icon,
+                ColorTag = string.IsNullOrWhiteSpace(colorTag) ? null : colorTag,
+            };
+            Commit(updated);
+        }
+    }
+
+    /// <summary>Saves the unsaved (Home) layout and the workspace shown beside it, if any.</summary>
+    public void SaveLastLayout(WorkspaceLayout layout, Guid? activeWorkspaceId = null)
+    {
+        lock (_gate)
+        {
+            Commit(_workspaces, NormalizeLayout(layout), activeWorkspaceId);
         }
     }
 
@@ -201,12 +233,23 @@ public sealed class WorkspaceStore
             : throw new ArgumentException("Workspace name cannot be empty.", nameof(name));
     }
 
-    private void Commit(List<Workspace> workspaces, WorkspaceLayout? lastLayout)
+    private void Commit(List<Workspace> workspaces) => Commit(workspaces, _lastLayout, _lastActiveWorkspaceId);
+
+    private void Commit(List<Workspace> workspaces, WorkspaceLayout? lastLayout, Guid? lastActiveWorkspaceId)
     {
-        WriteAtomic(_path, new WorkspaceStoreData { Workspaces = workspaces, LastLayout = lastLayout }, _preserveBackup);
+        // A deleted workspace cannot be reopened at startup.
+        if (lastActiveWorkspaceId is { } id && !workspaces.Any(workspace => workspace.Id == id))
+            lastActiveWorkspaceId = null;
+        WriteAtomic(_path, new WorkspaceStoreData
+        {
+            Workspaces = workspaces,
+            LastLayout = lastLayout,
+            LastActiveWorkspaceId = lastActiveWorkspaceId,
+        }, _preserveBackup);
         _preserveBackup = false;
         _workspaces = workspaces;
         _lastLayout = lastLayout;
+        _lastActiveWorkspaceId = lastActiveWorkspaceId;
     }
 
     internal static WorkspaceStoreData ParsePayload(byte[] payload)
@@ -275,6 +318,7 @@ public sealed class WorkspaceStore
                 };
             }).ToList(),
             LastLayout = source.LastLayout is null ? null : RemapLayout(source.LastLayout),
+            LastActiveWorkspaceId = source.LastActiveWorkspaceId,
         };
     }
 
@@ -308,6 +352,7 @@ public sealed class WorkspaceStore
         {
             Workspaces = workspaces,
             LastLayout = data.LastLayout is null ? null : NormalizeLayout(data.LastLayout),
+            LastActiveWorkspaceId = data.LastActiveWorkspaceId is { } active && ids.Contains(active) ? active : null,
         };
     }
 
@@ -433,4 +478,5 @@ internal sealed record WorkspaceStoreData
 {
     public List<Workspace>? Workspaces { get; init; }
     public WorkspaceLayout? LastLayout { get; init; }
+    public Guid? LastActiveWorkspaceId { get; init; }
 }
