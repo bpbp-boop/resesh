@@ -1207,6 +1207,7 @@ tries again 250 ms later. Resesh copies those timings.
 - On Windows the library frees pages with `DiscardVirtualMemory`: the working set (Task
   Manager's memory column) drops, the commit charge doesn't. In the native test, 20,000
   styled log lines went from 20.9 MB resident to 0.74 MB in 57 steps.
+
 ## 2026-10-27 - A session's theme override colors its tab
 
 Session theme overrides used to stay inside the terminal so a tab strip never mixed themes.
@@ -1227,3 +1228,17 @@ column gutter can border several stacked panes. So gutters stay neutral, and an 
 (`PaneFocusFrame`) draws the sides over the exact gutter pixels, keeping each seam one
 pixel. It is placed from layout offsets rather than rendered bounds so pane motion doesn't
 skew it, and it steps aside while a gutter is hovered or dragged.
+
+## 2026-10-28 - Kitty clipboard writes copy plain text only
+
+Since libghostty-vt 1.4, Kitty clipboard protocol (OSC 5522) writes reach the same
+clipboard_write callback as OSC 52, so they worked with no shim change, and the program gets
+a DONE reply. A 5522 write can carry several MIME types in any order, though, and the shim
+copied the first `text/*` one, so a program sending `text/html` before `text/plain` put raw
+markup on the clipboard. The callback now copies only `text/plain` (with or without
+parameters such as `;charset=utf-8`) and answers ENOSYS when there's none, so the program
+knows the copy didn't happen.
+
+Reads stay off, as with OSC 52: no clipboard_read callback is installed, so 5522 reads and
+type lists get EPERM, OSC 52 `?` gets no reply, and `CSI ? 5522 $ p` reports paste events
+unsupported. Paste events are on the ROADMAP backlog.
