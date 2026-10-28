@@ -666,6 +666,15 @@ have `synchronize-panes` if they truly want it.
   nested children (make → cc) and survives fancy prompts; Linux/procfs only, adds polling,
   and assumes one shell per connection. Back pocket unless discovery + stock context data
   prove insufficient.
+- **Kitty clipboard paste events (mode 5522)** — on a user paste, a remote program gets
+  the clipboard's MIME types and reads the one it wants, so a screenshot could be pasted
+  into a TUI over SSH. libghostty-vt 1.4 implements the protocol; we'd install its
+  clipboard_read callback, answer only reads carrying the paste's one-time password (every
+  other read stays EPERM), save a copy of the Windows clipboard formats at paste time (the
+  callback runs on the reader thread with the lock held), and map CF_DIB/HTML Format to
+  `image/png`/`text/html`. Wait for users: as of 2026-10 only kitty 0.44.1+ and
+  Ghostty 1.4 terminals speak it; Claude Code declined it (anthropics/claude-code#42712),
+  and Neovim and tmux don't. Kitty clipboard *writes* already work (text only).
 
 ---
 

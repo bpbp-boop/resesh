@@ -234,10 +234,14 @@ static void on_pwd(GhosttyTerminal term, void* user) {
 
 static void on_clipboard_write(GhosttyTerminal term, void* user, const GhosttyClipboardWrite* write) {
   (void)term;
+  // Kitty clipboard writes (OSC 5522) can carry several types in any order; copy the plain
+  // text one, so text/html arriving first doesn't put markup on the clipboard. Writes with
+  // no plain text are answered unsupported rather than copied in some other form.
   GhosttyClipboardWriteResult result = GHOSTTY_CLIPBOARD_WRITE_RESULT_UNSUPPORTED;
   for (size_t i = 0; i < write->contents_len; i++) {
     const GhosttyClipboardContent* c = &write->contents[i];
-    if (c->mime.len >= 5 && memcmp(c->mime.ptr, "text/", 5) == 0) {
+    if (c->mime.len >= 10 && memcmp(c->mime.ptr, "text/plain", 10) == 0 &&
+        (c->mime.len == 10 || c->mime.ptr[10] == ';')) {
       emit((RvtTerm*)user, RVT_EVENT_CLIPBOARD, c->data.ptr, c->data.len);
       result = GHOSTTY_CLIPBOARD_WRITE_RESULT_SUCCESS;
       break;

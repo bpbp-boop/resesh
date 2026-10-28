@@ -190,6 +190,57 @@ public sealed unsafe class NativeFrameTests
     }
 
     [WindowsNativeFact]
+    public void KittyClipboardWritesCopyThePlainTextAndNeverReadTheClipboard()
+    {
+        Assert.Null(GhosttyNative.TryLoad());
+        var events = t_events = [];
+        var handle = GhosttyNative.rvt_new(80, 24, 100, &CollectEvent, IntPtr.Zero);
+        try
+        {
+            const string E = "\u001b", ST = "\u001b\\";
+            void Write(string text)
+            {
+                var bytes = Encoding.UTF8.GetBytes(text);
+                fixed (byte* data = bytes)
+                    GhosttyNative.rvt_write(handle, data, (nuint)bytes.Length);
+            }
+            string[] Of(GhosttyEventKind kind) => events.Where(e => e.Kind == (int)kind)
+                .Select(e => Encoding.UTF8.GetString(e.Data)).ToArray();
+            string Mime(string mime) => Convert.ToBase64String(Encoding.UTF8.GetBytes(mime));
+            string Data(string text) => Convert.ToBase64String(Encoding.UTF8.GetBytes(text));
+
+            // HTML first, then plain text in two chunks.
+            Write(E + "]5522;type=write:id=c1" + ST
+                + E + "]5522;type=wdata:mime=" + Mime("text/html") + ";" + Data("<b>hi</b>") + ST
+                + E + "]5522;type=wdata:mime=" + Mime("text/plain;charset=utf-8") + ";" + Data("Ghost") + ST
+                + E + "]5522;type=wdata:mime=" + Mime("text/plain;charset=utf-8") + ";" + Data("ty") + ST
+                + E + "]5522;type=wdata" + ST);
+            Assert.Equal(["Ghostty"], Of(GhosttyEventKind.Clipboard));
+            Assert.Equal([E + "]5522;type=write:status=DONE:id=c1" + ST], Of(GhosttyEventKind.Pty));
+
+            events.Clear();
+            Write(E + "]5522;type=write:id=c2" + ST
+                + E + "]5522;type=wdata:mime=" + Mime("text/html") + ";" + Data("<b>hi</b>") + ST
+                + E + "]5522;type=wdata" + ST);
+            Assert.Empty(Of(GhosttyEventKind.Clipboard));
+            Assert.Equal([E + "]5522;type=write:status=ENOSYS:id=c2" + ST], Of(GhosttyEventKind.Pty));
+
+            // A remote host must never read the local clipboard, or even list what it holds.
+            events.Clear();
+            Write(E + "]5522;type=read;" + Mime(".") + ST);
+            Write(E + "]5522;type=read;" + Mime("text/plain") + ST);
+            Write(E + "]52;c;?" + ST);
+            Assert.All(Of(GhosttyEventKind.Pty), reply => Assert.Contains("status=EPERM", reply));
+            Assert.Equal(2, Of(GhosttyEventKind.Pty).Length);
+        }
+        finally
+        {
+            GhosttyNative.rvt_free(handle);
+            t_events = null;
+        }
+    }
+
+    [WindowsNativeFact]
     public void TrimmedNativeMarkersCanBeFreedAndReused()
     {
         using var terminal = new NativeTerminal();
