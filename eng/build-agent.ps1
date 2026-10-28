@@ -1,6 +1,7 @@
 # Builds the remote session agent: our fork of zmx at the commit pinned in
 # eng/agent/agent.json, against the Ghostty commit pinned in eng/ghostty-vt.json with
-# eng/agent/ghostty-vt-formatter.patch applied.
+# eng/agent/ghostty-vt-formatter.patch applied. agent.json may pin its own "ghostty" and "zig"
+# instead, for when the app moves to a Ghostty the patch has not been ported to yet.
 # Output: .artifacts/agent/<arch>/resesh-agent, a static musl binary for Linux, stripped,
 # and .artifacts/agent/agent-manifest.json, which the app reads (AgentPackage).
 #
@@ -26,6 +27,7 @@ $ErrorActionPreference = 'Stop'
 $repo = Resolve-Path (Join-Path $PSScriptRoot '..')
 $pin = Get-Content (Join-Path $PSScriptRoot 'agent\agent.json') -Raw | ConvertFrom-Json
 $ghosttyPin = (Get-Content (Join-Path $PSScriptRoot 'ghostty-vt.json') -Raw | ConvertFrom-Json)
+if ($pin.ghostty) { $ghosttyPin = $pin }
 $version = "$($pin.zmx.version)-resesh.$($pin.revision)"
 $ghosttyVersion = "ghostty-$($ghosttyPin.ghostty.version)-$($ghosttyPin.ghostty.commit.Substring(0, 8))"
 

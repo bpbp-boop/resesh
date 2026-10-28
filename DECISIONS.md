@@ -1242,3 +1242,23 @@ knows the copy didn't happen.
 Reads stay off, as with OSC 52: no clipboard_read callback is installed, so 5522 reads and
 type lists get EPERM, OSC 52 `?` gets no reply, and `CSI ? 5522 $ p` reports paste events
 unsupported. Paste events are on the ROADMAP backlog.
+
+## 2026-10-28 - The session agent keeps its own Ghostty pin until its patch is ported
+
+The libghostty-vt 1.4.0 update moved `eng/ghostty-vt.json`, which `build-agent.ps1` also
+built the agent from, and `eng/agent/ghostty-vt-formatter.patch` (OSC 133 marks in the VT
+snapshot sent on reattach) doesn't apply to 1.4: upstream rewrote the formatter for 1.4's
+speedups, and 11 of the patch's 21 hunks fail. 1.4 still doesn't write OSC 133 itself, so
+the patch is still needed. `agent.json` can now pin its own `ghostty` and `zig`, and does:
+b699ea7 (1.3.2-dev) with Zig 0.16, the inputs agent 0.8.1-resesh.2 was built from, so the
+revision stays at 2 and hosts keep the binary they have. Porting the patch to 1.4 (and
+checking that the zmx fork builds with Zig 0.17) removes the override; raise the revision
+then. When moving `eng/ghostty-vt.json`, build the agent too.
+
+## 2026-10-28 - Glyph Protocol off
+
+libghostty-vt 1.4 enables the experimental Glyph Protocol (APC `25a1`) by default: it answers
+support queries and stores glyphs programs register for Private Use Area code points. The
+renderer never draws them, so a program that asked would print code points that show as
+empty boxes instead of using its fallback. `rvt_new` turns it off with
+`GHOSTTY_TERMINAL_OPT_GLYPH_PROTOCOL`, as for Kitty graphics, and the queries get no reply.
