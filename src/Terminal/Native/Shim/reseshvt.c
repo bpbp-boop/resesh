@@ -393,6 +393,11 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
   // unsupported and fall back, rather than spending up to 10 MB a tab on invisible images.
   uint64_t kitty_images = 0;
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &kitty_images);
+  // Likewise the Glyph Protocol (APC 25a1): it answers support queries and keeps registered
+  // glyphs, which the renderer never draws, so programs would show empty boxes instead of
+  // falling back.
+  bool glyphs = false;
+  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_GLYPH_PROTOCOL, &glyphs);
   size_t unknown_max = 4096;
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_UNKNOWN_MAX_BYTES, &unknown_max);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_USERDATA, t);

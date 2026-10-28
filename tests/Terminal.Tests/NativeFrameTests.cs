@@ -145,6 +145,27 @@ public sealed unsafe class NativeFrameTests
     }
 
     [WindowsNativeFact]
+    public void GlyphProtocolProbeAndRegistrationGetNoReply()
+    {
+        Assert.Null(GhosttyNative.TryLoad());
+        var events = t_events = [];
+        var handle = GhosttyNative.rvt_new(80, 24, 100, &CollectEvent, IntPtr.Zero);
+        try
+        {
+            // A support query, then a glyph registration for U+E0A0.
+            var bytes = Encoding.UTF8.GetBytes("\u001b_25a1;s\u001b\\\u001b_25a1;r;cp=e0a0;AAAAAAAAAAAAAA==\u001b\\");
+            fixed (byte* data = bytes)
+                GhosttyNative.rvt_write(handle, data, (nuint)bytes.Length);
+            Assert.DoesNotContain(events, e => e.Kind == (int)GhosttyEventKind.Pty);
+        }
+        finally
+        {
+            GhosttyNative.rvt_free(handle);
+            t_events = null;
+        }
+    }
+
+    [WindowsNativeFact]
     public void ScrollbackCompressesOnceAskedAndAsksAgainAfterNewOutput()
     {
         Assert.Null(GhosttyNative.TryLoad());
