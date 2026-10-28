@@ -108,7 +108,7 @@ Shell integration adds prompt and command boundaries, exit results, and current-
 reports to the existing command marks and file pane. It is **off by default for every
 session**, including existing profiles and imported connections.
 
-- For a local profile, turn on **Enable shell integration (experimental)** in its editor.
+- For a local profile, turn on **Shell integration (experimental)** on its editor's Shell tab.
   Recognized Bash, Zsh, Fish, and PowerShell executables are supported. WSL, Command Prompt,
   and custom command/script launches keep their ordinary startup and show a skip notice.
 - For SSH, select **Shell integration (experimental)** in the session's **Connection**

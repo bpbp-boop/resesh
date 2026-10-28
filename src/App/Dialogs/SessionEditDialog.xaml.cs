@@ -57,15 +57,17 @@ public sealed partial class SessionEditDialog : ContentDialog
             .Concat(ThemeCatalog.All).ToList();
         _existing = existing;
         _keyStore = keyStore;
-        Title = existing is null ? "New session" : "Edit session";
+        TitleText.Text = existing is null ? "New session" : "Edit session";
+        AutomationProperties.SetName(this, TitleText.Text); // the title is an element, not a string
         PasswordHint.Text = existing is null
             ? "Stored in Windows Credential Manager"
             : "Stored in Windows Credential Manager — leave blank to keep the current one";
 
         if (notice is not null)
         {
-            NoticeBar.Message = notice;
-            NoticeBar.IsOpen = true;
+            ConnectedNote.Visibility = Visibility.Visible;
+            ToolTipService.SetToolTip(ConnectedNote, notice);
+            AutomationProperties.SetName(ConnectedNote, notice);
         }
 
         FolderBox.ItemsSource = folderPaths.ToList();
@@ -170,22 +172,9 @@ public sealed partial class SessionEditDialog : ContentDialog
             DetachedSessionsBox.IsEnabled = PersistenceBackendBox.IsEnabled = PersistentToggle.IsOn;
         };
         if (initialTarget != SessionSettingsTarget.General)
-            SectionBar.SelectedItem = TerminalSection;
-        Opened += (_, _) =>
-        {
-            UpdateDialogLayout();
-            XamlRoot.Changed += OnRootChanged;
-            DispatcherQueue.TryEnqueue(() => InitialFocus(initialTarget)?.Focus(FocusState.Programmatic));
-        };
-        Closed += (_, _) => XamlRoot.Changed -= OnRootChanged;
-    }
-
-    private void OnRootChanged(XamlRoot sender, XamlRootChangedEventArgs args) => UpdateDialogLayout();
-
-    private void UpdateDialogLayout()
-    {
-        SessionForm.Width = Math.Min(600, Math.Max(240, XamlRoot.Size.Width - 96));
-        SectionHost.Height = Math.Min(480, Math.Max(160, XamlRoot.Size.Height - 250));
+            SectionBar.SelectedItem = AppearanceSection;
+        DialogSizing.FitSections(this, SessionForm, SectionHost, preferredWidth: 600, preferredHeight: 480);
+        Opened += (_, _) => DispatcherQueue.TryEnqueue(() => InitialFocus(initialTarget)?.Focus(FocusState.Programmatic));
     }
 
     private void UpdateAdvancedHeader()
@@ -492,13 +481,14 @@ public sealed partial class SessionEditDialog : ContentDialog
     private void SectionBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
         // Fires during InitializeComponent for the initially-selected item, before the panels exist.
-        if (ConnectionPanel is null || NetworkPanel is null || TerminalPanel is null || NotesBox is null)
+        if (ConnectionPanel is null || NetworkPanel is null || TerminalPanel is null || AppearancePanel is null || NotesBox is null)
             return;
 
         var selected = sender.SelectedItem;
         NetworkPanel.Visibility = selected == NetworkSection ? Visibility.Visible : Visibility.Collapsed;
         ConnectionPanel.Visibility = selected == ConnectionSection ? Visibility.Visible : Visibility.Collapsed;
         TerminalPanel.Visibility = selected == TerminalSection ? Visibility.Visible : Visibility.Collapsed;
+        AppearancePanel.Visibility = selected == AppearanceSection ? Visibility.Visible : Visibility.Collapsed;
         NotesBox.Visibility = selected == NotesSection ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -529,6 +519,8 @@ public sealed partial class SessionEditDialog : ContentDialog
         TelnetEncodingBox.Visibility = telnet ? Visibility.Visible : Visibility.Collapsed;
         TelnetSizePanel.Visibility = telnet ? Visibility.Visible : Visibility.Collapsed;
         TelnetNotice.IsOpen = telnet;
+        // A closed InfoBar still takes a slot in the StackPanel, and with it a row of spacing.
+        TelnetNotice.Visibility = telnet ? Visibility.Visible : Visibility.Collapsed;
         UpdateNetworkFields();
     }
 
