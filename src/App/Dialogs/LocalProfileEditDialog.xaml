@@ -117,7 +117,7 @@
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <CheckBox x:Name="MakeDefaultBox" Grid.Column="0" Content="Default local profile (+ Session, Ctrl+Shift+T)" />
+                        <CheckBox x:Name="MakeDefaultBox" Grid.Column="0" Content="Default local profile (Ctrl+Shift+T)" />
                         <Button
                             x:Name="ResetButton"
                             Grid.Column="1"

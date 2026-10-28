@@ -148,6 +148,7 @@
                     <MenuFlyoutItem x:Name="NewWindowMenuItem" Text="New Window" Command="{x:Bind ViewModel.NewWindowCommand}" />
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="New SSH Session…" Command="{x:Bind ViewModel.NewSshSessionCommand}" />
+                    <MenuFlyoutItem Text="New Telnet Session…" Command="{x:Bind ViewModel.NewTelnetSessionCommand}" />
                     <MenuFlyoutItem Text="New Local Profile…" Command="{x:Bind ViewModel.NewLocalProfileCommand}" />
                     <MenuFlyoutItem Text="New Folder…" Command="{x:Bind ViewModel.NewFolderCommand}" />
                     <MenuFlyoutItem Text="Open Recording…" Command="{x:Bind ViewModel.OpenRecordingCommand}" />
@@ -314,20 +315,6 @@
                     BorderThickness="0">
                     <FontIcon Glyph="&#xE721;" FontSize="14" />
                 </Button>
-                <!-- Primary action creates a saved SSH session. Local profiles stay in the menu. -->
-                <SplitButton
-                    x:Name="NewSessionButton"
-                    Command="{x:Bind ViewModel.NewSshSessionCommand}"
-                    AutomationProperties.Name="New SSH session"
-                    ToolTipService.ToolTip="Create a new SSH session">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE710;" FontSize="14" />
-                        <TextBlock x:Name="NewSessionLabel" Text="New SSH session" />
-                    </StackPanel>
-                    <SplitButton.Flyout>
-                        <MenuFlyout x:Name="NewSessionFlyout" Opening="NewSessionFlyout_Opening" />
-                    </SplitButton.Flyout>
-                </SplitButton>
                 <ToggleButton
                     x:Name="PinButton"
                     AutomationProperties.Name="Keep window on top"
@@ -624,6 +611,7 @@
                     <TreeView.ContextFlyout>
                         <MenuFlyout>
                             <MenuFlyoutItem Text="New SSH Session…" Command="{x:Bind ViewModel.NewSshSessionCommand}" />
+                            <MenuFlyoutItem Text="New Telnet Session…" Command="{x:Bind ViewModel.NewTelnetSessionCommand}" />
                             <MenuFlyoutItem Text="New Local Profile…" Command="{x:Bind ViewModel.NewLocalProfileCommand}" />
                             <MenuFlyoutItem Text="New Folder…" Command="{x:Bind ViewModel.NewFolderCommand}" />
                             <MenuFlyoutSeparator />
