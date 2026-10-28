@@ -1251,9 +1251,21 @@ snapshot sent on reattach) doesn't apply to 1.4: upstream rewrote the formatter 
 speedups, and 11 of the patch's 21 hunks fail. 1.4 still doesn't write OSC 133 itself, so
 the patch is still needed. `agent.json` can now pin its own `ghostty` and `zig`, and does:
 b699ea7 (1.3.2-dev) with Zig 0.16, the inputs agent 0.8.1-resesh.2 was built from, so the
-revision stays at 2 and hosts keep the binary they have. Porting the patch to 1.4 (and
-checking that the zmx fork builds with Zig 0.17) removes the override; raise the revision
-then. When moving `eng/ghostty-vt.json`, build the agent too.
+revision stays at 2 and hosts keep the binary they have. When moving `eng/ghostty-vt.json`,
+build the agent too.
+
+Removing the override takes more than the patch. Porting the patch was the easy part (1.4
+writes OSC 8 links in VT output itself, so only the OSC 133 half is left, and its test
+passes on 1.4). The blocker is that 1.4 needs Zig 0.17 and our zmx fork builds only with
+0.16. Upstream zmx moved to 0.17 (07c89c0) after freezing its IPC wire format (35b8783,
+"existing daemons must be killed before upgrading"): the header gained a protocol version,
+and tag 22, our `StatGet`, became `Capture`. An app update reattaches with the new agent
+(`AgentPersistence.ResumeCommand` uses the current version's path), so on that upstream a
+new agent couldn't reach sessions an older one started, and users would lose them. The 0.17
+commit alone doesn't fit our older fork either; it builds on upstream's restructuring. The
+way forward is to rebase the fork onto upstream and have the app reattach each session with
+the agent version that started it (old versions stay installed), then raise the revision.
+That's on the ROADMAP; until then the agent stays on 1.3.2.
 
 ## 2026-10-28 - Glyph Protocol off
 
