@@ -16,10 +16,11 @@
 typedef struct { void* ptr; } RvtSrwLock;
 __declspec(dllimport) void __stdcall InitializeSRWLock(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall AcquireSRWLockExclusive(RvtSrwLock* lock);
+__declspec(dllimport) unsigned char __stdcall TryAcquireSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) uint64_t __stdcall GetTickCount64(void);
 
-#define RVT_ABI_VERSION 7
+#define RVT_ABI_VERSION 8
 
 // ---- events -------------------------------------------------------------------------------
 
@@ -31,6 +32,7 @@ enum {
   RVT_EVENT_CLIPBOARD = 5,  // UTF-8 text a program copied (OSC 52)
   RVT_EVENT_OSC = 6,        // unknown OSC content, "number;payload"
   RVT_EVENT_SEMANTIC = 7,   // RvtSemanticEvent followed by the UTF-8 command line (OSC 133)
+  RVT_EVENT_COMPRESS = 8,   // scrollback changed: call rvt_compress once the terminal is idle
 };
 
 // Shell integration step, captured while the output is parsed (the C# side handles it
@@ -127,10 +129,10 @@ typedef struct {
   uint32_t cell_w, cell_h, screen_w, screen_h;
   bool render_held;
   uint64_t hold_started_ms;
+  uint64_t compress_activity; // libghostty-vt activity token when compression was last scheduled
+  bool compress_scheduled;    // RVT_EVENT_COMPRESS sent and rvt_compress hasn't finished
 } RvtTerm;
 
-static void lock(RvtTerm* t) { AcquireSRWLockExclusive(&t->lock); }
-static void unlock(RvtTerm* t) { ReleaseSRWLockExclusive(&t->lock); }
 static uint32_t pack(GhosttyColorRgb c) { return ((uint32_t)c.r << 16) | ((uint32_t)c.g << 8) | c.b; }
 static GhosttyColorRgb unpack(uint32_t v) {
   GhosttyColorRgb c = { (uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v };
@@ -139,6 +141,22 @@ static GhosttyColorRgb unpack(uint32_t v) {
 
 static void emit(RvtTerm* t, int kind, const uint8_t* data, size_t len) {
   if (t->on_event) t->on_event(t->user, kind, data, len);
+}
+
+static void lock(RvtTerm* t) { AcquireSRWLockExclusive(&t->lock); }
+
+// Output, resizes and clears all change the scrollback, so every call ends with this check
+// rather than each export deciding whether it needs compression.
+static void unlock(RvtTerm* t) {
+  uint64_t activity;
+  if (!t->compress_scheduled &&
+      ghostty_terminal_compression_activity(t->term, &activity) == GHOSTTY_SUCCESS &&
+      activity != t->compress_activity) {
+    t->compress_activity = activity;
+    t->compress_scheduled = true;
+    emit(t, RVT_EVENT_COMPRESS, NULL, 0);
+  }
+  ReleaseSRWLockExclusive(&t->lock);
 }
 
 // ---- markers and lines (caller holds the lock) ---------------------------------------------
@@ -367,6 +385,10 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
   // Ghostty itself; programs can still turn mode 2027 off.
   GhosttyTerminalModeConfig grapheme = { GHOSTTY_MODE_GRAPHEME_CLUSTER, true };
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_MODE_DEFAULT, &grapheme);
+  // The renderer doesn't draw Kitty images, so turn the protocol off: programs then see it
+  // unsupported and fall back, rather than spending up to 10 MB a tab on invisible images.
+  uint64_t kitty_images = 0;
+  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &kitty_images);
   size_t unknown_max = 4096;
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_UNKNOWN_MAX_BYTES, &unknown_max);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_USERDATA, t);
@@ -382,6 +404,7 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS, (const void*)on_program_status);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_XTVERSION, (const void*)on_xtversion);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, (const void*)on_render_hold);
+  ghostty_terminal_compression_activity(t->term, &t->compress_activity);
   return t;
 }
 
@@ -403,8 +426,46 @@ RVT_API void rvt_free(RvtTerm* t) {
   ghostty_render_state_row_iterator_free(t->it);
   ghostty_render_state_free(t->rs);
   ghostty_terminal_free(t->term);
-  unlock(t);
+  ReleaseSRWLockExclusive(&t->lock); // not unlock(): the terminal is gone
   free(t);
+}
+
+enum { RVT_COMPRESS_DONE = 0, RVT_COMPRESS_PENDING = 1, RVT_COMPRESS_WAIT = 2 };
+
+// One bounded step of scrollback compression, for the host's idle timer after
+// RVT_EVENT_COMPRESS. Never waits for the lock. WAIT: the terminal is busy or changed since
+// the last call, so try again after the idle delay; PENDING: call again soon; DONE: stop
+// until the next RVT_EVENT_COMPRESS.
+RVT_API int rvt_compress(RvtTerm* t) {
+  if (!TryAcquireSRWLockExclusive(&t->lock)) return RVT_COMPRESS_WAIT;
+  int status = RVT_COMPRESS_WAIT;
+  uint64_t activity = 0;
+  ghostty_terminal_compression_activity(t->term, &activity);
+  if (activity != t->compress_activity) {
+    t->compress_activity = activity; // still changing: let it settle first
+  } else {
+    GhosttyTerminalCompressionResult result = GHOSTTY_TERMINAL_COMPRESSION_RESULT_COMPLETE;
+    ghostty_terminal_compress(t->term, GHOSTTY_TERMINAL_COMPRESSION_MODE_INCREMENTAL, &result);
+    if (result == GHOSTTY_TERMINAL_COMPRESSION_RESULT_PENDING) {
+      status = RVT_COMPRESS_PENDING;
+    } else {
+      status = RVT_COMPRESS_DONE;
+      // Unsupported stays unsupported, so leave it scheduled and never ask again.
+      t->compress_scheduled = result == GHOSTTY_TERMINAL_COMPRESSION_RESULT_UNSUPPORTED;
+    }
+  }
+  ReleaseSRWLockExclusive(&t->lock); // not unlock(): this mustn't schedule itself
+  return status;
+}
+
+// Bytes of physical memory both screens' pages hold (compressed pages count their
+// compressed size).
+RVT_API uint64_t rvt_resident_bytes(RvtTerm* t) {
+  GhosttyTerminalMemoryUsage usage = GHOSTTY_INIT_SIZED(GhosttyTerminalMemoryUsage);
+  lock(t);
+  GhosttyResult r = ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_MEMORY_USAGE, &usage);
+  unlock(t);
+  return r == GHOSTTY_SUCCESS ? usage.primary_resident_bytes + usage.alternate_resident_bytes : 0;
 }
 
 RVT_API void rvt_write(RvtTerm* t, const uint8_t* data, size_t len) {

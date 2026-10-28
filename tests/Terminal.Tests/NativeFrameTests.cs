@@ -124,6 +124,72 @@ public sealed unsafe class NativeFrameTests
     }
 
     [WindowsNativeFact]
+    public void KittyGraphicsProbeGetsNoReply()
+    {
+        Assert.Null(GhosttyNative.TryLoad());
+        var events = t_events = [];
+        var handle = GhosttyNative.rvt_new(80, 24, 100, &CollectEvent, IntPtr.Zero);
+        try
+        {
+            // The query kitty's icat and chafa send to detect image support.
+            var bytes = Encoding.UTF8.GetBytes("\u001b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\u001b\\");
+            fixed (byte* data = bytes)
+                GhosttyNative.rvt_write(handle, data, (nuint)bytes.Length);
+            Assert.DoesNotContain(events, e => e.Kind == (int)GhosttyEventKind.Pty);
+        }
+        finally
+        {
+            GhosttyNative.rvt_free(handle);
+            t_events = null;
+        }
+    }
+
+    [WindowsNativeFact]
+    public void ScrollbackCompressesOnceAskedAndAsksAgainAfterNewOutput()
+    {
+        Assert.Null(GhosttyNative.TryLoad());
+        var events = t_events = [];
+        var handle = GhosttyNative.rvt_new(120, 40, 100_000, &CollectEvent, IntPtr.Zero);
+        try
+        {
+            void Write(string text)
+            {
+                var bytes = Encoding.UTF8.GetBytes(text);
+                fixed (byte* data = bytes)
+                    GhosttyNative.rvt_write(handle, data, (nuint)bytes.Length);
+            }
+            int Asks() => events.Count(e => e.Kind == (int)GhosttyEventKind.Compress);
+
+            GhosttyNative.rvt_resident_bytes(handle);
+            Assert.Equal(0, Asks()); // nothing to compress yet
+
+            var log = new StringBuilder();
+            for (var i = 0; i < 20_000; i++)
+                log.Append("\u001b[32mINFO\u001b[0m request ").Append(i % 50).Append(" served from cache\r\n");
+            Write(log.ToString());
+            Write("more\r\n");
+            Assert.Equal(1, Asks()); // scheduled once, not on every write
+
+            var before = GhosttyNative.rvt_resident_bytes(handle);
+            // The first call sees the second write and waits for the output to settle.
+            Assert.Equal(GhosttyNative.CompressWait, GhosttyNative.rvt_compress(handle));
+            var steps = 0;
+            while (GhosttyNative.rvt_compress(handle) != GhosttyNative.CompressDone)
+                Assert.True(++steps < 100_000);
+            var after = GhosttyNative.rvt_resident_bytes(handle);
+            Assert.True(after < before / 2, $"{before} bytes before compression, {after} after");
+
+            Write("next\r\n");
+            Assert.Equal(2, Asks());
+        }
+        finally
+        {
+            GhosttyNative.rvt_free(handle);
+            t_events = null;
+        }
+    }
+
+    [WindowsNativeFact]
     public void TrimmedNativeMarkersCanBeFreedAndReused()
     {
         using var terminal = new NativeTerminal();

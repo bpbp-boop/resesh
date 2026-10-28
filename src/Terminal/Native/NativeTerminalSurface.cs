@@ -84,6 +84,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _blinkTimer;
     private readonly List<byte[]> _earlyOutput = [];
     private IntPtr _term;
+    private Timer? _compressTimer;
     private GCHandle _self;
     private TerminalCell* _cells;
     private byte* _dirty;
@@ -275,6 +276,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             return Task.CompletedTask;
         _initialized = true;
         _self = GCHandle.Alloc(this);
+        _compressTimer = new Timer(CompressTick);
         lock (_termGate)
         {
             _term = GhosttyNative.rvt_new((ushort)Columns, (ushort)Rows, (nuint)Math.Max(0, _scrollback),
@@ -312,6 +314,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
                 GhosttyNative.rvt_free(_term);
             _term = IntPtr.Zero;
         }
+        _compressTimer?.Dispose();
         if (_self.IsAllocated)
             _self.Free();
         _renderer.SwapChainChanged -= OnRendererSwapChainChanged;
@@ -436,6 +439,12 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         {
             if (GCHandle.FromIntPtr(user).Target is not NativeTerminalSurface self || self._disposed)
                 return;
+            // Raised with the shim lock held, on whichever thread changed the scrollback.
+            if (kind == (int)GhosttyEventKind.Compress)
+            {
+                self.ScheduleCompression(CompressIdleMilliseconds);
+                return;
+            }
             var bytes = length == 0 ? [] : new ReadOnlySpan<byte>(data, checked((int)length)).ToArray();
             // Raised on the UI thread.
             self.DispatcherQueue.TryEnqueue(() => self.DispatchNativeEvent((GhosttyEventKind)kind, bytes));
@@ -497,6 +506,65 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
                     ContextReported?.Invoke(payload);
                 }
                 break;
+        }
+    }
+
+    // ---- scrollback compression -----------------------------------------------------------
+
+    // Ghostty's own timings (src/renderer/Thread.zig): compress once the scrollback has been
+    // still for 250 ms, then a bounded step every millisecond until it is done.
+    private const int CompressIdleMilliseconds = 250;
+    private const int CompressStepMilliseconds = 1;
+    private static readonly TimeSpan CompressSlice = TimeSpan.FromMilliseconds(2);
+
+    private void ScheduleCompression(int delayMilliseconds)
+    {
+        try
+        {
+            _compressTimer?.Change(delayMilliseconds, Timeout.Infinite);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// Runs on the thread pool and never waits for the terminal, so output always wins. Windows
+    /// timers can't fire every millisecond, so one tick runs steps for up to 2 ms instead.
+    /// </summary>
+    private void CompressTick(object? state)
+    {
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
+        while (true)
+        {
+            if (!Monitor.TryEnter(_termGate))
+            {
+                ScheduleCompression(CompressIdleMilliseconds);
+                return;
+            }
+            int status;
+            try
+            {
+                if (_term == IntPtr.Zero)
+                    return;
+                status = GhosttyNative.rvt_compress(_term);
+            }
+            finally
+            {
+                Monitor.Exit(_termGate);
+            }
+            if (status == GhosttyNative.CompressDone)
+                return;
+            if (status == GhosttyNative.CompressWait)
+            {
+                ScheduleCompression(CompressIdleMilliseconds);
+                return;
+            }
+            if (System.Diagnostics.Stopwatch.GetElapsedTime(start) >= CompressSlice)
+            {
+                ScheduleCompression(CompressStepMilliseconds);
+                return;
+            }
         }
     }
 

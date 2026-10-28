@@ -1168,6 +1168,45 @@ silently failed, so the 4px header, 1px padding and 2px column stayed. Cast temp
 to a base type that has the members you need (and reach children through
 `VisualTreeHelper`), and check template tweaks in an AOT build, not only Debug.
 
+## 2026-10-28 - libghostty-vt 1.4.0, with Kitty graphics off
+
+Moved the pin from b699ea7 (1.3.2-dev) to the v1.4.0 tag (83fb956), which needs Zig 0.17.
+Between those commits the C API only gained things (render-state images, compression,
+snapshot images, `CSI 19 t`); nothing the shim calls was renamed or renumbered, so it built
+unchanged and the shim ABI stays at 7. The 1.4 security fixes include crashes, hangs and
+file reads in Kitty graphics handling.
+
+libghostty-vt accepts Kitty images by default (10 MB per terminal) but the renderer never
+draws them, so a program would see the probe answered and send images that only cost
+memory. `rvt_new` sets `GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT` to 0, which turns the
+protocol off; programs fall back to other image formats or none. Since 1.4 a full reset
+keeps the limit. Drawing images would mean re-enabling it and walking
+`GHOSTTY_RENDER_STATE_DATA_IMAGE_ITERATOR`.
+
+## 2026-10-28 - Compress idle scrollback on Ghostty's timings
+
+libghostty-vt 1.4 compresses cold scrollback pages, but only when the host asks: it has an
+activity token that changes when the scrollback does (output, resize, viewport scroll, erase)
+and an incremental `ghostty_terminal_compress` step. Ghostty's renderer
+(`src/renderer/Thread.zig`) waits 250 ms after the token last changed, then steps every 1 ms
+until done. It never waits for the terminal lock: if the lock is busy or the token moved, it
+tries again 250 ms later. Resesh copies those timings.
+
+- The shim's `unlock()` checks the token, so every export is covered without each one
+  deciding. When the token has moved and nothing is scheduled, it raises
+  `RVT_EVENT_COMPRESS` once (ABI 8). `NativeTerminalSurface` handles that event inline (no
+  UI dispatch) by arming a one-shot thread-pool timer.
+- `rvt_compress` try-locks and returns WAIT (busy or changed: retry in 250 ms), PENDING
+  (step again) or DONE (stop until the next event). The C# tick also gives up on a busy
+  `_termGate` rather than holding up the reader thread.
+- Windows timers can't wait 1 ms, so a tick runs steps for up to 2 ms, then reschedules.
+- The timer is only ever re-armed, never cancelled. Cancelling on DONE could race an event
+  raised just after the shim cleared its scheduled flag and drop it.
+- Reading history (search, copy) expands pages without changing the token, so they stay
+  expanded until the next output or scroll. Ghostty behaves the same way.
+- On Windows the library frees pages with `DiscardVirtualMemory`: the working set (Task
+  Manager's memory column) drops, the commit charge doesn't. In the native test, 20,000
+  styled log lines went from 20.9 MB resident to 0.74 MB in 57 steps.
 ## 2026-10-27 - A session's theme override colors its tab
 
 Session theme overrides used to stay inside the terminal so a tab strip never mixed themes.
