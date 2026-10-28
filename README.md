@@ -18,18 +18,18 @@ version-specific findings and design decisions.
 
 ## Build & run
 
-Requires the .NET 10 SDK on Windows 10 21H2 or later, and Git. Build the terminal's native
-libraries once per architecture first (the script downloads the pinned Zig and Ghostty commit;
-`-BuildRoot` holds about 2 GB of toolchain and caches):
+Requires the .NET 10 SDK on Windows 10 21H2 or later, and Git. The build also builds the terminal's
+native libraries with `eng/build-ghostty-vt.ps1` whenever they are missing or out of date (it downloads
+the pinned Zig and Ghostty commit; `-BuildRoot` holds about 2 GB of toolchain and caches), so the
+first build takes several minutes:
 
 ```
-.\eng\build-ghostty-vt.ps1 -Architecture x64
 dotnet build src/App/Resesh.App.csproj -p:Platform=x64
 src/App/bin/x64/Debug/net10.0-windows10.0.19041.0/Resesh.App.exe
 ```
 
-On ARM64, substitute `-Architecture arm64` and `-p:Platform=ARM64`. Rerun the script when
-`eng/ghostty-vt.json` or `src/Terminal/Native/Shim/` changes.
+On ARM64, use `-p:Platform=ARM64`. The native step reruns when `eng/ghostty-vt.json`, the script or
+`src/Terminal/Native/Shim/` changes; pass `-p:SkipGhosttyVtBuild=true` to skip it.
 
 ### Screenshot demo
 
