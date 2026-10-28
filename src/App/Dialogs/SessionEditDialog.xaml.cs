@@ -128,7 +128,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             {
                 OverrideThemeBox.SelectedItem = ThemeCatalog.All.FirstOrDefault(theme => theme.Id == overrides.Theme)
                     ?? OverrideThemeBox.Items[0];
-                OverrideFontFamilyBox.Text = overrides.FontFamily ?? "";
+                OverrideFontFamilyBox.FamilyName = overrides.FontFamily ?? "";
                 if (overrides.FontSize is { } fontSize)
                     OverrideFontSizeBox.Value = fontSize;
                 if (overrides.Scrollback is { } scrollback)
@@ -276,7 +276,7 @@ public sealed partial class SessionEditDialog : ContentDialog
     private Control? InitialFocus(SessionSettingsTarget target) => target switch
     {
         SessionSettingsTarget.Theme => OverrideThemeBox,
-        SessionSettingsTarget.FontFamily => OverrideFontFamilyBox,
+        SessionSettingsTarget.FontFamily => OverrideFontFamilyBox.FocusTarget,
         SessionSettingsTarget.FontSize => OverrideFontSizeBox,
         SessionSettingsTarget.Scrollback => OverrideScrollbackBox,
         SessionSettingsTarget.AlwaysRecord => OverrideRecordingBox,
@@ -620,7 +620,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         var overrides = new TerminalOverrides
         {
             Theme = (OverrideThemeBox.SelectedItem as ThemeChoice)?.Id is { Length: > 0 } theme ? theme : null,
-            FontFamily = string.IsNullOrWhiteSpace(OverrideFontFamilyBox.Text) ? null : OverrideFontFamilyBox.Text.Trim(),
+            FontFamily = string.IsNullOrWhiteSpace(OverrideFontFamilyBox.FamilyName) ? null : OverrideFontFamilyBox.FamilyName.Trim(),
             FontSize = double.IsNaN(OverrideFontSizeBox.Value) ? null : (int)OverrideFontSizeBox.Value,
             Scrollback = double.IsNaN(OverrideScrollbackBox.Value) ? null : (int)OverrideScrollbackBox.Value,
             AlwaysRecord = OverrideRecordingBox.SelectedIndex switch

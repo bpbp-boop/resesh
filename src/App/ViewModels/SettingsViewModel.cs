@@ -89,10 +89,36 @@ public sealed partial class SettingsViewModel : ObservableObject
         set { if (value is not null) Save(value, s => s with { Theme = value.Id }, () => Theme); }
     }
 
-    public string FontFamily
+    /// <summary>The terminal font: the first entry of the saved font list. Picking one keeps
+    /// the fallbacks after it.</summary>
+    public string TerminalFont
     {
-        get => Current.FontFamily;
-        set => Save(value, s => s with { FontFamily = NonBlank(value) ?? s.FontFamily }, () => FontFamily);
+        get => FontFamilies.Primary(Current.FontFamily);
+        set => Save(value, s => s with
+        {
+            FontFamily = NonBlank(value) is { } font ? FontFamilies.WithPrimary(s.FontFamily, font) : s.FontFamily,
+        }, () => TerminalFont);
+    }
+
+    /// <summary>The fonts after the first, comma-separated, tried in order for characters the
+    /// terminal font lacks. Blank leaves only the renderer's built-in fallbacks.</summary>
+    public string FallbackFonts
+    {
+        get => FontFamilies.Fallbacks(Current.FontFamily);
+        set => Save(value, s => s with { FontFamily = FontFamilies.WithFallbacks(s.FontFamily, value ?? "") },
+            () => FallbackFonts);
+    }
+
+    /// <summary>Puts the font and its fallbacks back to the shipped defaults.</summary>
+    [RelayCommand]
+    private void ResetFonts()
+    {
+        var current = Current;
+        if (current.FontFamily != FontFamilies.Default
+            && _environment.Save(current with { FontFamily = FontFamilies.Default }))
+            SettingChanged?.Invoke(nameof(TerminalFont));
+        OnPropertyChanged(nameof(TerminalFont));
+        OnPropertyChanged(nameof(FallbackFonts));
     }
 
     public double FontSize

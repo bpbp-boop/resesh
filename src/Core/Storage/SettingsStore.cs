@@ -53,7 +53,7 @@ public sealed record AppSettings
     public Guid? DefaultLocalProfileId { get; init; }
 
     public string Theme { get; set; } = "dark";
-    public string FontFamily { get; set; } = "Cascadia Mono, Consolas, monospace";
+    public string FontFamily { get; set; } = FontFamilies.Default;
     public int FontSize { get; set; } = 14;
     public int Scrollback { get; set; } = 10000;
     public bool CopyOnSelect { get; set; } = true;
@@ -93,7 +93,8 @@ public sealed record AppSettings
             : this with
             {
                 Theme = overrides.Theme ?? Theme,
-                FontFamily = overrides.FontFamily ?? FontFamily,
+                // A session's font goes in front of the app's fallbacks rather than replacing them.
+                FontFamily = FontFamilies.Layer(overrides.FontFamily, FontFamily),
                 FontSize = overrides.FontSize ?? FontSize,
                 Scrollback = overrides.Scrollback ?? Scrollback,
                 AlwaysRecord = overrides.AlwaysRecord ?? AlwaysRecord,

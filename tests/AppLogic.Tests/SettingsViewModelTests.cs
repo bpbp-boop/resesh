@@ -78,7 +78,7 @@ public sealed class SettingsViewModelTests
         settings.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
 
         settings.FontSize = double.NaN;
-        settings.FontFamily = "   ";
+        settings.TerminalFont = "   ";
         settings.RecordingDirectory = "";
 
         Assert.Equal(new AppSettings().FontSize, _settings.FontSize);
@@ -130,13 +130,50 @@ public sealed class SettingsViewModelTests
     }
 
     [Fact]
-    public void FontFamilyIsTrimmed()
+    public void TerminalFontIsTrimmed()
     {
         var settings = Settings();
 
-        settings.FontFamily = "  Fira Code ";
+        settings.TerminalFont = "  Fira Code ";
 
-        Assert.Equal("Fira Code", _settings.FontFamily);
+        Assert.Equal("Fira Code", settings.TerminalFont);
+    }
+
+    [Fact]
+    public void PickingAFontKeepsTheFallbacks()
+    {
+        var settings = Settings();
+
+        settings.TerminalFont = "Geist Mono";
+
+        Assert.Equal("Geist Mono, Consolas, monospace", _settings.FontFamily);
+        Assert.Equal("Consolas, monospace", settings.FallbackFonts);
+    }
+
+    [Fact]
+    public void FallbacksChangeWithoutTouchingTheFont()
+    {
+        var settings = Settings();
+
+        settings.FallbackFonts = "JetBrainsMono Nerd Font Mono,  Consolas";
+
+        Assert.Equal("Cascadia Mono, JetBrainsMono Nerd Font Mono, Consolas", _settings.FontFamily);
+    }
+
+    [Fact]
+    public void ResetFontsRestoresTheDefaultList()
+    {
+        var settings = Settings();
+        settings.TerminalFont = "Geist Mono";
+        settings.FallbackFonts = "";
+        var raised = new List<string?>();
+        settings.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        settings.ResetFontsCommand.Execute(null);
+
+        Assert.Equal(FontFamilies.Default, _settings.FontFamily);
+        Assert.Contains(nameof(SettingsViewModel.TerminalFont), raised);
+        Assert.Contains(nameof(SettingsViewModel.FallbackFonts), raised);
     }
 
     [Fact]

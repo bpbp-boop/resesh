@@ -70,7 +70,7 @@ public sealed partial class SettingsPage : UserControl
     private (FrameworkElement Card, Control Control)? FieldOf(GlobalSettingsTarget target) => target switch
     {
         GlobalSettingsTarget.Theme => (ThemeCard, ThemeBox),
-        GlobalSettingsTarget.FontFamily => (FontFamilyCard, FontFamilyBox),
+        GlobalSettingsTarget.FontFamily => (FontFamilyCard, FontFamilyBox.FocusTarget),
         GlobalSettingsTarget.FontSize => (FontSizeCard, FontSizeBox),
         GlobalSettingsTarget.Scrollback => (ScrollbackCard, ScrollbackBox),
         GlobalSettingsTarget.CopyOnSelect => (CopyOnSelectCard, CopyOnSelectSwitch),

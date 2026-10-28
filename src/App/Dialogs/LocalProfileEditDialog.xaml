@@ -4,6 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:icons="using:Resesh.App.Icons"
+    xmlns:controls="using:Resesh.App.Controls"
     PrimaryButtonText="Save"
     CloseButtonText="Cancel"
     DefaultButton="Primary"
@@ -193,7 +194,7 @@
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <ComboBox x:Name="OverrideThemeBox" Grid.Column="0" Header="Theme" SelectedIndex="0" HorizontalAlignment="Stretch" />
-                        <TextBox x:Name="OverrideFontFamilyBox" Grid.Column="1" Header="Terminal font family" PlaceholderText="(app setting)" />
+                        <controls:FontFamilyPicker x:Name="OverrideFontFamilyBox" Grid.Column="1" Header="Terminal font" ShowAppSettingChoice="True" PlaceholderText="Use app setting" />
                     </Grid>
 
                     <Grid ColumnSpacing="12">
