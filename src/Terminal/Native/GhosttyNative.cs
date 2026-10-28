@@ -32,6 +32,7 @@ internal enum GhosttyEventKind
     Clipboard = 5,
     Osc = 6,
     Semantic = 7,
+    Compress = 8,
 }
 
 /// <summary>
@@ -41,8 +42,9 @@ internal enum GhosttyEventKind
 /// </summary>
 internal static unsafe partial class GhosttyNative
 {
+    public const int CompressDone = 0, CompressPending = 1, CompressWait = 2;
     private const string Library = "reseshvt";
-    private const int ExpectedAbi = 7;
+    private const int ExpectedAbi = 8;
 
     private static readonly Lazy<string?> LoadError = new(Load);
 
@@ -78,6 +80,8 @@ internal static unsafe partial class GhosttyNative
         delegate* unmanaged<IntPtr, int, byte*, nuint, void> onEvent, IntPtr user);
     [LibraryImport(Library)] public static partial void rvt_free(IntPtr term);
     [LibraryImport(Library)] public static partial void rvt_write(IntPtr term, byte* data, nuint len);
+    [LibraryImport(Library)] public static partial int rvt_compress(IntPtr term);
+    [LibraryImport(Library)] public static partial ulong rvt_resident_bytes(IntPtr term);
     [LibraryImport(Library)] public static partial void rvt_resize(IntPtr term, ushort cols, ushort rows, uint cellWidth, uint cellHeight);
     [LibraryImport(Library)] public static partial void rvt_set_scrollback(IntPtr term, nuint lines);
     [LibraryImport(Library)] public static partial void rvt_set_colors(IntPtr term, uint fg, uint bg, uint cursor, uint* palette16);
