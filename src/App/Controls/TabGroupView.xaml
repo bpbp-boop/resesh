@@ -250,18 +250,18 @@
                                 PointerEntered="TabHeader_PointerEntered"
                                 PointerExited="TabHeader_PointerExited">
                                 <Grid.Background>
-                                    <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBackgroundColor(AppTheme, IsActive, IsPointerOver), Mode=OneWay}" />
+                                    <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBackgroundColor(TabTheme, IsActive, IsPointerOver), Mode=OneWay}" />
                                 </Grid.Background>
                                 <Grid.BorderBrush>
-                                    <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBorderColor(AppTheme), Mode=OneWay}" />
+                                    <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBorderColor(TabTheme), Mode=OneWay}" />
                                 </Grid.BorderBrush>
                                 <Rectangle
-                                    Height="{x:Bind local:PresentationValues.FocusedTabAccentThickness(AppTheme), Mode=OneWay}"
+                                    Height="{x:Bind local:PresentationValues.FocusedTabAccentThickness(TabTheme), Mode=OneWay}"
                                     VerticalAlignment="Top"
                                     HorizontalAlignment="Stretch"
                                     Visibility="{x:Bind local:PresentationValues.FocusedAccentVisibility(IsActive, IsGroupFocused), Mode=OneWay}">
                                     <Rectangle.Fill>
-                                        <SolidColorBrush Color="{x:Bind local:PresentationValues.FocusedTabBorderColor(AppTheme, ColorTag), Mode=OneWay}" />
+                                        <SolidColorBrush Color="{x:Bind local:PresentationValues.FocusedTabBorderColor(TabTheme, ColorTag), Mode=OneWay}" />
                                     </Rectangle.Fill>
                                 </Rectangle>
                                 <Rectangle
@@ -270,7 +270,7 @@
                                     HorizontalAlignment="Stretch"
                                     Visibility="{x:Bind local:PresentationValues.InactiveUnderlineVisibility(IsActive, IsGroupFocused), Mode=OneWay}">
                                     <Rectangle.Fill>
-                                        <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBorderColor(AppTheme), Mode=OneWay}" />
+                                        <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBorderColor(TabTheme), Mode=OneWay}" />
                                     </Rectangle.Fill>
                                 </Rectangle>
                                 <!-- OSC 9;4 and file-transfer progress along the bottom edge. The
@@ -366,7 +366,7 @@
                                             BorderThickness="1"
                                             Visibility="{x:Bind local:PresentationValues.AgentBadgeVisibility(AgentIconKey, Agent.Attention, ShowsProgramStatus), Mode=OneWay}">
                                             <Border.BorderBrush>
-                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBackgroundColor(AppTheme, IsActive, IsPointerOver), Mode=OneWay}" />
+                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBackgroundColor(TabTheme, IsActive, IsPointerOver), Mode=OneWay}" />
                                             </Border.BorderBrush>
                                             <Border.Background>
                                                 <SolidColorBrush Color="{x:Bind local:PresentationValues.AgentBadgeColor(Agent.Attention), Mode=OneWay}" />
@@ -396,7 +396,7 @@
                                         ToolTipService.ToolTip="Pinned"
                                         Visibility="{x:Bind local:PresentationValues.Visible(IsPinned), Mode=OneWay}">
                                         <FontIcon.Foreground>
-                                            <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
+                                            <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(TabTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
                                         </FontIcon.Foreground>
                                     </FontIcon>
                                     <FontIcon
@@ -407,7 +407,7 @@
                                         VerticalAlignment="Center"
                                         Visibility="{x:Bind local:PresentationValues.Visible(IsLocked), Mode=OneWay}">
                                         <FontIcon.Foreground>
-                                            <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
+                                            <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(TabTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
                                         </FontIcon.Foreground>
                                     </FontIcon>
                                     <!-- Two lines: the session name, and whatever best identifies
@@ -430,7 +430,7 @@
                                             TextTrimming="CharacterEllipsis"
                                             ToolTipService.ToolTip="{x:Bind Header, Mode=OneWay}">
                                             <TextBlock.Foreground>
-                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
+                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(TabTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
                                             </TextBlock.Foreground>
                                         </TextBlock>
                                             <TextBlock
@@ -443,7 +443,7 @@
                                                 Opacity="0.7"
                                                 ToolTipService.ToolTip="{x:Bind CompletionSubtitleTooltip, Mode=OneWay}">
                                                 <TextBlock.Foreground>
-                                                    <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
+                                                    <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(TabTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
                                                 </TextBlock.Foreground>
                                             </TextBlock>
                                     </StackPanel>
@@ -479,7 +479,7 @@
                                             Glyph="&#xE711;"
                                             FontSize="10">
                                             <FontIcon.Foreground>
-                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(AppTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
+                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(TabTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
                                             </FontIcon.Foreground>
                                         </FontIcon>
                                     </Button>

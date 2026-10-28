@@ -27,7 +27,7 @@ test("session splitters keep a visible one-pixel divider under a transparent hit
 
 test("pane divider stays one pixel wide while hover color changes", () => {
   const groupActivation = source.match(
-    /private void SetSplitterActive[\s\S]*?\n    }\r?\n\r?\n    \/\/\/ <summary>Pane focus is carried by/)?.[0] ?? "";
+    /private void SetSplitterActive[\s\S]*?\n    }\r?\n\r?\n    \/\/\/ <summary>Gutters stay neutral/)?.[0] ?? "";
   const filePaneActivation = terminalViewSource.match(
     /private void SetPaneSplitterActive[\s\S]*?\n    }\r?\n\r?\n    private void ApplyPaneSplitterTheme/)?.[0] ?? "";
 

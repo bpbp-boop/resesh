@@ -49,29 +49,53 @@ test("Phthalo Green uses its green shell and terminal palette", () => {
   assert.match(visualPalette, /"phthalo-green" => New\(0x123524, 0x0B2118, 0x2D5A48, 0xD7EEE5, 0x245A46\)/);
 });
 
+test("Crimson pairs a wine-red terminal with a matching tab and a bold red accent", () => {
+  assert.match(catalog, /new\("crimson", "Crimson"\)/);
+  assert.match(terminalThemes, /\["crimson"\] = New\(\s*0x330B12, 0xF4E4E6,/);
+  // The active tab is the terminal background, so tab and terminal read as one surface.
+  assert.match(visualPalette, /"crimson" => New\(0x330B12, [\s\S]*?Accent = Hex\(0xFF4D5E\),\s*AccentBarThickness = 3/);
+  // Unselected crimson tabs stay visibly red instead of fading into the tab strip.
+  assert.match(visualPalette, /"crimson"[\s\S]*?InactiveTab = Hex\(0x4A101A\),\s*HoverTab = Hex\(0x5C1622\)/);
+});
+
 test("the active tab and the focused pane are a full step, not a nudge", () => {
   // Active tab: its own background step plus the theme accent bar above it.
   assert.match(presentation, /FocusedTabBorderColor[\s\S]*?parsed\.A > 0 \? parsed : palette\.Accent/);
   assert.match(presentation, /FocusedTabAccentThickness[\s\S]*?For\(appTheme\)\.AccentBarThickness/);
   assert.match(
     tabGroupXaml,
-    /Height="\{x:Bind local:PresentationValues\.FocusedTabAccentThickness\(AppTheme\), Mode=OneWay\}"/,
+    /Height="\{x:Bind local:PresentationValues\.FocusedTabAccentThickness\(TabTheme\), Mode=OneWay\}"/,
   );
-  // Focused pane: the gutter the two panes already share IS the border, so the seam
-  // between panes stays exactly one pixel instead of stacking a border on each side.
-  assert.doesNotMatch(tabGroupXaml, /PaneFocusEdge/);
-  assert.match(
-    mainWindow,
-    /groups\.Contains\(ViewModel\.FocusedGroup\) \? _themePalette\.PaneFocusBorder : _themePalette\.PaneBorder/,
-  );
+  // Gutters stay neutral: pane gutters take PaneBorder, the tree splitter Divider.
   assert.match(mainWindow, /Width = isColumns \? 1 : double\.NaN/);
-  assert.match(
-    mainWindow,
-    /_paneBoundaries\[splitterLine\] =\s*\[\.\. branch\.Children\[index\]\.Values, \.\. branch\.Children\[index \+ 1\]\.Values\]/,
-  );
-  // A boundary the focused pane does not touch stays neutral, and so does the tree splitter.
-  assert.match(mainWindow, /_paneBoundaries\.TryGetValue\(line, out var groups\)[\s\S]*?_themePalette\.Divider/);
-  assert.match(mainWindow, /_paneBoundaries\.Clear\(\)/);
+  assert.match(mainWindow, /_paneGutters\.Add\(splitterLine\)/);
+  assert.match(mainWindow, /_paneGutters\.Contains\(line\) \? _themePalette\.PaneBorder : _themePalette\.Divider/);
+  assert.match(mainWindow, /_paneGutters\.Clear\(\)/);
+});
+
+test("the focused pane is outlined like a folder open at its selected tab", () => {
+  // Sides and bottom are drawn over the shared one-pixel gutters, from the top of the
+  // pane's content (not the tab strip) down, so a seam never doubles.
+  assert.match(mainWindowXaml, /<Canvas x:Name="PaneFocusFrame" Grid\.Column="3" IsHitTestVisible="False">/);
+  assert.match(mainWindow, /var top = pane\.Y \+ focused!\.ContentEdgeTop;/);
+  assert.match(mainWindow, /var leftX = gutterLeft \? pane\.X - 1 : pane\.X;/);
+  assert.match(mainWindow, /PlaceFrameEdge\(PaneFocusLeft, gutterLeft \|\| themed, leftX, top, 1, bottomY \+ 1 - top\)/);
+  assert.match(mainWindow, /PlaceFrameEdge\(PaneFocusRight, gutterRight \|\| themed, rightX, top, 1, bottomY \+ 1 - top\)/);
+  assert.match(mainWindow, /PlaceFrameEdge\(PaneFocusBottom, gutterBelow \|\| themed,/);
+  // The top is the tab strip's own bottom line, which already leaves the selected tab open.
+  assert.match(tabGroup, /internal void SetFocusEdge\(Windows\.UI\.Color\? color\)/);
+  assert.match(tabGroup, /var edge = _showsFocusEdge \? _focusEdgeBrush : _tabDividerBrush;\s*LeftTabStripDivider\.Fill = edge;\s*RightTabStripDivider\.Fill = edge;/);
+  assert.match(mainWindow, /groupView\.SetFocusEdge\(ReferenceEquals\(groupView, focused\) \? color : null\)/);
+  // Drawn when split, or always (every side) for a session themed unlike the app,
+  // in that session's theme.
+  assert.match(mainWindow, /var themed = sessionPalette is not null && sessionPalette != _themePalette;/);
+  assert.match(mainWindow, /var focused = \(ViewModel\.IsSplit \|\| themed\)\s*&& _groupViews\.TryGetValue\(ViewModel\.FocusedGroup, out var view\)/);
+  assert.match(mainWindow, /var color = \(sessionPalette \?\? _themePalette\)\.PaneFocusBorder;/);
+  // It follows focus, theme, session edits, resizes and layout rebuilds.
+  assert.match(mainWindow, /e\.PropertyName == nameof\(MainViewModel\.ActiveSessionTheme\)\)\s*\{\s*UpdatePaneFocusFrame\(\)/);
+  assert.match(mainWindow, /private void RepaintSplitterLines\(\)[\s\S]*?UpdatePaneFocusFrame\(\);/);
+  assert.match(mainWindow, /view\.SizeChanged \+= \(_, _\) => UpdatePaneFocusFrame\(\)/);
+  assert.match(mainWindow, /DispatcherQueuePriority\.Low, UpdatePaneFocusFrame\)/);
 });
 
 test("the command palette is built from theme surfaces, not Fluent defaults", () => {
@@ -298,8 +322,10 @@ test("live theme changes remove WinUI tab insets again after template rebuild", 
 test("live theme changes recolor both retained tab-row divider brushes", () => {
   assert.match(tabGroup, /_tabDividerBrush\.Color = palette\.Divider/);
   assert.match(tabGroup, /Resources\["TabViewBorderBrush"\] = divider/);
-  assert.match(tabGroup, /LeftTabStripDivider\.Fill = divider/);
-  assert.match(tabGroup, /RightTabStripDivider\.Fill = divider/);
+  // The strip edge reuses the retained divider brush unless it is drawing pane focus.
+  assert.match(tabGroup, /internal void ApplyTheme\(ThemeVisualPalette palette\)[\s\S]*?ApplyStripEdge\(\);/);
+  assert.match(tabGroup, /LeftTabStripDivider\.Fill = edge/);
+  assert.match(tabGroup, /RightTabStripDivider\.Fill = edge/);
 });
 
 test("resesh Dark keeps its original divider and bypasses stale Fluent strokes", () => {

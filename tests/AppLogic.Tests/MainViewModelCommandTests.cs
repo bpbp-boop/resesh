@@ -46,6 +46,30 @@ public sealed class MainViewModelCommandTests : IDisposable
     private static Session Ssh(string name = "router", string folder = "") =>
         new() { Id = Guid.NewGuid(), Name = name, Host = name + ".example", FolderPath = folder };
 
+    // ---- Focused pane theme ----
+
+    [Fact]
+    public void ActiveSessionTheme_FollowsTheActiveTabAndSessionEdits()
+    {
+        var window = Window();
+        var production = Ssh("prod") with { Overrides = new TerminalOverrides { Theme = "crimson" } };
+        _store.Add(production);
+        Open(window, production, TabConnectionState.Connected);
+        Assert.Equal("crimson", window.ActiveSessionTheme);
+
+        var changed = new List<string?>();
+        window.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+
+        window.UpdateSession(production with { Overrides = null }, null);
+        Assert.Null(window.ActiveSessionTheme);
+        Assert.Contains(nameof(MainViewModel.ActiveSessionTheme), changed);
+
+        changed.Clear();
+        Open(window, Ssh("lab") with { Overrides = new TerminalOverrides { Theme = "dracula" } }, TabConnectionState.Connected);
+        Assert.Equal("dracula", window.ActiveSessionTheme);
+        Assert.Contains(nameof(MainViewModel.ActiveSessionTheme), changed);
+    }
+
     // ---- Tab commands ----
 
     [Fact]

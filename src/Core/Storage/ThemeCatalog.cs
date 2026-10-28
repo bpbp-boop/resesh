@@ -24,6 +24,7 @@ public static class ThemeCatalog
         new("catppuccin-mocha", "Catppuccin Mocha"),
         new("phthalo-green", "Phthalo Green"),
         new("vaporwave", "Vaporwave"),
+        new("crimson", "Crimson"),
     ];
 
     public static ThemeChoice Find(string? id) =>

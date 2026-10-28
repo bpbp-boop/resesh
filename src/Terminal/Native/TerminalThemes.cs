@@ -93,6 +93,14 @@ internal static class TerminalThemes
                 0xA69BFF, 0xFF71E5, 0x55E7EF, 0xEEEAF5,
                 0x9675B3, 0xFF9CC4, 0x9BFFDE, 0xFFE9B5,
                 0xC5BAFF, 0xFFA1F0, 0x9AFAFF, 0xFFF5FF),
+            // A deep wine background that reads as "careful" at a glance (a production
+            // session, say), with ANSI red pushed bright enough to stay legible on it.
+            ["crimson"] = New(
+                0x330B12, 0xF4E4E6, 0xFF6B7A, 0x6B1F2C,
+                0x1F060A, 0xFF5C6C, 0x8BD48B, 0xF2C46D,
+                0x7FA8F5, 0xE58AD8, 0x6FD3D1, 0xF4E4E6,
+                0x9A6C74, 0xFF8792, 0xA8E6A3, 0xFFD98E,
+                0xA2C1FF, 0xF2A9E8, 0x95E6E3, 0xFFF5F6),
         };
 
     internal static TerminalTheme Find(string? id) =>
