@@ -87,6 +87,8 @@ public sealed record LocalTarget
 /// </summary>
 public sealed record TerminalOverrides
 {
+    /// <summary>Colors the session's terminal and its tab header, so a session such as
+    /// production stands out in a tab strip drawn with the app theme.</summary>
     public string? Theme { get; init; }
     public string? FontFamily { get; init; }
     public int? FontSize { get; init; }

@@ -140,6 +140,10 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>The focused group's selected tab — what the status bar describes.</summary>
     public TabViewModel? ActiveTab => FocusedGroup.SelectedTab;
 
+    /// <summary>The active tab's session theme override, if any. The focused pane's border
+    /// takes this theme so a session such as production is flagged where keystrokes go.</summary>
+    public string? ActiveSessionTheme => ActiveTab?.Session.Overrides?.Theme;
+
     public void NotifyActiveTabChanged()
     {
         OnPropertyChanged(nameof(StatusText));
@@ -299,6 +303,7 @@ public sealed partial class MainViewModel : ObservableObject
             // Appearance overrides take effect immediately; connection fields apply on next connect.
             _environment.ApplySessionSettings(tab);
         }
+        OnPropertyChanged(nameof(ActiveSessionTheme));
         // Preserve realized containers for presentation-only edits (icon, color, endpoint,
         // terminal settings, etc.). Rebuild only when membership, hierarchy, ordering, or
         // the active filter projection may have changed.

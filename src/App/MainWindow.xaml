@@ -974,6 +974,15 @@
                  a GridSplitter between each pair. -->
             <Grid x:Name="GroupArea" Grid.Column="3" />
 
+            <!-- The focused pane's sides and bottom, drawn over the gutters it shares with
+                 its neighbours from the top of its content down. Code places and colors
+                 them; the tab strip's own bottom line closes the top. -->
+            <Canvas x:Name="PaneFocusFrame" Grid.Column="3" IsHitTestVisible="False">
+                <Rectangle x:Name="PaneFocusLeft" Width="1" Visibility="Collapsed" />
+                <Rectangle x:Name="PaneFocusRight" Width="1" Visibility="Collapsed" />
+                <Rectangle x:Name="PaneFocusBottom" Height="1" Visibility="Collapsed" />
+            </Canvas>
+
             <!-- On narrow windows the sessions pane floats over the tabs. This layer dims
                  them and closes the pane on a click; terminals never see those clicks. -->
             <Border

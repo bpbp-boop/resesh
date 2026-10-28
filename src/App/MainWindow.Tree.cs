@@ -22,7 +22,8 @@ public sealed partial class MainWindow
     // ---- tree pane persistence ----
 
     private readonly Dictionary<CommunityToolkit.WinUI.Controls.GridSplitter, Border> _splitterLines = [];
-    private readonly Dictionary<Border, HashSet<TabGroupViewModel>> _paneBoundaries = [];
+    private readonly HashSet<Border> _paneGutters = [];
+    private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _paneFocusBrush = new(Microsoft.UI.Colors.Transparent);
     private readonly HashSet<CommunityToolkit.WinUI.Controls.GridSplitter> _activeSplitters = [];
     private readonly Dictionary<SplitLayoutBranch<TabGroupViewModel>, IReadOnlyList<double>> _savedPaneSizes = [];
 
@@ -51,24 +52,100 @@ public sealed partial class MainWindow
             else
                 _activeSplitters.Remove(splitter);
             line.Background = SplitterBrush(line, active);
+            UpdatePaneFocusFrame();
         }
     }
 
-    /// <summary>Pane focus is carried by the one-pixel gutter the two panes already share.
-    /// A border drawn inside each pane would stack with it, so the seam is the border:
-    /// gutters touching the focused pane take the theme's focus color, the rest stay
-    /// neutral. Same-orientation branches are always flattened, so every leaf under a
-    /// boundary's two subtrees really does touch that boundary.</summary>
+    /// <summary>Gutters stay neutral; pane focus is drawn by <see cref="UpdatePaneFocusFrame"/>.</summary>
     private Microsoft.UI.Xaml.Media.Brush SplitterBrush(Border line, bool active)
     {
         if (active)
             return (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSplitterHoverBrush"];
 
-        if (!_paneBoundaries.TryGetValue(line, out var groups))
-            return new Microsoft.UI.Xaml.Media.SolidColorBrush(_themePalette.Divider); // the tree splitter
-
         return new Microsoft.UI.Xaml.Media.SolidColorBrush(
-            groups.Contains(ViewModel.FocusedGroup) ? _themePalette.PaneFocusBorder : _themePalette.PaneBorder);
+            _paneGutters.Contains(line) ? _themePalette.PaneBorder : _themePalette.Divider);
+    }
+
+    /// <summary>Outlines the focused pane like a folder: its sides rise from the bottom to
+    /// the top of its content, and the line under its tab strip runs along the top to the
+    /// selected tab, which stays open to the content. The sides sit exactly on the
+    /// one-pixel gutters the pane shares with its neighbours, so a seam never doubles.
+    /// Normally drawn only when split, on the gutters: a lone pane needs no focus mark.
+    /// A session drawn in a theme other than the app's (a Crimson production session, say)
+    /// is always outlined, split or not, on every side: where no gutter exists the edge
+    /// takes the pane's own outermost pixel. The color is that session theme's.</summary>
+    private void UpdatePaneFocusFrame()
+    {
+        var sessionPalette = ViewModel.ActiveSessionTheme is { } theme
+            ? ThemeVisualPalette.For(App.ResolveTheme(theme))
+            : null;
+        // Palettes are records, so this compares colors: a theme override that matches the
+        // app theme (or High Contrast, which overrides both) draws nothing special.
+        var themed = sessionPalette is not null && sessionPalette != _themePalette;
+        var focused = (ViewModel.IsSplit || themed)
+            && _groupViews.TryGetValue(ViewModel.FocusedGroup, out var view)
+                ? view
+                : null;
+        var color = (sessionPalette ?? _themePalette).PaneFocusBorder;
+        foreach (var groupView in _groupViews.Values)
+            groupView.SetFocusEdge(ReferenceEquals(groupView, focused) ? color : null);
+
+        _paneFocusBrush.Color = color;
+        var bounds = focused is null ? null : PaneLayoutBounds(focused);
+        // A hovered or dragged gutter shows its own highlight; the frame steps aside.
+        var resizing = _activeSplitters.Any(splitter => splitter != TreeSplitter);
+        if (bounds is not { } pane || resizing)
+        {
+            PaneFocusLeft.Visibility = PaneFocusRight.Visibility = PaneFocusBottom.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        // A gutter on a side means a neighbour there; the edge sits on that gutter.
+        var gutterLeft = pane.X > 0.5;
+        var gutterRight = pane.Right < GroupArea.ActualWidth - 0.5;
+        var gutterBelow = pane.Bottom < GroupArea.ActualHeight - 0.5;
+        var leftX = gutterLeft ? pane.X - 1 : pane.X;
+        var rightX = gutterRight ? pane.Right : pane.Right - 1;
+        var bottomY = gutterBelow ? pane.Bottom : pane.Bottom - 1;
+        var top = pane.Y + focused!.ContentEdgeTop;
+        PlaceFrameEdge(PaneFocusLeft, gutterLeft || themed, leftX, top, 1, bottomY + 1 - top);
+        PlaceFrameEdge(PaneFocusRight, gutterRight || themed, rightX, top, 1, bottomY + 1 - top);
+        // The bottom spans to whichever sides are drawn so the corners join.
+        var bottomLeft = gutterLeft || themed ? leftX : pane.X;
+        var bottomRight = gutterRight || themed ? rightX + 1 : pane.Right;
+        PlaceFrameEdge(PaneFocusBottom, gutterBelow || themed, bottomLeft, bottomY, bottomRight - bottomLeft, 1);
+    }
+
+    private void PlaceFrameEdge(Microsoft.UI.Xaml.Shapes.Rectangle edge, bool shown,
+        double x, double y, double width, double height)
+    {
+        edge.Visibility = shown && width > 0 && height > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (edge.Visibility == Visibility.Collapsed)
+            return;
+        edge.Fill = _paneFocusBrush;
+        Canvas.SetLeft(edge, x);
+        Canvas.SetTop(edge, y);
+        edge.Width = width;
+        edge.Height = height;
+    }
+
+    /// <summary>A pane's laid-out rectangle in <see cref="GroupArea"/>. Layout offsets, not
+    /// rendered bounds, so the frame lands where the pane settles while pane motion plays.</summary>
+    private Windows.Foundation.Rect? PaneLayoutBounds(TabGroupView view)
+    {
+        if (!view.IsLoaded || view.ActualWidth <= 0 || view.ActualHeight <= 0)
+            return null;
+        double x = 0, y = 0;
+        DependencyObject? node = view;
+        while (node is UIElement element && !ReferenceEquals(node, GroupArea))
+        {
+            x += element.ActualOffset.X;
+            y += element.ActualOffset.Y;
+            node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node);
+        }
+        return ReferenceEquals(node, GroupArea)
+            ? new Windows.Foundation.Rect(x, y, view.ActualWidth, view.ActualHeight)
+            : null;
     }
 
     private void SaveTreePaneWidth()

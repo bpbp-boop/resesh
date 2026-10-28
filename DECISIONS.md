@@ -1207,3 +1207,23 @@ tries again 250 ms later. Resesh copies those timings.
 - On Windows the library frees pages with `DiscardVirtualMemory`: the working set (Task
   Manager's memory column) drops, the commit charge doesn't. In the native test, 20,000
   styled log lines went from 20.9 MB resident to 0.74 MB in 57 steps.
+## 2026-10-27 - A session's theme override colors its tab
+
+Session theme overrides used to stay inside the terminal so a tab strip never mixed themes.
+Now the override colors the session's tab header too, so a production host given Crimson,
+for example, stands out from the rest. A separate opt-in checkbox was tried first and
+dropped: it was easy to miss, and a theme override is already a deliberate choice to make
+a session look different. The choice lives on `TabViewModel.TabTheme`, and every tab-header
+color binds to it, so `PresentationValues` still never reads session overrides.
+
+When split, the focused pane is outlined like a folder in its focus color, which comes from
+the active tab's session theme (`MainViewModel.ActiveSessionTheme`) when it has one. The
+sides rise from the bottom to the top of the pane's content, and the line under the tab
+strip carries the top edge to the selected tab, which stays open. A session whose theme
+differs from the app's is outlined even in a single pane, and on every side: where there
+is no gutter (the window edges), the edge takes the pane's own outermost pixel. Coloring whole gutters
+did not work: a gutter runs the full height of the split, up through the tab strip, and a
+column gutter can border several stacked panes. So gutters stay neutral, and an overlay
+(`PaneFocusFrame`) draws the sides over the exact gutter pixels, keeping each seam one
+pixel. It is placed from layout offsets rather than rendered bounds so pane motion doesn't
+skew it, and it steps aside while a gutter is hovered or dragged.
