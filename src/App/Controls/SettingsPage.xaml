@@ -100,13 +100,33 @@
                             AutomationProperties.Name="Theme"
                             AutomationProperties.AutomationId="SettingsTheme" />
                     </toolkit:SettingsCard>
-                    <toolkit:SettingsCard x:Name="FontFamilyCard" Header="Terminal font family">
-                        <TextBox
+                    <!-- The saved setting is one list: this font, then the fallbacks. Picking a font
+                         replaces only the first entry, so the fallbacks survive it. -->
+                    <toolkit:SettingsCard x:Name="FontFamilyCard" Header="Terminal font">
+                        <controls:FontFamilyPicker
                             x:Name="FontFamilyBox"
                             MinWidth="280"
-                            Text="{x:Bind ViewModel.FontFamily, Mode=TwoWay}"
-                            AutomationProperties.Name="Terminal font family"
+                            FamilyName="{x:Bind ViewModel.TerminalFont, Mode=TwoWay}"
+                            AutomationProperties.Name="Terminal font"
                             AutomationProperties.AutomationId="SettingsFontFamily" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        Header="Fallback fonts"
+                        Description="Tried in order for characters the terminal font doesn't have, such as icons from a Nerd Font. Separate with commas.">
+                        <TextBox
+                            MinWidth="280"
+                            Text="{x:Bind ViewModel.FallbackFonts, Mode=TwoWay}"
+                            PlaceholderText="Built-in fallbacks only"
+                            AutomationProperties.Name="Fallback fonts"
+                            AutomationProperties.AutomationId="SettingsFallbackFonts" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        Header="Restore default fonts"
+                        Description="Cascadia Mono, falling back to Consolas.">
+                        <Button
+                            Content="Reset"
+                            Command="{x:Bind ViewModel.ResetFontsCommand}"
+                            AutomationProperties.AutomationId="SettingsResetFonts" />
                     </toolkit:SettingsCard>
                     <toolkit:SettingsCard x:Name="FontSizeCard" Header="Font size">
                         <NumberBox

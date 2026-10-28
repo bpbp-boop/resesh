@@ -28,6 +28,7 @@
     <Compile Include="../../src/Terminal/Native/LineTimes.cs" Link="Native/LineTimes.cs" />
     <Compile Include="../../src/Terminal/Native/BuiltinGlyphs.cs" Link="Native/BuiltinGlyphs.cs" />
     <Compile Include="../../src/Terminal/Native/SystemFontFallback.cs" Link="Native/SystemFontFallback.cs" />
+    <Compile Include="../../src/Terminal/InstalledFonts.cs" Link="InstalledFonts.cs" />
     <Compile Include="../../src/Terminal/TerminalCommandExecution.cs" Link="TerminalCommandExecution.cs" />
     <Compile Include="../../src/Terminal/TerminalCommandRecord.cs" Link="TerminalCommandRecord.cs" />
     <Compile Include="../../src/Terminal/TerminalHighlight.cs" Link="TerminalHighlight.cs" />

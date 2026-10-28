@@ -1274,3 +1274,18 @@ support queries and stores glyphs programs register for Private Use Area code po
 renderer never draws them, so a program that asked would print code points that show as
 empty boxes instead of using its fallback. `rvt_new` turns it off with
 `GHOSTTY_TERMINAL_OPT_GLYPH_PROTOCOL`, as for Kitty graphics, and the queries get no reply.
+
+## 2026-10-28 - Tabbed dialogs size their sections from the measured template
+
+ContentDialog's template puts the title and content inside a ScrollViewer named
+`ContentScrollViewer` whose vertical scrolling is *disabled*, so content taller than the
+dialog is clipped, not scrolled. The session editor guessed the chrome as a fixed 250 px of
+window height; when the guess was low, the last fields were cut off with no way to reach
+them. `DialogSizing.FitSections` now measures the form's offset inside `BackgroundElement`
+and the `CommandSpace` row, and gives the section host whatever is left (up to its preferred
+height), re-fitting when the window or the form above the host changes.
+
+The session editor's Terminal tab held about 770 px of fields in a 480 px host, so it always
+showed a scrollbar (a full one, for anyone with "Always show scrollbars" on). Appearance
+overrides, icon and color moved to their own Appearance tab, which the local profile editor
+now shares.

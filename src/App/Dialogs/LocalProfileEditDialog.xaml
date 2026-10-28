@@ -3,87 +3,251 @@
     Style="{StaticResource DefaultContentDialogStyle}"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:icons="using:Resesh.App.Icons"
+    xmlns:controls="using:Resesh.App.Controls"
     PrimaryButtonText="Save"
     CloseButtonText="Cancel"
     DefaultButton="Primary"
     PrimaryButtonClick="OnPrimaryButtonClick">
 
-    <!-- The scrollbar gets its own gutter: without it, it sits on top of the fields it
-         overlaps as soon as the form is long enough to scroll (which it always is). -->
-    <ScrollViewer MaxHeight="560" Padding="0,0,12,0" HorizontalScrollBarVisibility="Disabled">
-        <!-- Wide enough for the longest field headers, which the template clips rather than wraps. -->
-        <StackPanel MinWidth="460" Spacing="12">
-            <TextBlock
-                x:Name="ValidationText"
-                Foreground="{ThemeResource SystemFillColorCriticalBrush}"
-                TextWrapping="Wrap"
-                Visibility="Collapsed"
-                AutomationProperties.LiveSetting="Polite" />
+    <!-- Laid out like the SSH session editor: same width, same tabs-over-a-fixed-host shape,
+         so the two dialogs feel like one form. -->
+    <ContentDialog.Resources>
+        <x:Double x:Key="ContentDialogMaxWidth">660</x:Double>
+    </ContentDialog.Resources>
 
-            <TextBox x:Name="NameBox" Header="Name" />
-            <ComboBox x:Name="FolderBox" Header="Folder (under Local)" IsEditable="True" HorizontalAlignment="Stretch" />
-            <TextBox x:Name="ExecutableBox" Header="Executable" PlaceholderText="e.g. %SystemRoot%\System32\cmd.exe" />
+    <StackPanel x:Name="ProfileForm" Spacing="12" Width="600">
+        <SelectorBar x:Name="SectionBar" SelectionChanged="SectionBar_SelectionChanged">
+            <SelectorBarItem x:Name="ShellSection" Text="Shell" IsSelected="True" />
+            <SelectorBarItem x:Name="AppearanceSection" Text="Appearance" />
+            <SelectorBarItem x:Name="NotesSection" Text="Notes" />
+        </SelectorBar>
+
+        <!-- A fixed height keeps the dialog from resizing as sections change. Each
+             section scrolls inside it, so a short window still reaches every field. -->
+        <Grid x:Name="SectionHost" Height="440">
+            <ScrollViewer
+                x:Name="ShellPanel"
+                VerticalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Disabled"
+                Padding="0,0,12,0">
+                <StackPanel Spacing="12">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBox x:Name="NameBox" Header="Name" PlaceholderText="PowerShell" />
+                            <TextBlock x:Name="NameError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
+                        <ComboBox
+                            x:Name="FolderBox"
+                            Grid.Column="1"
+                            VerticalAlignment="Top"
+                            Header="Folder (under Local)"
+                            IsEditable="True"
+                            PlaceholderText="(Local)"
+                            HorizontalAlignment="Stretch" />
+                    </Grid>
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBox x:Name="ExecutableBox" Header="Executable" PlaceholderText="%SystemRoot%\System32\cmd.exe" />
+                            <TextBlock x:Name="ExecutableError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
+                        <TextBox x:Name="StartDirBox" Grid.Column="1" VerticalAlignment="Top" Header="Starting directory" PlaceholderText="Your user profile folder" />
+                    </Grid>
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Spacing="4">
+                            <TextBox
+                                x:Name="ArgumentsBox"
+                                Header="Arguments"
+                                Height="96"
+                                AcceptsReturn="True"
+                                TextWrapping="NoWrap"
+                                ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                            <TextBlock
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="One per line. No quoting needed."
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Grid.Column="1" Spacing="4">
+                            <TextBox
+                                x:Name="EnvironmentBox"
+                                Header="Environment"
+                                Height="96"
+                                AcceptsReturn="True"
+                                TextWrapping="NoWrap"
+                                ScrollViewer.VerticalScrollBarVisibility="Auto" />
+                            <TextBlock
+                                x:Name="EnvironmentHint"
+                                Style="{ThemeResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="NAME=value per line. An empty value removes the variable."
+                                TextWrapping="Wrap" />
+                            <TextBlock x:Name="EnvironmentError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
+                    </Grid>
+
+                    <StackPanel Spacing="4">
+                        <ToggleSwitch
+                            x:Name="ShellIntegrationSwitch"
+                            Header="Shell integration (experimental)"
+                            AutomationProperties.AutomationId="LocalShellIntegrationToggle" />
+                        <TextBlock
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Detects Bash, Zsh, Fish and PowerShell when a new terminal starts, and reports commands and the working directory without editing shell profiles."
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <CheckBox x:Name="MakeDefaultBox" Grid.Column="0" Content="Default local profile (Ctrl+Shift+T)" />
+                        <Button
+                            x:Name="ResetButton"
+                            Grid.Column="1"
+                            Content="Reset to discovered defaults"
+                            Visibility="Collapsed"
+                            Click="Reset_Click" />
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+
+            <ScrollViewer
+                x:Name="AppearancePanel"
+                VerticalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Disabled"
+                Padding="0,0,12,0"
+                Visibility="Collapsed">
+                <StackPanel Spacing="12">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Spacing="8" VerticalAlignment="Bottom">
+                            <TextBlock Text="Icon" />
+                            <DropDownButton x:Name="IconButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Image x:Name="IconButtonImage" Width="16" Height="16" VerticalAlignment="Center" />
+                                    <TextBlock x:Name="IconButtonText" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <DropDownButton.Flyout>
+                                    <Flyout x:Name="IconFlyout" Placement="Bottom">
+                                        <GridView
+                                            x:Name="IconGrid"
+                                            MaxWidth="340"
+                                            MaxHeight="300"
+                                            SelectionMode="None"
+                                            IsItemClickEnabled="True"
+                                            ItemClick="IconGrid_ItemClick">
+                                            <GridView.ItemTemplate>
+                                                <DataTemplate x:DataType="icons:IconChoice">
+                                                    <Grid Width="36" Height="36" ToolTipService.ToolTip="{x:Bind Name}">
+                                                        <FontIcon Glyph="{x:Bind Glyph}" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                        <Image Source="{x:Bind Image}" Width="24" Height="24" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </GridView.ItemTemplate>
+                                        </GridView>
+                                    </Flyout>
+                                </DropDownButton.Flyout>
+                            </DropDownButton>
+                        </StackPanel>
+                        <ComboBox x:Name="ColorBox" Grid.Column="1" Header="Color tag" VerticalAlignment="Bottom" SelectedIndex="0" HorizontalAlignment="Stretch" />
+                    </Grid>
+                    <TextBlock
+                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Drop your own PNG/SVG files into %APPDATA%\Resesh\icons\ and they appear in the picker."
+                        TextWrapping="Wrap" />
+
+                    <StackPanel Spacing="2" Margin="0,4,0,0">
+                        <TextBlock
+                            Style="{ThemeResource BodyStrongTextBlockStyle}"
+                            Text="Appearance overrides" />
+                        <TextBlock
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Blank fields use the app-wide setting."
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="OverrideThemeBox" Grid.Column="0" Header="Theme" SelectedIndex="0" HorizontalAlignment="Stretch" />
+                        <controls:FontFamilyPicker x:Name="OverrideFontFamilyBox" Grid.Column="1" Header="Terminal font" ShowAppSettingChoice="True" PlaceholderText="Use app setting" />
+                    </Grid>
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <NumberBox
+                            x:Name="OverrideFontSizeBox"
+                            Grid.Column="0"
+                            Header="Font size"
+                            PlaceholderText="(app setting)"
+                            Minimum="8"
+                            Maximum="32"
+                            SpinButtonPlacementMode="Compact" />
+                        <NumberBox
+                            x:Name="OverrideScrollbackBox"
+                            Grid.Column="1"
+                            Header="Scrollback lines"
+                            PlaceholderText="(app setting)"
+                            Minimum="1000"
+                            Maximum="100000"
+                            SmallChange="1000"
+                            SpinButtonPlacementMode="Compact" />
+                    </Grid>
+
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <ComboBox x:Name="OverrideRecordingBox" Grid.Column="0" Header="Automatic recording" SelectedIndex="0" HorizontalAlignment="Stretch">
+                            <x:String>Use app setting</x:String>
+                            <x:String>Always record</x:String>
+                            <x:String>Never record</x:String>
+                        </ComboBox>
+                        <ComboBox x:Name="OverrideHistoryBox" Grid.Column="1" Header="Command history" SelectedIndex="0" HorizontalAlignment="Stretch">
+                            <x:String>Use app setting</x:String>
+                            <x:String>Keep history</x:String>
+                            <x:String>Don't keep history</x:String>
+                        </ComboBox>
+                    </Grid>
+                </StackPanel>
+            </ScrollViewer>
+
             <TextBox
-                x:Name="ArgumentsBox"
-                Header="Arguments (one per line — no quoting needed)"
-                Height="72"
+                x:Name="NotesBox"
+                Header="Notes"
                 AcceptsReturn="True"
-                TextWrapping="NoWrap" />
-            <TextBox x:Name="StartDirBox" Header="Starting directory" PlaceholderText="Blank = your user profile folder" />
-            <TextBox
-                x:Name="EnvironmentBox"
-                Header="Environment overrides (NAME=value per line; empty value removes)"
-                Height="72"
-                AcceptsReturn="True"
-                TextWrapping="NoWrap" />
-
-            <ToggleSwitch
-                x:Name="ShellIntegrationSwitch"
-                Header="Enable shell integration (experimental)"
-                AutomationProperties.AutomationId="LocalShellIntegrationToggle" />
-            <TextBlock
-                Text="Detects supported shells (Bash, Zsh, Fish and PowerShell) when a new terminal starts. Enables command and working-directory reporting without editing shell profiles."
                 TextWrapping="Wrap"
-                Style="{StaticResource CaptionTextBlockStyle}" />
-
-            <ComboBox x:Name="IconBox" Header="Icon" DisplayMemberPath="Name" x:SuppressXamlTrimWarnings="True" HorizontalAlignment="Stretch" />
-            <ComboBox x:Name="ColorBox" Header="Color tag" HorizontalAlignment="Stretch" />
-
-            <ComboBox x:Name="OverrideThemeBox" Header="Theme override" HorizontalAlignment="Stretch" />
-            <TextBox x:Name="OverrideFontFamilyBox" Header="Font family override" PlaceholderText="Blank = app setting" />
-            <NumberBox
-                x:Name="OverrideFontSizeBox"
-                Header="Font size override"
-                Minimum="8"
-                Maximum="32"
-                PlaceholderText="App setting"
-                SpinButtonPlacementMode="Compact" />
-            <NumberBox
-                x:Name="OverrideScrollbackBox"
-                Header="Scrollback override"
-                Minimum="1000"
-                Maximum="100000"
-                SmallChange="1000"
-                PlaceholderText="App setting"
-                SpinButtonPlacementMode="Compact" />
-            <ComboBox x:Name="OverrideRecordingBox" Header="Automatic recording" SelectedIndex="0" HorizontalAlignment="Stretch">
-                <x:String>Use app setting</x:String>
-                <x:String>Always record</x:String>
-                <x:String>Never record</x:String>
-            </ComboBox>
-            <ComboBox x:Name="OverrideHistoryBox" Header="Command history" SelectedIndex="0" HorizontalAlignment="Stretch">
-                <x:String>Use app setting</x:String>
-                <x:String>Keep history</x:String>
-                <x:String>Don't keep history</x:String>
-            </ComboBox>
-
-            <CheckBox x:Name="MakeDefaultBox" Content="Make this the default local profile (+ Session, Ctrl+Shift+T)" />
-
-            <Button
-                x:Name="ResetButton"
-                Content="Reset to discovered defaults"
-                Visibility="Collapsed"
-                Click="Reset_Click" />
-        </StackPanel>
-    </ScrollViewer>
+                ScrollViewer.VerticalScrollBarVisibility="Auto"
+                VerticalAlignment="Stretch"
+                Visibility="Collapsed" />
+        </Grid>
+    </StackPanel>
 </ContentDialog>

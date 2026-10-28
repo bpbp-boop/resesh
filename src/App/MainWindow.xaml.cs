@@ -637,31 +637,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             _ = OpenSessionEditorAsync(existing: null, defaultFolder: "");
     }
 
-    /// <summary>Rebuilds the + Session menu: visible local profiles, then the creators.</summary>
-    private void NewSessionFlyout_Opening(object sender, object e)
-    {
-        NewSessionFlyout.Items.Clear();
-        foreach (var profile in ViewModel.VisibleSessions.Where(s => s.IsLocal)
-                     .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase))
-        {
-            var captured = profile;
-            var item = new MenuFlyoutItem
-            {
-                Text = profile.Name,
-                Icon = App.Icons.GetImage(profile.Icon, Icons.SessionIconCatalog.ListIconSize) is { } image
-                    ? new ImageIcon { Source = image }
-                    : new FontIcon { Glyph = "" },
-            };
-            item.Click += (_, _) => ConnectSession(captured);
-            NewSessionFlyout.Items.Add(item);
-        }
-        if (NewSessionFlyout.Items.Count > 0)
-            NewSessionFlyout.Items.Add(new MenuFlyoutSeparator());
-        NewSessionFlyout.Items.Add(new MenuFlyoutItem { Text = "New SSH Session…", Command = ViewModel.NewSshSessionCommand });
-        NewSessionFlyout.Items.Add(new MenuFlyoutItem { Text = "New Telnet Session…", Command = ViewModel.NewTelnetSessionCommand });
-        NewSessionFlyout.Items.Add(new MenuFlyoutItem { Text = "New Local Profile…", Command = ViewModel.NewLocalProfileCommand });
-    }
-
     private async Task OpenLocalProfileEditorAsync(
         Session? existing,
         string defaultFolder,
@@ -728,10 +703,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     // ---- narrow windows ----
 
-    // Title bar widths, in DIPs, below which parts of it compact. Measured at 100%:
-    // menus 314, caption buttons 144, New SSH session 203 (about 80 as an icon).
-    private const double TitleBarFullWidth = 1000;
-    private const double TitleBarSearchWidth = 860;
+    // Title bar width, in DIPs, below which quick connect folds into a button. Measured at
+    // 100%: menus 314, caption buttons 144.
+    private const double TitleBarSearchWidth = 780;
     // Keeps the compact title bar and a usable tab area (rail + minimum tree + tabs).
     private const double MinimumWindowWidth = 740;
     private const double MinimumWindowHeight = 480;
@@ -851,12 +825,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         presenter.PreferredMinimumHeight = (int)Math.Ceiling(MinimumWindowHeight * scale);
     }
 
-    /// <summary>Drops the New SSH session label first, then folds quick connect into a
-    /// search button that expands over the menus while it is in use.</summary>
+    /// <summary>Folds quick connect into a search button that expands over the menus while
+    /// it is in use.</summary>
     private void ApplyTitleBarWidth()
     {
         var width = AppTitleBar.ActualWidth;
-        NewSessionLabel.Visibility = width >= TitleBarFullWidth ? Visibility.Visible : Visibility.Collapsed;
         var compact = width < TitleBarSearchWidth;
         if (!compact)
             _quickConnectExpanded = false;

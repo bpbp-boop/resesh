@@ -153,15 +153,29 @@ test("the session options form has room for its columns and scrolls every sectio
   // 500 of content inside the stock 548 cap left nothing for the dialog's own padding.
   assert.match(sessionEditXaml, /<x:Double x:Key="ContentDialogMaxWidth">660<\/x:Double>/);
   assert.match(sessionEditXaml, /<StackPanel x:Name="SessionForm" Spacing="12" Width="600">/);
-  // Both form sections scroll, and the scrollbar has its own gutter rather than
+  // Every form section scrolls, and the scrollbar has its own gutter rather than
   // sitting on the fields.
-  const connection = sessionEditXaml.match(/x:Name="ConnectionPanel"[\s\S]*?>/)?.[0] ?? "";
-  const terminal = sessionEditXaml.match(/x:Name="TerminalPanel"[\s\S]*?>/)?.[0] ?? "";
-  for (const section of [connection, terminal]) {
-    assert.match(section, /VerticalScrollBarVisibility="Auto"/);
-    assert.match(section, /Padding="0,0,12,0"/);
+  const sections = [
+    [sessionEditXaml, "ConnectionPanel"],
+    [sessionEditXaml, "NetworkPanel"],
+    [sessionEditXaml, "TerminalPanel"],
+    [sessionEditXaml, "AppearancePanel"],
+    [localDialogXaml, "ShellPanel"],
+    [localDialogXaml, "AppearancePanel"],
+  ];
+  for (const [xaml, name] of sections) {
+    const section = xaml.match(new RegExp(`x:Name="${name}"[\\s\\S]*?>`))?.[0] ?? "";
+    assert.match(section, /VerticalScrollBarVisibility="Auto"/, name);
+    assert.match(section, /Padding="0,0,12,0"/, name);
   }
-  assert.match(localDialogXaml, /<ScrollViewer MaxHeight="560" Padding="0,0,12,0"/);
+  // The local profile editor shares the session editor's tabbed shape and width.
+  assert.match(localDialogXaml, /<x:Double x:Key="ContentDialogMaxWidth">660<\/x:Double>/);
+  assert.match(localDialogXaml, /<StackPanel x:Name="ProfileForm" Spacing="12" Width="600">/);
+  assert.match(localDialogXaml, /<SelectorBar x:Name="SectionBar"/);
+  // Both fit their section host to the measured dialog chrome, so the dialog itself never
+  // scrolls on top of the section.
+  assert.match(sessionDialog, /DialogSizing\.FitSections\(this, SessionForm, SectionHost/);
+  assert.match(localDialog, /DialogSizing\.FitSections\(this, ProfileForm, SectionHost/);
   // No negative margins faking the gap between a heading and its caption.
   assert.doesNotMatch(sessionEditXaml, /Margin="0,-\d/);
 });

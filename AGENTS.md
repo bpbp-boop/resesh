@@ -23,11 +23,12 @@ libghostty-vt drawn with Direct2D/DirectWrite into a `SwapChainPanel`.
 
 ## Build and test
 
-Everything is Windows-only. Build the native terminal library once per architecture before
-building the app; rerun it when `eng/ghostty-vt.json` or `src/Terminal/Native/Shim/` changes.
+Everything is Windows-only. Building the Terminal project runs `eng/build-ghostty-vt.ps1` itself
+when the native libraries are missing or `eng/ghostty-vt.json`, the script or
+`src/Terminal/Native/Shim/` changed (a content hash in `.artifacts/ghostty-vt/<arch>/inputs.sha256`).
+It is skipped on CI, which caches the DLLs, and with `-p:SkipGhosttyVtBuild=true`.
 
 ```powershell
-.\eng\build-ghostty-vt.ps1 -Architecture x64
 dotnet build src/App/Resesh.App.csproj -p:Platform=x64
 
 dotnet test tests/Core.Tests

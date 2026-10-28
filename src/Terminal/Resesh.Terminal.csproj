@@ -31,11 +31,16 @@
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(GhosttyVtArchitecture)'!='' and Exists('$(GhosttyVtDir)ghostty-vt.dll') and Exists('$(GhosttyVtDir)reseshvt.dll')">
-    <!-- The terminal's native libraries, built by eng/build-ghostty-vt.ps1 -->
+  <ItemGroup Condition="'$(GhosttyVtArchitecture)'!=''">
+    <!-- The terminal's native libraries, built by eng/build-ghostty-vt.ps1 (BuildGhosttyVt below
+         runs it before the copy when they are missing or out of date). -->
     <None Include="$(GhosttyVtDir)ghostty-vt.dll;$(GhosttyVtDir)reseshvt.dll;$(GhosttyVtDir)LICENSE.ghostty.txt"
           Link="GhosttyVt\%(Filename)%(Extension)"
           CopyToOutputDirectory="PreserveNewest" />
+    <!-- What the native build depends on. Listed for Visual Studio's fast up-to-date check, which
+         otherwise skips this project when only the shim or the pin changed. -->
+    <GhosttyVtInput Include="$(MSBuildThisFileDirectory)..\..\eng\ghostty-vt.json;$(MSBuildThisFileDirectory)..\..\eng\build-ghostty-vt.ps1;$(MSBuildThisFileDirectory)Native\Shim\**\*" />
+    <UpToDateCheckInput Include="@(GhosttyVtInput)" />
   </ItemGroup>
 
   <ItemGroup>
@@ -46,9 +51,43 @@
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
-  <Target Name="RequireGhosttyVt" BeforeTargets="Build"
-          Condition="'$(GhosttyVtArchitecture)'!='' and (!Exists('$(GhosttyVtDir)ghostty-vt.dll') or !Exists('$(GhosttyVtDir)reseshvt.dll'))">
-    <Error Text="The terminal's native libraries are not built for $(GhosttyVtArchitecture). Run eng/build-ghostty-vt.ps1 -Architecture $(GhosttyVtArchitecture)." />
+  <!--
+    Rebuilds the native libraries when the pin, the build script or the shim changed since they
+    were last built, so a build from Visual Studio never runs against a stale reseshvt ABI. The
+    check is a content hash stamped next to the DLLs, not timestamps, so switching branches
+    and back doesn't rebuild. Skipped on CI (which caches the DLLs on the same inputs), in
+    design-time builds, and with -p:SkipGhosttyVtBuild=true.
+  -->
+  <PropertyGroup>
+    <GhosttyVtStamp>$(GhosttyVtDir)inputs.sha256</GhosttyVtStamp>
+    <GhosttyVtPowerShell Condition="Exists('$(ProgramFiles)\PowerShell\7\pwsh.exe')">&quot;$(ProgramFiles)\PowerShell\7\pwsh.exe&quot;</GhosttyVtPowerShell>
+    <GhosttyVtPowerShell Condition="'$(GhosttyVtPowerShell)'==''">powershell.exe</GhosttyVtPowerShell>
+  </PropertyGroup>
+
+  <Target Name="BuildGhosttyVt"
+          Condition="'$(GhosttyVtArchitecture)'!='' and '$(DesignTimeBuild)'!='true' and '$(SkipGhosttyVtBuild)'!='true' and '$(CI)'!='true'">
+    <GetFileHash Files="@(GhosttyVtInput)" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="_GhosttyVtInputHash" />
+    </GetFileHash>
+    <ReadLinesFromFile File="$(GhosttyVtStamp)" Condition="Exists('$(GhosttyVtStamp)')">
+      <Output TaskParameter="Lines" PropertyName="_GhosttyVtBuiltHash" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <_GhosttyVtInputsHash>@(_GhosttyVtInputHash->'%(Filename)%(Extension)=%(FileHash)', ',')</_GhosttyVtInputsHash>
+      <_GhosttyVtStale Condition="'$(_GhosttyVtInputsHash)'!='$(_GhosttyVtBuiltHash)' or !Exists('$(GhosttyVtDir)ghostty-vt.dll') or !Exists('$(GhosttyVtDir)reseshvt.dll')">true</_GhosttyVtStale>
+    </PropertyGroup>
+    <Message Condition="'$(_GhosttyVtStale)'=='true'" Importance="high"
+             Text="Building the terminal's native libraries for $(GhosttyVtArchitecture) (the first build downloads Zig and Ghostty and takes several minutes)..." />
+    <Exec Condition="'$(_GhosttyVtStale)'=='true'"
+          Command="$(GhosttyVtPowerShell) -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\eng\build-ghostty-vt.ps1&quot; -Architecture $(GhosttyVtArchitecture)" />
+    <WriteLinesToFile Condition="'$(_GhosttyVtStale)'=='true'" File="$(GhosttyVtStamp)"
+                      Lines="$(_GhosttyVtInputsHash)" Overwrite="true" />
+  </Target>
+
+  <Target Name="RequireGhosttyVt" BeforeTargets="BeforeBuild" DependsOnTargets="BuildGhosttyVt"
+          Condition="'$(GhosttyVtArchitecture)'!=''">
+    <Error Condition="!Exists('$(GhosttyVtDir)ghostty-vt.dll') or !Exists('$(GhosttyVtDir)reseshvt.dll')"
+           Text="The terminal's native libraries are not built for $(GhosttyVtArchitecture). Run eng/build-ghostty-vt.ps1 -Architecture $(GhosttyVtArchitecture)." />
   </Target>
 
 </Project>
