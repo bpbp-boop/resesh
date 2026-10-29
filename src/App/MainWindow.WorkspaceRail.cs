@@ -639,6 +639,6 @@ public sealed partial class MainWindow
     {
         var current = App.Workspaces.Workspaces.FirstOrDefault(candidate => candidate.Id == workspace.Id) ?? workspace;
         if (await Dialogs.WorkspaceIconDialog.EditAsync(Root.XamlRoot, current) is { } choice)
-            WorkspaceOperations.SetAppearance(current.Id, choice.Icon, choice.Initials);
+            WorkspaceOperations.SetAppearance(current.Id, choice.Icon, choice.Initials, choice.LabelIcon);
     }
 }

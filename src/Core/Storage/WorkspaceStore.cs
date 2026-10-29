@@ -46,9 +46,13 @@ public sealed record Workspace
     /// button. Null, or a key the catalog does not know, draws the name's initials instead.</summary>
     public string? Icon { get; set; }
 
-    /// <summary>Letters the rail button shows in place of the ones taken from the name, when it
-    /// has no icon. Null takes them from the name.</summary>
+    /// <summary>Letters the rail button shows in place of the ones taken from the name. Null
+    /// takes them from the name.</summary>
     public string? Initials { get; set; }
+
+    /// <summary>Draws the initials as a small label under the icon, so workspaces that share
+    /// an icon still tell apart. Without an icon the initials are drawn anyway.</summary>
+    public bool LabelIcon { get; set; }
 }
 
 /// <summary>
@@ -275,7 +279,7 @@ public sealed class WorkspaceStore
         }
     }
 
-    public void SetAppearance(Guid id, string? icon, string? initials)
+    public void SetAppearance(Guid id, string? icon, string? initials, bool labelIcon = false)
     {
         lock (_gate)
         {
@@ -285,6 +289,7 @@ public sealed class WorkspaceStore
             {
                 Icon = string.IsNullOrWhiteSpace(icon) ? null : icon,
                 Initials = WorkspaceAppearance.NormalizeInitials(initials),
+                LabelIcon = labelIcon,
             };
             Commit(updated);
         }

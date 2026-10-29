@@ -57,15 +57,17 @@ public sealed class WorkspaceAppearanceTests : IDisposable
         store.Load();
         var saved = store.SaveAs("Lab", new WorkspaceLayout());
 
-        store.SetAppearance(saved.Id, "server", " p r d 1 ");
+        store.SetAppearance(saved.Id, "server", " p r d 1 ", labelIcon: true);
         var loaded = new WorkspaceStore(path);
         loaded.Load();
         Assert.Equal("server", Assert.Single(loaded.Workspaces).Icon);
         Assert.Equal("prd", loaded.Workspaces[0].Initials);
+        Assert.True(loaded.Workspaces[0].LabelIcon);
 
         loaded.SetAppearance(saved.Id, " ", " ");
         Assert.Null(loaded.Workspaces[0].Icon);
         Assert.Null(loaded.Workspaces[0].Initials);
+        Assert.False(loaded.Workspaces[0].LabelIcon);
     }
 
     [Theory]

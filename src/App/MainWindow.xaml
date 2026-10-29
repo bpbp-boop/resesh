@@ -49,18 +49,35 @@
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         Opacity="{x:Bind TileOpacity, Mode=OneWay}">
-                        <FontIcon
-                            Glyph="{x:Bind Glyph, Mode=OneWay}"
-                            FontSize="16"
-                            Foreground="{StaticResource SessionTreeForegroundBrush}"
-                            Visibility="{x:Bind local:PresentationValues.Visible(HasIcon), Mode=OneWay}" />
-                        <Path
-                            Width="16"
-                            Height="16"
-                            Data="{x:Bind local:PresentationValues.IconPathGeometry(IconPath), Mode=OneWay}"
-                            Stroke="{StaticResource SessionTreeForegroundBrush}"
-                            StrokeThickness="1"
-                            StrokeLineJoin="Round" />
+                        <!-- The icon, with the initials small under it when the workspace asks. -->
+                        <StackPanel
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="1"
+                            Visibility="{x:Bind local:PresentationValues.Visible(HasIcon), Mode=OneWay}">
+                            <Grid Width="16" Height="16" HorizontalAlignment="Center">
+                                <FontIcon
+                                    Glyph="{x:Bind Glyph, Mode=OneWay}"
+                                    FontSize="16"
+                                    Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                                <Path
+                                    Width="16"
+                                    Height="16"
+                                    Data="{x:Bind local:PresentationValues.IconPathGeometry(IconPath), Mode=OneWay}"
+                                    Stroke="{StaticResource SessionTreeForegroundBrush}"
+                                    StrokeThickness="1"
+                                    StrokeLineJoin="Round" />
+                            </Grid>
+                            <TextBlock
+                                Text="{x:Bind Caption, Mode=OneWay}"
+                                FontSize="10"
+                                FontWeight="SemiBold"
+                                LineHeight="11"
+                                LineStackingStrategy="BlockLineHeight"
+                                HorizontalAlignment="Center"
+                                Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                Visibility="{x:Bind local:PresentationValues.Visible(HasCaption), Mode=OneWay}" />
+                        </StackPanel>
                         <TextBlock
                             Text="{x:Bind Monogram, Mode=OneWay}"
                             FontSize="12"

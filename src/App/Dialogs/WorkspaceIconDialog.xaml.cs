@@ -6,9 +6,9 @@ using Windows.System;
 
 namespace Resesh.App.Dialogs;
 
-/// <summary>The icon a workspace chose (null means its initials) and its own initials (null
-/// means the ones from its name).</summary>
-public sealed record WorkspaceIconSelection(string? Icon, string? Initials);
+/// <summary>The icon a workspace chose (null means its initials), its own initials (null means
+/// the ones from its name), and whether the initials label the icon.</summary>
+public sealed record WorkspaceIconSelection(string? Icon, string? Initials, bool LabelIcon);
 
 /// <summary>One cell in the picker: a catalog icon, or the workspace's initials as text.</summary>
 public sealed class WorkspaceIconChoice(WorkspaceIcon? icon, string initials)
@@ -41,6 +41,7 @@ public sealed partial class WorkspaceIconDialog : ContentDialog
         _nameInitials = WorkspaceAppearance.Monogram(workspace.Name);
         InitialsBox.PlaceholderText = _nameInitials;
         InitialsBox.Text = WorkspaceAppearance.NormalizeInitials(workspace.Initials) ?? "";
+        LabelIconBox.IsChecked = workspace.LabelIcon;
 
         _choices =
         [
@@ -63,7 +64,7 @@ public sealed partial class WorkspaceIconDialog : ContentDialog
     {
         var dialog = new WorkspaceIconDialog(workspace) { XamlRoot = xamlRoot };
         return await dialog.ShowModalAsync() == ContentDialogResult.Primary || dialog._committed
-            ? new WorkspaceIconSelection(dialog._selected.Key, dialog.CustomInitials)
+            ? new WorkspaceIconSelection(dialog._selected.Key, dialog.CustomInitials, dialog.LabelIconBox.IsChecked == true)
             : null;
     }
 
@@ -92,17 +93,23 @@ public sealed partial class WorkspaceIconDialog : ContentDialog
         Hide();
     }
 
-    /// <summary>Typed initials show at once in the Initials cell and the preview, and pick
-    /// Initials, since that is the only choice that draws them.</summary>
+    /// <summary>Typed initials show at once in the Initials cell and the preview. They pick
+    /// Initials unless they label the chosen icon, since otherwise nothing would draw them.</summary>
     private void InitialsBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         if (_choices is null)
             return; // setting the saved initials during construction
         _choices[0] = new WorkspaceIconChoice(null, CurrentInitials);
-        if (_selected.Icon is null || CustomInitials is not null)
+        if (_selected.Icon is null || (CustomInitials is not null && LabelIconBox.IsChecked != true))
             _selected = _choices[0];
         ApplyFilter(FilterBox.Text);
         ShowPreview();
+    }
+
+    private void LabelIconBox_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_choices is not null)
+            ShowPreview();
     }
 
     private void IconGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -119,6 +126,11 @@ public sealed partial class WorkspaceIconDialog : ContentDialog
         PreviewPath.Data = PresentationValues.IconPathGeometry(_selected.Path);
         PreviewMonogram.Text = CurrentInitials;
         PreviewMonogram.Visibility = PresentationValues.Visible(_selected.Icon is null);
+        PreviewIcon.Visibility = PresentationValues.Visible(_selected.Icon is not null);
+        PreviewCaption.Text = CurrentInitials;
+        PreviewCaption.Visibility = PresentationValues.Visible(LabelIconBox.IsChecked == true);
+        // The label only applies to an icon; with Initials chosen they are the button already.
+        LabelIconBox.IsEnabled = _selected.Icon is not null;
         PreviewIconName.Text = _selected.Name;
     }
 }

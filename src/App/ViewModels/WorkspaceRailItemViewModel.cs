@@ -58,6 +58,7 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
     private string _monogram;
     private string _glyph = "";
     private string _iconPath = "";
+    private bool _labelIcon;
     private bool _isOpen;
     private bool _isActive;
     private bool _isOpenElsewhere;
@@ -103,6 +104,11 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
 
     /// <summary>A glyph or a path is drawn; otherwise the monogram is.</summary>
     public bool HasIcon => _glyph.Length > 0 || _iconPath.Length > 0;
+
+    /// <summary>The initials drawn small under the icon, or "" for none.</summary>
+    public string Caption => HasIcon && _labelIcon ? _monogram : "";
+
+    public bool HasCaption => Caption.Length > 0;
 
     /// <summary>This window holds the workspace's tabs, shown or not. Home is always open.</summary>
     public bool IsOpen => _isOpen;
@@ -205,6 +211,9 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
         iconChanged |= Set(ref _iconPath, icon?.Path ?? "", nameof(IconPath));
         if (iconChanged)
             OnPropertyChanged(nameof(HasIcon));
+        _labelIcon = workspace.LabelIcon;
+        OnPropertyChanged(nameof(Caption));
+        OnPropertyChanged(nameof(HasCaption));
         NotifyState();
     }
 

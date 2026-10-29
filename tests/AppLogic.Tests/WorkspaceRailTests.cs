@@ -153,6 +153,12 @@ public sealed class WorkspaceRailTests : IDisposable
 
         item.Update(workspace with { Name = "Core network", Initials = "cor" });
         Assert.Equal("cor", item.Monogram);
+        Assert.False(item.HasCaption); // no icon: the initials are the button
+
+        item.Update(workspace with { Name = "Core network", Initials = "cor", Icon = "database", LabelIcon = true });
+        Assert.Equal("cor", item.Caption);
+        item.Update(workspace with { Name = "Core network", Icon = "database", LabelIcon = false });
+        Assert.Equal("", item.Caption);
 
         item.Update(workspace with { Name = "Core network", Icon = "server" });
 

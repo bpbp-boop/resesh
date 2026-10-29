@@ -10,22 +10,33 @@
     CloseButtonText="Cancel"
     DefaultButton="Primary">
 
-    <!-- The chosen icon and its name with the workspace's initials, a filter, then the icons
-         that match it. Icons are
-         drawn as in the rail: a font glyph, or a 16×16 path for one the font lacks. -->
+    <!-- The chosen icon and its name with the workspace's initials and whether they label the
+         icon, a filter, then the icons that match it. Icons are drawn as in the rail: a font
+         glyph, or a 16×16 path for one the font lacks. -->
     <StackPanel Width="312" Spacing="12">
         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
             <Grid Width="40" Height="40">
-                <FontIcon x:Name="PreviewGlyph" FontSize="20" />
-                <Viewbox Width="20" Height="20">
-                    <Path
-                        x:Name="PreviewPath"
-                        Width="16"
-                        Height="16"
-                        Stroke="{ThemeResource TextFillColorPrimaryBrush}"
-                        StrokeThickness="1"
-                        StrokeLineJoin="Round" />
-                </Viewbox>
+                <StackPanel x:Name="PreviewIcon" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="1">
+                    <Grid Width="20" Height="20" HorizontalAlignment="Center">
+                        <FontIcon x:Name="PreviewGlyph" FontSize="20" />
+                        <Viewbox Width="20" Height="20">
+                            <Path
+                                x:Name="PreviewPath"
+                                Width="16"
+                                Height="16"
+                                Stroke="{ThemeResource TextFillColorPrimaryBrush}"
+                                StrokeThickness="1"
+                                StrokeLineJoin="Round" />
+                        </Viewbox>
+                    </Grid>
+                    <TextBlock
+                        x:Name="PreviewCaption"
+                        FontSize="10"
+                        FontWeight="SemiBold"
+                        LineHeight="11"
+                        LineStackingStrategy="BlockLineHeight"
+                        HorizontalAlignment="Center" />
+                </StackPanel>
                 <TextBlock
                     x:Name="PreviewMonogram"
                     FontSize="15"
@@ -43,16 +54,23 @@
                     Style="{ThemeResource CaptionTextBlockStyle}"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
-            <!-- Typing initials picks Initials; the placeholder shows the ones from the name. -->
+            <!-- Typing initials picks Initials unless they label an icon; the placeholder shows
+                 the ones from the name. -->
             <TextBox
                 x:Name="InitialsBox"
                 Grid.Column="2"
                 Width="76"
                 VerticalAlignment="Center"
                 TextChanged="InitialsBox_TextChanged"
-                ToolTipService.ToolTip="Up to 3 characters shown when there is no icon"
+                ToolTipService.ToolTip="Up to 3 characters, shown in place of an icon or under it"
                 AutomationProperties.Name="Initials" />
         </Grid>
+
+        <CheckBox
+            x:Name="LabelIconBox"
+            Content="Show initials under the icon"
+            Checked="LabelIconBox_Changed"
+            Unchecked="LabelIconBox_Changed" />
 
         <TextBox
             x:Name="FilterBox"

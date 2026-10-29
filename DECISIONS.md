@@ -1407,3 +1407,14 @@ of the workspace for good.
   in the rail menu and the Workspaces menu. Reverting an open workspace reopens it as saved,
   so its sessions reconnect.
 - Home has no saved layout and keeps restoring as it was left.
+
+## 2026-10-29 - Initials can label a workspace's icon
+
+Two workspaces on the same technology end up with the same icon (two databases, say). A
+workspace can now draw its initials as a small label under its icon (`Workspace.LabelIcon`,
+"Show initials under the icon" in the icon dialog), so they still tell apart at a glance. The
+icon moves up and the label sits under it at 10 px inside the same 30 px button; without the
+option the button is unchanged. A corner letter was ruled out because the alert and unsaved
+dots already use the corners, and initials over or behind the icon read poorly against its
+strokes. With the label on, typing initials keeps the chosen icon instead of switching to
+Initials.
