@@ -117,3 +117,42 @@ Release build, recording on (`alwaysRecord`), `app/appbench.ps1`:
   5.9 s -> 3.8 s, tiny 9.0 s -> 3.2 s; WebView2 logs 9.2 s -> 8.1 s (it shares the recorder).
 - Baselines drift between sessions (the producer tracking polls the process list): compare
   within one table only.
+
+## Frame timings in the shipping renderer (2026-10-29)
+
+`RESESH_FRAME_STATS=<dir>` makes the app log every drawn frame (UI-thread time per step, rows
+drawn, GPU time from D3D11 timestamp queries, output parsed since the last frame).
+`app/framebench.ps1` runs profiles at given window sizes; `framestats.py` summarizes. AOT
+publish, SSH floods from `sshflood.py` (no ConPTY), built-in highlight rules on (the default),
+4K 144 Hz display (6.9 ms budget), RX 6800 XT. Medians unless noted; µs.
+
+| window / workload | grid | fps | UI thread per frame (p50 / p99) | read | prep | record | EndDraw | Present | GPU p50 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1280×800 logs | 97×36 | 137–141 | 870 / 1,900 | 50 | 280 | 285 | 21 | 200 | 125 |
+| 1280×800 color | 97×36 | 76–90 | 875 / 2,000–5,000 | 87 | 187 | 89 | 174 | 186 | 155 |
+| 1280×800 tui | 97×36 | 128–143 | 470 / 970 | 77 | 8 | 67 | 120 | 170 | 300 |
+| 1280×800 unicode | 97×36 | 46–50 | 20,400 / 25,700 | 49 | 225 | 19,700 | 49 | 287 | 249 |
+| 1280×800 tiny | 97×36 | 16–23 | 1,300 / 2,800 | 970 | 84 | 44 | 62 | 176 | 88 |
+| full screen logs | 381×109 | 82–97 | 3,500 / 7,500–9,400 | 530 | 1,260 | 1,250 | 110 | 310 | 1,770 |
+| full screen color | 381×109 | 89–94 | 3,170 / 6,600–8,300 | 615 | 900 | 1,240 | 43 | 315 | 1,785 |
+| full screen tui | 381×109 | 126–139 | 880 / 2,000–2,400 | 244 | 8 | 135 | 135 | 345 | 977 |
+| full screen unicode | 381×109 | 10–16 | 60,000–106,000 | 650 | 675 | 58,000–105,000 | 135 | 325 | 40,000–73,000 |
+| full screen tiny | 381×109 | 7–8 | 6,100 / 8,600–11,800 | 4,700 | 340 | 290 | 166 | 647 | 1,570 |
+
+- **Color emoji are the outlier.** `DrawCluster` sends each one through `ID2D1DeviceContext::
+  DrawText` with a color font: a new layout plus color-glyph rasterization per emoji per frame,
+  ~0.55 ms of UI thread each (one 👍 per line in `unicode`), and tens of ms of GPU at full
+  screen. A rasterized-glyph cache (what Ghostty's atlas does) would remove almost all of it.
+- **Plain text at full screen costs ~3.5 ms of UI thread and ~1.8 ms GPU per frame**, within
+  the 144 Hz budget at p50 but not at p99, so scrolling floods run at 80–100 fps. Recording is
+  ~11 µs per row; Direct2D's GPU work grows with the pixels drawn.
+- **prep is the highlighter** (it skips the alternate screen, so `tui` shows ~8 µs): ~11 µs per
+  dirty row while scrolling, because every new line misses the match cache. The scroll bar
+  update (~40 µs) and IME box placement (~8 µs) are small.
+- **read in `tiny`** is the UI thread waiting on the parser lock: libghostty-vt parses one-short-
+  line output at 5–18 MB/s (slower on wider grids), so frames drop to 7–23 fps. That is the
+  shared core, not our renderer.
+- Copy of the window-sized canvas to the back buffer is ~10–45 µs of CPU and not visible in GPU
+  time; Present is ~0.2–0.35 ms and never blocked for a vsync.
+- The paced (`-r1`) runs drew at 64 fps because asyncio's sleep on Windows has 15.6 ms
+  granularity; use floods for frame-rate numbers.

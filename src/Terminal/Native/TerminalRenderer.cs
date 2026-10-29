@@ -102,6 +102,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         EnsureShared();
         CreateDeviceResources();
         s_renderers.Add(this);
+        if (FrameStats.Enabled)
+            StatsSurface = FrameStats.NextSurfaceId();
     }
 
     private void CreateDeviceResources()
@@ -133,6 +135,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             s_d2dDevice = s_d2dFactory.CreateDevice(dxgiDevice);
             using var adapter = dxgiDevice.GetAdapter();
             s_dxgiFactory = adapter.GetParent<IDXGIFactory2>();
+            if (FrameStats.Enabled)
+                FrameStats.Info($"adapter: {adapter.Description.Description}");
             s_dwrite = DWrite.DWriteCreateFactory<IDWriteFactory2>(DWFactoryType.Shared);
             s_generation++;
         }
@@ -485,6 +489,10 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             _runAdvances = new float[cols];
         }
 
+        var stats = FrameStats.Enabled;
+        var gpuSlot = stats ? BeginGpuTiming() : -1;
+        var recordStart = stats ? FrameStats.Now() : 0;
+        var rowsDrawn = 0;
         _dc.BeginDraw();
         if (full)
         {
@@ -529,10 +537,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             if (dirty[y] == 0 && !full)
                 continue;
             dirty[y] = 0;
+            rowsDrawn++;
             DrawRow(cells + y * cols, cols, y, info.DefaultBackground, selectionColor, extend);
         }
         if (cursorShown && info.CursorVisible != 0 && info.CursorY < rows && info.CursorX < cols)
             DrawCursor(cells + info.CursorY * cols + info.CursorX, info, focused);
+        var endDrawStart = stats ? FrameStats.Now() : 0;
         var endDraw = _dc.EndDraw();
         if (endDraw == Vortice.Direct2D1.ResultCode.RecreateTarget)
         {
@@ -541,9 +551,21 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         }
         endDraw.CheckError();
 
+        var copyStart = stats ? FrameStats.Now() : 0;
         using (var backBuffer = _swapChain.GetBuffer<ID3D11Texture2D>(0))
             s_context!.CopyResource(backBuffer, _canvas);
+        if (stats)
+            EndGpuTiming(gpuSlot);
+        var presentStart = stats ? FrameStats.Now() : 0;
         var present = _swapChain.Present(1, PresentFlags.None);
+        if (stats)
+        {
+            var presentEnd = FrameStats.Now();
+            LastTimings = (rowsDrawn, FrameStats.Microseconds(recordStart, endDrawStart),
+                FrameStats.Microseconds(endDrawStart, copyStart), FrameStats.Microseconds(copyStart, presentStart),
+                FrameStats.Microseconds(presentStart, presentEnd));
+        }
+        FrameNumber++;
         if (present == Vortice.DXGI.ResultCode.DeviceRemoved
             || present == Vortice.DXGI.ResultCode.DeviceReset
             || present == Vortice.DXGI.ResultCode.DeviceHung)
@@ -852,6 +874,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     private void DisposeDeviceResources()
     {
+        DisposeGpuQueries();
         ReleaseSwapChain();
         DisposeFaces();
         DisposeGlyphGeometries();

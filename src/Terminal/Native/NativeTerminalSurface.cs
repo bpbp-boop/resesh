@@ -91,6 +91,12 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private int _cellCapacity;
     private int _dirtyCapacity;
     private int _framePending;
+    // FrameStats only: output parsed since the last drawn frame, and when that frame started.
+    private long _statsParsedBytes;
+    private long _statsParseTicks;
+    private long _statsLastFrame;
+    private double _statsInputUs;
+    private double _statsScrollUs;
     private bool _renderingHooked;
     private bool _renderingPaused;
     private bool _forceFull = true;
@@ -347,7 +353,17 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             {
                 TerminalSurface.TraceHook?.Invoke($"output observer failed: {exception.Message}");
             }
-            WriteToTerminal(data);
+            if (FrameStats.Enabled)
+            {
+                var parseStart = FrameStats.Now();
+                WriteToTerminal(data);
+                Interlocked.Add(ref _statsParseTicks, FrameStats.Now() - parseStart);
+                Interlocked.Add(ref _statsParsedBytes, data.Length);
+            }
+            else
+            {
+                WriteToTerminal(data);
+            }
             if (_term == IntPtr.Zero)
                 return;
             _keyframeBytes += data.Length;
@@ -784,7 +800,9 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             return; // a failed resize must not read a frame into the previous, smaller buffers
         var info = _lastInfo;
         var full = _forceFull;
+        var frameStart = FrameStats.Enabled ? FrameStats.Now() : 0;
         var rows = GhosttyNative.rvt_read_frame(_term, _cells, (ushort)Columns, (ushort)Rows, _dirty, full ? 1 : 0, &info);
+        var readEnd = FrameStats.Enabled ? FrameStats.Now() : 0;
         if (info.RenderHeld != 0)
         {
             // Poll through the native synchronized-output timeout even without more output.
@@ -825,9 +843,17 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         }
         _lastInfo = info;
         UpdatePointerCursor();
+        var inputStart = FrameStats.Enabled ? FrameStats.Now() : 0;
         if (cursorMoved)
             PlaceTextInput();
+        var scrollStart = FrameStats.Enabled ? FrameStats.Now() : 0;
         UpdateScrollBar(info);
+        if (FrameStats.Enabled)
+        {
+            var scrollEnd = FrameStats.Now();
+            _statsInputUs = FrameStats.Microseconds(inputStart, scrollStart);
+            _statsScrollUs = FrameStats.Microseconds(scrollStart, scrollEnd);
+        }
         if (_findOpen)
             UpdateFindCount();
         if (rows > 0 || full)
@@ -840,8 +866,11 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             return;
         _cursorRowDirty = false;
 
+        var drawStart = FrameStats.Enabled ? FrameStats.Now() : 0;
         if (!_renderer.Draw(_cells, Columns, Rows, _dirty, info, _cursorBlinkOn, _focused, _theme.Selection, full))
             return; // recovery requested a full frame; do not clear that request
+        if (FrameStats.Enabled)
+            RecordFrameStats(frameStart, readEnd, drawStart, full);
         _forceFull = false;
         if (_renderer.MarginColor != _marginColor)
         {
@@ -851,6 +880,37 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _ruler.SetLaneBackground(color);
         }
         _lastCursorRow = info.CursorVisible != 0 ? info.CursorY : -1;
+    }
+
+    private void RecordFrameStats(long frameStart, long readEnd, long drawStart, bool full)
+    {
+        var end = FrameStats.Now();
+        var timings = _renderer.LastTimings;
+        FrameStats.Frame(new FrameRecord
+        {
+            Surface = _renderer.StatsSurface,
+            Frame = _renderer.FrameNumber - 1,
+            Started = frameStart,
+            IntervalMs = _statsLastFrame == 0 ? 0 : FrameStats.Microseconds(_statsLastFrame, frameStart) / 1000,
+            Columns = Columns,
+            Rows = Rows,
+            RowsDrawn = timings.RowsDrawn,
+            Full = full,
+            BufferWidth = _renderer.BufferWidth,
+            BufferHeight = _renderer.BufferHeight,
+            ReadUs = FrameStats.Microseconds(frameStart, readEnd),
+            PrepUs = FrameStats.Microseconds(readEnd, drawStart),
+            InputUs = _statsInputUs,
+            ScrollUs = _statsScrollUs,
+            RecordUs = timings.RecordUs,
+            EndDrawUs = timings.EndDrawUs,
+            CopyUs = timings.CopyUs,
+            PresentUs = timings.PresentUs,
+            TotalUs = FrameStats.Microseconds(frameStart, end),
+            ParsedBytes = Interlocked.Exchange(ref _statsParsedBytes, 0),
+            ParseUs = FrameStats.Microseconds(0, Interlocked.Exchange(ref _statsParseTicks, 0)),
+        });
+        _statsLastFrame = frameStart;
     }
 
     private bool _cursorRowDirty;
