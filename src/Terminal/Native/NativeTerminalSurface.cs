@@ -223,6 +223,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         ConfigureTextInput();
 
         _renderer.GraphemeAt = GraphemeAt;
+        FrameStats.StartUiProbe(DispatcherQueue);
         _renderer.SwapChainChanged += OnRendererSwapChainChanged;
         _blinkTimer = DispatcherQueue.CreateTimer();
         _blinkTimer.Interval = TimeSpan.FromMilliseconds(BlinkMilliseconds);

@@ -23,6 +23,9 @@ internal static class FrameStats
     private static readonly object Gate = new();
     private static readonly StringBuilder Frames = new();
     private static readonly StringBuilder Gpu = new();
+    private static readonly StringBuilder Ui = new();
+    private static string? s_uiPath;
+    private static int s_uiProbeStarted;
     private static readonly long Start = Stopwatch.GetTimestamp();
     private static string? s_framesPath;
     private static string? s_gpuPath;
@@ -42,6 +45,8 @@ internal static class FrameStats
             s_gpuPath = Path.Combine(dir, $"gpu-{pid}.csv");
             File.WriteAllText(s_framesPath, FrameHeader + "\n");
             File.WriteAllText(s_gpuPath, "surface,frame,gpu_us\n");
+            s_uiPath = Path.Combine(dir, $"ui-{pid}.csv");
+            File.WriteAllText(s_uiPath, "t_ms,lag_us\n");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -65,6 +70,34 @@ internal static class FrameStats
         catch (IOException)
         {
         }
+    }
+
+    /// <summary>
+    /// Measures how long the UI thread takes to get to new work, which is what typing and
+    /// clicking feel like: every 10 ms a background thread posts a timestamped callback and
+    /// logs how late it ran to <c>ui-&lt;pid&gt;.csv</c>. One probe per process.
+    /// </summary>
+    public static void StartUiProbe(Microsoft.UI.Dispatching.DispatcherQueue queue)
+    {
+        if (!Enabled || Interlocked.Exchange(ref s_uiProbeStarted, 1) == 1)
+            return;
+        var thread = new Thread(() =>
+        {
+            while (true)
+            {
+                var posted = Now();
+                queue.TryEnqueue(() =>
+                {
+                    var ran = Now();
+                    var line = string.Create(CultureInfo.InvariantCulture,
+                        $"{Microseconds(Start, posted) / 1000:F3},{Microseconds(posted, ran):F1}\n");
+                    lock (Gate)
+                        Ui.Append(line);
+                });
+                Thread.Sleep(10);
+            }
+        }) { IsBackground = true, Name = "UI lag probe" };
+        thread.Start();
     }
 
     public static int NextSurfaceId() => Interlocked.Increment(ref s_nextSurface);
@@ -109,20 +142,23 @@ internal static class FrameStats
 
     private static void Flush()
     {
-        string frames, gpu;
+        string frames, gpu, ui;
         lock (Gate)
         {
-            if (Frames.Length == 0 && Gpu.Length == 0)
+            if (Frames.Length == 0 && Gpu.Length == 0 && Ui.Length == 0)
                 return;
             frames = Frames.ToString();
             gpu = Gpu.ToString();
+            ui = Ui.ToString();
             Frames.Clear();
             Gpu.Clear();
+            Ui.Clear();
         }
         try
         {
             File.AppendAllText(s_framesPath!, frames);
             File.AppendAllText(s_gpuPath!, gpu);
+            File.AppendAllText(s_uiPath!, ui);
         }
         catch (IOException)
         {

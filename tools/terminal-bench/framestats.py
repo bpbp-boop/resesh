@@ -48,10 +48,23 @@ def load(run, keep_all):
     return frames
 
 
+def load_ui(run, frames):
+    # UI-thread lag samples while the frames above were drawn.
+    if not frames:
+        return []
+    lo, hi = min(r['t_ms'] for r in frames), max(r['t_ms'] for r in frames)
+    lags = []
+    for path in glob.glob(os.path.join(run, 'ui-*.csv')):
+        with open(path, newline='') as f:
+            lags += [float(r['lag_us']) for r in csv.DictReader(f) if r.get('lag_us') and lo <= float(r['t_ms']) <= hi]
+    return lags
+
+
 def summarize(run, keep_all):
     frames = load(run, keep_all)
     if not frames:
         return None
+    ui = load_ui(run, frames)
     col = lambda k: [r[k] for r in frames]
     gpu = [r['gpu_us'] for r in frames if r['gpu_us'] is not None]
     span_ms = (max(col('t_ms')) - min(col('t_ms'))) or 1
@@ -82,6 +95,9 @@ def summarize(run, keep_all):
         'gpu p50': pct(gpu, 50),
         'gpu p95': pct(gpu, 95),
         'gaps>2x': sum(1 for i in intervals if i > 2 * pct(intervals, 50)),
+        'ui lag p50': pct(ui, 50),
+        'ui lag p99': pct(ui, 99),
+        'ui lag max': max(ui) if ui else float('nan'),
         'gaps>50ms': sum(1 for i in intervals if i > 50),
         'annot max': max(col('annotations_us')) if 'annotations_us' in first else float('nan'),
         'annot ms/s': sum(col('annotations_us')) / span_ms if 'annotations_us' in first else float('nan'),
