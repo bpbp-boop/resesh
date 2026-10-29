@@ -84,7 +84,7 @@ public interface IMainWindowServices
     Task RenameWorkspaceAsync(Workspace workspace);
     Task DeleteWorkspaceAsync(Workspace workspace);
 
-    /// <summary>Chooses the icon and colour of the workspace's rail button.</summary>
+    /// <summary>Chooses the icon of the workspace's rail button.</summary>
     Task CustomizeWorkspaceAsync(Workspace workspace);
 
     /// <summary>Closes the workspace's tabs in this window, after saving its layout.</summary>

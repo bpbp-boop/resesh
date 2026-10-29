@@ -18,34 +18,80 @@ public sealed class WorkspaceAppearanceTests : IDisposable
         Assert.Equal(expected, WorkspaceAppearance.Monogram(name));
 
     [Fact]
-    public void Color_UsesTheChosenColorOrOneStableForTheId()
+    public void Icons_HaveDistinctKeysAndGlyphsAndLeaveHomeAlone()
     {
-        var id = Guid.NewGuid();
-        var automatic = WorkspaceAppearance.Color(new Workspace { Id = id, Name = "A" });
+        var icons = WorkspaceAppearance.Icons;
 
-        Assert.Contains(automatic, WorkspaceAppearance.Palette.Select(entry => entry.Hex));
-        Assert.Equal(automatic, WorkspaceAppearance.Color(new Workspace { Id = id, Name = "Renamed" }));
-        Assert.Equal("#C239B3", WorkspaceAppearance.Color(new Workspace { Id = id, ColorTag = "#C239B3" }));
-        Assert.Equal(automatic, WorkspaceAppearance.Color(new Workspace { Id = id, ColorTag = "purple" }));
+        Assert.Equal(icons.Count, icons.Select(icon => icon.Key).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(icons.Count, icons.Select(icon => icon.Glyph + icon.Path).Distinct().Count());
+        // Exactly one way to draw each: a single glyph, or path data.
+        Assert.All(icons, icon => Assert.True(icon.Glyph.Length == 1 ^ icon.Path.Length > 0, icon.Key));
+        Assert.DoesNotContain(icons, icon => icon.Glyph == WorkspaceAppearance.HomeGlyph);
     }
 
+    [Theory]
+    [InlineData("server", "server")]
+    [InlineData("Server", "server")]
+    [InlineData("debian", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    public void Find_ReturnsCatalogIconsAndNothingForUnknownKeys(string? key, string? expected) =>
+        Assert.Equal(expected, WorkspaceAppearance.Find(key)?.Key);
+
+    [Theory]
+    [InlineData("", "server", true)]
+    [InlineData("SQL", "database", true)]
+    [InlineData("data", "database", true)]
+    [InlineData("k8s", "cluster", true)]
+    [InlineData("prod live", "lightning", true)]
+    [InlineData("prod web", "lightning", false)]
+    [InlineData("data", "server", false)]
+    public void Matches_FindsNameKeyOrKeywordsForEveryWord(string filter, string key, bool expected) =>
+        Assert.Equal(expected, WorkspaceAppearance.Find(key)!.Matches(filter));
+
     [Fact]
-    public void SetAppearance_PersistsIconAndColorAndClearsBlankValues()
+    public void SetAppearance_PersistsIconAndInitialsAndClearsBlankOnes()
     {
         var path = Path.Combine(_dir.FullName, "workspaces.json");
         var store = new WorkspaceStore(path);
         store.Load();
         var saved = store.SaveAs("Lab", new WorkspaceLayout());
 
-        store.SetAppearance(saved.Id, "debian", "#10893E");
+        store.SetAppearance(saved.Id, "server", " p r d 1 ");
         var loaded = new WorkspaceStore(path);
         loaded.Load();
-        Assert.Equal("debian", Assert.Single(loaded.Workspaces).Icon);
-        Assert.Equal("#10893E", loaded.Workspaces[0].ColorTag);
+        Assert.Equal("server", Assert.Single(loaded.Workspaces).Icon);
+        Assert.Equal("prd", loaded.Workspaces[0].Initials);
 
-        loaded.SetAppearance(saved.Id, " ", null);
+        loaded.SetAppearance(saved.Id, " ", " ");
         Assert.Null(loaded.Workspaces[0].Icon);
-        Assert.Null(loaded.Workspaces[0].ColorTag);
+        Assert.Null(loaded.Workspaces[0].Initials);
+    }
+
+    [Theory]
+    [InlineData(null, "Prod incident", "PI")]
+    [InlineData("", "Prod incident", "PI")]
+    [InlineData("DB", "Prod incident", "DB")]
+    [InlineData("prod", "x", "pro")]
+    [InlineData("é1", "x", "é1")]
+    [InlineData("🔥🔥🔥🔥", "x", "🔥🔥🔥")]
+    public void Initials_PreferTheWorkspacesOwnCutToThreeCharacters(string? initials, string name, string expected) =>
+        Assert.Equal(expected, WorkspaceAppearance.Initials(new Workspace { Name = name, Initials = initials }));
+
+    [Fact]
+    public void Load_IgnoresTheColourEarlierBuildsSaved()
+    {
+        var path = Path.Combine(_dir.FullName, "with-color.json");
+        var store = new WorkspaceStore(path);
+        store.Load();
+        var saved = store.SaveAs("Lab", new WorkspaceLayout());
+        File.WriteAllText(path, File.ReadAllText(path).Replace("\"name\"", "\"colorTag\": \"#10893E\", \"name\""));
+
+        var loaded = new WorkspaceStore(path);
+        loaded.Load();
+
+        Assert.Null(loaded.LoadWarning);
+        Assert.Equal(saved.Id, Assert.Single(loaded.Workspaces).Id);
     }
 
     [Fact]

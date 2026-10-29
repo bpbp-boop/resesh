@@ -20,8 +20,8 @@ public sealed class WorkspaceCoordinator(
     public bool Update(Guid id) => Execute("Workspace was not updated", () => store.Update(id, capture()));
     public bool Delete(Guid id) => Execute("Workspace was not deleted", () => store.Delete(id));
     public bool Reorder(IReadOnlyList<Guid> ids) => Execute("Workspace order was not saved", () => store.Reorder(ids));
-    public bool SetAppearance(Guid id, string? icon, string? colorTag) =>
-        Execute("Workspace was not changed", () => store.SetAppearance(id, icon, colorTag));
+    public bool SetAppearance(Guid id, string? icon, string? initials) =>
+        Execute("Workspace was not changed", () => store.SetAppearance(id, icon, initials));
 
     /// <summary>Keeps an open workspace's saved layout in step with what it shows. A workspace
     /// deleted meanwhile, or one left with no saved sessions, keeps what it had.</summary>

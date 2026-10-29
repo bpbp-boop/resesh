@@ -56,8 +56,8 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
     private Workspace? _workspace;
     private string _name;
     private string _monogram;
-    private string _iconKey = "";
-    private string _colorTag = "";
+    private string _glyph = "";
+    private string _iconPath = "";
     private bool _isOpen;
     private bool _isActive;
     private bool _isOpenElsewhere;
@@ -71,7 +71,8 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
         _monogram = WorkspaceAppearance.Monogram(name);
     }
 
-    public static WorkspaceRailItemViewModel CreateHome() => new(Guid.Empty, HomeName) { _isOpen = true };
+    public static WorkspaceRailItemViewModel CreateHome() =>
+        new(Guid.Empty, HomeName) { _isOpen = true, _glyph = WorkspaceAppearance.HomeGlyph };
 
     public static WorkspaceRailItemViewModel For(Workspace workspace)
     {
@@ -92,11 +93,15 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
 
     public string Monogram => _monogram;
 
-    /// <summary>The chosen icon's catalog key, or "" to draw the monogram. Never null: x:Bind
-    /// function bindings skip an update to null and would keep showing the old icon.</summary>
-    public string IconKey => _iconKey;
+    /// <summary>The icon's glyph, or "" to draw the monogram. Never null: x:Bind skips an
+    /// update to null and would keep showing the old icon.</summary>
+    public string Glyph => _glyph;
 
-    public string ColorTag => _colorTag;
+    /// <summary>Path data for an icon the font has no glyph for, or "".</summary>
+    public string IconPath => _iconPath;
+
+    /// <summary>A glyph or a path is drawn; otherwise the monogram is.</summary>
+    public bool HasIcon => _glyph.Length > 0 || _iconPath.Length > 0;
 
     /// <summary>This window holds the workspace's tabs, shown or not. Home is always open.</summary>
     public bool IsOpen => _isOpen;
@@ -146,19 +151,43 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
 
     public string AutomationName => Tooltip;
 
+    /// <summary>The hover card's status line.</summary>
+    public string StatusText =>
+        IsHome ? (_isActive ? "Showing · tabs outside saved workspaces" : "Tabs outside saved workspaces")
+        : _isActive ? "Showing"
+        : _isOpen ? "Open in the background"
+        : _isOpenElsewhere ? "Open in another window"
+        : "Not open";
+
+    /// <summary>The background alert as a sentence for the hover card, or "".</summary>
+    public string AlertText
+    {
+        get
+        {
+            var text = WorkspaceAlerts.Describe(_alert);
+            return text.Length == 0 ? "" : char.ToUpperInvariant(text[0]) + text[1..];
+        }
+    }
+
+    /// <summary>The switch shortcut for this position, or "".</summary>
+    public string ShortcutText => ShortcutLabel ?? "";
+
     public string AutomationId => IsHome ? "WorkspaceRail_Home" : $"WorkspaceRail_{Id:N}";
 
     private string? ShortcutLabel =>
         _position is >= 1 and <= 9 ? KeyBindings.Get(ShortcutIds.GoToWorkspace).Chords[_position - 1].Label : null;
 
-    /// <summary>Takes the saved name, icon and colour after a rename or customisation.</summary>
+    /// <summary>Takes the saved name and icon after a rename or a new icon.</summary>
     public void Update(Workspace workspace)
     {
         _workspace = workspace;
         Set(ref _name, workspace.Name, nameof(Name));
-        Set(ref _monogram, WorkspaceAppearance.Monogram(workspace.Name), nameof(Monogram));
-        Set(ref _iconKey, workspace.Icon ?? "", nameof(IconKey));
-        Set(ref _colorTag, WorkspaceAppearance.Color(workspace), nameof(ColorTag));
+        Set(ref _monogram, WorkspaceAppearance.Initials(workspace), nameof(Monogram));
+        var icon = WorkspaceAppearance.Find(workspace.Icon);
+        var iconChanged = Set(ref _glyph, icon?.Glyph ?? "", nameof(Glyph));
+        iconChanged |= Set(ref _iconPath, icon?.Path ?? "", nameof(IconPath));
+        if (iconChanged)
+            OnPropertyChanged(nameof(HasIcon));
         NotifyState();
     }
 
@@ -174,13 +203,6 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
             NotifyState();
     }
 
-    /// <summary>Re-reads the colour and icon, for a theme change the view draws them for.</summary>
-    public void NotifyAppearanceChanged()
-    {
-        OnPropertyChanged(nameof(ColorTag));
-        OnPropertyChanged(nameof(IconKey));
-    }
-
     private void NotifyState()
     {
         OnPropertyChanged(nameof(HasAlert));
@@ -188,6 +210,9 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
         OnPropertyChanged(nameof(TileOpacity));
         OnPropertyChanged(nameof(Tooltip));
         OnPropertyChanged(nameof(AutomationName));
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(AlertText));
+        OnPropertyChanged(nameof(ShortcutText));
     }
 
     private bool Set<T>(ref T field, T value, string propertyName)

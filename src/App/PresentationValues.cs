@@ -19,6 +19,8 @@ public static class PresentationValues
 {
     public static Visibility Visible(bool value) => value ? Visibility.Visible : Visibility.Collapsed;
 
+    public static Visibility Collapsed(bool value) => Visible(!value);
+
     // Tab progress strip. WinUI's ProgressBar supplies the theme colours: accent, then
     // critical red for ShowError and caution amber for ShowPaused.
     public static Visibility ProgressVisibility(TerminalProgress progress) => Visible(progress.IsActive);
@@ -199,37 +201,23 @@ public static class PresentationValues
 
     // ---- workspace rail buttons ----
 
-    public const double WorkspaceIconSize = 20;
+    /// <summary>A workspace icon drawn as a path; null for "" so nothing is drawn.</summary>
+    public static Geometry? IconPathGeometry(string path) =>
+        path.Length == 0
+            ? null
+            : (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), path);
 
-    /// <summary>A tile takes its workspace's colour. An icon sits on a neutral tile so a
-    /// coloured logo is not drawn on another colour; Home has no colour; High Contrast uses
-    /// its selection colour for every tile.</summary>
-    public static Brush WorkspaceTileBrush(string colorTag, string iconKey)
-    {
-        if (App.IsHighContrast)
-            return ResourceBrush("SessionTreeSelectionBrush");
-        var color = ParseColor(colorTag);
-        return color.A == 0 || WorkspaceIcon(iconKey) is not null
-            ? ResourceBrush("SessionChromeFrameBrush")
-            : new SolidColorBrush(color);
-    }
+    private const double RailMarkerFullHeight = 20;
+    private static readonly Windows.UI.ViewManagement.UISettings MotionSettings = new();
 
-    public static Brush WorkspaceTileForeground(string colorTag)
-    {
-        if (App.IsHighContrast)
-            return ResourceBrush("SessionTreeSelectionForegroundBrush");
-        return ParseColor(colorTag).A == 0
-            ? ResourceBrush("SessionTreeForegroundBrush")
-            : ResourceBrush("WorkspaceTileForegroundBrush");
-    }
+    /// <summary>The workspace marker is drawn at full height and scaled, so a change of state
+    /// animates through its ScaleTransition instead of snapping.</summary>
+    public static System.Numerics.Vector3 RailMarkerScale(double height) =>
+        new(1, (float)(height / RailMarkerFullHeight), 1);
 
-    public static ImageSource? WorkspaceIcon(string iconKey) =>
-        iconKey.Length == 0 ? null : App.Icons.GetImage(iconKey, WorkspaceIconSize);
-
-    public static Visibility WorkspaceIconVisibility(string iconKey) => Visible(WorkspaceIcon(iconKey) is not null);
-
-    public static Visibility WorkspaceMonogramVisibility(string iconKey, bool isHome) =>
-        Visible(!isHome && WorkspaceIcon(iconKey) is null);
+    /// <summary>Matches the workspace slide; zero when Windows animation effects are off.</summary>
+    public static TimeSpan RailMarkerDuration =>
+        MotionSettings.AnimationsEnabled ? TimeSpan.FromMilliseconds(170) : TimeSpan.Zero;
 
     /// <summary>The alert dot's colour: amber when an agent waits, red for a dropped
     /// session, the accent for unseen output — the tab strip's own meanings.</summary>

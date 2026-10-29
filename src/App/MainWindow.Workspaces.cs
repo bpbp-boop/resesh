@@ -148,7 +148,7 @@ public sealed partial class MainWindow
                         Item("Add to current layout", ViewModel.OpenWorkspaceAdditivelyCommand),
                         new MenuFlyoutSeparator(),
                         Item("Update from current layout…", ViewModel.UpdateWorkspaceCommand),
-                        Item("Icon and color…", ViewModel.CustomizeWorkspaceCommand),
+                        Item("Icon…", ViewModel.CustomizeWorkspaceCommand),
                         Item("Rename…", ViewModel.RenameWorkspaceCommand),
                         Item("Delete…", ViewModel.DeleteWorkspaceCommand),
                     },
@@ -289,7 +289,7 @@ public sealed partial class MainWindow
         if (App.Workspaces.LastLayout is { } layout)
             ApplyWorkspaceLayout(layout, additive: false);
         if (App.Workspaces.LastActiveWorkspaceId is { } active)
-            ShowWorkspace(active, saveCurrent: false);
+            ShowWorkspace(active, saveCurrent: false, animate: false); // startup: no motion
     }
 
     private void ApplyWorkspaceLayout(WorkspaceLayout layout, bool additive)

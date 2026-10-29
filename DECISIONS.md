@@ -1316,3 +1316,55 @@ goes through `FocusGroup`, which brings a parked workspace back first.
   workspaces. Ctrl+Alt stays unused because it is AltGr on many layouts.
 - `SplitOrientation` is not on the camel-case enum list, so it persists as a number
   (`0` = columns). Changing that now would need a reader for both forms.
+
+## 2026-10-29 - Workspace buttons use monochrome glyphs, not colours
+
+Workspace rail buttons first drew the name's initials on a colour from the id, or a session
+icon and chosen colour. The colours clashed with the monochrome tool icons above them, and
+coloured session logos looked out of place on the rail. A workspace now picks one of a fixed
+set of Segoe Fluent Icons glyphs (`WorkspaceAppearance.Icons`), drawn bare in the rail's own
+brushes like the tool icons above, so it follows every theme including High Contrast. No icon still
+draws the initials.
+
+- Every glyph in the set also exists in Segoe MDL2 Assets, the Windows 10 fallback. Check
+  any new one in both fonts. Home's glyph is not in the set, so no workspace looks like Home.
+- Segoe Fluent Icons has no database glyph, so Database is path data on a 16×16 grid drawn
+  with a 1px stroke, which matches the font's weight. `WorkspaceIcon` holds a glyph or a path.
+- The picker's filter also matches keywords ("sql", "k8s", "prod"), and Enter saves the first match.
+- Icon keys are saved, so never rename one. A key the set does not know (such as a session
+  icon saved by the first rail build) draws the initials.
+- Middle-click on a rail button closes that workspace, as it closes a tab, through the same
+  confirmed path as the menu. The menu lists Close workspace even when it is closed (disabled),
+  so the gesture is discoverable. winapp ui cannot send a middle-click; check it by hand.
+- `Workspace.ColorTag` is gone. JSON ignores the unknown field, so older files load and lose
+  it on the next save.
+
+## 2026-10-29 - Workspace switches slide, never fade
+
+Switching workspaces slides the shown workspace 24 px into place over 170 ms (the pane motion's
+duration and ease-out), from the side of the rail its button sits on: lower in the rail rises
+from below, higher drops from above. The workspace being left goes at once. `GroupArea` and
+`PaneFocusFrame` are translated together, each with an inset clip that opens in step, so
+panes never draw over the title bar or status bar while they move.
+
+- No fade or crossfade: a terminal's swap chain composes near-black under partial opacity
+  (see the pane motion), and a crossfade would keep the parked workspace drawing.
+- The rail marker is drawn at full height and scaled, so its change animates through a
+  `ScaleTransition` instead of snapping. Its duration is bound to zero when Windows animation
+  effects are off; the slide checks the same setting.
+- The workspace reopened at startup does not animate. A switch during a slide restarts it.
+
+## 2026-10-29 - Workspace initials and the rail hover card
+
+A workspace can have its own initials (`Workspace.Initials`), set in the icon dialog beside
+the preview. Up to three characters as a reader counts them (`StringInfo` text elements, so an
+emoji or accented letter is one), spaces removed and case kept; blank falls back to the
+letters from the name. Typing initials selects the Initials choice, since only it draws them.
+
+Rail buttons show a hover card instead of a tooltip: name, switch shortcut, status (showing,
+open in the background, open in another window, not open) and the background alert. WinUI's
+ToolTip waits before opening and has no setting for the delay, which is slow when scanning a
+column of icons, so the card is a `Popup` opened on `PointerEntered` and closed on
+`PointerExited`. It also opens for keyboard focus, never for touch, closes when the context
+menu opens or a drag starts, and follows the item's property changes while it is up. The
+button's automation name still carries the same text for screen readers.

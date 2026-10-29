@@ -42,13 +42,13 @@ public sealed record Workspace
     public IReadOnlyList<WorkspaceGroup> Groups { get; set; } = [];
     public WorkspaceLayoutNode? Layout { get; init; }
 
-    /// <summary>A session icon catalog key drawn on the workspace's rail button. Null draws
-    /// the name's initials instead.</summary>
+    /// <summary>A <see cref="WorkspaceAppearance.Icons"/> key drawn on the workspace's rail
+    /// button. Null, or a key the catalog does not know, draws the name's initials instead.</summary>
     public string? Icon { get; set; }
 
-    /// <summary>The rail button's colour as #RRGGBB. Null takes a colour derived from the id,
-    /// so neighbouring workspaces differ without anyone choosing.</summary>
-    public string? ColorTag { get; set; }
+    /// <summary>Letters the rail button shows in place of the ones taken from the name, when it
+    /// has no icon. Null takes them from the name.</summary>
+    public string? Initials { get; set; }
 }
 
 /// <summary>
@@ -193,7 +193,7 @@ public sealed class WorkspaceStore
         }
     }
 
-    public void SetAppearance(Guid id, string? icon, string? colorTag)
+    public void SetAppearance(Guid id, string? icon, string? initials)
     {
         lock (_gate)
         {
@@ -202,7 +202,7 @@ public sealed class WorkspaceStore
             updated[index] = updated[index] with
             {
                 Icon = string.IsNullOrWhiteSpace(icon) ? null : icon,
-                ColorTag = string.IsNullOrWhiteSpace(colorTag) ? null : colorTag,
+                Initials = WorkspaceAppearance.NormalizeInitials(initials),
             };
             Commit(updated);
         }

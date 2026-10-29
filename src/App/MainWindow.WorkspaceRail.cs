@@ -34,6 +34,7 @@ public sealed partial class MainWindow
     private readonly Dictionary<Guid, ParkedWorkspace> _parkedWorkspaces = [];
     private Guid _shownWorkspace = HomeWorkspace;
     private bool _railRefreshQueued;
+    private WorkspaceRailItemViewModel? _middlePressedRailItem;
 
     /// <summary>Home's rail button, alone in its list so it shares the workspace template.</summary>
     public ObservableCollection<WorkspaceRailItemViewModel> RailHome { get; } = [WorkspaceRailItemViewModel.CreateHome()];
@@ -49,6 +50,10 @@ public sealed partial class MainWindow
 
     private void InitializeWorkspaceRail()
     {
+        // Middle-click closes a workspace, as it closes a tab. The list items handle presses
+        // themselves, so listen to handled events too.
+        WorkspaceRailList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(WorkspaceRail_PointerPressed), true);
+        WorkspaceRailList.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(WorkspaceRail_PointerReleased), true);
         ViewModel.TabChanged += (_, property) =>
         {
             if (property is nameof(TabViewModel.HasUnseenOutput) or nameof(TabViewModel.Agent)
@@ -68,7 +73,7 @@ public sealed partial class MainWindow
     /// <summary>Shows a workspace: Home, one this window has parked, or a saved one it opens
     /// now. One open in another window is shown there instead. The workspace being left is
     /// saved as it stands, then parked with its tabs connected.</summary>
-    internal void ShowWorkspace(Guid id, bool focusTerminal = true, bool saveCurrent = true)
+    internal void ShowWorkspace(Guid id, bool focusTerminal = true, bool saveCurrent = true, bool animate = true)
     {
         if (id == _shownWorkspace)
         {
@@ -108,7 +113,10 @@ public sealed partial class MainWindow
                 FinishLayoutChange(ViewModel.Groups[0], null);
         }
 
+        var previous = _shownWorkspace;
         _shownWorkspace = id;
+        if (animate)
+            PlayWorkspaceSwitchMotion(previous, id);
         App.RefreshWorkspaceRails();
         App.RefreshWindowTitles();
         if (focusTerminal)
@@ -453,6 +461,29 @@ public sealed partial class MainWindow
             ShowWorkspace(item.Id);
     }
 
+    private void WorkspaceRail_PointerPressed(object sender, PointerRoutedEventArgs e) =>
+        _middlePressedRailItem = e.GetCurrentPoint(WorkspaceRailList).Properties.IsMiddleButtonPressed
+            ? RailItemFromSource(e.OriginalSource)
+            : null;
+
+    /// <summary>Closes the workspace when the middle button is pressed and released on the
+    /// same open one, through the same confirmed path as the menu's Close.</summary>
+    private void WorkspaceRail_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        var pressed = _middlePressedRailItem;
+        _middlePressedRailItem = null;
+        if (pressed is { IsOpen: true, Workspace: { } workspace }
+            && e.GetCurrentPoint(WorkspaceRailList).Properties.PointerUpdateKind == Microsoft.UI.Input.PointerUpdateKind.MiddleButtonReleased
+            && ReferenceEquals(RailItemFromSource(e.OriginalSource), pressed))
+        {
+            e.Handled = true;
+            _ = CloseWorkspaceAsync(workspace);
+        }
+    }
+
+    private static WorkspaceRailItemViewModel? RailItemFromSource(object source) =>
+        (source as FrameworkElement)?.DataContext as WorkspaceRailItemViewModel;
+
     private void WorkspaceRail_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args) =>
         WorkspaceOperations.Reorder(RailWorkspaces.Select(item => item.Id).ToList());
 
@@ -463,6 +494,7 @@ public sealed partial class MainWindow
         if (args.OriginalSource is not FrameworkElement { DataContext: WorkspaceRailItemViewModel item } source)
             return;
         args.Handled = true;
+        HideWorkspaceHoverCard();
         var menu = BuildWorkspaceRailMenu(item);
         if (args.TryGetPosition(source, out var point))
             menu.ShowAt(source, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Position = point });
@@ -494,13 +526,15 @@ public sealed partial class MainWindow
         if (!item.IsActive && !item.IsOpen && !item.IsOpenElsewhere)
             menu.Items.Add(Item("Add to current layout", ViewModel.OpenWorkspaceAdditivelyCommand, workspace));
         menu.Items.Add(new MenuFlyoutSeparator());
-        menu.Items.Add(Item("Icon and color…", ViewModel.CustomizeWorkspaceCommand, workspace));
+        menu.Items.Add(Item("Icon…", ViewModel.CustomizeWorkspaceCommand, workspace));
         menu.Items.Add(Item("Rename…", ViewModel.RenameWorkspaceCommand, workspace));
-        if (item.IsOpen)
-        {
-            menu.Items.Add(new MenuFlyoutSeparator());
-            menu.Items.Add(Item("Close", ViewModel.CloseWorkspaceCommand, workspace));
-        }
+        menu.Items.Add(new MenuFlyoutSeparator());
+        // Always listed, so middle-click is discoverable; only an open one can close here.
+        var close = item.IsOpen
+            ? Item("Close workspace", ViewModel.CloseWorkspaceCommand, workspace)
+            : new MenuFlyoutItem { Text = "Close workspace", IsEnabled = false };
+        close.KeyboardAcceleratorTextOverride = "Middle-click";
+        menu.Items.Add(close);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(Item("Delete…", ViewModel.DeleteWorkspaceCommand, workspace));
         return menu;
@@ -509,15 +543,7 @@ public sealed partial class MainWindow
     private async Task CustomizeWorkspaceAsync(Workspace workspace)
     {
         var current = App.Workspaces.Workspaces.FirstOrDefault(candidate => candidate.Id == workspace.Id) ?? workspace;
-        if (await Dialogs.WorkspaceAppearanceDialog.EditAsync(Root.XamlRoot, current) is { } choice)
-            WorkspaceOperations.SetAppearance(current.Id, choice.Icon, choice.ColorTag);
-    }
-
-    /// <summary>Tiles draw their colours through presentation functions that read High
-    /// Contrast when they run, so a theme change re-reads them.</summary>
-    private void RefreshWorkspaceRailTheme()
-    {
-        foreach (var item in RailHome.Concat(RailWorkspaces))
-            item.NotifyAppearanceChanged();
+        if (await Dialogs.WorkspaceIconDialog.EditAsync(Root.XamlRoot, current) is { } choice)
+            WorkspaceOperations.SetAppearance(current.Id, choice.Icon, choice.Initials);
     }
 }

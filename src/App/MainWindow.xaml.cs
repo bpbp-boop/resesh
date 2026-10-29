@@ -1384,7 +1384,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         foreach (var groupView in _groupViews.Values)
             groupView.ApplyTheme(palette);
         ApplyTitleBarButtonColors(theme); // caption buttons don't follow XAML theming
-        RefreshWorkspaceRailTheme();
         foreach (var tab in ViewModel.AllTabs)
         {
             if (tab.View is TerminalTabView view)

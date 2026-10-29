@@ -113,12 +113,12 @@ public sealed class WorkspaceRailTests : IDisposable
     [Fact]
     public void RailItem_ShowsStateMarkerAndAlertOnlyInTheBackground()
     {
-        var workspace = new Workspace { Id = Guid.NewGuid(), Name = "Prod incident", Icon = "debian" };
+        var workspace = new Workspace { Id = Guid.NewGuid(), Name = "Prod incident", Icon = "warning" };
         var item = WorkspaceRailItemViewModel.For(workspace);
 
         Assert.Equal("PI", item.Monogram);
-        Assert.Equal("debian", item.IconKey);
-        Assert.Equal(WorkspaceAppearance.Color(workspace), item.ColorTag);
+        Assert.Equal(WorkspaceAppearance.Find("warning")!.Glyph, item.Glyph);
+        Assert.True(item.HasIcon);
         Assert.Equal(0, item.MarkerHeight);
         Assert.True(item.TileOpacity < 1);
 
@@ -126,6 +126,9 @@ public sealed class WorkspaceRailTests : IDisposable
         Assert.Equal(8, item.MarkerHeight);
         Assert.True(item.HasAlert);
         Assert.Equal("Prod incident — open, an agent needs you (Ctrl+Shift+2)", item.Tooltip);
+        Assert.Equal("Open in the background", item.StatusText);
+        Assert.Equal("An agent needs you", item.AlertText);
+        Assert.Equal("Ctrl+Shift+2", item.ShortcutText);
 
         item.SetState(isOpen: true, isActive: true, isOpenElsewhere: false, WorkspaceAlert.Attention, position: 2);
         Assert.Equal(20, item.MarkerHeight);
@@ -135,6 +138,9 @@ public sealed class WorkspaceRailTests : IDisposable
         item.SetState(isOpen: false, isActive: false, isOpenElsewhere: true, WorkspaceAlert.None, position: 12);
         Assert.True(item.IsOpenElsewhere);
         Assert.Equal("Prod incident — open in another window", item.Tooltip);
+        Assert.Equal("Open in another window", item.StatusText);
+        Assert.Equal("", item.AlertText);
+        Assert.Equal("", item.ShortcutText);
     }
 
     [Fact]
@@ -145,14 +151,28 @@ public sealed class WorkspaceRailTests : IDisposable
         var changed = new List<string?>();
         item.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
 
-        item.Update(workspace with { Name = "Core network", Icon = null, ColorTag = "#10893E" });
+        item.Update(workspace with { Name = "Core network", Initials = "cor" });
+        Assert.Equal("cor", item.Monogram);
+
+        item.Update(workspace with { Name = "Core network", Icon = "server" });
 
         Assert.Equal("Core network", item.Name);
         Assert.Equal("CN", item.Monogram);
-        Assert.Equal("", item.IconKey);
-        Assert.Equal("#10893E", item.ColorTag);
+        Assert.True(item.HasIcon);
         Assert.Contains(nameof(WorkspaceRailItemViewModel.Monogram), changed);
-        Assert.Contains(nameof(WorkspaceRailItemViewModel.ColorTag), changed);
+        Assert.Contains(nameof(WorkspaceRailItemViewModel.Glyph), changed);
+        Assert.Contains(nameof(WorkspaceRailItemViewModel.HasIcon), changed);
+
+        item.Update(workspace with { Icon = "database" });
+        Assert.Equal("", item.Glyph);
+        Assert.Equal(WorkspaceAppearance.Find("database")!.Path, item.IconPath);
+        Assert.True(item.HasIcon);
+
+        // A key this build does not know, such as a session icon, falls back to the initials.
+        item.Update(workspace with { Icon = "debian" });
+        Assert.Equal("", item.Glyph);
+        Assert.Equal("", item.IconPath);
+        Assert.False(item.HasIcon);
     }
 
     [Fact]
@@ -164,7 +184,7 @@ public sealed class WorkspaceRailTests : IDisposable
         Assert.True(home.IsHome);
         Assert.Null(home.Workspace);
         Assert.True(home.IsOpen);
-        Assert.Equal("", home.ColorTag);
+        Assert.Equal(WorkspaceAppearance.HomeGlyph, home.Glyph);
         Assert.Equal("Home — tabs outside saved workspaces, new output (Ctrl+Shift+1)", home.Tooltip);
     }
 

@@ -14,52 +14,61 @@
         Background="{StaticResource SessionShellBrush}">
         <Grid.Resources>
             <!-- A workspace rail button: an edge marker (tall when shown, short when open in
-                 the background), the tile with its initials, icon or Home glyph, the alert
-                 dot for a workspace in the background, and a mark when another window has it. -->
+                 the background), its icon or initials, drawn bare like the tool icons above, the alert
+                 dot for a workspace in the background, and a mark when another window has it.
+                 Hovering shows WorkspaceHoverCard at once instead of a delayed tooltip. -->
             <DataTemplate x:Key="WorkspaceRailItemTemplate" x:DataType="vm:WorkspaceRailItemViewModel">
                 <Grid
                     Width="44"
                     Height="40"
                     Background="Transparent"
-                    ToolTipService.ToolTip="{x:Bind Tooltip, Mode=OneWay}"
+                    PointerEntered="WorkspaceRailItem_PointerEntered"
+                    PointerExited="WorkspaceRailItem_PointerExited"
+                    PointerCanceled="WorkspaceRailItem_PointerExited"
                     AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
                     AutomationProperties.AutomationId="{x:Bind AutomationId}">
+                    <!-- Full height, scaled to the marker's size so the change animates. -->
                     <Rectangle
                         Width="4"
-                        Height="{x:Bind MarkerHeight, Mode=OneWay}"
+                        Height="20"
                         Margin="-2,0,0,0"
                         RadiusX="2"
                         RadiusY="2"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
-                        Fill="{StaticResource SessionTreeForegroundBrush}" />
+                        CenterPoint="2,10,0"
+                        Scale="{x:Bind local:PresentationValues.RailMarkerScale(MarkerHeight), Mode=OneWay}"
+                        Fill="{StaticResource SessionTreeForegroundBrush}">
+                        <Rectangle.ScaleTransition>
+                            <Vector3Transition Duration="{x:Bind local:PresentationValues.RailMarkerDuration}" />
+                        </Rectangle.ScaleTransition>
+                    </Rectangle>
                     <Grid
                         Width="30"
                         Height="30"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         Opacity="{x:Bind TileOpacity, Mode=OneWay}">
-                        <Border
-                            CornerRadius="8"
-                            Background="{x:Bind local:PresentationValues.WorkspaceTileBrush(ColorTag, IconKey), Mode=OneWay}" />
                         <FontIcon
-                            Glyph="&#xE80F;"
-                            FontSize="15"
+                            Glyph="{x:Bind Glyph, Mode=OneWay}"
+                            FontSize="16"
                             Foreground="{StaticResource SessionTreeForegroundBrush}"
-                            Visibility="{x:Bind local:PresentationValues.Visible(IsHome)}" />
+                            Visibility="{x:Bind local:PresentationValues.Visible(HasIcon), Mode=OneWay}" />
+                        <Path
+                            Width="16"
+                            Height="16"
+                            Data="{x:Bind local:PresentationValues.IconPathGeometry(IconPath), Mode=OneWay}"
+                            Stroke="{StaticResource SessionTreeForegroundBrush}"
+                            StrokeThickness="1"
+                            StrokeLineJoin="Round" />
                         <TextBlock
                             Text="{x:Bind Monogram, Mode=OneWay}"
                             FontSize="12"
                             FontWeight="SemiBold"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center"
-                            Foreground="{x:Bind local:PresentationValues.WorkspaceTileForeground(ColorTag), Mode=OneWay}"
-                            Visibility="{x:Bind local:PresentationValues.WorkspaceMonogramVisibility(IconKey, IsHome), Mode=OneWay}" />
-                        <Image
-                            Width="20"
-                            Height="20"
-                            Source="{x:Bind local:PresentationValues.WorkspaceIcon(IconKey), Mode=OneWay}"
-                            Visibility="{x:Bind local:PresentationValues.WorkspaceIconVisibility(IconKey), Mode=OneWay}" />
+                            Foreground="{StaticResource SessionTreeForegroundBrush}"
+                            Visibility="{x:Bind local:PresentationValues.Collapsed(HasIcon), Mode=OneWay}" />
                     </Grid>
                     <Border
                         Width="{x:Bind local:PresentationValues.WorkspaceAlertSize(Alert), Mode=OneWay}"
@@ -580,6 +589,8 @@
                                 IsItemClickEnabled="True"
                                 ItemClick="WorkspaceRail_ItemClick"
                                 ContextRequested="WorkspaceRail_ContextRequested"
+                                GotFocus="WorkspaceRail_GotFocus"
+                                LostFocus="WorkspaceRail_LostFocus"
                                 Visibility="Collapsed"
                                 AutomationProperties.Name="Home workspace" />
                             <ListView
@@ -593,8 +604,11 @@
                                 CanReorderItems="True"
                                 AllowDrop="True"
                                 ItemClick="WorkspaceRail_ItemClick"
+                                DragItemsStarting="WorkspaceRail_DragItemsStarting"
                                 DragItemsCompleted="WorkspaceRail_DragItemsCompleted"
                                 ContextRequested="WorkspaceRail_ContextRequested"
+                                GotFocus="WorkspaceRail_GotFocus"
+                                LostFocus="WorkspaceRail_LostFocus"
                                 AutomationProperties.Name="Workspaces" />
                             <Button
                                 x:Name="NewWorkspaceRailButton"
@@ -607,17 +621,10 @@
                                 ToolTipService.ToolTip="New workspace"
                                 AutomationProperties.Name="New workspace"
                                 AutomationProperties.AutomationId="WorkspaceRail_New">
-                                <Border
-                                    Width="30"
-                                    Height="30"
-                                    CornerRadius="8"
-                                    BorderThickness="1"
-                                    BorderBrush="{StaticResource SessionChromeFrameBrush}">
-                                    <FontIcon
-                                        Glyph="&#xE710;"
-                                        FontSize="12"
-                                        Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
-                                </Border>
+                                <FontIcon
+                                    Glyph="&#xE710;"
+                                    FontSize="14"
+                                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
                             </Button>
                         </StackPanel>
                     </ScrollViewer>
@@ -914,7 +921,7 @@
                                                 CommandParameter="{x:Bind}"
                                                 Click="WorkspaceRowMenu_Click" />
                                             <MenuFlyoutItem
-                                                Text="Icon and color…"
+                                                Text="Icon…"
                                                 Tag="customize"
                                                 CommandParameter="{x:Bind}"
                                                 Click="WorkspaceRowMenu_Click" />
@@ -1172,5 +1179,47 @@
             x:Name="CommandPalette"
             Grid.RowSpan="3"
             Canvas.ZIndex="1000" />
+
+        <!-- A workspace rail button's name and state, shown beside it the moment the pointer
+             (or keyboard focus) reaches it. Code fills and places it; it never takes input. -->
+        <Popup
+            x:Name="WorkspaceHoverCard"
+            Grid.RowSpan="3"
+            IsHitTestVisible="False"
+            ShouldConstrainToRootBounds="True">
+            <Border
+                x:Name="WorkspaceHoverCardBody"
+                MinWidth="160"
+                MaxWidth="300"
+                Padding="12,8"
+                IsHitTestVisible="False"
+                CornerRadius="{ThemeResource OverlayCornerRadius}"
+                BorderThickness="1"
+                Background="{ThemeResource FlyoutPresenterBackground}"
+                BorderBrush="{ThemeResource FlyoutBorderThemeBrush}">
+                <StackPanel Spacing="2">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                        <TextBlock
+                            x:Name="HoverCardName"
+                            TextTrimming="CharacterEllipsis"
+                            Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                        <TextBlock
+                            x:Name="HoverCardShortcut"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </Grid>
+                    <TextBlock
+                        x:Name="HoverCardStatus"
+                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel x:Name="HoverCardAlert" Orientation="Horizontal" Spacing="6" Margin="0,2,0,0">
+                        <Ellipse x:Name="HoverCardAlertDot" Width="8" Height="8" VerticalAlignment="Center" />
+                        <TextBlock x:Name="HoverCardAlertText" Style="{ThemeResource CaptionTextBlockStyle}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Popup>
     </Grid>
 </Window>

@@ -56,8 +56,8 @@ and the git history.
 - **Workspaces & layout restore** — named ordered tab-group layouts with pinned and active
   tab state, replace or additive opening that adopts live connections, clean-exit startup
   restore, and conflict-aware workspace remapping through backup import.
-- **Workspace rail** — each saved workspace is a rail button (initials or a chosen icon and
-  color). Switching keeps the workspace you leave connected in the background; Home holds the
+- **Workspace rail** — each saved workspace is a rail button (initials or an icon from a set
+  that matches the rail). Switching keeps the workspace you leave connected in the background; Home holds the
   tabs outside any workspace. Background alerts (new output, a dropped session, an agent
   waiting), Ctrl+Shift+1–9, autosave on switch and close, and reopening the last shown
   workspace at startup. Not yet: dragging a tab onto a workspace button to move it there.
