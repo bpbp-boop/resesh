@@ -156,3 +156,19 @@ publish, SSH floods from `sshflood.py` (no ConPTY), built-in highlight rules on 
   time; Present is ~0.2–0.35 ms and never blocked for a vsync.
 - The paced (`-r1`) runs drew at 64 fps because asyncio's sleep on Windows has 15.6 ms
   granularity; use floods for frame-rate numbers.
+
+### After the emoji atlas (same day)
+
+Color emoji are now rasterized once per (cluster, width, color) into a 2048² atlas and copied
+with a nearest-neighbor `DrawBitmap`; screenshots of the `unicode` workload are pixel-identical
+to before. Combining-mark clusters reuse their text layout.
+
+| unicode workload | before | after |
+|---|---:|---:|
+| 1280×800 fps | 46–50 | 138–141 |
+| 1280×800 UI thread per frame (p50) | 20.4 ms | 0.94 ms |
+| full screen fps | 10–16 | 109–122 |
+| full screen UI thread per frame (p50) | 60–106 ms | 2.9–3.0 ms |
+| full screen GPU per frame (p50) | 40–73 ms | 1.75 ms |
+
+`logs` and `color` are unchanged within run-to-run noise.

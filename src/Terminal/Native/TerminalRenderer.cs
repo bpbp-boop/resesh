@@ -261,6 +261,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         // double line is three of these wide, so keep it to a fifth of the cell.
         _boxThickness = Math.Clamp((int)MathF.Ceiling(metrics.UnderlineThickness * scale), 1, Math.Max(1, CellWidth / 5));
         DisposeGlyphGeometries();
+        ResetClusterCaches();
 
         _emojiFormat?.Dispose();
         _emojiFormat = s_dwrite.CreateTextFormat("Segoe UI Emoji", FontWeight.Normal, FontStyle.Normal, emPixels * 0.9f);
@@ -802,18 +803,11 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         var width = (c.Wide == TerminalCell.WideChar ? 2 : 1) * CellWidth;
         SetBrush(Rgb(c.Foreground));
         var emoji = IsEmojiPresentation(c.Codepoint) || text.Contains('️');
+        float left = OriginX + x * CellWidth, top = y * CellHeight;
         if (emoji)
-        {
-            _dc.DrawText(text, _emojiFormat!, new Rect(OriginX + x * CellWidth, y * CellHeight, width, CellHeight), _brush,
-                DrawTextOptions.EnableColorFont | DrawTextOptions.Clip);
-            return;
-        }
-        // Base character plus combining marks: lay out in the terminal font on the baseline.
-        using var layout = s_dwrite!.CreateTextLayout(text, _clusterFormat!, width, CellHeight);
-        var lineMetrics = layout.LineMetrics;
-        var offset = lineMetrics.Length > 0 ? _baseline - lineMetrics[0].Baseline : 0;
-        _dc.DrawTextLayout(new Vector2(OriginX + x * CellWidth, y * CellHeight + offset), layout, _brush,
-            DrawTextOptions.Clip);
+            DrawEmoji(text, width / CellWidth, c.Foreground, new Vortice.RawRectF(left, top, left + width, top + CellHeight));
+        else
+            DrawCombiningCluster(text, width, new Vector2(left, top));
     }
 
     private void DrawCursor(TerminalCell* cell, in GhosttyFrameInfo info, bool focused)
@@ -875,6 +869,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private void DisposeDeviceResources()
     {
         DisposeGpuQueries();
+        ResetClusterCaches();
         ReleaseSwapChain();
         DisposeFaces();
         DisposeGlyphGeometries();
