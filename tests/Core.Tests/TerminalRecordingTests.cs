@@ -203,6 +203,19 @@ public sealed class TerminalRecordingTests : IDisposable
     }
 
     [Fact]
+    public void KeyframeIsCopiedBecauseTheCallersBufferIsFreedAfterwards()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(80, 24, startedAt: started);
+        var buffer = Encoding.UTF8.GetBytes("full-state");
+
+        capture.CaptureKeyframe(buffer, 80, 24, started.AddSeconds(1).ToUnixTimeMilliseconds());
+        Array.Fill(buffer, (byte)'x'); // the terminal surface hands over native memory it then frees
+
+        Assert.Equal(Encoding.UTF8.GetBytes("full-state"), capture.Snapshot().Keyframe?.State.ToArray());
+    }
+
+    [Fact]
     public void OversizedKeyframeDisablesRewindWithoutOutputEvents()
     {
         var started = DateTimeOffset.UtcNow;

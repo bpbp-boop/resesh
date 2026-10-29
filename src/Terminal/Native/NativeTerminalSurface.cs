@@ -388,26 +388,42 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         var buffer = GhosttyNative.rvt_format_vt(_term, out var length);
         if (FrameStats.Enabled)
             Interlocked.Add(ref _statsKeyframeTicks, FrameStats.Now() - statsStart);
-        byte[] state;
-        try
-        {
-            state = buffer == null || length == 0
-                ? "\u001b[0m"u8.ToArray() // an empty screen still needs a non-empty keyframe
-                : new ReadOnlySpan<byte>(buffer, checked((int)length)).ToArray();
-        }
-        finally
-        {
-            GhosttyNative.rvt_free_buffer(buffer, length);
-        }
         _keyframeBytes = 0;
         _lastKeyframeMs = Math.Max(unixMs, _lastObservedMs);
+        // Handlers see the shim's buffer itself and copy what they keep: a keyframe is megabytes
+        // on a large screen, and copying it here as well only made large-object garbage.
+        using var native = new NativeBytes(buffer, length);
         try
         {
-            handler(state, Columns, Rows, _lastKeyframeMs);
+            handler(native.Length > 0 ? native.Memory : EmptyKeyframe, Columns, Rows, _lastKeyframeMs);
         }
         catch (Exception exception)
         {
             TerminalSurface.TraceHook?.Invoke($"keyframe capture failed: {exception.Message}");
+        }
+    }
+
+    // An empty screen still needs a non-empty keyframe.
+    private static readonly byte[] EmptyKeyframe = "\u001b[0m"u8.ToArray();
+
+    /// <summary>A shim-allocated buffer as <see cref="Memory{T}"/>, freed on dispose.</summary>
+    private sealed class NativeBytes(byte* pointer, nuint length) : System.Buffers.MemoryManager<byte>
+    {
+        public int Length { get; } = pointer == null ? 0 : checked((int)length);
+
+        public override Span<byte> GetSpan() => new(pointer, Length);
+
+        public override System.Buffers.MemoryHandle Pin(int elementIndex = 0) => new(pointer + elementIndex);
+
+        public override void Unpin()
+        {
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (pointer != null)
+                GhosttyNative.rvt_free_buffer(pointer, length);
+            pointer = null;
         }
     }
 
