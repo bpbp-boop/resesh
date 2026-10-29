@@ -1483,3 +1483,13 @@ pins them), so saved sessions keep their icons.
   WinUI's modern ListViewItem template with an older one that has no selection pill.
 - A workspace open in the background keeps a neutral marker of the same pill shape at half
   height; it is not a ListView concept.
+
+## 2026-10-29 - Parse output in slices and let readers in between
+
+`rvt_write` used to parse each SSH read in one hold of the terminal's SRW lock. In a flood of
+short lines with a full scrollback libghostty-vt parses ~5 MB/s, so a 32 KB read held the lock
+for ~6 ms, and the UI thread's frame read and line-text reads (the overview index takes the lock
+once per line) queued behind it: 7 fps and 450 ms stalls at full screen. The shim now parses in
+4 KB slices. SRW locks let the releasing thread take the lock straight back, so every other
+entry point counts itself in `waiting` while blocked and the writer `SwitchToThread`s (bounded)
+until that count drops. Measured with `RESESH_FRAME_STATS` (tools/terminal-bench/RESULTS.md).

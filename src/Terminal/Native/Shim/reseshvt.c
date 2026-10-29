@@ -19,6 +19,7 @@ __declspec(dllimport) void __stdcall AcquireSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) unsigned char __stdcall TryAcquireSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) uint64_t __stdcall GetTickCount64(void);
+__declspec(dllimport) int __stdcall SwitchToThread(void);
 
 #define RVT_ABI_VERSION 8
 
@@ -124,6 +125,7 @@ typedef struct {
   uint32_t span_hash;
   GhosttySelection match_buf[RVT_MAX_SPANS];
   RvtSrwLock lock;
+  volatile long waiting; // callers other than rvt_write blocked in lock()
   RvtEventFn on_event;
   void* user;
   uint32_t cell_w, cell_h, screen_w, screen_h;
@@ -143,7 +145,12 @@ static void emit(RvtTerm* t, int kind, const uint8_t* data, size_t len) {
   if (t->on_event) t->on_event(t->user, kind, data, len);
 }
 
-static void lock(RvtTerm* t) { AcquireSRWLockExclusive(&t->lock); }
+// Everything but rvt_write counts itself while it waits, so a long write can step aside.
+static void lock(RvtTerm* t) {
+  __atomic_fetch_add(&t->waiting, 1, __ATOMIC_SEQ_CST);
+  AcquireSRWLockExclusive(&t->lock);
+  __atomic_fetch_sub(&t->waiting, 1, __ATOMIC_SEQ_CST);
+}
 
 // Output, resizes and clears all change the scrollback, so every call ends with this check
 // rather than each export deciding whether it needs compression.
@@ -477,10 +484,22 @@ RVT_API uint64_t rvt_resident_bytes(RvtTerm* t) {
   return r == GHOSTTY_SUCCESS ? usage.primary_resident_bytes + usage.alternate_resident_bytes : 0;
 }
 
+// Output is parsed in slices, releasing the lock between them: an SSH read can be 32 KB or
+// more, which takes milliseconds to parse when every line scrolls a full scrollback, and the
+// UI thread's frame and line reads would otherwise wait for all of it. SRW locks let the
+// releasing thread barge back in, so the writer yields until any waiter has the lock.
+#define RVT_WRITE_SLICE 4096
 RVT_API void rvt_write(RvtTerm* t, const uint8_t* data, size_t len) {
-  lock(t);
-  ghostty_terminal_vt_write(t->term, data, len);
-  unlock(t);
+  size_t offset = 0;
+  do {
+    size_t n = len - offset < RVT_WRITE_SLICE ? len - offset : RVT_WRITE_SLICE;
+    AcquireSRWLockExclusive(&t->lock);
+    ghostty_terminal_vt_write(t->term, data + offset, n);
+    unlock(t);
+    offset += n;
+    for (int spins = 0; offset < len && spins < 1000 && __atomic_load_n(&t->waiting, __ATOMIC_SEQ_CST) > 0; spins++)
+      SwitchToThread();
+  } while (offset < len);
 }
 
 RVT_API void rvt_resize(RvtTerm* t, uint16_t cols, uint16_t rows, uint32_t cell_w, uint32_t cell_h) {

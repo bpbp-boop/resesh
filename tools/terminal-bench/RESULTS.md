@@ -172,3 +172,30 @@ to before. Combining-mark clusters reuse their text layout.
 | full screen GPU per frame (p50) | 40–73 ms | 1.75 ms |
 
 `logs` and `color` are unchanged within run-to-run noise.
+
+### UI-thread stalls (same day)
+
+Frame logs now also carry GC pause time, allocation, the annotation pass (ruler, overview index)
+and keyframe capture. The slow frames and 150–500 ms gaps between frames were not the renderer:
+
+- **Overview indexing** (the ruler's highlight lane) scanned up to 2000 scrollback lines per pass
+  on the UI thread. Each line read takes the terminal lock, so during a flood a pass took
+  50–500 ms and passes ran back to back (up to 950 ms of every second in `tiny`). A pass now
+  stops after 4 ms; indexing catches up when output calms.
+- **The terminal lock**: `rvt_write` parsed a whole SSH read (32 KB+) under one lock hold, ~6 ms
+  in `tiny`, and every UI read (the frame, line text) waited behind it. Writes are now parsed in
+  4 KB slices, and the writer yields while anyone waits for the lock.
+- GC pauses are ~2–3% of the time (2–3 MB allocated per frame, mostly outside the renderer);
+  the highlighter's row text no longer allocates. Highlighting still costs ~11 µs per new row
+  in a flood: the regex, not the text building.
+
+Full screen (381×109), before → after:
+
+| workload | fps | longest annotation pass | gaps > 50 ms | UI per frame p50 |
+|---|---|---|---|---|
+| logs | 99–109 → 117–132 | 150–175 → 7–8 ms | 7–9 → 1 | 3.5–3.9 → 3.5 ms |
+| color | 99 → 120–133 | 136–163 → 7–11 ms | 6–10 → 1 | 3.1–3.2 → 3.2 ms |
+| unicode | 92–111 → 130–131 | 26–45 → 6–9 ms | 1 → 1 | 2.7–2.9 → 2.8 ms |
+| tiny | 7 → 122–124 | 446–496 → 23–24 ms | 11–14 → 1 | 6.3–6.8 → 2.2 ms |
+
+(The one remaining gap per run is at start-up.)
