@@ -23,16 +23,24 @@ public sealed class WorkspaceAppearanceTests : IDisposable
         var icons = WorkspaceAppearance.Icons;
 
         Assert.Equal(icons.Count, icons.Select(icon => icon.Key).Distinct(StringComparer.OrdinalIgnoreCase).Count());
-        Assert.Equal(icons.Count, icons.Select(icon => icon.Glyph + icon.Path).Distinct().Count());
-        // Exactly one way to draw each: a single glyph, or path data.
-        Assert.All(icons, icon => Assert.True(icon.Glyph.Length == 1 ^ icon.Path.Length > 0, icon.Key));
+        Assert.Equal(
+            icons.Count(icon => !icon.IsBrand),
+            icons.Where(icon => !icon.IsBrand).Select(icon => icon.Glyph + icon.Path).Distinct().Count());
+        // Exactly one way to draw each: a single glyph, path data, or a brand mark.
+        Assert.All(icons, icon => Assert.Equal(1,
+            (icon.Glyph.Length == 1 ? 1 : 0) + (icon.Path.Length > 0 ? 1 : 0) + (icon.IsBrand ? 1 : 0)));
+        Assert.Equal(Resesh.Core.Models.SessionIcons.Brands.Count, icons.Count(icon => icon.IsBrand));
+        // Every icon has a section, and every general icon is in exactly one.
+        Assert.All(icons, icon => Assert.False(string.IsNullOrEmpty(icon.Group), icon.Key));
+        Assert.Equal(31, icons.Count(icon => !icon.IsBrand));
         Assert.DoesNotContain(icons, icon => icon.Glyph == WorkspaceAppearance.HomeGlyph);
     }
 
     [Theory]
     [InlineData("server", "server")]
     [InlineData("Server", "server")]
-    [InlineData("debian", null)]
+    [InlineData("debian", "debian")]
+    [InlineData("unknown-icon", null)]
     [InlineData("", null)]
     [InlineData(null, null)]
     public void Find_ReturnsCatalogIconsAndNothingForUnknownKeys(string? key, string? expected) =>
@@ -48,6 +56,19 @@ public sealed class WorkspaceAppearanceTests : IDisposable
     [InlineData("data", "server", false)]
     public void Matches_FindsNameKeyOrKeywordsForEveryWord(string filter, string key, bool expected) =>
         Assert.Equal(expected, WorkspaceAppearance.Find(key)!.Matches(filter));
+
+    [Theory]
+    [InlineData("mysql", "mysql")]
+    [InlineData("sql", "sqlite")]
+    [InlineData("postgres", "postgresql")]
+    [InlineData("couch", "couchdb")]
+    [InlineData("k8s", "cluster")]
+    [InlineData("lab", "flask")]
+    public void FilterRanking_PutsTheIconTheTextNamesFirst(string filter, string expected) =>
+        Assert.Equal(expected, WorkspaceAppearance.Icons
+            .Where(icon => icon.Matches(filter))
+            .OrderBy(icon => icon.MatchRank(filter))
+            .First().Key);
 
     [Fact]
     public void SetAppearance_PersistsIconAndInitialsAndClearsBlankOnes()

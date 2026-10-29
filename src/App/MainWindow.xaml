@@ -67,6 +67,10 @@
                                     Stroke="{StaticResource SessionTreeForegroundBrush}"
                                     StrokeThickness="1"
                                     StrokeLineJoin="Round" />
+                                <Image
+                                    Width="16"
+                                    Height="16"
+                                    Source="{x:Bind local:PresentationValues.WorkspaceBrandImage(BrandKey), Mode=OneWay}" />
                             </Grid>
                             <TextBlock
                                 Text="{x:Bind Caption, Mode=OneWay}"

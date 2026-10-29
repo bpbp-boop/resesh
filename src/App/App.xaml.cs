@@ -52,6 +52,7 @@ public partial class App : Application
     private static string StorePath(string fileName, string defaultPath) =>
         Program.StorePath(fileName, defaultPath);
     public static Resesh.App.Icons.SessionIconCatalog Icons { get; } = new();
+    public static Resesh.App.Icons.BrandIconImages Brands { get; } = new();
 
     /// <summary>Built-in local profiles whose shell is installed right now (set once at
     /// launch by discovery). Built-ins outside this set are hidden, not deleted.</summary>

@@ -63,8 +63,12 @@ public static class PresentationValues
 
     public static Uri? TreeIconUri(string? key) => App.Icons.GetTreeUri(key);
 
+    /// <summary>A session's icon in a list: a built-in mark drawn one-colour in the pane's
+    /// colour, or a custom icon file as it is.</summary>
     public static ImageSource? SessionIcon(string? key) =>
-        App.Icons.GetImage(key, SessionIconCatalog.ListIconSize);
+        key is not null && SessionIcons.IsBuiltIn(key)
+            ? App.Brands.Get(key, SessionIconCatalog.ListIconSize, ((SolidColorBrush)ResourceBrush("SessionTreeForegroundBrush")).Color)
+            : App.Icons.GetImage(key, SessionIconCatalog.ListIconSize);
 
     public static ImageSource? AgentIcon(string? key) =>
         App.Icons.GetAgentImage(key, SessionIconCatalog.ListIconSize);
@@ -200,6 +204,11 @@ public static class PresentationValues
         ThemeVisualPalette.For(appTheme).AccentBarThickness;
 
     // ---- workspace rail buttons ----
+
+    /// <summary>A workspace's brand mark for the rail: drawn sharp at 16 px in the rail's
+    /// foreground colour; null for "".</summary>
+    public static ImageSource? WorkspaceBrandImage(string brandKey) =>
+        App.Brands.Get(brandKey, 16, ((SolidColorBrush)ResourceBrush("SessionTreeForegroundBrush")).Color);
 
     /// <summary>A workspace icon drawn as a path; null for "" so nothing is drawn.</summary>
     public static Geometry? IconPathGeometry(string path) =>

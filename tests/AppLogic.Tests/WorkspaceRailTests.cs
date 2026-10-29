@@ -174,10 +174,16 @@ public sealed class WorkspaceRailTests : IDisposable
         Assert.Equal(WorkspaceAppearance.Find("database")!.Path, item.IconPath);
         Assert.True(item.HasIcon);
 
-        // A key this build does not know, such as a session icon, falls back to the initials.
-        item.Update(workspace with { Icon = "debian" });
+        // A brand mark is drawn from the session tree's images.
+        item.Update(workspace with { Icon = "mysql" });
+        Assert.Equal("mysql", item.BrandKey);
+        Assert.True(item.HasIcon);
+
+        // A key this build does not know falls back to the initials.
+        item.Update(workspace with { Icon = "unknown-icon" });
         Assert.Equal("", item.Glyph);
         Assert.Equal("", item.IconPath);
+        Assert.Equal("", item.BrandKey);
         Assert.False(item.HasIcon);
     }
 

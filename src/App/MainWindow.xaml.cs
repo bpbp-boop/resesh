@@ -93,6 +93,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         // Lets the icon catalog rasterize at true device pixels (XamlRoot is null until
         // the content loads; the catalog falls back to scale 1 and re-renders on demand).
         App.Icons.ScaleProvider = () => Root.XamlRoot?.RasterizationScale ?? 1.0;
+        App.Brands.ScaleProvider = () => Root.XamlRoot?.RasterizationScale ?? 1.0;
         AttachGroupView(ViewModel.Groups[0]);
         RebuildGroupLayout();
         ViewModel.TreeRebuilt += () =>
@@ -1385,6 +1386,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         foreach (var groupView in _groupViews.Values)
             groupView.ApplyTheme(palette);
         ApplyTitleBarButtonColors(theme); // caption buttons don't follow XAML theming
+        foreach (var item in RailHome.Concat(RailWorkspaces))
+            item.NotifyThemeChanged(); // brand marks are drawn in the rail's colour
         foreach (var tab in ViewModel.AllTabs)
         {
             if (tab.View is TerminalTabView view)

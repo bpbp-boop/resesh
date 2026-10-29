@@ -58,6 +58,7 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
     private string _monogram;
     private string _glyph = "";
     private string _iconPath = "";
+    private string _brandKey = "";
     private bool _labelIcon;
     private bool _isOpen;
     private bool _isActive;
@@ -103,7 +104,10 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
     public string IconPath => _iconPath;
 
     /// <summary>A glyph or a path is drawn; otherwise the monogram is.</summary>
-    public bool HasIcon => _glyph.Length > 0 || _iconPath.Length > 0;
+    /// <summary>The brand mark's key, drawn from the session tree's one-colour images, or "".</summary>
+    public string BrandKey => _brandKey;
+
+    public bool HasIcon => _glyph.Length > 0 || _iconPath.Length > 0 || _brandKey.Length > 0;
 
     /// <summary>The initials drawn small under the icon, or "" for none.</summary>
     public string Caption => HasIcon && _labelIcon ? _monogram : "";
@@ -209,6 +213,7 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
         var icon = WorkspaceAppearance.Find(workspace.Icon);
         var iconChanged = Set(ref _glyph, icon?.Glyph ?? "", nameof(Glyph));
         iconChanged |= Set(ref _iconPath, icon?.Path ?? "", nameof(IconPath));
+        iconChanged |= Set(ref _brandKey, icon is { IsBrand: true } ? icon.Key : "", nameof(BrandKey));
         if (iconChanged)
             OnPropertyChanged(nameof(HasIcon));
         _labelIcon = workspace.LabelIcon;
@@ -216,6 +221,9 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
         OnPropertyChanged(nameof(HasCaption));
         NotifyState();
     }
+
+    /// <summary>Re-draws the brand mark, which is rendered in the theme's rail colour.</summary>
+    public void NotifyThemeChanged() => OnPropertyChanged(nameof(BrandKey));
 
     public void SetState(
         bool isOpen, bool isActive, bool isOpenElsewhere, WorkspaceAlert alert, int position, bool hasUnsavedChanges = false)

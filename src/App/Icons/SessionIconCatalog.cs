@@ -5,57 +5,27 @@ using Resesh.Core.Storage;
 
 namespace Resesh.App.Icons;
 
-/// <summary>One entry in the icon picker: a key plus its display name and image.
-/// Key is null for the "Auto-detect" choice and <see cref="SessionIcons.None"/> for "No icon".</summary>
-// DisplayMemberPath reads properties by name; this generates that lookup for AOT.
-[WinRT.GeneratedBindableCustomProperty]
-public sealed partial record IconChoice(string? Key, string Name, ImageSource? Image, string Glyph = "");
+/// <summary>One icon file a user dropped into the custom icons folder: its key (the file name)
+/// and the name the picker shows.</summary>
+public sealed record CustomIcon(string Key, string Name);
 
 /// <summary>
-/// Resolves icon keys to renderable images: built-in badges bundled under
-/// Assets\SessionIcons (SVG or PNG), plus user files dropped into
-/// %APPDATA%\Resesh\icons\ (icon key = filename). Loaded images are cached and
-/// shared by every view; UI-thread only.
+/// Resolves session icon keys to images. Built-in icons are one-colour marks: the tree draws
+/// their 64 px PNGs, and everything else draws their SVGs through <see cref="BrandIconImages"/>.
+/// Custom icons are files the user dropped into %APPDATA%\Resesh\icons\ (icon key = filename),
+/// shown as they are. Loaded images are cached and shared by every view; UI-thread only.
 /// </summary>
 public sealed class SessionIconCatalog
 {
-    /// <summary>Logical display sizes; must match the Image Width/Height in the XAML that
-    /// shows them, or the exact-size rasterization guarantee is lost.</summary>
+    /// <summary>Logical display size; must match the Image Width/Height in the XAML that
+    /// shows it, or the exact-size rasterization guarantee is lost.</summary>
     public const double ListIconSize = 16;
-    public const double PickerTileSize = 24;
 
     private static readonly string[] CustomExtensions = [".svg", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".bmp"];
+
+    /// <summary>Tree icon file per built-in key: the device glyphs and every brand mark.</summary>
     private static readonly IReadOnlyDictionary<string, string> TreeIconFiles =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["linux"] = "linux.png",
-            ["proxmox"] = "proxmox.png",
-            ["debian"] = "debian.png",
-            ["ubuntu"] = "ubuntu.png",
-            ["rhel"] = "redhat.png",
-            ["centos"] = "centos.png",
-            ["fedora"] = "fedora.png",
-            ["suse"] = "suse.png",
-            ["arch"] = "archlinux.png",
-            ["alpine"] = "alpinelinux.png",
-            ["freebsd"] = "freebsd.png",
-            ["openbsd"] = "openbsd.png",
-            ["windows"] = "panels-top-left.png",
-            ["macos"] = "apple.png",
-            ["cisco"] = "cisco.png",
-            ["juniper"] = "junipernetworks.png",
-            ["arista"] = "arista.png",
-            ["nokia"] = "nokia.png",
-            ["paloalto"] = "paloaltonetworks.png",
-            ["fortinet"] = "fortinet.png",
-            ["mikrotik"] = "mikrotik.png",
-            ["vyos"] = "vyos.png",
-            ["aruba"] = "wifi.png",
-            ["router"] = "router.png",
-            ["switch"] = "network.png",
-            ["firewall"] = "shield.png",
-            ["server"] = "server.png",
-        };
+        SessionIcons.TreeIcons.ToDictionary(icon => icon.Key, icon => icon.File, StringComparer.OrdinalIgnoreCase);
 
     // Cached per (key, physical pixel size): each display surface gets a bitmap rendered at
     // its exact on-screen size, so the GPU never resamples (its bilinear-only minification
@@ -78,12 +48,11 @@ public sealed class SessionIconCatalog
     public static string CustomIconsDirectory { get; } =
         Program.StorePath("icons", AppDataPaths.Roaming("icons"));
 
-    private static string BuiltInDirectory => Path.Combine(AppContext.BaseDirectory, "Assets", "SessionIcons");
     private static string TreeIconDirectory => Path.Combine(AppContext.BaseDirectory, "Assets", "SessionTreeIcons");
 
-    /// <summary>The image for an icon key rendered for a display size in logical pixels
-    /// (16 in the tree/tab strip, 24 in the picker), or null for no/unknown icon (callers
-    /// fall back to the default glyph).</summary>
+    /// <summary>A custom icon's image rendered for a display size in logical pixels, or null
+    /// for a built-in key (drawn one-colour by <see cref="BrandIconImages"/>), no icon, or a
+    /// missing file.</summary>
     public ImageSource? GetImage(string? key, double logicalSize)
     {
         if (string.IsNullOrEmpty(key) || key == SessionIcons.None)
@@ -160,18 +129,11 @@ public sealed class SessionIconCatalog
         }
     }
 
+    /// <summary>A custom icon's file, or null for a built-in key or a missing file.</summary>
     private static string? ResolvePath(string key)
     {
         if (SessionIcons.IsBuiltIn(key))
-        {
-            foreach (var ext in (string[])[".svg", ".png"])
-            {
-                var path = Path.Combine(BuiltInDirectory, key + ext);
-                if (File.Exists(path))
-                    return path;
-            }
             return null;
-        }
 
         // Custom keys are bare filenames; GetFileName guards against path segments.
         var file = Path.Combine(CustomIconsDirectory, Path.GetFileName(key));
@@ -187,22 +149,11 @@ public sealed class SessionIconCatalog
             ? new SvgImageSource(new Uri(path)) { RasterizePixelWidth = pixels, RasterizePixelHeight = pixels }
             : new BitmapImage(new Uri(path)) { DecodePixelWidth = pixels };
 
-    /// <summary>
-    /// Everything the picker offers: Auto-detect, No icon, the built-in packs, then custom
-    /// files (re-scanned on every call so newly dropped files appear; their cache entries
-    /// are refreshed in case a file was replaced).
-    /// </summary>
-    public List<IconChoice> PickerEntries()
+    /// <summary>The icon files in the custom icons folder, re-scanned on every call so newly
+    /// dropped files appear; their cached images are refreshed in case a file was replaced.</summary>
+    public List<CustomIcon> CustomIcons()
     {
-        var entries = new List<IconChoice>
-        {
-            new(null, "Auto-detect (suggested from the server on first connect)", null, ""),
-            new(SessionIcons.None, "No icon", null, ""),
-        };
-
-        foreach (var info in SessionIcons.BuiltIn)
-            entries.Add(new IconChoice(info.Key, info.Name, GetImage(info.Key, PickerTileSize)));
-
+        var icons = new List<CustomIcon>();
         try
         {
             if (Directory.Exists(CustomIconsDirectory))
@@ -214,14 +165,14 @@ public sealed class SessionIconCatalog
                     var key = Path.GetFileName(file);
                     foreach (var stale in _cache.Keys.Where(k => k.Key.Equals(key, StringComparison.OrdinalIgnoreCase)).ToList())
                         _cache.Remove(stale);
-                    entries.Add(new IconChoice(key, Path.GetFileNameWithoutExtension(file), GetImage(key, PickerTileSize)));
+                    icons.Add(new CustomIcon(key, Path.GetFileNameWithoutExtension(file)));
                 }
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
         }
-        return entries;
+        return icons;
     }
 
     /// <summary>Clears cached custom images after a backup import replaces icon files.</summary>

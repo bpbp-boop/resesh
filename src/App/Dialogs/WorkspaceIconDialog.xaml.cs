@@ -1,8 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
+using Resesh.App.Controls;
 using Resesh.Core.Storage;
-using Windows.System;
 
 namespace Resesh.App.Dialogs;
 
@@ -10,28 +9,14 @@ namespace Resesh.App.Dialogs;
 /// the ones from its name), and whether the initials label the icon.</summary>
 public sealed record WorkspaceIconSelection(string? Icon, string? Initials, bool LabelIcon);
 
-/// <summary>One cell in the picker: a catalog icon, or the workspace's initials as text.</summary>
-public sealed class WorkspaceIconChoice(WorkspaceIcon? icon, string initials)
-{
-    public WorkspaceIcon? Icon { get; } = icon;
-    public string? Key => Icon?.Key;
-    public string Name => Icon?.Name ?? "Initials";
-    public string Glyph => Icon?.Glyph ?? "";
-    public string Path => Icon?.Path ?? "";
-    public string Text => Icon is null ? initials : "";
-
-    public bool Matches(string filter) =>
-        Icon?.Matches(filter) ?? (string.IsNullOrWhiteSpace(filter) || Name.Contains(filter.Trim(), StringComparison.OrdinalIgnoreCase));
-}
-
-/// <summary>Chooses the icon on a workspace's rail button from the workspace icon set, or its
-/// initials, which can be the workspace's own. A filter narrows the set by name and keywords.</summary>
+/// <summary>Chooses the icon on a workspace's rail button from the workspace icon set, by
+/// section, or its initials, which can be the workspace's own.</summary>
 public sealed partial class WorkspaceIconDialog : ContentDialog
 {
+    private const double PreviewBrandSize = 24;
+
     private readonly string _nameInitials;
-    private readonly List<WorkspaceIconChoice> _choices;
-    private WorkspaceIconChoice _selected;
-    private bool _refilling;
+    private IconPickerChoice _initials;
     private bool _committed;
 
     public WorkspaceIconDialog(Workspace workspace)
@@ -43,15 +28,20 @@ public sealed partial class WorkspaceIconDialog : ContentDialog
         InitialsBox.Text = WorkspaceAppearance.NormalizeInitials(workspace.Initials) ?? "";
         LabelIconBox.IsChecked = workspace.LabelIcon;
 
-        _choices =
-        [
-            new WorkspaceIconChoice(null, CurrentInitials),
-            .. WorkspaceAppearance.Icons.Select(icon => new WorkspaceIconChoice(icon, "")),
-        ];
+        _initials = InitialsChoice();
+        var choices = new List<IconPickerChoice> { _initials };
+        choices.AddRange(WorkspaceAppearance.Icons.Select(icon => new IconPickerChoice(
+            icon.Key,
+            icon.Name,
+            icon.Group,
+            icon.Keywords,
+            glyph: icon.Glyph,
+            path: icon.Path,
+            brandKey: icon.IsBrand ? icon.Key : "")));
         // A key this build does not know draws the initials, so the picker starts there too.
-        var current = WorkspaceAppearance.Find(workspace.Icon);
-        _selected = _choices.First(choice => choice.Icon == current);
-        ApplyFilter("");
+        var current = WorkspaceAppearance.Find(workspace.Icon)?.Key;
+        Picker.SetChoices(choices, choices.First(choice => choice.Key == current));
+        Picker.Loaded += (_, _) => ShowPreview();
         ShowPreview();
     }
 
@@ -59,37 +49,26 @@ public sealed partial class WorkspaceIconDialog : ContentDialog
 
     private string CurrentInitials => CustomInitials ?? _nameInitials;
 
+    private IconPickerChoice Selected => Picker.Selected ?? _initials;
+
+    private IconPickerChoice InitialsChoice() =>
+        new(null, "Initials", "Initials", "letters monogram", text: CurrentInitials);
+
     /// <summary>Shows the dialog; the choice on Save, or null when cancelled.</summary>
     public static async Task<WorkspaceIconSelection?> EditAsync(XamlRoot xamlRoot, Workspace workspace)
     {
         var dialog = new WorkspaceIconDialog(workspace) { XamlRoot = xamlRoot };
         return await dialog.ShowModalAsync() == ContentDialogResult.Primary || dialog._committed
-            ? new WorkspaceIconSelection(dialog._selected.Key, dialog.CustomInitials, dialog.LabelIconBox.IsChecked == true)
+            ? new WorkspaceIconSelection(dialog.Selected.Key, dialog.CustomInitials, dialog.LabelIconBox.IsChecked == true)
             : null;
     }
 
-    /// <summary>Shows the matching icons. The choice survives being filtered out, so typing a
-    /// filter and clearing it again never loses it.</summary>
-    private void ApplyFilter(string filter)
-    {
-        var matches = _choices.Where(choice => choice.Matches(filter)).ToList();
-        _refilling = true;
-        IconGrid.ItemsSource = matches;
-        IconGrid.SelectedItem = matches.Contains(_selected) ? _selected : null;
-        _refilling = false;
-        NoMatchText.Visibility = PresentationValues.Visible(matches.Count == 0);
-    }
+    private void Picker_SelectionChanged(object? sender, IconPickerChoice choice) => ShowPreview();
 
-    private void FilterBox_TextChanged(object sender, TextChangedEventArgs e) => ApplyFilter(FilterBox.Text);
-
-    /// <summary>Enter saves the first match, so typing "sql" and Enter picks Database.</summary>
-    private void FilterBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    /// <summary>Enter in the filter saves the best match, so typing "mysql" and Enter picks MySQL.</summary>
+    private void Picker_Committed(object? sender, IconPickerChoice choice)
     {
-        if (e.Key != VirtualKey.Enter || IconGrid.Items.FirstOrDefault() is not WorkspaceIconChoice first)
-            return;
-        _selected = first;
         _committed = true;
-        e.Handled = true;
         Hide();
     }
 
@@ -97,40 +76,38 @@ public sealed partial class WorkspaceIconDialog : ContentDialog
     /// Initials unless they label the chosen icon, since otherwise nothing would draw them.</summary>
     private void InitialsBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        if (_choices is null)
+        if (_initials is null)
             return; // setting the saved initials during construction
-        _choices[0] = new WorkspaceIconChoice(null, CurrentInitials);
-        if (_selected.Icon is null || (CustomInitials is not null && LabelIconBox.IsChecked != true))
-            _selected = _choices[0];
-        ApplyFilter(FilterBox.Text);
+        var replacement = InitialsChoice();
+        Picker.Replace(_initials, replacement);
+        _initials = replacement;
+        if (Selected.Key is not null && CustomInitials is not null && LabelIconBox.IsChecked != true)
+            Picker.Select(_initials);
         ShowPreview();
     }
 
     private void LabelIconBox_Changed(object sender, RoutedEventArgs e)
     {
-        if (_choices is not null)
+        if (_initials is not null)
             ShowPreview();
-    }
-
-    private void IconGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_refilling || IconGrid.SelectedItem is not WorkspaceIconChoice choice)
-            return;
-        _selected = choice;
-        ShowPreview();
     }
 
     private void ShowPreview()
     {
-        PreviewGlyph.Glyph = _selected.Glyph;
-        PreviewPath.Data = PresentationValues.IconPathGeometry(_selected.Path);
+        var selected = Selected;
+        var isIcon = selected.Key is not null;
+        PreviewGlyph.Glyph = selected.Glyph;
+        PreviewPath.Data = PresentationValues.IconPathGeometry(selected.Path);
+        PreviewBrand.Source = selected.BrandKey.Length > 0 && Picker.IsLoaded
+            ? App.Brands.Get(selected.BrandKey, PreviewBrandSize, Picker.MarkColor)
+            : null;
         PreviewMonogram.Text = CurrentInitials;
-        PreviewMonogram.Visibility = PresentationValues.Visible(_selected.Icon is null);
-        PreviewIcon.Visibility = PresentationValues.Visible(_selected.Icon is not null);
+        PreviewMonogram.Visibility = PresentationValues.Visible(!isIcon);
+        PreviewIcon.Visibility = PresentationValues.Visible(isIcon);
         PreviewCaption.Text = CurrentInitials;
         PreviewCaption.Visibility = PresentationValues.Visible(LabelIconBox.IsChecked == true);
         // The label only applies to an icon; with Initials chosen they are the button already.
-        LabelIconBox.IsEnabled = _selected.Icon is not null;
-        PreviewIconName.Text = _selected.Name;
+        LabelIconBox.IsEnabled = isIcon;
+        PreviewIconName.Text = selected.Name;
     }
 }

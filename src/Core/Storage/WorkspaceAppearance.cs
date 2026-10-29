@@ -1,18 +1,19 @@
+using Resesh.Core.Models;
+
 namespace Resesh.Core.Storage;
 
 /// <summary>One icon a workspace can show on the rail: a stable key that is saved, a name for
 /// the picker, extra words the picker's filter matches, and how it is drawn: a Segoe Fluent
-/// Icons glyph, or path data on a 16×16 grid for a shape the font lacks. Exactly one of
-/// <paramref name="Glyph"/> and <paramref name="Path"/> is set.</summary>
-public sealed record WorkspaceIcon(string Key, string Name, string Keywords, string Glyph, string Path = "")
+/// Icons glyph, path data on a 16×16 grid for a shape the font lacks, or a brand mark from
+/// <see cref="SessionIcons.Brands"/>. Exactly one of the three is set.</summary>
+public sealed record WorkspaceIcon(
+    string Key, string Name, string Keywords, string Glyph, string Path = "", bool IsBrand = false, string Group = "")
 {
     /// <summary>Matches the filter text against the name, key and keywords, ignoring case.</summary>
-    public bool Matches(string filter) =>
-        string.IsNullOrWhiteSpace(filter)
-        || filter.Split(' ', StringSplitOptions.RemoveEmptyEntries).All(word =>
-            Name.Contains(word, StringComparison.OrdinalIgnoreCase)
-            || Key.Contains(word, StringComparison.OrdinalIgnoreCase)
-            || Keywords.Contains(word, StringComparison.OrdinalIgnoreCase));
+    public bool Matches(string filter) => SessionIcons.Matches(filter, Name, Key, Keywords);
+
+    /// <summary>How well a matching icon fits the filter, lower first.</summary>
+    public int MatchRank(string filter) => SessionIcons.MatchRank(filter, Name, Key);
 }
 
 /// <summary>How a workspace looks on the window's rail: a chosen icon, or the initials of its
@@ -40,7 +41,7 @@ public static class WorkspaceAppearance
     /// theme. Each glyph exists in Segoe Fluent Icons and in Segoe MDL2 Assets, which Windows
     /// 10 falls back to. Grouped as machines, infrastructure, tools, security, operations and
     /// general marks; keys are saved, so never rename one.</summary>
-    public static IReadOnlyList<WorkspaceIcon> Icons { get; } =
+    private static IReadOnlyList<WorkspaceIcon> GeneralIcons { get; } =
     [
         new("server", "Server", "host machine vm rack", ""),
         new("database", "Database", "db sql postgres mysql oracle mongo redis data storage", "", DatabasePath),
@@ -73,6 +74,32 @@ public static class WorkspaceAppearance
         new("tag", "Tag", "label release", ""),
         new("pin", "Site", "location datacenter office", ""),
         new("star", "Favorite", "important", ""),
+    ];
+
+    /// <summary>Picker sections for the general icons, in order.</summary>
+    private static readonly (string Group, string[] Keys)[] GeneralGroups =
+    [
+        ("Machines", ["server", "database", "desktop", "laptop", "chip", "cloud", "globe"]),
+        ("Infrastructure", ["cluster", "cube", "box"]),
+        ("Tools", ["terminal", "code", "tools", "wrench"]),
+        ("Security", ["lock", "key", "shield"]),
+        ("Operations", ["warning", "lightning", "pulse", "chart"]),
+        ("Other", ["briefcase", "people", "education", "flask", "lightbulb", "puzzle", "flag", "tag", "pin", "star"]),
+    ];
+
+    /// <summary>A picker section title for each brand group.</summary>
+    public static string GroupName(BrandGroup group) => SessionIcons.GroupName(group);
+
+    /// <summary>The general icons by section, then every brand mark by group; each knows its
+    /// section. Declared after <see cref="GeneralIcons"/>: static initializers run in source
+    /// order.</summary>
+    public static IReadOnlyList<WorkspaceIcon> Icons { get; } =
+    [
+        .. GeneralGroups.SelectMany(section => section.Keys.Select(key =>
+            GeneralIcons.Single(icon => icon.Key == key) with { Group = section.Group })),
+        .. SessionIcons.Brands
+            .OrderBy(brand => brand.Group)
+            .Select(brand => new WorkspaceIcon(brand.Key, brand.Name, brand.Keywords, "", IsBrand: true, Group: GroupName(brand.Group))),
     ];
 
     /// <summary>The icon saved under this key, or null for none or a key this build does not

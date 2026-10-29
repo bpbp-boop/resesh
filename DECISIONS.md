@@ -1418,3 +1418,56 @@ option the button is unchanged. A corner letter was ruled out because the alert 
 dots already use the corners, and initials over or behind the icon read poorly against its
 strokes. With the label on, typing initials keeps the chosen icon instead of switching to
 Initials.
+
+## 2026-10-29 - One brand icon list for sessions and workspaces
+
+Brand marks live in one list, `SessionIcons.Brands` (key, name, file, group, search words),
+drawn from the one-colour images in `Assets/SessionTreeIcons`. The session tree builds its
+key-to-file map from it, and the workspace picker shows every entry after the general icons,
+tinted by a monochrome `BitmapIcon` like the tree. Growing it means adding a file pair and a
+line; nothing else needs to change.
+
+- New marks come from Simple Icons 16.35.0 (CC0), each saved as its SVG plus a 64 px PNG
+  rendered black on transparent with the mark fitted into the centred 52 px, which is how
+  the existing tree icons were made (checked by measuring them). `tests/BrandIconAssetsTests.js`
+  checks every entry has both files.
+- Not available because Simple Icons dropped them after brand requests: AWS, Azure, Oracle,
+  Microsoft SQL Server, Linode (Akamai is there), HAProxy, Zabbix, XCP-ng.
+- New brands can be chosen for workspaces only. Picking one for a session also needs a
+  coloured badge in `Assets/SessionIcons`, which none of them has yet.
+- Session keys saved on workspaces by the first rail build ("debian") now draw their brand
+  instead of falling back to initials.
+- The picker ranks filter matches: the icon named exactly first, then names starting with
+  the text, names containing it, and search words last, so "mysql" and Enter pick MySQL
+  rather than the general Database icon whose search words include mysql.
+- Brand marks are drawn from their SVGs, recoloured and rasterised at the exact physical
+  size (`BrandIconImages`), on the rail and in the picker. Tinting the 64 px tree PNGs with
+  a monochrome BitmapIcon blurred them at 16–24 px. The SVGs now ship with the app; the tree
+  keeps its PNGs. Marks that are mostly lettering are cropped through their viewBox to their
+  compact part (MySQL to the dolphin, VMware to "vm"), and Synology, a wordmark only, is
+  left out. Cisco stays a thin row of bars: it is the real mark and is wide.
+- The icon dialog is 600 px wide with sections: Initials, the general icons by kind
+  (Machines, Infrastructure, Tools, Security, Operations, Other), then the brand groups. It
+  groups through a CollectionViewSource, whose view is replaced whenever its source is, so
+  the grid takes the new view after each filter.
+
+## 2026-10-29 - Session icons are one-colour and share the workspace icon picker
+
+This replaces the badge-style session icons of 2026-08-15. Built-in session icons are now the
+one-colour marks in `Assets/SessionTreeIcons`: the device glyphs (server, router, switch,
+firewall, wireless) and every brand in `SessionIcons.Brands`, listed together as
+`SessionIcons.TreeIcons`. The tree still draws their PNGs; lists and pickers draw their SVGs
+sharp in the theme's colour through `BrandIconImages`. The coloured badges in
+`Assets/SessionIcons` are gone. Every existing session icon key is still built in (a test
+pins them), so saved sessions keep their icons.
+
+- One picker, `Controls/IconPicker`: a filter over icons in titled sections, Enter for the
+  best match. The workspace icon dialog uses it, and so do the session and local profile
+  editors, each in its own Icon tab instead of a dropdown on the Appearance tab (the colour
+  tag stays there). In a session editor Enter only picks; it does not save the session.
+- The session picker offers Auto-detect (null, so the first connect may suggest an icon; for
+  a local shell, the default terminal glyph) and No icon, then Devices and the brand groups,
+  then the user's own files from the icons folder under Your icons, shown as they are. A
+  saved key whose file is missing still round-trips.
+- Sessions can't pick the workspace's general glyph icons (desktop, lock, chart and so on):
+  the tree draws session icons from image files, and those are font glyphs and paths.
