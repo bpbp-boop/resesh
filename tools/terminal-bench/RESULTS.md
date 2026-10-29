@@ -219,3 +219,21 @@ what typing and clicking wait for. Same session, same machine, 2 runs each, befo
 What is left on the UI thread during a flood is the annotation pass (command marks, ruler, the
 overview index's scan of the live screen): up to ~10 ms, and ~23 ms in `tiny`, where each of the
 109 live-row reads waits behind a 4 KB parse slice. That, not drawing, is now the UI's worst case.
+
+### Batched line reads for the overview index (same day)
+
+`rvt_lines_text` reads a run of lines under one hold of the terminal lock; the overview index
+fetches its scrollback slice in 64-line chunks (plus the next line, which wrap detection reads)
+and the live screen in one call. Full-screen `tiny`, render-thread build → batched:
+
+| | before | after |
+|---|---|---|
+| UI lag p99 | 5.5–6.0 ms | 2.1–3.5 ms |
+| UI lag max | 7.4–19 ms | 4.9–14 ms |
+| longest annotation pass | 22.7–22.9 ms | 17–20 ms |
+
+Other workloads are unchanged. What remains of a `tiny` pass is a dozen single native calls
+(the anchor marker, line times, command tracking), each of which can wait 1–4 ms for the lock,
+mostly behind the ~4 ms rewind keyframe capture that runs once a second during a flood.
+
+`framestats.py` now leaves out UI stalls that began before the measured window (connecting).

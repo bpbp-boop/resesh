@@ -53,11 +53,22 @@ def load_ui(run, frames):
     if not frames:
         return []
     lo, hi = min(r['t_ms'] for r in frames), max(r['t_ms'] for r in frames)
-    lags = []
+    samples = []
     for path in glob.glob(os.path.join(run, 'ui-*.csv')):
         with open(path, newline='') as f:
-            lags += [float(r['lag_us']) for r in csv.DictReader(f) if r.get('lag_us') and lo <= float(r['t_ms']) <= hi]
-    return lags
+            samples += [(float(r['t_ms']), float(r['lag_us'])) for r in csv.DictReader(f) if r.get('lag_us')]
+    # Callbacks queued behind one stall all run at the same moment; a stall that began before
+    # the window (connecting, start-up) is not part of it, whichever samples it delayed.
+    kept, group, group_done = [], [], None
+    for t, lag in sorted(samples, key=lambda s: s[0] + s[1] / 1000) + [(float('inf'), 0)]:
+        done = t + lag / 1000
+        if group and done - group_done > 2:  # a new moment: settle the previous group
+            started = min(s[0] for s in group)
+            kept += [l for s, l in group if lo <= s <= hi and started >= lo]
+            group = []
+        group.append((t, lag))
+        group_done = done
+    return kept
 
 
 def summarize(run, keep_all):

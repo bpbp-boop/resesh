@@ -11,6 +11,8 @@ namespace Resesh.Terminal.Native;
 internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlighter, TimeSpan? sliceBudget = null)
 {
     private const int SliceLines = 2000;
+    // Lines read per native call; the time budget is checked between chunks.
+    private const int ChunkLines = 64;
     // Each line read takes the parser's lock, so during a flood a line can cost 100+ us and a
     // 2000-line slice held the UI thread for 50-500 ms. A pass stops at whichever comes first.
     private readonly long _sliceBudgetTicks =
@@ -57,13 +59,19 @@ internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlight
         var start = System.Diagnostics.Stopwatch.GetTimestamp();
         for (var line = (int)Math.Max(0, _nextVirtual - offset); line < liveStart && scanned < SliceLines; line++, scanned++)
         {
-            if (scanned > 0 && scanned % 16 == 0 && System.Diagnostics.Stopwatch.GetTimestamp() - start > _sliceBudgetTicks)
-                break;
+            if (scanned % ChunkLines == 0)
+            {
+                if (scanned > 0 && System.Diagnostics.Stopwatch.GetTimestamp() - start > _sliceBudgetTicks)
+                    break;
+                // One line more: Mask looks at the next line to see whether it continues this one.
+                buffer.Prefetch(line, Math.Min(ChunkLines, liveStart - line) + 1);
+            }
             var mask = Mask(line);
             if (mask != 0)
                 _scrollback[line + offset] = mask;
             _nextVirtual = line + offset + 1;
         }
+        buffer.Prefetch(liveStart, buffer.Length - liveStart);
         for (var line = liveStart; line < buffer.Length; line++)
         {
             var mask = Mask(line);

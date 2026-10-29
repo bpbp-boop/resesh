@@ -44,7 +44,7 @@ internal static unsafe partial class GhosttyNative
 {
     public const int CompressDone = 0, CompressPending = 1, CompressWait = 2;
     private const string Library = "reseshvt";
-    private const int ExpectedAbi = 8;
+    private const int ExpectedAbi = 9;
 
     private static readonly Lazy<string?> LoadError = new(Load);
 
@@ -112,6 +112,7 @@ internal static unsafe partial class GhosttyNative
     [LibraryImport(Library)] public static partial byte* rvt_format_vt(IntPtr term, out nuint length);
     [LibraryImport(Library)] public static partial void rvt_buffer_info(IntPtr term, GhosttyBufferInfo* info);
     [LibraryImport(Library)] public static partial int rvt_line_text(IntPtr term, int line, byte* output, nuint capacity, int* wrapped);
+    [LibraryImport(Library)] public static partial int rvt_lines_text(IntPtr term, int first, int count, byte* output, nuint capacity, int* lengths, byte* wrapped);
     [LibraryImport(Library)] public static partial uint rvt_marker_new(IntPtr term, int line);
     [LibraryImport(Library)] public static partial int rvt_marker_line(IntPtr term, uint id);
     [LibraryImport(Library)] public static partial void rvt_marker_free(IntPtr term, uint id);

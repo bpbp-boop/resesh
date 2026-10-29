@@ -21,7 +21,7 @@ __declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) uint64_t __stdcall GetTickCount64(void);
 __declspec(dllimport) int __stdcall SwitchToThread(void);
 
-#define RVT_ABI_VERSION 8
+#define RVT_ABI_VERSION 9
 
 // ---- events -------------------------------------------------------------------------------
 
@@ -1163,11 +1163,10 @@ RVT_API void rvt_buffer_info(RvtTerm* t, RvtBufferInfo* out) {
 // Text of one absolute line, trailing blanks trimmed (xterm's translateToString(true)).
 // *wrapped: the line continues the one above (a soft wrap). Returns bytes written, or -1
 // when the line does not exist.
-RVT_API int rvt_line_text(RvtTerm* t, int32_t line, uint8_t* out, size_t cap, int* wrapped) {
+static int line_text_locked(RvtTerm* t, int32_t line, uint8_t* out, size_t cap, int* wrapped) {
   *wrapped = 0;
   if (line < 0) return -1;
   int rc = -1;
-  lock(t);
   uint16_t cols = 0;
   ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_COLS, &cols);
   GhosttyGridRef a = GHOSTTY_INIT_SIZED(GhosttyGridRef), b = GHOSTTY_INIT_SIZED(GhosttyGridRef);
@@ -1195,8 +1194,35 @@ RVT_API int rvt_line_text(RvtTerm* t, int32_t line, uint8_t* out, size_t cap, in
     else if (r == GHOSTTY_NO_VALUE) rc = 0; // an empty line
     while (rc > 0 && (out[rc - 1] == '\n' || out[rc - 1] == '\r')) rc--;
   }
+  return rc;
+}
+
+RVT_API int rvt_line_text(RvtTerm* t, int32_t line, uint8_t* out, size_t cap, int* wrapped) {
+  lock(t);
+  int rc = line_text_locked(t, line, out, cap, wrapped);
   unlock(t);
   return rc;
+}
+
+// Lines first..first+count-1 under one hold of the lock: a caller reading many lines (the
+// overview index scanning the screen) would otherwise queue behind the parser once per line.
+// Texts are packed into out; lengths[i] is line i's byte length, or -1 when it does not exist
+// or did not fit. Stops when out has no room for another line; returns the lines attempted.
+RVT_API int rvt_lines_text(RvtTerm* t, int32_t first, int32_t count, uint8_t* out, size_t cap,
+                           int32_t* lengths, uint8_t* wrapped) {
+  if (first < 0 || count <= 0) return 0;
+  int done = 0;
+  size_t used = 0;
+  lock(t);
+  for (; done < count && cap - used >= 1024; done++) {
+    int w = 0;
+    int rc = line_text_locked(t, first + done, out + used, cap - used, &w);
+    lengths[done] = rc;
+    wrapped[done] = (uint8_t)w;
+    if (rc > 0) used += (size_t)rc;
+  }
+  unlock(t);
+  return done;
 }
 
 RVT_API uint32_t rvt_marker_new(RvtTerm* t, int32_t line) {

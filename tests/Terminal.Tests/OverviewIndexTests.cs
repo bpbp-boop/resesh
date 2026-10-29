@@ -46,14 +46,14 @@ public class OverviewIndexTests
     [Fact]
     public void StopsASliceAtItsTimeBudgetButAlwaysProgresses()
     {
-        var (_, index) = Setup(500, i => i % 100 == 50 ? "error" : "fine", sliceBudget: TimeSpan.Zero);
-        Assert.True(index.Advance());        // 16 lines, then the budget is spent
+        var (_, index) = Setup(500, i => i % 100 == 80 ? "error" : "fine", sliceBudget: TimeSpan.Zero);
+        Assert.True(index.Advance());        // one 64-line chunk, then the budget is spent
         Assert.Empty(Indexed(index));
         var calls = 1;
         while (index.Advance())
             calls++;
         Assert.True(calls > 1);
-        Assert.Equal([50, 150, 250, 350, 450], Indexed(index));
+        Assert.Equal([80, 180, 280, 380, 480], Indexed(index));
     }
 
     [Fact]
