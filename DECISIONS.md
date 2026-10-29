@@ -1531,3 +1531,20 @@ between scrollback slices): more often, they compete with the parser for the loc
 (rules, reflow) are flags the next pass reads, so the UI never waits for the worker, except
 `Dispose`, which must not free the terminal under a running pass, and ruler tooltips, which ask
 for a line's time with a 5 ms timeout.
+
+## 2026-10-29 - Generic network device icons
+
+The device glyphs grew from five to 23, for hosts that are no particular brand, in two picker
+sections: Network devices (router, switch, firewall, wireless, network, Ethernet port, console
+cable, load balancer, VPN, internet, mesh / SD-WAN, radio tower, cellular, satellite) and
+Devices (server, storage, database, PDU, UPS, embedded, printer, camera, VoIP phone).
+
+- They are Lucide 1.34.0 glyphs (ISC, the version the first five came from), made the same
+  way: the 24-unit box rendered black into the centred 52 px of a 64 px PNG, beside its SVG.
+- Lucide has no network switch, and the old Switch icon was Lucide's topology diagram. Switch
+  is now drawn in Lucide's style (`switch.svg`: a box of ports under a two-way arrow), and the
+  topology drawing stays as Network. Saved "switch" keys draw the new switch.
+- "aruba" is now named Wireless, since it always drew a generic Wi-Fi glyph; HPE and Aruba
+  stay in its search words and banner suggestion still picks it.
+- Workspaces now offer the device glyphs too, after the general icons. Server and Database are
+  left out there, since the general set already has them under the same keys.
