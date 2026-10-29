@@ -29,7 +29,11 @@ public sealed class WorkspaceAppearanceTests : IDisposable
         // Exactly one way to draw each: a single glyph, path data, or a brand mark.
         Assert.All(icons, icon => Assert.Equal(1,
             (icon.Glyph.Length == 1 ? 1 : 0) + (icon.Path.Length > 0 ? 1 : 0) + (icon.IsBrand ? 1 : 0)));
-        Assert.Equal(Resesh.Core.Models.SessionIcons.Brands.Count, icons.Count(icon => icon.IsBrand));
+        // Every brand mark, and the device glyphs except Server and Database, which keep their general glyphs.
+        Assert.Equal(
+            Resesh.Core.Models.SessionIcons.Brands.Count + Resesh.Core.Models.SessionIcons.DeviceGlyphs.Count - 2,
+            icons.Count(icon => icon.IsBrand));
+        Assert.Contains(icons, icon => icon.Key == "switch" && icon.IsBrand && icon.Group == "Network devices");
         // Every icon has a section, and every general icon is in exactly one.
         Assert.All(icons, icon => Assert.False(string.IsNullOrEmpty(icon.Group), icon.Key));
         Assert.Equal(31, icons.Count(icon => !icon.IsBrand));

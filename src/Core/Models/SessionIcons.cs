@@ -6,6 +6,7 @@ public sealed record SessionIconInfo(string Key, string Name, string Group);
 /// <summary>Where a brand mark (or device glyph) sits in a picker.</summary>
 public enum BrandGroup
 {
+    NetworkDevices,
     Devices,
     OperatingSystems,
     Infrastructure,
@@ -117,16 +118,35 @@ public static class SessionIcons
         new("git", "Git", "git.png", BrandGroup.Automation, "repository source"),
     ];
 
-    /// <summary>Generic device glyphs (Lucide, ISC) for sessions that are no particular brand,
-    /// from the same folder and drawn the same way. Sessions only: workspaces have their own
-    /// general set.</summary>
+    /// <summary>Generic device glyphs for hosts that are no particular brand, from the same folder
+    /// and drawn the same way: Lucide (ISC) glyphs, plus a network switch drawn in Lucide's style
+    /// since Lucide has none. Sessions and workspaces both offer them. Keys are saved, so never
+    /// rename one; "aruba" and "switch" are keys from before the rename and redraw.</summary>
     public static readonly IReadOnlyList<BrandIcon> DeviceGlyphs =
     [
+        new("router", "Router", "router.png", BrandGroup.NetworkDevices, "gateway cpe edge"),
+        new("switch", "Switch", "switch.png", BrandGroup.NetworkDevices, "network lan ethernet layer 2 l2 l3 core access"),
+        new("firewall", "Firewall", "shield.png", BrandGroup.NetworkDevices, "security utm ngfw"),
+        new("aruba", "Wireless", "wifi.png", BrandGroup.NetworkDevices, "wifi wlan access point ap controller hpe aruba"),
+        new("network", "Network", "network.png", BrandGroup.NetworkDevices, "topology lan segment subnet vlan"),
+        new("ethernet", "Ethernet port", "ethernet-port.png", BrandGroup.NetworkDevices, "patch panel port rj45 lan"),
+        new("console", "Console cable", "cable.png", BrandGroup.NetworkDevices, "serial console server rollover oob out of band"),
+        new("loadbalancer", "Load balancer", "split.png", BrandGroup.NetworkDevices, "lb haproxy f5 proxy adc"),
+        new("vpn", "VPN", "globe-lock.png", BrandGroup.NetworkDevices, "tunnel ipsec wireguard openvpn concentrator"),
+        new("internet", "Internet", "globe.png", BrandGroup.NetworkDevices, "wan isp uplink transit"),
+        new("mesh", "Mesh / SD-WAN", "waypoints.png", BrandGroup.NetworkDevices, "sdwan overlay tailscale zerotier"),
+        new("radio", "Radio tower", "radio-tower.png", BrandGroup.NetworkDevices, "ptp ptmp backhaul microwave wisp"),
+        new("cellular", "Cellular", "signal.png", BrandGroup.NetworkDevices, "lte 4g 5g modem mobile"),
+        new("satellite", "Satellite", "satellite-dish.png", BrandGroup.NetworkDevices, "starlink vsat dish"),
         new("server", "Server", "server.png", BrandGroup.Devices, "host machine"),
-        new("router", "Router", "router.png", BrandGroup.Devices, "gateway"),
-        new("switch", "Switch", "network.png", BrandGroup.Devices, "network"),
-        new("firewall", "Firewall", "shield.png", BrandGroup.Devices, "security"),
-        new("aruba", "HPE / Aruba", "wifi.png", BrandGroup.Devices, "wireless wifi access point"),
+        new("storage", "Storage", "hard-drive.png", BrandGroup.Devices, "nas san disk drive array"),
+        new("database", "Database", "database.png", BrandGroup.Devices, "db sql data"),
+        new("pdu", "PDU", "plug-zap.png", BrandGroup.Devices, "power distribution outlet"),
+        new("ups", "UPS", "battery-charging.png", BrandGroup.Devices, "power battery"),
+        new("embedded", "Embedded", "circuit-board.png", BrandGroup.Devices, "iot board microcontroller esp32 arduino firmware"),
+        new("printer", "Printer", "printer.png", BrandGroup.Devices, "print"),
+        new("camera", "Camera", "cctv.png", BrandGroup.Devices, "cctv ip camera nvr surveillance"),
+        new("phone", "VoIP phone", "phone.png", BrandGroup.Devices, "sip pbx telephone voip"),
     ];
 
     /// <summary>Every built-in session icon in picker order: device glyphs, then brands by group.
@@ -140,6 +160,7 @@ public static class SessionIcons
     /// <summary>A picker section title for each group.</summary>
     public static string GroupName(BrandGroup group) => group switch
     {
+        BrandGroup.NetworkDevices => "Network devices",
         BrandGroup.Devices => "Devices",
         BrandGroup.OperatingSystems => "Operating systems",
         BrandGroup.Infrastructure => "Servers and storage",

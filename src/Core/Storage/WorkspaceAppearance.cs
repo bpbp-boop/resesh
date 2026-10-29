@@ -4,8 +4,8 @@ namespace Resesh.Core.Storage;
 
 /// <summary>One icon a workspace can show on the rail: a stable key that is saved, a name for
 /// the picker, extra words the picker's filter matches, and how it is drawn: a Segoe Fluent
-/// Icons glyph, path data on a 16×16 grid for a shape the font lacks, or a brand mark from
-/// <see cref="SessionIcons.Brands"/>. Exactly one of the three is set.</summary>
+/// Icons glyph, path data on a 16×16 grid for a shape the font lacks, or a one-colour image
+/// from <see cref="SessionIcons.TreeIcons"/> (a device glyph or brand mark). Exactly one of the three is set.</summary>
 public sealed record WorkspaceIcon(
     string Key, string Name, string Keywords, string Glyph, string Path = "", bool IsBrand = false, string Group = "")
 {
@@ -90,13 +90,17 @@ public static class WorkspaceAppearance
     /// <summary>A picker section title for each brand group.</summary>
     public static string GroupName(BrandGroup group) => SessionIcons.GroupName(group);
 
-    /// <summary>The general icons by section, then every brand mark by group; each knows its
-    /// section. Declared after <see cref="GeneralIcons"/>: static initializers run in source
-    /// order.</summary>
+    /// <summary>The general icons by section, then the device glyphs a general icon does not
+    /// already cover (Server and Database keep their glyphs), then every brand mark by group;
+    /// each knows its section. Declared after <see cref="GeneralIcons"/>: static initializers
+    /// run in source order.</summary>
     public static IReadOnlyList<WorkspaceIcon> Icons { get; } =
     [
         .. GeneralGroups.SelectMany(section => section.Keys.Select(key =>
             GeneralIcons.Single(icon => icon.Key == key) with { Group = section.Group })),
+        .. SessionIcons.DeviceGlyphs
+            .Where(device => !GeneralIcons.Any(icon => icon.Key == device.Key))
+            .Select(device => new WorkspaceIcon(device.Key, device.Name, device.Keywords, "", IsBrand: true, Group: GroupName(device.Group))),
         .. SessionIcons.Brands
             .OrderBy(brand => brand.Group)
             .Select(brand => new WorkspaceIcon(brand.Key, brand.Name, brand.Keywords, "", IsBrand: true, Group: GroupName(brand.Group))),
