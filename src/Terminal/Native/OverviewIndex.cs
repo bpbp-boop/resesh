@@ -8,9 +8,13 @@ namespace Resesh.Terminal.Native;
 /// invalidate the index: virtual = absolute line + (anchor's virtual - anchor's line). Losing
 /// the anchor, a reflow, or a rule change rebuilds it.
 /// </summary>
-internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlighter)
+internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlighter, TimeSpan? sliceBudget = null)
 {
     private const int SliceLines = 2000;
+    // Each line read takes the parser's lock, so during a flood a line can cost 100+ us and a
+    // 2000-line slice held the UI thread for 50-500 ms. A pass stops at whichever comes first.
+    private readonly long _sliceBudgetTicks =
+        (long)((sliceBudget ?? TimeSpan.FromMilliseconds(4)).TotalSeconds * System.Diagnostics.Stopwatch.Frequency);
     private const int ReanchorGap = 4096;
 
     private readonly Dictionary<long, uint> _scrollback = [];
@@ -50,8 +54,11 @@ internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlight
         // Scrollback ends where the live screen area begins.
         var liveStart = Math.Max(0, buffer.Length - buffer.Rows);
         var scanned = 0;
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
         for (var line = (int)Math.Max(0, _nextVirtual - offset); line < liveStart && scanned < SliceLines; line++, scanned++)
         {
+            if (scanned > 0 && scanned % 16 == 0 && System.Diagnostics.Stopwatch.GetTimestamp() - start > _sliceBudgetTicks)
+                break;
             var mask = Mask(line);
             if (mask != 0)
                 _scrollback[line + offset] = mask;
