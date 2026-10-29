@@ -55,11 +55,19 @@ public sealed partial class MainWindow
 
     /// <summary>Shows an app page in the tab strip: selects the tab already hosting it,
     /// or opens one in the focused group with the view <paramref name="createView"/> builds.</summary>
-    private TabViewModel OpenAppPage(AppPage page, Func<TabViewModel, UIElement> createView)
+    private TabViewModel OpenAppPage(AppPage page, Func<TabViewModel, UIElement> createView, bool followShownWorkspace = false)
     {
         if (ViewModel.FindAppPage(page) is { } existing)
         {
             var existingGroup = ViewModel.GroupOf(existing);
+            // A page that belongs to the app rather than a workspace comes to the one shown,
+            // instead of switching back to the workspace it was opened in.
+            if (followShownWorkspace && ViewModel.IsBackgroundGroup(existingGroup))
+            {
+                existing.IsInBackgroundWorkspace = false;
+                MoveTabBetweenGroups(existing, ViewModel.FocusedGroup, ViewModel.FocusedGroup.Tabs.Count);
+                return existing;
+            }
             existingGroup.SelectedTab = existing;
             FocusGroup(existingGroup);
             return existing;

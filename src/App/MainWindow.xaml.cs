@@ -1210,10 +1210,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     // ---- settings ----
 
     /// <summary>Opens Settings in this window's Settings tab (or reuses the one already
-    /// open) at the given field.</summary>
+    /// open, bringing it to the shown workspace) at the given field.</summary>
     private Task ShowSettingsAsync(GlobalSettingsTarget target)
     {
-        var tab = OpenAppPage(AppPage.Settings, createdTab => CreateSettingsPage(createdTab));
+        var tab = OpenAppPage(AppPage.Settings, createdTab => CreateSettingsPage(createdTab), followShownWorkspace: true);
         if (tab.View is SettingsPage page)
             page.Navigate(target);
         return Task.CompletedTask;

@@ -1368,3 +1368,17 @@ column of icons, so the card is a `Popup` opened on `PointerEntered` and closed 
 `PointerExited`. It also opens for keyboard focus, never for touch, closes when the context
 menu opens or a drag starts, and follows the item's property changes while it is up. The
 button's automation name still carries the same text for screen readers.
+
+## 2026-10-29 - Settings opens from the foot of the rail and follows the shown workspace
+
+The Settings gear moved from the title bar to the bottom of the left rail, apart from the
+pane tools and the workspaces, as in most rail-based apps. It opens the same Settings tab;
+Settings is not a side pane (its section list, forms and terminal preview need the tab
+area) and not a full-window page (rail buttons already switch what the tab area shows, so a
+Settings mode there would read as another workspace and hide the terminals a theme change
+should be checked against). It uses the rail's hover card with its name and shortcut.
+
+Settings belongs to the app, not a workspace. A tab lives in the workspace it was opened in,
+so reopening Settings from another workspace used to switch back to that one.
+`OpenAppPage(..., followShownWorkspace: true)` now moves a parked Settings tab into the shown
+workspace's focused pane instead; the parked pane it leaves is pruned as for any moved tab.

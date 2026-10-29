@@ -430,15 +430,6 @@
                     ToolTipService.ToolTip="Keep window on top">
                     <FontIcon Glyph="&#xE718;" FontSize="14" />
                 </ToggleButton>
-                <Button
-                    x:Name="SettingsButton"
-                    AutomationProperties.Name="Settings"
-                    Command="{x:Bind ViewModel.OpenSettingsCommand}"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    ToolTipService.ToolTip="Settings">
-                    <FontIcon Glyph="&#xE713;" FontSize="14" />
-                </Button>
             </StackPanel>
         </Grid>
 
@@ -482,7 +473,7 @@
                 Background="{StaticResource SessionShellBrush}"
                 BorderBrush="{StaticResource SessionChromeFrameBrush}"
                 BorderThickness="0,0,1,0">
-                <Grid RowDefinitions="Auto,Auto,Auto,*">
+                <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
                     <Button
                         x:Name="SessionsPaneToggleButton"
                         Width="44"
@@ -628,6 +619,27 @@
                             </Button>
                         </StackPanel>
                     </ScrollViewer>
+
+                    <!-- Settings belongs to the app, not a pane or a workspace, so it sits apart at
+                         the foot of the rail and opens the Settings tab in the shown workspace. -->
+                    <Button
+                        x:Name="RailSettingsButton"
+                        Grid.Row="4"
+                        Width="44"
+                        Height="44"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Command="{x:Bind ViewModel.OpenSettingsCommand}"
+                        PointerEntered="RailSettingsButton_PointerEntered"
+                        PointerExited="RailSettingsButton_PointerExited"
+                        PointerCanceled="RailSettingsButton_PointerExited"
+                        GotFocus="RailSettingsButton_GotFocus"
+                        LostFocus="RailSettingsButton_LostFocus"
+                        AutomationProperties.Name="Settings"
+                        AutomationProperties.AutomationId="RailSettings">
+                        <FontIcon Glyph="&#xE713;" FontSize="16" />
+                    </Button>
                 </Grid>
             </Border>
 

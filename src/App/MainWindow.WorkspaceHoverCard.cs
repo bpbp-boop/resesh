@@ -9,8 +9,9 @@ using Windows.Foundation;
 
 namespace Resesh.App;
 
-// The workspace hover card: a rail button's name, state, background alert and shortcut,
-// beside the button the moment the pointer or keyboard focus reaches it. A tooltip waits
+// The rail hover card: a workspace button's name, state, background alert and shortcut (or
+// the Settings button's name and shortcut), beside the button the moment the pointer or
+// keyboard focus reaches it. A tooltip waits
 // before it opens, which is slow for scanning a column of icons. The card follows the item
 // while it is shown, so a switch or an alert updates it in place.
 public sealed partial class MainWindow
@@ -47,14 +48,46 @@ public sealed partial class MainWindow
             HideWorkspaceHoverCard();
     }
 
+    private void RailSettingsButton_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType is not PointerDeviceType.Touch)
+            ShowSettingsHoverCard();
+    }
+
+    private void RailSettingsButton_PointerExited(object sender, PointerRoutedEventArgs e) => HideSettingsHoverCard();
+
+    private void RailSettingsButton_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (RailSettingsButton.FocusState == FocusState.Keyboard)
+            ShowSettingsHoverCard();
+    }
+
+    private void RailSettingsButton_LostFocus(object sender, RoutedEventArgs e) => HideSettingsHoverCard();
+
+    private void HideSettingsHoverCard()
+    {
+        if (ReferenceEquals(_hoverCardAnchor, RailSettingsButton))
+            HideWorkspaceHoverCard();
+    }
+
+    /// <summary>The rail's Settings button uses the same card, with just its name and shortcut.</summary>
+    private void ShowSettingsHoverCard()
+    {
+        DetachHoverCardItem();
+        _hoverCardAnchor = RailSettingsButton;
+        var chords = Resesh.Core.Input.KeyBindings.Get(Resesh.Core.Input.ShortcutIds.Settings).Chords;
+        FillHoverCard("Settings", "", chords.Count > 0 ? chords[0].Label : "", WorkspaceAlert.None, "");
+        PlaceWorkspaceHoverCard();
+        WorkspaceHoverCard.IsOpen = true;
+    }
+
     private void WorkspaceRail_DragItemsStarting(object sender, DragItemsStartingEventArgs e) => HideWorkspaceHoverCard();
 
     private void ShowWorkspaceHoverCard(FrameworkElement anchor, WorkspaceRailItemViewModel item)
     {
         if (!ReferenceEquals(item, _hoverCardItem))
         {
-            if (_hoverCardItem is not null)
-                _hoverCardItem.PropertyChanged -= HoverCardItem_PropertyChanged;
+            DetachHoverCardItem();
             item.PropertyChanged += HoverCardItem_PropertyChanged;
             _hoverCardItem = item;
         }
@@ -67,10 +100,15 @@ public sealed partial class MainWindow
     private void HideWorkspaceHoverCard()
     {
         WorkspaceHoverCard.IsOpen = false;
+        DetachHoverCardItem();
+        _hoverCardAnchor = null;
+    }
+
+    private void DetachHoverCardItem()
+    {
         if (_hoverCardItem is not null)
             _hoverCardItem.PropertyChanged -= HoverCardItem_PropertyChanged;
         _hoverCardItem = null;
-        _hoverCardAnchor = null;
     }
 
     private void HoverCardItem_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -81,14 +119,18 @@ public sealed partial class MainWindow
         PlaceWorkspaceHoverCard(); // an alert line changes the card's height
     }
 
-    private void FillWorkspaceHoverCard(WorkspaceRailItemViewModel item)
+    private void FillWorkspaceHoverCard(WorkspaceRailItemViewModel item) =>
+        FillHoverCard(item.Name, item.StatusText, item.ShortcutText, item.Alert, item.AlertText);
+
+    private void FillHoverCard(string name, string status, string shortcut, WorkspaceAlert alert, string alertText)
     {
-        HoverCardName.Text = item.Name;
-        HoverCardStatus.Text = item.StatusText;
-        HoverCardShortcut.Text = item.ShortcutText;
-        HoverCardAlert.Visibility = PresentationValues.Visible(item.HasAlert);
-        HoverCardAlertText.Text = item.AlertText;
-        HoverCardAlertDot.Fill = new SolidColorBrush(PresentationValues.WorkspaceAlertColor(item.Alert));
+        HoverCardName.Text = name;
+        HoverCardStatus.Text = status;
+        HoverCardStatus.Visibility = PresentationValues.Visible(status.Length > 0);
+        HoverCardShortcut.Text = shortcut;
+        HoverCardAlert.Visibility = PresentationValues.Visible(alert != WorkspaceAlert.None);
+        HoverCardAlertText.Text = alertText;
+        HoverCardAlertDot.Fill = new SolidColorBrush(PresentationValues.WorkspaceAlertColor(alert));
     }
 
     /// <summary>Beside the rail, centred on the button and kept inside the window.</summary>
