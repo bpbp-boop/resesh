@@ -17,7 +17,8 @@ internal static class FrameStats
 
     private const string FrameHeader =
         "surface,frame,t_ms,interval_ms,cols,rows,rows_drawn,full,buf_w,buf_h," +
-        "read_us,prep_us,input_us,scroll_us,record_us,enddraw_us,copy_us,present_us,total_us,parsed_bytes,parse_us";
+        "read_us,prep_us,input_us,scroll_us,record_us,enddraw_us,copy_us,present_us,total_us,parsed_bytes,parse_us," +
+        "annotations_us,keyframe_us,gc_pause_us,gc0,gc1,gc2,alloc_kb";
 
     private static readonly object Gate = new();
     private static readonly StringBuilder Frames = new();
@@ -72,11 +73,29 @@ internal static class FrameStats
 
     public static double Microseconds(long from, long to) => (to - from) * 1_000_000.0 / Stopwatch.Frequency;
 
+    private static TimeSpan s_lastPause;
+    private static int s_lastGen0, s_lastGen1, s_lastGen2;
+    private static long s_lastAllocated;
+
+    /// <summary>Process-wide GC activity since the previous frame of any surface.</summary>
+    private static (double PauseUs, int Gen0, int Gen1, int Gen2, long AllocatedKb) GcSincePrevious()
+    {
+        var pause = GC.GetTotalPauseDuration();
+        int gen0 = GC.CollectionCount(0), gen1 = GC.CollectionCount(1), gen2 = GC.CollectionCount(2);
+        var allocated = GC.GetTotalAllocatedBytes(false);
+        var result = ((pause - s_lastPause).TotalMicroseconds, gen0 - s_lastGen0, gen1 - s_lastGen1, gen2 - s_lastGen2,
+            (allocated - s_lastAllocated) / 1024);
+        (s_lastPause, s_lastGen0, s_lastGen1, s_lastGen2, s_lastAllocated) = (pause, gen0, gen1, gen2, allocated);
+        return result;
+    }
+
     public static void Frame(in FrameRecord r)
     {
+        var gc = GcSincePrevious();
         var line = string.Create(CultureInfo.InvariantCulture,
             $"{r.Surface},{r.Frame},{Microseconds(Start, r.Started) / 1000:F3},{r.IntervalMs:F3},{r.Columns},{r.Rows},{r.RowsDrawn},{(r.Full ? 1 : 0)},{r.BufferWidth},{r.BufferHeight}," +
-            $"{r.ReadUs:F1},{r.PrepUs:F1},{r.InputUs:F1},{r.ScrollUs:F1},{r.RecordUs:F1},{r.EndDrawUs:F1},{r.CopyUs:F1},{r.PresentUs:F1},{r.TotalUs:F1},{r.ParsedBytes},{r.ParseUs:F1}\n");
+            $"{r.ReadUs:F1},{r.PrepUs:F1},{r.InputUs:F1},{r.ScrollUs:F1},{r.RecordUs:F1},{r.EndDrawUs:F1},{r.CopyUs:F1},{r.PresentUs:F1},{r.TotalUs:F1},{r.ParsedBytes},{r.ParseUs:F1}," +
+            $"{r.AnnotationsUs:F1},{r.KeyframeUs:F1},{gc.PauseUs:F1},{gc.Gen0},{gc.Gen1},{gc.Gen2},{gc.AllocatedKb}\n");
         lock (Gate)
             Frames.Append(line);
     }
@@ -136,4 +155,6 @@ internal struct FrameRecord
     public double TotalUs;
     public long ParsedBytes;
     public double ParseUs;
+    public double AnnotationsUs;
+    public double KeyframeUs;
 }

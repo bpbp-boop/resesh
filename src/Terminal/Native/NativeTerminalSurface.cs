@@ -97,6 +97,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private long _statsLastFrame;
     private double _statsInputUs;
     private double _statsScrollUs;
+    private long _statsAnnotationTicks;
+    private long _statsKeyframeTicks;
     private bool _renderingHooked;
     private bool _renderingPaused;
     private bool _forceFull = true;
@@ -380,7 +382,10 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     {
         if (_term == IntPtr.Zero || _readOnly || KeyframeCaptured is not { } handler)
             return;
+        var statsStart = FrameStats.Enabled ? FrameStats.Now() : 0;
         var buffer = GhosttyNative.rvt_format_vt(_term, out var length);
+        if (FrameStats.Enabled)
+            Interlocked.Add(ref _statsKeyframeTicks, FrameStats.Now() - statsStart);
         byte[] state;
         try
         {
@@ -818,8 +823,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             {
                 if (_dirty[y] == 0)
                     continue;
-                var row = y;
-                _highlighter.ApplyRow(new Span<TerminalCell>(_cells + y * Columns, Columns), x => GraphemeAt(x, row));
+                _highlightRow = y;
+                _highlighter.ApplyRow(new Span<TerminalCell>(_cells + y * Columns, Columns), _highlightGrapheme ??= x => GraphemeAt(x, _highlightRow));
             }
         }
         if (rows > 0 && _hoverSpans.Length > 0)
@@ -909,11 +914,16 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             TotalUs = FrameStats.Microseconds(frameStart, end),
             ParsedBytes = Interlocked.Exchange(ref _statsParsedBytes, 0),
             ParseUs = FrameStats.Microseconds(0, Interlocked.Exchange(ref _statsParseTicks, 0)),
+            AnnotationsUs = FrameStats.Microseconds(0, _statsAnnotationTicks),
+            KeyframeUs = FrameStats.Microseconds(0, Interlocked.Exchange(ref _statsKeyframeTicks, 0)),
         });
         _statsLastFrame = frameStart;
+        _statsAnnotationTicks = 0;
     }
 
     private bool _cursorRowDirty;
+    private int _highlightRow;
+    private Func<int, string?>? _highlightGrapheme;
     private uint? _marginColor;
 
     /// <summary>Mirrors libghostty-vt's scroll state; it has no change event, so every frame
@@ -1876,6 +1886,18 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     }
 
     private void RunAnnotations()
+    {
+        if (!FrameStats.Enabled)
+        {
+            RunAnnotationsCore();
+            return;
+        }
+        var start = FrameStats.Now();
+        RunAnnotationsCore();
+        _statsAnnotationTicks += FrameStats.Now() - start;
+    }
+
+    private void RunAnnotationsCore()
     {
         _annotationsPending = false;
         _lastAnnotationsMs = Environment.TickCount64;
