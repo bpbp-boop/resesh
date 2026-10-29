@@ -13,8 +13,8 @@
         KeyboardAcceleratorPlacementMode="Hidden"
         Background="{StaticResource SessionShellBrush}">
         <Grid.Resources>
-            <!-- A workspace rail button: an edge marker (tall when shown, short when open in
-                 the background), its icon or initials, drawn bare like the tool icons above, the alert
+            <!-- A workspace rail button: a short marker when open in the background (the shown
+                 one is the list's native selection pill), its icon or initials, drawn bare like the tool icons above, the alert
                  dot for a workspace in the background, and a mark when another window has it.
                  Hovering shows WorkspaceHoverCard at once instead of a delayed tooltip. -->
             <DataTemplate x:Key="WorkspaceRailItemTemplate" x:DataType="vm:WorkspaceRailItemViewModel">
@@ -27,18 +27,21 @@
                     PointerCanceled="WorkspaceRailItem_PointerExited"
                     AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
                     AutomationProperties.AutomationId="{x:Bind AutomationId}">
-                    <!-- Full height, scaled to the marker's size so the change animates. -->
+                    <!-- The shown workspace is the list's selection, which draws ListView's own
+                         accent pill. A workspace open in the background shows a neutral pill of
+                         the same shape at half height, in the same place, scaled so it animates. -->
                     <Rectangle
-                        Width="4"
-                        Height="20"
-                        Margin="-2,0,0,0"
-                        RadiusX="2"
-                        RadiusY="2"
+                        Width="{ThemeResource NavigationViewSelectionIndicatorWidth}"
+                        Height="{ThemeResource NavigationViewSelectionIndicatorHeight}"
+                        Margin="4,0,0,0"
+                        RadiusX="{ThemeResource NavigationViewSelectionIndicatorRadius}"
+                        RadiusY="{ThemeResource NavigationViewSelectionIndicatorRadius}"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
-                        CenterPoint="2,10,0"
+                        CenterPoint="1.5,8,0"
                         Scale="{x:Bind local:PresentationValues.RailMarkerScale(MarkerHeight), Mode=OneWay}"
-                        Fill="{StaticResource SessionTreeForegroundBrush}">
+                        Fill="{StaticResource SessionTreeForegroundBrush}"
+>
                         <Rectangle.ScaleTransition>
                             <Vector3Transition Duration="{x:Bind local:PresentationValues.RailMarkerDuration}" />
                         </Rectangle.ScaleTransition>
@@ -141,7 +144,7 @@
                         Visibility="{x:Bind local:PresentationValues.Visible(ShowsUnsavedMark), Mode=OneWay}" />
                 </Grid>
             </DataTemplate>
-            <Style x:Key="WorkspaceRailItemStyle" TargetType="ListViewItem">
+            <Style x:Key="WorkspaceRailItemStyle" TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
                 <Setter Property="Padding" Value="0" />
                 <Setter Property="Margin" Value="0" />
                 <Setter Property="MinWidth" Value="0" />
@@ -601,7 +604,8 @@
                                 ItemsSource="{x:Bind RailHome, Mode=OneWay}"
                                 ItemTemplate="{StaticResource WorkspaceRailItemTemplate}"
                                 ItemContainerStyle="{StaticResource WorkspaceRailItemStyle}"
-                                SelectionMode="None"
+                                SelectionMode="Single"
+                                SingleSelectionFollowsFocus="False"
                                 IsItemClickEnabled="True"
                                 ItemClick="WorkspaceRail_ItemClick"
                                 ContextRequested="WorkspaceRail_ContextRequested"
@@ -614,7 +618,8 @@
                                 ItemsSource="{x:Bind RailWorkspaces, Mode=OneWay}"
                                 ItemTemplate="{StaticResource WorkspaceRailItemTemplate}"
                                 ItemContainerStyle="{StaticResource WorkspaceRailItemStyle}"
-                                SelectionMode="None"
+                                SelectionMode="Single"
+                                SingleSelectionFollowsFocus="False"
                                 IsItemClickEnabled="True"
                                 CanDragItems="True"
                                 CanReorderItems="True"

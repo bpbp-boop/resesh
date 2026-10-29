@@ -1471,3 +1471,15 @@ pins them), so saved sessions keep their icons.
   saved key whose file is missing still round-trips.
 - Sessions can't pick the workspace's general glyph icons (desktop, lock, chart and so on):
   the tree draws session icons from image files, and those are font glyphs and paths.
+- The shown workspace is the selection of the rail's ListViews (Home's and the workspaces'),
+  so ListView draws its own accent pill and selected background: platform motion, theming
+  and High Contrast, with nothing hand-animated. It measures the same as the tool rail's
+  NavigationView pill (3 x 16 px, same place); ListView's pill fades in on the new item
+  instead of sliding, and its corners are 1.5 against 2. A hand-built copy of the tool pill
+  was tried first and moved differently from it. Arrow keys move focus, not the selection
+  (SingleSelectionFollowsFocus off), and the code sets the selection from the shown
+  workspace, so a click on a workspace open in another window leaves it where it was.
+- The item style must be BasedOn DefaultListViewItemStyle: a style without it replaces
+  WinUI's modern ListViewItem template with an older one that has no selection pill.
+- A workspace open in the background keeps a neutral marker of the same pill shape at half
+  height; it is not a ListView concept.

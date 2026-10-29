@@ -216,7 +216,8 @@ public static class PresentationValues
             ? null
             : (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), path);
 
-    private const double RailMarkerFullHeight = 20;
+    // NavigationViewSelectionIndicatorHeight: the marker is the native selection pill's shape.
+    private const double RailMarkerFullHeight = 16;
     private static readonly Windows.UI.ViewManagement.UISettings MotionSettings = new();
 
     /// <summary>The workspace marker is drawn at full height and scaled, so a change of state

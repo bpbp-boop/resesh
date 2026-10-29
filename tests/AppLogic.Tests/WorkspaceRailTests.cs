@@ -131,7 +131,7 @@ public sealed class WorkspaceRailTests : IDisposable
         Assert.Equal("Ctrl+Shift+2", item.ShortcutText);
 
         item.SetState(isOpen: true, isActive: true, isOpenElsewhere: false, WorkspaceAlert.Attention, position: 2);
-        Assert.Equal(20, item.MarkerHeight);
+        Assert.Equal(0, item.MarkerHeight); // the list's selection pill marks it
         Assert.False(item.HasAlert);
         Assert.Equal(1.0, item.TileOpacity);
 

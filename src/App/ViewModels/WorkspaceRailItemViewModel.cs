@@ -138,9 +138,10 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
     /// <summary>1-based place in the rail, which its Ctrl+Shift+number shortcut follows.</summary>
     public int Position => _position;
 
-    /// <summary>Discord-style marker at the rail's edge: tall for the shown workspace,
+    /// <summary>Neutral marker beside the button for a workspace held in the background: none
+    /// for the shown workspace (its list's native selection pill marks it),
     /// a short stub for one open in the background, nothing for a closed one.</summary>
-    public double MarkerHeight => _isActive ? 20 : _isOpen || _isOpenElsewhere ? 8 : 0;
+    public double MarkerHeight => _isActive ? 0 : _isOpen || _isOpenElsewhere ? 8 : 0;
 
     /// <summary>Closed workspaces draw dimmed, so live ones stand out.</summary>
     public double TileOpacity => _isActive || _isOpen || _isOpenElsewhere ? 1.0 : 0.6;

@@ -497,6 +497,11 @@ public sealed partial class MainWindow
                 HasUnsavedWorkspaceChanges(item.Id));
         }
 
+        // The shown workspace is the selection of whichever list holds it, so ListView draws its
+        // own accent pill; the other list selects nothing.
+        WorkspaceRailHomeList.SelectedItem = _shownWorkspace == HomeWorkspace ? RailHome[0] : null;
+        WorkspaceRailList.SelectedItem = RailWorkspaces.FirstOrDefault(item => item.Id == _shownWorkspace);
+
         var hasWorkspaces = saved.Count > 0;
         WorkspaceRailDivider.Visibility = hasWorkspaces ? Visibility.Visible : Visibility.Collapsed;
         WorkspaceRailHomeList.Visibility = hasWorkspaces ? Visibility.Visible : Visibility.Collapsed;
