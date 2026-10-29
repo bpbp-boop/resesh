@@ -199,3 +199,23 @@ Full screen (381×109), before → after:
 | tiny | 7 → 122–124 | 446–496 → 23–24 ms | 11–14 → 1 | 6.3–6.8 → 2.2 ms |
 
 (The one remaining gap per run is at start-up.)
+
+### Render thread (same day)
+
+Frames are now drawn on a per-surface render thread (like Ghostty) instead of the UI thread's
+`CompositionTarget.Rendering`. The frame log's times are now render-thread times; `ui lag`
+(from `ui-<pid>.csv`) is how late a callback posted every 10 ms ran on the UI thread, which is
+what typing and clicking wait for. Same session, same machine, 2 runs each, before → after:
+
+| workload | fps | UI lag p50 | UI lag p99 | UI lag max |
+|---|---|---|---|---|
+| full screen logs | 117–130 → 126–138 | 0.15–0.6 → 0.06–0.11 ms | 5.6–8.1 → 0.8–0.9 ms | 13–17 → 4.3 ms |
+| full screen color | 88–132 → 128–134 | 0.07–0.16 → 0.06–0.07 ms | 3.2–3.9 → 0.4–1.3 ms | 7–8 → 0.5–4.3 ms |
+| full screen unicode | 133–137 → 136–138 | 0.16 → 0.05 ms | 3.3–6.5 → 2.9–3.9 ms | 6.4–7.3 → 5.4–7.7 ms |
+| full screen tui | 107–134 → 135–140 | 0.08–0.1 → 0.06 ms | 1.1–1.7 → 0.4–2.1 ms | 3–8.5 → 1.5–2.6 ms |
+| full screen tiny | 120–122 → 142 | 0.13 → 0.06–0.08 ms | 4.6–6.2 → 5.5–6.0 ms | 7.5–7.9 → 7.4–19 ms |
+| 1280×800 logs | 79–88 → 131 | 0.08–0.11 → 0.06–0.07 ms | 0.6–1.1 → 0.4–3.4 ms | 3.9–17 → 2.4–4.4 ms |
+
+What is left on the UI thread during a flood is the annotation pass (command marks, ruler, the
+overview index's scan of the live screen): up to ~10 ms, and ~23 ms in `tiny`, where each of the
+109 live-row reads waits behind a 4 KB parse slice. That, not drawing, is now the UI's worst case.

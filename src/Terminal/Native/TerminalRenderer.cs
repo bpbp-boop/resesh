@@ -17,7 +17,9 @@ namespace Resesh.Terminal.Native;
 /// Draws a flattened libghostty-vt grid with Direct2D/DirectWrite into a composition swap chain
 /// for a SwapChainPanel. Dirty rows are drawn into a retained canvas texture; each present copies
 /// the canvas to the back buffer, because flip-model buffers do not keep their contents.
-/// UI thread only.
+/// Thread-safe: every entry point holds <see cref="DeviceGate"/>, because all terminals share
+/// one D3D device and single-threaded Direct2D factory. Each surface draws from its own render
+/// thread, and the UI thread draws directly during layout.
 /// </summary>
 internal sealed unsafe partial class TerminalRenderer : IDisposable
 {
@@ -29,7 +31,9 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private static IDWriteFactory2? s_dwrite;
     private static IDXGIFactory2? s_dxgiFactory;
     private static readonly HashSet<TerminalRenderer> s_renderers = [];
-    private static int s_uiThread;
+    /// <summary>Serializes all use of the shared device, its immediate context and every
+    /// renderer's Direct2D objects. Taken after a surface's own render lock, never before.</summary>
+    internal static readonly object DeviceGate = new();
     private static int s_generation;
     private static bool s_recovering;
 
@@ -90,6 +94,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private int _bufferHeight;
     private int _capacityWidth;
     private int _capacityHeight;
+    /// <summary>Read under <see cref="DeviceGate"/>: device recovery replaces it from whichever
+    /// thread notices the loss.</summary>
     public IDXGISwapChain1? SwapChain => _swapChain;
     public event Action? SwapChainChanged;
 
@@ -99,9 +105,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     public TerminalRenderer()
     {
-        EnsureShared();
-        CreateDeviceResources();
-        s_renderers.Add(this);
+        lock (DeviceGate)
+        {
+            EnsureShared();
+            CreateDeviceResources();
+            s_renderers.Add(this);
+        }
         if (FrameStats.Enabled)
             StatsSurface = FrameStats.NextSurfaceId();
     }
@@ -117,10 +126,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     private static void EnsureShared()
     {
-        var thread = Environment.CurrentManagedThreadId;
-        if (s_uiThread != 0 && s_uiThread != thread)
-            throw new InvalidOperationException("Terminal graphics resources must be used on their UI thread.");
-        s_uiThread = thread;
+        System.Diagnostics.Debug.Assert(Monitor.IsEntered(DeviceGate));
         if (s_device is not null)
             return;
         try
@@ -167,8 +173,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     private static void RecoverShared(int observedGeneration)
     {
-        if (Environment.CurrentManagedThreadId != s_uiThread)
-            throw new InvalidOperationException("Terminal graphics recovery must run on the UI thread.");
+        System.Diagnostics.Debug.Assert(Monitor.IsEntered(DeviceGate));
         if (s_recovering || observedGeneration != s_generation)
             return;
         s_recovering = true;
@@ -211,6 +216,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     /// <summary>Loads the font chain and measures the cell. <paramref name="emPixels"/> is the
     /// font size in physical pixels (CSS px times the rasterization scale).</summary>
     public void SetFont(string fontFamilyList, float emPixels)
+    {
+        lock (DeviceGate)
+            SetFontLocked(fontFamilyList, emPixels);
+    }
+
+    private void SetFontLocked(string fontFamilyList, float emPixels)
     {
         DisposeFaces();
         _fontFamilyList = fontFamilyList;
@@ -320,6 +331,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     /// Full frames fill the whole buffer, so the part past the grid is always background.</remarks>
     public bool Resize(int pixelWidth, int pixelHeight, int capacityWidth = 0, int capacityHeight = 0)
     {
+        lock (DeviceGate)
+            return ResizeLocked(pixelWidth, pixelHeight, capacityWidth, capacityHeight);
+    }
+
+    private bool ResizeLocked(int pixelWidth, int pixelHeight, int capacityWidth, int capacityHeight)
+    {
         pixelWidth = Math.Max(1, pixelWidth);
         pixelHeight = Math.Max(1, pixelHeight);
         _capacityWidth = Math.Max(_capacityWidth, capacityWidth);
@@ -378,6 +395,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     /// <summary>Presents a frame of one color: what the chain shows before its first real draw.</summary>
     public void Clear(uint color)
     {
+        lock (DeviceGate)
+            ClearLocked(color);
+    }
+
+    private void ClearLocked(uint color)
+    {
         if (_disposed || _swapChain is null || _canvas is null)
             return;
         _dc.BeginDraw();
@@ -392,6 +415,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     /// <summary>Maps the physical-pixel swap chain onto the panel's DIP layout.</summary>
     public void SetCompositionScale(float scaleX, float scaleY)
+    {
+        lock (DeviceGate)
+            SetCompositionScaleLocked(scaleX, scaleY);
+    }
+
+    private void SetCompositionScaleLocked(float scaleX, float scaleY)
     {
         _compositionScaleX = scaleX;
         _compositionScaleY = scaleY;
@@ -479,6 +508,13 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     public uint? MarginColor { get; private set; }
 
     public bool Draw(TerminalCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
+        bool cursorShown, bool focused, uint selectionColor, bool full)
+    {
+        lock (DeviceGate)
+            return DrawLocked(cells, cols, rows, dirty, info, cursorShown, focused, selectionColor, full);
+    }
+
+    private bool DrawLocked(TerminalCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
         bool cursorShown, bool focused, uint selectionColor, bool full)
     {
         if (_disposed || _swapChain is null || _canvas is null)
@@ -889,6 +925,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     }
 
     public void Dispose()
+    {
+        lock (DeviceGate)
+            DisposeLocked();
+    }
+
+    private void DisposeLocked()
     {
         if (_disposed)
             return;

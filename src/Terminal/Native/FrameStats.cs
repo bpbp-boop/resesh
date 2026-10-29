@@ -17,7 +17,7 @@ internal static class FrameStats
 
     private const string FrameHeader =
         "surface,frame,t_ms,interval_ms,cols,rows,rows_drawn,full,buf_w,buf_h," +
-        "read_us,prep_us,input_us,scroll_us,record_us,enddraw_us,copy_us,present_us,total_us,parsed_bytes,parse_us," +
+        "read_us,prep_us,record_us,enddraw_us,copy_us,present_us,total_us,parsed_bytes,parse_us," +
         "annotations_us,keyframe_us,gc_pause_us,gc0,gc1,gc2,alloc_kb";
 
     private static readonly object Gate = new();
@@ -124,10 +124,13 @@ internal static class FrameStats
 
     public static void Frame(in FrameRecord r)
     {
-        var gc = GcSincePrevious();
+        // Render threads of several surfaces report concurrently.
+        (double PauseUs, int Gen0, int Gen1, int Gen2, long AllocatedKb) gc;
+        lock (Gate)
+            gc = GcSincePrevious();
         var line = string.Create(CultureInfo.InvariantCulture,
             $"{r.Surface},{r.Frame},{Microseconds(Start, r.Started) / 1000:F3},{r.IntervalMs:F3},{r.Columns},{r.Rows},{r.RowsDrawn},{(r.Full ? 1 : 0)},{r.BufferWidth},{r.BufferHeight}," +
-            $"{r.ReadUs:F1},{r.PrepUs:F1},{r.InputUs:F1},{r.ScrollUs:F1},{r.RecordUs:F1},{r.EndDrawUs:F1},{r.CopyUs:F1},{r.PresentUs:F1},{r.TotalUs:F1},{r.ParsedBytes},{r.ParseUs:F1}," +
+            $"{r.ReadUs:F1},{r.PrepUs:F1},{r.RecordUs:F1},{r.EndDrawUs:F1},{r.CopyUs:F1},{r.PresentUs:F1},{r.TotalUs:F1},{r.ParsedBytes},{r.ParseUs:F1}," +
             $"{r.AnnotationsUs:F1},{r.KeyframeUs:F1},{gc.PauseUs:F1},{gc.Gen0},{gc.Gen1},{gc.Gen2},{gc.AllocatedKb}\n");
         lock (Gate)
             Frames.Append(line);
@@ -182,8 +185,6 @@ internal struct FrameRecord
     public int BufferHeight;
     public double ReadUs;
     public double PrepUs;
-    public double InputUs;
-    public double ScrollUs;
     public double RecordUs;
     public double EndDrawUs;
     public double CopyUs;

@@ -1493,3 +1493,25 @@ once per line) queued behind it: 7 fps and 450 ms stalls at full screen. The shi
 4 KB slices. SRW locks let the releasing thread take the lock straight back, so every other
 entry point counts itself in `waiting` while blocked and the writer `SwitchToThread`s (bounded)
 until that count drops. Measured with `RESESH_FRAME_STATS` (tools/terminal-bench/RESULTS.md).
+
+## 2026-10-29 - Draw terminals on their own render threads
+
+Each `NativeTerminalSurface` now draws on its own thread, as Ghostty does, instead of in
+`CompositionTarget.Rendering` on the UI thread: a full-screen 4K frame costs ~3 ms, and during a
+flood that was most of every frame interval, so input waited behind output. Pieces:
+
+- `_renderGate` (per surface) guards the cell buffers, grid size, highlighter and hover state;
+  `TerminalRenderer.DeviceGate` (global) serializes the shared D3D device, its immediate context
+  and every renderer's Direct2D objects (the factory stays single-threaded; access is serial).
+  Lock order is always render gate, then device gate; device recovery and `AttachSwapChain` hold
+  only the device gate.
+- Layout still draws synchronously on the UI thread under both locks, so a resized buffer is
+  never shown black (the 2026-10-15 window-sized swap chain fix depends on it).
+- Pacing is `DwmFlush` after each drawn frame: the first frame after a quiet spell (a key's echo)
+  draws immediately, a flood draws once per composition. No frame-latency waitable object: its
+  handle would have to outlive swap chain replacement while a render thread waits on it.
+- XAML-side effects of a frame (scroll bar, IME box, pointer, blink timer, annotations, margin
+  brush) are merged and posted to the UI thread; `Visibility`/`IsLoaded` are mirrored in fields
+  because the render thread cannot read dependency properties.
+- Link hover builds row text with its own `Highlighter`, since the render thread owns the
+  shared one's buffers.

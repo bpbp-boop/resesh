@@ -84,8 +84,6 @@ def summarize(run, keep_all):
         'cpu max': max(col('total_us')),
         'read p50': pct(col('read_us'), 50),
         'prep p50': pct(col('prep_us'), 50),
-        'scroll p50': pct(col('scroll_us'), 50) if 'scroll_us' in first else float('nan'),
-        'input p50': pct(col('input_us'), 50) if 'input_us' in first else float('nan'),
         'record p50': pct(col('record_us'), 50),
         'record p95': pct(col('record_us'), 95),
         'enddraw p50': pct(col('enddraw_us'), 50),
