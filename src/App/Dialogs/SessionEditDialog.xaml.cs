@@ -300,37 +300,12 @@ public sealed partial class SessionEditDialog : ContentDialog
     // ---- icon picker ----
 
     /// <summary>Selected icon key: null = auto-detect, SessionIcons.None = explicitly none.</summary>
-    private string? _selectedIcon;
+    private string? SelectedIcon => IconPicker.Selected?.Key;
 
     private void PopulateIconPicker(string? currentKey)
     {
-        var entries = App.Icons.PickerEntries();
-        // A key whose file has gone missing (deleted custom icon) still round-trips.
-        if (!string.IsNullOrEmpty(currentKey)
-            && !entries.Any(e => string.Equals(e.Key, currentKey, StringComparison.OrdinalIgnoreCase)))
-        {
-            entries.Add(new Icons.IconChoice(currentKey, $"{currentKey} (missing)", null, ""));
-        }
-        IconGrid.ItemsSource = entries;
-        _selectedIcon = string.IsNullOrEmpty(currentKey) ? null : currentKey;
-        UpdateIconButton(entries.First(e => string.Equals(e.Key, _selectedIcon, StringComparison.OrdinalIgnoreCase)));
-    }
-
-    private void IconGrid_ItemClick(object sender, ItemClickEventArgs e)
-    {
-        var choice = (Icons.IconChoice)e.ClickedItem;
-        _selectedIcon = choice.Key;
-        UpdateIconButton(choice);
-        IconFlyout.Hide();
-    }
-
-    private void UpdateIconButton(Icons.IconChoice choice)
-    {
-        // The button shows the icon at 16, not the picker-tile 24 — fetch its own size.
-        var image = App.Icons.GetImage(choice.Key, Icons.SessionIconCatalog.ListIconSize);
-        IconButtonImage.Source = image;
-        IconButtonImage.Visibility = image is null ? Visibility.Collapsed : Visibility.Visible;
-        IconButtonText.Text = choice.Key is null ? "Auto-detect" : choice.Name;
+        var choices = Icons.SessionIconChoices.Build(currentKey, out var selected);
+        IconPicker.SetChoices(choices, selected);
     }
 
     // ---- network: jump host, proxy, tunnels ----
@@ -481,7 +456,7 @@ public sealed partial class SessionEditDialog : ContentDialog
     private void SectionBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
         // Fires during InitializeComponent for the initially-selected item, before the panels exist.
-        if (ConnectionPanel is null || NetworkPanel is null || TerminalPanel is null || AppearancePanel is null || NotesBox is null)
+        if (ConnectionPanel is null || NetworkPanel is null || TerminalPanel is null || AppearancePanel is null || IconPanel is null || NotesBox is null)
             return;
 
         var selected = sender.SelectedItem;
@@ -489,6 +464,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         ConnectionPanel.Visibility = selected == ConnectionSection ? Visibility.Visible : Visibility.Collapsed;
         TerminalPanel.Visibility = selected == TerminalSection ? Visibility.Visible : Visibility.Collapsed;
         AppearancePanel.Visibility = selected == AppearanceSection ? Visibility.Visible : Visibility.Collapsed;
+        IconPanel.Visibility = selected == IconSection ? Visibility.Visible : Visibility.Collapsed;
         NotesBox.Visibility = selected == NotesSection ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -681,7 +657,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             },
             Notes = NotesBox.Text,
             ColorTag = ColorChoices[Math.Max(0, ColorBox.SelectedIndex)].Hex,
-            Icon = _selectedIcon,
+            Icon = SelectedIcon,
             Agent = _existing?.Agent,
             CredentialNeeded = _existing?.CredentialNeeded ?? false,
             JumpHostId = via == 1 ? (JumpBox.SelectedItem as JumpChoice)?.Id : null,

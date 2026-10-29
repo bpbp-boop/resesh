@@ -1289,3 +1289,197 @@ The session editor's Terminal tab held about 770 px of fields in a 480 px host, 
 showed a scrollbar (a full one, for anyone with "Always show scrollbars" on). Appearance
 overrides, icon and color moved to their own Appearance tab, which the local profile editor
 now shares.
+
+## 2026-10-28 - Workspaces switch on the rail and stay connected
+
+A window now holds every workspace it opens. The one it shows is laid out as before; the
+others are *parked*: their tab groups move to `MainViewModel.BackgroundGroups`, their group
+views leave the visual tree with `TabGroupView.IsParked` set (terminals stop drawing, never
+take focus), and their tabs are flagged `IsInBackgroundWorkspace`. `AllTabs` and `GroupOf`
+include parked tabs, so `App.WindowFor`, the close prompt, pinned-tab saving and settings
+still reach them; `ShownTabs` and `Groups` are what is on screen. Anything that reveals a tab
+goes through `FocusGroup`, which brings a parked workspace back first.
+
+- Home is the workspace with no id: the tabs that belong to no saved workspace. It is always
+  open. The rail shows Home and the workspaces only once one exists; + is always there.
+- Leaving a workspace, closing it, and closing the window save its layout (`AutoSave`), so a
+  rail button reopens what was there. An all-empty layout or a deleted workspace is not
+  saved over. "Update from current layout" stays for Home and for explicit copies.
+- New workspace from Home *moves* Home's tabs into it instead of copying the layout, because
+  a copy would open every connection a second time when its button is clicked. For the same
+  reason a workspace is open in one window at most: its button in another window goes there.
+- Showing a workspace no longer asks to replace the current layout; nothing closes. "Open
+  additively" remains, as "Add to current layout".
+- A terminal still connects on its first `Loaded`. Startup restores Home's layout and then
+  shows the last workspace, so Home's tabs connect when Home is first shown.
+- Ctrl+Shift+1…9 pick rail positions (1 is Home) and pass to the shell when there are no
+  workspaces. Ctrl+Alt stays unused because it is AltGr on many layouts.
+- `SplitOrientation` is not on the camel-case enum list, so it persists as a number
+  (`0` = columns). Changing that now would need a reader for both forms.
+
+## 2026-10-29 - Workspace buttons use monochrome glyphs, not colours
+
+Workspace rail buttons first drew the name's initials on a colour from the id, or a session
+icon and chosen colour. The colours clashed with the monochrome tool icons above them, and
+coloured session logos looked out of place on the rail. A workspace now picks one of a fixed
+set of Segoe Fluent Icons glyphs (`WorkspaceAppearance.Icons`), drawn bare in the rail's own
+brushes like the tool icons above, so it follows every theme including High Contrast. No icon still
+draws the initials.
+
+- Every glyph in the set also exists in Segoe MDL2 Assets, the Windows 10 fallback. Check
+  any new one in both fonts. Home's glyph is not in the set, so no workspace looks like Home.
+- Segoe Fluent Icons has no database glyph, so Database is path data on a 16×16 grid drawn
+  with a 1px stroke, which matches the font's weight. `WorkspaceIcon` holds a glyph or a path.
+- The picker's filter also matches keywords ("sql", "k8s", "prod"), and Enter saves the first match.
+- Icon keys are saved, so never rename one. A key the set does not know (such as a session
+  icon saved by the first rail build) draws the initials.
+- Middle-click on a rail button closes that workspace, as it closes a tab, through the same
+  confirmed path as the menu. The menu lists Close workspace even when it is closed (disabled),
+  so the gesture is discoverable. winapp ui cannot send a middle-click; check it by hand.
+- `Workspace.ColorTag` is gone. JSON ignores the unknown field, so older files load and lose
+  it on the next save.
+
+## 2026-10-29 - Workspace switches slide, never fade
+
+Switching workspaces slides the shown workspace 24 px into place over 170 ms (the pane motion's
+duration and ease-out), from the side of the rail its button sits on: lower in the rail rises
+from below, higher drops from above. The workspace being left goes at once. `GroupArea` and
+`PaneFocusFrame` are translated together, each with an inset clip that opens in step, so
+panes never draw over the title bar or status bar while they move.
+
+- No fade or crossfade: a terminal's swap chain composes near-black under partial opacity
+  (see the pane motion), and a crossfade would keep the parked workspace drawing.
+- The rail marker is drawn at full height and scaled, so its change animates through a
+  `ScaleTransition` instead of snapping. Its duration is bound to zero when Windows animation
+  effects are off; the slide checks the same setting.
+- The workspace reopened at startup does not animate. A switch during a slide restarts it.
+
+## 2026-10-29 - Workspace initials and the rail hover card
+
+A workspace can have its own initials (`Workspace.Initials`), set in the icon dialog beside
+the preview. Up to three characters as a reader counts them (`StringInfo` text elements, so an
+emoji or accented letter is one), spaces removed and case kept; blank falls back to the
+letters from the name. Typing initials selects the Initials choice, since only it draws them.
+
+Rail buttons show a hover card instead of a tooltip: name, switch shortcut, status (showing,
+open in the background, open in another window, not open) and the background alert. WinUI's
+ToolTip waits before opening and has no setting for the delay, which is slow when scanning a
+column of icons, so the card is a `Popup` opened on `PointerEntered` and closed on
+`PointerExited`. It also opens for keyboard focus, never for touch, closes when the context
+menu opens or a drag starts, and follows the item's property changes while it is up. The
+button's automation name still carries the same text for screen readers. The rail's tool buttons (side pane toggle, Sessions, Workspaces, Recent sessions, Recordings, Settings) use the same card with a name, a line on what they are for and any shortcut; NavigationView adds its own tooltip to compact items that have none, so each is given a hidden one.
+
+## 2026-10-29 - Settings opens from the foot of the rail and follows the shown workspace
+
+The Settings gear moved from the title bar to the bottom of the left rail, apart from the
+pane tools and the workspaces, as in most rail-based apps. It opens the same Settings tab;
+Settings is not a side pane (its section list, forms and terminal preview need the tab
+area) and not a full-window page (rail buttons already switch what the tab area shows, so a
+Settings mode there would read as another workspace and hide the terminals a theme change
+should be checked against). It uses the rail's hover card with its name and shortcut.
+
+Settings belongs to the app, not a workspace. A tab lives in the workspace it was opened in,
+so reopening Settings from another workspace used to switch back to that one.
+`OpenAppPage(..., followShownWorkspace: true)` now moves a parked Settings tab into the shown
+workspace's focused pane instead; the parked pane it leaves is pruned as for any moved tab.
+
+## 2026-10-29 - A workspace changes only when it is saved
+
+This replaces the 2026-10-28 rule that leaving, closing or quitting saves a workspace's
+layout. A workspace is a saved layout you change on purpose: "Save workspace" (or "Update from
+current layout…") is the only thing that writes it. Leaving a workspace saved nothing it
+needed, since it stays open and connected, and quietly made any tab opened in passing part
+of the workspace for good.
+
+- What differs is a *draft* (`WorkspaceStore.SetDraft`), kept in `workspaces.json` beside the
+  saved layouts. Switching away and closing the window write it, so a crash or quit loses
+  nothing; opening a closed workspace starts from its draft. Saving or reverting drops it,
+  and a deleted workspace's draft goes with it.
+- A change is what a save would keep: tabs, their order and pins, and how panes split
+  (`WorkspaceStore.HasChanges`). Pane sizes and the selected tab are left out, so resizing a
+  pane or clicking a tab does not mark a workspace changed. A layout with no saved sessions
+  open is not a change.
+- Closing a changed workspace asks Save and close / Close without saving / Cancel (Save is
+  the default, since it keeps work), folded into the existing disconnect warning. Without
+  changes the old prompt is unchanged.
+- The rail shows unsaved changes as a small dot in the button's corner, in the hover card,
+  and in its automation name. "Save workspace" and "Revert to saved…" are enabled only then,
+  in the rail menu and the Workspaces menu. Reverting an open workspace reopens it as saved,
+  so its sessions reconnect.
+- Home has no saved layout and keeps restoring as it was left.
+
+## 2026-10-29 - Initials can label a workspace's icon
+
+Two workspaces on the same technology end up with the same icon (two databases, say). A
+workspace can now draw its initials as a small label under its icon (`Workspace.LabelIcon`,
+"Show initials under the icon" in the icon dialog), so they still tell apart at a glance. The
+icon moves up and the label sits under it at 10 px inside the same 30 px button; without the
+option the button is unchanged. A corner letter was ruled out because the alert and unsaved
+dots already use the corners, and initials over or behind the icon read poorly against its
+strokes. With the label on, typing initials keeps the chosen icon instead of switching to
+Initials.
+
+## 2026-10-29 - One brand icon list for sessions and workspaces
+
+Brand marks live in one list, `SessionIcons.Brands` (key, name, file, group, search words),
+drawn from the one-colour images in `Assets/SessionTreeIcons`. The session tree builds its
+key-to-file map from it, and the workspace picker shows every entry after the general icons,
+tinted by a monochrome `BitmapIcon` like the tree. Growing it means adding a file pair and a
+line; nothing else needs to change.
+
+- New marks come from Simple Icons 16.35.0 (CC0), each saved as its SVG plus a 64 px PNG
+  rendered black on transparent with the mark fitted into the centred 52 px, which is how
+  the existing tree icons were made (checked by measuring them). `tests/BrandIconAssetsTests.js`
+  checks every entry has both files.
+- Not available because Simple Icons dropped them after brand requests: AWS, Azure, Oracle,
+  Microsoft SQL Server, Linode (Akamai is there), HAProxy, Zabbix, XCP-ng.
+- New brands can be chosen for workspaces only. Picking one for a session also needs a
+  coloured badge in `Assets/SessionIcons`, which none of them has yet.
+- Session keys saved on workspaces by the first rail build ("debian") now draw their brand
+  instead of falling back to initials.
+- The picker ranks filter matches: the icon named exactly first, then names starting with
+  the text, names containing it, and search words last, so "mysql" and Enter pick MySQL
+  rather than the general Database icon whose search words include mysql.
+- Brand marks are drawn from their SVGs, recoloured and rasterised at the exact physical
+  size (`BrandIconImages`), on the rail and in the picker. Tinting the 64 px tree PNGs with
+  a monochrome BitmapIcon blurred them at 16–24 px. The SVGs now ship with the app; the tree
+  keeps its PNGs. Marks that are mostly lettering are cropped through their viewBox to their
+  compact part (MySQL to the dolphin, VMware to "vm"), and Synology, a wordmark only, is
+  left out. Cisco stays a thin row of bars: it is the real mark and is wide.
+- The icon dialog is 600 px wide with sections: Initials, the general icons by kind
+  (Machines, Infrastructure, Tools, Security, Operations, Other), then the brand groups. It
+  groups through a CollectionViewSource, whose view is replaced whenever its source is, so
+  the grid takes the new view after each filter.
+
+## 2026-10-29 - Session icons are one-colour and share the workspace icon picker
+
+This replaces the badge-style session icons of 2026-08-15. Built-in session icons are now the
+one-colour marks in `Assets/SessionTreeIcons`: the device glyphs (server, router, switch,
+firewall, wireless) and every brand in `SessionIcons.Brands`, listed together as
+`SessionIcons.TreeIcons`. The tree still draws their PNGs; lists and pickers draw their SVGs
+sharp in the theme's colour through `BrandIconImages`. The coloured badges in
+`Assets/SessionIcons` are gone. Every existing session icon key is still built in (a test
+pins them), so saved sessions keep their icons.
+
+- One picker, `Controls/IconPicker`: a filter over icons in titled sections, Enter for the
+  best match. The workspace icon dialog uses it, and so do the session and local profile
+  editors, each in its own Icon tab instead of a dropdown on the Appearance tab (the colour
+  tag stays there). In a session editor Enter only picks; it does not save the session.
+- The session picker offers Auto-detect (null, so the first connect may suggest an icon; for
+  a local shell, the default terminal glyph) and No icon, then Devices and the brand groups,
+  then the user's own files from the icons folder under Your icons, shown as they are. A
+  saved key whose file is missing still round-trips.
+- Sessions can't pick the workspace's general glyph icons (desktop, lock, chart and so on):
+  the tree draws session icons from image files, and those are font glyphs and paths.
+- The shown workspace is the selection of the rail's ListViews (Home's and the workspaces'),
+  so ListView draws its own accent pill and selected background: platform motion, theming
+  and High Contrast, with nothing hand-animated. It measures the same as the tool rail's
+  NavigationView pill (3 x 16 px, same place); ListView's pill fades in on the new item
+  instead of sliding, and its corners are 1.5 against 2. A hand-built copy of the tool pill
+  was tried first and moved differently from it. Arrow keys move focus, not the selection
+  (SingleSelectionFollowsFocus off), and the code sets the selection from the shown
+  workspace, so a click on a workspace open in another window leaves it where it was.
+- The item style must be BasedOn DefaultListViewItemStyle: a style without it replaces
+  WinUI's modern ListViewItem template with an older one that has no selection pill.
+- A workspace open in the background keeps a neutral marker of the same pill shape at half
+  height; it is not a ListView concept.

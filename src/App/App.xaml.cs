@@ -52,6 +52,7 @@ public partial class App : Application
     private static string StorePath(string fileName, string defaultPath) =>
         Program.StorePath(fileName, defaultPath);
     public static Resesh.App.Icons.SessionIconCatalog Icons { get; } = new();
+    public static Resesh.App.Icons.BrandIconImages Brands { get; } = new();
 
     /// <summary>Built-in local profiles whose shell is installed right now (set once at
     /// launch by discovery). Built-ins outside this set are hidden, not deleted.</summary>
@@ -365,6 +366,31 @@ public partial class App : Application
         RefreshWindowTitles();
     }
 
+    /// <summary>Every window's rail shows which workspaces the others hold, so a workspace
+    /// opening or closing anywhere refreshes them all.</summary>
+    internal static void RefreshWorkspaceRails()
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.RefreshWorkspaceMenu();
+    }
+
+    /// <summary>The window holding a workspace, if any. A workspace is open in one window at
+    /// most, so its connections are never opened twice.</summary>
+    internal static MainWindow? WindowWithWorkspace(Guid workspaceId, MainWindow? except) =>
+        Current is App app
+            ? app._windows.FirstOrDefault(window => !ReferenceEquals(window, except) && window.IsWorkspaceOpen(workspaceId))
+            : null;
+
+    internal static void DiscardWorkspaceInAllWindows(Guid workspaceId)
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.DiscardWorkspace(workspaceId);
+    }
+
     internal static void SetTabContentDropTargetsVisible(bool visible)
     {
         if (Current is not App app)
@@ -390,6 +416,7 @@ public partial class App : Application
         {
             _windows.Remove(window);
             RefreshWindowTitles();
+            RefreshWorkspaceRails(); // its workspaces are no longer open elsewhere
         };
         window.Activate();
         RefreshWindowTitles();

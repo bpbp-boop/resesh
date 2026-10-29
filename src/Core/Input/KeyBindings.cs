@@ -89,6 +89,7 @@ public static class ShortcutIds
     public const string FilterSessions = "view.filterSessions";
     public const string ToggleSessionsPane = "view.toggleSessionsPane";
     public const string FullScreen = "view.fullScreen";
+    public const string GoToWorkspace = "view.goToWorkspace";
 
     public const string NextTab = "tab.next";
     public const string PreviousTab = "tab.previous";
@@ -216,6 +217,10 @@ public static class KeyBindings
         Add(ShortcutIds.FilterSessions, App, "Filter Sessions", ShortcutScope.Window, [Letter(Ctrl, 'F')],
             "Outside the terminal. In the terminal, Ctrl+F goes to the shell");
         Add(ShortcutIds.FullScreen, App, "Full Screen", ShortcutScope.App, [Chord(KeyModifiers.None, VirtualKeys.F11, "F11")]);
+        Add(ShortcutIds.GoToWorkspace, App, "Go to Workspace 1–9", ShortcutScope.App,
+            [.. Enumerable.Range(1, 9).Select(n => Chord(CtrlShift, '0' + n, n.ToString()))],
+            "In rail order: 1 is Home. Without saved workspaces the key goes to the shell",
+            display: "Ctrl+Shift+1 … Ctrl+Shift+9");
 
         const string Tabs = TabsCategory;
         Add(ShortcutIds.NextTab, Tabs, "Next Tab", ShortcutScope.App, [Chord(Ctrl, VirtualKeys.Tab, "Tab")]);

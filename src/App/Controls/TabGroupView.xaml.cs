@@ -697,7 +697,7 @@ public sealed partial class TabGroupView : UserControl
         if (_terminalVisibilityDeferred)
             return;
         var selected = Group.SelectedTab?.View;
-        var windowHidden = _host.IsWindowHidden;
+        var windowHidden = _host.IsWindowHidden || _isParked;
         foreach (var child in TerminalHost.Children)
         {
             var shown = ReferenceEquals(child, selected);
@@ -905,8 +905,26 @@ public sealed partial class TabGroupView : UserControl
         QueueTabDividerRefresh();
     }
 
+    private bool _isParked;
+
+    /// <summary>The group belongs to a workspace in the background: out of the visual tree,
+    /// its terminals connected but not drawing, and never taking focus.</summary>
+    public bool IsParked
+    {
+        get => _isParked;
+        set
+        {
+            if (_isParked == value)
+                return;
+            _isParked = value;
+            SyncTerminalVisibility();
+        }
+    }
+
     private void FocusTerminal(TabViewModel? tab)
     {
+        if (_isParked)
+            return;
         if (tab?.View is Terminal.TerminalTabView view)
             DispatcherQueue.TryEnqueue(view.FocusTerminal);
     }

@@ -28,7 +28,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private readonly Dictionary<TabGroupViewModel, TabGroupView> _groupViews = [];
     private SplitLayout<TabGroupViewModel> _groupLayout;
-    private Guid? _workspaceId;
     private bool _closeConfirmed;
     private bool _closePromptOpen;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
@@ -94,6 +93,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         // Lets the icon catalog rasterize at true device pixels (XamlRoot is null until
         // the content loads; the catalog falls back to scale 1 and re-renders on demand).
         App.Icons.ScaleProvider = () => Root.XamlRoot?.RasterizationScale ?? 1.0;
+        App.Brands.ScaleProvider = () => Root.XamlRoot?.RasterizationScale ?? 1.0;
         AttachGroupView(ViewModel.Groups[0]);
         RebuildGroupLayout();
         ViewModel.TreeRebuilt += () =>
@@ -125,6 +125,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         ApplySettingsToApp();
         RegisterAccelerators();
         InitializeSessionsRail();
+        InitializeWorkspaceRail();
         RefreshWorkspaceMenu();
         _uiSettings.ColorValuesChanged += SystemColorsChanged;
         AppWindow.Closing += AppWindow_Closing;
@@ -133,7 +134,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             _uiSettings.ColorValuesChanged -= SystemColorsChanged;
             Resesh.Core.Backend.CleanupActions.Run(App.ReportRecoverableError,
                 SaveTreePaneWidth,
-                () => WorkspaceOperations.SaveLastLayout(),
+                SaveWorkspacesOnClose,
                 ViewModel.CloseAllTabs);
         };
     }
@@ -146,16 +147,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             return;
         }
 
-        var workspaceName = _workspaceId is { } workspaceId
+        var workspaceName = ShownWorkspaceId is { } workspaceId
             ? App.Workspaces.Workspaces.FirstOrDefault(workspace => workspace.Id == workspaceId)?.Name
             : null;
         Title = workspaceName ?? ViewModel.ActiveTab?.Session.Name ?? "resesh";
-    }
-
-    private void SetWorkspaceContext(Guid? workspaceId)
-    {
-        _workspaceId = workspaceId;
-        App.RefreshWindowTitles();
     }
 
     private void SystemColorsChanged(UISettings sender, object args)
@@ -215,6 +210,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     private TabGroupView AttachGroupView(TabGroupViewModel group)
     {
         var view = new TabGroupView(group, this);
+        group.Tabs.CollectionChanged += (_, _) => QueueWorkspaceRailRefresh();
         // The initial app-wide theme pass has already run when a user creates a split.
         // Apply the live palette now so the new strip does not start with Fluent defaults.
         view.ApplyTheme(_themePalette);
@@ -297,6 +293,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
                 return SelectTab(group, TabNavigation.GoTo(chord + 1, group.Tabs.Count));
             case ShortcutIds.LastTab:
                 return SelectTab(group, TabNavigation.GoTo(9, group.Tabs.Count));
+            case ShortcutIds.GoToWorkspace:
+                return GoToWorkspaceAt(chord + 1);
             case ShortcutIds.FocusGroupLeft:
                 return tab is not null && FocusNeighborGroup(group, NavigationDirection.Left);
             case ShortcutIds.FocusGroupRight:
@@ -1134,7 +1132,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     private void OnCommandCompletion(TabViewModel tab, Resesh.Core.Backend.CommandCompletion completion)
     {
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        if (Interop.WindowAlerts.IsForeground(hwnd) && tab.IsActive && !tab.IsLocked
+        if (Interop.WindowAlerts.IsForeground(hwnd) && tab.IsOnScreen && !tab.IsLocked
             && tab.View is TerminalTabView { IsRewinding: false })
             return; // The tab's completion tooltip is enough when its output is visible.
 
@@ -1180,7 +1178,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         if (!settings.ShowAgentIcons)
             return;
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        if (Interop.WindowAlerts.IsForeground(hwnd) && tab.IsActive)
+        if (Interop.WindowAlerts.IsForeground(hwnd) && tab.IsOnScreen)
             return;
         if (!Interop.WindowAlerts.IsForeground(hwnd))
         {
@@ -1214,10 +1212,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     // ---- settings ----
 
     /// <summary>Opens Settings in this window's Settings tab (or reuses the one already
-    /// open) at the given field.</summary>
+    /// open, bringing it to the shown workspace) at the given field.</summary>
     private Task ShowSettingsAsync(GlobalSettingsTarget target)
     {
-        var tab = OpenAppPage(AppPage.Settings, createdTab => CreateSettingsPage(createdTab));
+        var tab = OpenAppPage(AppPage.Settings, createdTab => CreateSettingsPage(createdTab), followShownWorkspace: true);
         if (tab.View is SettingsPage page)
             page.Navigate(target);
         return Task.CompletedTask;
@@ -1388,6 +1386,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         foreach (var groupView in _groupViews.Values)
             groupView.ApplyTheme(palette);
         ApplyTitleBarButtonColors(theme); // caption buttons don't follow XAML theming
+        foreach (var item in RailHome.Concat(RailWorkspaces))
+            item.NotifyThemeChanged(); // brand marks are drawn in the rail's colour
         foreach (var tab in ViewModel.AllTabs)
         {
             if (tab.View is TerminalTabView view)

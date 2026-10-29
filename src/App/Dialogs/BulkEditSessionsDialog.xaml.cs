@@ -77,12 +77,10 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
         ColorBox.SelectedIndex = 0;
 
         var icons = new List<Choice> { NoChange };
-        icons.AddRange(App.Icons.PickerEntries().Select(icon => new Choice
-        {
-            Change = true,
-            Value = icon.Key,
-            Label = icon.Key is null ? "Auto-detect" : icon.Name,
-        }));
+        icons.Add(new Choice { Change = true, Value = null, Label = "Auto-detect" });
+        icons.Add(new Choice { Change = true, Value = SessionIcons.None, Label = "No icon" });
+        icons.AddRange(SessionIcons.BuiltIn.Select(icon => new Choice { Change = true, Value = icon.Key, Label = icon.Name }));
+        icons.AddRange(App.Icons.CustomIcons().Select(icon => new Choice { Change = true, Value = icon.Key, Label = icon.Name }));
         IconBox.ItemsSource = icons;
         IconBox.SelectedIndex = 0;
 

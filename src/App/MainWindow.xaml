@@ -13,6 +13,145 @@
         KeyboardAcceleratorPlacementMode="Hidden"
         Background="{StaticResource SessionShellBrush}">
         <Grid.Resources>
+            <!-- A workspace rail button: a short marker when open in the background (the shown
+                 one is the list's native selection pill), its icon or initials, drawn bare like the tool icons above, the alert
+                 dot for a workspace in the background, and a mark when another window has it.
+                 Hovering shows WorkspaceHoverCard at once instead of a delayed tooltip. -->
+            <DataTemplate x:Key="WorkspaceRailItemTemplate" x:DataType="vm:WorkspaceRailItemViewModel">
+                <Grid
+                    Width="44"
+                    Height="40"
+                    Background="Transparent"
+                    PointerEntered="WorkspaceRailItem_PointerEntered"
+                    PointerExited="WorkspaceRailItem_PointerExited"
+                    PointerCanceled="WorkspaceRailItem_PointerExited"
+                    AutomationProperties.Name="{x:Bind AutomationName, Mode=OneWay}"
+                    AutomationProperties.AutomationId="{x:Bind AutomationId}">
+                    <!-- The shown workspace is the list's selection, which draws ListView's own
+                         accent pill. A workspace open in the background shows a neutral pill of
+                         the same shape at half height, in the same place, scaled so it animates. -->
+                    <Rectangle
+                        Width="{ThemeResource NavigationViewSelectionIndicatorWidth}"
+                        Height="{ThemeResource NavigationViewSelectionIndicatorHeight}"
+                        Margin="4,0,0,0"
+                        RadiusX="{ThemeResource NavigationViewSelectionIndicatorRadius}"
+                        RadiusY="{ThemeResource NavigationViewSelectionIndicatorRadius}"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        CenterPoint="1.5,8,0"
+                        Scale="{x:Bind local:PresentationValues.RailMarkerScale(MarkerHeight), Mode=OneWay}"
+                        Fill="{StaticResource SessionTreeForegroundBrush}"
+>
+                        <Rectangle.ScaleTransition>
+                            <Vector3Transition Duration="{x:Bind local:PresentationValues.RailMarkerDuration}" />
+                        </Rectangle.ScaleTransition>
+                    </Rectangle>
+                    <Grid
+                        Width="30"
+                        Height="30"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Opacity="{x:Bind TileOpacity, Mode=OneWay}">
+                        <!-- The icon, with the initials small under it when the workspace asks. -->
+                        <StackPanel
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="1"
+                            Visibility="{x:Bind local:PresentationValues.Visible(HasIcon), Mode=OneWay}">
+                            <Grid Width="16" Height="16" HorizontalAlignment="Center">
+                                <FontIcon
+                                    Glyph="{x:Bind Glyph, Mode=OneWay}"
+                                    FontSize="16"
+                                    Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                                <Path
+                                    Width="16"
+                                    Height="16"
+                                    Data="{x:Bind local:PresentationValues.IconPathGeometry(IconPath), Mode=OneWay}"
+                                    Stroke="{StaticResource SessionTreeForegroundBrush}"
+                                    StrokeThickness="1"
+                                    StrokeLineJoin="Round" />
+                                <Image
+                                    Width="16"
+                                    Height="16"
+                                    Source="{x:Bind local:PresentationValues.WorkspaceBrandImage(BrandKey), Mode=OneWay}" />
+                            </Grid>
+                            <TextBlock
+                                Text="{x:Bind Caption, Mode=OneWay}"
+                                FontSize="10"
+                                FontWeight="SemiBold"
+                                LineHeight="11"
+                                LineStackingStrategy="BlockLineHeight"
+                                HorizontalAlignment="Center"
+                                Foreground="{StaticResource SessionTreeForegroundBrush}"
+                                Visibility="{x:Bind local:PresentationValues.Visible(HasCaption), Mode=OneWay}" />
+                        </StackPanel>
+                        <TextBlock
+                            Text="{x:Bind Monogram, Mode=OneWay}"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Foreground="{StaticResource SessionTreeForegroundBrush}"
+                            Visibility="{x:Bind local:PresentationValues.Collapsed(HasIcon), Mode=OneWay}" />
+                    </Grid>
+                    <Border
+                        Width="{x:Bind local:PresentationValues.WorkspaceAlertSize(Alert), Mode=OneWay}"
+                        Height="{x:Bind local:PresentationValues.WorkspaceAlertSize(Alert), Mode=OneWay}"
+                        Margin="0,2,3,0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Top"
+                        CornerRadius="7"
+                        BorderThickness="1"
+                        BorderBrush="{StaticResource SessionShellBrush}"
+                        Visibility="{x:Bind local:PresentationValues.Visible(HasAlert), Mode=OneWay}">
+                        <Border.Background>
+                            <SolidColorBrush Color="{x:Bind local:PresentationValues.WorkspaceAlertColor(Alert), Mode=OneWay}" />
+                        </Border.Background>
+                        <Viewbox Stretch="Uniform">
+                            <Path
+                                Width="10"
+                                Height="10"
+                                Data="{x:Bind local:PresentationValues.WorkspaceAlertSymbol(Alert), Mode=OneWay}"
+                                Stroke="{StaticResource SessionBadgeGlyphBrush}"
+                                StrokeThickness="1.6"
+                                StrokeStartLineCap="Round"
+                                StrokeEndLineCap="Round"
+                                StrokeLineJoin="Round" />
+                        </Viewbox>
+                    </Border>
+                    <Border
+                        Width="14"
+                        Height="14"
+                        Margin="0,0,3,2"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Bottom"
+                        CornerRadius="7"
+                        Background="{StaticResource SessionShellBrush}"
+                        Visibility="{x:Bind local:PresentationValues.Visible(IsOpenElsewhere), Mode=OneWay}">
+                        <FontIcon
+                            Glyph="&#xE8A7;"
+                            FontSize="9"
+                            Foreground="{StaticResource SessionTreeForegroundBrush}" />
+                    </Border>
+                    <!-- Unsaved changes: a small dot in the corner, like an unsaved document. -->
+                    <Ellipse
+                        Width="6"
+                        Height="6"
+                        Margin="0,0,6,6"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Bottom"
+                        Fill="{StaticResource SessionTreeForegroundBrush}"
+                        Visibility="{x:Bind local:PresentationValues.Visible(ShowsUnsavedMark), Mode=OneWay}" />
+                </Grid>
+            </DataTemplate>
+            <Style x:Key="WorkspaceRailItemStyle" TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            </Style>
             <!-- A single container template keeps recycled folders and sessions consistent. -->
             <DataTemplate x:Key="TreeNodeTemplate" x:DataType="vm:TreeNodeViewModel">
                 <TreeViewItem
@@ -324,15 +463,6 @@
                     ToolTipService.ToolTip="Keep window on top">
                     <FontIcon Glyph="&#xE718;" FontSize="14" />
                 </ToggleButton>
-                <Button
-                    x:Name="SettingsButton"
-                    AutomationProperties.Name="Settings"
-                    Command="{x:Bind ViewModel.OpenSettingsCommand}"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    ToolTipService.ToolTip="Settings">
-                    <FontIcon Glyph="&#xE713;" FontSize="14" />
-                </Button>
             </StackPanel>
         </Grid>
 
@@ -376,7 +506,7 @@
                 Background="{StaticResource SessionShellBrush}"
                 BorderBrush="{StaticResource SessionChromeFrameBrush}"
                 BorderThickness="0,0,1,0">
-                <Grid RowDefinitions="Auto,Auto,*">
+                <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
                     <Button
                         x:Name="SessionsPaneToggleButton"
                         Width="44"
@@ -385,7 +515,6 @@
                         Background="Transparent"
                         BorderThickness="0"
                         Command="{x:Bind ViewModel.ToggleSessionsPaneCommand}"
-                        ToolTipService.ToolTip="Show or hide the sessions pane"
                         AutomationProperties.Name="Show or hide the sessions pane">
                         <FontIcon Glyph="&#xE700;" FontSize="16" />
                     </Button>
@@ -400,6 +529,7 @@
                         Width="44"
                         Margin="0,4,0,0"
                         HorizontalAlignment="Left"
+                        VerticalAlignment="Top"
                         PaneDisplayMode="LeftCompact"
                         CompactPaneLength="44"
                         OpenPaneLength="44"
@@ -416,7 +546,6 @@
                                 x:Name="SessionsRailItem"
                                 Content="Sessions"
                                 Tag="sessions"
-                                ToolTipService.ToolTip="Sessions"
                                 AutomationProperties.Name="Sessions">
                                 <NavigationViewItem.Icon>
                                     <FontIcon Glyph="&#xE8B7;" FontSize="16" />
@@ -426,7 +555,6 @@
                                 x:Name="WorkspacesRailItem"
                                 Content="Workspaces"
                                 Tag="workspaces"
-                                ToolTipService.ToolTip="Workspaces"
                                 AutomationProperties.Name="Workspaces">
                                 <NavigationViewItem.Icon>
                                     <ImageIcon>
@@ -440,7 +568,6 @@
                                 x:Name="RecentRailItem"
                                 Content="Recent sessions"
                                 Tag="recent"
-                                ToolTipService.ToolTip="Recent sessions"
                                 AutomationProperties.Name="Recent sessions">
                                 <NavigationViewItem.Icon>
                                     <FontIcon Glyph="&#xE823;" FontSize="16" />
@@ -450,7 +577,6 @@
                                 x:Name="RecordingsRailItem"
                                 Content="Recordings"
                                 Tag="recordings"
-                                ToolTipService.ToolTip="Recordings"
                                 AutomationProperties.Name="Recordings">
                                 <NavigationViewItem.Icon>
                                     <FontIcon Glyph="&#xE8B2;" FontSize="16" />
@@ -458,6 +584,87 @@
                             </NavigationViewItem>
                         </NavigationView.MenuItems>
                     </NavigationView>
+
+                    <!-- Workspaces. These switch what the tab area shows, not which pane is
+                         beside it, so they live outside the NavigationView with a marker of
+                         their own. Home appears once a workspace exists; + is always there. -->
+                    <ScrollViewer
+                        Grid.Row="3"
+                        VerticalScrollBarVisibility="Hidden"
+                        HorizontalScrollMode="Disabled">
+                        <StackPanel Padding="0,0,0,8">
+                            <Rectangle
+                                x:Name="WorkspaceRailDivider"
+                                Height="1"
+                                Margin="8,6"
+                                Fill="{StaticResource SessionChromeFrameBrush}"
+                                Visibility="Collapsed" />
+                            <ListView
+                                x:Name="WorkspaceRailHomeList"
+                                ItemsSource="{x:Bind RailHome, Mode=OneWay}"
+                                ItemTemplate="{StaticResource WorkspaceRailItemTemplate}"
+                                ItemContainerStyle="{StaticResource WorkspaceRailItemStyle}"
+                                SelectionMode="Single"
+                                SingleSelectionFollowsFocus="False"
+                                IsItemClickEnabled="True"
+                                ItemClick="WorkspaceRail_ItemClick"
+                                ContextRequested="WorkspaceRail_ContextRequested"
+                                GotFocus="WorkspaceRail_GotFocus"
+                                LostFocus="WorkspaceRail_LostFocus"
+                                Visibility="Collapsed"
+                                AutomationProperties.Name="Home workspace" />
+                            <ListView
+                                x:Name="WorkspaceRailList"
+                                ItemsSource="{x:Bind RailWorkspaces, Mode=OneWay}"
+                                ItemTemplate="{StaticResource WorkspaceRailItemTemplate}"
+                                ItemContainerStyle="{StaticResource WorkspaceRailItemStyle}"
+                                SelectionMode="Single"
+                                SingleSelectionFollowsFocus="False"
+                                IsItemClickEnabled="True"
+                                CanDragItems="True"
+                                CanReorderItems="True"
+                                AllowDrop="True"
+                                ItemClick="WorkspaceRail_ItemClick"
+                                DragItemsStarting="WorkspaceRail_DragItemsStarting"
+                                DragItemsCompleted="WorkspaceRail_DragItemsCompleted"
+                                ContextRequested="WorkspaceRail_ContextRequested"
+                                GotFocus="WorkspaceRail_GotFocus"
+                                LostFocus="WorkspaceRail_LostFocus"
+                                AutomationProperties.Name="Workspaces" />
+                            <Button
+                                x:Name="NewWorkspaceRailButton"
+                                Width="44"
+                                Height="40"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Click="NewWorkspaceRailButton_Click"
+                                ToolTipService.ToolTip="New workspace"
+                                AutomationProperties.Name="New workspace"
+                                AutomationProperties.AutomationId="WorkspaceRail_New">
+                                <FontIcon
+                                    Glyph="&#xE710;"
+                                    FontSize="14"
+                                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+                            </Button>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <!-- Settings belongs to the app, not a pane or a workspace, so it sits apart at
+                         the foot of the rail and opens the Settings tab in the shown workspace. -->
+                    <Button
+                        x:Name="RailSettingsButton"
+                        Grid.Row="4"
+                        Width="44"
+                        Height="44"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Command="{x:Bind ViewModel.OpenSettingsCommand}"
+                        AutomationProperties.Name="Settings"
+                        AutomationProperties.AutomationId="RailSettings">
+                        <FontIcon Glyph="&#xE713;" FontSize="16" />
+                    </Button>
                 </Grid>
             </Border>
 
@@ -730,7 +937,7 @@
                                     <Button.Flyout>
                                         <MenuFlyout>
                                             <MenuFlyoutItem
-                                                Text="Open"
+                                                Text="Show"
                                                 Tag="open"
                                                 CommandParameter="{x:Bind}"
                                                 Click="WorkspaceRowMenu_Click" />
@@ -740,7 +947,7 @@
                                                 CommandParameter="{x:Bind}"
                                                 Click="WorkspaceRowMenu_Click" />
                                             <MenuFlyoutItem
-                                                Text="Open additively"
+                                                Text="Add to current layout"
                                                 Tag="additive"
                                                 CommandParameter="{x:Bind}"
                                                 Click="WorkspaceRowMenu_Click" />
@@ -748,6 +955,11 @@
                                             <MenuFlyoutItem
                                                 Text="Update from current layout…"
                                                 Tag="update"
+                                                CommandParameter="{x:Bind}"
+                                                Click="WorkspaceRowMenu_Click" />
+                                            <MenuFlyoutItem
+                                                Text="Icon…"
+                                                Tag="customize"
                                                 CommandParameter="{x:Bind}"
                                                 Click="WorkspaceRowMenu_Click" />
                                             <MenuFlyoutItem
@@ -1004,5 +1216,47 @@
             x:Name="CommandPalette"
             Grid.RowSpan="3"
             Canvas.ZIndex="1000" />
+
+        <!-- A workspace rail button's name and state, shown beside it the moment the pointer
+             (or keyboard focus) reaches it. Code fills and places it; it never takes input. -->
+        <Popup
+            x:Name="WorkspaceHoverCard"
+            Grid.RowSpan="3"
+            IsHitTestVisible="False"
+            ShouldConstrainToRootBounds="True">
+            <Border
+                x:Name="WorkspaceHoverCardBody"
+                MinWidth="160"
+                MaxWidth="300"
+                Padding="12,8"
+                IsHitTestVisible="False"
+                CornerRadius="{ThemeResource OverlayCornerRadius}"
+                BorderThickness="1"
+                Background="{ThemeResource FlyoutPresenterBackground}"
+                BorderBrush="{ThemeResource FlyoutBorderThemeBrush}">
+                <StackPanel Spacing="2">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                        <TextBlock
+                            x:Name="HoverCardName"
+                            TextTrimming="CharacterEllipsis"
+                            Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                        <TextBlock
+                            x:Name="HoverCardShortcut"
+                            Grid.Column="1"
+                            VerticalAlignment="Center"
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </Grid>
+                    <TextBlock
+                        x:Name="HoverCardStatus"
+                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel x:Name="HoverCardAlert" Orientation="Horizontal" Spacing="6" Margin="0,2,0,0">
+                        <Ellipse x:Name="HoverCardAlertDot" Width="8" Height="8" VerticalAlignment="Center" />
+                        <TextBlock x:Name="HoverCardAlertText" Style="{ThemeResource CaptionTextBlockStyle}" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Popup>
     </Grid>
 </Window>

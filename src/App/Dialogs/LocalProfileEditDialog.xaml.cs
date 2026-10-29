@@ -24,7 +24,8 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
     private readonly Session? _existing;
 
     /// <summary>Selected icon key: null = the default local glyph, SessionIcons.None = explicitly none.</summary>
-    private string? _selectedIcon;
+    /// <summary>Selected icon key: null = the default terminal glyph, SessionIcons.None = none.</summary>
+    private string? SelectedIcon => IconPicker.Selected?.Key;
 
     /// <summary>The saved profile, or null if the dialog was cancelled.</summary>
     public Session? Result { get; private set; }
@@ -116,12 +117,13 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
     private void SectionBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
         // Fires during InitializeComponent for the initially-selected item, before the panels exist.
-        if (ShellPanel is null || AppearancePanel is null || NotesBox is null)
+        if (ShellPanel is null || AppearancePanel is null || IconPanel is null || NotesBox is null)
             return;
 
         var selected = sender.SelectedItem;
         ShellPanel.Visibility = selected == ShellSection ? Visibility.Visible : Visibility.Collapsed;
         AppearancePanel.Visibility = selected == AppearanceSection ? Visibility.Visible : Visibility.Collapsed;
+        IconPanel.Visibility = selected == IconSection ? Visibility.Visible : Visibility.Collapsed;
         NotesBox.Visibility = selected == NotesSection ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -129,34 +131,10 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
 
     private void PopulateIconPicker(string? currentKey)
     {
-        var entries = App.Icons.PickerEntries();
-        entries[0] = entries[0] with { Name = DefaultIconName }; // "Auto-detect" is SSH-only
-        // A key whose file has gone missing (deleted custom icon) still round-trips.
-        if (!string.IsNullOrEmpty(currentKey)
-            && !entries.Any(e => string.Equals(e.Key, currentKey, StringComparison.OrdinalIgnoreCase)))
-        {
-            entries.Add(new Icons.IconChoice(currentKey, $"{currentKey} (missing)", null, ""));
-        }
-        IconGrid.ItemsSource = entries;
-        _selectedIcon = string.IsNullOrEmpty(currentKey) ? null : currentKey;
-        UpdateIconButton(entries.First(e => string.Equals(e.Key, _selectedIcon, StringComparison.OrdinalIgnoreCase)));
-    }
-
-    private void IconGrid_ItemClick(object sender, ItemClickEventArgs e)
-    {
-        var choice = (Icons.IconChoice)e.ClickedItem;
-        _selectedIcon = choice.Key;
-        UpdateIconButton(choice);
-        IconFlyout.Hide();
-    }
-
-    private void UpdateIconButton(Icons.IconChoice choice)
-    {
-        // The button shows the icon at 16, not the picker-tile 24 — fetch its own size.
-        var image = App.Icons.GetImage(choice.Key, Icons.SessionIconCatalog.ListIconSize);
-        IconButtonImage.Source = image;
-        IconButtonImage.Visibility = image is null ? Visibility.Collapsed : Visibility.Visible;
-        IconButtonText.Text = choice.Name;
+        // "Auto-detect" is SSH-only; a local shell without a choice shows the terminal glyph.
+        var choices = Icons.SessionIconChoices.Build(
+            currentKey, out var selected, unsetName: DefaultIconName, unsetText: "", unsetGlyph: "");
+        IconPicker.SetChoices(choices, selected);
     }
 
     private void Reset_Click(object sender, RoutedEventArgs e)
@@ -261,7 +239,7 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
                 Environment = environment.Count > 0 ? environment : null,
             },
             ColorTag = SessionEditDialog.ColorChoices[Math.Max(0, ColorBox.SelectedIndex)].Hex,
-            Icon = _selectedIcon,
+            Icon = SelectedIcon,
             Agent = _existing?.Agent,
             Notes = NotesBox.Text,
             Overrides = overrides.IsEmpty ? null : overrides,

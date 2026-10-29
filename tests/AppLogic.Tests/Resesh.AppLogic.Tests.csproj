@@ -31,5 +31,6 @@
     <Compile Include="../../src/App/ViewModels/TabGroupViewModel.cs" Link="ViewModels/TabGroupViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/TreeNodeViewModel.cs" Link="ViewModels/TreeNodeViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/ViewModelEnvironment.cs" Link="ViewModels/ViewModelEnvironment.cs" />
+    <Compile Include="../../src/App/ViewModels/WorkspaceRailItemViewModel.cs" Link="ViewModels/WorkspaceRailItemViewModel.cs" />
   </ItemGroup>
 </Project>

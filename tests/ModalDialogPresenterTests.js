@@ -43,15 +43,24 @@ test("every direct ContentDialog display uses the modal presenter", () => {
   assert.deepEqual(unguarded, []);
 });
 
-test("workspace replacement confirmation reaches the shared modal presenter", () => {
+test("showing a workspace keeps the current tabs, so it asks nothing", () => {
   const openWorkspace = windowCode.match(
-    /private async Task OpenWorkspaceAsync[\s\S]*?\n    }\r?\n\r?\n    private static void OpenWorkspaceInNewWindow/,
+    /private Task OpenWorkspaceAsync[\s\S]*?\n    }\r?\n/,
+  )?.[0] ?? "";
+
+  assert.match(openWorkspace, /ShowWorkspace\(workspace\.Id\)/);
+  assert.doesNotMatch(openWorkspace, /ConfirmAsync\(|Replace Current Layout/);
+});
+
+test("closing a workspace confirms through the shared modal presenter", () => {
+  const closeWorkspace = windowCode.match(
+    /private async Task CloseWorkspaceAsync[\s\S]*?\n    }\r?\n/,
   )?.[0] ?? "";
   const confirm = windowCode.match(/private Task<bool> ConfirmAsync\([\s\S]*?;\r?\n/)?.[0] ?? "";
   const sharedConfirm = read("Dialogs", "ConfirmDialog.xaml.cs");
 
-  assert.match(openWorkspace, /"Replace Current Layout\?"/);
-  assert.match(openWorkspace, /ConfirmAsync\(/);
+  assert.match(closeWorkspace, /"Close Workspace\?"/);
+  assert.match(closeWorkspace, /ConfirmAsync\(/);
   assert.match(confirm, /ConfirmDialog\.ConfirmAsync\(/);
   assert.match(sharedConfirm, /await this\.ShowModalAsync\(\)/);
 });

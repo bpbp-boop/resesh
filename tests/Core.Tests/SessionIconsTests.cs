@@ -21,22 +21,32 @@ public class SessionIconsTests
     }
 
     [Fact]
-    public void EveryBuiltInIconHasABundledAsset()
+    public void EveryBuiltInIconHasItsOneColourImageAndSvg()
     {
         var dir = FindSessionIconAssetDirectory();
-        foreach (var info in SessionIcons.BuiltIn)
+        Assert.Equal(SessionIcons.TreeIcons.Count, SessionIcons.BuiltIn.Count);
+        foreach (var icon in SessionIcons.TreeIcons)
         {
-            Assert.True(
-                File.Exists(Path.Combine(dir, info.Key + ".svg")) || File.Exists(Path.Combine(dir, info.Key + ".png")),
-                $"no bundled asset for built-in icon '{info.Key}'");
+            Assert.True(File.Exists(Path.Combine(dir, icon.File)), $"no image for built-in icon '{icon.Key}'");
+            Assert.True(File.Exists(Path.Combine(dir, Path.ChangeExtension(icon.File, ".svg"))), $"no SVG for built-in icon '{icon.Key}'");
         }
+    }
+
+    [Fact]
+    public void ExistingSessionIconKeysStayBuiltIn()
+    {
+        // Saved sessions use these keys; dropping the coloured badges must not orphan them.
+        foreach (var key in (string[])["linux", "proxmox", "debian", "ubuntu", "rhel", "centos", "fedora", "suse",
+                     "arch", "alpine", "freebsd", "openbsd", "windows", "macos", "cisco", "juniper", "arista",
+                     "nokia", "paloalto", "fortinet", "mikrotik", "vyos", "aruba", "router", "switch", "firewall", "server"])
+            Assert.True(SessionIcons.IsBuiltIn(key), key);
     }
 
     private static string FindSessionIconAssetDirectory()
     {
         for (var current = new DirectoryInfo(AppContext.BaseDirectory); current is not null; current = current.Parent)
         {
-            var candidate = Path.Combine(current.FullName, "src", "App", "Assets", "SessionIcons");
+            var candidate = Path.Combine(current.FullName, "src", "App", "Assets", "SessionTreeIcons");
             if (Directory.Exists(candidate))
                 return candidate;
         }

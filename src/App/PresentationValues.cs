@@ -19,6 +19,8 @@ public static class PresentationValues
 {
     public static Visibility Visible(bool value) => value ? Visibility.Visible : Visibility.Collapsed;
 
+    public static Visibility Collapsed(bool value) => Visible(!value);
+
     // Tab progress strip. WinUI's ProgressBar supplies the theme colours: accent, then
     // critical red for ShowError and caution amber for ShowPaused.
     public static Visibility ProgressVisibility(TerminalProgress progress) => Visible(progress.IsActive);
@@ -61,8 +63,12 @@ public static class PresentationValues
 
     public static Uri? TreeIconUri(string? key) => App.Icons.GetTreeUri(key);
 
+    /// <summary>A session's icon in a list: a built-in mark drawn one-colour in the pane's
+    /// colour, or a custom icon file as it is.</summary>
     public static ImageSource? SessionIcon(string? key) =>
-        App.Icons.GetImage(key, SessionIconCatalog.ListIconSize);
+        key is not null && SessionIcons.IsBuiltIn(key)
+            ? App.Brands.Get(key, SessionIconCatalog.ListIconSize, ((SolidColorBrush)ResourceBrush("SessionTreeForegroundBrush")).Color)
+            : App.Icons.GetImage(key, SessionIconCatalog.ListIconSize);
 
     public static ImageSource? AgentIcon(string? key) =>
         App.Icons.GetAgentImage(key, SessionIconCatalog.ListIconSize);
@@ -196,6 +202,51 @@ public static class PresentationValues
     /// saturated color on screen ask for a thicker bar so it reads as a marker.</summary>
     public static double FocusedTabAccentThickness(string appTheme) =>
         ThemeVisualPalette.For(appTheme).AccentBarThickness;
+
+    // ---- workspace rail buttons ----
+
+    /// <summary>A workspace's brand mark for the rail: drawn sharp at 16 px in the rail's
+    /// foreground colour; null for "".</summary>
+    public static ImageSource? WorkspaceBrandImage(string brandKey) =>
+        App.Brands.Get(brandKey, 16, ((SolidColorBrush)ResourceBrush("SessionTreeForegroundBrush")).Color);
+
+    /// <summary>A workspace icon drawn as a path; null for "" so nothing is drawn.</summary>
+    public static Geometry? IconPathGeometry(string path) =>
+        path.Length == 0
+            ? null
+            : (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), path);
+
+    // NavigationViewSelectionIndicatorHeight: the marker is the native selection pill's shape.
+    private const double RailMarkerFullHeight = 16;
+    private static readonly Windows.UI.ViewManagement.UISettings MotionSettings = new();
+
+    /// <summary>The workspace marker is drawn at full height and scaled, so a change of state
+    /// animates through its ScaleTransition instead of snapping.</summary>
+    public static System.Numerics.Vector3 RailMarkerScale(double height) =>
+        new(1, (float)(height / RailMarkerFullHeight), 1);
+
+    /// <summary>Matches the workspace slide; zero when Windows animation effects are off.</summary>
+    public static TimeSpan RailMarkerDuration =>
+        MotionSettings.AnimationsEnabled ? TimeSpan.FromMilliseconds(170) : TimeSpan.Zero;
+
+    /// <summary>The alert dot's colour: amber when an agent waits, red for a dropped
+    /// session, the accent for unseen output — the tab strip's own meanings.</summary>
+    public static Windows.UI.Color WorkspaceAlertColor(WorkspaceAlert alert) => alert switch
+    {
+        WorkspaceAlert.Attention => AgentBadgeColor(AgentAttention.NeedsApproval),
+        WorkspaceAlert.Disconnected => Rgb(0xE74856),
+        _ => Rgb(0x0078D4),
+    };
+
+    public static double WorkspaceAlertSize(WorkspaceAlert alert) => alert == WorkspaceAlert.Activity ? 8 : 12;
+
+    /// <summary>A symbol on the urgent alerts, so they read without telling the colours apart.</summary>
+    public static Geometry? WorkspaceAlertSymbol(WorkspaceAlert alert) => alert switch
+    {
+        WorkspaceAlert.Attention => AgentBadgeSymbol(AgentAttention.NeedsApproval),
+        WorkspaceAlert.Disconnected => AgentBadgeSymbol(AgentAttention.Failed),
+        _ => null,
+    };
 
     private static Brush ResourceBrush(string key) =>
         (Brush)Application.Current.Resources[key];

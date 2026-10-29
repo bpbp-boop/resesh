@@ -32,6 +32,13 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>All tab groups in visual traversal order.</summary>
     public ObservableCollection<TabGroupViewModel> Groups { get; } = [];
 
+    /// <summary>Tab groups of the window's other open workspaces. Their tabs stay connected
+    /// and belong to this window, but they are not laid out until their workspace is shown.</summary>
+    public List<TabGroupViewModel> BackgroundGroups { get; } = [];
+
+    /// <summary>Raised when a property of any tab in the window changes.</summary>
+    public event Action<TabViewModel, string?>? TabChanged;
+
     public MainViewModel(
         SessionStore store,
         ICredentialService credentials,
@@ -179,7 +186,13 @@ public sealed partial class MainViewModel : ObservableObject
 
     // ---- Tabs / groups ----
 
-    public IEnumerable<TabViewModel> AllTabs => Groups.SelectMany(g => g.Tabs);
+    /// <summary>Every tab the window owns, in every open workspace.</summary>
+    public IEnumerable<TabViewModel> AllTabs => Groups.Concat(BackgroundGroups).SelectMany(g => g.Tabs);
+
+    /// <summary>The tabs of the workspace the window is showing.</summary>
+    public IEnumerable<TabViewModel> ShownTabs => Groups.SelectMany(g => g.Tabs);
+
+    public bool IsBackgroundGroup(TabGroupViewModel group) => BackgroundGroups.Contains(group);
 
     /// <summary>This window's tabs as one indicator, for its taskbar button.</summary>
     public TerminalProgress Progress => TerminalProgress.Combine(AllTabs.Select(tab => tab.Progress));
@@ -188,7 +201,7 @@ public sealed partial class MainViewModel : ObservableObject
     public TabViewModel? FindAppPage(AppPage page) => AllTabs.FirstOrDefault(tab => tab.Page == page);
 
     public TabGroupViewModel GroupOf(TabViewModel tab) =>
-        Groups.First(g => g.Tabs.Contains(tab));
+        Groups.Concat(BackgroundGroups).First(g => g.Tabs.Contains(tab));
 
     /// <summary>Creates a tab in the given group (or the focused one) and selects it.</summary>
     public TabViewModel Connect(Session session, TabGroupViewModel? group = null, TabViewModel? insertAfter = null)
@@ -243,6 +256,8 @@ public sealed partial class MainViewModel : ObservableObject
         {
             OnPropertyChanged(nameof(Progress));
         }
+        if (sender is TabViewModel changed)
+            TabChanged?.Invoke(changed, e.PropertyName);
 
         // Tab commands target the active tab by default, so its state decides what they allow.
         if (e.PropertyName is nameof(TabViewModel.State) or nameof(TabViewModel.IsLocked)
@@ -262,7 +277,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     public void CloseAllTabs()
     {
-        foreach (var group in Groups)
+        foreach (var group in Groups.Concat(BackgroundGroups))
         {
             foreach (var tab in group.Tabs.ToList())
             {
