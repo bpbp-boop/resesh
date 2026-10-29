@@ -1491,8 +1491,11 @@ short lines with a full scrollback libghostty-vt parses ~5 MB/s, so a 32 KB read
 for ~6 ms, and the UI thread's frame read and line-text reads (the overview index takes the lock
 once per line) queued behind it: 7 fps and 450 ms stalls at full screen. The shim now parses in
 4 KB slices. SRW locks let the releasing thread take the lock straight back, so every other
-entry point counts itself in `waiting` while blocked and the writer `SwitchToThread`s (bounded)
-until that count drops. Measured with `RESESH_FRAME_STATS` (tools/terminal-bench/RESULTS.md).
+entry point counts itself in `waiting` while blocked and the writer spins (at most 100 µs) until
+that count drops. Not `SwitchToThread`: the first version yielded that way, and once a background
+reader waited for the lock often, the writer kept handing its whole time slice (~15 ms) to other
+threads and SSH floods were capped at exactly 25 MB/s (384 KB per ~16 ms). Measured with
+`RESESH_FRAME_STATS` (tools/terminal-bench/RESULTS.md).
 
 ## 2026-10-29 - Draw terminals on their own render threads
 
@@ -1515,3 +1518,16 @@ flood that was most of every frame interval, so input waited behind output. Piec
   because the render thread cannot read dependency properties.
 - Link hover builds row text with its own `Highlighter`, since the render thread owns the
   shared one's buffers.
+
+## 2026-10-29 - Index the ruler's highlight lane off the UI thread
+
+`AnnotationWorker` runs line times and the overview index on the thread pool, one pass at a time,
+over its own `TerminalCommandBuffer` (its own line cache and markers, so nothing is shared with
+the UI thread's buffer). Each of their terminal reads can wait for the parser; on the UI thread a
+full-screen flood of short lines made a pass take 17–23 ms even with batched reads. The UI's
+annotation pass now only asks for a worker pass and paints the ruler from the worker's last
+ticks; the worker posts a ruler repaint when they change. Passes keep the UI's old pace (100 ms
+between scrollback slices): more often, they compete with the parser for the lock. Resets
+(rules, reflow) are flags the next pass reads, so the UI never waits for the worker, except
+`Dispose`, which must not free the terminal under a running pass, and ruler tooltips, which ask
+for a line's time with a 5 ms timeout.

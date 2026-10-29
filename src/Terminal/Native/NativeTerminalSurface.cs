@@ -74,8 +74,10 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private sealed record PlaybackFrame(double Time, int Index, int Columns, int Rows, byte[] State);
     private sealed record PlaybackModel(TerminalTimedReplayEvent[] Events, List<PlaybackFrame> Frames);
-    private OverviewIndex? _overview;
-    private LineTimes? _lineTimes;
+    private AnnotationWorker? _annotations; // line times and the highlight lane, off the UI thread
+    private int _rulerRefreshPosted;
+    private IReadOnlyList<CommandMarkInfo> _rulerMarks = [];
+    private IReadOnlyList<int> _rulerBookmarks = [];
     private readonly int[] _searchLineBuffer = new int[4096];
     private (ulong Total, ulong Offset, ulong Length) _scrollState;
     private readonly TerminalRenderer _renderer = new();
@@ -196,7 +198,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             }
         };
         _ruler.LineText = line => _commandBuffer?.LineText(line);
-        _ruler.LineTime = line => _lineTimes?.TimeOf(line);
+        _ruler.LineTime = line => _annotations?.TimeOf(line);
         _ruler.CopyRequested += CopyMarkOutput;
         _commandsPanel.JumpRequested += JumpToMark;
         _commandsPanel.CopyRequested += CopyMarkOutput;
@@ -310,6 +312,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _disposed = true;
         _blinkTimer.Stop();
         StopRenderThread();
+        _annotations?.Dispose(wait: true); // its pass may be reading the terminal freed below
         _commands?.Dispose();
         _commandBuffer?.Detach();
         lock (_termGate)
@@ -645,7 +648,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         {
             GhosttyNative.rvt_resize(_term, (ushort)cols, (ushort)rows, (uint)_renderer.CellWidth, (uint)_renderer.CellHeight);
             if (sizeChanged)
-                _overview?.Reset(); // reflow rewraps rows: indexed line numbers all move
+                _annotations?.ResetOverview(); // reflow rewraps rows: indexed line numbers all move
         }
         ForceFull();
         RequestFrame();
@@ -1611,7 +1614,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     {
         lock (_renderGate)
             _highlighter.SetRules(rules);
-        _overview?.Reset();
+        _annotations?.ResetOverview();
         QueueAnnotations();
         ForceFull(); // re-read every row so old highlights go and new ones appear
         RequestFrame();
@@ -1624,8 +1627,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void CreateCommandTracker()
     {
-        _overview?.Reset();
-        _lineTimes?.Reset();
+        _annotations?.Dispose(wait: false);
         _commandBuffer?.Detach();
         var commandBuffer = new TerminalCommandBuffer(() => _disposed ? IntPtr.Zero : _term);
         _commandBuffer = commandBuffer;
@@ -1653,8 +1655,11 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _commands.PromptContext += (context, platform) => PromptContextChanged?.Invoke(context, platform);
         _commands.CommandMarked += command => CommandObserved?.Invoke(Cap(command));
         _commands.Changed += QueueAnnotations;
-        _overview = new OverviewIndex(_commandBuffer, _highlighter);
-        _lineTimes = new LineTimes(_commandBuffer);
+        // Its own buffer: the worker's reads and markers never meet the UI thread's.
+        var workerBuffer = new TerminalCommandBuffer(() => _disposed ? IntPtr.Zero : _term);
+        _annotations = new AnnotationWorker(workerBuffer, _highlighter, PostRulerRefresh,
+            refresh: workerBuffer.Refresh, detach: workerBuffer.Detach,
+            trace: message => TerminalSurface.TraceHook?.Invoke(message));
         _commands.SetHistoryCapture(_historyCapture);
         if (_promptPlatform is not null)
             _commands.SetPromptPlatform(_promptPlatform);
@@ -1734,35 +1739,38 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         if (_disposed || RefreshCommands() is not { } commands)
             return;
         commands.NoteOutput(_lastObservedMs);
-        if (!_replaying && _lastObservedMs > 0)
-            _lineTimes?.Note(_lastObservedMs);
+        _annotations?.Request(!_replaying && _lastObservedMs > 0 ? _lastObservedMs : 0);
         commands.OnOutputParsed();
         var marks = commands.Commands();
         _ruler.Visibility = _commandBuffer!.IsAlternate ? Visibility.Collapsed : Visibility.Visible;
-        var moreToIndex = _overview?.Advance() ?? false;
-        _ruler.Update(marks, commands.BookmarkLines(), _commandBuffer.Length,
-            OverviewTicks(), SearchLines(out var currentSearchLine), currentSearchLine);
-        if (moreToIndex)
-            QueueAnnotations(); // keep indexing older scrollback at low priority
+        _rulerMarks = marks;
+        _rulerBookmarks = commands.BookmarkLines();
+        UpdateRuler();
         UpdateCommandsPanelPresentation();
         if (_commandsPanel.IsOpen)
             _commandsPanel.SetCommands(marks);
     }
 
-    /// <summary>Highlight-lane ticks: each indexed line in the color of its first overview rule.</summary>
-    private List<(int Line, uint Color)> OverviewTicks()
+    /// <summary>Repaints the ruler from the last annotation pass and the worker's latest ticks.</summary>
+    private void UpdateRuler()
     {
-        var ticks = new List<(int, uint)>();
-        if (_overview is null)
-            return ticks;
-        var rules = _highlighter.Rules;
-        foreach (var (line, mask) in _overview.Lines())
-        {
-            var index = 31 - System.Numerics.BitOperations.LeadingZeroCount(mask); // the last rule wins, as in terminal.html
-            if (index < rules.Count)
-                ticks.Add((line, rules[index].Color));
-        }
-        return ticks;
+        if (_disposed || _commandBuffer is null)
+            return;
+        _ruler.Update(_rulerMarks, _rulerBookmarks, _commandBuffer.Length,
+            _annotations?.Ticks ?? [], SearchLines(out var currentSearchLine), currentSearchLine);
+    }
+
+    /// <summary>Called on the annotation worker when the highlight lane changed.</summary>
+    private void PostRulerRefresh()
+    {
+        if (_disposed || Interlocked.Exchange(ref _rulerRefreshPosted, 1) == 1)
+            return;
+        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                Volatile.Write(ref _rulerRefreshPosted, 0);
+                UpdateRuler();
+            }))
+            Volatile.Write(ref _rulerRefreshPosted, 0);
     }
 
     private int[] SearchLines(out int current)

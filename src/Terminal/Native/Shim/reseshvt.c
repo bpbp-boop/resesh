@@ -19,7 +19,8 @@ __declspec(dllimport) void __stdcall AcquireSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) unsigned char __stdcall TryAcquireSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) uint64_t __stdcall GetTickCount64(void);
-__declspec(dllimport) int __stdcall SwitchToThread(void);
+__declspec(dllimport) int __stdcall QueryPerformanceCounter(int64_t* count);
+__declspec(dllimport) int __stdcall QueryPerformanceFrequency(int64_t* frequency);
 
 #define RVT_ABI_VERSION 9
 
@@ -487,8 +488,29 @@ RVT_API uint64_t rvt_resident_bytes(RvtTerm* t) {
 // Output is parsed in slices, releasing the lock between them: an SSH read can be 32 KB or
 // more, which takes milliseconds to parse when every line scrolls a full scrollback, and the
 // UI thread's frame and line reads would otherwise wait for all of it. SRW locks let the
-// releasing thread barge back in, so the writer yields until any waiter has the lock.
+// releasing thread barge back in, so between slices the writer spins briefly while anyone
+// waits, letting the woken waiter take the lock first. Spin, not SwitchToThread: yielding
+// can hand the writer's whole time slice (~15 ms) to an unrelated thread, which capped SSH
+// floods at 25 MB/s once a background reader waited for the lock often.
 #define RVT_WRITE_SLICE 4096
+#define RVT_WAITER_SPIN_US 100
+
+static void let_waiter_in(RvtTerm* t) {
+  if (__atomic_load_n(&t->waiting, __ATOMIC_SEQ_CST) == 0) return;
+  int64_t frequency = 0, start = 0, now = 0;
+  QueryPerformanceFrequency(&frequency);
+  QueryPerformanceCounter(&start);
+  const int64_t limit = frequency * RVT_WAITER_SPIN_US / 1000000;
+  do {
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_ia32_pause();
+#elif defined(__aarch64__)
+    __asm__ volatile("yield");
+#endif
+    QueryPerformanceCounter(&now);
+  } while (__atomic_load_n(&t->waiting, __ATOMIC_SEQ_CST) > 0 && now - start < limit);
+}
+
 RVT_API void rvt_write(RvtTerm* t, const uint8_t* data, size_t len) {
   size_t offset = 0;
   do {
@@ -497,8 +519,7 @@ RVT_API void rvt_write(RvtTerm* t, const uint8_t* data, size_t len) {
     ghostty_terminal_vt_write(t->term, data + offset, n);
     unlock(t);
     offset += n;
-    for (int spins = 0; offset < len && spins < 1000 && __atomic_load_n(&t->waiting, __ATOMIC_SEQ_CST) > 0; spins++)
-      SwitchToThread();
+    if (offset < len) let_waiter_in(t);
   } while (offset < len);
 }
 

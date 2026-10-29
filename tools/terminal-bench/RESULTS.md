@@ -237,3 +237,22 @@ Other workloads are unchanged. What remains of a `tiny` pass is a dozen single n
 mostly behind the ~4 ms rewind keyframe capture that runs once a second during a flood.
 
 `framestats.py` now leaves out UI stalls that began before the measured window (connecting).
+
+### Annotation worker (same day)
+
+Line times and the overview index moved to `AnnotationWorker` on the thread pool. The first
+version capped SSH floods at exactly 25.2 MB/s: the shim's writer `SwitchToThread`ed while the
+worker waited for the lock, losing ~15 ms time slices. It now spins at most 100 µs instead, and
+worker passes keep a 100 ms pace. Batched build → worker build, same session:
+
+| | full screen tiny | full screen logs | full screen tui |
+|---|---|---|---|
+| UI lag p99 | 2.1–3.5 → 0.5 ms | 0.4 → 1.4–3.9 ms* | — → 0.5–0.6 ms |
+| UI lag max | 4.9–14 → 2.4–4.8 ms | 0.7–5.4 → 6.8–12 ms* | — → 3.5–5.6 ms |
+| longest annotation pass (UI) | 17–20 → 1.8–2.1 ms | 7–11 → 0.3–0.4 ms | 0.2 ms |
+| fps | 137–142 → 142 | 123–135 → 137 | → 140 |
+| output MB/s | 4.7 → 4.7 | 30–75 → 58–74 | 79–110 |
+
+\* The logs stalls are gen2 GC pauses (11–13 ms, 7–9 per run in both builds) landing in the
+measured window; none line up with annotation work. Allocation is 2–3 MB per frame, much of it
+outside the renderer (rewind keyframes copy ~1 MB of VT text each).

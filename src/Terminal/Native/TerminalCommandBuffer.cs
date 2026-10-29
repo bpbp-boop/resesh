@@ -31,7 +31,8 @@ internal struct GhosttySemanticEvent
 }
 
 /// <summary>
-/// <see cref="ICommandBuffer"/> over a libghostty-vt terminal. UI thread only. Buffer info and
+/// <see cref="ICommandBuffer"/> over a libghostty-vt terminal, used by one thread at a time: the
+/// surface's on the UI thread, the annotation worker's on the pool. Buffer info and
 /// line reads are cached until <see cref="Refresh"/>, which the surface calls before each
 /// tracker entry point, so one pass sees one consistent snapshot of positions.
 /// </summary>

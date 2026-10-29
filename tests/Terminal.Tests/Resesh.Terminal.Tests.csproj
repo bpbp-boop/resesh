@@ -26,6 +26,7 @@
     <Compile Include="../../src/Terminal/Native/OverviewIndex.cs" Link="Native/OverviewIndex.cs" />
     <Compile Include="../../src/Terminal/Native/TerminalPaste.cs" Link="Native/TerminalPaste.cs" />
     <Compile Include="../../src/Terminal/Native/LineTimes.cs" Link="Native/LineTimes.cs" />
+    <Compile Include="../../src/Terminal/Native/AnnotationWorker.cs" Link="Native/AnnotationWorker.cs" />
     <Compile Include="../../src/Terminal/Native/BuiltinGlyphs.cs" Link="Native/BuiltinGlyphs.cs" />
     <Compile Include="../../src/Terminal/Native/SystemFontFallback.cs" Link="Native/SystemFontFallback.cs" />
     <Compile Include="../../src/Terminal/InstalledFonts.cs" Link="InstalledFonts.cs" />

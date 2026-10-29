@@ -14,7 +14,8 @@ internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlight
     // Lines read per native call; the time budget is checked between chunks.
     private const int ChunkLines = 64;
     // Each line read takes the parser's lock, so during a flood a line can cost 100+ us and a
-    // 2000-line slice held the UI thread for 50-500 ms. A pass stops at whichever comes first.
+    // 2000-line slice took 50-500 ms. A pass stops at whichever comes first, and runs on the
+    // annotation worker, not the UI thread.
     private readonly long _sliceBudgetTicks =
         (long)((sliceBudget ?? TimeSpan.FromMilliseconds(4)).TotalSeconds * System.Diagnostics.Stopwatch.Frequency);
     private const int ReanchorGap = 4096;
