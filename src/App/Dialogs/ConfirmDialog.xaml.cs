@@ -57,6 +57,23 @@ public sealed partial class ConfirmDialog : ContentDialog
         return confirmedByKeyboard || result == ContentDialogResult.Primary;
     }
 
+    /// <summary>A three-way question such as Save / Don't save / Cancel. Primary is the
+    /// default, so only use it when the primary action keeps the user's work.</summary>
+    public static async Task<ContentDialogResult> ChooseAsync(
+        XamlRoot xamlRoot,
+        string title,
+        string message,
+        string primaryText,
+        string secondaryText)
+    {
+        var dialog = new ConfirmDialog(title, message, primaryText, defaultToPrimary: true)
+        {
+            XamlRoot = xamlRoot,
+            SecondaryButtonText = secondaryText,
+        };
+        return await dialog.ShowModalAsync();
+    }
+
     public static Task<bool> ConfirmAsync(
         XamlRoot xamlRoot,
         string title,

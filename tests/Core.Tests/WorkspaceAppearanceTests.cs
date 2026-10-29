@@ -114,7 +114,7 @@ public sealed class WorkspaceAppearanceTests : IDisposable
     }
 
     [Fact]
-    public void AutoSave_KeepsTheSavedLayoutWhenNothingSavableIsOpen()
+    public void Save_KeepsTheSavedLayoutWhenNothingSavableIsOpen()
     {
         var path = Path.Combine(_dir.FullName, "autosave.json");
         var store = new WorkspaceStore(path);
@@ -128,12 +128,12 @@ public sealed class WorkspaceAppearanceTests : IDisposable
         var notices = new List<string>();
         var coordinator = new WorkspaceCoordinator(store, () => layout, () => { }, (title, _) => notices.Add(title));
 
-        Assert.False(coordinator.AutoSave(lab.Id, new WorkspaceLayout { Groups = [new WorkspaceGroup()] }));
-        Assert.False(coordinator.AutoSave(Guid.NewGuid(), layout));
+        Assert.False(coordinator.Save(lab.Id, new WorkspaceLayout { Groups = [new WorkspaceGroup()] }));
+        Assert.False(coordinator.Save(Guid.NewGuid(), layout));
         Assert.Equal(session, Assert.Single(Assert.Single(store.Workspaces).Groups).Tabs[0].SessionId);
 
         var second = Guid.NewGuid();
-        Assert.True(coordinator.AutoSave(lab.Id, new WorkspaceLayout
+        Assert.True(coordinator.Save(lab.Id, new WorkspaceLayout
         {
             Groups = [new WorkspaceGroup { Tabs = [new WorkspaceTabReference { SessionId = second }] }],
         }));

@@ -387,7 +387,7 @@ public partial class App : Application
         if (Current is not App app)
             return;
         foreach (var window in app._windows.ToList())
-            window.DiscardWorkspace(workspaceId, save: false);
+            window.DiscardWorkspace(workspaceId);
     }
 
     internal static void SetTabContentDropTargetsVisible(bool visible)

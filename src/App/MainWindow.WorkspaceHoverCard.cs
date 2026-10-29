@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Resesh.App.ViewModels;
+using Resesh.Core.Input;
 using Windows.Foundation;
 
 namespace Resesh.App;
@@ -48,35 +49,62 @@ public sealed partial class MainWindow
             HideWorkspaceHoverCard();
     }
 
-    private void RailSettingsButton_PointerEntered(object sender, PointerRoutedEventArgs e)
+    /// <summary>What the card says for a rail tool: its name, a line on what it is for, and
+    /// the shortcut it has, if any.</summary>
+    private readonly record struct RailToolCard(string Name, string Description, string? ShortcutId);
+
+    private Dictionary<FrameworkElement, RailToolCard> _railToolCards = [];
+
+    /// <summary>Gives the rail's tool buttons the workspace buttons' card. NavigationView adds a
+    /// tooltip of its own to compact items that have none, so each gets a hidden one instead.</summary>
+    private void InitializeRailToolCards()
     {
-        if (e.Pointer.PointerDeviceType is not PointerDeviceType.Touch)
-            ShowSettingsHoverCard();
+        _railToolCards = new()
+        {
+            [SessionsPaneToggleButton] = new("Side pane", "Show or hide the pane beside the rail", ShortcutIds.ToggleSessionsPane),
+            [SessionsRailItem] = new("Sessions", "Saved sessions and local shells", null),
+            [WorkspacesRailItem] = new("Workspaces", "Saved layouts of tabs and panes", null),
+            [RecentRailItem] = new("Recent sessions", "Sessions you connected to lately", null),
+            [RecordingsRailItem] = new("Recordings", "Recorded sessions to play back", null),
+            [RailSettingsButton] = new("Settings", "", ShortcutIds.Settings),
+        };
+        foreach (var element in _railToolCards.Keys)
+        {
+            ToolTipService.SetToolTip(element, new ToolTip { Visibility = Visibility.Collapsed });
+            element.PointerEntered += RailTool_PointerEntered;
+            element.PointerExited += RailTool_PointerExited;
+            element.PointerCanceled += RailTool_PointerExited;
+            element.GotFocus += RailTool_GotFocus;
+            element.LostFocus += RailTool_PointerExited;
+        }
     }
 
-    private void RailSettingsButton_PointerExited(object sender, PointerRoutedEventArgs e) => HideSettingsHoverCard();
-
-    private void RailSettingsButton_GotFocus(object sender, RoutedEventArgs e)
+    private void RailTool_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
-        if (RailSettingsButton.FocusState == FocusState.Keyboard)
-            ShowSettingsHoverCard();
+        if (e.Pointer.PointerDeviceType is not PointerDeviceType.Touch && sender is FrameworkElement element)
+            ShowRailToolCard(element);
     }
 
-    private void RailSettingsButton_LostFocus(object sender, RoutedEventArgs e) => HideSettingsHoverCard();
-
-    private void HideSettingsHoverCard()
+    private void RailTool_GotFocus(object sender, RoutedEventArgs e)
     {
-        if (ReferenceEquals(_hoverCardAnchor, RailSettingsButton))
+        if (sender is Control { FocusState: FocusState.Keyboard } control)
+            ShowRailToolCard(control);
+    }
+
+    private void RailTool_PointerExited(object sender, RoutedEventArgs e)
+    {
+        if (ReferenceEquals(_hoverCardAnchor, sender))
             HideWorkspaceHoverCard();
     }
 
-    /// <summary>The rail's Settings button uses the same card, with just its name and shortcut.</summary>
-    private void ShowSettingsHoverCard()
+    private void ShowRailToolCard(FrameworkElement element)
     {
+        if (!_railToolCards.TryGetValue(element, out var card))
+            return;
         DetachHoverCardItem();
-        _hoverCardAnchor = RailSettingsButton;
-        var chords = Resesh.Core.Input.KeyBindings.Get(Resesh.Core.Input.ShortcutIds.Settings).Chords;
-        FillHoverCard("Settings", "", chords.Count > 0 ? chords[0].Label : "", WorkspaceAlert.None, "");
+        _hoverCardAnchor = element;
+        var chords = card.ShortcutId is { } id ? KeyBindings.Get(id).Chords : [];
+        FillHoverCard(card.Name, card.Description, chords.Count > 0 ? chords[0].Label : "", WorkspaceAlert.None, "");
         PlaceWorkspaceHoverCard();
         WorkspaceHoverCard.IsOpen = true;
     }
@@ -92,6 +120,7 @@ public sealed partial class MainWindow
             _hoverCardItem = item;
         }
         _hoverCardAnchor = anchor;
+        RefreshWorkspaceRail();
         FillWorkspaceHoverCard(item);
         PlaceWorkspaceHoverCard();
         WorkspaceHoverCard.IsOpen = true;

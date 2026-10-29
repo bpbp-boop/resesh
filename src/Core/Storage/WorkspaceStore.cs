@@ -68,6 +68,7 @@ public sealed class WorkspaceStore
     private List<Workspace> _workspaces = [];
     private WorkspaceLayout? _lastLayout;
     private Guid? _lastActiveWorkspaceId;
+    private Dictionary<Guid, WorkspaceLayout> _drafts = [];
     private bool _preserveBackup;
     public string? LoadWarning { get; private set; }
 
@@ -94,6 +95,84 @@ public sealed class WorkspaceStore
         get { lock (_gate) return _lastActiveWorkspaceId; }
     }
 
+    /// <summary>The unsaved layout a workspace was left with when its window closed, if it
+    /// differs from the saved one. Opening the workspace starts from this instead.</summary>
+    public WorkspaceLayout? DraftOf(Guid id)
+    {
+        lock (_gate) return _drafts.GetValueOrDefault(id);
+    }
+
+    public bool HasDraft(Guid id)
+    {
+        lock (_gate) return _drafts.ContainsKey(id);
+    }
+
+    /// <summary>Whether a live layout differs from the workspace's saved one in what a save
+    /// would keep: tabs, their order and pins, and how panes split. Pane sizes and selected
+    /// tabs are left out, so resizing a pane or clicking a tab is not a change. A layout with
+    /// no saved sessions open is not a change either: there is nothing to save.</summary>
+    public bool HasChanges(Guid id, WorkspaceLayout live)
+    {
+        lock (_gate) return HasChangesLocked(id, live);
+    }
+
+    private bool HasChangesLocked(Guid id, WorkspaceLayout live)
+    {
+        var index = _workspaces.FindIndex(workspace => workspace.Id == id);
+        if (index < 0)
+            return false;
+        var normalized = NormalizeLayout(live);
+        if (normalized.Groups.All(group => group.Tabs.Count == 0))
+            return false;
+        var saved = NormalizeLayout(new WorkspaceLayout { Groups = _workspaces[index].Groups, Layout = _workspaces[index].Layout });
+        return !SameArrangement(saved, normalized);
+    }
+
+    /// <summary>Keeps (or, with no changes, drops) a workspace's unsaved layout. The saved
+    /// layout is never touched: only <see cref="Update"/> changes that.</summary>
+    public void SetDraft(Guid id, WorkspaceLayout? live)
+    {
+        lock (_gate)
+        {
+            if (!_workspaces.Any(workspace => workspace.Id == id))
+                return;
+            var drafts = new Dictionary<Guid, WorkspaceLayout>(_drafts);
+            if (live is not null && HasChangesLocked(id, live))
+                drafts[id] = NormalizeLayout(live);
+            else if (!drafts.Remove(id))
+                return;
+            Commit(_workspaces, _lastLayout, _lastActiveWorkspaceId, drafts);
+        }
+    }
+
+    internal static bool SameArrangement(WorkspaceLayout a, WorkspaceLayout b)
+    {
+        if (a.Groups.Count != b.Groups.Count)
+            return false;
+        for (var index = 0; index < a.Groups.Count; index++)
+        {
+            if (!a.Groups[index].Tabs.SequenceEqual(b.Groups[index].Tabs))
+                return false;
+        }
+        return SameNode(a.Layout, b.Layout);
+    }
+
+    private static bool SameNode(WorkspaceLayoutNode? a, WorkspaceLayoutNode? b)
+    {
+        if (a is null || b is null)
+            return a is null && b is null;
+        if (a.Orientation != b.Orientation || a.Children.Count != b.Children.Count)
+            return false;
+        if (a.Orientation is null)
+            return a.GroupIndex == b.GroupIndex;
+        for (var index = 0; index < a.Children.Count; index++)
+        {
+            if (!SameNode(a.Children[index], b.Children[index]))
+                return false;
+        }
+        return true;
+    }
+
     public void Load()
     {
         lock (_gate)
@@ -105,6 +184,7 @@ public sealed class WorkspaceStore
             _workspaces = data.Workspaces!;
             _lastLayout = data.LastLayout;
             _lastActiveWorkspaceId = data.LastActiveWorkspaceId;
+            _drafts = (data.Drafts ?? []).ToDictionary(draft => draft.WorkspaceId, draft => draft.Layout);
         }
     }
 
@@ -159,7 +239,9 @@ public sealed class WorkspaceStore
                 Groups = normalized.Groups,
                 Layout = normalized.Layout,
             };
-            Commit(updated);
+            var drafts = new Dictionary<Guid, WorkspaceLayout>(_drafts);
+            drafts.Remove(id);
+            Commit(updated, _lastLayout, _lastActiveWorkspaceId, drafts);
         }
     }
 
@@ -235,21 +317,35 @@ public sealed class WorkspaceStore
 
     private void Commit(List<Workspace> workspaces) => Commit(workspaces, _lastLayout, _lastActiveWorkspaceId);
 
-    private void Commit(List<Workspace> workspaces, WorkspaceLayout? lastLayout, Guid? lastActiveWorkspaceId)
+    private void Commit(List<Workspace> workspaces, WorkspaceLayout? lastLayout, Guid? lastActiveWorkspaceId) =>
+        Commit(workspaces, lastLayout, lastActiveWorkspaceId, _drafts);
+
+    private void Commit(
+        List<Workspace> workspaces,
+        WorkspaceLayout? lastLayout,
+        Guid? lastActiveWorkspaceId,
+        Dictionary<Guid, WorkspaceLayout> drafts)
     {
-        // A deleted workspace cannot be reopened at startup.
+        // A deleted workspace cannot be reopened at startup, and its draft goes with it.
         if (lastActiveWorkspaceId is { } id && !workspaces.Any(workspace => workspace.Id == id))
             lastActiveWorkspaceId = null;
+        drafts = drafts
+            .Where(draft => workspaces.Any(workspace => workspace.Id == draft.Key))
+            .ToDictionary(draft => draft.Key, draft => draft.Value);
         WriteAtomic(_path, new WorkspaceStoreData
         {
             Workspaces = workspaces,
             LastLayout = lastLayout,
             LastActiveWorkspaceId = lastActiveWorkspaceId,
+            Drafts = drafts.Count == 0
+                ? null
+                : drafts.Select(draft => new WorkspaceDraft { WorkspaceId = draft.Key, Layout = draft.Value }).ToList(),
         }, _preserveBackup);
         _preserveBackup = false;
         _workspaces = workspaces;
         _lastLayout = lastLayout;
         _lastActiveWorkspaceId = lastActiveWorkspaceId;
+        _drafts = drafts;
     }
 
     internal static WorkspaceStoreData ParsePayload(byte[] payload)
@@ -319,6 +415,7 @@ public sealed class WorkspaceStore
             }).ToList(),
             LastLayout = source.LastLayout is null ? null : RemapLayout(source.LastLayout),
             LastActiveWorkspaceId = source.LastActiveWorkspaceId,
+            Drafts = source.Drafts?.Select(draft => draft with { Layout = RemapLayout(draft.Layout) }).ToList(),
         };
     }
 
@@ -353,6 +450,12 @@ public sealed class WorkspaceStore
             Workspaces = workspaces,
             LastLayout = data.LastLayout is null ? null : NormalizeLayout(data.LastLayout),
             LastActiveWorkspaceId = data.LastActiveWorkspaceId is { } active && ids.Contains(active) ? active : null,
+            // A draft for a workspace that is gone, or a second one for the same workspace, is dropped.
+            Drafts = data.Drafts?
+                .Where(draft => draft is not null && ids.Contains(draft.WorkspaceId) && draft.Layout is not null)
+                .GroupBy(draft => draft.WorkspaceId)
+                .Select(group => group.First() with { Layout = NormalizeLayout(group.First().Layout) })
+                .ToList(),
         };
     }
 
@@ -479,4 +582,12 @@ internal sealed record WorkspaceStoreData
     public List<Workspace>? Workspaces { get; init; }
     public WorkspaceLayout? LastLayout { get; init; }
     public Guid? LastActiveWorkspaceId { get; init; }
+    public List<WorkspaceDraft>? Drafts { get; init; }
+}
+
+/// <summary>A workspace's unsaved layout, kept across restarts until it is saved or reverted.</summary>
+internal sealed record WorkspaceDraft
+{
+    public Guid WorkspaceId { get; set; }
+    public WorkspaceLayout Layout { get; set; } = new();
 }

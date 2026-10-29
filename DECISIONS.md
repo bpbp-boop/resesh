@@ -1367,7 +1367,7 @@ ToolTip waits before opening and has no setting for the delay, which is slow whe
 column of icons, so the card is a `Popup` opened on `PointerEntered` and closed on
 `PointerExited`. It also opens for keyboard focus, never for touch, closes when the context
 menu opens or a drag starts, and follows the item's property changes while it is up. The
-button's automation name still carries the same text for screen readers.
+button's automation name still carries the same text for screen readers. The rail's tool buttons (side pane toggle, Sessions, Workspaces, Recent sessions, Recordings, Settings) use the same card with a name, a line on what they are for and any shortcut; NavigationView adds its own tooltip to compact items that have none, so each is given a hidden one.
 
 ## 2026-10-29 - Settings opens from the foot of the rail and follows the shown workspace
 
@@ -1382,3 +1382,28 @@ Settings belongs to the app, not a workspace. A tab lives in the workspace it wa
 so reopening Settings from another workspace used to switch back to that one.
 `OpenAppPage(..., followShownWorkspace: true)` now moves a parked Settings tab into the shown
 workspace's focused pane instead; the parked pane it leaves is pruned as for any moved tab.
+
+## 2026-10-29 - A workspace changes only when it is saved
+
+This replaces the 2026-10-28 rule that leaving, closing or quitting saves a workspace's
+layout. A workspace is a saved layout you change on purpose: "Save workspace" (or "Update from
+current layout…") is the only thing that writes it. Leaving a workspace saved nothing it
+needed, since it stays open and connected, and quietly made any tab opened in passing part
+of the workspace for good.
+
+- What differs is a *draft* (`WorkspaceStore.SetDraft`), kept in `workspaces.json` beside the
+  saved layouts. Switching away and closing the window write it, so a crash or quit loses
+  nothing; opening a closed workspace starts from its draft. Saving or reverting drops it,
+  and a deleted workspace's draft goes with it.
+- A change is what a save would keep: tabs, their order and pins, and how panes split
+  (`WorkspaceStore.HasChanges`). Pane sizes and the selected tab are left out, so resizing a
+  pane or clicking a tab does not mark a workspace changed. A layout with no saved sessions
+  open is not a change.
+- Closing a changed workspace asks Save and close / Close without saving / Cancel (Save is
+  the default, since it keeps work), folded into the existing disconnect warning. Without
+  changes the old prompt is unchanged.
+- The rail shows unsaved changes as a small dot in the button's corner, in the hover card,
+  and in its automation name. "Save workspace" and "Revert to saved…" are enabled only then,
+  in the rail menu and the Workspaces menu. Reverting an open workspace reopens it as saved,
+  so its sessions reconnect.
+- Home has no saved layout and keeps restoring as it was left.

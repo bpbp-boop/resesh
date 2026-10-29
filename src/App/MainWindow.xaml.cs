@@ -209,6 +209,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     private TabGroupView AttachGroupView(TabGroupViewModel group)
     {
         var view = new TabGroupView(group, this);
+        group.Tabs.CollectionChanged += (_, _) => QueueWorkspaceRailRefresh();
         // The initial app-wide theme pass has already run when a user creates a split.
         // Apply the live palette now so the new strip does not start with Fluent defaults.
         view.ApplyTheme(_themePalette);

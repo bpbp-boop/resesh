@@ -176,6 +176,25 @@ public sealed class WorkspaceRailTests : IDisposable
     }
 
     [Fact]
+    public void RailItem_ShowsUnsavedChangesUnlessAnotherWindowHasIt()
+    {
+        var item = WorkspaceRailItemViewModel.For(new Workspace { Id = Guid.NewGuid(), Name = "Lab" });
+
+        item.SetState(isOpen: true, isActive: false, isOpenElsewhere: false, WorkspaceAlert.None, position: 2, hasUnsavedChanges: true);
+        Assert.True(item.ShowsUnsavedMark);
+        Assert.Equal("Open in the background · unsaved changes", item.StatusText);
+        Assert.Equal("Lab — open, unsaved changes (Ctrl+Shift+2)", item.Tooltip);
+
+        item.SetState(isOpen: false, isActive: false, isOpenElsewhere: true, WorkspaceAlert.None, position: 2, hasUnsavedChanges: true);
+        Assert.True(item.HasUnsavedChanges);
+        Assert.False(item.ShowsUnsavedMark);
+
+        var home = WorkspaceRailItemViewModel.CreateHome();
+        home.SetState(true, true, false, WorkspaceAlert.None, 1, hasUnsavedChanges: true);
+        Assert.False(home.HasUnsavedChanges);
+    }
+
+    [Fact]
     public void HomeItem_IsAlwaysOpenAndHasNoWorkspace()
     {
         var home = WorkspaceRailItemViewModel.CreateHome();

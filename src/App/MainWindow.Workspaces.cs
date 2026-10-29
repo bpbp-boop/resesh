@@ -154,7 +154,11 @@ public sealed partial class MainWindow
                     },
                 };
                 if (IsWorkspaceOpen(workspace.Id))
+                {
                     submenu.Items.Insert(3, Item("Close", ViewModel.CloseWorkspaceCommand));
+                    foreach (var entry in SaveWorkspaceMenuItems(workspace).Reverse())
+                        submenu.Items.Insert(3, entry);
+                }
                 menuItems.Add(submenu);
             }
         }
@@ -289,7 +293,7 @@ public sealed partial class MainWindow
         if (App.Workspaces.LastLayout is { } layout)
             ApplyWorkspaceLayout(layout, additive: false);
         if (App.Workspaces.LastActiveWorkspaceId is { } active)
-            ShowWorkspace(active, saveCurrent: false, animate: false); // startup: no motion
+            ShowWorkspace(active, keepDraft: false, animate: false); // startup: no motion
     }
 
     private void ApplyWorkspaceLayout(WorkspaceLayout layout, bool additive)

@@ -109,6 +109,15 @@
                             FontSize="9"
                             Foreground="{StaticResource SessionTreeForegroundBrush}" />
                     </Border>
+                    <!-- Unsaved changes: a small dot in the corner, like an unsaved document. -->
+                    <Ellipse
+                        Width="6"
+                        Height="6"
+                        Margin="0,0,6,6"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Bottom"
+                        Fill="{StaticResource SessionTreeForegroundBrush}"
+                        Visibility="{x:Bind local:PresentationValues.Visible(ShowsUnsavedMark), Mode=OneWay}" />
                 </Grid>
             </DataTemplate>
             <Style x:Key="WorkspaceRailItemStyle" TargetType="ListViewItem">
@@ -482,7 +491,6 @@
                         Background="Transparent"
                         BorderThickness="0"
                         Command="{x:Bind ViewModel.ToggleSessionsPaneCommand}"
-                        ToolTipService.ToolTip="Show or hide the sessions pane"
                         AutomationProperties.Name="Show or hide the sessions pane">
                         <FontIcon Glyph="&#xE700;" FontSize="16" />
                     </Button>
@@ -514,7 +522,6 @@
                                 x:Name="SessionsRailItem"
                                 Content="Sessions"
                                 Tag="sessions"
-                                ToolTipService.ToolTip="Sessions"
                                 AutomationProperties.Name="Sessions">
                                 <NavigationViewItem.Icon>
                                     <FontIcon Glyph="&#xE8B7;" FontSize="16" />
@@ -524,7 +531,6 @@
                                 x:Name="WorkspacesRailItem"
                                 Content="Workspaces"
                                 Tag="workspaces"
-                                ToolTipService.ToolTip="Workspaces"
                                 AutomationProperties.Name="Workspaces">
                                 <NavigationViewItem.Icon>
                                     <ImageIcon>
@@ -538,7 +544,6 @@
                                 x:Name="RecentRailItem"
                                 Content="Recent sessions"
                                 Tag="recent"
-                                ToolTipService.ToolTip="Recent sessions"
                                 AutomationProperties.Name="Recent sessions">
                                 <NavigationViewItem.Icon>
                                     <FontIcon Glyph="&#xE823;" FontSize="16" />
@@ -548,7 +553,6 @@
                                 x:Name="RecordingsRailItem"
                                 Content="Recordings"
                                 Tag="recordings"
-                                ToolTipService.ToolTip="Recordings"
                                 AutomationProperties.Name="Recordings">
                                 <NavigationViewItem.Icon>
                                     <FontIcon Glyph="&#xE8B2;" FontSize="16" />
@@ -631,11 +635,6 @@
                         Background="Transparent"
                         BorderThickness="0"
                         Command="{x:Bind ViewModel.OpenSettingsCommand}"
-                        PointerEntered="RailSettingsButton_PointerEntered"
-                        PointerExited="RailSettingsButton_PointerExited"
-                        PointerCanceled="RailSettingsButton_PointerExited"
-                        GotFocus="RailSettingsButton_GotFocus"
-                        LostFocus="RailSettingsButton_LostFocus"
                         AutomationProperties.Name="Settings"
                         AutomationProperties.AutomationId="RailSettings">
                         <FontIcon Glyph="&#xE713;" FontSize="16" />

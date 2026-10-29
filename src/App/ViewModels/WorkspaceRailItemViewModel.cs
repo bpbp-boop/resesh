@@ -62,6 +62,7 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
     private bool _isActive;
     private bool _isOpenElsewhere;
     private WorkspaceAlert _alert;
+    private bool _hasUnsavedChanges;
     private int _position;
 
     private WorkspaceRailItemViewModel(Guid id, string name)
@@ -117,6 +118,13 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
 
     public bool HasAlert => _alert != WorkspaceAlert.None;
 
+    /// <summary>Its tabs or panes differ from its saved layout, live or in a kept draft.</summary>
+    public bool HasUnsavedChanges => _hasUnsavedChanges;
+
+    /// <summary>The unsaved mark shares the button's corner with the other-window mark, which
+    /// wins: that window is where the changes are.</summary>
+    public bool ShowsUnsavedMark => _hasUnsavedChanges && !_isOpenElsewhere;
+
     /// <summary>1-based place in the rail, which its Ctrl+Shift+number shortcut follows.</summary>
     public int Position => _position;
 
@@ -140,6 +148,8 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
                 parts.Add("open");
             else if (_isOpenElsewhere)
                 parts.Add("open in another window");
+            if (_hasUnsavedChanges)
+                parts.Add("unsaved changes");
             if (_alert != WorkspaceAlert.None)
                 parts.Add(WorkspaceAlerts.Describe(_alert));
             var text = parts.Count == 0 ? _name : $"{_name} — {string.Join(", ", parts)}";
@@ -152,12 +162,19 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
     public string AutomationName => Tooltip;
 
     /// <summary>The hover card's status line.</summary>
-    public string StatusText =>
-        IsHome ? (_isActive ? "Showing · tabs outside saved workspaces" : "Tabs outside saved workspaces")
-        : _isActive ? "Showing"
-        : _isOpen ? "Open in the background"
-        : _isOpenElsewhere ? "Open in another window"
-        : "Not open";
+    public string StatusText
+    {
+        get
+        {
+            var state =
+                IsHome ? (_isActive ? "Showing · tabs outside saved workspaces" : "Tabs outside saved workspaces")
+                : _isActive ? "Showing"
+                : _isOpen ? "Open in the background"
+                : _isOpenElsewhere ? "Open in another window"
+                : "Not open";
+            return _hasUnsavedChanges ? state + " · unsaved changes" : state;
+        }
+    }
 
     /// <summary>The background alert as a sentence for the hover card, or "".</summary>
     public string AlertText
@@ -191,9 +208,11 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
         NotifyState();
     }
 
-    public void SetState(bool isOpen, bool isActive, bool isOpenElsewhere, WorkspaceAlert alert, int position)
+    public void SetState(
+        bool isOpen, bool isActive, bool isOpenElsewhere, WorkspaceAlert alert, int position, bool hasUnsavedChanges = false)
     {
         var changed = false;
+        changed |= Set(ref _hasUnsavedChanges, hasUnsavedChanges && !IsHome, nameof(HasUnsavedChanges));
         changed |= Set(ref _isOpen, isOpen || IsHome, nameof(IsOpen));
         changed |= Set(ref _isActive, isActive, nameof(IsActive));
         changed |= Set(ref _isOpenElsewhere, isOpenElsewhere && !isOpen, nameof(IsOpenElsewhere));
@@ -206,6 +225,7 @@ public sealed partial class WorkspaceRailItemViewModel : ObservableObject
     private void NotifyState()
     {
         OnPropertyChanged(nameof(HasAlert));
+        OnPropertyChanged(nameof(ShowsUnsavedMark));
         OnPropertyChanged(nameof(MarkerHeight));
         OnPropertyChanged(nameof(TileOpacity));
         OnPropertyChanged(nameof(Tooltip));

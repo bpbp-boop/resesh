@@ -54,10 +54,11 @@ public sealed partial class MainWindow
         // themselves, so listen to handled events too.
         WorkspaceRailList.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(WorkspaceRail_PointerPressed), true);
         WorkspaceRailList.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(WorkspaceRail_PointerReleased), true);
+        InitializeRailToolCards();
         ViewModel.TabChanged += (_, property) =>
         {
             if (property is nameof(TabViewModel.HasUnseenOutput) or nameof(TabViewModel.Agent)
-                or nameof(TabViewModel.State))
+                or nameof(TabViewModel.State) or nameof(TabViewModel.IsPinned))
                 QueueWorkspaceRailRefresh();
         };
         // Tabs opening and closing in Home change what the + button would do.
@@ -71,9 +72,10 @@ public sealed partial class MainWindow
     // ---- showing a workspace ----
 
     /// <summary>Shows a workspace: Home, one this window has parked, or a saved one it opens
-    /// now. One open in another window is shown there instead. The workspace being left is
-    /// saved as it stands, then parked with its tabs connected.</summary>
-    internal void ShowWorkspace(Guid id, bool focusTerminal = true, bool saveCurrent = true, bool animate = true)
+    /// now (from its unsaved draft, if it has one). One open in another window is shown there
+    /// instead. The workspace being left is parked with its tabs connected; its changes are
+    /// kept as a draft in case the app stops, but its saved layout is not touched.</summary>
+    internal void ShowWorkspace(Guid id, bool focusTerminal = true, bool keepDraft = true, bool animate = true)
     {
         if (id == _shownWorkspace)
         {
@@ -97,8 +99,8 @@ public sealed partial class MainWindow
         }
 
         EndZoomForLayoutChange();
-        if (saveCurrent)
-            SaveShownWorkspace();
+        if (keepDraft)
+            KeepShownWorkspaceDraft();
         ParkShownWorkspace();
         if (_parkedWorkspaces.Remove(id, out var parked))
         {
@@ -108,7 +110,9 @@ public sealed partial class MainWindow
         {
             StartEmptyWorkspace();
             if (saved is not null)
-                ApplyWorkspaceLayout(new WorkspaceLayout { Groups = saved.Groups, Layout = saved.Layout }, additive: false);
+                ApplyWorkspaceLayout(
+                    App.Workspaces.DraftOf(id) ?? new WorkspaceLayout { Groups = saved.Groups, Layout = saved.Layout },
+                    additive: false);
             else
                 FinishLayoutChange(ViewModel.Groups[0], null);
         }
@@ -123,11 +127,12 @@ public sealed partial class MainWindow
             FocusActiveTerminal();
     }
 
-    /// <summary>Saves the shown workspace's layout, so its rail button reopens it as it was.</summary>
-    private void SaveShownWorkspace()
+    /// <summary>Keeps the shown workspace's unsaved changes as a draft (or drops a draft it no
+    /// longer needs), so they survive a crash. Its saved layout is not touched.</summary>
+    private void KeepShownWorkspaceDraft()
     {
         if (_shownWorkspace != HomeWorkspace)
-            WorkspaceOperations.AutoSave(_shownWorkspace, CaptureWorkspaceLayout());
+            WorkspaceOperations.KeepDraft(_shownWorkspace, CaptureWorkspaceLayout());
     }
 
     private void ParkShownWorkspace()
@@ -297,43 +302,105 @@ public sealed partial class MainWindow
         App.RefreshWindowTitles();
     }
 
+    /// <summary>Closes a workspace's tabs. With changes from its saved layout, asks whether to
+    /// save them first (closing without saving drops them); otherwise asks only when sessions
+    /// would disconnect, as before.</summary>
     private async Task CloseWorkspaceAsync(Workspace workspace)
     {
         if (!IsWorkspaceOpen(workspace.Id))
             return;
         var tabs = (_shownWorkspace == workspace.Id ? ViewModel.ShownTabs : _parkedWorkspaces[workspace.Id].Tabs).ToList();
         var sessions = tabs.Count(tab => !tab.IsAppPage);
-        if (sessions > 0 && App.Settings.Current.ConfirmCloseActiveSessions
-            && !await ConfirmAsync(
-                "Close Workspace?",
-                $"Close \"{workspace.Name}\"? Its {sessions} open {(sessions == 1 ? "session disconnects" : "sessions disconnect")}. "
-                    + "Its layout is saved, so opening it again reconnects.",
-                "Close",
-                acceptY: true))
+        var disconnects = sessions == 0
+            ? ""
+            : $" Its {sessions} open {(sessions == 1 ? "session disconnects" : "sessions disconnect")}.";
+
+        if (App.Workspaces.HasChanges(workspace.Id, LiveWorkspaceLayout(workspace.Id)))
+        {
+            var choice = await Dialogs.ConfirmDialog.ChooseAsync(
+                Root.XamlRoot,
+                "Save Workspace Changes?",
+                $"\"{workspace.Name}\" has tabs or panes that differ from its saved layout. Save them before closing?{disconnects}",
+                "Save and close",
+                "Close without saving");
+            if (choice == ContentDialogResult.None || !IsWorkspaceOpen(workspace.Id))
+                return;
+            if (choice == ContentDialogResult.Primary)
+            {
+                if (!WorkspaceOperations.Save(workspace.Id, LiveWorkspaceLayout(workspace.Id)))
+                    return;
+            }
+            else
+            {
+                WorkspaceOperations.DiscardDraft(workspace.Id);
+            }
+        }
+        else
+        {
+            if (sessions > 0 && App.Settings.Current.ConfirmCloseActiveSessions
+                && !await ConfirmAsync(
+                    "Close Workspace?",
+                    $"Close \"{workspace.Name}\"?{disconnects} Opening it again reconnects.",
+                    "Close",
+                    acceptY: true))
+            {
+                return;
+            }
+            if (!IsWorkspaceOpen(workspace.Id))
+                return; // closed while the dialog was open
+            WorkspaceOperations.DiscardDraft(workspace.Id); // a stale one from a crash
+        }
+        DiscardWorkspace(workspace.Id);
+    }
+
+    /// <summary>Discards an open workspace's changes and reopens it as saved, or for one that
+    /// is not open, forgets the draft it would have opened from.</summary>
+    private async Task RevertWorkspaceAsync(Workspace workspace)
+    {
+        var open = IsWorkspaceOpen(workspace.Id);
+        if (!await ConfirmAsync(
+            "Revert Workspace?",
+            open
+                ? $"Discard the changes to \"{workspace.Name}\" and reopen it as saved? Its open sessions disconnect and reconnect."
+                : $"Discard the unsaved changes to \"{workspace.Name}\"? It opens as saved next time.",
+            "Revert"))
         {
             return;
         }
+        WorkspaceOperations.DiscardDraft(workspace.Id);
         if (!IsWorkspaceOpen(workspace.Id))
-            return; // closed while the dialog was open
-        DiscardWorkspace(workspace.Id, save: true);
+            return;
+        var wasShown = _shownWorkspace == workspace.Id;
+        DiscardWorkspace(workspace.Id);
+        if (wasShown)
+            ShowWorkspace(workspace.Id, animate: false);
     }
 
-    /// <summary>Closes every tab of a workspace in this window, saving its layout first when
-    /// asked. A shown workspace hands the window back to Home before it goes.</summary>
-    internal void DiscardWorkspace(Guid id, bool save)
+    /// <summary>An open workspace's layout as it stands, shown or parked.</summary>
+    private WorkspaceLayout LiveWorkspaceLayout(Guid id) =>
+        _shownWorkspace == id ? CaptureWorkspaceLayout() : CaptureParkedLayout(_parkedWorkspaces[id]);
+
+    /// <summary>Whether a workspace differs from what it was saved as: live here, live in the
+    /// window that holds it, or through the draft it will open from.</summary>
+    internal bool HasUnsavedWorkspaceChanges(Guid id)
+    {
+        if (id == HomeWorkspace)
+            return false;
+        if (IsWorkspaceOpen(id))
+            return App.Workspaces.HasChanges(id, LiveWorkspaceLayout(id));
+        if (App.WindowWithWorkspace(id, except: this) is { } other)
+            return other.HasUnsavedWorkspaceChanges(id);
+        return App.Workspaces.HasDraft(id);
+    }
+
+    /// <summary>Closes every tab of a workspace in this window without saving anything. A
+    /// shown workspace hands the window back to Home before it goes.</summary>
+    internal void DiscardWorkspace(Guid id)
     {
         if (!IsWorkspaceOpen(id))
             return;
         if (_shownWorkspace == id)
-        {
-            if (save)
-                SaveShownWorkspace();
-            ShowWorkspace(HomeWorkspace, saveCurrent: false);
-        }
-        else if (save)
-        {
-            WorkspaceOperations.AutoSave(id, CaptureParkedLayout(_parkedWorkspaces[id]));
-        }
+            ShowWorkspace(HomeWorkspace, keepDraft: false);
 
         if (!_parkedWorkspaces.Remove(id, out var parked))
             return;
@@ -355,15 +422,17 @@ public sealed partial class MainWindow
         App.RefreshWorkspaceRails();
     }
 
-    /// <summary>Saves every open workspace and the Home layout as the window closes.</summary>
+    /// <summary>Keeps every open workspace's unsaved changes as a draft, so it reopens as it
+    /// was left, and saves the Home layout, as the window closes. No workspace's saved layout
+    /// changes here.</summary>
     private void SaveWorkspacesOnClose()
     {
         foreach (var (id, parked) in _parkedWorkspaces)
         {
             if (id != HomeWorkspace)
-                WorkspaceOperations.AutoSave(id, CaptureParkedLayout(parked));
+                WorkspaceOperations.KeepDraft(id, CaptureParkedLayout(parked));
         }
-        SaveShownWorkspace();
+        KeepShownWorkspaceDraft();
         var home = _shownWorkspace == HomeWorkspace
             ? CaptureWorkspaceLayout()
             : _parkedWorkspaces.TryGetValue(HomeWorkspace, out var parkedHome)
@@ -424,7 +493,8 @@ public sealed partial class MainWindow
                 _shownWorkspace == item.Id,
                 App.WindowWithWorkspace(item.Id, except: this) is not null,
                 AlertFor(item.Id),
-                index + 2);
+                index + 2,
+                HasUnsavedWorkspaceChanges(item.Id));
         }
 
         var hasWorkspaces = saved.Count > 0;
@@ -529,6 +599,8 @@ public sealed partial class MainWindow
         menu.Items.Add(Item("Icon…", ViewModel.CustomizeWorkspaceCommand, workspace));
         menu.Items.Add(Item("Rename…", ViewModel.RenameWorkspaceCommand, workspace));
         menu.Items.Add(new MenuFlyoutSeparator());
+        foreach (var entry in SaveWorkspaceMenuItems(workspace))
+            menu.Items.Add(entry);
         // Always listed, so middle-click is discoverable; only an open one can close here.
         var close = item.IsOpen
             ? Item("Close workspace", ViewModel.CloseWorkspaceCommand, workspace)
@@ -538,6 +610,29 @@ public sealed partial class MainWindow
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(Item("Delete…", ViewModel.DeleteWorkspaceCommand, workspace));
         return menu;
+    }
+
+    /// <summary>"Save workspace" and "Revert to saved…", enabled while the workspace differs
+    /// from its saved layout, open here or through a draft.</summary>
+    private IEnumerable<MenuFlyoutItemBase> SaveWorkspaceMenuItems(Workspace workspace)
+    {
+        var unsaved = HasUnsavedWorkspaceChanges(workspace.Id);
+        var save = new MenuFlyoutItem { Text = "Save workspace", IsEnabled = unsaved };
+        save.Click += (_, _) => SaveWorkspaceNow(workspace);
+        var revert = new MenuFlyoutItem { Text = "Revert to saved…", IsEnabled = unsaved };
+        revert.Click += (_, _) => _ = RevertWorkspaceAsync(workspace);
+        return [save, revert];
+    }
+
+    /// <summary>Makes a workspace's current layout what it opens to: live if it is open here,
+    /// otherwise the draft it was left with. Nothing else saves a workspace's layout.</summary>
+    private void SaveWorkspaceNow(Workspace workspace)
+    {
+        var layout = IsWorkspaceOpen(workspace.Id)
+            ? LiveWorkspaceLayout(workspace.Id)
+            : App.Workspaces.DraftOf(workspace.Id);
+        if (layout is not null)
+            WorkspaceOperations.Save(workspace.Id, layout);
     }
 
     private async Task CustomizeWorkspaceAsync(Workspace workspace)
