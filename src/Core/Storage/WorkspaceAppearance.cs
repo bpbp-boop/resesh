@@ -29,11 +29,12 @@ public static class WorkspaceAppearance
         "M2.5,3.5 L2.5,12.5 A5.5,2 0 0 0 13.5,12.5 L13.5,3.5 " +
         "M2.5,8 A5.5,2 0 0 0 13.5,8";
 
-    /// <summary>A lab beaker with a lip and a fill line, drawn like <see cref="DatabasePath"/>.</summary>
-    private const string BeakerPath =
-        "M1.5,1.5 L14.5,1.5 " +
-        "M3,1.5 L3,12.5 A2,2 0 0 0 5,14.5 L11,14.5 A2,2 0 0 0 13,12.5 L13,1.5 " +
-        "M3,9 L13,9";
+    /// <summary>A conical (Erlenmeyer) lab flask with a lipped neck and a fill line, drawn like
+    /// <see cref="DatabasePath"/>.</summary>
+    private const string FlaskPath =
+        "M5,1.5 L11,1.5 " +
+        "M6,1.5 L6,6 L2.2,12.6 A1.3,1.3 0 0 0 3.3,14.5 L12.7,14.5 A1.3,1.3 0 0 0 13.8,12.6 L10,6 L10,1.5 " +
+        "M3.7,10 L12.3,10";
 
     /// <summary>Monochrome outline icons that match the rail's tool icons and follow every
     /// theme. Each glyph exists in Segoe Fluent Icons and in Segoe MDL2 Assets, which Windows
@@ -65,7 +66,7 @@ public static class WorkspaceAppearance
         new("briefcase", "Work", "client customer business", ""),
         new("people", "Team", "group users", ""),
         new("education", "Learning", "training school course", ""),
-        new("beaker", "Lab", "beaker science experiment test staging sandbox", "", BeakerPath),
+        new("flask", "Lab", "flask beaker erlenmeyer science experiment test staging sandbox", "", FlaskPath),
         new("lightbulb", "Ideas", "experiment", ""),
         new("puzzle", "Plugins", "extensions integration", ""),
         new("flag", "Flag", "milestone", ""),
