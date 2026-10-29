@@ -20,6 +20,8 @@ public abstract partial class TerminalSurface : Grid, IDisposable
     public abstract event Action<byte[]>? InputReceived;
     public abstract event Action<int, int>? Resized;
     public abstract event TerminalOutputObservedHandler? OutputObserved;
+    /// <summary>A rewind keyframe: the screen as VT text, its size and capture time. The memory
+    /// is only valid during the call; a handler that keeps it copies it.</summary>
     public abstract event Action<ReadOnlyMemory<byte>, int, int, long>? KeyframeCaptured;
     public abstract event Action? ReconnectRequested;
 

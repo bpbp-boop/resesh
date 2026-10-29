@@ -27,6 +27,43 @@ public sealed unsafe class NativeFrameTests
     }
 
     [WindowsNativeFact]
+    public void PrefetchedLinesMatchLinesReadOneByOne()
+    {
+        using var terminal = new NativeTerminal();
+        var text = new StringBuilder();
+        for (var i = 0; i < 40; i++)
+            text.Append(i % 7 == 3 ? "" : i % 5 == 0 ? "wrapped " + new string((char)('a' + i % 26), 30) + " 日本語 ✓" : $"line {i} ünïcödé").Append("\r\n");
+        terminal.Write(text.ToString());
+        var batched = new TerminalCommandBuffer(() => terminal.Handle);
+        var single = new TerminalCommandBuffer(() => terminal.Handle);
+        batched.Refresh();
+        single.Refresh();
+        Assert.True(batched.Length > 40);
+        batched.Prefetch(0, batched.Length + 5); // past the end is clipped
+        for (var line = 0; line < batched.Length; line++)
+        {
+            Assert.Equal(single.LineText(line), batched.LineText(line));
+            Assert.Equal(single.IsWrapped(line), batched.IsWrapped(line));
+        }
+        Assert.Contains(Enumerable.Range(0, batched.Length), batched.IsWrapped);
+    }
+
+    [WindowsNativeFact]
+    public void OutputSplitAcrossParseSlicesIsParsedWhole()
+    {
+        using var terminal = new NativeTerminal();
+        var buffer = new TerminalCommandBuffer(() => terminal.Handle);
+        // The shim parses in 4096-byte slices: put a 3-byte character and an SGR sequence
+        // across each of the first two boundaries.
+        var pad = new string('x', 4095) + "日" + new string('y', 4093) + "\u001b[31mred\u001b[0m end";
+        terminal.Write(pad);
+        buffer.Refresh();
+        var all = string.Concat(Enumerable.Range(0, buffer.Length).Select(buffer.LineText));
+        Assert.Contains("x日y", all);
+        Assert.EndsWith("yred end", all);
+    }
+
+    [WindowsNativeFact]
     public void HyperlinkHoverStopsAtHardBreaksAndDifferentLinks()
     {
         using var terminal = new NativeTerminal();

@@ -13,9 +13,9 @@ namespace Resesh.Terminal.Native;
 
 /// <summary>
 /// Live terminal drawn in-process: libghostty-vt parses on the backend's reader thread and a
-/// Direct2D/DirectWrite renderer presents into a SwapChainPanel on the UI thread, so the
-/// terminal is ordinary XAML content. Partial files: Playback (rewind and recordings),
-/// TextInput (keyboard focus, IME), Links. Not implemented: UIA text for screen readers.
+/// Direct2D/DirectWrite renderer presents into a SwapChainPanel from the surface's render
+/// thread, so the terminal is ordinary XAML content. Partial files: Rendering (the render
+/// thread and frames), Playback (rewind and recordings), TextInput (keyboard focus, IME), Links. Not implemented: UIA text for screen readers.
 /// </summary>
 public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 {
@@ -74,8 +74,10 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private sealed record PlaybackFrame(double Time, int Index, int Columns, int Rows, byte[] State);
     private sealed record PlaybackModel(TerminalTimedReplayEvent[] Events, List<PlaybackFrame> Frames);
-    private OverviewIndex? _overview;
-    private LineTimes? _lineTimes;
+    private AnnotationWorker? _annotations; // line times and the highlight lane, off the UI thread
+    private int _rulerRefreshPosted;
+    private IReadOnlyList<CommandMarkInfo> _rulerMarks = [];
+    private IReadOnlyList<int> _rulerBookmarks = [];
     private readonly int[] _searchLineBuffer = new int[4096];
     private (ulong Total, ulong Offset, ulong Length) _scrollState;
     private readonly TerminalRenderer _renderer = new();
@@ -90,20 +92,19 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private byte* _dirty;
     private int _cellCapacity;
     private int _dirtyCapacity;
-    private int _framePending;
-    private bool _renderingHooked;
-    private bool _renderingPaused;
-    private bool _forceFull = true;
-    private bool _disposed;
+    // FrameStats only: output parsed since the last drawn frame, and when that frame started.
+    private long _statsParsedBytes;
+    private long _statsParseTicks;
+    private long _statsLastFrame;
+    private long _statsAnnotationTicks;
+    private long _statsKeyframeTicks;
+    private volatile bool _disposed;
     private bool _initialized;
     private bool _readyRaised;
-    private bool _focused;
     private bool _reportedFocus;
     private bool _inputEnabled = true;
     private bool _connected = true;
     private bool _isSplit;
-    private bool _cursorBlinkOn = true;
-    private int _lastCursorRow = -1;
     private GhosttyFrameInfo _lastInfo = new() { MouseShape = GhosttyNative.MouseShapeText };
     private ushort _suppressCharactersForKey;
     private float _fontScale;
@@ -197,7 +198,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             }
         };
         _ruler.LineText = line => _commandBuffer?.LineText(line);
-        _ruler.LineTime = line => _lineTimes?.TimeOf(line);
+        _ruler.LineTime = line => _annotations?.TimeOf(line);
         _ruler.CopyRequested += CopyMarkOutput;
         _commandsPanel.JumpRequested += JumpToMark;
         _commandsPanel.CopyRequested += CopyMarkOutput;
@@ -215,6 +216,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         ConfigureTextInput();
 
         _renderer.GraphemeAt = GraphemeAt;
+        FrameStats.StartUiProbe(DispatcherQueue);
         _renderer.SwapChainChanged += OnRendererSwapChainChanged;
         _blinkTimer = DispatcherQueue.CreateTimer();
         _blinkTimer.Interval = TimeSpan.FromMilliseconds(BlinkMilliseconds);
@@ -231,6 +233,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         {
             if (_disposed)
                 return;
+            _loaded = true;
+            _visible = Visibility == Visibility.Visible;
             AttachSwapChain();
             Relayout();
             PrimeSwapChain();
@@ -242,12 +246,13 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             // surface is already back in the tree; detaching then would leave it blank.
             if (IsLoaded)
                 return;
-            UnhookRendering();
+            _loaded = false;
             AttachSwapChain(detach: true);
         };
         RegisterPropertyChangedCallback(VisibilityProperty, (_, _) =>
         {
-            _forceFull = true;
+            _visible = Visibility == Visibility.Visible;
+            ForceFull();
             RequestFrame();
             // A hidden surface never draws, so its buffers hold whatever was last shown.
             // Draw before the frame that reveals it (a tab switch, a split).
@@ -294,6 +299,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _earlyOutput.Clear();
             CaptureKeyframeLocked(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         }
+        StartRenderThread();
         CreateCommandTracker();
         Relayout();
         return Task.CompletedTask;
@@ -305,7 +311,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             return;
         _disposed = true;
         _blinkTimer.Stop();
-        UnhookRendering();
+        StopRenderThread();
+        _annotations?.Dispose(wait: true); // its pass may be reading the terminal freed below
         _commands?.Dispose();
         _commandBuffer?.Detach();
         lock (_termGate)
@@ -319,11 +326,14 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _self.Free();
         _renderer.SwapChainChanged -= OnRendererSwapChainChanged;
         AttachSwapChain(detach: true);
-        _renderer.Dispose();
-        if (_cells != null) NativeMemory.Free(_cells);
-        if (_dirty != null) NativeMemory.Free(_dirty);
-        _cells = null;
-        _dirty = null;
+        lock (_renderGate) // in case the render thread outlived its join
+        {
+            _renderer.Dispose();
+            if (_cells != null) NativeMemory.Free(_cells);
+            if (_dirty != null) NativeMemory.Free(_dirty);
+            _cells = null;
+            _dirty = null;
+        }
     }
 
     // ---- output ---------------------------------------------------------------------------
@@ -347,7 +357,17 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             {
                 TerminalSurface.TraceHook?.Invoke($"output observer failed: {exception.Message}");
             }
-            WriteToTerminal(data);
+            if (FrameStats.Enabled)
+            {
+                var parseStart = FrameStats.Now();
+                WriteToTerminal(data);
+                Interlocked.Add(ref _statsParseTicks, FrameStats.Now() - parseStart);
+                Interlocked.Add(ref _statsParsedBytes, data.Length);
+            }
+            else
+            {
+                WriteToTerminal(data);
+            }
             if (_term == IntPtr.Zero)
                 return;
             _keyframeBytes += data.Length;
@@ -364,27 +384,46 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     {
         if (_term == IntPtr.Zero || _readOnly || KeyframeCaptured is not { } handler)
             return;
+        var statsStart = FrameStats.Enabled ? FrameStats.Now() : 0;
         var buffer = GhosttyNative.rvt_format_vt(_term, out var length);
-        byte[] state;
-        try
-        {
-            state = buffer == null || length == 0
-                ? "\u001b[0m"u8.ToArray() // an empty screen still needs a non-empty keyframe
-                : new ReadOnlySpan<byte>(buffer, checked((int)length)).ToArray();
-        }
-        finally
-        {
-            GhosttyNative.rvt_free_buffer(buffer, length);
-        }
+        if (FrameStats.Enabled)
+            Interlocked.Add(ref _statsKeyframeTicks, FrameStats.Now() - statsStart);
         _keyframeBytes = 0;
         _lastKeyframeMs = Math.Max(unixMs, _lastObservedMs);
+        // Handlers see the shim's buffer itself and copy what they keep: a keyframe is megabytes
+        // on a large screen, and copying it here as well only made large-object garbage.
+        using var native = new NativeBytes(buffer, length);
         try
         {
-            handler(state, Columns, Rows, _lastKeyframeMs);
+            handler(native.Length > 0 ? native.Memory : EmptyKeyframe, Columns, Rows, _lastKeyframeMs);
         }
         catch (Exception exception)
         {
             TerminalSurface.TraceHook?.Invoke($"keyframe capture failed: {exception.Message}");
+        }
+    }
+
+    // An empty screen still needs a non-empty keyframe.
+    private static readonly byte[] EmptyKeyframe = "\u001b[0m"u8.ToArray();
+
+    /// <summary>A shim-allocated buffer as <see cref="Memory{T}"/>, freed on dispose.</summary>
+    private sealed class NativeBytes(byte* pointer, nuint length) : System.Buffers.MemoryManager<byte>
+    {
+        public int Length { get; } = pointer == null ? 0 : checked((int)length);
+
+        public override Span<byte> GetSpan() => new(pointer, Length);
+
+        public override System.Buffers.MemoryHandle Pin(int elementIndex = 0) => new(pointer + elementIndex);
+
+        public override void Unpin()
+        {
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (pointer != null)
+                GhosttyNative.rvt_free_buffer(pointer, length);
+            pointer = null;
         }
     }
 
@@ -574,6 +613,26 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     {
         if (_disposed || _panel.ActualWidth <= 0 || _panel.ActualHeight <= 0)
             return;
+        int cols, rows;
+        bool sizeChanged;
+        // The render thread reads the grid size and buffers under this lock.
+        lock (_renderGate)
+            (cols, rows, sizeChanged) = RelayoutLocked();
+        if (!_initialized)
+            return;
+        if (!_readyRaised)
+        {
+            _readyRaised = true;
+            Ready?.Invoke(cols, rows);
+        }
+        else if (sizeChanged)
+        {
+            Resized?.Invoke(cols, rows);
+        }
+    }
+
+    private (int Columns, int Rows, bool SizeChanged) RelayoutLocked()
+    {
         var scale = _panel.CompositionScaleX > 0 ? _panel.CompositionScaleX : (float)(XamlRoot?.RasterizationScale ?? 1);
         var fontChanged = scale != _fontScale;
         if (fontChanged)
@@ -605,9 +664,9 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         {
             GhosttyNative.rvt_resize(_term, (ushort)cols, (ushort)rows, (uint)_renderer.CellWidth, (uint)_renderer.CellHeight);
             if (sizeChanged)
-                _overview?.Reset(); // reflow rewraps rows: indexed line numbers all move
+                _annotations?.ResetOverview(); // reflow rewraps rows: indexed line numbers all move
         }
-        _forceFull = true;
+        ForceFull();
         RequestFrame();
         // Resized buffers are black until drawn. Draw them in this layout pass so the
         // frame that shows the new size (a split, a zoom, a window resize) has content,
@@ -617,18 +676,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         if (created)
             AttachSwapChain();
         PlaceTextInput();
-
-        if (!_initialized)
-            return;
-        if (!_readyRaised)
-        {
-            _readyRaised = true;
-            Ready?.Invoke(cols, rows);
-        }
-        else if (sizeChanged)
-        {
-            Resized?.Invoke(cols, rows);
-        }
+        return (cols, rows, sizeChanged);
     }
 
     /// <summary>A surface loaded hidden (a background tab) has no size, so Relayout made no
@@ -636,6 +684,12 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     /// that first shows the tab then only changes the chain's source size, and a chain with
     /// nothing presented yet would show black.</summary>
     private void PrimeSwapChain()
+    {
+        lock (_renderGate)
+            PrimeSwapChainLocked();
+    }
+
+    private void PrimeSwapChainLocked()
     {
         if (_disposed || _renderer.SwapChain is not null || XamlRoot is not { } root)
             return;
@@ -672,16 +726,30 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         }
     }
 
+    /// <summary>Raised under the device lock, possibly on a render thread recovering from a lost
+    /// device, so the panel is updated later on the UI thread.</summary>
     private void OnRendererSwapChainChanged()
     {
         if (_disposed)
             return;
-        _forceFull = true;
-        AttachSwapChain();
-        RequestFrame();
+        ForceFull();
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_disposed)
+                return;
+            AttachSwapChain();
+            RequestFrame();
+        });
     }
 
     private void AttachSwapChain(bool detach = false)
+    {
+        // Held while the panel takes the chain, so device recovery can't release it meanwhile.
+        lock (TerminalRenderer.DeviceGate)
+            AttachSwapChainLocked(detach);
+    }
+
+    private void AttachSwapChainLocked(bool detach)
     {
         var chain = detach ? null : _renderer.SwapChain;
         if (chain is not null && !IsLoaded)
@@ -700,160 +768,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         }
     }
 
-    /// <summary>Asks for a draw on the next composition frame. Safe from any thread; repeated
-    /// requests before that frame coalesce.</summary>
-    private void RequestFrame()
-    {
-        if (_disposed || Interlocked.Exchange(ref _framePending, 1) == 1)
-            return;
-        if (!DispatcherQueue.TryEnqueue(HookRendering))
-            Volatile.Write(ref _framePending, 0);
-    }
-
-    private void HookRendering()
-    {
-        if (_disposed || !IsLoaded)
-        {
-            Volatile.Write(ref _framePending, 0);
-            return;
-        }
-        if (_renderingPaused)
-        {
-            // Nothing to draw, but command tracking still follows the output.
-            Volatile.Write(ref _framePending, 0);
-            QueueAnnotations();
-            return;
-        }
-        if (_renderingHooked)
-            return;
-        _renderingHooked = true;
-        CompositionTarget.Rendering += OnRendering;
-    }
-
-    public override void SetRenderingPaused(bool paused)
-    {
-        if (_renderingPaused == paused || _disposed)
-            return;
-        _renderingPaused = paused;
-        if (paused)
-        {
-            _blinkTimer.Stop(); // the next frame restarts it
-            _cursorBlinkOn = true;
-            UnhookRendering();
-            return;
-        }
-        _forceFull = true;
-        RequestFrame();
-    }
-
-    private void UnhookRendering()
-    {
-        if (_renderingHooked)
-        {
-            _renderingHooked = false;
-            CompositionTarget.Rendering -= OnRendering;
-        }
-        Volatile.Write(ref _framePending, 0);
-    }
-
-    private void OnRendering(object? sender, object args)
-    {
-        // Unhook first: leaving Rendering subscribed makes XAML draw every frame even when idle.
-        UnhookRendering();
-        DrawFrame();
-    }
-
-    private void DrawFrame()
-    {
-        try
-        {
-            RenderFrame();
-        }
-        catch (Exception exception)
-        {
-            TerminalSurface.TraceHook?.Invoke($"ghostty render failed: {exception}");
-            _forceFull = true;
-        }
-    }
-
-    private void RenderFrame()
-    {
-        if (_disposed || !IsLoaded || _replaying || _renderingPaused || _term == IntPtr.Zero || _cells == null || _renderer.SwapChain is null || Visibility != Visibility.Visible)
-            return;
-        if ((long)Columns * Rows > _cellCapacity || Rows > _dirtyCapacity)
-            return; // a failed resize must not read a frame into the previous, smaller buffers
-        var info = _lastInfo;
-        var full = _forceFull;
-        var rows = GhosttyNative.rvt_read_frame(_term, _cells, (ushort)Columns, (ushort)Rows, _dirty, full ? 1 : 0, &info);
-        if (info.RenderHeld != 0)
-        {
-            // Poll through the native synchronized-output timeout even without more output.
-            // Nothing from a held frame, including cursor/scroll metadata, is published.
-            RequestFrame();
-            return;
-        }
-        // Highlight only the rows just read: their cells are fresh, so tints never compound.
-        // The alternate screen (vim, htop) is never highlighted, as in terminal.html.
-        if (rows > 0 && _highlighter.HasRules && info.Alternate == 0)
-        {
-            for (var y = 0; y < Rows; y++)
-            {
-                if (_dirty[y] == 0)
-                    continue;
-                var row = y;
-                _highlighter.ApplyRow(new Span<TerminalCell>(_cells + y * Columns, Columns), x => GraphemeAt(x, row));
-            }
-        }
-        if (rows > 0 && _hoverSpans.Length > 0)
-        {
-            ApplyHoverLink();
-            if (_hoverSpans.Any(span => span.Row < Rows && _dirty[span.Row] != 0))
-                UpdateHoverLink(_hoverCell, force: true); // output moved under the pointer
-        }
-
-        var cursorMoved = info.CursorY != _lastInfo.CursorY || info.CursorX != _lastInfo.CursorX
-            || info.CursorVisible != _lastInfo.CursorVisible || info.CursorStyle != _lastInfo.CursorStyle;
-        if (cursorMoved)
-        {
-            _cursorBlinkOn = true;
-            MarkCursorDirty();
-        }
-        var blink = info.CursorBlinking != 0 && _focused && info.CursorVisible != 0;
-        if (blink != _blinkTimer.IsRunning)
-        {
-            if (blink) _blinkTimer.Start(); else { _blinkTimer.Stop(); _cursorBlinkOn = true; }
-        }
-        _lastInfo = info;
-        UpdatePointerCursor();
-        if (cursorMoved)
-            PlaceTextInput();
-        UpdateScrollBar(info);
-        if (_findOpen)
-            UpdateFindCount();
-        if (rows > 0 || full)
-            QueueAnnotations();
-        if (info.CursorVisible != 0 && info.CursorY < Rows)
-            _dirty[info.CursorY] = 1;
-        if (_lastCursorRow >= 0 && _lastCursorRow < Rows)
-            _dirty[_lastCursorRow] = 1;
-        if (rows == 0 && !full && !cursorMoved && !_cursorRowDirty)
-            return;
-        _cursorRowDirty = false;
-
-        if (!_renderer.Draw(_cells, Columns, Rows, _dirty, info, _cursorBlinkOn, _focused, _theme.Selection, full))
-            return; // recovery requested a full frame; do not clear that request
-        _forceFull = false;
-        if (_renderer.MarginColor != _marginColor)
-        {
-            _marginColor = _renderer.MarginColor;
-            var color = _marginColor ?? _theme.Background;
-            Background = new SolidColorBrush(ToColor(color));
-            _ruler.SetLaneBackground(color);
-        }
-        _lastCursorRow = info.CursorVisible != 0 ? info.CursorY : -1;
-    }
-
-    private bool _cursorRowDirty;
+    private int _highlightRow;
+    private Func<int, string?>? _highlightGrapheme;
     private uint? _marginColor;
 
     /// <summary>Mirrors libghostty-vt's scroll state; it has no change event, so every frame
@@ -889,7 +805,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         RequestFrame();
     }
 
-    private void MarkCursorDirty() => _cursorRowDirty = true;
+    private void MarkCursorDirty() => Volatile.Write(ref _cursorRowDirty, 1);
 
     private string? GraphemeAt(int x, int y)
     {
@@ -916,7 +832,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         var b = _theme.Background;
         var luminance = ((b >> 16) & 0xFF) * 299 + ((b >> 8) & 0xFF) * 587 + (b & 0xFF) * 114;
         _ruler.SetTheme(dark: luminance < 128_000, _theme.Background, _theme.Selection);
-        _marginColor = null; // the next frame reapplies an extended margin over the new theme
+        lock (_renderGate)
+            _marginColor = null; // the next frame reapplies an extended margin over the new theme
         ApplyTextInputStyle();
     }
 
@@ -937,7 +854,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _scrollback = scrollback;
         _readOnly = readOnly;
         _fixed80Columns = fixed80Columns;
-        _highlighter.SetRules(highlights);
+        lock (_renderGate)
+            _highlighter.SetRules(highlights);
         Background = new SolidColorBrush(ToColor(_theme.Background));
     }
 
@@ -962,7 +880,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         }
         if (relayout)
             _fontScale = 0; // forces SetFont on the next layout pass
-        _forceFull = true;
+        ForceFull();
         Relayout();
         RequestFrame();
     }
@@ -1710,10 +1628,11 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     public override void ApplyHighlights(IReadOnlyList<TerminalHighlight> rules)
     {
-        _highlighter.SetRules(rules);
-        _overview?.Reset();
+        lock (_renderGate)
+            _highlighter.SetRules(rules);
+        _annotations?.ResetOverview();
         QueueAnnotations();
-        _forceFull = true; // re-read every row so old highlights go and new ones appear
+        ForceFull(); // re-read every row so old highlights go and new ones appear
         RequestFrame();
     }
 
@@ -1724,8 +1643,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void CreateCommandTracker()
     {
-        _overview?.Reset();
-        _lineTimes?.Reset();
+        _annotations?.Dispose(wait: false);
         _commandBuffer?.Detach();
         var commandBuffer = new TerminalCommandBuffer(() => _disposed ? IntPtr.Zero : _term);
         _commandBuffer = commandBuffer;
@@ -1753,8 +1671,11 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _commands.PromptContext += (context, platform) => PromptContextChanged?.Invoke(context, platform);
         _commands.CommandMarked += command => CommandObserved?.Invoke(Cap(command));
         _commands.Changed += QueueAnnotations;
-        _overview = new OverviewIndex(_commandBuffer, _highlighter);
-        _lineTimes = new LineTimes(_commandBuffer);
+        // Its own buffer: the worker's reads and markers never meet the UI thread's.
+        var workerBuffer = new TerminalCommandBuffer(() => _disposed ? IntPtr.Zero : _term);
+        _annotations = new AnnotationWorker(workerBuffer, _highlighter, PostRulerRefresh,
+            refresh: workerBuffer.Refresh, detach: workerBuffer.Detach,
+            trace: message => TerminalSurface.TraceHook?.Invoke(message));
         _commands.SetHistoryCapture(_historyCapture);
         if (_promptPlatform is not null)
             _commands.SetPromptPlatform(_promptPlatform);
@@ -1817,40 +1738,55 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void RunAnnotations()
     {
+        if (!FrameStats.Enabled)
+        {
+            RunAnnotationsCore();
+            return;
+        }
+        var start = FrameStats.Now();
+        RunAnnotationsCore();
+        Interlocked.Add(ref _statsAnnotationTicks, FrameStats.Now() - start);
+    }
+
+    private void RunAnnotationsCore()
+    {
         _annotationsPending = false;
         _lastAnnotationsMs = Environment.TickCount64;
         if (_disposed || RefreshCommands() is not { } commands)
             return;
         commands.NoteOutput(_lastObservedMs);
-        if (!_replaying && _lastObservedMs > 0)
-            _lineTimes?.Note(_lastObservedMs);
+        _annotations?.Request(!_replaying && _lastObservedMs > 0 ? _lastObservedMs : 0);
         commands.OnOutputParsed();
         var marks = commands.Commands();
         _ruler.Visibility = _commandBuffer!.IsAlternate ? Visibility.Collapsed : Visibility.Visible;
-        var moreToIndex = _overview?.Advance() ?? false;
-        _ruler.Update(marks, commands.BookmarkLines(), _commandBuffer.Length,
-            OverviewTicks(), SearchLines(out var currentSearchLine), currentSearchLine);
-        if (moreToIndex)
-            QueueAnnotations(); // keep indexing older scrollback at low priority
+        _rulerMarks = marks;
+        _rulerBookmarks = commands.BookmarkLines();
+        UpdateRuler();
         UpdateCommandsPanelPresentation();
         if (_commandsPanel.IsOpen)
             _commandsPanel.SetCommands(marks);
     }
 
-    /// <summary>Highlight-lane ticks: each indexed line in the color of its first overview rule.</summary>
-    private List<(int Line, uint Color)> OverviewTicks()
+    /// <summary>Repaints the ruler from the last annotation pass and the worker's latest ticks.</summary>
+    private void UpdateRuler()
     {
-        var ticks = new List<(int, uint)>();
-        if (_overview is null)
-            return ticks;
-        var rules = _highlighter.Rules;
-        foreach (var (line, mask) in _overview.Lines())
-        {
-            var index = 31 - System.Numerics.BitOperations.LeadingZeroCount(mask); // the last rule wins, as in terminal.html
-            if (index < rules.Count)
-                ticks.Add((line, rules[index].Color));
-        }
-        return ticks;
+        if (_disposed || _commandBuffer is null)
+            return;
+        _ruler.Update(_rulerMarks, _rulerBookmarks, _commandBuffer.Length,
+            _annotations?.Ticks ?? [], SearchLines(out var currentSearchLine), currentSearchLine);
+    }
+
+    /// <summary>Called on the annotation worker when the highlight lane changed.</summary>
+    private void PostRulerRefresh()
+    {
+        if (_disposed || Interlocked.Exchange(ref _rulerRefreshPosted, 1) == 1)
+            return;
+        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                Volatile.Write(ref _rulerRefreshPosted, 0);
+                UpdateRuler();
+            }))
+            Volatile.Write(ref _rulerRefreshPosted, 0);
     }
 
     private int[] SearchLines(out int current)

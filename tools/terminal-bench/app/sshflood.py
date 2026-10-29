@@ -56,6 +56,40 @@ STYLES = (
 )
 
 
+def parse_name(name):
+    # <workload>[-x<repeat>][-r<MB/s>]: -x5 streams the workload five times back to back,
+    # -r2 streams it at 2 MB/s (looping) for PACED_SECONDS. Frame benchmarks need runs
+    # longer than one 8 MB burst.
+    repeat, rate = 1, 0.0
+    parts = name.split('-')
+    for part in parts[1:]:
+        if part.startswith('x') and part[1:].isdigit():
+            repeat = int(part[1:])
+        elif part.startswith('r'):
+            rate = float(part[1:])
+    return parts[0], repeat, rate
+
+
+PACED_SECONDS = 10
+
+
+async def paced(process, data, rate):
+    loop = asyncio.get_running_loop()
+    chunk = max(1024, int(rate * 1_000_000 / 100))  # 100 writes per second
+    start = loop.time()
+    sent = offset = 0
+    while loop.time() - start < PACED_SECONDS:
+        piece = data[offset:offset + chunk]
+        offset = (offset + chunk) % len(data)
+        process.stdout.write(piece)
+        await process.stdout.drain()
+        sent += len(piece)
+        due = start + sent / (rate * 1_000_000)
+        delay = due - loop.time()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+
 async def handle(process):
     name = process.get_extra_info('username')
     if name == 'probe':
@@ -63,13 +97,18 @@ async def handle(process):
         return
     if name == 'styles':
         process.stdout.write(STYLES.encode())
+    name, repeat, rate = parse_name(name)
     path = os.path.join(WORKLOADS, name + '.bin')
     if os.path.exists(path):
         with open(path, 'rb') as f:
             data = f.read()
-        for i in range(0, len(data), 32768):
-            process.stdout.write(data[i:i + 32768])
-            await process.stdout.drain()
+        if rate:
+            await paced(process, data, rate)
+        else:
+            for _ in range(repeat):
+                for i in range(0, len(data), 32768):
+                    process.stdout.write(data[i:i + 32768])
+                    await process.stdout.drain()
     elif name != 'styles':
         process.stdout.write(f'no workload {name}\r\n'.encode())
     # Idle like a quiet shell until the client closes; a resize or break is not the end.

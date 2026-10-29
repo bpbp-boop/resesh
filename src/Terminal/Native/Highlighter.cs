@@ -29,17 +29,26 @@ internal sealed class Highlighter
     internal sealed record Rule(string Id, Regex Pattern, uint Color, bool Tint, bool Underline, bool ShowInOverview);
 
     private IReadOnlyList<Rule> _rules = [];
-    private readonly StringBuilder _text = new();
-    private readonly List<int> _starts = [];
-    private readonly List<int> _ends = [];
+    // Row text and its column map, reused for every row: a scrolling frame repaints every
+    // row, so building strings here showed up as most of the highlighter's cost and garbage.
+    private char[] _text = new char[256];
+    private int[] _starts = new int[256];
+    private int[] _ends = new int[256];
+    private int _length;
     private readonly Dictionary<string, (int Index, int Length, int Rule)[]> _matches = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (int Index, int Length, int Rule)[]>.AlternateLookup<ReadOnlySpan<char>> _matchesBySpan;
+
+    public Highlighter()
+    {
+        _matchesBySpan = _matches.GetAlternateLookup<ReadOnlySpan<char>>();
+    }
 
     public IReadOnlyList<Rule> Rules => _rules;
 
     /// <summary>The column map of the last <see cref="RowText"/>: the first cell and the cell
     /// after the last that each UTF-16 code unit covers.</summary>
-    internal IReadOnlyList<int> ColumnStarts => _starts;
-    internal IReadOnlyList<int> ColumnEnds => _ends;
+    internal IReadOnlyList<int> ColumnStarts => new ArraySegment<int>(_starts, 0, _length);
+    internal IReadOnlyList<int> ColumnEnds => new ArraySegment<int>(_ends, 0, _length);
     public bool HasRules => _rules.Count > 0;
 
     /// <summary>Replaces the rule set. Patterns this engine rejects are skipped, as the page
@@ -113,11 +122,14 @@ internal sealed class Highlighter
     /// <summary>Text of a row with a column map: every UTF-16 code unit knows the cells it
     /// covers, so wide characters and grapheme clusters map to their full cells. Trailing
     /// blanks are trimmed, as xterm's translateToString(true) does.</summary>
-    internal string RowText(ReadOnlySpan<TerminalCell> row, Func<int, string?>? grapheme)
+    internal string RowText(ReadOnlySpan<TerminalCell> row, Func<int, string?>? grapheme) =>
+        new(FillRow(row, grapheme));
+
+    /// <summary>Fills the reusable row buffer and column map; the span is valid until the
+    /// next call.</summary>
+    private ReadOnlySpan<char> FillRow(ReadOnlySpan<TerminalCell> row, Func<int, string?>? grapheme)
     {
-        _text.Clear();
-        _starts.Clear();
-        _ends.Clear();
+        _length = 0;
         for (var x = 0; x < row.Length; x++)
         {
             ref readonly var cell = ref row[x];
@@ -148,18 +160,23 @@ internal sealed class Highlighter
                 Append('\uFFFD', x, width);
             }
         }
-        var length = _text.Length;
-        while (length > 0 && char.IsWhiteSpace(_text[length - 1]))
-            length--;
-        _text.Length = length;
-        return _text.ToString();
+        while (_length > 0 && char.IsWhiteSpace(_text[_length - 1]))
+            _length--;
+        return _text.AsSpan(0, _length);
     }
 
     private void Append(char c, int x, int width)
     {
-        _text.Append(c);
-        _starts.Add(x);
-        _ends.Add(x + width);
+        if (_length == _text.Length)
+        {
+            Array.Resize(ref _text, _length * 2);
+            Array.Resize(ref _starts, _length * 2);
+            Array.Resize(ref _ends, _length * 2);
+        }
+        _text[_length] = c;
+        _starts[_length] = x;
+        _ends[_length] = x + width;
+        _length++;
     }
 
     /// <summary>Applies every rule to one freshly read row (never to an already highlighted
@@ -168,11 +185,12 @@ internal sealed class Highlighter
     {
         if (_rules.Count == 0)
             return;
-        var text = RowText(row, grapheme);
-        if (text.Length == 0)
+        var span = FillRow(row, grapheme);
+        if (span.IsEmpty)
             return;
-        if (!_matches.TryGetValue(text, out var matches))
+        if (!_matchesBySpan.TryGetValue(span, out var matches))
         {
+            var text = new string(span);
             matches = FindMatches(text);
             if (_matches.Count >= MaxCachedRows)
                 _matches.Clear();

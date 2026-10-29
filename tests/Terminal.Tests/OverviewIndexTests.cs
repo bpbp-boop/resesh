@@ -5,7 +5,9 @@ namespace Resesh.Terminal.Tests;
 /// <summary>The ruler's highlight lane index (terminal.html's Phase 9.3).</summary>
 public class OverviewIndexTests
 {
-    private static (FakeBuffer Buffer, OverviewIndex Index) Setup(int lines, Func<int, string> text, int rows = 10)
+    // A generous budget, so only the line cap ends a slice on a slow test machine.
+    private static (FakeBuffer Buffer, OverviewIndex Index) Setup(int lines, Func<int, string> text, int rows = 10,
+        TimeSpan? sliceBudget = null)
     {
         var buffer = new FakeBuffer { Rows = rows };
         for (var i = 0; i < lines; i++)
@@ -15,7 +17,7 @@ public class OverviewIndexTests
             new TerminalHighlight("err", "error", "#ff5555", ShowInOverview: true),
             new TerminalHighlight("warn", "warn", "#f1fa8c"),
         ]);
-        return (buffer, new OverviewIndex(buffer, highlighter));
+        return (buffer, new OverviewIndex(buffer, highlighter, sliceBudget ?? TimeSpan.FromMinutes(1)));
     }
 
     private static int[] Indexed(OverviewIndex index) => [.. index.Lines().Select(l => l.Line).OrderBy(l => l)];
@@ -39,6 +41,19 @@ public class OverviewIndexTests
             calls++;
         Assert.Equal(3, calls);              // 4990 scrollback lines: 2000 + 2000 + 990
         Assert.Equal([7, 1007, 2007, 3007, 4007], Indexed(index));
+    }
+
+    [Fact]
+    public void StopsASliceAtItsTimeBudgetButAlwaysProgresses()
+    {
+        var (_, index) = Setup(500, i => i % 100 == 80 ? "error" : "fine", sliceBudget: TimeSpan.Zero);
+        Assert.True(index.Advance());        // one 64-line chunk, then the budget is spent
+        Assert.Empty(Indexed(index));
+        var calls = 1;
+        while (index.Advance())
+            calls++;
+        Assert.True(calls > 1);
+        Assert.Equal([80, 180, 280, 380, 480], Indexed(index));
     }
 
     [Fact]

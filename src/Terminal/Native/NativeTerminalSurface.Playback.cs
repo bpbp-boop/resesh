@@ -143,7 +143,7 @@ public sealed partial class NativeTerminalSurface
                 return;
             _fixedGrid = size;
             _replaying = false;
-            _forceFull = true;
+            ForceFull();
             Relayout();
             RequestFrame();
         }

@@ -17,7 +17,9 @@ namespace Resesh.Terminal.Native;
 /// Draws a flattened libghostty-vt grid with Direct2D/DirectWrite into a composition swap chain
 /// for a SwapChainPanel. Dirty rows are drawn into a retained canvas texture; each present copies
 /// the canvas to the back buffer, because flip-model buffers do not keep their contents.
-/// UI thread only.
+/// Thread-safe: every entry point holds <see cref="DeviceGate"/>, because all terminals share
+/// one D3D device and single-threaded Direct2D factory. Each surface draws from its own render
+/// thread, and the UI thread draws directly during layout.
 /// </summary>
 internal sealed unsafe partial class TerminalRenderer : IDisposable
 {
@@ -29,7 +31,9 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private static IDWriteFactory2? s_dwrite;
     private static IDXGIFactory2? s_dxgiFactory;
     private static readonly HashSet<TerminalRenderer> s_renderers = [];
-    private static int s_uiThread;
+    /// <summary>Serializes all use of the shared device, its immediate context and every
+    /// renderer's Direct2D objects. Taken after a surface's own render lock, never before.</summary>
+    internal static readonly object DeviceGate = new();
     private static int s_generation;
     private static bool s_recovering;
 
@@ -90,6 +94,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private int _bufferHeight;
     private int _capacityWidth;
     private int _capacityHeight;
+    /// <summary>Read under <see cref="DeviceGate"/>: device recovery replaces it from whichever
+    /// thread notices the loss.</summary>
     public IDXGISwapChain1? SwapChain => _swapChain;
     public event Action? SwapChainChanged;
 
@@ -99,9 +105,14 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     public TerminalRenderer()
     {
-        EnsureShared();
-        CreateDeviceResources();
-        s_renderers.Add(this);
+        lock (DeviceGate)
+        {
+            EnsureShared();
+            CreateDeviceResources();
+            s_renderers.Add(this);
+        }
+        if (FrameStats.Enabled)
+            StatsSurface = FrameStats.NextSurfaceId();
     }
 
     private void CreateDeviceResources()
@@ -115,10 +126,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     private static void EnsureShared()
     {
-        var thread = Environment.CurrentManagedThreadId;
-        if (s_uiThread != 0 && s_uiThread != thread)
-            throw new InvalidOperationException("Terminal graphics resources must be used on their UI thread.");
-        s_uiThread = thread;
+        System.Diagnostics.Debug.Assert(Monitor.IsEntered(DeviceGate));
         if (s_device is not null)
             return;
         try
@@ -133,6 +141,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             s_d2dDevice = s_d2dFactory.CreateDevice(dxgiDevice);
             using var adapter = dxgiDevice.GetAdapter();
             s_dxgiFactory = adapter.GetParent<IDXGIFactory2>();
+            if (FrameStats.Enabled)
+                FrameStats.Info($"adapter: {adapter.Description.Description}");
             s_dwrite = DWrite.DWriteCreateFactory<IDWriteFactory2>(DWFactoryType.Shared);
             s_generation++;
         }
@@ -163,8 +173,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     private static void RecoverShared(int observedGeneration)
     {
-        if (Environment.CurrentManagedThreadId != s_uiThread)
-            throw new InvalidOperationException("Terminal graphics recovery must run on the UI thread.");
+        System.Diagnostics.Debug.Assert(Monitor.IsEntered(DeviceGate));
         if (s_recovering || observedGeneration != s_generation)
             return;
         s_recovering = true;
@@ -207,6 +216,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     /// <summary>Loads the font chain and measures the cell. <paramref name="emPixels"/> is the
     /// font size in physical pixels (CSS px times the rasterization scale).</summary>
     public void SetFont(string fontFamilyList, float emPixels)
+    {
+        lock (DeviceGate)
+            SetFontLocked(fontFamilyList, emPixels);
+    }
+
+    private void SetFontLocked(string fontFamilyList, float emPixels)
     {
         DisposeFaces();
         _fontFamilyList = fontFamilyList;
@@ -257,6 +272,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         // double line is three of these wide, so keep it to a fifth of the cell.
         _boxThickness = Math.Clamp((int)MathF.Ceiling(metrics.UnderlineThickness * scale), 1, Math.Max(1, CellWidth / 5));
         DisposeGlyphGeometries();
+        ResetClusterCaches();
 
         _emojiFormat?.Dispose();
         _emojiFormat = s_dwrite.CreateTextFormat("Segoe UI Emoji", FontWeight.Normal, FontStyle.Normal, emPixels * 0.9f);
@@ -314,6 +330,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     /// XAML commit that moves the pane, which showed black for a frame on splits and zooms.
     /// Full frames fill the whole buffer, so the part past the grid is always background.</remarks>
     public bool Resize(int pixelWidth, int pixelHeight, int capacityWidth = 0, int capacityHeight = 0)
+    {
+        lock (DeviceGate)
+            return ResizeLocked(pixelWidth, pixelHeight, capacityWidth, capacityHeight);
+    }
+
+    private bool ResizeLocked(int pixelWidth, int pixelHeight, int capacityWidth, int capacityHeight)
     {
         pixelWidth = Math.Max(1, pixelWidth);
         pixelHeight = Math.Max(1, pixelHeight);
@@ -373,6 +395,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     /// <summary>Presents a frame of one color: what the chain shows before its first real draw.</summary>
     public void Clear(uint color)
     {
+        lock (DeviceGate)
+            ClearLocked(color);
+    }
+
+    private void ClearLocked(uint color)
+    {
         if (_disposed || _swapChain is null || _canvas is null)
             return;
         _dc.BeginDraw();
@@ -387,6 +415,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     /// <summary>Maps the physical-pixel swap chain onto the panel's DIP layout.</summary>
     public void SetCompositionScale(float scaleX, float scaleY)
+    {
+        lock (DeviceGate)
+            SetCompositionScaleLocked(scaleX, scaleY);
+    }
+
+    private void SetCompositionScaleLocked(float scaleX, float scaleY)
     {
         _compositionScaleX = scaleX;
         _compositionScaleY = scaleY;
@@ -476,6 +510,13 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     public bool Draw(TerminalCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
         bool cursorShown, bool focused, uint selectionColor, bool full)
     {
+        lock (DeviceGate)
+            return DrawLocked(cells, cols, rows, dirty, info, cursorShown, focused, selectionColor, full);
+    }
+
+    private bool DrawLocked(TerminalCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
+        bool cursorShown, bool focused, uint selectionColor, bool full)
+    {
         if (_disposed || _swapChain is null || _canvas is null)
             return false;
         var observedGeneration = _generation;
@@ -485,6 +526,10 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             _runAdvances = new float[cols];
         }
 
+        var stats = FrameStats.Enabled;
+        var gpuSlot = stats ? BeginGpuTiming() : -1;
+        var recordStart = stats ? FrameStats.Now() : 0;
+        var rowsDrawn = 0;
         _dc.BeginDraw();
         if (full)
         {
@@ -529,10 +574,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             if (dirty[y] == 0 && !full)
                 continue;
             dirty[y] = 0;
+            rowsDrawn++;
             DrawRow(cells + y * cols, cols, y, info.DefaultBackground, selectionColor, extend);
         }
         if (cursorShown && info.CursorVisible != 0 && info.CursorY < rows && info.CursorX < cols)
             DrawCursor(cells + info.CursorY * cols + info.CursorX, info, focused);
+        var endDrawStart = stats ? FrameStats.Now() : 0;
         var endDraw = _dc.EndDraw();
         if (endDraw == Vortice.Direct2D1.ResultCode.RecreateTarget)
         {
@@ -541,9 +588,21 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         }
         endDraw.CheckError();
 
+        var copyStart = stats ? FrameStats.Now() : 0;
         using (var backBuffer = _swapChain.GetBuffer<ID3D11Texture2D>(0))
             s_context!.CopyResource(backBuffer, _canvas);
+        if (stats)
+            EndGpuTiming(gpuSlot);
+        var presentStart = stats ? FrameStats.Now() : 0;
         var present = _swapChain.Present(1, PresentFlags.None);
+        if (stats)
+        {
+            var presentEnd = FrameStats.Now();
+            LastTimings = (rowsDrawn, FrameStats.Microseconds(recordStart, endDrawStart),
+                FrameStats.Microseconds(endDrawStart, copyStart), FrameStats.Microseconds(copyStart, presentStart),
+                FrameStats.Microseconds(presentStart, presentEnd));
+        }
+        FrameNumber++;
         if (present == Vortice.DXGI.ResultCode.DeviceRemoved
             || present == Vortice.DXGI.ResultCode.DeviceReset
             || present == Vortice.DXGI.ResultCode.DeviceHung)
@@ -780,18 +839,11 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         var width = (c.Wide == TerminalCell.WideChar ? 2 : 1) * CellWidth;
         SetBrush(Rgb(c.Foreground));
         var emoji = IsEmojiPresentation(c.Codepoint) || text.Contains('️');
+        float left = OriginX + x * CellWidth, top = y * CellHeight;
         if (emoji)
-        {
-            _dc.DrawText(text, _emojiFormat!, new Rect(OriginX + x * CellWidth, y * CellHeight, width, CellHeight), _brush,
-                DrawTextOptions.EnableColorFont | DrawTextOptions.Clip);
-            return;
-        }
-        // Base character plus combining marks: lay out in the terminal font on the baseline.
-        using var layout = s_dwrite!.CreateTextLayout(text, _clusterFormat!, width, CellHeight);
-        var lineMetrics = layout.LineMetrics;
-        var offset = lineMetrics.Length > 0 ? _baseline - lineMetrics[0].Baseline : 0;
-        _dc.DrawTextLayout(new Vector2(OriginX + x * CellWidth, y * CellHeight + offset), layout, _brush,
-            DrawTextOptions.Clip);
+            DrawEmoji(text, width / CellWidth, c.Foreground, new Vortice.RawRectF(left, top, left + width, top + CellHeight));
+        else
+            DrawCombiningCluster(text, width, new Vector2(left, top));
     }
 
     private void DrawCursor(TerminalCell* cell, in GhosttyFrameInfo info, bool focused)
@@ -852,6 +904,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     private void DisposeDeviceResources()
     {
+        DisposeGpuQueries();
+        ResetClusterCaches();
         ReleaseSwapChain();
         DisposeFaces();
         DisposeGlyphGeometries();
@@ -871,6 +925,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     }
 
     public void Dispose()
+    {
+        lock (DeviceGate)
+            DisposeLocked();
+    }
+
+    private void DisposeLocked()
     {
         if (_disposed)
             return;

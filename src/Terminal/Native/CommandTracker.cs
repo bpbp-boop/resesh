@@ -26,6 +26,8 @@ internal interface ICommandBuffer
     /// <summary>The line continues the one above it (a soft wrap).</summary>
     bool IsWrapped(int line);
     ICommandMarker? CreateMarker(int line);
+    /// <summary>Reads a run of lines in one go ahead of <see cref="LineText"/> calls for them.</summary>
+    void Prefetch(int first, int count) { }
 }
 
 /// <summary>One command mark as the ruler and the commands panel show it.</summary>

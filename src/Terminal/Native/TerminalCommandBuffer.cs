@@ -31,7 +31,8 @@ internal struct GhosttySemanticEvent
 }
 
 /// <summary>
-/// <see cref="ICommandBuffer"/> over a libghostty-vt terminal. UI thread only. Buffer info and
+/// <see cref="ICommandBuffer"/> over a libghostty-vt terminal, used by one thread at a time: the
+/// surface's on the UI thread, the annotation worker's on the pool. Buffer info and
 /// line reads are cached until <see cref="Refresh"/>, which the surface calls before each
 /// tracker entry point, so one pass sees one consistent snapshot of positions.
 /// </summary>
@@ -83,6 +84,48 @@ internal sealed unsafe partial class TerminalCommandBuffer(Func<IntPtr> terminal
     }
 
     public string? LineText(int line) => Line(line).Text;
+
+    private byte[]? _prefetchText;
+    private int[] _prefetchLengths = [];
+    private byte[] _prefetchWrapped = [];
+
+    /// <summary>Fills the line cache for a run of lines with one native call, which takes the
+    /// terminal lock once: line by line, each read waits behind the parser during a flood.</summary>
+    public void Prefetch(int first, int count)
+    {
+        var term = terminal();
+        first = Math.Max(0, first);
+        count = Math.Min(count, _info.TotalLines - first);
+        if (term == IntPtr.Zero || count <= 0)
+            return;
+        _prefetchText ??= new byte[256 * 1024];
+        if (_prefetchLengths.Length < count)
+        {
+            _prefetchLengths = new int[count];
+            _prefetchWrapped = new byte[count];
+        }
+        while (count > 0)
+        {
+            int done;
+            fixed (byte* text = _prefetchText)
+            fixed (int* lengths = _prefetchLengths)
+            fixed (byte* wrapped = _prefetchWrapped)
+                done = GhosttyNative.rvt_lines_text(term, first, count, text, (nuint)_prefetchText.Length, lengths, wrapped);
+            if (done <= 0)
+                return;
+            var offset = 0;
+            for (var i = 0; i < done; i++)
+            {
+                var length = _prefetchLengths[i];
+                if (length < 0)
+                    continue; // missing or did not fit: Line reads it on its own
+                _lines[first + i] = (Encoding.UTF8.GetString(_prefetchText, offset, length), _prefetchWrapped[i] != 0);
+                offset += length;
+            }
+            first += done;
+            count -= done;
+        }
+    }
 
     public bool IsWrapped(int line) => Line(line).Wrapped;
 

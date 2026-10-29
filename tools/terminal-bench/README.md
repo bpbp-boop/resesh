@@ -43,3 +43,20 @@ connection pays SSH.NET and server start-up. For hot paths, `dotnet-trace collec
 --profile dotnet-sampled-thread-time --format Speedscope` (wall-clock samples: `PollGC` frames are
 GC waits, `UNMANAGED_CODE_TIME` is native work or blocking) and `--profile gc-verbose` for
 allocation ticks.
+
+## Frame timings (`RESESH_FRAME_STATS`)
+
+Set `RESESH_FRAME_STATS=<folder>` before launching the app and it writes `frames-<pid>.csv`
+(per drawn frame: UI-thread time for each step, rows drawn, buffer size, output parsed since
+the previous frame), `gpu-<pid>.csv` (GPU time per frame from timestamp queries) and
+`info-<pid>.txt` (the adapter) there. With the variable unset the hooks cost one bool check.
+
+```powershell
+# sshflood.py usernames take -x<n> (repeat the workload n times) and -r<MB/s> (paced, 10 s)
+& app\framebench.ps1 -Exe <publish>\Resesh.App.exe -DataDir <data-dir> -Out <dir> `
+    -Profiles @('SSH logs-x30', 'SSH unicode-x20') -Sizes @('small=1280x800', 'big=3840x2160')
+python framestats.py <run dir> ...
+```
+
+Sizes are window placements written to the data dir's settings before each launch (the app
+clamps them to the work area). Results: `RESULTS.md`.

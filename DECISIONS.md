@@ -1483,3 +1483,51 @@ pins them), so saved sessions keep their icons.
   WinUI's modern ListViewItem template with an older one that has no selection pill.
 - A workspace open in the background keeps a neutral marker of the same pill shape at half
   height; it is not a ListView concept.
+
+## 2026-10-29 - Parse output in slices and let readers in between
+
+`rvt_write` used to parse each SSH read in one hold of the terminal's SRW lock. In a flood of
+short lines with a full scrollback libghostty-vt parses ~5 MB/s, so a 32 KB read held the lock
+for ~6 ms, and the UI thread's frame read and line-text reads (the overview index takes the lock
+once per line) queued behind it: 7 fps and 450 ms stalls at full screen. The shim now parses in
+4 KB slices. SRW locks let the releasing thread take the lock straight back, so every other
+entry point counts itself in `waiting` while blocked and the writer spins (at most 100 µs) until
+that count drops. Not `SwitchToThread`: the first version yielded that way, and once a background
+reader waited for the lock often, the writer kept handing its whole time slice (~15 ms) to other
+threads and SSH floods were capped at exactly 25 MB/s (384 KB per ~16 ms). Measured with
+`RESESH_FRAME_STATS` (tools/terminal-bench/RESULTS.md).
+
+## 2026-10-29 - Draw terminals on their own render threads
+
+Each `NativeTerminalSurface` now draws on its own thread, as Ghostty does, instead of in
+`CompositionTarget.Rendering` on the UI thread: a full-screen 4K frame costs ~3 ms, and during a
+flood that was most of every frame interval, so input waited behind output. Pieces:
+
+- `_renderGate` (per surface) guards the cell buffers, grid size, highlighter and hover state;
+  `TerminalRenderer.DeviceGate` (global) serializes the shared D3D device, its immediate context
+  and every renderer's Direct2D objects (the factory stays single-threaded; access is serial).
+  Lock order is always render gate, then device gate; device recovery and `AttachSwapChain` hold
+  only the device gate.
+- Layout still draws synchronously on the UI thread under both locks, so a resized buffer is
+  never shown black (the 2026-10-15 window-sized swap chain fix depends on it).
+- Pacing is `DwmFlush` after each drawn frame: the first frame after a quiet spell (a key's echo)
+  draws immediately, a flood draws once per composition. No frame-latency waitable object: its
+  handle would have to outlive swap chain replacement while a render thread waits on it.
+- XAML-side effects of a frame (scroll bar, IME box, pointer, blink timer, annotations, margin
+  brush) are merged and posted to the UI thread; `Visibility`/`IsLoaded` are mirrored in fields
+  because the render thread cannot read dependency properties.
+- Link hover builds row text with its own `Highlighter`, since the render thread owns the
+  shared one's buffers.
+
+## 2026-10-29 - Index the ruler's highlight lane off the UI thread
+
+`AnnotationWorker` runs line times and the overview index on the thread pool, one pass at a time,
+over its own `TerminalCommandBuffer` (its own line cache and markers, so nothing is shared with
+the UI thread's buffer). Each of their terminal reads can wait for the parser; on the UI thread a
+full-screen flood of short lines made a pass take 17–23 ms even with batched reads. The UI's
+annotation pass now only asks for a worker pass and paints the ruler from the worker's last
+ticks; the worker posts a ruler repaint when they change. Passes keep the UI's old pace (100 ms
+between scrollback slices): more often, they compete with the parser for the lock. Resets
+(rules, reflow) are flags the next pass reads, so the UI never waits for the worker, except
+`Dispose`, which must not free the terminal under a running pass, and ruler tooltips, which ask
+for a line's time with a 5 ms timeout.

@@ -8,9 +8,16 @@ namespace Resesh.Terminal.Native;
 /// invalidate the index: virtual = absolute line + (anchor's virtual - anchor's line). Losing
 /// the anchor, a reflow, or a rule change rebuilds it.
 /// </summary>
-internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlighter)
+internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlighter, TimeSpan? sliceBudget = null)
 {
     private const int SliceLines = 2000;
+    // Lines read per native call; the time budget is checked between chunks.
+    private const int ChunkLines = 64;
+    // Each line read takes the parser's lock, so during a flood a line can cost 100+ us and a
+    // 2000-line slice took 50-500 ms. A pass stops at whichever comes first, and runs on the
+    // annotation worker, not the UI thread.
+    private readonly long _sliceBudgetTicks =
+        (long)((sliceBudget ?? TimeSpan.FromMilliseconds(4)).TotalSeconds * System.Diagnostics.Stopwatch.Frequency);
     private const int ReanchorGap = 4096;
 
     private readonly Dictionary<long, uint> _scrollback = [];
@@ -50,13 +57,22 @@ internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlight
         // Scrollback ends where the live screen area begins.
         var liveStart = Math.Max(0, buffer.Length - buffer.Rows);
         var scanned = 0;
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
         for (var line = (int)Math.Max(0, _nextVirtual - offset); line < liveStart && scanned < SliceLines; line++, scanned++)
         {
+            if (scanned % ChunkLines == 0)
+            {
+                if (scanned > 0 && System.Diagnostics.Stopwatch.GetTimestamp() - start > _sliceBudgetTicks)
+                    break;
+                // One line more: Mask looks at the next line to see whether it continues this one.
+                buffer.Prefetch(line, Math.Min(ChunkLines, liveStart - line) + 1);
+            }
             var mask = Mask(line);
             if (mask != 0)
                 _scrollback[line + offset] = mask;
             _nextVirtual = line + offset + 1;
         }
+        buffer.Prefetch(liveStart, buffer.Length - liveStart);
         for (var line = liveStart; line < buffer.Length; line++)
         {
             var mask = Mask(line);

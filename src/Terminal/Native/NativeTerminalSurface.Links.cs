@@ -19,6 +19,7 @@ public sealed unsafe partial class NativeTerminalSurface
     private string? _hoverUri;
     private (int Row, int Start, int End)[] _hoverSpans = [];
     private (int X, int Y) _hoverCell = (-1, -1);
+    private readonly Highlighter _linkText = new(); // row text only: the render thread owns _highlighter's buffers
 
     private readonly record struct LinkHit(string Uri, (int Row, int Start, int End)[] Spans);
 
@@ -35,7 +36,7 @@ public sealed unsafe partial class NativeTerminalSurface
         _hoverUri = hit?.Uri;
         _hoverSpans = hit?.Spans ?? [];
         UpdatePointerCursor();
-        _forceFull = true; // re-read rows so the old underline goes and the new one shows
+        ForceFull(); // re-read rows so the old underline goes and the new one shows
         RequestFrame();
     }
 
@@ -71,10 +72,10 @@ public sealed unsafe partial class NativeTerminalSurface
         _ => InputSystemCursorShape.Arrow, // default, context-menu, alias, copy, zoom-in, zoom-out
     };
 
-    /// <summary>Underlines the hovered link on rows just read.</summary>
-    private void ApplyHoverLink()
+    /// <summary>Underlines the hovered link on rows just read (render side, under the render lock).</summary>
+    private void ApplyHoverLink((int Row, int Start, int End)[] spans)
     {
-        foreach (var (row, start, end) in _hoverSpans)
+        foreach (var (row, start, end) in spans)
         {
             if (row < 0 || row >= Rows || _dirty[row] == 0)
                 continue;
@@ -84,6 +85,12 @@ public sealed unsafe partial class NativeTerminalSurface
     }
 
     private LinkHit? LinkAt(int x, int y)
+    {
+        lock (_renderGate) // the cell buffer is the render thread's
+            return LinkAtLocked(x, y);
+    }
+
+    private LinkHit? LinkAtLocked(int x, int y)
     {
         if (_term == IntPtr.Zero || _cells == null || x < 0 || y < 0 || x >= Columns || y >= Rows)
             return null;
@@ -115,10 +122,10 @@ public sealed unsafe partial class NativeTerminalSurface
         for (var row = top; row <= bottom; row++)
         {
             var r = row;
-            var rowText = _highlighter.RowText(new ReadOnlySpan<TerminalCell>(_cells + row * Columns, Columns), c => GraphemeAt(c, r));
+            var rowText = _linkText.RowText(new ReadOnlySpan<TerminalCell>(_cells + row * Columns, Columns), c => GraphemeAt(c, r));
             text.Append(rowText);
             for (var i = 0; i < rowText.Length; i++)
-                map.Add((row, _highlighter.ColumnStarts[i], _highlighter.ColumnEnds[i]));
+                map.Add((row, _linkText.ColumnStarts[i], _linkText.ColumnEnds[i]));
         }
 
         for (var match = UrlPattern.Match(text.ToString()); match.Success; match = match.NextMatch())

@@ -170,6 +170,8 @@ public sealed class TerminalCapture : IDisposable
             Changed?.Invoke();
     }
 
+    /// <summary>Keeps a copy of <paramref name="state"/>: the caller's memory may be freed as soon
+    /// as this returns (the terminal surface passes the shim's own buffer).</summary>
     public void CaptureKeyframe(ReadOnlyMemory<byte> state, int columns, int rows, long unixTimeMilliseconds)
     {
         if (state.IsEmpty)

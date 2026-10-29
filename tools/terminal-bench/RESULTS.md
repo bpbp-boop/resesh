@@ -117,3 +117,142 @@ Release build, recording on (`alwaysRecord`), `app/appbench.ps1`:
   5.9 s -> 3.8 s, tiny 9.0 s -> 3.2 s; WebView2 logs 9.2 s -> 8.1 s (it shares the recorder).
 - Baselines drift between sessions (the producer tracking polls the process list): compare
   within one table only.
+
+## Frame timings in the shipping renderer (2026-10-29)
+
+`RESESH_FRAME_STATS=<dir>` makes the app log every drawn frame (UI-thread time per step, rows
+drawn, GPU time from D3D11 timestamp queries, output parsed since the last frame).
+`app/framebench.ps1` runs profiles at given window sizes; `framestats.py` summarizes. AOT
+publish, SSH floods from `sshflood.py` (no ConPTY), built-in highlight rules on (the default),
+4K 144 Hz display (6.9 ms budget), RX 6800 XT. Medians unless noted; µs.
+
+| window / workload | grid | fps | UI thread per frame (p50 / p99) | read | prep | record | EndDraw | Present | GPU p50 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1280×800 logs | 97×36 | 137–141 | 870 / 1,900 | 50 | 280 | 285 | 21 | 200 | 125 |
+| 1280×800 color | 97×36 | 76–90 | 875 / 2,000–5,000 | 87 | 187 | 89 | 174 | 186 | 155 |
+| 1280×800 tui | 97×36 | 128–143 | 470 / 970 | 77 | 8 | 67 | 120 | 170 | 300 |
+| 1280×800 unicode | 97×36 | 46–50 | 20,400 / 25,700 | 49 | 225 | 19,700 | 49 | 287 | 249 |
+| 1280×800 tiny | 97×36 | 16–23 | 1,300 / 2,800 | 970 | 84 | 44 | 62 | 176 | 88 |
+| full screen logs | 381×109 | 82–97 | 3,500 / 7,500–9,400 | 530 | 1,260 | 1,250 | 110 | 310 | 1,770 |
+| full screen color | 381×109 | 89–94 | 3,170 / 6,600–8,300 | 615 | 900 | 1,240 | 43 | 315 | 1,785 |
+| full screen tui | 381×109 | 126–139 | 880 / 2,000–2,400 | 244 | 8 | 135 | 135 | 345 | 977 |
+| full screen unicode | 381×109 | 10–16 | 60,000–106,000 | 650 | 675 | 58,000–105,000 | 135 | 325 | 40,000–73,000 |
+| full screen tiny | 381×109 | 7–8 | 6,100 / 8,600–11,800 | 4,700 | 340 | 290 | 166 | 647 | 1,570 |
+
+- **Color emoji are the outlier.** `DrawCluster` sends each one through `ID2D1DeviceContext::
+  DrawText` with a color font: a new layout plus color-glyph rasterization per emoji per frame,
+  ~0.55 ms of UI thread each (one 👍 per line in `unicode`), and tens of ms of GPU at full
+  screen. A rasterized-glyph cache (what Ghostty's atlas does) would remove almost all of it.
+- **Plain text at full screen costs ~3.5 ms of UI thread and ~1.8 ms GPU per frame**, within
+  the 144 Hz budget at p50 but not at p99, so scrolling floods run at 80–100 fps. Recording is
+  ~11 µs per row; Direct2D's GPU work grows with the pixels drawn.
+- **prep is the highlighter** (it skips the alternate screen, so `tui` shows ~8 µs): ~11 µs per
+  dirty row while scrolling, because every new line misses the match cache. The scroll bar
+  update (~40 µs) and IME box placement (~8 µs) are small.
+- **read in `tiny`** is the UI thread waiting on the parser lock: libghostty-vt parses one-short-
+  line output at 5–18 MB/s (slower on wider grids), so frames drop to 7–23 fps. That is the
+  shared core, not our renderer.
+- Copy of the window-sized canvas to the back buffer is ~10–45 µs of CPU and not visible in GPU
+  time; Present is ~0.2–0.35 ms and never blocked for a vsync.
+- The paced (`-r1`) runs drew at 64 fps because asyncio's sleep on Windows has 15.6 ms
+  granularity; use floods for frame-rate numbers.
+
+### After the emoji atlas (same day)
+
+Color emoji are now rasterized once per (cluster, width, color) into a 2048² atlas and copied
+with a nearest-neighbor `DrawBitmap`; screenshots of the `unicode` workload are pixel-identical
+to before. Combining-mark clusters reuse their text layout.
+
+| unicode workload | before | after |
+|---|---:|---:|
+| 1280×800 fps | 46–50 | 138–141 |
+| 1280×800 UI thread per frame (p50) | 20.4 ms | 0.94 ms |
+| full screen fps | 10–16 | 109–122 |
+| full screen UI thread per frame (p50) | 60–106 ms | 2.9–3.0 ms |
+| full screen GPU per frame (p50) | 40–73 ms | 1.75 ms |
+
+`logs` and `color` are unchanged within run-to-run noise.
+
+### UI-thread stalls (same day)
+
+Frame logs now also carry GC pause time, allocation, the annotation pass (ruler, overview index)
+and keyframe capture. The slow frames and 150–500 ms gaps between frames were not the renderer:
+
+- **Overview indexing** (the ruler's highlight lane) scanned up to 2000 scrollback lines per pass
+  on the UI thread. Each line read takes the terminal lock, so during a flood a pass took
+  50–500 ms and passes ran back to back (up to 950 ms of every second in `tiny`). A pass now
+  stops after 4 ms; indexing catches up when output calms.
+- **The terminal lock**: `rvt_write` parsed a whole SSH read (32 KB+) under one lock hold, ~6 ms
+  in `tiny`, and every UI read (the frame, line text) waited behind it. Writes are now parsed in
+  4 KB slices, and the writer yields while anyone waits for the lock.
+- GC pauses are ~2–3% of the time (2–3 MB allocated per frame, mostly outside the renderer);
+  the highlighter's row text no longer allocates. Highlighting still costs ~11 µs per new row
+  in a flood: the regex, not the text building.
+
+Full screen (381×109), before → after:
+
+| workload | fps | longest annotation pass | gaps > 50 ms | UI per frame p50 |
+|---|---|---|---|---|
+| logs | 99–109 → 117–132 | 150–175 → 7–8 ms | 7–9 → 1 | 3.5–3.9 → 3.5 ms |
+| color | 99 → 120–133 | 136–163 → 7–11 ms | 6–10 → 1 | 3.1–3.2 → 3.2 ms |
+| unicode | 92–111 → 130–131 | 26–45 → 6–9 ms | 1 → 1 | 2.7–2.9 → 2.8 ms |
+| tiny | 7 → 122–124 | 446–496 → 23–24 ms | 11–14 → 1 | 6.3–6.8 → 2.2 ms |
+
+(The one remaining gap per run is at start-up.)
+
+### Render thread (same day)
+
+Frames are now drawn on a per-surface render thread (like Ghostty) instead of the UI thread's
+`CompositionTarget.Rendering`. The frame log's times are now render-thread times; `ui lag`
+(from `ui-<pid>.csv`) is how late a callback posted every 10 ms ran on the UI thread, which is
+what typing and clicking wait for. Same session, same machine, 2 runs each, before → after:
+
+| workload | fps | UI lag p50 | UI lag p99 | UI lag max |
+|---|---|---|---|---|
+| full screen logs | 117–130 → 126–138 | 0.15–0.6 → 0.06–0.11 ms | 5.6–8.1 → 0.8–0.9 ms | 13–17 → 4.3 ms |
+| full screen color | 88–132 → 128–134 | 0.07–0.16 → 0.06–0.07 ms | 3.2–3.9 → 0.4–1.3 ms | 7–8 → 0.5–4.3 ms |
+| full screen unicode | 133–137 → 136–138 | 0.16 → 0.05 ms | 3.3–6.5 → 2.9–3.9 ms | 6.4–7.3 → 5.4–7.7 ms |
+| full screen tui | 107–134 → 135–140 | 0.08–0.1 → 0.06 ms | 1.1–1.7 → 0.4–2.1 ms | 3–8.5 → 1.5–2.6 ms |
+| full screen tiny | 120–122 → 142 | 0.13 → 0.06–0.08 ms | 4.6–6.2 → 5.5–6.0 ms | 7.5–7.9 → 7.4–19 ms |
+| 1280×800 logs | 79–88 → 131 | 0.08–0.11 → 0.06–0.07 ms | 0.6–1.1 → 0.4–3.4 ms | 3.9–17 → 2.4–4.4 ms |
+
+What is left on the UI thread during a flood is the annotation pass (command marks, ruler, the
+overview index's scan of the live screen): up to ~10 ms, and ~23 ms in `tiny`, where each of the
+109 live-row reads waits behind a 4 KB parse slice. That, not drawing, is now the UI's worst case.
+
+### Batched line reads for the overview index (same day)
+
+`rvt_lines_text` reads a run of lines under one hold of the terminal lock; the overview index
+fetches its scrollback slice in 64-line chunks (plus the next line, which wrap detection reads)
+and the live screen in one call. Full-screen `tiny`, render-thread build → batched:
+
+| | before | after |
+|---|---|---|
+| UI lag p99 | 5.5–6.0 ms | 2.1–3.5 ms |
+| UI lag max | 7.4–19 ms | 4.9–14 ms |
+| longest annotation pass | 22.7–22.9 ms | 17–20 ms |
+
+Other workloads are unchanged. What remains of a `tiny` pass is a dozen single native calls
+(the anchor marker, line times, command tracking), each of which can wait 1–4 ms for the lock,
+mostly behind the ~4 ms rewind keyframe capture that runs once a second during a flood.
+
+`framestats.py` now leaves out UI stalls that began before the measured window (connecting).
+
+### Annotation worker (same day)
+
+Line times and the overview index moved to `AnnotationWorker` on the thread pool. The first
+version capped SSH floods at exactly 25.2 MB/s: the shim's writer `SwitchToThread`ed while the
+worker waited for the lock, losing ~15 ms time slices. It now spins at most 100 µs instead, and
+worker passes keep a 100 ms pace. Batched build → worker build, same session:
+
+| | full screen tiny | full screen logs | full screen tui |
+|---|---|---|---|
+| UI lag p99 | 2.1–3.5 → 0.5 ms | 0.4 → 1.4–3.9 ms* | — → 0.5–0.6 ms |
+| UI lag max | 4.9–14 → 2.4–4.8 ms | 0.7–5.4 → 6.8–12 ms* | — → 3.5–5.6 ms |
+| longest annotation pass (UI) | 17–20 → 1.8–2.1 ms | 7–11 → 0.3–0.4 ms | 0.2 ms |
+| fps | 137–142 → 142 | 123–135 → 137 | → 140 |
+| output MB/s | 4.7 → 4.7 | 30–75 → 58–74 | 79–110 |
+
+\* The logs stalls are gen2 GC pauses (11–13 ms, 7–9 per run in both builds) landing in the
+measured window; none line up with annotation work. Allocation is 2–3 MB per frame, much of it
+outside the renderer (rewind keyframes copy ~1 MB of VT text each).

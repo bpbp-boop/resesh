@@ -19,8 +19,10 @@ __declspec(dllimport) void __stdcall AcquireSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) unsigned char __stdcall TryAcquireSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) void __stdcall ReleaseSRWLockExclusive(RvtSrwLock* lock);
 __declspec(dllimport) uint64_t __stdcall GetTickCount64(void);
+__declspec(dllimport) int __stdcall QueryPerformanceCounter(int64_t* count);
+__declspec(dllimport) int __stdcall QueryPerformanceFrequency(int64_t* frequency);
 
-#define RVT_ABI_VERSION 8
+#define RVT_ABI_VERSION 9
 
 // ---- events -------------------------------------------------------------------------------
 
@@ -124,6 +126,7 @@ typedef struct {
   uint32_t span_hash;
   GhosttySelection match_buf[RVT_MAX_SPANS];
   RvtSrwLock lock;
+  volatile long waiting; // callers other than rvt_write blocked in lock()
   RvtEventFn on_event;
   void* user;
   uint32_t cell_w, cell_h, screen_w, screen_h;
@@ -143,7 +146,12 @@ static void emit(RvtTerm* t, int kind, const uint8_t* data, size_t len) {
   if (t->on_event) t->on_event(t->user, kind, data, len);
 }
 
-static void lock(RvtTerm* t) { AcquireSRWLockExclusive(&t->lock); }
+// Everything but rvt_write counts itself while it waits, so a long write can step aside.
+static void lock(RvtTerm* t) {
+  __atomic_fetch_add(&t->waiting, 1, __ATOMIC_SEQ_CST);
+  AcquireSRWLockExclusive(&t->lock);
+  __atomic_fetch_sub(&t->waiting, 1, __ATOMIC_SEQ_CST);
+}
 
 // Output, resizes and clears all change the scrollback, so every call ends with this check
 // rather than each export deciding whether it needs compression.
@@ -477,10 +485,42 @@ RVT_API uint64_t rvt_resident_bytes(RvtTerm* t) {
   return r == GHOSTTY_SUCCESS ? usage.primary_resident_bytes + usage.alternate_resident_bytes : 0;
 }
 
+// Output is parsed in slices, releasing the lock between them: an SSH read can be 32 KB or
+// more, which takes milliseconds to parse when every line scrolls a full scrollback, and the
+// UI thread's frame and line reads would otherwise wait for all of it. SRW locks let the
+// releasing thread barge back in, so between slices the writer spins briefly while anyone
+// waits, letting the woken waiter take the lock first. Spin, not SwitchToThread: yielding
+// can hand the writer's whole time slice (~15 ms) to an unrelated thread, which capped SSH
+// floods at 25 MB/s once a background reader waited for the lock often.
+#define RVT_WRITE_SLICE 4096
+#define RVT_WAITER_SPIN_US 100
+
+static void let_waiter_in(RvtTerm* t) {
+  if (__atomic_load_n(&t->waiting, __ATOMIC_SEQ_CST) == 0) return;
+  int64_t frequency = 0, start = 0, now = 0;
+  QueryPerformanceFrequency(&frequency);
+  QueryPerformanceCounter(&start);
+  const int64_t limit = frequency * RVT_WAITER_SPIN_US / 1000000;
+  do {
+#if defined(__x86_64__) || defined(__i386__)
+    __builtin_ia32_pause();
+#elif defined(__aarch64__)
+    __asm__ volatile("yield");
+#endif
+    QueryPerformanceCounter(&now);
+  } while (__atomic_load_n(&t->waiting, __ATOMIC_SEQ_CST) > 0 && now - start < limit);
+}
+
 RVT_API void rvt_write(RvtTerm* t, const uint8_t* data, size_t len) {
-  lock(t);
-  ghostty_terminal_vt_write(t->term, data, len);
-  unlock(t);
+  size_t offset = 0;
+  do {
+    size_t n = len - offset < RVT_WRITE_SLICE ? len - offset : RVT_WRITE_SLICE;
+    AcquireSRWLockExclusive(&t->lock);
+    ghostty_terminal_vt_write(t->term, data + offset, n);
+    unlock(t);
+    offset += n;
+    if (offset < len) let_waiter_in(t);
+  } while (offset < len);
 }
 
 RVT_API void rvt_resize(RvtTerm* t, uint16_t cols, uint16_t rows, uint32_t cell_w, uint32_t cell_h) {
@@ -1144,11 +1184,10 @@ RVT_API void rvt_buffer_info(RvtTerm* t, RvtBufferInfo* out) {
 // Text of one absolute line, trailing blanks trimmed (xterm's translateToString(true)).
 // *wrapped: the line continues the one above (a soft wrap). Returns bytes written, or -1
 // when the line does not exist.
-RVT_API int rvt_line_text(RvtTerm* t, int32_t line, uint8_t* out, size_t cap, int* wrapped) {
+static int line_text_locked(RvtTerm* t, int32_t line, uint8_t* out, size_t cap, int* wrapped) {
   *wrapped = 0;
   if (line < 0) return -1;
   int rc = -1;
-  lock(t);
   uint16_t cols = 0;
   ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_COLS, &cols);
   GhosttyGridRef a = GHOSTTY_INIT_SIZED(GhosttyGridRef), b = GHOSTTY_INIT_SIZED(GhosttyGridRef);
@@ -1176,8 +1215,35 @@ RVT_API int rvt_line_text(RvtTerm* t, int32_t line, uint8_t* out, size_t cap, in
     else if (r == GHOSTTY_NO_VALUE) rc = 0; // an empty line
     while (rc > 0 && (out[rc - 1] == '\n' || out[rc - 1] == '\r')) rc--;
   }
+  return rc;
+}
+
+RVT_API int rvt_line_text(RvtTerm* t, int32_t line, uint8_t* out, size_t cap, int* wrapped) {
+  lock(t);
+  int rc = line_text_locked(t, line, out, cap, wrapped);
   unlock(t);
   return rc;
+}
+
+// Lines first..first+count-1 under one hold of the lock: a caller reading many lines (the
+// overview index scanning the screen) would otherwise queue behind the parser once per line.
+// Texts are packed into out; lengths[i] is line i's byte length, or -1 when it does not exist
+// or did not fit. Stops when out has no room for another line; returns the lines attempted.
+RVT_API int rvt_lines_text(RvtTerm* t, int32_t first, int32_t count, uint8_t* out, size_t cap,
+                           int32_t* lengths, uint8_t* wrapped) {
+  if (first < 0 || count <= 0) return 0;
+  int done = 0;
+  size_t used = 0;
+  lock(t);
+  for (; done < count && cap - used >= 1024; done++) {
+    int w = 0;
+    int rc = line_text_locked(t, first + done, out + used, cap - used, &w);
+    lengths[done] = rc;
+    wrapped[done] = (uint8_t)w;
+    if (rc > 0) used += (size_t)rc;
+  }
+  unlock(t);
+  return done;
 }
 
 RVT_API uint32_t rvt_marker_new(RvtTerm* t, int32_t line) {
