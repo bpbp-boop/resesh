@@ -167,6 +167,16 @@
                             AutomationProperties.Name="Paste with right-click"
                             AutomationProperties.AutomationId="SettingsRightClickPaste" />
                     </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        x:Name="ConfirmMultilinePasteCard"
+                        Header="Confirm multi-line pastes"
+                        Description="Ask before pasting text that would press Enter. Skipped when the program handles pasted lines itself (bracketed paste).">
+                        <ToggleSwitch
+                            x:Name="ConfirmMultilinePasteSwitch"
+                            IsOn="{x:Bind ViewModel.ConfirmMultilinePaste, Mode=TwoWay}"
+                            AutomationProperties.Name="Confirm multi-line pastes"
+                            AutomationProperties.AutomationId="SettingsConfirmMultilinePaste" />
+                    </toolkit:SettingsCard>
 
                     <TextBlock Text="Startup and interface" Style="{StaticResource GroupHeader}" />
                     <toolkit:SettingsCard x:Name="ShowStatusBarCard" Header="Show status bar">
@@ -284,6 +294,15 @@
                         Content="Add key…"
                         Click="AddKey_Click"
                         AutomationProperties.AutomationId="SettingsAddKey" />
+
+                    <TextBlock x:Name="SshAlgorithmsHeader" Text="SSH algorithms" Style="{StaticResource GroupHeader}" />
+                    <TextBlock
+                        Style="{StaticResource GroupDescription}"
+                        Text="What every SSH session offers unless it chooses its own on its Advanced tab. A connection uses the first one in each list that the host also has. Everything is on by default, including the legacy algorithms older devices need; turn legacy off to harden connections to modern hosts." />
+                    <ContentControl
+                        x:Name="SshAlgorithmsHost"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch" />
                 </StackPanel>
                 </Grid>
             </ScrollViewer>

@@ -32,14 +32,28 @@ public sealed record ImportCandidate
     /// </summary>
     public string? PasswordFingerprint { get; init; }
 
+    /// <summary>The serial line, for a serial session (<see cref="SerialProtocol"/>).</summary>
+    public SerialTarget? Serial { get; init; }
+
+    /// <summary>Algorithms the source turns off for this host (from OpenSSH KexAlgorithms etc.).</summary>
+    public SshAlgorithms? Algorithms { get; init; }
+
     /// <summary>Plain telnet (not SecureCRT's Telnet/SSL, which needs TLS we don't speak).</summary>
     public bool IsTelnet => Protocol == TelnetProtocol;
 
-    /// <summary>SSH and plain telnet are importable; serial, rlogin, raw etc. are listed as skipped.</summary>
-    public bool IsSupported => Protocol is "SSH2" or "SSH1" || IsTelnet;
+    /// <summary>A serial port with a usable port name.</summary>
+    public bool IsSerial => Protocol == SerialProtocol && Serial is not null;
+
+    public bool IsSsh => Protocol is "SSH2" or "SSH1";
+
+    /// <summary>SSH, plain telnet and serial are importable; rlogin, raw etc. are listed as skipped.</summary>
+    public bool IsSupported => IsSsh || IsTelnet || IsSerial;
 
     /// <summary>The normalized protocol name both importers use for telnet.</summary>
     public const string TelnetProtocol = "TELNET";
+
+    /// <summary>The normalized protocol name importers use for serial.</summary>
+    public const string SerialProtocol = "SERIAL";
 
     /// <summary>The port to assume when the source stores none.</summary>
     public static int DefaultPort(string protocol) => protocol == TelnetProtocol ? 23 : 22;
@@ -372,8 +386,9 @@ public static class SecureCrtImporter
     public static bool IsDuplicate(SessionStore store, ImportCandidate candidate) =>
         store.Sessions.Any(s =>
             s.Name.Equals(candidate.Name, StringComparison.OrdinalIgnoreCase)
-            && s.Host.Equals(candidate.Host, StringComparison.OrdinalIgnoreCase)
-            && s.Port == candidate.Port);
+            && (candidate.IsSerial
+                ? s.IsSerial && string.Equals(s.Serial?.PortName, candidate.Serial!.PortName, StringComparison.OrdinalIgnoreCase)
+                : s.Host.Equals(candidate.Host, StringComparison.OrdinalIgnoreCase) && s.Port == candidate.Port));
 
     /// <summary>Adds the selected candidates, skipping duplicates. With an identity plan,
     /// sessions sharing a login use one identity (created or reused) instead of their own.</summary>
@@ -387,7 +402,11 @@ public static class SecureCrtImporter
 
         void Add(ImportCandidate candidate, Session session)
         {
-            session = session with { Proxy = session.Kind == SessionKind.Ssh ? candidate.Proxy : null };
+            session = session with
+            {
+                Proxy = session.Kind == SessionKind.Ssh ? candidate.Proxy : null,
+                Algorithms = session.Kind == SessionKind.Ssh && candidate.Algorithms is { IsEmpty: false } ? candidate.Algorithms : null,
+            };
             store.Add(session);
             added.Add((session, candidate.JumpHostName));
         }
@@ -436,6 +455,21 @@ public static class SecureCrtImporter
                     FolderPath = candidate.FolderPath,
                     Host = candidate.Host,
                     Port = candidate.Port,
+                    AuthMethod = AuthMethod.None,
+                });
+                imported++;
+                continue;
+            }
+
+            if (candidate.IsSerial)
+            {
+                Add(candidate, new Session
+                {
+                    Kind = SessionKind.Serial,
+                    Name = candidate.Name,
+                    FolderPath = candidate.FolderPath,
+                    Serial = candidate.Serial,
+                    Port = 0,
                     AuthMethod = AuthMethod.None,
                 });
                 imported++;

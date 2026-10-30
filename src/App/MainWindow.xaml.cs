@@ -613,6 +613,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
                 },
             });
         AddTerminal("Find", "search text scrollback", ShortcutIds.Find, keepFocus: true);
+        AddTerminal("Paste", "clipboard insert", ShortcutIds.Paste, keepFocus: true);
         AddTerminal("Select All", "selection copy", ShortcutIds.SelectAll);
         AddTerminal("Clear Scrollback", "history buffer reset clean", ShortcutIds.ClearScrollback);
         AddTerminal("Zoom In", "font size bigger larger", ShortcutIds.ZoomIn);

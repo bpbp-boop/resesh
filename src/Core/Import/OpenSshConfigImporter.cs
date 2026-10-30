@@ -82,6 +82,7 @@ public static class OpenSshConfigImporter
     {
         var matches = true;
         string? hostName = null, username = null, identity = null, proxyJump = null;
+        string? kex = null, ciphers = null, macs = null, hostKeys = null;
         int? port = null;
         foreach (var rawLine in content.Split('\n'))
         {
@@ -112,6 +113,15 @@ public static class OpenSshConfigImporter
                     proxyJump = Unquote(value);
                 else if (directive.Equals("IdentityFile", StringComparison.OrdinalIgnoreCase) && identity is null)
                     identity = Unquote(value);
+                // First value wins, as for every other option.
+                else if (directive.Equals("KexAlgorithms", StringComparison.OrdinalIgnoreCase))
+                    kex ??= Unquote(value);
+                else if (directive.Equals("Ciphers", StringComparison.OrdinalIgnoreCase))
+                    ciphers ??= Unquote(value);
+                else if (directive.Equals("MACs", StringComparison.OrdinalIgnoreCase))
+                    macs ??= Unquote(value);
+                else if (directive.Equals("HostKeyAlgorithms", StringComparison.OrdinalIgnoreCase))
+                    hostKeys ??= Unquote(value);
             }
         }
         candidate = candidate with
@@ -122,6 +132,7 @@ public static class OpenSshConfigImporter
             Username = string.IsNullOrWhiteSpace(username) ? Environment.UserName : username,
             Port = port ?? 22,
             JumpHostName = JumpAlias(proxyJump),
+            Algorithms = Ssh.SshAlgorithmPolicy.FromOpenSsh(kex, ciphers, macs, hostKeys),
         };
         if (identity is not null)
         {

@@ -54,6 +54,7 @@ public sealed partial class BackupConflictViewModel : ObservableObject
         {
             var reason = Conflict.Match == BackupConflictMatch.SessionId
                 ? "same session id"
+                : Conflict.Imported.IsSerial ? "same serial port"
                 : Conflict.Imported.IsTelnet ? "same telnet host and port" : "same host, port, and username";
             return $"Backup: {Endpoint(Conflict.Imported)}. Existing: {Conflict.Existing.Name} ({Endpoint(Conflict.Existing)}). Match: {reason}.";
         }
@@ -63,7 +64,9 @@ public sealed partial class BackupConflictViewModel : ObservableObject
         ? session.Local?.Executable ?? "local profile"
         : session.IsTelnet
             ? $"telnet {session.Host}:{session.Port}"
-            : $"{session.Username}@{session.Host}:{session.Port}";
+            : session.IsSerial
+                ? $"serial {session.Serial?.Describe()}"
+                : $"{session.Username}@{session.Host}:{session.Port}";
 }
 
 public sealed partial class ImportBackupDialog : ContentDialog

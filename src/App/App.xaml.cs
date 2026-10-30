@@ -103,7 +103,11 @@ public partial class App : Application
             return;
         if (!DemoMode.IsEnabled)
             MigrateLegacyDataDir();
-        _settingsLoad = Task.Run(() => Settings.Load());
+        _settingsLoad = Task.Run(() =>
+        {
+            Settings.Load();
+            Resesh.Core.Ssh.SshAlgorithmPolicy.AppDefaults = Settings.Current.SshAlgorithms;
+        });
         _storesLoad = Task.Run(() =>
         {
             Store.Load();
@@ -136,11 +140,20 @@ public partial class App : Application
 
     internal static bool SaveSettings(AppSettings settings)
     {
-        try { Settings.Save(settings); return true; }
+        try
+        {
+            Settings.Save(settings);
+            return true;
+        }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             ReportRecoverableError(exception);
             return false;
+        }
+        finally
+        {
+            // Connections read the defaults from Core; keep them to what is actually saved.
+            Resesh.Core.Ssh.SshAlgorithmPolicy.AppDefaults = Settings.Current.SshAlgorithms;
         }
     }
 
@@ -207,6 +220,7 @@ public partial class App : Application
         Resesh.Core.Ssh.SshTerminalSession.TraceHook = message => MainWindow.Trace(message);
         Resesh.Core.Local.LocalTerminalSession.TraceHook = message => MainWindow.Trace(message);
         Resesh.Core.Telnet.TelnetTerminalSession.TraceHook = message => MainWindow.Trace(message);
+        Resesh.Core.Serial.SerialTerminalSession.TraceHook = message => MainWindow.Trace(message);
         Resesh.Terminal.TerminalSurface.TraceHook = message => MainWindow.Trace(message);
         TaskbarIntegration.TraceHook = message => MainWindow.Trace(message);
 #endif

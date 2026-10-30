@@ -172,6 +172,20 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
+    /// <summary>The status bar's tooltip: the active tab's connection details while it is
+    /// connected, otherwise none.</summary>
+    public string? StatusDetails => ActiveTab is { State: TabConnectionState.Connected, IsLocked: false, ConnectionDetails.Length: > 0 } tab
+        ? tab.ConnectionDetails
+        : null;
+
+    // Every change to the status text can change its tooltip too.
+    protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        base.OnPropertyChanged(e);
+        if (e.PropertyName == nameof(StatusText))
+            base.OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(StatusDetails)));
+    }
+
     public IReadOnlyList<string> FolderPathsForPicker => _store.Folders;
 
     public IReadOnlyList<string> LocalFolderPathsForPicker => _store.FoldersOf(SessionKind.Local);
@@ -248,7 +262,7 @@ public sealed partial class MainViewModel : ObservableObject
     private void Tab_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(TabViewModel.State) or nameof(TabViewModel.ConnectionSummary)
-            or nameof(TabViewModel.Header) or nameof(TabViewModel.IsLocked))
+            or nameof(TabViewModel.ConnectionDetails) or nameof(TabViewModel.Header) or nameof(TabViewModel.IsLocked))
         {
             OnPropertyChanged(nameof(StatusText));
         }

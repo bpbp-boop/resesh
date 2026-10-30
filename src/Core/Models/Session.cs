@@ -34,6 +34,9 @@ public enum SessionKind
     /// <summary>Plain telnet to <see cref="Session.Host"/>:<see cref="Session.Port"/>.
     /// Shares the remote-host tree (folder namespace) with SSH.</summary>
     Telnet,
+    /// <summary>A local serial port (<see cref="Session.Serial"/>): a console cable to a
+    /// device. Shares the remote-host tree with SSH and telnet.</summary>
+    Serial,
 }
 
 /// <summary>Opt-in shell hooks. Automatic detection is supported only for local profiles.</summary>
@@ -118,7 +121,7 @@ public sealed record TerminalOverrides
 
 /// <summary>
 /// A saved profile: common identity plus exactly one target — SSH (host/port/username/auth,
-/// the fields below, present since v1), telnet (host/port only), or local
+/// the fields below, present since v1), telnet (host/port only), serial (<see cref="Serial"/>), or local
 /// (<see cref="Local"/>), tagged by <see cref="Kind"/>. Secrets (password / key passphrase) are never stored here;
 /// they live in Windows Credential Manager keyed by <see cref="Id"/>.
 /// </summary>
@@ -146,6 +149,13 @@ public sealed record Session
 
     [JsonIgnore]
     public bool IsTelnet => Kind == SessionKind.Telnet;
+
+    [JsonIgnore]
+    public bool IsSerial => Kind == SessionKind.Serial;
+
+    /// <summary>The serial port and line settings; set exactly when <see cref="Kind"/> is Serial.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SerialTarget? Serial { get; init; }
 
     /// <summary>The folder namespace this profile lives in: local profiles under the
     /// virtual Local root, every remote kind (SSH, telnet) in the main host tree.</summary>
@@ -226,6 +236,20 @@ public sealed record Session
     /// <summary>Keeps the actual Telnet terminal at 80 columns, including text wrapping.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool TelnetFixed80Columns { get; init; }
+
+    /// <summary>Key exchange, cipher, MAC and host-key algorithm lists for SSH, in OpenSSH
+    /// syntax. Null offers the SSH library's defaults.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SshAlgorithms? Algorithms { get; init; }
+
+    /// <summary>Milliseconds to wait after each pasted line. Devices with small input buffers
+    /// (network gear on a console or telnet line) drop characters from a fast paste.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int PasteLineDelay { get; set; }
+
+    /// <summary>Milliseconds to wait after each pasted character, for devices slower still.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int PasteCharacterDelay { get; set; }
 
     /// <summary>Run the remote shell inside tmux so it survives disconnects (requires tmux on the host).</summary>
     public bool Persistent { get; init; }

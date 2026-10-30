@@ -1548,3 +1548,69 @@ Devices (server, storage, database, PDU, UPS, embedded, printer, camera, VoIP ph
   stay in its search words and banner suggestion still picks it.
 - Workspaces now offer the device glyphs too, after the general icons. Server and Database are
   left out there, since the general set already has them under the same keys.
+
+## 2026-10-30 - Serial consoles, SSH algorithm lists, safe paste
+
+**Serial.** `SessionKind.Serial` is a fourth enum value, like telnet before it: an older build
+cannot read a `sessions.json` holding a serial session (unknown enum value), and stores never
+save over a file they could not read, so nothing is lost on a downgrade, only refused.
+`System.IO.Ports` (10.0.12) does the port I/O; a hand-written Win32 backend would need the same
+overlapped I/O it already has, because a synchronous COM handle serialises a blocked `ReadFile`
+with every `WriteFile`. Its `Handshake` enum has no DSR/DTR, so that flow control is not offered.
+Port descriptions come from SetupAPI (`GUID_DEVINTERFACE_COMPORT`, `SPDRP_FRIENDLYNAME`, the
+device key's `PortName`): WMI would need COM interop that Native AOT does not support. Sends go
+through a queue and thread, as for telnet, so a device holding XOFF or CTS cannot stall the UI,
+and a break is queued in order with the bytes before it. DTR and RTS are raised on open: several
+USB adapters send nothing until they see them, and PuTTY and SecureCRT raise them too.
+
+**SSH algorithms.** SSH.NET 2026.0.0 already offers `diffie-hellman-group1-sha1`,
+`diffie-hellman-group14-sha1`, `diffie-hellman-group-exchange-sha1`, `aes*-cbc`, `3des-cbc`,
+`hmac-sha1` and `ssh-rsa` by default (checked by printing `ConnectionInfo`'s lists), so legacy
+devices did not need overrides to connect, and everything stays on by default. The choices are
+check boxes, not OpenSSH-style text lists (a first version of this branch had those): they show
+what exists and cannot name what SSH.NET lacks (`ssh-dss`, `hmac-md5`, `arcfour`). The cost is
+order: a connection always offers SSH.NET's order, so there is no `^list` to prefer one.
+`SshAlgorithms` stores what is turned off per kind, not what is on, so an algorithm a later
+SSH.NET adds is offered without an edit. A null list sets nothing: a session follows the app
+setting for that kind, and the app turns nothing off; an empty list turns everything on.
+The app setting reaches Core through `SshAlgorithmPolicy.AppDefaults`, set after loading and
+after every save, because SSH connections are built in several places (terminal, file pane,
+jump hosts) that have no settings store. `SshConnectionFactory.CreateConnectionInfo` removes
+what is off, so all of them follow it. OpenSSH config lists still import, converted to the same
+on/off choices; a list naming nothing SSH.NET has is ignored rather than turning a kind off.
+`SshAlgorithmPolicyTests.Supported_ListsSshNetDefaults_IncludingLegacyAlgorithms` fails if an
+SSH.NET update drops one of the legacy algorithms.
+
+**Safe paste.** The question is skipped when the program has bracketed paste (mode 2004) on,
+read through a new shim call `rvt_bracketed_paste` (reseshvt ABI 10): pasted line breaks then
+reach the program as text, as in Windows Terminal. Cancel is the default button, as for every
+confirmation. Paced pastes skip libghostty's paste encoder and send each chunk with line breaks
+as CR, which is what the encoder sends unbracketed, and are never used when bracketed paste is
+on. Only keys typed on the keyboard stop a slow paste (`TerminalSurface.TypedInputFilter`):
+the surface's input event also carries focus reports, mouse reports and the terminal's replies
+to the program, none of which should stop it. Progress is shown in place of the tab's
+connection summary, which is restored unless a disconnect changed it in the meantime.
+
+## 2026-10-30 - Trust host keys by key, and prefer the trusted type
+
+SSH.NET's `HostKeyEventArgs.HostKeyName` is the negotiated signature algorithm, not the key
+type: one RSA key arrives as `rsa-sha2-512`, `rsa-sha2-256` or `ssh-rsa` with the same blob and
+fingerprint (checked by building all three through `ConnectionInfo.HostKeyAlgorithms`; the FxSsh
+test server signs as `rsa-sha2-256`). `KnownHostsStore` compared the name exactly, so a host
+trusted as `ssh-rsa` that later gained SHA-2 signatures (a firmware update) read as a changed key.
+Trust now compares key families (`SshHostKeyTypes.Family`: the three RSA names are one key, the
+three RSA certificate names another; everything else is its own name).
+
+Like OpenSSH, a connection now offers the host key algorithms for the key already trusted for
+that host first (`SshHostKeyTypes.PreferTrusted`, in `CreateConnectionInfo`), so a host with
+several keys keeps showing the trusted one even though SSH.NET's order prefers others. When
+the trusted type is turned off in the algorithm settings, the host can only show another key,
+which proves nothing; that is reported as a setting to change (`HostKeyRejected`) instead of
+the changed-key warning, which users would learn to click through. A different key while the
+trusted type is offered still gets the full warning. Resesh still keeps one key per host.
+
+The status bar's tooltip lists what a connection negotiated (`SshNegotiated`): key exchange,
+cipher, MAC ("built into the cipher" for GCM and ChaCha20-Poly1305) and host key, with legacy
+ones marked, and the status line says "legacy algorithms" when any is in use. Choosing the
+order of algorithms was considered and left out: unticking covers the reasons to reorder
+(see the entry above), and seeing what was chosen is more useful than steering it.

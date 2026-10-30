@@ -1062,9 +1062,13 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _suppressCharactersForKey = 0;
     }
 
-    private void SendUserInput(byte[] bytes)
+    /// <summary>Sends input and scrolls to the bottom. <paramref name="typed"/> is false
+    /// for bytes the app sends on the user's behalf, which skip <see cref="TerminalSurface.TypedInputFilter"/>.</summary>
+    private void SendUserInput(byte[] bytes, bool typed = true)
     {
         if (_readOnly || bytes.Length == 0)
+            return;
+        if (typed && TypedInputFilter?.Invoke(bytes) == true)
             return;
         InputReceived?.Invoke(bytes);
         if (_lastInfo.ScrollOffset + _lastInfo.ScrollLength < _lastInfo.ScrollTotal)
@@ -1584,7 +1588,24 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         }
     }
 
-    private Task PasteFromClipboardAsync() => TerminalClipboard.PasteIntoAsync(PasteText);
+    private Task PasteFromClipboardAsync() => TerminalClipboard.PasteIntoAsync(text =>
+    {
+        if (_disposed || _readOnly || !_connected || !_inputEnabled || string.IsNullOrEmpty(text))
+            return;
+        if (PasteInterceptor?.Invoke(text) == true)
+            return;
+        PasteText(text);
+    });
+
+    public override bool BracketedPaste =>
+        !_disposed && _term != IntPtr.Zero && GhosttyNative.rvt_bracketed_paste(_term) == 1;
+
+    public override void SendInput(byte[] data)
+    {
+        if (_disposed || !_connected || !_inputEnabled || _term == IntPtr.Zero)
+            return;
+        SendUserInput(data, typed: false);
+    }
 
     /// <summary>Bracketed when the program enabled mode 2004; the encoded bytes come back
     /// through the PTY event and leave as <see cref="InputReceived"/>.</summary>

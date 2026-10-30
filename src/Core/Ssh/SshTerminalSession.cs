@@ -86,6 +86,9 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
     /// <summary>Negotiated server-to-client cipher, once connected.</summary>
     public string? Encryption => _client?.ConnectionInfo?.CurrentServerEncryption;
 
+    /// <summary>Everything the connection agreed on with the host, once connected.</summary>
+    public SshNegotiated? Negotiated => SshNegotiated.From(_client?.ConnectionInfo);
+
     /// <summary>"keytype SHA256:fingerprint" of the server key seen during connect.</summary>
     public string? HostKeyFingerprint { get; private set; }
 
@@ -140,7 +143,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             }
             var auth = SshConnectionFactory.BuildAuthMethods(session, secret, interactiveResponder);
             var connectionInfo = SshConnectionFactory.CreateConnectionInfo(
-                session, auth, TimeSpan.FromMinutes(2), via, proxyPassword);
+                session, auth, TimeSpan.FromMinutes(2), via, proxyPassword, _knownHosts);
 
             // Unreachable hosts fail in seconds; the rest of the connect gets a generous timeout
             // because the first-connect host key dialog sits inside the handshake.

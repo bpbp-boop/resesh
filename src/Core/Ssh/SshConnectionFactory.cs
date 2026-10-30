@@ -84,6 +84,12 @@ internal static class SshConnectionFactory
             SshFailureKind.AuthenticationFailed, "Authentication failed â€” check the username and credential.", ex),
         ProxyException => new SshSessionException(
             SshFailureKind.HostUnreachable, $"The proxy refused the connection: {ex.Message}", ex),
+        // "No matching key exchange algorithm (server offers ...)": the host was reached
+        // and named what it has, so say where to change what this end offers.
+        SshConnectionException when ex.Message.StartsWith("No matching ", StringComparison.Ordinal) => new SshSessionException(
+            SshFailureKind.Other,
+            $"{ex.Message.TrimEnd('.')}. If one of those is turned off, turn it on in the session's "
+            + "Advanced settings or in Settings › Identities & Keys › SSH algorithms.", ex),
         SshConnectionException or System.Net.Sockets.SocketException => new SshSessionException(
             SshFailureKind.HostUnreachable, $"Could not reach the host: {ex.Message}", ex),
         _ => new SshSessionException(SshFailureKind.Other, ex.Message, ex),
@@ -106,7 +112,8 @@ internal static class SshConnectionFactory
     /// <summary>The address SSH.NET dials: the jump chain's forwarded port, the proxy (which
     /// is told the real host), or the host itself.</summary>
     internal static ConnectionInfo CreateConnectionInfo(
-        Session session, AuthenticationMethod[] auth, TimeSpan timeout, SshJumpChain? via, string? proxyPassword)
+        Session session, AuthenticationMethod[] auth, TimeSpan timeout, SshJumpChain? via, string? proxyPassword,
+        KnownHostsStore? knownHosts = null)
     {
         ConnectionInfo info;
         if (via is not null)
@@ -127,6 +134,8 @@ internal static class SshConnectionFactory
         else
             info = new ConnectionInfo(session.Host, session.Port, session.Username, auth);
         info.Timeout = timeout;
+        SshAlgorithmPolicy.Apply(info, session);
+        SshHostKeyTypes.PreferTrusted(info, knownHosts?.Lookup(session.Host, session.Port));
         return info;
     }
 
@@ -197,6 +206,13 @@ internal static class SshConnectionFactory
                     var previous = verdict == HostKeyVerdict.Mismatch
                         ? knownHosts.Lookup(session.Host, session.Port)
                         : null;
+                    if (previous is not null
+                        && SshHostKeyTypes.TrustedTypeTurnedOff(client.ConnectionInfo, session, previous, e.HostKeyName) is { } turnedOff)
+                    {
+                        check.Failure = turnedOff;
+                        e.CanTrust = false;
+                        break;
+                    }
                     var info = new HostKeyInfo(session.Host, session.Port, e.HostKeyName, sha256, verdict, previous);
                     var trusted = decision?.Invoke(info) ?? false;
                     cancellationToken.ThrowIfCancellationRequested();

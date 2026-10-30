@@ -130,7 +130,7 @@ public sealed class SshJumpChain : IDisposable
 
         var auth = SshConnectionFactory.BuildAuthMethods(session, hop.Secret, interactiveResponder);
         var connectionInfo = SshConnectionFactory.CreateConnectionInfo(
-            session, auth, TimeSpan.FromMinutes(2), via, hop.ProxyPassword);
+            session, auth, TimeSpan.FromMinutes(2), via, hop.ProxyPassword, knownHosts);
         var client = new SshClient(connectionInfo) { KeepAliveInterval = TimeSpan.FromSeconds(30) };
         var hostKey = SshConnectionFactory.VerifyHostKey(client, session, knownHosts, hostKeyDecision, cancellationToken);
         try

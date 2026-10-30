@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>features — resesh</title>
 <link rel="canonical" href="https://resesh.net/features.html">
-<meta name="description" content="Current and planned resesh features: saved sessions, shared logins, bulk session editing, a native terminal, program status on tabs, searchable command history, comparing command runs, telnet consoles, jump hosts, proxies and tunnels, keyboard shortcuts, persistent remote sessions, coding agents over SSH, GPU rendering, highlighting, recordings, workspaces, file transfers and backups.">
+<meta name="description" content="Current and planned resesh features: saved sessions, shared logins, bulk session editing, a native terminal, program status on tabs, searchable command history, comparing command runs, telnet and serial consoles, safe paste, jump hosts, proxies and tunnels, keyboard shortcuts, persistent remote sessions, coding agents over SSH, GPU rendering, highlighting, recordings, workspaces, file transfers and backups.">
 <link rel="icon" href="assets/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -44,7 +44,7 @@
 <section class="container page-head">
   <div class="breadcrumb"><a href="index.html">./resesh</a> <span class="breadcrumb__sep">/</span> features</div>
   <h1 class="h1-features">features and planned work</h1>
-  <p class="page-head__lede">manage SSH and telnet sessions and local terminals on windows.</p>
+  <p class="page-head__lede">manage SSH, telnet and serial sessions and local terminals on windows.</p>
   <div class="chips">
     <span class="chip">winui 3 · .net 10</span>
     <span class="chip">ssh.net transport</span>
@@ -231,10 +231,61 @@
         </div>
       </div>
 
-      <div class="row" id="terminal">
+      <div class="row" id="serial">
         <div class="row__head">
           <div class="row__label">
             <span class="row__index">07</span>
+            <span class="row__title">serial consoles</span>
+          </div>
+          <span class="badge badge--new row__badge">new</span>
+        </div>
+        <div class="row__body">
+          <p class="row__text">plug a console cable into a switch, router or firewall and open it like any other session. serial sessions share the session list, folders, tabs, splits, highlighting, history and recordings.</p>
+          <ul class="row__bullets">
+            <li>the port picker names each adapter (usb serial device, prolific, ftdi) instead of a bare com number</li>
+            <li>speed, data bits, parity, stop bits and flow control (none, xon/xoff, rts/cts); 9600 8N1 by default</li>
+            <li>send break (ctrl break) for rommon, boot loaders and password recovery</li>
+            <li>pull the cable and the tab says so; plug it back in and the tab reconnects by itself</li>
+            <li>type serial COM5 115200 in quick connect for a one-off session</li>
+            <li>putty serial sessions come across on import</li>
+          </ul>
+        </div>
+        <div class="row__media row__media--empty">
+          <div class="placeholder placeholder--empty">
+            <span class="placeholder__none">no screenshot yet</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="paste">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">08</span>
+            <span class="row__title">safe paste</span>
+          </div>
+          <span class="badge badge--new row__badge">new</span>
+        </div>
+        <div class="row__body">
+          <p class="row__text">a paste that would press enter asks first, and pastes into slow devices go out at a pace they can keep up with.</p>
+          <ul class="row__bullets">
+            <li>pasting more than one line shows the lines and the session they will run on, with cancel as the default</li>
+            <li>no question when the program handles pasted lines itself (bracketed paste), as shells do</li>
+            <li>per session, wait after each line or each character, for console lines and devices with small input buffers</li>
+            <li>a slow paste shows its progress in the status bar; typing any key stops it</li>
+            <li>turn the question off in settings, or from the question itself</li>
+          </ul>
+        </div>
+        <div class="row__media row__media--empty">
+          <div class="placeholder placeholder--empty">
+            <span class="placeholder__none">no screenshot yet</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" id="terminal">
+        <div class="row__head">
+          <div class="row__label">
+            <span class="row__index">09</span>
             <span class="row__title">native terminal</span>
           </div>
           <span class="badge badge--new row__badge">new</span>
@@ -266,7 +317,7 @@
       <div class="row" id="cli-mode">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">08</span>
+            <span class="row__index">10</span>
             <span class="row__title">network cli mode on the tab</span>
           </div>
         </div>
@@ -295,7 +346,7 @@
       <div class="row" id="highlighting">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">09</span>
+            <span class="row__index">11</span>
             <span class="row__title">keyword highlighting</span>
           </div>
         </div>
@@ -320,7 +371,7 @@
       <div class="row" id="scrollbar">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">10</span>
+            <span class="row__index">12</span>
             <span class="row__title">annotated scrollbar</span>
           </div>
         </div>
@@ -347,7 +398,7 @@
       <div class="row" id="commands">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">11</span>
+            <span class="row__index">13</span>
             <span class="row__title">command list</span>
           </div>
         </div>
@@ -386,7 +437,7 @@
       <div class="row" id="rewind">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">12</span>
+            <span class="row__index">14</span>
             <span class="row__title">recording and rewind</span>
           </div>
         </div>
@@ -405,7 +456,7 @@
       <div class="row" id="shortcuts">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">13</span>
+            <span class="row__index">15</span>
             <span class="row__title">keyboard shortcuts and command palette</span>
           </div>
         </div>
@@ -433,7 +484,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">14</span>
+            <span class="row__index">16</span>
             <span class="row__title">persistent remote sessions</span>
           </div>
         </div>
@@ -465,7 +516,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">15</span>
+            <span class="row__index">17</span>
             <span class="row__title">shell integration and command alerts</span>
           </div>
         </div>
@@ -489,7 +540,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">16</span>
+            <span class="row__index">18</span>
             <span class="row__title">coding agents over ssh</span>
           </div>
         </div>
@@ -519,7 +570,7 @@
       <div class="row" id="status">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">17</span>
+            <span class="row__index">19</span>
             <span class="row__title">program status on tabs</span>
           </div>
           <span class="badge badge--new row__badge">new</span>
@@ -550,7 +601,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">18</span>
+            <span class="row__index">20</span>
             <span class="row__title">progress on tabs and the taskbar</span>
           </div>
         </div>
@@ -574,7 +625,7 @@
       <div class="row">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">19</span>
+            <span class="row__index">21</span>
             <span class="row__title">workspaces and layout restore</span>
           </div>
         </div>
@@ -602,7 +653,7 @@
       <div class="row" id="windows">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">20</span>
+            <span class="row__index">22</span>
             <span class="row__title">small windows, settings and the taskbar</span>
           </div>
           <span class="badge badge--new row__badge">new</span>
@@ -632,7 +683,7 @@
       <div class="row" id="files">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">21</span>
+            <span class="row__index">23</span>
             <span class="row__title">file transfer and browsing</span>
           </div>
         </div>
@@ -657,7 +708,7 @@
       <div class="row" id="keys">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">22</span>
+            <span class="row__index">24</span>
             <span class="row__title">keys, secrets and host keys</span>
           </div>
         </div>
@@ -682,7 +733,7 @@
       <div class="row" id="backup">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">23</span>
+            <span class="row__index">25</span>
             <span class="row__title">backup, export, import</span>
           </div>
         </div>
@@ -709,7 +760,7 @@
       <div class="row" id="themes">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">24</span>
+            <span class="row__index">26</span>
             <span class="row__title">themes</span>
           </div>
         </div>
@@ -728,7 +779,7 @@
       <div class="row" id="network">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">25</span>
+            <span class="row__index">27</span>
             <span class="row__title">jump hosts, proxies and tunnels</span>
           </div>
         </div>
@@ -742,6 +793,7 @@
             <li>the tunnels dialog adds, stops and restarts tunnels on a connected tab, and shows why one failed</li>
             <li>bulk edit sets a jump host for many sessions at once</li>
             <li>OpenSSH ProxyJump and PuTTY proxy settings come across on import</li>
+            <li>turn SSH key exchange, cipher, MAC and host key algorithms on or off in settings, with legacy ones marked and one click to turn them off, and override them per session for an old device; algorithm options import from ~/.ssh/config</li>
             <li>the file pane follows the jump host or proxy; opening a folder in file explorer does not</li>
           </ul>
         </div>
@@ -755,7 +807,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">26</span>
+            <span class="row__index">28</span>
             <span class="row__title">gssapi / kerberos auth</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -773,7 +825,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">27</span>
+            <span class="row__index">29</span>
             <span class="row__title">ssh agent</span>
           </div>
           <span class="badge row__badge">planned</span>
@@ -791,25 +843,7 @@
       <div class="row row--planned">
         <div class="row__head">
           <div class="row__label">
-            <span class="row__index">28</span>
-            <span class="row__title">serial consoles</span>
-          </div>
-          <span class="badge row__badge">planned</span>
-        </div>
-        <div class="row__body">
-          <p class="row__text">planned serial connections for console cables. settings will include baud rate, parity and flow control, and send break will work over serial too.</p>
-        </div>
-        <div class="row__media row__media--empty">
-          <div class="placeholder placeholder--empty">
-            <span class="placeholder__none">no screenshot yet</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="row row--planned">
-        <div class="row__head">
-          <div class="row__label">
-            <span class="row__index">29</span>
+            <span class="row__index">30</span>
             <span class="row__title">other planned work</span>
           </div>
           <span class="badge row__badge">planned</span>

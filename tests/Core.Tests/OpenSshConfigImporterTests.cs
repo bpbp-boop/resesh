@@ -32,6 +32,35 @@ public sealed class OpenSshConfigImporterTests
     }
 
     [Fact]
+    public void Parse_ImportsAlgorithmOptions_FirstValueWins()
+    {
+        const string config = """
+            Host old-switch
+                HostName 10.0.0.2
+                KexAlgorithms +diffie-hellman-group1-sha1
+                HostKeyAlgorithms=+ssh-rsa
+                Ciphers aes128-cbc,3des-cbc
+
+            Host *
+                Ciphers aes256-ctr
+                MACs hmac-sha1
+
+            Host modern
+            """;
+
+        var result = OpenSshConfigImporter.Parse(config);
+
+        var old = result.Importable.Single(candidate => candidate.Name == "old-switch").Algorithms!;
+        Assert.Empty(old.DisabledKeyExchange!);
+        Assert.Empty(old.DisabledHostKeys!);
+        Assert.Equal(["aes128-cbc", "3des-cbc"], Ssh.SshAlgorithmPolicy.Offered(Ssh.SshAlgorithmKind.Cipher, old, null));
+        Assert.Equal(["hmac-sha1"], Ssh.SshAlgorithmPolicy.Offered(Ssh.SshAlgorithmKind.Mac, old, null));
+        var modern = result.Importable.Single(candidate => candidate.Name == "modern").Algorithms!;
+        Assert.Equal(["aes256-ctr"], Ssh.SshAlgorithmPolicy.Offered(Ssh.SshAlgorithmKind.Cipher, modern, null));
+        Assert.Null(modern.DisabledKeyExchange);
+    }
+
+    [Fact]
     public void Parse_SkipsWildcardAndNegatedHostPatterns()
     {
         const string config = """

@@ -51,6 +51,7 @@
             <SelectorBarItem x:Name="ConnectionSection" Text="Connection" IsSelected="True" />
             <SelectorBarItem x:Name="NetworkSection" Text="Network" />
             <SelectorBarItem x:Name="TerminalSection" Text="Terminal" />
+            <SelectorBarItem x:Name="AdvancedSection" Text="Advanced" />
             <SelectorBarItem x:Name="AppearanceSection" Text="Appearance" />
             <SelectorBarItem x:Name="IconSection" Text="Icon" />
             <SelectorBarItem x:Name="NotesSection" Text="Notes" />
@@ -101,8 +102,9 @@
                             HorizontalAlignment="Stretch">
                             <ComboBoxItem Content="SSH" />
                             <ComboBoxItem Content="Telnet" />
+                            <ComboBoxItem Content="Serial" />
                         </ComboBox>
-                        <StackPanel Grid.Column="1" Spacing="4">
+                        <StackPanel x:Name="HostField" Grid.Column="1" Spacing="4">
                             <TextBox x:Name="HostBox" Header="Host" PlaceholderText="10.0.0.1 or host.example.com" />
                             <TextBlock x:Name="HostError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
                         </StackPanel>
@@ -124,6 +126,77 @@
                         Severity="Warning"
                         Title="Unencrypted"
                         Message="Telnet sends everything in plain text, including passwords typed at the server's login prompt. Use it for console servers and lab or management networks, not general remote access." />
+
+                    <StackPanel x:Name="SerialPanel" Spacing="12" Visibility="Collapsed">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="140" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Spacing="4">
+                                <ComboBox
+                                    x:Name="SerialPortBox"
+                                    Header="Serial port"
+                                    IsEditable="True"
+                                    PlaceholderText="COM3"
+                                    AutomationProperties.AutomationId="SerialPortBox"
+                                    HorizontalAlignment="Stretch" />
+                                <TextBlock x:Name="SerialPortError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+                            </StackPanel>
+                            <Button
+                                Grid.Column="1"
+                                Margin="0,28,0,0"
+                                VerticalAlignment="Top"
+                                Content="Refresh"
+                                AutomationProperties.Name="Refresh serial ports"
+                                Click="RefreshSerialPorts_Click" />
+                            <ComboBox
+                                x:Name="BaudBox"
+                                Grid.Column="2"
+                                VerticalAlignment="Top"
+                                Header="Speed (baud)"
+                                IsEditable="True"
+                                AutomationProperties.AutomationId="SerialBaudBox"
+                                HorizontalAlignment="Stretch" />
+                        </Grid>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="DataBitsBox" Grid.Column="0" Header="Data bits" SelectedIndex="3" HorizontalAlignment="Stretch">
+                                <x:String>5</x:String>
+                                <x:String>6</x:String>
+                                <x:String>7</x:String>
+                                <x:String>8</x:String>
+                            </ComboBox>
+                            <ComboBox x:Name="ParityBox" Grid.Column="1" Header="Parity" SelectedIndex="0" HorizontalAlignment="Stretch">
+                                <x:String>None</x:String>
+                                <x:String>Odd</x:String>
+                                <x:String>Even</x:String>
+                                <x:String>Mark</x:String>
+                                <x:String>Space</x:String>
+                            </ComboBox>
+                            <ComboBox x:Name="StopBitsBox" Grid.Column="2" Header="Stop bits" SelectedIndex="0" HorizontalAlignment="Stretch">
+                                <x:String>1</x:String>
+                                <x:String>1.5</x:String>
+                                <x:String>2</x:String>
+                            </ComboBox>
+                            <ComboBox x:Name="FlowControlBox" Grid.Column="3" Header="Flow control" SelectedIndex="0" HorizontalAlignment="Stretch">
+                                <x:String>None</x:String>
+                                <x:String>XON/XOFF</x:String>
+                                <x:String>RTS/CTS</x:String>
+                            </ComboBox>
+                        </Grid>
+                        <TextBlock
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Most console ports on network gear use 9600 8N1 with no flow control. Send Break (Ctrl+Break) interrupts a boot for password recovery. If the cable is unplugged, the tab reconnects when it comes back."
+                            TextWrapping="Wrap" />
+                    </StackPanel>
 
                     <StackPanel x:Name="SshOptionsPanel" Spacing="12">
                     <StackPanel Spacing="4">
@@ -200,28 +273,6 @@
                             Text="Stored in Windows Credential Manager"
                             TextWrapping="Wrap" />
                     </StackPanel>
-
-                    <Expander x:Name="AdvancedSection" Header="Advanced · Shell integration: Off" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                        <StackPanel Spacing="8">
-                            <ComboBox
-                                x:Name="ShellIntegrationBox"
-                                AutomationProperties.AutomationId="SshShellIntegrationBox"
-                                Header="Shell integration (experimental)"
-                                SelectedIndex="0"
-                                HorizontalAlignment="Stretch">
-                                <ComboBoxItem Content="Off" />
-                                <ComboBoxItem Content="Bash" />
-                                <ComboBoxItem Content="Zsh" />
-                                <ComboBoxItem Content="Fish" />
-                                <ComboBoxItem Content="PowerShell (Windows)" />
-                            </ComboBox>
-                            <TextBlock
-                                Style="{ThemeResource CaptionTextBlockStyle}"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="Choose the account's actual shell. Use only for shell accounts, not network-device CLIs. Applies when a new terminal starts; stores a script cache remotely without editing shell profiles. PowerShell requires Persistent session to be off (Terminal section)."
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Expander>
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>
@@ -336,7 +387,7 @@
                 Padding="0,0,12,0"
                 Visibility="Collapsed">
                 <StackPanel Spacing="12">
-                <Grid ColumnSpacing="12">
+                <Grid x:Name="TerminalTypeRow" ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="*" />
@@ -382,6 +433,42 @@
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                 </StackPanel>
 
+                <StackPanel x:Name="PastePanel" Spacing="4">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <NumberBox
+                            x:Name="PasteLineDelayBox"
+                            Grid.Column="0"
+                            Header="Paste: wait after each line (ms)"
+                            Minimum="0"
+                            Maximum="5000"
+                            SmallChange="10"
+                            LargeChange="100"
+                            Value="0"
+                            SpinButtonPlacementMode="Compact"
+                            AutomationProperties.AutomationId="PasteLineDelayBox" />
+                        <NumberBox
+                            x:Name="PasteCharacterDelayBox"
+                            Grid.Column="1"
+                            Header="Paste: wait after each character (ms)"
+                            Minimum="0"
+                            Maximum="1000"
+                            SmallChange="1"
+                            LargeChange="10"
+                            Value="0"
+                            SpinButtonPlacementMode="Compact"
+                            AutomationProperties.AutomationId="PasteCharacterDelayBox" />
+                    </Grid>
+                    <TextBlock
+                        Style="{ThemeResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="Slows pastes for devices that drop characters from a fast paste, such as switches and routers on a console line. Try 50 to 200 ms per line. Typing any key stops a slow paste; Esc stops it without sending anything. 0 pastes at once."
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
                 <StackPanel x:Name="PersistentPanel" Spacing="4">
                     <ToggleSwitch x:Name="PersistentToggle" Header="Persistent session" />
                 <TextBlock x:Name="PersistentError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
@@ -420,6 +507,48 @@
                         Text="Applies to new tabs. Closing a tab only detaches its shell. Shells open in another tab or attached from somewhere else are never ended automatically."
                         TextWrapping="Wrap" />
                 </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <ScrollViewer
+                x:Name="AdvancedPanel"
+                VerticalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Disabled"
+                Padding="0,0,12,0"
+                Visibility="Collapsed">
+                <StackPanel Spacing="12">
+                    <StackPanel Spacing="8">
+                        <ComboBox
+                            x:Name="ShellIntegrationBox"
+                            AutomationProperties.AutomationId="SshShellIntegrationBox"
+                            Header="Shell integration (experimental)"
+                            SelectedIndex="0"
+                            HorizontalAlignment="Stretch">
+                            <ComboBoxItem Content="Off" />
+                            <ComboBoxItem Content="Bash" />
+                            <ComboBoxItem Content="Zsh" />
+                            <ComboBoxItem Content="Fish" />
+                            <ComboBoxItem Content="PowerShell (Windows)" />
+                        </ComboBox>
+                        <TextBlock
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Choose the account's actual shell. Use only for shell accounts, not network-device CLIs. Applies when a new terminal starts; stores a script cache remotely without editing shell profiles. PowerShell requires Persistent session to be off (Terminal section)."
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <StackPanel Spacing="8">
+                        <TextBlock Style="{ThemeResource BodyStrongTextBlockStyle}" Text="SSH algorithms" />
+                        <TextBlock
+                            Style="{ThemeResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="Each kind follows Settings › Identities &amp; Keys › SSH algorithms unless you choose for this session. Turn legacy algorithms back on for an old device, or off to harden a modern one."
+                            TextWrapping="Wrap" />
+                        <ContentControl
+                            x:Name="AlgorithmsHost"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Stretch" />
+                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
 

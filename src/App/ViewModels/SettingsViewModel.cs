@@ -145,6 +145,19 @@ public sealed partial class SettingsViewModel : ObservableObject
         set => Save(value, s => s with { RightClickPaste = value }, () => RightClickPaste);
     }
 
+    /// <summary>SSH algorithms turned off for sessions that do not choose their own.</summary>
+    public Resesh.Core.Models.SshAlgorithms? SshAlgorithms
+    {
+        get => Current.SshAlgorithms;
+        set => Save(value, s => s with { SshAlgorithms = value }, () => SshAlgorithms);
+    }
+
+    public bool ConfirmMultilinePaste
+    {
+        get => Current.ConfirmMultilinePaste;
+        set => Save(value, s => s with { ConfirmMultilinePaste = value }, () => ConfirmMultilinePaste);
+    }
+
     public bool ShowStatusBar
     {
         get => Current.ShowStatusBar;

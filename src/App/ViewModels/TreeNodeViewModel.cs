@@ -61,6 +61,7 @@ public sealed partial class TreeNodeViewModel : ObservableObject
     {
         null => "",
         { IsLocal: true } => Path.GetFileNameWithoutExtension(Session.Local?.Executable ?? ""),
+        { IsSerial: true } => Session.Serial?.Describe() ?? "serial",
         { IsTelnet: true } => Session.Port == 23 ? $"telnet {Session.Host}" : $"telnet {Session.Host}:{Session.Port}",
         _ => Session.Port == 22 ? Session.Host : $"{Session.Host}:{Session.Port}",
     };

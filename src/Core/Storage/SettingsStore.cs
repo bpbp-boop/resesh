@@ -59,6 +59,15 @@ public sealed record AppSettings
     public bool CopyOnSelect { get; set; } = true;
     public bool RightClickPaste { get; set; } = true;
 
+    /// <summary>Ask before a paste that would press Enter, unless the program turned on
+    /// bracketed paste. On by default: a stray multi-line paste into a device CLI runs
+    /// every line.</summary>
+    public bool ConfirmMultilinePaste { get; set; } = true;
+
+    /// <summary>SSH algorithms turned off for every session that does not choose its own.
+    /// Null offers everything SSH.NET has.</summary>
+    public SshAlgorithms? SshAlgorithms { get; set; }
+
     /// <summary>Automatically start a disk recording for each new terminal tab.</summary>
     public bool AlwaysRecord { get; init; }
 

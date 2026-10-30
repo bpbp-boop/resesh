@@ -67,9 +67,9 @@ public sealed record SessionBulkEdit
                 PassphraseRequired = false,
             };
         }
-        if (Port is { } port && !session.IsLocal)
+        if (Port is { } port && !session.IsLocal && !session.IsSerial)
             edited = edited with { Port = Math.Clamp(port, 1, 65535) };
-        if (SetJumpHost && !session.IsLocal && JumpHostId != session.Id)
+        if (SetJumpHost && !session.IsLocal && !session.IsSerial && JumpHostId != session.Id)
             edited = edited with { JumpHostId = JumpHostId };
         if (SetColor)
             edited = edited with { ColorTag = ColorTag };

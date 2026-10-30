@@ -12,6 +12,21 @@ public sealed class SessionBulkEditTests
         new() { Name = name, Kind = SessionKind.Local, Local = new LocalTarget { Executable = "pwsh.exe" } };
 
     [Fact]
+    public void PortAndJumpHost_LeaveSerialSessionsAlone()
+    {
+        var serial = new Session
+        {
+            Name = "console",
+            Kind = SessionKind.Serial,
+            Port = 0,
+            Serial = new SerialTarget { PortName = "COM3" },
+        };
+        var edit = new SessionBulkEdit { Port = 2222, SetJumpHost = true, JumpHostId = Guid.NewGuid() };
+
+        Assert.Same(serial, edit.Apply(serial));
+    }
+
+    [Fact]
     public void EmptyEdit_ChangesNothing()
     {
         var session = Ssh();

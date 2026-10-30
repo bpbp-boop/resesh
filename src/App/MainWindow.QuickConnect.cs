@@ -34,10 +34,12 @@ public sealed partial class MainWindow
         {
             items.Add(new QuickConnectSuggestion
             {
-                Display = adhoc.IsTelnet
+                Display = adhoc.IsSerial
+                    ? $"Open {adhoc.Serial?.Describe()}"
+                    : adhoc.IsTelnet
                     ? $"Connect to {adhoc.Host}:{adhoc.Port} over telnet"
                     : $"Connect to {adhoc.Username}@{adhoc.Host}" + (adhoc.Port != 22 ? $":{adhoc.Port}" : ""),
-                Detail = adhoc.IsTelnet ? "new connection · unencrypted" : "new connection",
+                Detail = adhoc.IsSerial ? "serial port" : adhoc.IsTelnet ? "new connection · unencrypted" : "new connection",
                 Glyph = "\uE768",
                 Session = adhoc,
             });
@@ -49,6 +51,8 @@ public sealed partial class MainWindow
                 Display = s.Name,
                 Detail = s.IsLocal
                     ? s.Local?.Executable ?? "local shell"
+                    : s.IsSerial
+                        ? $"serial {s.Serial?.Describe()}"
                     : s.IsTelnet
                         ? $"telnet {s.Host}" + (s.Port != 23 ? $":{s.Port}" : "")
                         : (App.LoginUsername(s) is { Length: > 0 } user ? $"{user}@{s.Host}" : s.Host)

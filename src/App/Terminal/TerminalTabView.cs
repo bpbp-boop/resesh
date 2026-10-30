@@ -23,7 +23,7 @@ namespace Resesh.App.Terminal;
 /// <summary>
 /// The content of one tab: a terminal surface plus the shell lifecycle for each target
 /// kind — SSH (credential prompt, host key confirmation, connect/reconnect, teardown),
-/// telnet (plain TCP connect/reconnect), or a local ConPTY process (launch, exit code,
+/// telnet (plain TCP connect/reconnect), serial (a COM port, in TerminalTabView.Serial.cs), or a local ConPTY process (launch, exit code,
 /// restart). The live shell is an
 /// <see cref="ITerminalBackend"/>; SSH-only surfaces keep a typed reference beside it.
 /// </summary>
@@ -156,6 +156,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         Children.Add(_terminal);
         Children.Add(_spinner);
 
+        _terminal.PasteInterceptor = InterceptPaste;
+        _terminal.TypedInputFilter = StopsPacedPaste;
         _terminal.InputReceived += data =>
         {
             _backend?.Write(data);
@@ -685,7 +687,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     {
         if (_connecting || _disposed || _ssh?.IsConnected == true
             || _backend is LocalTerminalSession { IsRunning: true }
-            || _backend is TelnetTerminalSession { IsConnected: true })
+            || _backend is TelnetTerminalSession { IsConnected: true }
+            || _backend is Resesh.Core.Serial.SerialTerminalSession { IsConnected: true })
             return;
         _connecting = true;
         _spinner.IsActive = true;
@@ -707,6 +710,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 await LaunchLocalAsync(isReconnect);
             else if (Session.IsTelnet)
                 await ConnectTelnetAsync(isReconnect);
+            else if (Session.IsSerial)
+                await ConnectSerialAsync(isReconnect);
             else
                 await ConnectSshAsync(isReconnect);
         }
@@ -1322,7 +1327,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _ => $"Tunnel open: {status.Tunnel.Describe()}",
     };
 
-    /// <summary>Cipher, host key, and how the tunnels are doing, for the status bar.</summary>
+    /// <summary>Cipher, host key, and how the tunnels are doing, for the status bar; every
+    /// negotiated algorithm for its tooltip.</summary>
     private void UpdateSshSummary()
     {
         if (_ssh is not { } session)
@@ -1337,8 +1343,11 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             (0, _) => failed == 1 ? "1 tunnel failed" : $"{failed} tunnels failed",
             _ => $"{open} of {open + failed} tunnels open",
         };
+        var negotiated = session.Negotiated;
+        _tab.ConnectionDetails = negotiated?.Details(session.HostKeyFingerprint) ?? "";
+        var legacy = negotiated?.UsesLegacy == true ? "legacy algorithms" : null;
         _tab.ConnectionSummary = string.Join(" • ",
-            new[] { session.Encryption, session.HostKeyFingerprint, tunnelSummary }.Where(s => !string.IsNullOrEmpty(s)));
+            new[] { session.Encryption, session.HostKeyFingerprint, legacy, tunnelSummary }.Where(s => !string.IsNullOrEmpty(s)));
     }
 
     /// <summary>How a connect reaches its host: the jump hosts in the order they are
@@ -1846,7 +1855,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 _persistence.KillCommand(Session.Id, _tab.TmuxSlot)));
     }
 
-    /// <summary>Sends a break signal when the live backend has one (telnet). Returns false
+    /// <summary>Sends a break signal when the live backend has one (telnet, serial). Returns false
     /// when there is nothing to send it on, so a shortcut can fall through.</summary>
     public bool SendBreak()
     {
@@ -2315,6 +2324,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             return;
         _disposed = true;
         _tab.Progress = TerminalProgress.None;
+        CancelPacedPaste();
+        StopSerialPortWatch();
         _agentPoll?.Stop();
         _agentPoll = null;
         CleanupActions.Run(App.ReportRecoverableError,

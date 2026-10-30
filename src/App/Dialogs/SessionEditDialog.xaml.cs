@@ -3,6 +3,8 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Automation;
 using Resesh.App.ViewModels;
 using Resesh.Core.Models;
+using Resesh.Core.Serial;
+using Resesh.Core.Ssh;
 using Resesh.Core.Storage;
 
 namespace Resesh.App.Dialogs;
@@ -38,6 +40,7 @@ public sealed partial class SessionEditDialog : ContentDialog
     ];
 
     private readonly Session? _existing;
+    private readonly Controls.SshAlgorithmPicker _algorithms = new(followsApp: true);
     private readonly SshKeyStore _keyStore;
 
     /// <summary>The saved session, or null if the dialog was cancelled.</summary>
@@ -86,9 +89,15 @@ public sealed partial class SessionEditDialog : ContentDialog
         FolderBox.LostFocus += (_, _) => UpdateLoginFields();
 
         _updatingProtocol = true;
-        ProtocolBox.SelectedIndex = (existing?.Kind ?? newKind) == SessionKind.Telnet ? 1 : 0;
+        ProtocolBox.SelectedIndex = (existing?.Kind ?? newKind) switch
+        {
+            SessionKind.Telnet => 1,
+            SessionKind.Serial => 2,
+            _ => 0,
+        };
         PortBox.Value = IsTelnet ? TelnetDefaultPort : SshDefaultPort;
         _updatingProtocol = false;
+        PopulateSerial(existing?.Serial);
 
         if (existing is not null)
         {
@@ -123,6 +132,8 @@ public sealed partial class SessionEditDialog : ContentDialog
                 _ => 0,
             };
             NotesBox.Text = existing.Notes;
+            PasteLineDelayBox.Value = existing.PasteLineDelay;
+            PasteCharacterDelayBox.Value = existing.PasteCharacterDelay;
 
             if (existing.Overrides is { } overrides)
             {
@@ -151,12 +162,10 @@ public sealed partial class SessionEditDialog : ContentDialog
         UpdateLoginFields();
         PopulateNetwork(existing);
         UpdateProtocolVisibility();
-        UpdateAdvancedHeader();
-        ShellIntegrationBox.SelectionChanged += (_, _) =>
-        {
-            UpdateAdvancedHeader();
-            ClearFieldError(PersistentToggle, PersistentError);
-        };
+        _algorithms.SetAppDefaults(App.Settings.Current.SshAlgorithms);
+        _algorithms.Value = existing?.Algorithms;
+        AlgorithmsHost.Content = _algorithms;
+        ShellIntegrationBox.SelectionChanged += (_, _) => ClearFieldError(PersistentToggle, PersistentError);
         NameBox.TextChanged += (_, _) => ClearFieldError(NameBox, NameError);
         HostBox.TextChanged += (_, _) => ClearFieldError(HostBox, HostError);
         KeyBox.SelectionChanged += (_, _) => ClearFieldError(KeyBox, KeyError);
@@ -175,13 +184,6 @@ public sealed partial class SessionEditDialog : ContentDialog
             SectionBar.SelectedItem = AppearanceSection;
         DialogSizing.FitSections(this, SessionForm, SectionHost, preferredWidth: 600, preferredHeight: 480);
         Opened += (_, _) => DispatcherQueue.TryEnqueue(() => InitialFocus(initialTarget)?.Focus(FocusState.Programmatic));
-    }
-
-    private void UpdateAdvancedHeader()
-    {
-        var header = $"Advanced · Shell integration: {(ShellIntegrationBox.SelectedItem as ComboBoxItem)?.Content ?? "Off"}";
-        AdvancedSection.Header = header;
-        AutomationProperties.SetName(AdvancedSection, header);
     }
 
     private static void ClearFieldError(Control field, TextBlock error)
@@ -203,7 +205,11 @@ public sealed partial class SessionEditDialog : ContentDialog
 
     private bool IsTelnet => ProtocolBox.SelectedIndex == 1;
 
-    private AuthMethod SelectedAuth => IsTelnet ? AuthMethod.None : (AuthMethod)Math.Max(0, AuthBox.SelectedIndex);
+    private bool IsSerial => ProtocolBox.SelectedIndex == 2;
+
+    private bool IsSsh => !IsTelnet && !IsSerial;
+
+    private AuthMethod SelectedAuth => !IsSsh ? AuthMethod.None : (AuthMethod)Math.Max(0, AuthBox.SelectedIndex);
 
     private Guid? SelectedKeyId => (KeyBox.SelectedItem as KeyChoice)?.Id;
 
@@ -323,7 +329,7 @@ public sealed partial class SessionEditDialog : ContentDialog
     /// <summary>New proxy password to store, or null to leave the stored one untouched.</summary>
     public string? ProxyPassword { get; private set; }
 
-    private int ViaIndex => IsTelnet && ViaBox.SelectedIndex == 2 ? 0 : Math.Max(0, ViaBox.SelectedIndex);
+    private int ViaIndex => IsSerial || (IsTelnet && ViaBox.SelectedIndex == 2) ? 0 : Math.Max(0, ViaBox.SelectedIndex);
 
     private ProxyKind SelectedProxyKind => ProxyKindBox.SelectedIndex switch
     {
@@ -456,13 +462,15 @@ public sealed partial class SessionEditDialog : ContentDialog
     private void SectionBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
         // Fires during InitializeComponent for the initially-selected item, before the panels exist.
-        if (ConnectionPanel is null || NetworkPanel is null || TerminalPanel is null || AppearancePanel is null || IconPanel is null || NotesBox is null)
+        if (ConnectionPanel is null || NetworkPanel is null || TerminalPanel is null || AdvancedPanel is null
+            || AppearancePanel is null || IconPanel is null || NotesBox is null)
             return;
 
         var selected = sender.SelectedItem;
         NetworkPanel.Visibility = selected == NetworkSection ? Visibility.Visible : Visibility.Collapsed;
         ConnectionPanel.Visibility = selected == ConnectionSection ? Visibility.Visible : Visibility.Collapsed;
         TerminalPanel.Visibility = selected == TerminalSection ? Visibility.Visible : Visibility.Collapsed;
+        AdvancedPanel.Visibility = selected == AdvancedSection ? Visibility.Visible : Visibility.Collapsed;
         AppearancePanel.Visibility = selected == AppearanceSection ? Visibility.Visible : Visibility.Collapsed;
         IconPanel.Visibility = selected == IconSection ? Visibility.Visible : Visibility.Collapsed;
         NotesBox.Visibility = selected == NotesSection ? Visibility.Visible : Visibility.Collapsed;
@@ -483,22 +491,106 @@ public sealed partial class SessionEditDialog : ContentDialog
         UpdateProtocolVisibility();
     }
 
-    /// <summary>Telnet has no username, authentication, keys, shell integration or tmux:
-    /// the server's own login prompt arrives in the terminal.</summary>
+    /// <summary>Telnet and serial have no username, authentication, keys, shell integration
+    /// or tmux: the device's own login prompt arrives in the terminal. Serial has no host,
+    /// port, route or terminal type either, only the COM port and its line settings.</summary>
     private void UpdateProtocolVisibility()
     {
-        if (SshOptionsPanel is null || PersistentPanel is null || TelnetNotice is null)
+        if (SshOptionsPanel is null || PersistentPanel is null || TelnetNotice is null || SerialPanel is null
+            || HostField is null || TerminalTypeRow is null || NetworkSection is null || AdvancedSection is null)
             return;
         var telnet = IsTelnet;
-        SshOptionsPanel.Visibility = telnet ? Visibility.Collapsed : Visibility.Visible;
-        PersistentPanel.Visibility = telnet ? Visibility.Collapsed : Visibility.Visible;
-        TelnetEncodingBox.Visibility = telnet ? Visibility.Visible : Visibility.Collapsed;
-        TelnetSizePanel.Visibility = telnet ? Visibility.Visible : Visibility.Collapsed;
+        var serial = IsSerial;
+        var ssh = !telnet && !serial;
+        static Visibility Shown(bool shown) => shown ? Visibility.Visible : Visibility.Collapsed;
+        SshOptionsPanel.Visibility = Shown(ssh);
+        PersistentPanel.Visibility = Shown(ssh);
+        TelnetEncodingBox.Visibility = Shown(telnet);
+        TelnetSizePanel.Visibility = Shown(telnet);
         TelnetNotice.IsOpen = telnet;
         // A closed InfoBar still takes a slot in the StackPanel, and with it a row of spacing.
-        TelnetNotice.Visibility = telnet ? Visibility.Visible : Visibility.Collapsed;
+        TelnetNotice.Visibility = Shown(telnet);
+        NameBox.PlaceholderText = serial ? "core-sw1 console" : "prod-web-01";
+        HostField.Visibility = Shown(!serial);
+        PortBox.Visibility = Shown(!serial);
+        SerialPanel.Visibility = Shown(serial);
+        TerminalTypeRow.Visibility = Shown(!serial);
+        NetworkSection.Visibility = Shown(!serial);
+        AdvancedSection.Visibility = Shown(ssh);
+        if ((serial && SectionBar.SelectedItem == NetworkSection) || (!ssh && SectionBar.SelectedItem == AdvancedSection))
+            SectionBar.SelectedItem = ConnectionSection;
         UpdateNetworkFields();
     }
+
+    // ---- serial ----
+
+    private void PopulateSerial(SerialTarget? target)
+    {
+        var line = target ?? new SerialTarget();
+        foreach (var rate in SerialTarget.CommonBaudRates)
+            BaudBox.Items.Add(rate.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var baud = line.BaudRate.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (BaudBox.Items.Contains(baud))
+            BaudBox.SelectedItem = baud;
+        else
+            SetEditableText(BaudBox, baud);
+        DataBitsBox.SelectedIndex = Math.Clamp(line.DataBits - 5, 0, 3);
+        ParityBox.SelectedIndex = (int)line.Parity;
+        StopBitsBox.SelectedIndex = (int)line.StopBits;
+        FlowControlBox.SelectedIndex = (int)line.FlowControl;
+        RefreshSerialPorts(target?.PortName);
+        SerialPortBox.SelectionChanged += (_, _) => ClearFieldError(SerialPortBox, SerialPortError);
+        SerialPortBox.TextSubmitted += (_, _) => ClearFieldError(SerialPortBox, SerialPortError);
+    }
+
+    private void RefreshSerialPorts_Click(object sender, RoutedEventArgs e) => RefreshSerialPorts(SelectedPortName);
+
+    /// <summary>Lists the ports present now, keeping <paramref name="keep"/> chosen (or typed,
+    /// when it is not present: a saved session for an adapter that is unplugged).</summary>
+    private void RefreshSerialPorts(string? keep)
+    {
+        var ports = SerialPortList.List();
+        SerialPortBox.Items.Clear();
+        foreach (var port in ports)
+            SerialPortBox.Items.Add(port.Label);
+        SerialPortBox.PlaceholderText = ports.Count == 0 ? "No ports found. Plug in the cable, then Refresh" : "COM3";
+        var match = ports.FirstOrDefault(port => string.Equals(port.PortName, keep, StringComparison.OrdinalIgnoreCase));
+        if (match is not null)
+            SerialPortBox.SelectedItem = match.Label;
+        else if (!string.IsNullOrWhiteSpace(keep))
+            SetEditableText(SerialPortBox, keep);
+        else if (ports.Count == 1)
+            SerialPortBox.SelectedItem = ports[0].Label;
+    }
+
+    /// <summary>"COM5" from the picker's item ("COM5 — USB Serial Device") or typed text.</summary>
+    private string? SelectedPortName
+    {
+        get
+        {
+            var text = SerialPortBox.SelectedItem as string ?? SerialPortBox.Text ?? "";
+            var first = text.Split([' ', '\u2014', '-'], 2, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            return SerialTarget.NormalizePortName(first);
+        }
+    }
+
+    private int? SelectedBaudRate =>
+        int.TryParse((BaudBox.SelectedItem as string ?? BaudBox.Text)?.Trim(), System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var baud) && baud is >= 50 and <= 4_000_000
+            ? baud
+            : null;
+
+    // An editable ComboBox resets Text set before it loads.
+    private static void SetEditableText(ComboBox box, string text)
+    {
+        if (box.IsLoaded)
+            box.Text = text;
+        else
+            box.Loaded += (_, _) => box.Text = text;
+    }
+
+    private static int DelayOf(NumberBox box) =>
+        double.IsNaN(box.Value) ? 0 : Math.Clamp((int)box.Value, 0, (int)box.Maximum);
 
     private void UpdateAuthFieldVisibility()
     {
@@ -547,10 +639,16 @@ public sealed partial class SessionEditDialog : ContentDialog
             SetFieldError(field, error, message);
             firstInvalid ??= field;
         }
-        Validate(NameBox, NameError, string.IsNullOrWhiteSpace(NameBox.Text), "Enter a session name.");
-        Validate(HostBox, HostError, string.IsNullOrWhiteSpace(HostBox.Text), "Enter a host name or IP address.");
         var telnet = IsTelnet;
-        var login = telnet ? new LoginChoice { Login = SessionLogin.Own } : SelectedLogin;
+        var serial = IsSerial;
+        var ssh = !telnet && !serial;
+        Validate(NameBox, NameError, string.IsNullOrWhiteSpace(NameBox.Text), "Enter a session name.");
+        Validate(HostBox, HostError, !serial && string.IsNullOrWhiteSpace(HostBox.Text), "Enter a host name or IP address.");
+        var portName = SelectedPortName;
+        var baud = SelectedBaudRate;
+        Validate(SerialPortBox, SerialPortError, serial && (portName is null || baud is null),
+            portName is null ? "Choose a port, or type a name such as COM3." : "Enter a speed such as 9600 or 115200.");
+        var login = !ssh ? new LoginChoice { Login = SessionLogin.Own } : SelectedLogin;
         var ownLogin = login.Login == SessionLogin.Own;
         var auth = ownLogin ? SelectedAuth : AuthMethod.Password;
         Validate(KeyBox, KeyError, ownLogin && auth == AuthMethod.PrivateKey && SelectedKeyId is null, "Select an SSH key.");
@@ -582,7 +680,14 @@ public sealed partial class SessionEditDialog : ContentDialog
         }
 
         var port = double.IsNaN(PortBox.Value) ? (telnet ? TelnetDefaultPort : SshDefaultPort) : (int)PortBox.Value;
-        if (!telnet && PersistentToggle.IsOn && ShellIntegrationBox.SelectedIndex == 4)
+        if (ssh && _algorithms.Error is not null)
+        {
+            SectionBar.SelectedItem = AdvancedSection;
+            _algorithms.ShowError();
+            args.Cancel = true;
+            return;
+        }
+        if (ssh && PersistentToggle.IsOn && ShellIntegrationBox.SelectedIndex == 4)
         {
             SetFieldError(PersistentToggle, PersistentError,
                 "Turn off Persistent session to use PowerShell shell integration.");
@@ -618,15 +723,29 @@ public sealed partial class SessionEditDialog : ContentDialog
         Result = new Session
         {
             Id = _existing?.Id ?? Guid.NewGuid(),
-            Kind = telnet ? SessionKind.Telnet : SessionKind.Ssh,
+            Kind = telnet ? SessionKind.Telnet : serial ? SessionKind.Serial : SessionKind.Ssh,
             Name = NameBox.Text.Trim(),
             FolderPath = FolderPaths.Normalize(FolderBox.Text),
-            Host = HostBox.Text.Trim(),
-            Port = Math.Clamp(port, 1, 65535),
-            Username = telnet ? "" : UsernameBox.Text.Trim(),
+            Host = serial ? "" : HostBox.Text.Trim(),
+            Port = serial ? 0 : Math.Clamp(port, 1, 65535),
+            Serial = serial
+                ? new SerialTarget
+                {
+                    PortName = portName!,
+                    BaudRate = baud!.Value,
+                    DataBits = Math.Max(0, DataBitsBox.SelectedIndex) + 5,
+                    Parity = (SerialParity)Math.Max(0, ParityBox.SelectedIndex),
+                    StopBits = (SerialStopBits)Math.Max(0, StopBitsBox.SelectedIndex),
+                    FlowControl = (SerialFlowControl)Math.Max(0, FlowControlBox.SelectedIndex),
+                }
+                : null,
+            Algorithms = ssh ? _algorithms.Value : null,
+            PasteLineDelay = DelayOf(PasteLineDelayBox),
+            PasteCharacterDelay = DelayOf(PasteCharacterDelayBox),
+            Username = ssh ? UsernameBox.Text.Trim() : "",
             InheritLogin = login.Login == SessionLogin.Inherit,
             IdentityId = login.Login == SessionLogin.Identity ? login.Identity?.Id : null,
-            AuthMethod = telnet ? AuthMethod.None : auth,
+            AuthMethod = ssh ? auth : AuthMethod.None,
             PrivateKeyId = ownLogin && auth == AuthMethod.PrivateKey ? SelectedKeyId : null,
             PrivateKeyPath = null,
             PassphraseRequired = false,
@@ -639,15 +758,15 @@ public sealed partial class SessionEditDialog : ContentDialog
             },
             TelnetReport80x25 = telnet && TelnetReport80x25Toggle.IsOn,
             TelnetFixed80Columns = telnet && TelnetFixed80ColumnsToggle.IsOn,
-            Persistent = !telnet && PersistentToggle.IsOn,
-            SessionAgent = !telnet && PersistentToggle.IsOn && PersistenceBackendBox.SelectedIndex == 1,
+            Persistent = ssh && PersistentToggle.IsOn,
+            SessionAgent = ssh && PersistentToggle.IsOn && PersistenceBackendBox.SelectedIndex == 1,
             DetachedSessions = DetachedSessionsBox.SelectedIndex switch
             {
                 1 => DetachedSessionAction.StartNew,
                 2 => DetachedSessionAction.EndDetachedAndStartNew,
                 _ => DetachedSessionAction.Ask,
             },
-            ShellIntegration = telnet ? ShellIntegrationMode.Disabled : ShellIntegrationBox.SelectedIndex switch
+            ShellIntegration = !ssh ? ShellIntegrationMode.Disabled : ShellIntegrationBox.SelectedIndex switch
             {
                 1 => ShellIntegrationMode.Bash,
                 2 => ShellIntegrationMode.Zsh,
@@ -662,7 +781,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             CredentialNeeded = _existing?.CredentialNeeded ?? false,
             JumpHostId = via == 1 ? (JumpBox.SelectedItem as JumpChoice)?.Id : null,
             Proxy = proxy,
-            Tunnels = telnet || _tunnels.Count == 0 ? null : _tunnels.ToList(),
+            Tunnels = !ssh || _tunnels.Count == 0 ? null : _tunnels.ToList(),
             Overrides = overrides.IsEmpty ? null : overrides,
         };
         ProxyPassword = proxy is not null && ProxyPasswordBox.Password.Length > 0 ? ProxyPasswordBox.Password : null;

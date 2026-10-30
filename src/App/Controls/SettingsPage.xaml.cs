@@ -33,6 +33,7 @@ public sealed partial class SettingsPage : UserControl
         highlightEditor.Changed += CommitHighlights;
         HighlightEditorHost.Content = highlightEditor;
         HookIdentityChanges();
+        SshAlgorithmsHost.Content = BuildSshAlgorithms();
         Show(Section.General);
     }
 
@@ -59,7 +60,7 @@ public sealed partial class SettingsPage : UserControl
             or GlobalSettingsTarget.RewindMegabytes or GlobalSettingsTarget.CommandHistory
             or GlobalSettingsTarget.CommandHistoryDays => Section.Recording,
         GlobalSettingsTarget.Highlighting => Section.Highlighting,
-        GlobalSettingsTarget.Identities => Section.Identities,
+        GlobalSettingsTarget.Identities or GlobalSettingsTarget.SshAlgorithms => Section.Identities,
         GlobalSettingsTarget.Sessions => Section.Sessions,
         GlobalSettingsTarget.Agents or GlobalSettingsTarget.ShowAgentIcons
             or GlobalSettingsTarget.AgentAlertFlash or GlobalSettingsTarget.AgentAlertSound => Section.Agents,
@@ -75,6 +76,7 @@ public sealed partial class SettingsPage : UserControl
         GlobalSettingsTarget.Scrollback => (ScrollbackCard, ScrollbackBox),
         GlobalSettingsTarget.CopyOnSelect => (CopyOnSelectCard, CopyOnSelectSwitch),
         GlobalSettingsTarget.RightClickPaste => (RightClickPasteCard, RightClickPasteSwitch),
+        GlobalSettingsTarget.ConfirmMultilinePaste => (ConfirmMultilinePasteCard, ConfirmMultilinePasteSwitch),
         GlobalSettingsTarget.ShowStatusBar => (ShowStatusBarCard, ShowStatusBarSwitch),
         GlobalSettingsTarget.SessionsPaneLayout => (SessionsPaneLayoutCard, SessionsPaneLayoutBox),
         GlobalSettingsTarget.ReopenLastLayout => (ReopenLastLayoutCard, ReopenLastLayoutSwitch),
@@ -87,8 +89,23 @@ public sealed partial class SettingsPage : UserControl
         GlobalSettingsTarget.ShowAgentIcons => (AgentIconsCard, AgentIconsSwitch),
         GlobalSettingsTarget.AgentAlertFlash => (AgentFlashCard, AgentFlashSwitch),
         GlobalSettingsTarget.AgentAlertSound => (AgentSoundCard, AgentSoundSwitch),
+        GlobalSettingsTarget.SshAlgorithms => (SshAlgorithmsHeader, (Control)SshAlgorithmsHost.Content),
         _ => null,
     };
+
+    /// <summary>Saves each change that leaves every kind with something on; until then the
+    /// picker shows what is wrong and the saved setting stays as it was.</summary>
+    private SshAlgorithmPicker BuildSshAlgorithms()
+    {
+        var picker = new SshAlgorithmPicker(followsApp: false) { Value = ViewModel.SshAlgorithms };
+        picker.SetAppDefaults(null);
+        picker.Changed += () =>
+        {
+            if (picker.Error is null)
+                ViewModel.SshAlgorithms = picker.Value;
+        };
+        return picker;
+    }
 
     private void Show(Section section)
     {

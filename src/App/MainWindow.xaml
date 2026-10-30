@@ -288,6 +288,7 @@
                     <MenuFlyoutSeparator />
                     <MenuFlyoutItem Text="New SSH Session…" Command="{x:Bind ViewModel.NewSshSessionCommand}" />
                     <MenuFlyoutItem Text="New Telnet Session…" Command="{x:Bind ViewModel.NewTelnetSessionCommand}" />
+                    <MenuFlyoutItem Text="New Serial Session…" Command="{x:Bind ViewModel.NewSerialSessionCommand}" />
                     <MenuFlyoutItem Text="New Local Profile…" Command="{x:Bind ViewModel.NewLocalProfileCommand}" />
                     <MenuFlyoutItem Text="New Folder…" Command="{x:Bind ViewModel.NewFolderCommand}" />
                     <MenuFlyoutItem Text="Open Recording…" Command="{x:Bind ViewModel.OpenRecordingCommand}" />
@@ -819,6 +820,7 @@
                         <MenuFlyout>
                             <MenuFlyoutItem Text="New SSH Session…" Command="{x:Bind ViewModel.NewSshSessionCommand}" />
                             <MenuFlyoutItem Text="New Telnet Session…" Command="{x:Bind ViewModel.NewTelnetSessionCommand}" />
+                    <MenuFlyoutItem Text="New Serial Session…" Command="{x:Bind ViewModel.NewSerialSessionCommand}" />
                             <MenuFlyoutItem Text="New Local Profile…" Command="{x:Bind ViewModel.NewLocalProfileCommand}" />
                             <MenuFlyoutItem Text="New Folder…" Command="{x:Bind ViewModel.NewFolderCommand}" />
                             <MenuFlyoutSeparator />
@@ -1204,7 +1206,11 @@
             Background="{StaticResource SessionChromeBrush}"
             BorderBrush="{StaticResource SessionChromeFrameBrush}"
             BorderThickness="0,1,0,0">
-            <TextBlock Text="{x:Bind ViewModel.StatusText, Mode=OneWay}" FontSize="12" Opacity="0.8" />
+            <TextBlock
+                Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
+                ToolTipService.ToolTip="{x:Bind ViewModel.StatusDetails, Mode=OneWay}"
+                FontSize="12"
+                Opacity="0.8" />
         </Border>
 
         <controls:HistoryView
