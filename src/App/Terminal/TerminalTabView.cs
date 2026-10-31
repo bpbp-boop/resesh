@@ -242,6 +242,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _agent = new AgentTracker(Session.Agent);
         WireAgentSignals();
         WireProgress();
+        WirePaste();
 
         Loaded += async (_, _) =>
         {

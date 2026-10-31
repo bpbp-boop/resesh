@@ -76,10 +76,62 @@ public sealed class PastePlanTests
     }
 
     [Fact]
+    public async Task SendAsync_WritesOnTheCallersContext()
+    {
+        // The app's write callback touches UI state, so every chunk after a delay must come
+        // back to the caller's thread rather than a timer thread.
+        using var context = new SingleThreadContext();
+        var threads = new List<int>();
+        var chunks = PastePlan.Chunks("one\ntwo\nthree", 5, 0);
+
+        var callerThread = await context.RunAsync(async () =>
+        {
+            await PastePlan.SendAsync(chunks, _ => threads.Add(Environment.CurrentManagedThreadId));
+            return Environment.CurrentManagedThreadId;
+        });
+
+        Assert.Equal(3, threads.Count);
+        Assert.All(threads, id => Assert.Equal(callerThread, id));
+    }
+
+    [Fact]
     public void Preview_ShowsFirstLinesAndCountsTheRest()
     {
         var text = string.Join("\n", Enumerable.Range(1, 10).Select(i => $"line {i}")) + "\n";
         Assert.Equal("line 1\nline 2\n… and 8 more", PastePlan.Preview(text, maxLines: 2));
+    }
+
+    // A UI-thread stand-in: one thread that runs everything posted to it.
+    private sealed class SingleThreadContext : SynchronizationContext, IDisposable
+    {
+        private readonly System.Collections.Concurrent.BlockingCollection<(SendOrPostCallback, object?)> _queue = new();
+        private readonly Thread _thread;
+
+        public SingleThreadContext()
+        {
+            _thread = new Thread(() =>
+            {
+                SetSynchronizationContext(this);
+                foreach (var (callback, state) in _queue.GetConsumingEnumerable())
+                    callback(state);
+            }) { IsBackground = true };
+            _thread.Start();
+        }
+
+        public override void Post(SendOrPostCallback d, object? state) => _queue.Add((d, state));
+
+        public Task<T> RunAsync<T>(Func<Task<T>> work)
+        {
+            var done = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Post(async _ =>
+            {
+                try { done.SetResult(await work()); }
+                catch (Exception ex) { done.SetException(ex); }
+            }, null);
+            return done.Task;
+        }
+
+        public void Dispose() => _queue.CompleteAdding();
     }
 
     // Progress<T> posts to a captured context; tests want the report inline.

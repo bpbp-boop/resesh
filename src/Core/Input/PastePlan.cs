@@ -72,7 +72,9 @@ public static class PastePlan
     }
 
     /// <summary>Sends <paramref name="chunks"/> through <paramref name="write"/>, waiting
-    /// after each. Reports each finished line. Stops quietly when cancelled.</summary>
+    /// after each. Reports each finished line. Stops quietly when cancelled. Every call to
+    /// <paramref name="write"/> runs on the caller's context, because callers write to UI
+    /// state; so the waits must not use ConfigureAwait(false).</summary>
     public static async Task SendAsync(IReadOnlyList<PasteChunk> chunks, Action<byte[]> write,
         IProgress<int>? linesSent = null, CancellationToken cancellationToken = default,
         TimeProvider? time = null)
@@ -90,7 +92,7 @@ public static class PastePlan
             {
                 try
                 {
-                    await Task.Delay(chunk.DelayAfter, time, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(chunk.DelayAfter, time, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {

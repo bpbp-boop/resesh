@@ -1,11 +1,14 @@
 using Resesh.App.Dialogs;
 using Resesh.App.ViewModels;
+using Resesh.Core.Backend;
 using Resesh.Core.Input;
 
 namespace Resesh.App.Terminal;
 
 /// <summary>Safe paste: asks before a paste that would press Enter, and sends it slowly to
-/// sessions that set a line or character delay. Typing anything stops a slow paste.</summary>
+/// sessions that set a line or character delay. Typing anything stops a slow paste, and so
+/// does the connection ending: a paste belongs to the connection it was made on and never
+/// carries on into a reconnect.</summary>
 public sealed partial class TerminalTabView
 {
     private CancellationTokenSource? _pacedPaste;
@@ -23,18 +26,33 @@ public sealed partial class TerminalTabView
         var paced = !bracketed && PastePlan.IsPaced(Session.PasteLineDelay, Session.PasteCharacterDelay);
         if (!confirm && !paced)
             return false;
-        _ = PasteAsync(text, confirm, paced);
+        _ = PasteAsync(text, confirm, paced, _connection);
         return true;
     }
 
-    private async Task PasteAsync(string text, bool confirm, bool paced)
+    /// <summary>Stops a slow paste as soon as the tab leaves the connected state.</summary>
+    private void WirePaste()
+    {
+        _tab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TabViewModel.State) && _tab.State != TabConnectionState.Connected)
+                CancelPacedPaste();
+        };
+    }
+
+    private bool IsLive(TerminalConnectionLifetime connection) =>
+        !_disposed && ReferenceEquals(_connection, connection) && !connection.Token.IsCancellationRequested
+        && _tab.State == TabConnectionState.Connected;
+
+    private async Task PasteAsync(string text, bool confirm, bool paced, TerminalConnectionLifetime connection)
     {
         if (confirm && !await ConfirmPasteAsync(text))
         {
             _terminal.FocusTerminal();
             return;
         }
-        if (_disposed || _tab.State != TabConnectionState.Connected)
+        // The connection may have dropped or been replaced while the dialog was open.
+        if (!IsLive(connection))
             return;
         _terminal.FocusTerminal();
         if (!paced)
@@ -44,7 +62,7 @@ public sealed partial class TerminalTabView
         }
 
         CancelPacedPaste();
-        var cancel = new CancellationTokenSource();
+        var cancel = CancellationTokenSource.CreateLinkedTokenSource(connection.Token);
         _pacedPaste = cancel;
         var total = PastePlan.LineBreaks(text);
         _summaryBeforePaste = _tab.ConnectionSummary;
@@ -56,7 +74,7 @@ public sealed partial class TerminalTabView
             // between them are timer awaits, so the window stays responsive.
             await PastePlan.SendAsync(
                 PastePlan.Chunks(text, Session.PasteLineDelay, Session.PasteCharacterDelay),
-                SendPacedChunk, progress, cancel.Token);
+                bytes => SendPacedChunk(bytes, connection), progress, cancel.Token);
         }
         finally
         {
@@ -69,9 +87,9 @@ public sealed partial class TerminalTabView
         }
     }
 
-    private void SendPacedChunk(byte[] bytes)
+    private void SendPacedChunk(byte[] bytes, TerminalConnectionLifetime connection)
     {
-        if (_disposed || _tab.State != TabConnectionState.Connected)
+        if (!IsLive(connection))
         {
             CancelPacedPaste();
             return;
