@@ -831,7 +831,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _commandsPanel.ApplyTheme(_theme, _fontFamily);
         var b = _theme.Background;
         var luminance = ((b >> 16) & 0xFF) * 299 + ((b >> 8) & 0xFF) * 587 + (b & 0xFF) * 114;
-        _ruler.SetTheme(dark: luminance < 128_000, _theme.Background, _theme.Selection);
+        _ruler.SetTheme(dark: luminance < 128_000, _theme.Background, _theme.Foreground);
         lock (_renderGate)
             _marginColor = null; // the next frame reapplies an extended margin over the new theme
         ApplyTextInputStyle();

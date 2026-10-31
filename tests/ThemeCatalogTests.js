@@ -310,9 +310,19 @@ test("the tab-row divider spans both sides without crossing the active tab", () 
   assert.match(tabGroup, /Tabs\.ContainerFromItem\(Tabs\.SelectedItem\)[\s\S]*?LeftTabStripDivider\.Width = activeLeft;[\s\S]*?RightTabStripDivider\.Width = stripWidth - activeRight;/);
 });
 
-test("the terminal ruler edge uses a visible theme colour", () => {
-  assert.match(terminalSurface, /_ruler\.SetTheme\(dark: [^,]+, _theme\.Background, _theme\.Selection\);/);
-  assert.match(terminalThemes, /\["solarized-dark"\] = New\(\s*0x002B36, 0x839496, 0x93A1A1, 0x274852,/);
+// The ruler's edge used to be drawn in the selection colour, which is also the focused
+// pane's outline, so the annotations lane read as another split. The lane is now a faint
+// lift of the terminal background toward its foreground, with an edge only in High Contrast.
+test("the terminal ruler is a faintly tinted lane, not a bordered one", () => {
+  const ruler = fs.readFileSync(
+    path.join(__dirname, "..", "src", "Terminal", "Native", "TerminalRuler.cs"),
+    "utf8");
+  assert.match(terminalSurface, /_ruler\.SetTheme\(dark: [^,]+, _theme\.Background, _theme\.Foreground\);/);
+  assert.doesNotMatch(terminalSurface, /_ruler\.SetTheme\([^)]*Selection/);
+  const tint = Number(ruler.match(/internal const double LaneTint = (\d*\.\d+);/)?.[1]);
+  assert.ok(tint > 0 && tint <= 0.08, "the lane stays a faint lift, not a panel");
+  assert.match(ruler, /: Over\(Rgb\(_laneForeground\), LaneTint, _laneBackground\);/);
+  assert.match(ruler, /var edge = highContrast \? Math\.Max\(1, \(int\)Math\.Round\(scale\)\) : 0;/);
 });
 
 test("live theme changes repaint existing shell and pane dividers", () => {

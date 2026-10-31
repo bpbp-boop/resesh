@@ -1649,3 +1649,16 @@ clipped. Measured afterwards: 9 physical pixels at 110% scale, dragging from bes
 resizes, and the visible divider stays one pixel. The strip reaches 3-4 DIP into the
 neighbouring panes, which only costs their outermost padding. `SplitterPresentationTests`
 fails if a splitter sets its own size or skips the helper.
+
+## 2026-11-01 - The ruler is a tinted lane, not a bordered one
+
+The annotations ruler drew a one-pixel edge toward the terminal in the theme's selection
+colour, carried over from terminal.html. The focused pane's outline is also the selection
+colour (`ThemeVisualPalette.PaneFocusBorder`), so in every theme the ruler's edge matched a
+split boundary exactly (`#264F78` in the default dark theme), and read as one: more so than
+an ordinary split gutter, which is grey. The lane now has no edge. It is the terminal
+background lifted 4% toward the foreground (`TerminalRuler.LaneTint`; `#0C0C0C` becomes
+`#141414`), which reads as a strip of the terminal, like a scrollbar track. High Contrast
+keeps a full-strength edge in the foreground colour, where a clear boundary matters more.
+The ruler reads `AccessibilitySettings.HighContrast` when it paints, as the Terminal project
+has no theme palette of its own.
