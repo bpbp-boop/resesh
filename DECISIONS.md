@@ -1649,3 +1649,21 @@ clipped. Measured afterwards: 9 physical pixels at 110% scale, dragging from bes
 resizes, and the visible divider stays one pixel. The strip reaches 3-4 DIP into the
 neighbouring panes, which only costs their outermost padding. `SplitterPresentationTests`
 fails if a splitter sets its own size or skips the helper.
+
+## 2026-11-01 - Splitter highlights wait 300 ms on hover and thicken to 3 DIP
+
+Divider lines light up only after the pointer rests on a splitter for 300 ms (VS Code's sash
+default), so passing the mouse across one doesn't flash it; pressing lights it at once. A lit
+line thickens from 1 to 3 DIP. That thickening existed before and was dropped on 2026-08-25
+when the tracks narrowed to 1px, because the track clipped it; it now uses negative margins,
+like the grab strip, and the lines sit at ZIndex 1 so neighbouring panes don't cover them.
+`SplitterHighlight` drives all three splitters. Two toolkit behaviours it works around:
+
+- `SizerBase` paints its whole grab strip on hover and press, immediately, whatever
+  `Background` says. Overriding `SizerBaseBackgroundPointerOver`/`Pressed` in App.xaml does
+  nothing, because the toolkit's template resolves them from its own dictionaries first; they
+  are set to transparent on each splitter's `Resources` instead.
+- The splitter doesn't capture the pointer while dragging. When a drag runs past a pane's
+  size limit, the pointer leaves the strip and the release goes to another element, so
+  `PointerReleased` never arrives. `ManipulationCompleted` ends the press as well, and so
+  does leaving the strip with no drag under way.
