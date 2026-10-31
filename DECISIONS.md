@@ -1633,3 +1633,19 @@ order of algorithms was considered and left out: unticking covers the reasons to
   monochrome marks take a gray or brand tint that reads on light and dark. Kiro's mask was
   one rectangle around the drawing and is dropped; herdr's Antigravity blurs its colours
   with SVG filters, so the mono arch takes a blue-green-yellow gradient instead.
+
+## 2026-11-01 - Splitter grab strips escape their 1px track with negative margins
+
+Every splitter (sessions pane, split groups, file pane) draws a one-pixel `Border` in a 1px
+grid track, with a transparent toolkit `GridSplitter` on top as the thing you grab. The
+splitter was given `Width=7` to make it easy to hit, but a grid clips each child to its cell
+and that clip applies to hit-testing, so the resize cursor showed on exactly one physical
+pixel (measured by sweeping the mouse across the line; UIA reported the splitter as 1px wide).
+The `7` never applied either: the toolkit's `SizerBase` style sets `MinWidth`/`MinHeight` to 8.
+
+`SplitterHitArea.Apply` now sizes all three: 8 DIP (the toolkit default) with negative
+margins of 3 before and 4 after, so width plus margins equals the 1px track and nothing is
+clipped. Measured afterwards: 9 physical pixels at 110% scale, dragging from beside the line
+resizes, and the visible divider stays one pixel. The strip reaches 3-4 DIP into the
+neighbouring panes, which only costs their outermost padding. `SplitterPresentationTests`
+fails if a splitter sets its own size or skips the helper.

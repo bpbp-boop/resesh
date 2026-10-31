@@ -1164,7 +1164,6 @@
             <toolkit:GridSplitter
                 x:Name="TreeSplitter"
                 Grid.Column="2"
-                Width="7"
                 Canvas.ZIndex="1"
                 HorizontalAlignment="Center"
                 Background="Transparent"
