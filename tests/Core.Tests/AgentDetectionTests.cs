@@ -21,7 +21,20 @@ public class AgentDetectionTests
     [InlineData("grok", "grok")]
     [InlineData("opencode", "opencode")]
     [InlineData("npx opencode-ai", "opencode")]
-    [InlineData("aider --model gpt", "agent")]
+    [InlineData("aider --model gpt", "aider")]
+    [InlineData("copilot --resume=abc", "copilot")]
+    [InlineData("npx @github/copilot", "copilot")]
+    [InlineData("kimi --session 1", "kimi")]
+    [InlineData("qwen --resume 1", "qwen")]
+    [InlineData("npx @qwen-code/qwen-code", "qwen")]
+    [InlineData("agy --conversation 1", "antigravity")]
+    [InlineData("kiro-cli chat", "kiro")]
+    [InlineData("C:\\tools\\devin.exe", "devin")]
+    [InlineData("qodercli --resume 1", "qoder")]
+    [InlineData("mastracode --thread 1", "mastracode")]
+    [InlineData("cursor-agent", "cursor")]
+    [InlineData("droid", "droid")]
+    [InlineData("letta", "letta")]
     public void RecognizesAgentCommands(string command, string expected) =>
         Assert.Equal(expected, AgentDetection.FromCommand(command));
 
@@ -32,6 +45,8 @@ public class AgentDetectionTests
     [InlineData("git commit -m 'claude helped'")]   // the word appears, but not as the command
     [InlineData("vim ~/claude/notes.md")]
     [InlineData("sudo systemctl restart nginx")]
+    [InlineData("antigravity .")]                   // IDE launchers, not the CLI agents
+    [InlineData("kiro .")]
     public void PlainCommandsAreNotAgents(string command) =>
         Assert.Null(AgentDetection.FromCommand(command));
 
@@ -93,10 +108,10 @@ public class AgentDetectionTests
         Assert.False(AgentDetection.IsShellTitle(title));
 
     [Fact]
-    public void NamedAgentBeatsGenericInAProcessList()
+    public void FindsTheAgentInAProcessList()
     {
-        Assert.Equal("claude", AgentDetection.FromProcessNames(["conhost", "aider", "claude"]));
-        Assert.Equal("agent", AgentDetection.FromProcessNames(["powershell", "aider"]));
+        Assert.Equal("claude", AgentDetection.FromProcessNames(["conhost", "node", "claude"]));
+        Assert.Equal("aider", AgentDetection.FromProcessNames(["powershell", "aider"]));
         Assert.Null(AgentDetection.FromProcessNames(["powershell", "conhost", "git"]));
         Assert.Null(AgentDetection.FromProcessNames(null));
     }
@@ -104,4 +119,27 @@ public class AgentDetectionTests
     [Fact]
     public void ProcessNamesIgnoreExtensionAndCase() =>
         Assert.Equal("claude", AgentDetection.FromProcessName("Claude.EXE"));
+
+    [Fact]
+    public void EveryAgentIdentityHasAnIcon()
+    {
+        var dir = FindAgentIconDirectory();
+        foreach (var identity in AgentIdentities.All.Where(a => a.IsAgent))
+        {
+            var stem = Path.Combine(dir, identity.Key);
+            Assert.True(File.Exists(stem + ".svg") || File.Exists(stem + ".png"), $"no icon for agent '{identity.Key}'");
+        }
+    }
+
+    private static string FindAgentIconDirectory()
+    {
+        for (var current = new DirectoryInfo(AppContext.BaseDirectory); current is not null; current = current.Parent)
+        {
+            var candidate = Path.Combine(current.FullName, "src", "App", "Assets", "AgentIcons");
+            if (Directory.Exists(candidate))
+                return candidate;
+        }
+
+        throw new DirectoryNotFoundException($"agent icon directory not found above {AppContext.BaseDirectory}");
+    }
 }

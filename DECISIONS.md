@@ -1614,3 +1614,22 @@ cipher, MAC ("built into the cipher" for GCM and ChaCha20-Poly1305) and host key
 ones marked, and the status line says "legacy algorithms" when any is in use. Choosing the
 order of algorithms was considered and left out: unticking covers the reasons to reorder
 (see the entry above), and seeing what was chosen is more useful than steering it.
+
+## 2026-10-31 - Twenty more named agents
+- Detection now names Aider, Amp, Antigravity, Cline, Crush, Cursor Agent, Devin, Factory
+  Droid, GitHub Copilot, Goose, Hermes Agent, Kilo Code, Kimi Code, Kiro, Letta Code, Maki,
+  MastraCode, Muse, Qoder and Qwen Code, each with its own icon. Command names follow herdr's
+  detection manifests. `copilot` is also AWS's Copilot CLI; recognizing GitHub's is worth a
+  stray icon until the next prompt. Antigravity and Kiro count only by their CLI names
+  (`agy`, `antigravity-cli`, `kiro-cli`), because `antigravity` and `kiro` open their IDEs.
+- Icons come from herdr-app's `defaults/icons` (Apache-2.0; LobeHub marks under MIT and
+  the agents' own) where it has one: Amp, Antigravity, Copilot, Crush, Cursor, Hermes, Kimi,
+  Kiro, MastraCode, Muse (Meta's mark, as herdr uses) and Qoder. Devin, Goose and Kilo Code
+  come from LobeHub; Cline and Qwen from Simple Icons 16.36.0; Letta and Factory from their
+  own site favicons; Aider and Maki from their repositories' PNG icons, which is why the
+  loader falls back to `<key>.png`.
+- The sources were normalized to fixed fills, as the earlier marks were: `currentColor`
+  renders black through `SvgImageSource`, Kimi's white K would vanish on light strips, and
+  monochrome marks take a gray or brand tint that reads on light and dark. Kiro's mask was
+  one rectangle around the drawing and is dropped; herdr's Antigravity blurs its colours
+  with SVG filters, so the mono arch takes a blue-green-yellow gradient instead.

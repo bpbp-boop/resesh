@@ -104,7 +104,9 @@ public sealed class SessionIconCatalog
             return cached;
         try
         {
-            var path = Path.Combine(AppContext.BaseDirectory, "Assets", "AgentIcons", key.ToLowerInvariant() + ".svg");
+            // SVG where the brand publishes one; a few (Aider, Maki) only ship PNG icons.
+            var stem = Path.Combine(AppContext.BaseDirectory, "Assets", "AgentIcons", key.ToLowerInvariant());
+            var path = File.Exists(stem + ".svg") ? stem + ".svg" : stem + ".png";
             if (!File.Exists(path))
                 return null;
             var source = LoadFile(path, cacheKey.Item2);
