@@ -86,6 +86,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         InitializeHistoryOverlay();
         RestoreWindowPlacement();
         AppWindow.Changed += AppWindow_Changed;
+        SplitterHitArea.Apply(TreeSplitter, columns: true);
         ConfigureSplitter(TreeSplitter, TreeSplitterLine);
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
         InitializeTitleBar();

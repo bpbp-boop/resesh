@@ -665,14 +665,13 @@ public sealed partial class MainWindow
                     : CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Rows,
                 HorizontalAlignment = isColumns ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
                 VerticalAlignment = isColumns ? VerticalAlignment.Stretch : VerticalAlignment.Center,
-                Width = isColumns ? 7 : double.NaN,
-                Height = isColumns ? double.NaN : 7,
                 // The separate Border below supplies the visible one-pixel divider.
                 // Keep this wider resize target transparent so it cannot cover that line.
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
             };
-            // Keep the seven-pixel hit target above the terminal content while its
-            // one-pixel grid track lets both tab groups meet the visible divider.
+            SplitterHitArea.Apply(splitter, isColumns);
+            // Keep the wider hit target above the terminal content while its one-pixel
+            // grid track lets both tab groups meet the visible divider.
             Canvas.SetZIndex(splitter, 1);
             if (isColumns)
             {

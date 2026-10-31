@@ -1942,12 +1942,12 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
             _paneSplitter = new CommunityToolkit.WinUI.Controls.GridSplitter
             {
-                Width = 7,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 ResizeBehavior = CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeBehavior.PreviousAndNext,
                 ResizeDirection = CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns,
             };
+            SplitterHitArea.Apply(_paneSplitter, columns: true);
             _paneSplitterLine = new Border
             {
                 Width = 1,
