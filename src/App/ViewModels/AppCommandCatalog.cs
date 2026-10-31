@@ -110,6 +110,8 @@ public sealed class AppCommandCatalog
         Setting("Scrollback Lines", "terminal history buffer", GlobalSettingsTarget.Scrollback);
         Setting("Copy Selected Text", "clipboard copy on select", GlobalSettingsTarget.CopyOnSelect);
         Setting("Paste With Right-Click", "clipboard mouse", GlobalSettingsTarget.RightClickPaste);
+        Setting("SSH Algorithms", "kex key exchange cipher mac host key legacy security harden", GlobalSettingsTarget.SshAlgorithms);
+        Setting("Confirm Multi-Line Pastes", "clipboard paste warning safe lines enter", GlobalSettingsTarget.ConfirmMultilinePaste);
         Setting("Reopen Last Layout at Startup", "workspace launch restore groups", GlobalSettingsTarget.ReopenLastLayout);
         Setting("Command History", "keep save commands output search retention", GlobalSettingsTarget.CommandHistory);
         Setting("Automatic Recording", "record sessions disk", GlobalSettingsTarget.AlwaysRecord);

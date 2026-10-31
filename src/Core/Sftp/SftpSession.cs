@@ -69,7 +69,7 @@ public sealed class SftpSession : IDisposable
     {
         var auth = SshConnectionFactory.BuildAuthMethods(session, secret, interactiveResponder);
         var connectionInfo = SshConnectionFactory.CreateConnectionInfo(
-            session, auth, TimeSpan.FromSeconds(30), via, proxyPassword);
+            session, auth, TimeSpan.FromSeconds(30), via, proxyPassword, _knownHosts);
 
         var client = new SftpClient(connectionInfo)
         {
@@ -87,7 +87,9 @@ public sealed class SftpSession : IDisposable
                 _knownHosts.BackfillHostKey(session.Host, session.Port, e.HostKeyName, e.HostKey);
             if (!e.CanTrust)
                 hostKeyFailure = verdict == HostKeyVerdict.Mismatch
-                    ? new SshSessionException(
+                    ? (_knownHosts.Lookup(session.Host, session.Port) is { } trusted
+                        ? SshHostKeyTypes.TrustedTypeTurnedOff(connectionInfo, session, trusted, e.HostKeyName)
+                        : null) ?? new SshSessionException(
                         SshFailureKind.HostKeyMismatch,
                         $"Host key for {session.Host}:{session.Port} does not match the trusted key. " +
                         "Reconnect the terminal to review the change.")

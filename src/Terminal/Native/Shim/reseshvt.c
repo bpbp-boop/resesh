@@ -22,7 +22,7 @@ __declspec(dllimport) uint64_t __stdcall GetTickCount64(void);
 __declspec(dllimport) int __stdcall QueryPerformanceCounter(int64_t* count);
 __declspec(dllimport) int __stdcall QueryPerformanceFrequency(int64_t* frequency);
 
-#define RVT_ABI_VERSION 9
+#define RVT_ABI_VERSION 10
 
 // ---- events -------------------------------------------------------------------------------
 
@@ -904,6 +904,16 @@ RVT_API int rvt_mouse_tracking(RvtTerm* t) {
   ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING, &tracking);
   unlock(t);
   return tracking ? 1 : 0;
+}
+
+// 1 when the program turned on bracketed paste (mode 2004): a pasted line break is then
+// text for the program, not an Enter.
+RVT_API int rvt_bracketed_paste(RvtTerm* t) {
+  GhosttyTerminalModeConfig query = { GHOSTTY_MODE_BRACKETED_PASTE, false };
+  lock(t);
+  GhosttyResult r = ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_MODE, &query);
+  unlock(t);
+  return r == GHOSTTY_SUCCESS && query.value ? 1 : 0;
 }
 
 // action: 0 press, 1 release, 2 motion. button: 0 none, 1 left, 2 right, 3 middle, 4/5 wheel.

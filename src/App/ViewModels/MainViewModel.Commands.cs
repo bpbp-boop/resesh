@@ -196,6 +196,10 @@ public sealed partial class MainViewModel
         Services.EditSessionAsync(existing: null, defaultFolder: "", SessionKind.Telnet);
 
     [RelayCommand(AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
+    private Task NewSerialSessionAsync() =>
+        Services.EditSessionAsync(existing: null, defaultFolder: "", SessionKind.Serial);
+
+    [RelayCommand(AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
     private Task NewLocalProfileAsync() => Services.EditLocalProfileAsync(existing: null, defaultFolder: "");
 
     [RelayCommand]

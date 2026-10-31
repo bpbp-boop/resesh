@@ -61,6 +61,8 @@ public sealed partial class ImportCandidateVm : ImportRow
         {
             if (Candidate.IsTelnet)
                 return $"telnet {Candidate.Host}" + (Candidate.Port == 23 ? "" : $":{Candidate.Port}");
+            if (Candidate.Serial is { } serial)
+                return $"serial {serial.Describe()}";
             var target = Candidate.Port == 22 ? Candidate.Host : $"{Candidate.Host}:{Candidate.Port}";
             var user = Candidate.Username.Length > 0 ? $"{Candidate.Username}@" : "";
             var key = Candidate.PrivateKeyPath is { Length: > 0 } path ? $" · key {Path.GetFileName(path)}" : "";
@@ -402,7 +404,7 @@ public sealed partial class ImportView : UserControl, IDisposable
     {
         if (!candidate.CanImport)
             return "Already exists";
-        if (candidate.Candidate.IsTelnet || !candidate.IsSelected)
+        if (!candidate.Candidate.IsSsh || !candidate.IsSelected)
             return "";
         var choice = _plan.Choices.GetValueOrDefault(candidate.Candidate);
         var name = choice?.Login is { } login

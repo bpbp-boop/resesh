@@ -21,8 +21,8 @@ public sealed record SessionCapabilities
     /// <summary>"Open Working Folder" (local starting directory in Explorer) applies.</summary>
     public bool LocalWorkingFolder { get; init; }
 
-    /// <summary>"Send Break" applies: the transport can carry a break signal (telnet BREAK,
-    /// which console servers turn into a serial break on the device's console port).</summary>
+    /// <summary>"Send Break" applies: the transport can carry a break signal (a serial line
+    /// break, or telnet BREAK, which console servers turn into one on the device's console port).</summary>
     public bool SendBreak { get; init; }
 
     /// <summary>Verb for ending the live connection/process: "Disconnect" or "Stop".</summary>
@@ -57,10 +57,19 @@ public sealed record SessionCapabilities
         StartAgainVerb = "Reconnect",
     };
 
+    // A serial port is a byte stream with a break signal and nothing else.
+    private static readonly SessionCapabilities Serial = new()
+    {
+        SendBreak = true,
+        StopVerb = "Disconnect",
+        StartAgainVerb = "Reconnect",
+    };
+
     public static SessionCapabilities For(Session session) => session.Kind switch
     {
         SessionKind.Local => Local,
         SessionKind.Telnet => Telnet,
+        SessionKind.Serial => Serial,
         _ => Ssh,
     };
 }

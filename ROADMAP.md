@@ -8,13 +8,17 @@ and the git history.
 
 ## Shipped
 
-- **Command history** — opt-in, local, searchable record of every finished command with
-  its output, folder, session, and exit result. Ctrl+Shift+H opens a search view with
-  `host:`/`in:`/`exit:` filters, day-grouped results, highlighted output with match
-  navigation, and insert-at-prompt. Per-session opt-out, retention in days, clear all.
-  Compare runs of the same command on the same host (unified or side by side, word-level
-  marks, ignore timestamps or numbers). Next: a "changed since last run" badge on command
-  marks, host-to-host comparison, Cisco abbreviation matching, per-command ignore rules.
+- **Serial consoles** — `SessionKind.Serial` with a `SerialTarget` (port, speed, data bits,
+  parity, stop bits, flow control), a port picker with SetupAPI device names, Send Break,
+  `serial COM5 115200` quick connect, PuTTY serial import, and a tab that reconnects when an
+  unplugged adapter comes back. Details under **Telnet & serial consoles** below.
+- **Safe paste** — a paste that would press Enter asks first (not when the program has
+  bracketed paste on); per-session line and character delays send a paste slowly to devices
+  that drop characters, with progress in the status bar and any key to stop.
+- **SSH algorithm choices** — check boxes for key exchange, cipher, MAC and host key
+  algorithms in Settings, marked legacy where they are, with per-session overrides kind by
+  kind on the session's new Advanced tab; `~/.ssh/config` algorithm options import as the
+  same choices; a negotiation failure says where to turn one on.
 
 - **Command completion bell** — explicitly arm one running command from its tab subtitle
   or the command palette. Shell integration supplies the execution identity and exit result.
@@ -302,7 +306,17 @@ ready for serial) and PuTTY/SecureCRT telnet import (port chosen by the session'
 - **UI note in the editor:** plaintext protocol — position it for console servers and lab/
   management networks, not general remote access.
 
-### Serial
+### Serial — shipped
+Built as `SessionKind.Serial` with a `SerialTarget` on the session (Host and Port stay empty),
+in the SSH folder tree; `Core/Serial` holds the `System.IO.Ports` backend and the SetupAPI
+port list. Differences from the plan below: the editor's port list refreshes with a button,
+not on device arrival; a missing port is not marked in the tree, but its tab polls every 1.5 s
+and reconnects when the port returns (opened or unplugged). DSR/DTR flow control is left out
+because `System.IO.Ports` has no handshake for it. Verified on an onboard COM1 with nothing
+attached (open, write, break, close, reopen, in-use error, missing-port wait); **still to do
+on real hardware:** a switch console through a USB adapter, unplug and replug, and Break into
+ROMMON. SecureCRT serial import is not done: its session keys for serial were not confirmed.
+
 - **Target:** COM port, baud (default 9600), data bits, parity, stop bits, flow control
   (none / XON-XOFF / RTS-CTS).
 - **Transport:** `System.IO.Ports.SerialPort` feeding the existing byte path. No resize
@@ -656,6 +670,27 @@ the classic multi-device-typo footgun on heterogeneous fleets, and anything wort
 to N devices at once is worth a playbook. Power users on tmux-persistent sessions already
 have `synchronize-panes` if they truly want it.
 
+- **Environment guardrails** — tag a session or folder (inherited, like identities) as
+  production, staging or lab. Production tabs get a coloured frame and tab accent that the
+  session theme cannot hide, and the tab shows the tag. On production tabs, a paste and a
+  command typed at the prompt that matches a risky-command list (`reload`, `write erase`,
+  `erase startup-config`, `format`, `shutdown` on an uplink, `rm -rf /`, `reboot`,
+  `clear ip bgp *`, `request system reboot`, ...) ask first and name the device. The list
+  is per vendor family, editable in Settings, and matched on what is actually sent (so
+  `wr er` and `reload in 5` count). Pastes always ask on production, whatever the
+  multi-line setting. Quick connect and workspace restore show the tag before connecting.
+  Tags come from NetBox status/tags once that source lands. This is a guard, not a policy
+  engine: one confirmation, never a block, and nothing is logged off the machine.
+- **Compare across hosts** — command history already compares runs of one command on one
+  host. Extend it to the same command on two or more hosts (`show run | sec bgp` on
+  core-sw1 vs core-sw2, `sysctl -a` on web01 vs web02) and to "before and after" a chosen
+  time on one host, for change windows. Pick runs from history or from the commands panel
+  of open tabs; normalise what always differs (hostnames, timestamps, uptime counters,
+  byte and packet counters, `!Time:` and `Last configuration change` lines) with built-in
+  and per-command ignore rules. Output: the existing unified/side-by-side view, plus a
+  plain-text and Markdown export sized for a change ticket. A "same command on all open
+  tabs in this group" capture is deliberately out: it is broadcast input under another
+  name (see the non-goal above). Runs come only from what was already typed.
 - **Command snippets** — saved commands with placeholders, per-folder scoping, send on
   click; optional "startup command" per session.
 - **More importers** — mRemoteNG. The shipped OpenSSH config parser can also supply
@@ -697,7 +732,7 @@ have `synchronize-panes` if they truly want it.
 | 1 | **GSSAPI spike** (parallel with anything) | S | **High — do early** |
 | 2 | Connectivity (SSH agent; tunnels, jump hosts and proxies shipped) | M | Medium |
 | 3 | Program status (OSC 7501) → alerts list | S–M | Low |
-| 4 | Telnet & serial consoles (telnet → serial) | S–M | Low |
+| 4 | ~~Telnet & serial consoles (telnet → serial)~~ shipped; real-hardware check of serial left | S–M | Low |
 | 5 | GSSAPI productization (path chosen by spike) | M | Depends on spike |
 | 6 | NetBox inventory source (read-only root → lenses → config context → console ports) | M–L | Medium |
 | 7 | Remote session agent (zmx fork → snapshot and status → upload → app backend) | L | Medium |

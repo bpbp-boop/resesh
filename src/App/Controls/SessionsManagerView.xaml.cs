@@ -22,6 +22,7 @@ public sealed class SessionRow
         {
             SessionKind.Local => "Local",
             SessionKind.Telnet => "Telnet",
+            SessionKind.Serial => "Serial",
             _ => "SSH",
         };
         Folder = session.IsLocal
@@ -29,6 +30,8 @@ public sealed class SessionRow
             : session.FolderPath.Length == 0 ? "—" : session.FolderPath;
         Host = session.IsLocal
             ? Path.GetFileName(session.Local?.Executable ?? "")
+            : session.IsSerial
+                ? session.Serial?.Describe() ?? ""
             : session.Port == (session.IsTelnet ? 23 : 22) ? session.Host : $"{session.Host}:{session.Port}";
         Login = login switch
         {
@@ -165,7 +168,8 @@ public sealed partial class SessionsManagerView : UserControl
         {
             1 => SessionKind.Ssh,
             2 => SessionKind.Telnet,
-            3 => SessionKind.Local,
+            3 => SessionKind.Serial,
+            4 => SessionKind.Local,
             _ => (SessionKind?)null,
         };
         if (kind is not null && row.Session.Kind != kind)

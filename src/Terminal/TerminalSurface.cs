@@ -66,6 +66,23 @@ public abstract partial class TerminalSurface : Grid, IDisposable
     /// <summary>Pastes text as the user's input, honoring the shell's bracketed-paste mode.</summary>
     public abstract void PasteText(string text);
 
+    /// <summary>Sees clipboard text the user pastes (Ctrl+V, right-click, the menu) before it
+    /// is sent. Returning true means the owner handles it: asks first, sends it slowly, or
+    /// drops it. Not called for text the app pastes itself.</summary>
+    public Func<string, bool>? PasteInterceptor { get; set; }
+
+    /// <summary>Sees bytes typed on the keyboard before they are sent (not pastes, mouse or
+    /// focus reports, or the terminal's answers to the program). Returning true drops them.</summary>
+    public Func<byte[], bool>? TypedInputFilter { get; set; }
+
+    /// <summary>True while the program has bracketed paste (mode 2004) on, so a pasted line
+    /// break reaches it as text rather than as Enter.</summary>
+    public abstract bool BracketedPaste { get; }
+
+    /// <summary>Sends bytes as if typed, scrolling to the bottom as typing does. Used to send
+    /// a paste a piece at a time.</summary>
+    public abstract void SendInput(byte[] data);
+
     /// <summary>Turns command-history capture on or off for this live terminal.</summary>
     public abstract void SetHistoryCapture(bool enabled);
 

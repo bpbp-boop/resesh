@@ -33,6 +33,7 @@ public sealed partial class TabViewModel : ObservableObject
     private string? _titleOverride;
     private TabConnectionState _state = TabConnectionState.Connecting;
     private string _connectionSummary = "";
+    private string _connectionDetails = "";
     private object? _view;
     private string _appTheme;
     private readonly CommandCompletionTracker _completionTracker = new();
@@ -484,6 +485,14 @@ public sealed partial class TabViewModel : ObservableObject
         set => SetProperty(ref _connectionSummary, value);
     }
 
+    /// <summary>Longer than <see cref="ConnectionSummary"/>, one fact per line, for the
+    /// status bar's tooltip: what an SSH connection negotiated. Shown only while connected.</summary>
+    public string ConnectionDetails
+    {
+        get => _connectionDetails;
+        set => SetProperty(ref _connectionDetails, value);
+    }
+
     public string Header => IsAppPage ? PageTitle(Page) : TitleOverride ?? Session.Name;
 
     // ---- second tab line (tells tabs of the same session apart) ----
@@ -650,6 +659,8 @@ public sealed partial class TabViewModel : ObservableObject
                     ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
                     : directory;
             }
+            if (Session.IsSerial)
+                return Session.Serial?.PortName ?? "serial";
             var username = Session.IsTelnet ? "" : _environment.LoginUsername(Session);
             return string.IsNullOrEmpty(username)
                 ? Session.Host
@@ -663,7 +674,9 @@ public sealed partial class TabViewModel : ObservableObject
             ? Session.Local?.Executable ?? ""
             : Session.IsTelnet
                 ? $"telnet {Session.Host}:{Session.Port}"
-                : $"{_environment.LoginUsername(Session)}@{Session.Host}:{Session.Port}";
+                : Session.IsSerial
+                    ? $"serial {Session.Serial?.Describe()}"
+                    : $"{_environment.LoginUsername(Session)}@{Session.Host}:{Session.Port}";
 
     public string StateText => Page switch
     {

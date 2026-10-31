@@ -170,6 +170,20 @@ public sealed class MainViewModelCommandTests : IDisposable
     }
 
     [Fact]
+    public void SendBreakWorksOnSerialTabs()
+    {
+        var window = Window();
+        Open(window, new Session
+        {
+            Name = "console",
+            Kind = SessionKind.Serial,
+            Port = 0,
+            Serial = new SerialTarget { PortName = "COM3" },
+        }, TabConnectionState.Connected);
+        Assert.True(window.SendBreakCommand.CanExecute(null));
+    }
+
+    [Fact]
     public void SplitNeedsASecondTabInTheGroup()
     {
         var window = Window();

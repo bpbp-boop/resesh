@@ -77,7 +77,7 @@ public static class ImportIdentityPlanner
         IReadOnlySet<string>? declined = null)
     {
         declined ??= new HashSet<string>();
-        var ssh = candidates.Where(c => !c.IsTelnet).ToList();
+        var ssh = candidates.Where(c => c.IsSsh).ToList();
         var loginOf = new Dictionary<ImportCandidate, ImportLogin?>(ReferenceEqualityComparer.Instance);
         foreach (var candidate in ssh)
             loginOf[candidate] = LoginOf(candidate);

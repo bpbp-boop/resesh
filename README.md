@@ -179,6 +179,62 @@ Press Ctrl+Shift+H, or use View → Command History, to search it across all ses
 - Search uses a SQLite full-text index, so history does not have to fit in memory. Words
   of three or more characters use the index; shorter words are matched by a scan.
 
+## Serial consoles
+
+Choose **File › New Serial Session…**, or type `serial COM5`, `serial COM5 115200` or
+`serial COM5 115200 7E1` in quick connect. The port picker lists the ports present now
+with their device names ("COM5 — USB Serial Device"); **Refresh** picks up a cable plugged
+in after the editor opened. Speed, data bits, parity, stop bits and flow control (none,
+XON/XOFF, RTS/CTS) are set per session; the default is 9600 8N1 with no flow control.
+
+- **Send Break** (Session menu, tab menu, command palette, Ctrl+Break) holds the line in
+  the break state for 300 ms, after whatever was typed before it has gone out.
+- Unplugging the adapter disconnects the tab and says so. The tab watches for the port and
+  reconnects when it returns. A session whose port is missing when it opens waits the same way.
+- DTR and RTS are raised on open (RTS is left to the driver with RTS/CTS), as PuTTY and
+  SecureCRT do; some adapters send nothing until they see them.
+- PuTTY serial sessions import with their line settings. DSR/DTR flow control has no
+  equivalent here and imports as none.
+
+## Safe paste
+
+A paste that would press Enter asks first: the confirmation names the session, shows the
+first lines, and defaults to Cancel. There is no question when the program has turned on
+bracketed paste (shells usually do), because pasted line breaks then reach it as text.
+Turn the question off in **Settings › Terminal › Confirm multi-line pastes**, or with
+**Don't ask again** in the question itself.
+
+For devices that drop characters from a fast paste, set **Paste: wait after each line**
+or **wait after each character** in the session's Terminal settings (50–200 ms per line
+suits most console lines). A slow paste shows its progress in the status bar; typing any
+key stops it, and Esc stops it without sending anything. Pastes into a program with
+bracketed paste on are never slowed.
+
+## SSH algorithms
+
+**Settings › Identities & Keys › SSH algorithms** chooses which key exchange, cipher, MAC
+and host key algorithms SSH sessions offer, with a check box for each. Everything is on by
+default, including the older algorithms legacy devices need (`diffie-hellman-group1-sha1`,
+`diffie-hellman-group14-sha1`, `aes128-cbc`, `3des-cbc`, `ssh-rsa`); they are marked
+*legacy*, and **Turn legacy off** clears them in one step to harden connections.
+
+A session's **Advanced** tab (which also holds shell integration) can choose differently.
+Each kind follows the app setting until **Use the app setting** is cleared for it; the
+session then keeps its own choices for that kind only. Algorithms are always offered in
+SSH.NET's order of preference. Settings store what is turned off, so an algorithm a later
+SSH.NET adds is offered without an edit.
+
+`KexAlgorithms`, `Ciphers`, `MACs` and `HostKeyAlgorithms` in `~/.ssh/config` import as
+the same on/off choices (their order is not kept; names SSH.NET does not implement, such as
+`ssh-dss` or `hmac-md5`, are ignored). When a host and resesh have nothing in common, the
+error names what the host offers and where to turn it on.
+
+Hover the status bar on a connected SSH tab to see what the connection negotiated (key
+exchange, cipher, MAC and host key, legacy ones marked); the status line itself says
+"legacy algorithms" when any is in use. A connection offers the host key type already
+trusted for that host first, as OpenSSH does, so the host keeps showing that key. If that
+type is turned off, the connection says so instead of reporting a changed host key.
+
 ## Data locations
 
 | What | Where |

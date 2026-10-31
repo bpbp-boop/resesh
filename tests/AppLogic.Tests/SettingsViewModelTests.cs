@@ -51,6 +51,20 @@ public sealed class SettingsViewModelTests
     }
 
     [Fact]
+    public void SshAlgorithmChoicesSaveAndClear()
+    {
+        var settings = Settings();
+        var legacyOff = new Resesh.Core.Models.SshAlgorithms { DisabledCiphers = ["3des-cbc"] };
+
+        settings.SshAlgorithms = legacyOff;
+        Assert.Same(legacyOff, _settings.SshAlgorithms);
+
+        settings.SshAlgorithms = null;
+        Assert.Null(_settings.SshAlgorithms);
+        Assert.Equal([nameof(SettingsViewModel.SshAlgorithms), nameof(SettingsViewModel.SshAlgorithms)], _changes);
+    }
+
+    [Fact]
     public void SessionsPaneLayoutSavesTheChosenLayout()
     {
         var settings = Settings();

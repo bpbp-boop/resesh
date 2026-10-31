@@ -72,6 +72,9 @@ internal sealed class CamelCaseEnumConverter : JsonConverterFactory
         [typeof(TelnetTextEncoding)] = Create<TelnetTextEncoding>(),
         [typeof(TunnelKind)] = Create<TunnelKind>(),
         [typeof(ProxyKind)] = Create<ProxyKind>(),
+        [typeof(SerialParity)] = Create<SerialParity>(),
+        [typeof(SerialStopBits)] = Create<SerialStopBits>(),
+        [typeof(SerialFlowControl)] = Create<SerialFlowControl>(),
     };
 
     /// <summary>The enums this converter handles (tests check it covers every persisted enum).</summary>

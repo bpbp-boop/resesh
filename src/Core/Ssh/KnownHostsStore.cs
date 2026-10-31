@@ -103,7 +103,8 @@ public sealed class KnownHostsStore
             EnsureAvailable();
             if (!_entries.TryGetValue(Key(host, port), out var entry))
                 return HostKeyVerdict.Unknown;
-            return entry.Sha256 == sha256 && entry.KeyType.Equals(keyType, StringComparison.OrdinalIgnoreCase)
+            // Same key, whichever signature algorithm it was presented with (RSA has three).
+            return entry.Sha256 == sha256 && SshHostKeyTypes.SameKey(entry.KeyType, keyType)
                 ? HostKeyVerdict.Match
                 : HostKeyVerdict.Mismatch;
         }
@@ -177,7 +178,7 @@ public sealed class KnownHostsStore
             EnsureAvailable();
             var key = Key(host, port);
             if (!_entries.TryGetValue(key, out var entry) || !string.IsNullOrEmpty(entry.PublicKeyBase64)
-                || !entry.KeyType.Equals(keyType, StringComparison.OrdinalIgnoreCase)
+                || !SshHostKeyTypes.SameKey(entry.KeyType, keyType)
                 || entry.Sha256 != Fingerprint(hostKey))
                 return false;
             var updated = new Dictionary<string, KnownHostEntry>(_entries, StringComparer.OrdinalIgnoreCase)

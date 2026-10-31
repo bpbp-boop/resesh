@@ -44,7 +44,7 @@ internal static unsafe partial class GhosttyNative
 {
     public const int CompressDone = 0, CompressPending = 1, CompressWait = 2;
     private const string Library = "reseshvt";
-    private const int ExpectedAbi = 9;
+    private const int ExpectedAbi = 10;
 
     private static readonly Lazy<string?> LoadError = new(Load);
 
@@ -121,6 +121,7 @@ internal static unsafe partial class GhosttyNative
     [LibraryImport(Library)] public static partial void rvt_search_status(IntPtr term, out nuint total, out nuint current);
     [LibraryImport(Library)] public static partial int rvt_search_lines(IntPtr term, int* output, int capacity, out int current);
     [LibraryImport(Library)] public static partial int rvt_paste(IntPtr term, byte* text, nuint length);
+    [LibraryImport(Library)] public static partial int rvt_bracketed_paste(IntPtr term);
 
     public const int ScrollTop = 0, ScrollBottom = 1, ScrollDelta = 2, ScrollRow = 3;
     public const int ModShift = 1, ModCtrl = 2, ModAlt = 4, ModSuper = 8;

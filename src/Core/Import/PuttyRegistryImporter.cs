@@ -112,6 +112,9 @@ public static class PuttyRegistryImporter
             host = rawHost[(atIndex + 1)..];
         }
 
+        if (protocol == ImportCandidate.SerialProtocol)
+            return ParseSerial(decodedName, values);
+
         if (telnet)
             username = ""; // the server prompts; a saved name has nowhere to go
         else if (string.IsNullOrWhiteSpace(username))
@@ -134,6 +137,52 @@ public static class PuttyRegistryImporter
                 2 => PuttyProxy(Models.ProxyKind.Socks5, proxyHost, values),
                 3 => PuttyProxy(Models.ProxyKind.Http, proxyHost, values),
                 _ => null,
+            },
+        };
+    }
+
+    /// <summary>PuTTY's serial settings: SerialLine, SerialSpeed, SerialDataBits,
+    /// SerialStopHalfbits (2, 3 or 4 half bits), SerialParity (none, odd, even, mark,
+    /// space) and SerialFlowControl (none, XON/XOFF, RTS/CTS, DSR/DTR). DSR/DTR has no
+    /// equivalent here and imports as none.</summary>
+    private static ImportCandidate ParseSerial(string name, IReadOnlyDictionary<string, object?> values)
+    {
+        var portName = SerialTarget.NormalizePortName(GetString(values, "SerialLine"));
+        var speed = values.TryGetValue("SerialSpeed", out var rawSpeed) && rawSpeed is int s && s > 0 ? s : 9600;
+        var dataBits = values.TryGetValue("SerialDataBits", out var rawBits) && rawBits is int b and >= 5 and <= 8 ? b : 8;
+        return new ImportCandidate
+        {
+            Name = name,
+            FolderPath = "",
+            RelativePath = $"PuTTY/{name}",
+            Protocol = ImportCandidate.SerialProtocol,
+            Port = 0,
+            Serial = portName is null ? null : new SerialTarget
+            {
+                PortName = portName,
+                BaudRate = speed,
+                DataBits = dataBits,
+                StopBits = values.TryGetValue("SerialStopHalfbits", out var stop) ? stop switch
+                {
+                    3 => SerialStopBits.OnePointFive,
+                    4 => SerialStopBits.Two,
+                    _ => SerialStopBits.One,
+                } : SerialStopBits.One,
+                Parity = values.TryGetValue("SerialParity", out var parity) ? parity switch
+                {
+                    1 => SerialParity.Odd,
+                    2 => SerialParity.Even,
+                    3 => SerialParity.Mark,
+                    4 => SerialParity.Space,
+                    _ => SerialParity.None,
+                } : SerialParity.None,
+                // PuTTY's default is XON/XOFF, so a missing value means that.
+                FlowControl = values.TryGetValue("SerialFlowControl", out var flow) ? flow switch
+                {
+                    1 => SerialFlowControl.XonXoff,
+                    2 => SerialFlowControl.RtsCts,
+                    _ => SerialFlowControl.None,
+                } : SerialFlowControl.XonXoff,
             },
         };
     }

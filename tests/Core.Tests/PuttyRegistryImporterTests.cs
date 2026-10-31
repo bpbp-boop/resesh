@@ -95,6 +95,35 @@ public sealed class PuttyRegistryImporterTests
     }
 
     [Fact]
+    public void ParseSession_Serial_ImportsLineSettings()
+    {
+        var serial = PuttyRegistryImporter.ParseSession("core%20console", new Dictionary<string, object?>
+        {
+            ["Protocol"] = "serial",
+            ["SerialLine"] = "com4",
+            ["SerialSpeed"] = 115200,
+            ["SerialDataBits"] = 7,
+            ["SerialStopHalfbits"] = 4,
+            ["SerialParity"] = 2,
+            ["SerialFlowControl"] = 0,
+        });
+
+        Assert.True(serial.IsSupported);
+        Assert.True(serial.IsSerial);
+        Assert.False(serial.IsSsh);
+        Assert.Equal("core console", serial.Name);
+        Assert.Equal("COM4 115200 7E2", serial.Serial!.Describe());
+
+        // PuTTY's own default flow control is XON/XOFF.
+        var defaults = PuttyRegistryImporter.ParseSession("s", new Dictionary<string, object?>
+        {
+            ["Protocol"] = "serial",
+            ["SerialLine"] = "COM1",
+        });
+        Assert.Equal("COM1 9600 8N1 XON/XOFF", defaults.Serial!.Describe());
+    }
+
+    [Fact]
     public void DecodeSessionName_HandlesSpecialCharacters()
     {
         Assert.Equal("My Web Server", PuttyRegistryImporter.DecodeSessionName("My%20Web%20Server"));

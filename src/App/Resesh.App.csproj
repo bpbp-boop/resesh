@@ -40,6 +40,7 @@
     <Content Include="Assets\SessionTreeIcons\*.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\SessionTreeIcons\*.svg" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\AgentIcons\*.svg" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\AgentIcons\*.png" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup Condition="Exists('..\..\.artifacts\agent\agent-manifest.json')">

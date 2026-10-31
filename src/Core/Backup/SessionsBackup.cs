@@ -386,7 +386,14 @@ public static class SessionsBackup
                 continue;
             }
 
-            if (imported.Kind is SessionKind.Ssh or SessionKind.Telnet)
+            if (imported.IsSerial)
+            {
+                match = existing.FirstOrDefault(s => s.IsSerial
+                    && string.Equals(s.Serial?.PortName, imported.Serial?.PortName, StringComparison.OrdinalIgnoreCase));
+                if (match is not null)
+                    conflicts.Add(new BackupConflict { Imported = imported, Existing = match, Match = BackupConflictMatch.Endpoint });
+            }
+            else if (imported.Kind is SessionKind.Ssh or SessionKind.Telnet)
             {
                 match = existing.FirstOrDefault(s => s.Kind == imported.Kind
                     && s.Port == imported.Port

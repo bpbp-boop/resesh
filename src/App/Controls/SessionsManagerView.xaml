@@ -77,6 +77,7 @@
                 <ComboBoxItem Content="All types" />
                 <ComboBoxItem Content="SSH" />
                 <ComboBoxItem Content="Telnet" />
+                <ComboBoxItem Content="Serial" />
                 <ComboBoxItem Content="Local" />
             </ComboBox>
             <ComboBox

@@ -219,6 +219,8 @@ public sealed partial class MainViewModel
             session.IsLocal
                 ? $"Delete the local profile \"{session.Name}\"?"
                     + (session.BuiltIn ? " (It returns with default settings after an app restart while its shell is installed.)" : "")
+                : session.IsSerial
+                    ? $"Delete \"{session.Name}\" ({session.Serial?.PortName})?"
                 : session.IsTelnet
                     ? $"Delete \"{session.Name}\" ({session.Host})?"
                     : $"Delete \"{session.Name}\" ({session.Host})? Its saved credential is removed too.");

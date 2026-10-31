@@ -10,6 +10,7 @@ public enum GlobalSettingsTarget
     Scrollback,
     CopyOnSelect,
     RightClickPaste,
+    ConfirmMultilinePaste,
     ShowStatusBar,
     SessionsPaneLayout,
     ReopenLastLayout,
@@ -26,6 +27,7 @@ public enum GlobalSettingsTarget
     AgentAlertFlash,
     AgentAlertSound,
     Identities,
+    SshAlgorithms,
     Sessions,
     About,
 }
