@@ -1955,10 +1955,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(_chromePalette.Divider),
                 IsHitTestVisible = false,
             };
-            _paneSplitter.PointerEntered += (_, _) => SetPaneSplitterActive(active: true);
-            _paneSplitter.PointerExited += (_, _) => SetPaneSplitterActive(active: false);
-            _paneSplitter.ManipulationStarted += (_, _) => SetPaneSplitterActive(active: true);
-            _paneSplitter.ManipulationCompleted += (_, _) => SetPaneSplitterActive(active: false);
+            SplitterHighlight.Attach(_paneSplitter, SetPaneSplitterActive);
             ColumnDefinitions[1].Width = new GridLength(1);
             Grid.SetColumn(_paneSplitterLine, 1);
             Children.Add(_paneSplitterLine);
@@ -1990,6 +1987,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             return;
         _paneSplitterActive = active;
         ApplyPaneSplitterTheme();
+        SplitterHighlight.SetLineThickness(_paneSplitterLine, columns: true, active);
     }
 
     private void UpdateFilePaneWidthLimit()

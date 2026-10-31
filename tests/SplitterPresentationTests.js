@@ -25,22 +25,62 @@ test("session splitters keep a visible one-pixel divider under a transparent hit
   assert.doesNotMatch(layoutBuilder, /Background = .*Resources\["SessionSurfaceBrush"\]/);
 });
 
-test("pane divider stays one pixel wide while hover color changes", () => {
+// The highlighted divider thickens, but only through the helper: a plain Width in the 1px
+// track would be clipped back to one pixel.
+test("pane divider thickens through SplitterHighlight while the hover color shows", () => {
   const groupActivation = source.match(
     /private void SetSplitterActive[\s\S]*?\n    }\r?\n\r?\n    \/\/\/ <summary>Gutters stay neutral/)?.[0] ?? "";
   const filePaneActivation = terminalViewSource.match(
-    /private void SetPaneSplitterActive[\s\S]*?\n    }\r?\n\r?\n    private void ApplyPaneSplitterTheme/)?.[0] ?? "";
+    /private void SetPaneSplitterActive[\s\S]*?\n    }\r?\n\r?\n    private void UpdateFilePaneWidthLimit/)?.[0] ?? "";
 
   assert.match(groupActivation, /line\.Background = SplitterBrush\(line, active\)/);
+  assert.match(groupActivation, /SplitterHighlight\.SetLineThickness\(\s*line,/);
   assert.doesNotMatch(groupActivation, /line\.(?:Width|Height)\s*=/);
   assert.match(filePaneActivation, /ApplyPaneSplitterTheme\(\)/);
+  assert.match(filePaneActivation, /SplitterHighlight\.SetLineThickness\(_paneSplitterLine, columns: true, active\)/);
   assert.doesNotMatch(filePaneActivation, /_paneSplitterLine\.Width\s*=/);
+
+  const helper = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "SplitterHighlight.cs"),
+    "utf8");
+  assert.match(helper, /var overhang = \(thickness - 1\) \/ 2;/);
+  assert.match(helper, /line\.Margin = new Thickness\(-overhang, 0, -overhang, 0\)/);
+  assert.match(helper, /line\.Margin = new Thickness\(0, -overhang, 0, -overhang\)/);
+  // Above the neighbouring panes, or the panes would cover the thicker line.
+  assert.match(source, /Canvas\.SetZIndex\(line, 1\)/);
+});
+
+// Hover highlights wait a moment so a mouse passing over a divider doesn't flash it; a press
+// lights it at once. Every splitter goes through the same class.
+test("splitter highlights wait for a hover delay but light at once on press", () => {
+  const helper = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "SplitterHighlight.cs"),
+    "utf8");
+
+  assert.match(helper, /HoverDelay = TimeSpan\.FromMilliseconds\(300\)/);
+  assert.match(helper, /PointerEntered \+= [\s\S]*?_hoverTimer\.Start\(\)/);
+  assert.match(helper, /PointerPressedEvent[\s\S]*?handledEventsToo: true/);
+  assert.match(helper, /var active = _hoverShown \|\| _pressed \|\| _dragging;/);
+  // The splitter doesn't capture the pointer, so a release off the strip never reaches it:
+  // the end of a drag, or leaving without one, has to end the press.
+  assert.match(helper, /ManipulationCompleted \+= [\s\S]*?_pressed = false;/);
+  assert.match(helper, /private void Leave\(\)[\s\S]*?if \(!_dragging\)\s*_pressed = false;/);
+  // The toolkit's own instant hover fill is cleared on each splitter, where its template
+  // looks first; app-level overrides don't reach it.
+  assert.match(helper, /splitter\.Resources\["SizerBaseBackgroundPointerOver"\] = clear;/);
+  assert.match(helper, /splitter\.Resources\["SizerBaseBackgroundPressed"\] = clear;/);
+
+  assert.match(source, /SplitterHighlight\.Attach\(splitter, active => SetSplitterActive\(splitter, active\)\)/);
+  assert.match(terminalViewSource, /SplitterHighlight\.Attach\(_paneSplitter, SetPaneSplitterActive\)/);
+  for (const text of [source, terminalViewSource])
+    assert.doesNotMatch(text, /[sS]plitter\.Pointer(?:Entered|Exited) \+=/);
 });
 
 test("session divider brushes are defined per theme", () => {
   assert.match(appResources, /x:Key="SessionDividerBrush" Color="#[0-9A-F]{6}"/);
   assert.match(appResources, /x:Key="Light"[\s\S]*x:Key="SessionDividerBrush" Color="#E6E6E6"/);
 });
+
 
 // A grid clips each child to its cell, hit-testing included. Every splitter sits in a 1px
 // divider track, so a plain Width there left a grab area of one pixel. The shared helper's

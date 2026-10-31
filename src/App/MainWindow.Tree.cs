@@ -30,15 +30,13 @@ public sealed partial class MainWindow
     private void ConfigureSplitter(CommunityToolkit.WinUI.Controls.GridSplitter splitter, Border line)
     {
         _splitterLines[splitter] = line;
-        splitter.PointerEntered += (_, _) => SetSplitterActive(splitter, active: true);
-        splitter.PointerExited += (_, _) => SetSplitterActive(splitter, active: false);
-        splitter.ManipulationStarted += (_, _) => SetSplitterActive(splitter, active: true);
-        splitter.ManipulationCompleted += (_, _) => SetSplitterActive(splitter, active: false);
+        // Above the neighbouring panes, so the thicker highlighted line isn't drawn under them.
+        Canvas.SetZIndex(line, 1);
+        SplitterHighlight.Attach(splitter, active => SetSplitterActive(splitter, active));
     }
 
     private void TreeSplitter_ManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e)
     {
-        SetSplitterActive(sender, active: false);
         SaveTreePaneWidth();
     }
 
@@ -52,6 +50,10 @@ public sealed partial class MainWindow
             else
                 _activeSplitters.Remove(splitter);
             line.Background = SplitterBrush(line, active);
+            SplitterHighlight.SetLineThickness(
+                line,
+                columns: splitter.ResizeDirection == CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns,
+                active);
             UpdatePaneFocusFrame();
         }
     }

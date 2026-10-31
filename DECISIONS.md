@@ -1649,3 +1649,34 @@ clipped. Measured afterwards: 9 physical pixels at 110% scale, dragging from bes
 resizes, and the visible divider stays one pixel. The strip reaches 3-4 DIP into the
 neighbouring panes, which only costs their outermost padding. `SplitterPresentationTests`
 fails if a splitter sets its own size or skips the helper.
+
+## 2026-11-01 - Splitter highlights wait 300 ms on hover and thicken to 3 DIP
+
+Divider lines light up only after the pointer rests on a splitter for 300 ms (VS Code's sash
+default), so passing the mouse across one doesn't flash it; pressing lights it at once. A lit
+line thickens from 1 to 3 DIP. That thickening existed before and was dropped on 2026-08-25
+when the tracks narrowed to 1px, because the track clipped it; it now uses negative margins,
+like the grab strip, and the lines sit at ZIndex 1 so neighbouring panes don't cover them.
+`SplitterHighlight` drives all three splitters. Two toolkit behaviours it works around:
+
+- `SizerBase` paints its whole grab strip on hover and press, immediately, whatever
+  `Background` says. Overriding `SizerBaseBackgroundPointerOver`/`Pressed` in App.xaml does
+  nothing, because the toolkit's template resolves them from its own dictionaries first; they
+  are set to transparent on each splitter's `Resources` instead.
+- The splitter doesn't capture the pointer while dragging. When a drag runs past a pane's
+  size limit, the pointer leaves the strip and the release goes to another element, so
+  `PointerReleased` never arrives. `ManipulationCompleted` ends the press as well, and so
+  does leaving the strip with no drag under way.
+
+## 2026-11-01 - The ruler is a tinted lane, not a bordered one
+
+The annotations ruler drew a one-pixel edge toward the terminal in the theme's selection
+colour, carried over from terminal.html. The focused pane's outline is also the selection
+colour (`ThemeVisualPalette.PaneFocusBorder`), so in every theme the ruler's edge matched a
+split boundary exactly (`#264F78` in the default dark theme), and read as one: more so than
+an ordinary split gutter, which is grey. The lane now has no edge. It is the terminal
+background lifted 4% toward the foreground (`TerminalRuler.LaneTint`; `#0C0C0C` becomes
+`#141414`), which reads as a strip of the terminal, like a scrollbar track. High Contrast
+keeps a full-strength edge in the foreground colour, where a clear boundary matters more.
+The ruler reads `AccessibilitySettings.HighContrast` when it paints, as the Terminal project
+has no theme palette of its own.

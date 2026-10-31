@@ -24,6 +24,12 @@ internal sealed partial class TerminalRuler : Grid
     private const double TickHeight = 3;
     private const double SnapPixels = 8;
 
+    /// <summary>How far the lane moves from the terminal background toward its foreground:
+    /// enough to read as a strip, too little to read as a boundary.</summary>
+    internal const double LaneTint = 0.04;
+
+    private static readonly Windows.UI.ViewManagement.AccessibilitySettings Accessibility = new();
+
     private readonly Image _ticks = new() { IsHitTestVisible = false, Stretch = Stretch.Fill };
     private WriteableBitmap? _bitmap;
     private uint[] _pixels = [];
@@ -42,7 +48,7 @@ internal sealed partial class TerminalRuler : Grid
     private long _total = 1;
     private CommandMarkInfo? _cardMark;
     private Color _ok, _fail, _unknown, _bookmark;
-    private uint _laneBackground = 0x0C0C0C, _laneBorder = 0x333333;
+    private uint _laneBackground = 0x0C0C0C, _laneForeground = 0xCCCCCC;
     private bool _split, _groupFocused = true, _pointerOver;
 
     internal event Action<long>? JumpRequested;
@@ -89,15 +95,16 @@ internal sealed partial class TerminalRuler : Grid
         };
         SizeChanged += (_, _) => Paint();
         BuildCard();
-        SetTheme(dark: true, 0x0C0C0C, 0x333333);
+        SetTheme(dark: true, 0x0C0C0C, 0xCCCCCC);
     }
 
-    /// <summary>terminal.html's getRuler: the command, bookmark and find palette by lightness,
-    /// the lane background from the theme and its edge from the selection color.</summary>
-    internal void SetTheme(bool dark, uint background, uint border)
+    /// <summary>terminal.html's getRuler: the command, bookmark and find palette by lightness.
+    /// The lane is the background lifted slightly toward the foreground (see
+    /// <see cref="LaneTint"/>), with no edge line.</summary>
+    internal void SetTheme(bool dark, uint background, uint foreground)
     {
         _laneBackground = background;
-        _laneBorder = border;
+        _laneForeground = foreground;
         // terminal.html's DARK_RULER / LIGHT_RULER command and bookmark colors.
         _ok = dark ? Rgb(0x2EA043) : Rgb(0x50A14F);
         _fail = dark ? Rgb(0xFF5555) : Rgb(0xE45649);
@@ -210,12 +217,17 @@ internal sealed partial class TerminalRuler : Grid
             _ticks.Source = _bitmap;
             fresh = true;
         }
-        // Opaque BGRA: the lane background with a one-pixel edge toward the terminal.
-        var background = 0xFF000000 | _laneBackground;
+        // Opaque BGRA. The lane is a faintly lifted strip of the terminal rather than a
+        // bordered panel: an edge line read as another split. High Contrast keeps a
+        // full-strength edge instead, where a clear boundary matters more than calm.
+        var highContrast = Accessibility.HighContrast;
+        var background = highContrast
+            ? 0xFF000000 | _laneBackground
+            : Over(Rgb(_laneForeground), LaneTint, _laneBackground);
         Array.Fill(_pixels, background);
-        var edge = Math.Max(1, (int)Math.Round(scale));
-        for (var y = 0; y < height; y++)
-            _pixels.AsSpan(y * width, Math.Min(edge, width)).Fill(0xFF000000 | _laneBorder);
+        var edge = highContrast ? Math.Max(1, (int)Math.Round(scale)) : 0;
+        for (var y = 0; y < height && edge > 0; y++)
+            _pixels.AsSpan(y * width, Math.Min(edge, width)).Fill(0xFF000000 | _laneForeground);
 
         var calm = _split && !_pointerOver;
         var ordinary = calm ? (_groupFocused ? 0.42 : 0.25) : 1;
