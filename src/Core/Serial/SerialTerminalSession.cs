@@ -17,7 +17,8 @@ public sealed class SerialSessionException(string message, bool portMissing = fa
 /// One open serial port: a reader thread and a sender thread, like telnet. Sends are queued
 /// so a device holding off flow control (XOFF, CTS low) can never stall the UI, and so a
 /// break is sent after the bytes typed before it. Bytes pass through unchanged. All calls
-/// are safe from any thread; events fire on the reader thread.
+/// are safe from any thread and return without waiting on the device; events fire on the
+/// reader or sender thread.
 /// </summary>
 public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
 {
@@ -39,8 +40,8 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
 
     public event TerminalOutputHandler? OutputReceived;
 
-    /// <summary>Raised once when the port fails (an unplugged adapter reports an I/O error).
-    /// Never raised for a local <see cref="Stop"/>/<see cref="Dispose"/>.</summary>
+    /// <summary>Raised once when the port fails: an unplugged adapter reports an I/O error,
+    /// or a write or break is refused. Never raised for a local <see cref="Stop"/>/<see cref="Dispose"/>.</summary>
     public event Action<Exception?>? Closed;
 
     /// <summary>Diagnostic hook (DEBUG builds wire this to a trace log).</summary>
@@ -167,17 +168,43 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
             port = _port;
             _outgoing.CompleteAdding();
         }
-        Close(port);
+        if (port is null)
+            return;
+        // SerialPort.Dispose flushes pending output, and Windows waits for flow control
+        // with no timeout: a device holding CTS low or sitting on XOFF would hang the
+        // caller (the UI thread, for Disconnect and tab close). Close on a thread of its own.
+        new Thread(() => Close(port)) { IsBackground = true, Name = "serial-close" }.Start();
     }
 
-    // Closing a port whose adapter was unplugged throws from the driver; the handle is
-    // released either way.
+    // Purge first so neither a blocked write on the sender thread nor the flush inside
+    // Dispose waits on the device. Closing a port whose adapter was unplugged throws from
+    // the driver; the handle is released either way.
     private static void Close(SerialPort? port)
     {
         if (port is null)
             return;
+        try { if (port.IsOpen) port.DiscardOutBuffer(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ObjectDisposedException or InvalidOperationException) { }
         try { port.Dispose(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ObjectDisposedException or InvalidOperationException) { }
+    }
+
+    /// <summary>The one close path for a failure seen by either thread: stops the sender,
+    /// closes the port (which ends the other thread's blocked read or write) and raises
+    /// <see cref="Closed"/> once. Does nothing after a local stop.</summary>
+    private void Fail(Exception? failure)
+    {
+        SerialPort? port;
+        lock (_gate)
+        {
+            _outgoing.CompleteAdding(); // releases the sender thread
+            port = _port;
+        }
+        if (_stopped || Interlocked.Exchange(ref _closedRaised, 1) != 0)
+            return;
+        TraceHook?.Invoke($"serial closed: {failure?.Message}");
+        Close(port);
+        Closed?.Invoke(failure);
     }
 
     private void ReadLoop()
@@ -200,18 +227,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
         {
             failure = ex;
         }
-
-        SerialPort? port;
-        lock (_gate)
-        {
-            _outgoing.CompleteAdding(); // releases the sender thread
-            port = _port;
-        }
-        if (_stopped || Interlocked.Exchange(ref _closedRaised, 1) != 0)
-            return;
-        TraceHook?.Invoke($"serial closed: {failure?.Message}");
-        Close(port);
-        Closed?.Invoke(failure);
+        Fail(failure);
     }
 
     private void SendLoop()
@@ -234,9 +250,11 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or UnauthorizedAccessException
             or InvalidOperationException or TimeoutException)
         {
-            // The reader observes the dead port and reports the close.
+            // A refused write or break does not always fail the reader too, so close here
+            // rather than leave a connected tab whose input goes nowhere.
             if (!_stopped)
                 TraceHook?.Invoke($"serial send failed: {ex.Message}");
+            Fail(ex);
         }
     }
 }
