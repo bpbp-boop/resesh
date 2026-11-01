@@ -110,6 +110,7 @@ public sealed class AppCommandCatalog
         Setting("Scrollback Lines", "terminal history buffer", GlobalSettingsTarget.Scrollback);
         Setting("Copy Selected Text", "clipboard copy on select", GlobalSettingsTarget.CopyOnSelect);
         Setting("Paste With Right-Click", "clipboard mouse", GlobalSettingsTarget.RightClickPaste);
+        Setting("Mouse in Programs", "mouse tracking reporting capture select copy shift claude codex tui vim", GlobalSettingsTarget.MouseCapture);
         Setting("SSH Algorithms", "kex key exchange cipher mac host key legacy security harden", GlobalSettingsTarget.SshAlgorithms);
         Setting("Confirm Multi-Line Pastes", "clipboard paste warning safe lines enter", GlobalSettingsTarget.ConfirmMultilinePaste);
         Setting("Reopen Last Layout at Startup", "workspace launch restore groups", GlobalSettingsTarget.ReopenLastLayout);
@@ -163,6 +164,7 @@ public sealed class AppCommandCatalog
         SessionSetting("Terminal Font Family Override", "current active tab appearance inherit", SessionSettingsTarget.FontFamily);
         SessionSetting("Font Size Override", "current active tab appearance inherit", SessionSettingsTarget.FontSize);
         SessionSetting("Scrollback Lines Override", "current active tab history inherit", SessionSettingsTarget.Scrollback);
+        SessionSetting("Mouse in Programs Override", "current active tab inherit mouse tracking select copy", SessionSettingsTarget.MouseCapture);
         SessionSetting("Automatic Recording Override", "current active tab inherit", SessionSettingsTarget.AlwaysRecord);
         SessionSetting("Command History Override", "current active tab inherit keep", SessionSettingsTarget.CommandHistory);
 

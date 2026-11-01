@@ -59,6 +59,11 @@ public sealed record AppSettings
     public bool CopyOnSelect { get; set; } = true;
     public bool RightClickPaste { get; set; } = true;
 
+    /// <summary>How much of the mouse a program that asks for it gets; see
+    /// <see cref="MouseCaptureModes"/>. Defaults to the wheel only, so selecting, copying and
+    /// right-click paste keep working in TUIs such as Claude Code and Codex.</summary>
+    public string MouseCapture { get; set; } = MouseCaptureModes.Scroll;
+
     /// <summary>Ask before a paste that would press Enter, unless the program turned on
     /// bracketed paste. On by default: a stray multi-line paste into a device CLI runs
     /// every line.</summary>
@@ -106,6 +111,7 @@ public sealed record AppSettings
                 FontFamily = FontFamilies.Layer(overrides.FontFamily, FontFamily),
                 FontSize = overrides.FontSize ?? FontSize,
                 Scrollback = overrides.Scrollback ?? Scrollback,
+                MouseCapture = overrides.MouseCapture ?? MouseCapture,
                 AlwaysRecord = overrides.AlwaysRecord ?? AlwaysRecord,
                 KeepCommandHistory = overrides.KeepCommandHistory ?? KeepCommandHistory,
             };
@@ -123,6 +129,23 @@ public static class SessionsPaneLayouts
 
     /// <summary>A saved value this version knows, or <see cref="Automatic"/>.</summary>
     public static string Normalize(string? layout) => layout is Float or Dock ? layout : Automatic;
+}
+
+/// <summary>Saved values of <see cref="AppSettings.MouseCapture"/>.</summary>
+public static class MouseCaptureModes
+{
+    /// <summary>Clicks, drags and the wheel go to the program; Shift selects instead.</summary>
+    public const string Always = "always";
+
+    /// <summary>Only the wheel goes to the program, which has no scrollback of its own to
+    /// scroll otherwise; Shift sends a click to it.</summary>
+    public const string Scroll = "scroll";
+
+    /// <summary>The program never gets the mouse.</summary>
+    public const string Never = "never";
+
+    /// <summary>A saved value this version knows, or <see cref="Scroll"/>.</summary>
+    public static string Normalize(string? mode) => mode is Always or Never ? mode : Scroll;
 }
 
 public sealed class SettingsStore

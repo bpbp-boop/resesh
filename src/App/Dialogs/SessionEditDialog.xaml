@@ -632,6 +632,18 @@
                         <x:String>Don't keep history</x:String>
                     </ComboBox>
                 </Grid>
+
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <ComboBox
+                        x:Name="OverrideMouseBox"
+                        Grid.Column="0"
+                        Header="Mouse in programs"
+                        HorizontalAlignment="Stretch" />
+                </Grid>
                 </StackPanel>
             </ScrollViewer>
 

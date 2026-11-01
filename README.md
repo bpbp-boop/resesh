@@ -210,6 +210,14 @@ suits most console lines). A slow paste shows its progress in the status bar; ty
 key stops it, and Esc stops it without sending anything. Pastes into a program with
 bracketed paste on are never slowed.
 
+## Mouse in programs
+
+Programs that use the mouse, such as Claude Code, Codex and vim, get only the scroll wheel
+by default. Dragging still selects, selections still copy, and right-click still pastes,
+as at a shell prompt. Hold Shift to send a click to the program instead. To give programs
+clicks too (Shift then selects), or nothing at all, change **Settings › Terminal › Mouse in
+programs**, or override it for one session in its Appearance settings.
+
 ## SSH algorithms
 
 **Settings › Identities & Keys › SSH algorithms** chooses which key exchange, cipher, MAC
