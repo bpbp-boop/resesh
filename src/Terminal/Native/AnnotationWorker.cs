@@ -25,7 +25,7 @@ internal sealed class AnnotationWorker
     private readonly LineTimes _lineTimes;
     private readonly Timer _continue;
 
-    private int _state; // 0 idle, 1 a pass queued or running, 2 another pass asked for meanwhile
+    private readonly PassScheduler _scheduler = new();
     private volatile bool _disposed;
     private bool _cleanedUp;
     private volatile bool _resetOverview;
@@ -88,23 +88,37 @@ internal sealed class AnnotationWorker
 
     /// <summary>Stops passes and releases markers. With <paramref name="wait"/>, returns only once
     /// no pass is reading the terminal (it is about to be freed); otherwise a running pass cleans
-    /// up when it ends.</summary>
+    /// up once it ends.</summary>
     public void Dispose(bool wait)
     {
         _disposed = true;
         _continue.Dispose();
         if (wait)
-            Monitor.Enter(_gate);
-        else if (!Monitor.TryEnter(_gate))
+        {
+            lock (_gate)
+                CleanUpLocked();
             return;
-        try
-        {
-            CleanUpLocked();
         }
-        finally
+        if (Monitor.TryEnter(_gate))
         {
-            Monitor.Exit(_gate);
+            try
+            {
+                CleanUpLocked();
+            }
+            finally
+            {
+                Monitor.Exit(_gate);
+            }
+            return;
         }
+        // A pass holds the gate. It may already be past its last disposed check and about to go
+        // idle, so leaving the clean-up to it could leak the buffer's markers: queue one that
+        // waits the pass out instead (CleanUpLocked runs once, whoever gets there first).
+        ThreadPool.UnsafeQueueUserWorkItem(_ =>
+        {
+            lock (_gate)
+                CleanUpLocked();
+        }, null);
     }
 
     private void Schedule()
@@ -112,10 +126,8 @@ internal sealed class AnnotationWorker
         if (_disposed)
             return;
         // Idle: start a pass. Busy: make sure the running one goes round again.
-        if (Interlocked.CompareExchange(ref _state, 1, 0) == 0)
+        if (_scheduler.Request())
             ThreadPool.UnsafeQueueUserWorkItem(_ => Run(), null);
-        else
-            Interlocked.Exchange(ref _state, 2);
     }
 
     private void Run()
@@ -141,12 +153,18 @@ internal sealed class AnnotationWorker
                 }
             }
             if (more && !_disposed)
-                _continue.Change(ContinueMilliseconds, Timeout.Infinite);
-            // Another request arrived during the pass: go again. Otherwise go idle, unless one
-            // arrives between the check and the exchange.
-            if (Interlocked.CompareExchange(ref _state, 1, 2) == 2)
-                continue;
-            if (Interlocked.CompareExchange(ref _state, 0, 1) == 1)
+            {
+                try
+                {
+                    _continue.Change(ContinueMilliseconds, Timeout.Infinite);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Disposed between the check and the call: no more passes anyway.
+                }
+            }
+            // Another request arrived during the pass: go again.
+            if (_scheduler.TryIdle())
                 return;
         }
     }

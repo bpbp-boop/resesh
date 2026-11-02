@@ -15,7 +15,7 @@ public class AnnotationWorkerTests
         public int PublishedThread;
         public readonly AnnotationWorker Worker;
 
-        public Harness(int lines, Func<int, string> text)
+        public Harness(int lines, Func<int, string> text, Action? refresh = null)
         {
             for (var i = 0; i < lines; i++)
                 Buffer.Add(text(i));
@@ -24,7 +24,7 @@ public class AnnotationWorkerTests
             {
                 PublishedThread = Environment.CurrentManagedThreadId;
                 Published.Release();
-            }, sliceBudget: TimeSpan.FromMinutes(1));
+            }, refresh: refresh, sliceBudget: TimeSpan.FromMinutes(1));
         }
 
         /// <summary>Waits for publications until the ticks satisfy the condition.</summary>
@@ -88,5 +88,35 @@ public class AnnotationWorkerTests
         h.Worker.Request(0);
         Assert.False(h.Published.Wait(TimeSpan.FromMilliseconds(200)));
         Assert.Null(h.Worker.TimeOf(29));
+    }
+
+    [Fact]
+    public void DisposeWithoutWaitingDuringAPassStillReleasesMarkers()
+    {
+        // The surface rebuilds its tracker with Dispose(wait: false): the pass holding the gate
+        // then has to be the one that releases the markers, even when it goes idle.
+        var inPass = new ManualResetEventSlim();
+        var resume = new ManualResetEventSlim();
+        var block = false;
+        Harness? h = null;
+        h = new Harness(30, i => i == 3 ? "error" : "fine", refresh: () =>
+        {
+            if (!Volatile.Read(ref block))
+                return;
+            inPass.Set();
+            resume.Wait(Wait);
+        });
+        h.Worker.Request(1_700_000_000_000);
+        h.WaitFor(t => t.Count == 1);
+        Assert.True(h.Buffer.LiveMarkerCount > 0);
+        Volatile.Write(ref block, true);
+        h.Worker.Request(1_700_000_001_000);
+        Assert.True(inPass.Wait(Wait));
+        h.Worker.Dispose(wait: false);
+        resume.Set();
+        var deadline = DateTime.UtcNow + Wait;
+        while (h.Buffer.LiveMarkerCount > 0 && DateTime.UtcNow < deadline)
+            Thread.Sleep(10);
+        Assert.Equal(0, h.Buffer.LiveMarkerCount);
     }
 }
