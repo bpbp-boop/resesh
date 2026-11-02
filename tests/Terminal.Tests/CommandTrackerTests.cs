@@ -529,6 +529,136 @@ public class CommandTrackerTests
         Assert.Equal(new CommandTracker.Osc3008(action, id, type, exit, status), parsed);
     }
 
+    /// <summary>Starts an exact command and leaves it running, as a dropped connection does.</summary>
+    private static void RunUntilCut(Harness h, string command)
+    {
+        h.Buffer.Add("user@host ~ $ " + command);
+        h.Semantic(1);
+        h.Buffer.CursorX = 14;
+        h.Semantic(2);
+        h.Semantic(3);
+        h.Buffer.Add("partial output");
+        h.Buffer.Add(""); // the cursor waits below the output
+    }
+
+    [Fact]
+    public void DisconnectEndsTheRunningPhaseSoTheNextShellsPromptIsRead()
+    {
+        var h = new Harness();
+        h.Tracker.SetExecutionReporting(true);
+        RunUntilCut(h, "sleep 600");
+        Assert.Equal(CommandTracker.CommandPhase.Executing, h.Tracker.Phase);
+
+        h.Tracker.ResetConnection();
+        h.Tracker.SetExecutionReporting(false);
+        Assert.Equal(CommandTracker.CommandPhase.Idle, h.Tracker.Phase);
+
+        // The next shell sends no OSC 133 at all: its idle prompt still names the folder.
+        h.Tracker.SetExecutionReporting(true);
+        h.Buffer.Add("user@host ~/work $");
+        Assert.Equal(("~/work", null), h.Tracker.ReportPromptContext(force: true));
+    }
+
+    [Fact]
+    public void DisconnectRecordsTheOpenCommandWithoutReportingCompletion()
+    {
+        var h = new Harness();
+        h.Tracker.SetExecutionReporting(true);
+        h.Tracker.SetHistoryCapture(true);
+        RunUntilCut(h, "make");
+        var started = Assert.Single(h.Executions);
+
+        h.Tracker.ResetConnection();
+        h.Tracker.SetExecutionReporting(false);
+        var record = Assert.Single(h.Records);
+        Assert.Equal("make", record.CommandLine);
+        Assert.Equal("partial output", record.Output);
+        Assert.Null(record.ExitCode);
+        Assert.Equal([started], h.Executions); // a cut transport is not a completion
+
+        // The next connection's D cannot finish or record the old command.
+        h.Tracker.SetExecutionReporting(true);
+        h.Semantic(4, exit: 0);
+        Assert.Single(h.Records);
+        Assert.Equal([started], h.Executions);
+        Assert.Null(Assert.Single(h.Tracker.Commands()).Exit);
+    }
+
+    [Fact]
+    public void ReconnectingToAShellWithoutIntegrationDiscoversCommandsAgain()
+    {
+        var h = new Harness();
+        h.Buffer.Add("user@host ~ $ ");
+        h.Semantic(1);
+        Assert.True(h.Tracker.ShellIntegrationSeen);
+
+        h.Tracker.ResetConnection();
+        Assert.False(h.Tracker.ShellIntegrationSeen);
+        h.Buffer.Add("admin@router:~$ show version");
+        h.Tracker.NotifyEnter();
+        h.RunTimers();
+        Assert.Equal("show version", Assert.Single(h.Tracker.Commands()).Text);
+
+        // OSC 3008 counts again too.
+        h.Buffer.Add("admin@router:~$ false");
+        h.Tracker.NotifyEnter();
+        h.Tracker.OnOsc3008("start=cmd1;type=command");
+        h.RunTimers();
+        h.Tracker.OnOsc3008("end=cmd1;exit=failure;status=1");
+        Assert.Equal(1, h.Tracker.Commands()[^1].Exit);
+    }
+
+    [Fact]
+    public void AReplayCutOffByADisconnectDoesNotSwallowTheNextConnection()
+    {
+        var h = new Harness();
+        h.Tracker.SetExecutionReporting(true);
+        h.Tracker.SetReplaying(true); // state=end never arrives
+        RunUntilCut(h, "top");
+        Assert.Empty(h.Running);
+
+        h.Tracker.ResetConnection();
+        h.Tracker.SetExecutionReporting(false);
+        Assert.Empty(h.Running); // what the cut replay held is not reported late
+
+        h.Tracker.SetExecutionReporting(true);
+        RunUntilCut(h, "ls");
+        Assert.Equal(("ls", true), h.Running[^1]);
+        Assert.Equal("ls", Assert.Single(h.Executions).CommandLine);
+    }
+
+    [Fact]
+    public void ReplayedCommandEndDoesNotFinishALiveExecution()
+    {
+        var h = new Harness();
+        h.Tracker.SetExecutionReporting(true);
+        RunUntilCut(h, "build");
+        h.Tracker.SetReplaying(true);
+        h.Semantic(4, exit: 1);
+        h.Semantic(1);
+        h.Tracker.SetReplaying(false);
+        Assert.False(Assert.Single(h.Executions).Completed);
+    }
+
+    [Fact]
+    public void ReplayedCommandEndDoesNotSetALiveMarksExit()
+    {
+        var h = new Harness();
+        h.Tracker.SetExecutionReporting(true);
+        RunUntilCut(h, "build");
+        h.Tracker.SetReplaying(true);
+        h.Semantic(4, exit: 1);
+        RunUntilCut(h, "old"); // a replayed command of its own, finished in the replay too
+        h.Semantic(4, exit: 2);
+        h.Tracker.SetReplaying(false);
+        Assert.Null(h.Tracker.Commands().Single(c => c.Text == "build").Exit);
+
+        // The live command is still the one the next live D finishes.
+        h.Semantic(4, exit: 0);
+        Assert.Equal(0, h.Tracker.Commands().Single(c => c.Text == "build").Exit);
+        Assert.Equal(2, h.Tracker.Commands().Single(c => c.Text == "old").Exit);
+    }
+
     [Theory]
     [InlineData("start=")]
     [InlineData("begin=x")]

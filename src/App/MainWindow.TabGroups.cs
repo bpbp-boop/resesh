@@ -248,8 +248,7 @@ public sealed partial class MainWindow
             },
         };
         var tab = ViewModel.Connect(session);
-        tab.PlaybackPath = path;
-        tab.State = TabConnectionState.Playback;
+        tab.StartPlayback(path);
         tab.ConnectionSummary = "read-only asciicast";
 
         var player = new TerminalPlayerView(recording);
@@ -296,7 +295,41 @@ public sealed partial class MainWindow
     }
 
     /// <summary>THE close pathway: X button, Ctrl+F4, context menu, and middle-click all land here.</summary>
+    /// <remarks>Callers fire and forget, so failures are reported here rather than lost. A
+    /// close in flight claims its tab; a second request for it while the first waits on a
+    /// dialog is dropped.</remarks>
     public async Task RequestCloseTabAsync(TabViewModel tab)
+    {
+        if (_windowClosed || !ViewModel.TryBeginClose(tab))
+            return;
+        try
+        {
+            await RequestCloseClaimedTabAsync(tab);
+        }
+        catch (Exception ex)
+        {
+            App.ReportRecoverableError(ex);
+        }
+        finally
+        {
+            ViewModel.EndClose(tab);
+        }
+    }
+
+    /// <summary>Whether a close that awaited a dialog or the network may still act on the tab:
+    /// meanwhile it may have closed itself, been dragged to another window, or this window
+    /// may have closed.</summary>
+    private bool CanStillClose(TabViewModel tab) => !_windowClosed && ViewModel.Owns(tab);
+
+    /// <summary>The open window that holds the tab now, for a single-tab close whose dialog was
+    /// answered: the answer was about the tab, so if it was dragged to another window
+    /// meanwhile the close follows it there. Null once the tab has closed.</summary>
+    private MainWindow? CloseOwnerOf(TabViewModel tab) =>
+        CanStillClose(tab) ? this
+        : App.WindowFor(tab) is { _windowClosed: false } other ? other
+        : null;
+
+    private async Task RequestCloseClaimedTabAsync(TabViewModel tab)
     {
         if (tab.IsAppPage
             || (!tab.IsPinned && !App.Settings.Current.ConfirmCloseActiveSessions))
@@ -324,14 +357,17 @@ public sealed partial class MainWindow
         if (tab.IsPinned)
         {
             // Pinned tabs need the extra deliberate step; one dialog covers both.
-            if (!await ConfirmAsync("Tab Is Pinned", $"\"{tab.Header}\" is pinned.{detail}", "Unpin and Close", acceptY: true))
+            if (!await ConfirmAsync("Tab Is Pinned", $"\"{tab.Header}\" is pinned.{detail}", "Unpin and Close", acceptY: true)
+                || CloseOwnerOf(tab) is not { } pinnedOwner)
                 return;
-            TogglePin(tab);
-            CloseTabCore(tab);
+            if (tab.IsPinned)
+                pinnedOwner.TogglePin(tab);
+            pinnedOwner.CloseTabCore(tab);
             return;
         }
-        if (await ConfirmAsync("Close Tab", $"Close \"{tab.Header}\"?{detail}", "Close", acceptY: true))
-            CloseTabCore(tab);
+        if (await ConfirmAsync("Close Tab", $"Close \"{tab.Header}\"?{detail}", "Close", acceptY: true)
+            && CloseOwnerOf(tab) is { } owner)
+            owner.CloseTabCore(tab);
     }
 
     private async Task RequestCloseTmuxTabAsync(TabViewModel tab, TerminalTabView view)
@@ -349,21 +385,46 @@ public sealed partial class MainWindow
             Note = "This ends everything running in the persistent session. Leave the check box clear to keep it running.",
         };
 
-        if (!await dialog.ConfirmAsync())
+        if (!await dialog.ConfirmAsync() || CloseOwnerOf(tab) is null)
             return;
         if (dialog.IsOptionChecked && !await view.TryEndRemoteSessionAsync())
         {
-            await ShowEndRemoteSessionFailureAsync(tab);
+            if (CloseOwnerOf(tab) is { } failedOwner)
+                await failedOwner.ShowEndRemoteSessionFailureAsync(tab);
             return;
         }
+        if (CloseOwnerOf(tab) is not { } owner)
+            return;
         if (tab.IsPinned)
-            TogglePin(tab);
-        CloseTabCore(tab);
+            owner.TogglePin(tab);
+        owner.CloseTabCore(tab);
     }
 
+    /// <summary>Bulk close: the context menu's close others, to the right, in the group, and
+    /// all. Tabs another close has already claimed are left to it.</summary>
     public async Task RequestCloseManyAsync(IReadOnlyList<TabViewModel> tabs, string description)
     {
-        tabs = tabs.Where(t => !t.IsPinned).ToList(); // bulk closes never touch pinned tabs
+        if (_windowClosed)
+            return;
+        // Bulk closes never touch pinned tabs.
+        var claimed = tabs.Where(t => !t.IsPinned).Distinct().Where(ViewModel.TryBeginClose).ToList();
+        try
+        {
+            await RequestCloseClaimedManyAsync(claimed, description);
+        }
+        catch (Exception ex)
+        {
+            App.ReportRecoverableError(ex);
+        }
+        finally
+        {
+            foreach (var tab in claimed)
+                ViewModel.EndClose(tab);
+        }
+    }
+
+    private async Task RequestCloseClaimedManyAsync(IReadOnlyList<TabViewModel> tabs, string description)
+    {
         if (tabs.Count == 0)
             return;
         if (!App.Settings.Current.ConfirmCloseActiveSessions)
@@ -384,8 +445,9 @@ public sealed partial class MainWindow
             await RequestCloseManyWithTmuxAsync(tabs, persistent, message);
             return;
         }
-        if (!await ConfirmAsync("Close Tabs", message, "Close", acceptY: true))
+        if (!await ConfirmAsync("Close Tabs", message, "Close", acceptY: true) || _windowClosed)
             return;
+        // CloseTabCore skips tabs that closed or left the window during the dialog.
         foreach (var tab in tabs)
             CloseTabCore(tab);
     }
@@ -404,19 +466,27 @@ public sealed partial class MainWindow
                 : $"End the persistent sessions of {persistent.Count} connected tabs",
             Note = "This ends everything running in those sessions. Leave the check box clear to keep them running.",
         };
-        if (!await dialog.ConfirmAsync())
+        if (!await dialog.ConfirmAsync() || _windowClosed)
             return;
 
         var failed = new HashSet<TabViewModel>();
         if (dialog.IsOptionChecked)
         {
-            var results = await Task.WhenAll(persistent.Select(async tab =>
-                (tab, ended: await ((TerminalTabView)tab.View!).TryEndRemoteSessionAsync())));
+            // Only the shells of tabs still here: a tab dragged to another window during
+            // the dialog left this close behind, and a closed one has no view to ask.
+            var results = await Task.WhenAll(persistent
+                .Where(tab => CanStillClose(tab) && tab.View is TerminalTabView)
+                .Select(async tab =>
+                    (tab, ended: await ((TerminalTabView)tab.View!).TryEndRemoteSessionAsync())));
             failed.UnionWith(results.Where(result => !result.ended).Select(result => result.tab));
         }
+        if (_windowClosed)
+            return;
         // A tab whose shell could not be ended stays open so the user can retry from it.
+        // CloseTabCore skips tabs that closed or left the window while this waited.
         foreach (var tab in tabs.Where(tab => !failed.Contains(tab)))
             CloseTabCore(tab);
+        failed.RemoveWhere(tab => !CanStillClose(tab));
         if (failed.Count > 0)
         {
             await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Could Not End Remote Sessions", failed.Count == 1
@@ -425,13 +495,19 @@ public sealed partial class MainWindow
         }
     }
 
+    /// <summary>Closes the tab now. Does nothing for a tab the window no longer holds (closed
+    /// already, or moved to another window), so a late caller can't throw midway.</summary>
     private void CloseTabCore(TabViewModel tab)
     {
-        Trace($"CloseTabCore: closing '{tab.Header}' selected={ReferenceEquals(ViewModel.GroupOf(tab).SelectedTab, tab)}");
-        var group = ViewModel.GroupOf(tab);
+        if (ViewModel.TryGroupOf(tab) is not { } group || !_groupViews.TryGetValue(group, out var groupView))
+        {
+            Trace($"CloseTabCore: '{tab.Header}' is no longer in this window; nothing to close");
+            return;
+        }
+        Trace($"CloseTabCore: closing '{tab.Header}' selected={ReferenceEquals(group.SelectedTab, tab)}");
         if (tab.View is OnboardingView onboarding)
             onboarding.CancelPreview();
-        _groupViews[group].CloseTerminal(
+        groupView.CloseTerminal(
             tab.View as UIElement,
             () => ViewModel.DetachTab(tab),
             () => (tab.View as IDisposable)?.Dispose());
@@ -594,7 +670,13 @@ public sealed partial class MainWindow
 
         GroupArea.Children.Clear();
         foreach (var splitter in _splitterLines.Keys.Where(splitter => splitter != TreeSplitter).ToList())
+        {
             _splitterLines.Remove(splitter);
+            // A gutter hovered or pressed as the layout changes (a pane closed or split by
+            // keyboard, say) never reports going to rest before it goes; left in the set,
+            // it would hide the focused-pane frame for the life of the window.
+            _activeSplitters.Remove(splitter);
+        }
         _paneGutters.Clear();
         GroupArea.Children.Add(BuildGroupLayoutElement(_groupLayout.Root));
         UpdateRulerPresentations();
@@ -796,16 +878,51 @@ public sealed partial class MainWindow
         }
     }
 
+    /// <remarks>Callers fire and forget. One lock or unlock prompt per tab at a time; the tab
+    /// may close, move to another window or be locked meanwhile, so it is re-checked after
+    /// the prompt rather than locked blindly with a password that would replace another.</remarks>
     public async Task LockSessionAsync(TabViewModel tab)
     {
-        if (await TextPromptDialog.PromptPasswordAsync(Root.XamlRoot, "Lock Session",
-                "Lock password (kept in memory only — not stored anywhere)", "Lock") is not { } password)
+        if (_windowClosed || tab.IsLocked || !ViewModel.TryBeginLockPrompt(tab))
             return;
-        tab.Lock(password);
-        (tab.View as TerminalTabView)?.ShowLockOverlay();
+        try
+        {
+            if (await TextPromptDialog.PromptPasswordAsync(Root.XamlRoot, "Lock Session",
+                    "Lock password (kept in memory only — not stored anywhere)", "Lock") is not { } password
+                || !CanStillClose(tab) || tab.IsLocked)
+                return;
+            tab.Lock(password);
+            (tab.View as TerminalTabView)?.ShowLockOverlay();
+        }
+        catch (Exception ex)
+        {
+            App.ReportRecoverableError(ex);
+        }
+        finally
+        {
+            ViewModel.EndLockPrompt(tab);
+        }
     }
 
     private async Task HandleUnlockAsync(TabViewModel tab, TerminalTabView view)
+    {
+        if (_windowClosed || !tab.IsLocked || !ViewModel.TryBeginLockPrompt(tab))
+            return;
+        try
+        {
+            await UnlockClaimedAsync(tab, view);
+        }
+        catch (Exception ex)
+        {
+            App.ReportRecoverableError(ex);
+        }
+        finally
+        {
+            ViewModel.EndLockPrompt(tab);
+        }
+    }
+
+    private async Task UnlockClaimedAsync(TabViewModel tab, TerminalTabView view)
     {
         var wait = tab.LockoutUntil - DateTimeOffset.Now;
         if (wait > TimeSpan.Zero)
@@ -821,7 +938,8 @@ public sealed partial class MainWindow
             XamlRoot = Root.XamlRoot,
             FieldHeader = "Unlock password",
         }.PromptAsync();
-        if (password is null)
+        // A tab that closed or moved to another window meanwhile is that window's to unlock.
+        if (password is null || !CanStillClose(tab) || !tab.IsLocked)
             return;
 
         if (tab.TryUnlock(password))

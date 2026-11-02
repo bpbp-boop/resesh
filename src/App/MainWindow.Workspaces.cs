@@ -206,11 +206,12 @@ public sealed partial class MainWindow
     private async Task SaveCurrentWorkspaceAsAsync()
     {
         var name = (await PromptAsync("Save Workspace", "Workspace name", ""))?.Trim();
-        if (string.IsNullOrEmpty(name))
+        if (string.IsNullOrEmpty(name) || _windowClosed)
             return;
 
+        // Checked after the prompt: the window may have switched workspace meanwhile.
         if (_shownWorkspace == HomeWorkspace)
-            AdoptShownTabsAsWorkspace(name);
+            _ = AdoptShownTabsAsWorkspace(name);
         else
             WorkspaceOperations.SaveAs(name);
     }

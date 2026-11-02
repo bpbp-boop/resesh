@@ -60,4 +60,48 @@ public sealed class Osc7WorkingDirectoryTests
         Assert.Null(tracker.Path);
         Assert.False(tracker.HostMismatch);
     }
+
+    [Fact]
+    public void Tracker_lets_the_sessions_own_host_take_over_from_a_nested_first_report()
+    {
+        var tracker = new Osc7WorkingDirectoryTracker();
+        tracker.SetKnownHosts(["web01.example.com", null]);
+        tracker.Observe(new("nested", "/root")); // reconnected straight into ssh-in-tmux
+        Assert.Equal("/root", tracker.Path);
+
+        tracker.Observe(new("web01", "/home/boden"));
+        Assert.Equal("/home/boden", tracker.Path);
+        Assert.False(tracker.HostMismatch);
+
+        tracker.Observe(new("nested", "/root"));
+        Assert.Null(tracker.Path);
+        Assert.True(tracker.HostMismatch);
+    }
+
+    [Fact]
+    public void Tracker_keeps_a_known_first_host_against_later_unknown_ones()
+    {
+        var tracker = new Osc7WorkingDirectoryTracker();
+        tracker.SetKnownHosts(["web01"]);
+        tracker.Observe(new("WEB01.example.com.", "/home/boden"));
+        tracker.Observe(new("web01", "/srv")); // the same machine, named without its domain
+        Assert.Equal("/srv", tracker.Path);
+
+        tracker.Observe(new("db02", "/var"));
+        Assert.True(tracker.HostMismatch);
+        Assert.Null(tracker.Path);
+    }
+
+    [Fact]
+    public void Tracker_known_hosts_survive_reset_and_do_not_match_across_addresses()
+    {
+        var tracker = new Osc7WorkingDirectoryTracker();
+        tracker.SetKnownHosts(["10.0.0.5"]);
+        tracker.Reset();
+        tracker.Observe(new("10", "/a")); // not the first label of an address
+        tracker.Observe(new("10.0.0.5", "/b"));
+        Assert.Equal("/b", tracker.Path);
+        tracker.Observe(new("10", "/c"));
+        Assert.True(tracker.HostMismatch);
+    }
 }

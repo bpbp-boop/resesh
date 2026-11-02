@@ -19,7 +19,9 @@ public sealed class SshJumpChain : IDisposable
 {
     private readonly List<(SshClient Client, ForwardedPortLocal Forward)> _links = [];
     private volatile Exception? _forwardFailure;
-    private bool _disposed;
+    // The last link's forward: only its failures explain a connection to the target.
+    private volatile ForwardedPortLocal? _lastForward;
+    private int _disposed;
 
     private SshJumpChain()
     {
@@ -30,9 +32,19 @@ public sealed class SshJumpChain : IDisposable
 
     public int Port { get; private set; }
 
-    /// <summary>Why the last jump could not open the forwarded connection, if it could not
-    /// (for example the target refused, or the server forbids forwarding).</summary>
+    /// <summary>Why the last jump could not open the forwarded connection in the current
+    /// attempt, if it could not (for example the target refused, or the server forbids
+    /// forwarding). Each attempt starts with <see cref="Probe"/>, which clears it, so a
+    /// failure from an earlier attempt is never reported as this one's cause.</summary>
     public string? ForwardFailure => _forwardFailure?.Message;
+
+    /// <summary>A forward reported a failure. Only the last link's count: an earlier link's
+    /// forward carries the next jump's SSH session, not connections to the target.</summary>
+    internal void RecordForwardFailure(Exception failure, ForwardedPortLocal? from = null)
+    {
+        if (from is null || ReferenceEquals(from, _lastForward))
+            _forwardFailure = failure;
+    }
 
     /// <summary>Connects every jump in order and opens the forward to
     /// <paramref name="targetHost"/>. A null <paramref name="hostKeyDecision"/> accepts
@@ -66,7 +78,8 @@ public sealed class SshJumpChain : IDisposable
                     // Port 0: the system picks a free loopback port, read back after Start.
                     var forward = new ForwardedPortLocal(Tunnel.Loopback, 0, nextHost, (uint)nextPort);
                     chain._links.Add((client, forward));
-                    forward.Exception += (_, e) => chain._forwardFailure = e.Exception;
+                    forward.Exception += (_, e) => chain.RecordForwardFailure(e.Exception, forward);
+                    chain._lastForward = forward;
                     client.AddForwardedPort(forward);
                     forward.Start();
                     chain.Port = (int)forward.BoundPort;
@@ -160,6 +173,8 @@ public sealed class SshJumpChain : IDisposable
     internal void Probe(Session session, TimeSpan timeout, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        // A new attempt: whatever an earlier connection through this chain hit is not news.
+        _forwardFailure = null;
         using var socket = new System.Net.Sockets.Socket(
             System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
         var answered = false;
@@ -192,9 +207,8 @@ public sealed class SshJumpChain : IDisposable
     /// <summary>Closes the jumps, last first, which ends anything connected through them.</summary>
     public void Dispose()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
-        _disposed = true;
         for (var index = _links.Count - 1; index >= 0; index--)
         {
             var (client, forward) = _links[index];

@@ -114,12 +114,12 @@ public sealed partial class MainWindow
         Dialogs.FolderIdentityDialog.EditAsync(Root.XamlRoot, folderPath);
 
     Task IMainWindowServices.ShowKeyboardShortcutsAsync() =>
-        ShowThenRefocusAsync(ShowKeyboardShortcutsAsync, _invokedFromTerminal);
+        ShowThenRefocusAsync(ShowKeyboardShortcutsAsync, InvokedFromTerminal);
 
-    void IMainWindowServices.ShowCommandPalette() => ShowCommandPalette(openedFromTerminal: _invokedFromTerminal);
+    void IMainWindowServices.ShowCommandPalette() => ShowCommandPalette();
 
     void IMainWindowServices.ShowHistory(Guid? sessionId) =>
-        ShowHistory(sessionId, openedFromTerminal: _invokedFromTerminal);
+        ShowHistory(sessionId);
 
     void IMainWindowServices.OpenWelcome() => OpenWelcome();
 

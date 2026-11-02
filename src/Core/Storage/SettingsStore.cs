@@ -157,17 +157,22 @@ public sealed class SettingsStore
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     });
 
-    private readonly string _path;
+    private readonly StoreFile _file;
     private readonly object _gate = new();
 
     public string? LoadWarning { get; private set; }
-    private bool _preserveBackup;
+
+    /// <summary>Whether saves are allowed; see <see cref="StoreLoadState"/>.</summary>
+    public StoreLoadState LoadState
+    {
+        get { lock (_gate) return _file.State; }
+    }
 
     public AppSettings Current { get; private set; } = new();
 
     public SettingsStore(string path)
     {
-        _path = path;
+        _file = new StoreFile(path, "Settings");
     }
 
     public static string DefaultPath =>
@@ -177,12 +182,11 @@ public sealed class SettingsStore
     {
         lock (_gate)
         {
-            var load = AtomicFile.Load(_path, Read, "Settings");
-            Current = load.Data ?? new AppSettings { OnboardingCompleted = File.Exists(_path) ? null : false };
-            _preserveBackup = load.PreserveBackup;
-            LoadWarning = load.Data is null && load.Warning is not null
-                ? load.Warning + " Default settings are in use."
-                : load.Warning;
+            var data = _file.Load(Read);
+            Current = data ?? new AppSettings { OnboardingCompleted = File.Exists(_file.Path) ? null : false };
+            LoadWarning = data is null && _file.Warning is not null
+                ? _file.Warning + " Default settings are in use."
+                : _file.Warning;
         }
     }
 
@@ -192,9 +196,8 @@ public sealed class SettingsStore
     {
         lock (_gate)
         {
-            AtomicFile.Write(_path, JsonSerializer.Serialize(settings, JsonOptions.Info<AppSettings>()), _preserveBackup);
+            _file.Write(JsonSerializer.Serialize(settings, JsonOptions.Info<AppSettings>()));
             Current = settings;
-            _preserveBackup = false;
         }
     }
 

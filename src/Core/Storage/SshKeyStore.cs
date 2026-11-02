@@ -16,20 +16,25 @@ public sealed class SshKeyStore
         Converters = { CamelCaseEnumConverter.Instance },
     });
 
-    private readonly string _path;
-    private bool _preserveBackup;
+    private readonly StoreFile _file;
     private readonly object _gate = new();
     private List<SshKeyReference> _keys = [];
 
     public SshKeyStore(string path)
     {
-        _path = path;
+        _file = new StoreFile(path, "SSH keys");
     }
 
     public static string DefaultPath => AppDataPaths.Roaming("ssh-keys.json");
 
     /// <summary>Set by <see cref="Load"/> when the file was recovered or unreadable.</summary>
     public string? LoadWarning { get; private set; }
+
+    /// <summary>Whether saves are allowed; see <see cref="StoreLoadState"/>.</summary>
+    public StoreLoadState LoadState
+    {
+        get { lock (_gate) return _file.State; }
+    }
 
     public IReadOnlyList<SshKeyReference> Keys
     {
@@ -40,10 +45,8 @@ public sealed class SshKeyStore
     {
         lock (_gate)
         {
-            var load = AtomicFile.Load(_path, Read, "SSH keys");
-            _preserveBackup = load.PreserveBackup;
-            LoadWarning = load.Warning;
-            _keys = load.Data?.Keys ?? [];
+            _keys = _file.Load(Read)?.Keys ?? [];
+            LoadWarning = _file.Warning;
         }
     }
 
@@ -306,9 +309,8 @@ public sealed class SshKeyStore
     private void Save(List<SshKeyReference> candidate)
     {
         var json = JsonSerializer.Serialize(new StoreData { Keys = candidate }, JsonOptions.Info<StoreData>());
-        AtomicFile.Write(_path, json, _preserveBackup);
+        _file.Write(json);
         _keys = candidate;
-        _preserveBackup = false;
     }
 
     private static StoreData? Read(string path) =>

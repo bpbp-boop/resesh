@@ -56,10 +56,7 @@ public sealed partial class TabGroupView : UserControl
     private const double MinimumTabWidth = 100;
     private const double ExpandedTabActionsFallbackWidth = 224;
 
-    // In-process handoff for cross-group tab drags.
-    private static TabViewModel? _draggedTab;
-    private static TabGroupView? _dragSource;
-    private static TabGroupView? _stripDropTarget;
+    // The drag itself is a TabDragSession (TabGroupView.Drag.cs); these are this strip's previews.
     private readonly Image _tabDragPreview = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
     // Inactive headers paint no background of their own, so the dragged header's image
     // would show the tabs it passes over through it. The backdrop is the strip colour.
@@ -83,7 +80,6 @@ public sealed partial class TabGroupView : UserControl
     private double _dragInitialScrollOffset;
     private double _dragPointerX;
     private readonly DispatcherTimer _dragScrollTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
-    private static TabGroupView? _scrollDropTarget;
 
     private readonly ITabGroupHost _host;
     private readonly MenuFlyout _tabMenu;
@@ -123,7 +119,7 @@ public sealed partial class TabGroupView : UserControl
         Group.Tabs.CollectionChanged += (_, e) =>
         {
             CaptureTabMotion();
-            if (_dragSource == this)
+            if (_drag?.Source == this)
                 EndTabDrag();
             QueueTabWidthRefresh();
             UpdateTabActionButtons();
@@ -208,7 +204,8 @@ public sealed partial class TabGroupView : UserControl
         TabStripHost.Children.Add(_tabDragLayer);
         AddHandler(DragOverEvent, new DragEventHandler(UpdateTabDragPreview), true);
         _dragScrollTimer.Tick += (_, _) => ScrollDraggedTabs();
-        Unloaded += (_, _) => StopDragScroll();
+        Unloaded += TabGroupView_Unloaded;
+        Tabs.AddHandler(PointerCaptureLostEvent, new PointerEventHandler(Tabs_PointerCaptureLost), true);
     }
 
     private async Task PrepareTabDragPreviewAsync(TabViewModel tab, Windows.Foundation.Point pointer)
@@ -265,7 +262,7 @@ public sealed partial class TabGroupView : UserControl
                     return;
                 entry.Preview.Source = bitmap;
             }
-            if (_dragSource == this && _draggedTab == tab)
+            if (_drag is { } drag && drag.Source == this && drag.Tab == tab)
                 ShowTabDragPreview();
         }
         catch (System.Runtime.InteropServices.COMException)
@@ -326,13 +323,13 @@ public sealed partial class TabGroupView : UserControl
 
     private void UpdateTabDragPreview(object sender, DragEventArgs e)
     {
-        if (_dragSource is null)
+        if (CurrentDrag is not { } drag)
             return;
 
         e.DragUIOverride.IsContentVisible = false;
         e.DragUIOverride.IsCaptionVisible = false;
         e.DragUIOverride.IsGlyphVisible = false;
-        if (_dragSource != this || _dragSlots.Count == 0)
+        if (drag.Source != this || _dragSlots.Count == 0)
             return;
 
         _dragPointerX = e.GetPosition(TabStripHost).X;
@@ -346,7 +343,7 @@ public sealed partial class TabGroupView : UserControl
 
     private void PositionTabDragPreview()
     {
-        if (_dragSource != this || _dragSlots.Count == 0)
+        if (CurrentDrag?.Source != this || _dragSlots.Count == 0)
             return;
         var viewport = TabViewportBounds();
         var scrollDelta = (_tabScrollViewer?.HorizontalOffset ?? 0) - _dragInitialScrollOffset;
@@ -374,11 +371,12 @@ public sealed partial class TabGroupView : UserControl
 
     private void UpdateDragScroll(DragEventArgs e)
     {
-        if (_draggedTab is null)
+        // A completed drag waits only for a queued drop; nothing should scroll under it.
+        if (CurrentDrag is not { Phase: TabDragPhase.Dragging } drag)
             return;
-        if (_scrollDropTarget != this)
-            _scrollDropTarget?.StopDragScroll();
-        _scrollDropTarget = this;
+        if (drag.ScrollTarget != this)
+            drag.ScrollTarget?.StopDragScroll();
+        drag.ScrollTarget = this;
         _dragPointerX = e.GetPosition(TabStripHost).X;
         _dragScrollTimer.Start();
     }
@@ -386,13 +384,13 @@ public sealed partial class TabGroupView : UserControl
     private void StopDragScroll()
     {
         _dragScrollTimer.Stop();
-        if (_scrollDropTarget == this)
-            _scrollDropTarget = null;
+        if (_drag is { } drag && drag.ScrollTarget == this)
+            drag.ScrollTarget = null;
     }
 
     private void ScrollDraggedTabs()
     {
-        if (_draggedTab is null || _tabScrollViewer is not { } viewer)
+        if (CurrentDrag is null || _tabScrollViewer is not { } viewer)
         {
             StopDragScroll();
             return;
@@ -407,7 +405,7 @@ public sealed partial class TabGroupView : UserControl
     private void TabScrollViewer_ViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
         PositionTabDragPreview();
-        if (_stripDropTarget == this)
+        if (_drag?.StripTarget == this)
             PositionTabStripDropIndicator(_dragPointerX);
         QueueTabDividerRefresh();
     }
@@ -917,6 +915,14 @@ public sealed partial class TabGroupView : UserControl
             if (_isParked == value)
                 return;
             _isParked = value;
+            if (value)
+            {
+                if (_drag?.Source == this)
+                    EndTabDrag();
+                if (_previewTab is not null || _dragItems.Count > 0)
+                    ResetTabDragPreview();
+                ReleaseTabStripHolds();
+            }
             SyncTerminalVisibility();
         }
     }
@@ -1013,7 +1019,7 @@ public sealed partial class TabGroupView : UserControl
 
     private async void Tabs_PointerReleased(object sender, PointerRoutedEventArgs e)
     {
-        if (_dragSource != this)
+        if (_drag?.Source != this)
             ResetTabDragPreview();
         // Only close when press and release landed on the same tab.
         var pressed = _middleClickTab;
@@ -1320,28 +1326,30 @@ public sealed partial class TabGroupView : UserControl
             StopDragScroll();
             ContentDropOverlay.Visibility = Visibility.Collapsed;
             TabTransferOverlay.Visibility = Visibility.Collapsed;
-            if (_stripDropTarget == this)
-                _stripDropTarget = null;
+            if (_drag is { } drag && drag.StripTarget == this)
+                drag.StripTarget = null;
         }
     }
 
     private void Tabs_TabDragStarting(TabView sender, TabViewTabDragStartingEventArgs args)
     {
         // Pinned tabs stay put at the front of their group.
-        if (args.Item is TabViewModel { IsPinned: true })
+        if (args.Item is not TabViewModel { IsPinned: false } tab)
         {
             args.Cancel = true;
             return;
         }
-        if (_previewTab != args.Item || _dragItems.Count != Group.Tabs.Count || _dragItems.Count == 0)
+        if (_previewTab != tab || _dragItems.Count != Group.Tabs.Count || _dragItems.Count == 0)
         {
             args.Cancel = true;
             ResetTabDragPreview();
             return;
         }
-        _draggedTab = args.Item as TabViewModel;
-        _dragSource = this;
-        if (_previewTab == _draggedTab && _tabDragPreview.Source is not null)
+        // A drag that never ended (its completion lost) must not leak into this one.
+        if (_drag is not null)
+            EndTabDrag();
+        _drag = new TabDragSession(tab, this);
+        if (_tabDragPreview.Source is not null)
             ShowTabDragPreview();
         args.Data.RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
         _host.SetTabContentDropTargetsVisible(true);
@@ -1352,52 +1360,41 @@ public sealed partial class TabGroupView : UserControl
         UpdateDragScroll(e);
         UpdateTabDragPreview(sender, e);
         UpdateTabStripDropIndicator(e);
-        if (_draggedTab is not null)
+        if (CurrentDrag is not null)
             e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
     }
 
-    private void Tabs_TabStripDrop(object sender, DragEventArgs e)
-    {
-        if (_draggedTab is not { } tab)
-            return;
-
-        if (_dragSource == this)
-        {
-            ReorderDraggedTab(e);
-            return;
-        }
-        MoveDraggedTabIntoGroup(tab, e.GetPosition(Tabs).X);
-        EndTabDrag();
-    }
+    private void Tabs_TabStripDrop(object sender, DragEventArgs e) => DropOnTabStrip(e);
 
     private void TabStripHost_DragOver(object sender, DragEventArgs e)
     {
         UpdateDragScroll(e);
         UpdateTabDragPreview(sender, e);
         UpdateTabStripDropIndicator(e);
-        if (_draggedTab is not null)
+        if (CurrentDrag is not null)
             e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
     }
 
-    private void TabStripHost_Drop(object sender, DragEventArgs e)
+    private void TabStripHost_Drop(object sender, DragEventArgs e) => DropOnTabStrip(e);
+
+    private void DropOnTabStrip(DragEventArgs e)
     {
-        if (_draggedTab is not { } tab)
+        if (CurrentDrag is not { } drag)
             return;
 
-        if (_dragSource == this)
+        if (drag.Source == this)
         {
-            ReorderDraggedTab(e);
+            ReorderDraggedTab(drag.Tab, e);
             return;
         }
 
-        MoveDraggedTabIntoGroup(tab, e.GetPosition(Tabs).X);
+        MoveDraggedTabIntoGroup(drag, e.GetPosition(Tabs).X);
         EndTabDrag();
     }
 
-    private void ReorderDraggedTab(DragEventArgs e)
+    private void ReorderDraggedTab(TabViewModel tab, DragEventArgs e)
     {
         UpdateTabDragPreview(this, e);
-        var tab = _draggedTab!;
         var target = _dragTargetIndex;
         var source = Group.Tabs.IndexOf(tab);
         EndTabDrag();
@@ -1411,21 +1408,23 @@ public sealed partial class TabGroupView : UserControl
 
     private static void HideTabStripDropIndicator()
     {
-        if (_stripDropTarget is { } target)
+        if (_drag is not { } drag)
+            return;
+        if (drag.StripTarget is { } target)
             target.TabTransferOverlay.Visibility = Visibility.Collapsed;
-        _stripDropTarget = null;
+        drag.StripTarget = null;
     }
 
     private void UpdateTabStripDropIndicator(DragEventArgs e)
     {
-        if (_draggedTab is null || _dragSource == this)
+        if (CurrentDrag is not { } drag || drag.Source == this)
         {
             HideTabStripDropIndicator();
             return;
         }
-        if (_stripDropTarget != this)
+        if (drag.StripTarget != this)
             HideTabStripDropIndicator();
-        _stripDropTarget = this;
+        drag.StripTarget = this;
         PositionTabStripDropIndicator(e.GetPosition(TabStripHost).X);
         TabTransferOverlay.Visibility = Visibility.Visible;
     }
@@ -1447,7 +1446,7 @@ public sealed partial class TabGroupView : UserControl
             || point.Y < 0 || point.Y >= TabStripHost.ActualHeight)
         {
             StopDragScroll();
-            if (_stripDropTarget == this)
+            if (_drag?.StripTarget == this)
                 HideTabStripDropIndicator();
         }
     }
@@ -1481,28 +1480,28 @@ public sealed partial class TabGroupView : UserControl
         return (index, x);
     }
 
-    private void MoveDraggedTabIntoGroup(TabViewModel tab, double pointerX)
+    private void MoveDraggedTabIntoGroup(TabDragSession drag, double pointerX)
     {
         // The marker and the transfer use the same insertion calculation.
         var insertion = GetTabInsertionPoint(pointerX);
         // The target host owns the transfer because each window has its own view model
         // and terminal visual tree.
         _host.TransferTabToGroup(
-            tab,
-            _dragSource!._host,
+            drag.Tab,
+            drag.Source._host,
             Group,
             insertion.Index);
     }
 
     private void ContentDropSurface_DragOver(object sender, DragEventArgs e)
     {
-        _scrollDropTarget?.StopDragScroll();
+        _drag?.ScrollTarget?.StopDragScroll();
         HideTabStripDropIndicator();
         UpdateTabDragPreview(sender, e);
-        if (_draggedTab is null || _dragSource is null)
+        if (CurrentDrag is not { } drag)
             return;
 
-        var sourceGroup = _dragSource.Group;
+        var sourceGroup = drag.Source.Group;
         // Splitting a group's only tab around itself would collapse the source and produce
         // no visible change. A lone tab can still be moved to split another group.
         if (ReferenceEquals(sourceGroup, Group) && sourceGroup.Tabs.Count <= 1)
@@ -1550,15 +1549,16 @@ public sealed partial class TabGroupView : UserControl
 
     private void ContentDropSurface_Drop(object sender, DragEventArgs e)
     {
-        if (_draggedTab is not { } tab || _dragSource is null)
+        if (CurrentDrag is not { } drag)
             return;
 
-        var sourceGroup = _dragSource.Group;
+        var tab = drag.Tab;
+        var sourceGroup = drag.Source.Group;
         if (ReferenceEquals(sourceGroup, Group) && sourceGroup.Tabs.Count <= 1)
             return;
 
         var direction = _dropDirection;
-        var sourceHost = _dragSource._host;
+        var sourceHost = drag.Source._host;
         if (!ReferenceEquals(sourceHost, _host))
             _host.TransferTabToGroup(tab, sourceHost, Group, Group.Tabs.Count);
         EndTabDrag();
@@ -1568,25 +1568,18 @@ public sealed partial class TabGroupView : UserControl
     private void Tabs_TabDragCompleted(TabView sender, TabViewTabDragCompletedEventArgs args)
     {
         ResetTabDragPreview();
+        if (_drag is not { } drag || drag.Source != this)
+            return;
         // WinUI can raise completion on the source before TabStripDrop reaches another
-        // TabView. Keep the in-process handoff alive through the current dispatcher turn.
+        // TabView, so ending the session here would drop that tab on the floor. Keep the
+        // handoff alive through the current dispatcher turn; a drop queued behind this
+        // ends it first, otherwise (a cancelled drag, a drop outside every target) this
+        // does. See DECISIONS.md, "Tab drags are one session with a deferred end".
+        drag.Phase = TabDragPhase.Completing;
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (_dragSource == this)
+            if (ReferenceEquals(_drag, drag))
                 EndTabDrag();
         });
-    }
-
-    private void EndTabDrag()
-    {
-        _scrollDropTarget?.StopDragScroll();
-        HideTabStripDropIndicator();
-        if (_dragSource is { } source)
-        {
-            source.ResetTabDragPreview();
-        }
-        _host.SetTabContentDropTargetsVisible(false);
-        _draggedTab = null;
-        _dragSource = null;
     }
 }

@@ -36,6 +36,7 @@ public sealed partial class FontFamilyPicker : UserControl
 
     private bool _ready;
     private bool _syncing;
+    private int _refreshVersion;
     private IReadOnlyList<string> _fonts = [];
 
     public FontFamilyPicker()
@@ -100,12 +101,16 @@ public sealed partial class FontFamilyPicker : UserControl
         ShowFamilyName();
     }
 
+    /// <summary>Rescans the installed fonts. Focus and opening the drop-down each start one,
+    /// so scans overlap; only the newest shows its result, or an older scan finishing last
+    /// would put back a list from before a font was installed or removed.</summary>
     private async Task RefreshFontsAsync()
     {
         if (!_ready)
             return;
+        var version = ++_refreshVersion;
         var fonts = await InstalledFonts.MonospaceFamiliesAsync(refresh: true);
-        if (_fonts.SequenceEqual(fonts))
+        if (version != _refreshVersion || _fonts.SequenceEqual(fonts))
             return;
         ShowFonts(fonts);
         ShowFamilyName(); // new items clear an editable ComboBox's text

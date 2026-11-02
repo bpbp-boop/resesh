@@ -14,22 +14,33 @@ internal sealed partial class SshfsMount : IDisposable
     private readonly string _knownHostsDirectory;
     private readonly Task _stderr;
     private readonly StringBuilder _stderrTail = new(16 * 1024);
-    private bool _disposed;
+    private readonly Action? _releaseDrive;
+    private volatile bool _disposed;
 
     /// <summary>Drive root, e.g. "S:" — maps to the remote "/".</summary>
     public string Root { get; }
 
-    internal SshfsMount(Process process, string root, string knownHostsDirectory)
+    internal SshfsMount(Process process, string root, string knownHostsDirectory, Action? releaseDrive = null)
     {
         _process = process;
         Root = root;
         _knownHostsDirectory = knownHostsDirectory;
+        _releaseDrive = releaseDrive;
         // Drain both pipes throughout the mount's life, not just when startup fails.
         _stderr = DrainErrorAsync(process.StandardError);
         _ = DrainOutputAsync(process.StandardOutput);
     }
 
-    public bool HasExited => _process.HasExited;
+    /// <summary>True once sshfs has ended, and after Dispose (the process object is gone then).</summary>
+    public bool HasExited
+    {
+        get
+        {
+            if (_disposed) return true;
+            try { return _process.HasExited; }
+            catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { return true; }
+        }
+    }
     public string FailureDetail
     {
         get
@@ -46,7 +57,7 @@ internal sealed partial class SshfsMount : IDisposable
         {
             if (_disposed) return false;
             try { return !_process.HasExited && Directory.Exists(Root + @"\"); }
-            catch (InvalidOperationException) { return false; }
+            catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { return false; }
         }
     }
 
@@ -92,6 +103,7 @@ internal sealed partial class SshfsMount : IDisposable
         finally
         {
             _process.Dispose();
+            _releaseDrive?.Invoke();
             Directory.Delete(_knownHostsDirectory, recursive: true);
         }
     }
@@ -153,13 +165,9 @@ internal static class SshfsIntegration
         return null;
     }
 
-    private static char? FreeDriveLetter()
-    {
-        var used = DriveInfo.GetDrives().Select(d => char.ToUpperInvariant(d.Name[0])).ToHashSet();
-        for (var c = 'Z'; c >= 'D'; c--)
-            if (!used.Contains(c)) return c;
-        return null;
-    }
+    /// <summary>A letter no drive uses and no other tab's mount holds; the caller releases it.</summary>
+    private static char? ReserveFreeDriveLetter() =>
+        DriveLetterReservations.Shared.Reserve(DriveInfo.GetDrives().Select(d => d.Name[0]));
 
     private static string CreateKnownHostsDirectory()
     {
@@ -184,8 +192,10 @@ internal static class SshfsIntegration
     /// <summary>
     /// Mounts remote / on a free drive using the session's credentials and trusted host key.
     /// Blocking (spawn + wait); run on a background thread. Passwords travel only over stdin.
+    /// Cancelling (the tab closed) stops the wait and kills sshfs.
     /// </summary>
-    public static SshfsMount Mount(Session session, KnownHostsStore knownHosts, string? password)
+    public static SshfsMount Mount(Session session, KnownHostsStore knownHosts, string? password,
+        CancellationToken cancellationToken = default)
     {
         var entry = knownHosts.Lookup(session.Host, session.Port)
             ?? throw new IOException("No trusted host key is stored. Connect the terminal first, then open Explorer again.");
@@ -204,8 +214,16 @@ internal static class SshfsIntegration
             throw new IOException("The session's password is not available. Connect the terminal first.");
         else if (password.Contains('\n') || password.Contains('\r'))
             throw new IOException("SSHFS cannot send a password containing a line break through password_stdin.");
-        var drive = FreeDriveLetter() ?? throw new IOException("no free drive letter for the mount.");
-        var directory = CreateKnownHostsDirectory();
+        cancellationToken.ThrowIfCancellationRequested();
+        var drive = ReserveFreeDriveLetter() ?? throw new IOException("no free drive letter for the mount.");
+        var releaseDrive = () => DriveLetterReservations.Shared.Release(drive);
+        string directory;
+        try { directory = CreateKnownHostsDirectory(); }
+        catch
+        {
+            releaseDrive();
+            throw;
+        }
         SshfsMount? mount = null;
         try
         {
@@ -258,7 +276,7 @@ internal static class SshfsIntegration
                 psi.ArgumentList.Add(option);
             }
             var process = Process.Start(psi) ?? throw new IOException("sshfs.exe failed to start.");
-            mount = new SshfsMount(process, $"{drive}:", directory);
+            mount = new SshfsMount(process, $"{drive}:", directory, releaseDrive);
             if (session.AuthMethod != AuthMethod.PrivateKey)
             {
                 process.StandardInput.Write(password);
@@ -271,14 +289,19 @@ internal static class SshfsIntegration
                 if (mount.HasExited)
                     throw new IOException(DescribeSshfsFailure(mount.FailureDetail));
                 if (mount.IsAlive) return mount;
-                Thread.Sleep(200);
+                if (cancellationToken.WaitHandle.WaitOne(200))
+                    cancellationToken.ThrowIfCancellationRequested();
             }
             throw new IOException("the sshfs mount did not come up within 20 seconds.");
         }
         catch
         {
-            if (mount is not null) mount.Dispose();
-            else Directory.Delete(directory, recursive: true);
+            if (mount is not null) mount.Dispose(); // releases the drive letter too
+            else
+            {
+                releaseDrive();
+                Directory.Delete(directory, recursive: true);
+            }
             throw;
         }
     }

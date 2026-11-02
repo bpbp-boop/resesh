@@ -35,8 +35,9 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
     private Stream? _stream;
     private Thread? _reader;
     private Thread? _sender;
-    private volatile bool _stopped;
-    private int _closedRaised;
+    private readonly BackendLifecycle _lifecycle = new();
+    // A failure and a local stop can both reach for the port; only the first closes it.
+    private int _portClosed;
 
     public event TerminalOutputHandler? OutputReceived;
 
@@ -47,7 +48,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
     /// <summary>Diagnostic hook (DEBUG builds wire this to a trace log).</summary>
     public static Action<string>? TraceHook { get; set; }
 
-    public bool IsConnected => !_stopped && _closedRaised == 0 && _port is { IsOpen: true };
+    public bool IsConnected => _lifecycle.IsOpen && _port is { IsOpen: true };
 
     /// <summary>The port and line settings in use, for the status bar.</summary>
     public string Description { get; private set; } = "";
@@ -56,6 +57,22 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
     public void Open(SerialTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);
+        if (!_lifecycle.TryBeginConnect())
+            throw _lifecycle.CannotConnect();
+        try
+        {
+            OpenPort(target);
+        }
+        catch
+        {
+            // A failed open is final, like a stop.
+            _lifecycle.BeginStop();
+            throw;
+        }
+    }
+
+    private void OpenPort(SerialTarget target)
+    {
         var name = SerialTarget.NormalizePortName(target.PortName)
             ?? throw new SerialSessionException(string.IsNullOrWhiteSpace(target.PortName)
                 ? "No serial port set for this session."
@@ -113,7 +130,9 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
 
         lock (_gate)
         {
-            if (_stopped)
+            // Dispose reads the port under this gate after it stops, so either the publish
+            // fails here or Dispose sees the port and closes it.
+            if (!_lifecycle.TryPublishOpen())
             {
                 port.Dispose();
                 throw new OperationCanceledException();
@@ -136,7 +155,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
             return;
         lock (_gate)
         {
-            if (_port is not null && !_stopped && !_outgoing.IsAddingCompleted)
+            if (_port is not null && !_lifecycle.IsStopped && !_outgoing.IsAddingCompleted)
                 _outgoing.Add(data);
         }
     }
@@ -150,7 +169,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
     {
         lock (_gate)
         {
-            if (_port is not null && !_stopped && !_outgoing.IsAddingCompleted)
+            if (_port is not null && !_lifecycle.IsStopped && !_outgoing.IsAddingCompleted)
                 _outgoing.Add(BreakMarker);
         }
     }
@@ -159,16 +178,17 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
 
     public void Dispose()
     {
+        // Outside the gate: a Closed being raised holds the lifecycle's lock, and this waits
+        // for it rather than letting it land after the stop.
+        if (!_lifecycle.BeginStop())
+            return;
         SerialPort? port;
         lock (_gate)
         {
-            if (_stopped)
-                return;
-            _stopped = true;
             port = _port;
             _outgoing.CompleteAdding();
         }
-        if (port is null)
+        if (port is null || Volatile.Read(ref _portClosed) != 0)
             return;
         // SerialPort.Dispose flushes pending output, and Windows waits for flow control
         // with no timeout: a device holding CTS low or sitting on XOFF would hang the
@@ -178,10 +198,11 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
 
     // Purge first so neither a blocked write on the sender thread nor the flush inside
     // Dispose waits on the device. Closing a port whose adapter was unplugged throws from
-    // the driver; the handle is released either way.
-    private static void Close(SerialPort? port)
+    // the driver; the handle is released either way. Once only: the failure path and a
+    // stop both get here.
+    private void Close(SerialPort? port)
     {
-        if (port is null)
+        if (port is null || Interlocked.Exchange(ref _portClosed, 1) != 0)
             return;
         try { if (port.IsOpen) port.DiscardOutBuffer(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ObjectDisposedException or InvalidOperationException) { }
@@ -191,7 +212,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
 
     /// <summary>The one close path for a failure seen by either thread: stops the sender,
     /// closes the port (which ends the other thread's blocked read or write) and raises
-    /// <see cref="Closed"/> once. Does nothing after a local stop.</summary>
+    /// <see cref="Closed"/> once. Raises nothing once a local stop has begun.</summary>
     private void Fail(Exception? failure)
     {
         SerialPort? port;
@@ -200,11 +221,16 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
             _outgoing.CompleteAdding(); // releases the sender thread
             port = _port;
         }
-        if (_stopped || Interlocked.Exchange(ref _closedRaised, 1) != 0)
-            return;
-        TraceHook?.Invoke($"serial closed: {failure?.Message}");
+        if (!_lifecycle.IsOpen)
+            return; // stopped (Dispose closes the port) or already reported
+        // Closed before Closed is raised: a reconnect from its handler reopens this port.
+        // Outside the lifecycle lock, so a stop is never held up by the driver.
         Close(port);
-        Closed?.Invoke(failure);
+        _lifecycle.TryRaiseRemoteClose(() =>
+        {
+            TraceHook?.Invoke($"serial closed: {failure?.Message}");
+            Closed?.Invoke(failure);
+        });
     }
 
     private void ReadLoop()
@@ -214,7 +240,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
         try
         {
             var stream = _stream!;
-            while (!_stopped)
+            while (!_lifecycle.IsStopped)
             {
                 var read = stream.Read(buffer, 0, buffer.Length);
                 if (read <= 0)
@@ -252,7 +278,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
         {
             // A refused write or break does not always fail the reader too, so close here
             // rather than leave a connected tab whose input goes nowhere.
-            if (!_stopped)
+            if (!_lifecycle.IsStopped)
                 TraceHook?.Invoke($"serial send failed: {ex.Message}");
             Fail(ex);
         }

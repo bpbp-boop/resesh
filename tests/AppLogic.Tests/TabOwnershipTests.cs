@@ -93,7 +93,7 @@ public sealed class TabOwnershipTests : IDisposable
         var view = new View();
         tab.View = view;
         tab.IsPinned = true;
-        tab.State = TabConnectionState.Connected;
+        tab.MarkConnected();
         tab.ApplyRunningCommand("long running command");
 
         var runningCommand = tab.RunningCommand;

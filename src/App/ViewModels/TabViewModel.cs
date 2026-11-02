@@ -20,8 +20,12 @@ public enum TabConnectionState
     /// <summary>Local process ended normally — neutral, keeps the tab open with the exit code.</summary>
     Exited,
 
-    /// <summary>Read-only playback of a recording; no backend process or connection.</summary>
+    /// <summary>Read-only playback of a recording; no backend process or connection. Final:
+    /// a playback tab never connects.</summary>
     Playback,
+
+    /// <summary>A native app page (Welcome, Settings, Import); no backend. Final.</summary>
+    Page,
 }
 
 /// <summary>One open tab: a session plus its terminal view and connection state.</summary>
@@ -95,6 +99,9 @@ public sealed partial class TabViewModel : ObservableObject
                 OnPropertyChanged(nameof(AutomationName));
         };
         Page = page;
+        // An app page is born in its final state; nothing may move it from there.
+        if (page != AppPage.None)
+            _state = TabConnectionState.Page;
     }
 
     public static TabViewModel CreateAppPage(AppPage page, ViewModelEnvironment environment) => new(
@@ -105,10 +112,7 @@ public sealed partial class TabViewModel : ObservableObject
             Kind = SessionKind.Local,
             Local = new LocalTarget(),
         },
-        environment, page)
-    {
-        State = TabConnectionState.Playback,
-    };
+        environment, page);
 
     public static TabViewModel CreateOnboarding(ViewModelEnvironment environment) =>
         CreateAppPage(AppPage.Welcome, environment);
@@ -136,25 +140,21 @@ public sealed partial class TabViewModel : ObservableObject
 
     private string? _playbackPath;
 
-    /// <summary>Non-null for an ephemeral, read-only asciicast playback tab.</summary>
-    public string? PlaybackPath
-    {
-        get => _playbackPath;
-        set
-        {
-            if (SetProperty(ref _playbackPath, value))
-            {
-                OnPropertyChanged(nameof(IsPlayback));
-                OnPropertyChanged(nameof(Subtitle));
-                OnPropertyChanged(nameof(Endpoint));
-            }
-        }
-    }
+    /// <summary>Non-null for an ephemeral, read-only asciicast playback tab. Set only by
+    /// <see cref="StartPlayback"/>, together with <see cref="TabConnectionState.Playback"/>.</summary>
+    public string? PlaybackPath => _playbackPath;
 
-    public bool IsPlayback => PlaybackPath is not null;
+    /// <summary>Same as <c>State == Playback</c>: the two are only ever set together.</summary>
+    public bool IsPlayback => _playbackPath is not null;
 
-    /// <summary>Exit code of the last local process run, shown while <see cref="State"/> is Exited.</summary>
-    public int? ExitCode { get; set; }
+    /// <summary>Playback and app-page tabs have no backend and never change state.</summary>
+    public bool IsInert => _state is TabConnectionState.Playback or TabConnectionState.Page;
+
+    private int? _exitCode;
+
+    /// <summary>Exit code of the last local process run, shown while <see cref="State"/> is
+    /// Exited. Set only by <see cref="MarkExited"/>, in the same step as the state.</summary>
+    public int? ExitCode => _exitCode;
 
     /// <summary>
     /// Identifies the remote shell selected at connect time. Ownership lives with the
@@ -200,31 +200,79 @@ public sealed partial class TabViewModel : ObservableObject
         }
     }
 
-    public TabConnectionState State
+    /// <summary>
+    /// The tab's connection state. Read-only: the terminal view moves it with the
+    /// transition methods below, which refuse every move for an inert tab (playback, app
+    /// page) and change <see cref="ExitCode"/> in the same step as the state, so no
+    /// listener ever sees one updated without the other.
+    /// </summary>
+    public TabConnectionState State => _state;
+
+    /// <summary>A connect or local launch starts. False (and nothing changes) for an inert tab.</summary>
+    public bool BeginConnecting() => TryEnter(TabConnectionState.Connecting, null);
+
+    /// <summary>The connection is up or the local process is running. Clears the exit code.</summary>
+    public bool MarkConnected() => TryEnter(TabConnectionState.Connected, null);
+
+    /// <summary>The connection ended or failed, or a local launch failed (red).</summary>
+    public bool MarkDisconnected() => TryEnter(TabConnectionState.Disconnected, null);
+
+    /// <summary>The local process ended or was stopped (neutral), with its exit code when known.</summary>
+    public bool MarkExited(int? exitCode) => TryEnter(TabConnectionState.Exited, exitCode);
+
+    /// <summary>Turns a new session tab into a read-only recording playback, path and state
+    /// in one step. Throws for an app page or a tab that has already connected.</summary>
+    public void StartPlayback(string path)
     {
-        get => _state;
-        set
+        ArgumentException.ThrowIfNullOrEmpty(path);
+        if (IsAppPage || _playbackPath is not null || _state != TabConnectionState.Connecting)
+            throw new InvalidOperationException("Only a new session tab can become a recording playback.");
+        _playbackPath = path;
+        Enter(TabConnectionState.Playback, null);
+        OnPropertyChanged(nameof(PlaybackPath));
+        OnPropertyChanged(nameof(IsPlayback));
+        OnPropertyChanged(nameof(Subtitle));
+        OnPropertyChanged(nameof(Endpoint));
+    }
+
+    private bool TryEnter(TabConnectionState state, int? exitCode)
+    {
+        if (IsInert)
+            return false;
+        Enter(state, exitCode);
+        return true;
+    }
+
+    private void Enter(TabConnectionState state, int? exitCode)
+    {
+        var stateChanged = _state != state;
+        var exitChanged = _exitCode != exitCode;
+        if (!stateChanged && !exitChanged)
+            return;
+        _state = state;
+        _exitCode = exitCode;
+        if (stateChanged)
         {
-            if (SetProperty(ref _state, value))
+            OnPropertyChanged(nameof(State));
+            // A reconnecting or dead tab must not keep advertising the last program it
+            // ran; the next prompt or full-screen app sets a fresh title.
+            if (state != TabConnectionState.Connected)
             {
-                // A reconnecting or dead tab must not keep advertising the last program it
-                // ran; the next prompt or full-screen app sets a fresh title.
-                if (value != TabConnectionState.Connected)
-                {
-                    _completionTracker.Reset();
-                    NotifyCompletionProperties();
-                    TerminalTitle = null;
-                    RunningCommand = null;
-                    _runningCommandIsExact = false;
-                    _programTitleIsCurrent = false;
-                    _lastProgramTitle = null;
-                    _staleProgramTitle = null;
-                    PromptContext = null;
-                    ReportedWorkingDirectory = null;
-                }
-                OnPropertyChanged(nameof(StateText));
+                _completionTracker.Reset();
+                NotifyCompletionProperties();
+                TerminalTitle = null;
+                RunningCommand = null;
+                _runningCommandIsExact = false;
+                _programTitleIsCurrent = false;
+                _lastProgramTitle = null;
+                _staleProgramTitle = null;
+                PromptContext = null;
+                ReportedWorkingDirectory = null;
             }
         }
+        if (exitChanged)
+            OnPropertyChanged(nameof(ExitCode));
+        OnPropertyChanged(nameof(StateText));
     }
 
     private bool _isRecording;
@@ -728,6 +776,7 @@ public sealed partial class TabViewModel : ObservableObject
             TabConnectionState.Connected when IsLocal => HasUnseenOutput ? "running — new output" : "running",
             TabConnectionState.Connected => HasUnseenOutput ? "connected — new output" : "connected",
             TabConnectionState.Playback => "recording playback",
+            TabConnectionState.Page => "",
             TabConnectionState.Exited => ExitCode is { } code ? $"exited (code {code})" : "exited",
             _ => IsLocal ? "failed" : "disconnected",
         },

@@ -13,10 +13,21 @@ internal sealed class TelnetBbsSizeFilter
         "\u001b[999;999H\u001b[6n"u8.ToArray(),
         "\u001b[18t"u8.ToArray(),
     ];
+    private const byte Esc = 0x1B, Bel = 0x07, Can = 0x18, Sub = 0x1A;
+
+    /// <summary>How long held bytes wait for the rest of a probe before going out as they
+    /// are: a probe split across reads arrives well within this, while a BBS that sent a
+    /// cursor move and is waiting for a key would otherwise show nothing.</summary>
+    public static readonly TimeSpan HoldLimit = TimeSpan.FromMilliseconds(50);
+
     private readonly List<byte> _pending = [];
     private bool _inString;
-    private bool _stringEscape;
     private bool _osc;
+    // The last byte went out as a lone ESC (a flushed hold): the next may introduce a string.
+    private bool _escapeFlushed;
+
+    /// <summary>Output held back as the possible start of a probe.</summary>
+    public bool HasHeldOutput => _pending.Count > 0;
 
     public byte[] Process(ReadOnlySpan<byte> input, List<byte> replies, bool flush = false)
     {
@@ -25,24 +36,35 @@ internal sealed class TelnetBbsSizeFilter
         {
             if (_inString)
             {
-                output.Add(value);
-                if ((_osc && value == 7) || (_stringEscape && value == '\\'))
+                // ECMA-48 / the VT parser: BEL ends an OSC, CAN and SUB abort any string,
+                // and ESC ends it too (ST when a backslash follows, otherwise the start of
+                // the next sequence, which must still be seen as a possible probe).
+                if (value == Esc)
+                {
                     _inString = false;
-                _stringEscape = value == 27;
+                    _pending.Add(value);
+                    continue;
+                }
+                output.Add(value);
+                if ((_osc && value == Bel) || value is Can or Sub)
+                    _inString = false;
                 continue;
             }
 
-            _pending.Add(value);
-            if (_pending.Count == 2 && _pending[0] == 27 && value is (byte)']' or (byte)'P' or (byte)'_' or (byte)'^' or (byte)'X')
+            var afterFlushedEscape = _escapeFlushed;
+            _escapeFlushed = false;
+            if (IsStringIntroducer(value) &&
+                (afterFlushedEscape && _pending.Count == 0 || _pending.Count == 1 && _pending[0] == Esc))
             {
                 _inString = true;
                 _osc = value == ']';
-                _stringEscape = false;
                 output.AddRange(_pending);
+                output.Add(value);
                 _pending.Clear();
                 continue;
             }
 
+            _pending.Add(value);
             while (_pending.Count > 0)
             {
                 var pending = System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_pending);
@@ -69,11 +91,18 @@ internal sealed class TelnetBbsSizeFilter
                 _pending.RemoveAt(0);
             }
         }
-        if (flush)
+        if (flush && _pending.Count > 0)
         {
+            _escapeFlushed = _pending[^1] == Esc;
             output.AddRange(_pending);
             _pending.Clear();
         }
         return [.. output];
     }
+
+    /// <summary>Releases held bytes once no more output arrived within <see cref="HoldLimit"/>.</summary>
+    public byte[] FlushHeld() => Process([], [], flush: true);
+
+    private static bool IsStringIntroducer(byte value) =>
+        value is (byte)']' or (byte)'P' or (byte)'_' or (byte)'^' or (byte)'X';
 }

@@ -1739,3 +1739,275 @@ is removed, so "π - project" and "~/src" are untouched.
 - The diagonal fills (U+1FB98, U+1FB99) space their lines exactly rather than rounding the
   spacing as Ghostty does, which left the cell corners bare at some sizes.
 - Checkerboards cap their rows at 16 so very tall cells stay within `MaxBoxes`.
+
+## 2026-11-02 - One lifecycle state machine for every connection backend
+- SSH, SFTP, telnet, serial and local sessions each kept their own flags (`_disposed`,
+  `_stopped`, `_closedRaised`, `_exitRaised`), checked in different orders. Two races fell
+  through the gaps. A Disconnect while Connect was still running found nothing published,
+  tore down nothing, and Connect then published a live client, shell, reader and watchdog
+  nobody owned (its detectors muted by the disposed flag, so the leak was silent). And a
+  remote close racing a local stop could raise Closed after the stop, because the
+  "already raised" exchange and the "stopped" check were separate steps.
+- `Backend.BackendLifecycle` is now the one state: NotStarted, Connecting, Open,
+  RemoteClosed, Stopped, changed only by compare-and-swap. A connect goes live only through
+  `TryPublishOpen`, which fails if a stop arrived meanwhile, and the connect thread then
+  tears down what it built. Each backend publishes resources by `Interlocked.Exchange` as
+  soon as they exist, and its teardown takes them back the same way, so a stop and an
+  abandoned connect can both tear down in any order without missing or doubling anything.
+- `TryRaiseRemoteClose` (Open → RemoteClosed) runs the Closed/Exited callback under the
+  lock `BeginStop` takes, as `LocalTerminalSession` already did with its exit gate. Once
+  Stop returns, no Closed is running or still to come. Every App handler only enqueues to
+  the dispatcher, so the wait is short, and a handler that stops from inside Closed
+  re-enters the lock on its own thread.
+- A failed connect is final (the state goes to Stopped): every caller already makes a new
+  instance per attempt, and a half-built instance being reusable was itself a leak path.
+- Local is the exception for stopping mid-start: `Start` is fast and never blocks, so a
+  `Stop` that finds it Connecting leaves the cleanup to `Start`, which finds the stop when
+  it publishes. Tearing handles out from under `CreateProcess` would be worse.
+  `IsRunning` deliberately stays true while the last output drains after the process ends
+  (`HasExited` says it ended), so a relaunch can't be offered before the exit notice lands.
+- Remote close is only possible from Open. Detectors (readers, watchdog, ErrorOccurred) start
+  after the publish; failures while connecting are reported by Connect throwing.
+- Telnet now closes the socket when a send fails. With a half-open TCP connection the reader
+  could block forever while every keystroke queued, so the tab looked connected. It also sets
+  TCP keepalive (30 s idle, 10 s interval, 3 probes), so a vanished peer is noticed in about
+  a minute.
+- `SshTunnelSet` has an internal Starting phase (the public `TunnelState` still reads Stopped
+  until the start settles, so the App's display needs no new case). A Stop, Remove or
+  Dispose during a start marks the entry. The starting thread alone holds the new port
+  until it settles under the lock, and closes it if the mark is set. A second Start of a
+  tunnel that is still starting is refused.
+## 2026-11-02 - Frame effects carry a sequence number
+- A frame's XAML side (scroll bar, IME position, pointer shape, blink, margin) reaches the UI
+  thread two ways: the render thread posts it, merged until the dispatcher runs it, and a
+  frame the UI thread draws itself during layout (`DrawFrame`) applies it at once. The posted
+  batch could arrive after a newer direct one and put the scroll bar and IME box back where
+  an older frame had them.
+- Each drawn frame is stamped from a counter incremented under `_renderGate`, so the order is
+  drawing order whichever thread drew. The UI thread remembers the newest frame it applied and
+  drops older metadata and margin; flags that only ask for work (annotations, hover refresh,
+  polling) are always applied. Margin has its own stamp because a merged batch can carry
+  metadata from one frame and a margin change from an earlier one.
+
+## 2026-11-02 - The terminal is freed under the render lock too
+- Frames read `_term` under `_renderGate` only, and `Dispose` joins the render thread for at
+  most two seconds: a frame can wait that long on the shared device gate behind another
+  surface's device recovery. `Dispose` now frees the terminal holding `_renderGate` and then
+  `_termGate`, so a late frame either finishes first or sees `_term` zero.
+- That nesting is safe because nothing waits for `_renderGate` while holding `_termGate` off
+  the UI thread: the render thread takes only `_renderGate` and then the device gate, and the
+  output reader, compression timer and replay hold `_termGate` without touching the render
+  lock. `ApplyColors` does nest the other way, but only on the UI thread, which `Dispose` is on.
+
+## 2026-11-02 - Renderers rebuild their own device resources
+- Device-loss recovery used to rebuild every renderer in one pass and had no failure state:
+  one exception left all of them blank for good. Each renderer now checks, at every Draw,
+  Resize and SetFont, whether it has a context made on the current device and rebuilds if
+  not, creating the shared device when it is missing. Recovery is just "tear everything
+  down, let each renderer try".
+- Failed device creation is retried at most once a second (`RetryDelay`), and the surface
+  schedules a frame for the retry, because a blank terminal asks for no frames of its own.
+- The constructor still throws when no device can be made: a surface that never had one is
+  the host's error to show, not a blank terminal to retry.
+
+## 2026-11-02 - Command tracking state is per connection
+- `CommandTracker.ResetConnection` (called from `NotifyDisconnected`) ends everything about
+  the command in progress: the OSC 133 phase, the pending mark, the running report, the open
+  history entry, a replay whose end marker was lost with the stream, OSC 3008 contexts and
+  "shell integration seen". A reconnect can land in a different shell, so integration is
+  detected afresh rather than disabling Enter-gated discovery for the tab's lifetime.
+- The open history entry is recorded with the output it has, before the disconnect divider.
+  The running report ends without a Completed event and the tab's running command gets no
+  event, as before: a cut transport says nothing about how the command finished, and the
+  host clears its own state on disconnect. Marks stay on the ruler.
+## 2026-11-02 - Tab state changes only through named transitions
+- `TabViewModel.State` and `ExitCode` are read-only. The terminal view moves a tab with
+  `BeginConnecting`, `MarkConnected`, `MarkDisconnected`, `MarkExited(code)` and
+  `StartPlayback(path)`. The exit code is stored in the same step as the state, so the tab
+  text never shows a stale "exited (code N)" between two property sets.
+- App pages have their own state, `TabConnectionState.Page`, instead of borrowing
+  `Playback`; `IsPlayback` and `State == Playback` now always agree. Both are inert: every
+  transition returns false on them, so nothing can start a connect on a playback or
+  settings tab.
+- The terminal view has one connection-phase test, `CanStartConnect`: no connect in flight
+  and the tab not Connected. It replaces checking each backend's `IsConnected`. The tab
+  state moves only from that view, so the two cannot drift.
+- Input to the live terminal is decided in one place, `UpdateInputEnabled`: off while a
+  connect runs, while locked, while rewinding and after dispose. A stopped tab keeps input
+  on so Enter reconnects. Ending a connect now re-enables input even when the user
+  disconnected during it; before, the terminal stayed deaf until something else turned it
+  back on.
+- The "update identity password" offer after a rejected login runs after `ConnectAsync`
+  has ended, so Reconnect works while it is on screen; a reconnect cancels it.
+
+## 2026-11-02 - Queued dialogs belong to whoever asked
+- `ShowModalAsync` takes an optional `CancellationToken`. The per-window queue made a
+  closed tab's credential or host-key prompt appear minutes later (callers only abandoned
+  the wait with `WaitAsync`, so the dialog itself stayed queued). Now a dialog cancelled
+  while queued is never shown, and one on screen is hidden; both return
+  `ContentDialogResult.None`, the same answer as the user pressing Cancel.
+- Every `ConnectDialogs` method takes the token, and the terminal view passes its
+  connection's token, so closing a tab or starting another connect takes its prompts away.
+- A dialog with no `XamlRoot`, or whose window has closed, returns `None` instead of
+  throwing; most of these run fire-and-forget on the dispatcher, where a throw went
+  unobserved.
+
+## 2026-11-02 - File pane state is explicit; the latest navigation wins
+- `FilePaneActivity` (headless, tested in AppLogic.Tests) holds the pane's state: Idle,
+  Loading, Operating, Failed (first listing failed) or Disposed, plus whether any listing
+  ever loaded. The pane used to infer "never loaded" from an empty list, so an empty
+  folder's Retry jumped home and its later failures covered the pane with the full error.
+- A navigation asked for while another loads cancels that load and runs next; only the
+  latest queued one survives. One asked for during a file operation gets the same
+  "Another file operation is still running." status the operations already gave, instead
+  of being dropped silently.
+- Every navigation has its own `CancellationTokenSource`, cancelled by a newer navigation
+  and by `Dispose`. The connect factory takes the token (linked with the tab's connection
+  token). `SftpSession.Connect` does not take one yet, so a hung connect is abandoned, not
+  stopped: the pane stops waiting and disposes the session if it ever arrives.
+- SFTP sessions are always disposed off the UI thread, including a stale one replaced on
+  reconnect.
+
+## 2026-11-02 - SSHFS drive letters are reserved app-wide
+- Two tabs opening Explorer at once both picked the same free drive letter, and the
+  second tab's mount check (`Directory.Exists`) then passed on the first tab's drive.
+  `DriveLetterReservations.Shared` hands out letters under a lock and keeps each reserved
+  until its mount fails or is disposed, so concurrent mounts get different letters.
+- The 20-second wait for the drive takes the tab's cancellation token: closing the tab
+  stops it and kills sshfs. `SshfsMount.HasExited` answers true after Dispose instead of
+  throwing on the disposed process.
+- A second "Open in Explorer" while the tab's mount is coming up waits for that mount and
+  then opens its own folder, instead of doing nothing.
+## 2026-11-02 - Tab drags are one session with a deferred end
+- A tab drag between strips, panes and windows is handed off in process, not through the
+  `DataPackage`. Its state (the tab, the source view, the strip showing the insertion marker,
+  the strip scrolling under the pointer, and a phase) is one `TabDragSession` held in a
+  static on `TabGroupView`; it used to be four statics, each cleared on its own path. A
+  source that left the tree mid-drag (parked by a workspace switch, removed with its pane)
+  gets no `TabDragCompleted`, so the statics stayed set and every window kept its content
+  drop targets up.
+- The session ends on a drop, on `TabDragCompleted`, when its tab leaves the source group,
+  when the source is parked, or when the source is still out of the tree one dispatcher turn
+  after `Unloaded`. The wait matters: `RebuildGroupLayout` removes and re-adds every group
+  view in one turn, and WinUI can raise `Unloaded` after the re-add. Handlers read the
+  session through `CurrentDrag`, which ignores one whose source has no parent.
+- `TabDragCompleted` does not end the session at once. WinUI can raise it on the source
+  before the target `TabView` raises `TabStripDrop`, so the session is marked `Completing`
+  and ended on the next dispatcher turn, only if it is still the current session. A drop
+  queued behind the completion still finds it.
+- A press that loses pointer capture drops its prepared drag preview a turn later, unless a
+  drag from that strip has started: the system drag loop takes capture after
+  `TabDragStarting`, and the drag needs the preview.
+
+## 2026-11-02 - Closes claim their tab and re-check after every await
+- `RequestCloseTabAsync` and `RequestCloseManyAsync` claim each tab on `MainViewModel`
+  (`TryBeginClose`/`EndClose`) for as long as their dialogs and remote-shell calls run. A
+  second request for a claimed tab (Ctrl+W again, a middle-click, a bulk close) is dropped
+  rather than queued behind the first: the first dialog already asks the question.
+- After every await they check that the window is still open and still owns the tab
+  (`MainViewModel.Owns`); a tab closed meanwhile is left alone. (A tab dragged to another
+  window meanwhile: see "A confirmed tab close follows the tab" below.)
+  `CloseTabCore` does nothing for a tab it no longer holds, so a late caller can't throw
+  partway through a bulk close. Callers fire and forget, so failures go to
+  `App.ReportRecoverableError`.
+- A window shows exactly one workspace and never also parks it (`WorkspaceParking`; debug
+  builds assert it). The + button decides whether Home's tabs become the new workspace
+  after the name prompt, not before it, since another window can switch this one meanwhile.
+## 2026-11-02 - Stores have explicit load states and never save over a file they could not read
+- Every JSON store (sessions, settings, workspaces, highlights, identities, SSH keys, known
+  hosts) loads and saves through `StoreFile`, which tracks a `StoreLoadState`: `NotLoaded`,
+  `Loaded`, `RecoveredFromBackup` or `Unreadable`. Stores expose it as `LoadState`.
+- An existing file that cannot be read is copied aside (`*.unreadable-{timestamp}`). Only a
+  successful copy makes it safe to carry on and save: a corrupt file is normally copied
+  fine, so it still starts empty (or recovers from .bak) as before. A file held unshared by
+  an antivirus scanner or OneDrive cannot be copied either; the store used to run empty
+  anyway, and its first two saves rotated the user's file into .bak and then over it. Now
+  that store is `Unreadable`: whatever it could show (the .bak, or nothing) is shown, every
+  save throws `StoreReadOnlyException` (an `IOException`, so existing "could not save"
+  reporting covers it) and `LoadWarning` says to close the program and restart. A locked
+  primary with a good .bak is also read-only, because the primary is newer than the .bak.
+- Reads retry a sharing violation three times (50, 150, 300 ms) before giving up, since
+  scanners usually let go quickly.
+- A save before `Load` throws `InvalidOperationException` only while the file or its .bak
+  exists; with no file there is nothing to overwrite, and view-model tests and first-run
+  code rely on using a store fresh.
+- Known hosts keep their stricter rules: an invalid file with no good backup still blocks
+  SSH (`LoadError`), because starting empty would make a changed host key look like a new
+  host. `Check`/`Lookup` before `Load` throw too while a file exists.
+
+## 2026-11-02 - Agent bells are ignored only while an adapter-reported agent is running
+- `AgentTracker` used to latch "an adapter has spoken" for the whole connection, so after
+  one Claude Code session with hooks, bells and OSC 9 were ignored for every later agent in
+  the tab, including ones with no adapter, and the source read "reported by the agent" for
+  identities that came from a command or process. The latch is now the adapter-asserted
+  identity itself: bells are ignored while it is set, and it ends with the agent (a prompt,
+  a shell title, the process leaving, an exit event, an OSC 7501 clear, the session ending).
+  A rerun agent must report again before its bells are dropped; one stray bell in between
+  is the cost.
+- Turning agent suppression ("none") on or off forgets the agent state, because evidence is
+  ignored while suppressed and the old badge would otherwise reappear after the agent left.
+
+## 2026-11-02 - A failed disk recording stops itself; the terminal and rewind carry on
+- An `IOException` from the recorder (disk full, drive gone) used to propagate out of
+  `TerminalCapture.CaptureOutput` into the terminal's output callback, leaving the recorder
+  installed so every later chunk threw again; a failed timer flush was swallowed. Now any
+  write or flush failure detaches and closes the recorder (closing errors are ignored, the
+  failure is already known), sets `RecordingError`, raises `RecordingChanged(false, path)`
+  and then `RecordingFailed(path, message)`. In-memory rewind capture keeps going. Events
+  fire outside the capture's lock, on the output thread or the flush timer's thread.
+- The recorder remembers its first failure and refuses further writes, so a half-written
+  cast line is never followed by more.
+- The plain-text log renderer holds at most 1024 unfinished rows (the topmost is written
+  out early) and 8192 characters per row, and line feeds stop counting at row 65535. A
+  hostile stream could otherwise make it hold gigabytes.
+
+## 2026-11-02 - Enter on a disconnected terminal reconnects; nothing is sent until the host confirms
+- `NativeTerminalSurface` set its connected flag on Enter, before any reconnect ran, so keys,
+  pastes and focus reports in the gap were encoded and handed to the host, whose `_backend`
+  was still the dead connection until `ConnectAsync` replaced it one dispatcher hop later.
+  The surface now tracks `SurfaceConnection` (Connected / Disconnected / Reconnecting): only
+  `NotifyConnected` makes input live; input while Reconnecting is dropped, as it is while
+  Disconnected. Dropping matches what the host does anyway once the connect starts (it turns
+  input off with `SetInputEnabled(false)`), and nothing typed into a dead link is replayed
+  into the new shell, where it could run as a command.
+- Enter while Reconnecting raises `ReconnectRequested` again. The host ignores a request it
+  cannot start (one already in flight, an inert tab) without reporting back, so a surface
+  that refused a second Enter could be stuck waiting forever.
+
+## 2026-11-02 - Telnet Auto encoding: typed input only moves forward
+- The Auto codec's output decoder flips between UTF-8 and CP437 on each sequence it sees,
+  and `EncodeInput` used to follow it, so what a key sent depended on the last screen: one
+  stray Latin-1 byte from a UTF-8 server turned the next typed "é" into CP437, and the
+  shared UTF-8 decoder could carry half a character across a flip.
+- Input now has its own state that only moves forward: Undecided (bytes pass through, as
+  UTF-8) → CP437 on the first invalid sequence → UTF-8 for good on a three- or four-byte
+  sequence. Two-byte sequences never decide it, because adjacent DOS block characters
+  ("█▓") are valid two-byte UTF-8. The forward move to UTF-8 keeps the "CP437 BBS intro,
+  then the server switches to UTF-8" case working; never flipping back is what stops the
+  oscillation. A CP437 board whose art happens to form a three-byte sequence latches input
+  to UTF-8; forcing CP437 on the session covers that.
+- A partial typed character is held as raw bytes rather than inside a `Decoder`, so it
+  survives an encoding change between writes.
+## 2026-11-02 - The exit prompt counts sessions when it appears and brings its window forward
+- Closing a window with open sessions waits for any dialog already queued on that window
+  (`ModalDialogPresenter.WaitForQueuedDialogsAsync`) before it counts sessions and builds
+  the prompt, so the count isn't from before a host-key or close dialog was answered. If no
+  sessions are left by then, the window just closes.
+- A session that joins the window while the prompt is open (dragged in, a jump-list launch)
+  was not part of the question, so a confirmed prompt asks again. Sessions closing meanwhile
+  only make "Exit" safer and are not re-asked.
+- Every close request that needs the prompt calls `BringToFront`. A taskbar close can come
+  while the window is minimized, and a second X while the prompt waits behind another of
+  the window's dialogs used to do nothing visible; the dialog that must be answered first
+  is now in view. The other dialog is not dismissed: its answer may matter (a host key).
+
+## 2026-11-02 - A confirmed tab close follows the tab to another window
+- A single-tab close whose dialog was answered "Close" closes the tab in whichever open
+  window holds it now (`CloseOwnerOf`, via `App.WindowFor`). The answer was about that tab,
+  so a drag to another window while the dialog was open (or a workspace taken over by
+  another window) no longer quietly cancels it. Unpinning and the "could not end the
+  persistent session" message happen in that window too.
+- The claim stays on the window that asked. The new window may start its own close of the
+  tab meanwhile; whichever acts first wins and the other finds the tab gone.
+- Bulk closes ("close others", "to the right", "all") are about this window's tabs and still
+  leave a tab that moved away alone: it is no longer among the tabs the question described.

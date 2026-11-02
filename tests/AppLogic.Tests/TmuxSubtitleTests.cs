@@ -48,12 +48,12 @@ public sealed class TmuxSubtitleTests
     public void ShellWithoutOscFallsBackToPromptContextAndReconnectClearsOldCwd()
     {
         var tab = Tab();
-        tab.State = TabConnectionState.Connected;
+        tab.MarkConnected();
         tab.ApplyPromptContext("/from-prompt");
         tab.ApplyTerminalTitle("bash");
         Assert.Equal("/from-prompt", tab.Subtitle);
         tab.ApplyReportedWorkingDirectory(new("server", "/tmp"));
-        tab.State = TabConnectionState.Disconnected;
+        tab.MarkDisconnected();
         tab.ApplyTerminalTitle("bash");
         Assert.Equal("bash", tab.Subtitle);
     }
@@ -83,7 +83,7 @@ public sealed class TmuxSubtitleTests
     public void ExactCommandSurvivesLateTmuxShellAndInterpreterTitlesUntilCompletion()
     {
         var tab = Tab();
-        tab.State = TabConnectionState.Connected;
+        tab.MarkConnected();
         tab.ApplyReportedWorkingDirectory(new("server", "/home/user/etc"));
         tab.ApplyPromptContext("~/etc");
         tab.ApplyRunningCommand("ansible-playbook site.yml", exact: true);
@@ -96,7 +96,7 @@ public sealed class TmuxSubtitleTests
         Assert.Equal("~/etc", tab.Subtitle);
 
         tab.ApplyRunningCommand("ansible-playbook next.yml", exact: true);
-        tab.State = TabConnectionState.Disconnected;
+        tab.MarkDisconnected();
         tab.ApplyRunningCommand("sleep 1"); // fresh connection using discovery
         tab.ApplyTerminalTitle("bash");
         Assert.Null(tab.RunningCommand);
@@ -106,7 +106,7 @@ public sealed class TmuxSubtitleTests
     public void AgentTitleReplacesCommandNameWithoutItsSpinner()
     {
         var tab = Tab();
-        tab.State = TabConnectionState.Connected;
+        tab.MarkConnected();
         tab.ApplyTerminalTitle("bash");
         tab.ApplyRunningCommand("claude --resume", exact: true);
         Assert.Equal("claude", tab.Subtitle);
@@ -126,7 +126,7 @@ public sealed class TmuxSubtitleTests
     public void StickyTmuxTitleFromEarlierProgramDoesNotReplaceNewCommand()
     {
         var tab = Tab();
-        tab.State = TabConnectionState.Connected;
+        tab.MarkConnected();
         tab.ApplyRunningCommand("claude", exact: true);
         tab.ApplyTerminalTitle("✳ Fix login bug");
         tab.ApplyRunningCommand("", exact: true);

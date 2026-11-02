@@ -82,6 +82,55 @@ public sealed class TelnetTextCodecTests
     }
 
     [Fact]
+    public void AutoInput_IgnoresAStrayInvalidByteOnceUtf8IsEstablished()
+    {
+        var codec = new TelnetTextCodec(TelnetTextEncoding.Auto);
+        codec.DecodeOutput("漢字\r\n"u8);
+        codec.DecodeOutput([0xe9, 0x20]); // a Latin-1 filename in a listing
+        Assert.Equal("é"u8.ToArray(), codec.EncodeInput("é"u8));
+    }
+
+    [Fact]
+    public void AutoInput_MovesToUtf8OnceAndStays()
+    {
+        var codec = new TelnetTextCodec(TelnetTextEncoding.Auto);
+        codec.DecodeOutput([0xdb, 0xdb, 0x20]); // CP437 intro
+        Assert.Equal(new byte[] { 0x82 }, codec.EncodeInput("é"u8));
+        codec.DecodeOutput("▄█▀"u8); // the server switched to UTF-8
+        Assert.Equal("é"u8.ToArray(), codec.EncodeInput("é"u8));
+        // Output still decodes the next invalid byte as CP437, but input does not flip back.
+        Assert.Equal("█ ", Encoding.UTF8.GetString(codec.DecodeOutput([0xdb, 0x20])));
+        Assert.Equal("é"u8.ToArray(), codec.EncodeInput("é"u8));
+    }
+
+    [Fact]
+    public void AutoInput_IsNotDecidedByAmbiguousTwoByteSequences()
+    {
+        var codec = new TelnetTextCodec(TelnetTextEncoding.Auto);
+        codec.DecodeOutput([0xdb, 0xb2]); // "█▓" in CP437, also valid two-byte UTF-8
+        codec.DecodeOutput([0xdb, 0x20]); // then plainly CP437
+        Assert.Equal(new byte[] { 0x82 }, codec.EncodeInput("é"u8));
+    }
+
+    [Fact]
+    public void AutoInput_KeepsAPartialCharacterAcrossAnEncodingChange()
+    {
+        var codec = new TelnetTextCodec(TelnetTextEncoding.Auto);
+        codec.DecodeOutput([0xdb, 0x20]);
+        Assert.Empty(codec.EncodeInput([0xc3]));
+        codec.DecodeOutput("▄"u8);
+        Assert.Equal(new byte[] { 0xc3, 0xa9 }, codec.EncodeInput([0xa9]));
+    }
+
+    [Fact]
+    public void Cp437Input_HoldsOnlyAnIncompleteTrailingCharacter()
+    {
+        var codec = new TelnetTextCodec(TelnetTextEncoding.Cp437);
+        Assert.Equal(new byte[] { (byte)'a', 0x82 }, codec.EncodeInput([(byte)'a', 0xc3, 0xa9, 0xe2, 0x96]));
+        Assert.Equal(new byte[] { 0xdc }, codec.EncodeInput([0x84])); // ▄
+    }
+
+    [Fact]
     public void TelnetIacIsUnescapedBeforeTextConversion_AndEscapedAfterInputConversion()
     {
         var protocol = new TelnetProtocol("xterm", 80, 25);

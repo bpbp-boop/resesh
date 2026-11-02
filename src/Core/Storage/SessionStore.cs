@@ -19,9 +19,8 @@ public sealed class SessionStore
         Converters = { CamelCaseEnumConverter.Instance },
     });
 
-    private readonly string _path;
+    private readonly StoreFile _file;
     private readonly object _gate = new();
-    private bool _preserveBackup;
 
     private List<Session> _sessions = [];
     private List<string> _folders = [];
@@ -33,7 +32,7 @@ public sealed class SessionStore
 
     public SessionStore(string path)
     {
-        _path = path;
+        _file = new StoreFile(path, "Sessions");
     }
 
     public static string DefaultPath =>
@@ -41,6 +40,12 @@ public sealed class SessionStore
 
     /// <summary>Set by <see cref="Load"/> when the file was recovered or unreadable.</summary>
     public string? LoadWarning { get; private set; }
+
+    /// <summary>Whether saves are allowed; see <see cref="StoreLoadState"/>.</summary>
+    public StoreLoadState LoadState
+    {
+        get { lock (_gate) return _file.State; }
+    }
 
     public IReadOnlyList<Session> Sessions
     {
@@ -75,10 +80,8 @@ public sealed class SessionStore
     {
         lock (_gate)
         {
-            var load = AtomicFile.Load(_path, Read, "Sessions");
-            _preserveBackup = load.PreserveBackup;
-            LoadWarning = load.Warning;
-            var data = load.Data ?? new StoreData();
+            var data = _file.Load(Read) ?? new StoreData();
+            LoadWarning = _file.Warning;
             _sessions = data.Sessions ?? [];
             _folders = data.Folders ?? [];
             _localFolders = data.LocalFolders ?? [];
@@ -473,12 +476,11 @@ public sealed class SessionStore
         };
         var json = JsonSerializer.Serialize(data, JsonOptions.Info<StoreData>());
 
-        AtomicFile.Write(_path, json, _preserveBackup);
+        _file.Write(json);
         _sessions = sessions;
         _folders = folders;
         _localFolders = localFolders;
         _folderSettings = folderSettings;
-        _preserveBackup = false;
     }
 
     private static StoreData? Read(string path)

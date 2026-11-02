@@ -41,6 +41,10 @@ public sealed record SshCommandResult(bool Success, string Output, string Error)
 public sealed class SshTerminalSession : Backend.ITerminalBackend
 {
     private readonly KnownHostsStore _knownHosts;
+    private readonly Backend.BackendLifecycle _lifecycle = new();
+    // Each resource is published by Interlocked.Exchange as soon as it exists and taken back
+    // the same way by Teardown, so a Disconnect while Connect is still running tears down
+    // whatever is already built, and Connect, finding the stop afterwards, tears down the rest.
     private SshClient? _client;
     private SshJumpChain? _jumpChain;
     private SshTunnelSet? _tunnels;
@@ -48,8 +52,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
     private CancellationTokenSource? _readerCts;
     private Task? _readerTask;
     private System.Threading.Timer? _watchdog;
-    private int _closedRaised;
-    private volatile bool _disposed;
+    private volatile bool _execOnly;
 
     public event Backend.TerminalOutputHandler? OutputReceived;
 
@@ -74,14 +77,22 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
     /// <summary>Optional setup diagnostics, delivered before the interactive stream starts.</summary>
     public Action<string>? ShellIntegrationNotice { get; set; }
 
+    /// <summary>The shell is open. Always false for an <see cref="IsExecOnly"/> connection.</summary>
     public bool IsConnected => IsConnectionOpen(
         _client?.IsConnected == true,
         _shell is not null,
-        Volatile.Read(ref _closedRaised));
+        _lifecycle.IsOpen);
+
+    /// <summary>
+    /// Connected with <c>openShell: false</c> (the session manager's connection): exec channels
+    /// only. It has no shell, reader or watchdog, so it never raises <see cref="Closed"/> and
+    /// <see cref="IsConnected"/> stays false; callers find a dead transport when a command fails.
+    /// </summary>
+    public bool IsExecOnly => _execOnly;
 
     /// <summary>The interactive shell can end while its SSH transport stays connected.</summary>
-    internal static bool IsConnectionOpen(bool transportConnected, bool shellCreated, int closedRaised) =>
-        transportConnected && shellCreated && closedRaised == 0;
+    internal static bool IsConnectionOpen(bool transportConnected, bool shellCreated, bool open) =>
+        transportConnected && shellCreated && open;
 
     /// <summary>Negotiated server-to-client cipher, once connected.</summary>
     public string? Encryption => _client?.ConnectionInfo?.CurrentServerEncryption;
@@ -119,19 +130,26 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         string? proxyPassword = null,
         Func<SshHop, SshHop?>? resolveLogin = null)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (_client is not null)
-            throw new InvalidOperationException("Session already used; create a new instance per connection.");
         if (bootstrapCommand is not null && bootstrapCommandFactory is not null)
             throw new ArgumentException("Specify either a bootstrap command or a bootstrap factory, not both.");
+        if (!_lifecycle.TryBeginConnect())
+            throw _lifecycle.CannotConnect();
+        _execOnly = !openShell;
 
-        // Jump hosts connect first, each asking about its own host key and login.
-        var via = jumps is { Count: > 0 }
-            ? SshJumpChain.Open(jumps, session.Host, session.Port, _knownHosts, HostKeyDecision, interactiveResponder, cancellationToken, Connecting, resolveLogin)
-            : null;
+        ShellStream shell;
         SshClient client;
         try
         {
+            ThrowIfAbandoned(cancellationToken);
+            // Jump hosts connect first, each asking about its own host key and login.
+            var via = jumps is { Count: > 0 }
+                ? SshJumpChain.Open(jumps, session.Host, session.Port, _knownHosts, HostKeyDecision, interactiveResponder, cancellationToken, Connecting, resolveLogin)
+                : null;
+            // Published now so a Disconnect during the rest of the connect closes the
+            // jumps, which also cuts the target's handshake short.
+            Interlocked.Exchange(ref _jumpChain, via);
+            ThrowIfAbandoned(cancellationToken);
+
             Connecting?.Invoke(session);
             // The session's own login is asked for last, once the jump hosts are through.
             if (resolveLogin is not null)
@@ -139,7 +157,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
                 var login = resolveLogin(new SshHop(session, secret, proxyPassword))
                     ?? throw new OperationCanceledException("No credential provided.");
                 (session, secret, proxyPassword) = (login.Session, login.Secret, login.ProxyPassword);
-                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfAbandoned(cancellationToken);
             }
             var auth = SshConnectionFactory.BuildAuthMethods(session, secret, interactiveResponder);
             var connectionInfo = SshConnectionFactory.CreateConnectionInfo(
@@ -156,7 +174,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             catch (Exception ex)
             {
                 client.Dispose();
-                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfAbandoned(cancellationToken);
                 if (hostKey.Failure is { } hostKeyFailure)
                     throw hostKeyFailure;
                 throw ex as SshSessionException ?? SshConnectionFactory.Classify(ex, session, via);
@@ -166,32 +184,27 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
                 HostKeyFingerprint = hostKey.Fingerprint;
                 SshConnectionFactory.DisposeAuthMethods(auth);
             }
-        }
-        catch
-        {
-            via?.Dispose();
-            throw;
-        }
+            Interlocked.Exchange(ref _client, client);
+            Interlocked.Exchange(ref _tunnels, new SshTunnelSet(client, status => TunnelChanged?.Invoke(status)));
+            ThrowIfAbandoned(cancellationToken);
 
-        _jumpChain = via;
-        _client = client;
-        _tunnels = new SshTunnelSet(client, status => TunnelChanged?.Invoke(status));
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
             // Before the shell, so what the tunnels report is not mixed into its output.
             // A connection without a shell (the session manager's) carries none.
             foreach (var tunnel in (openShell ? tunnels : null) ?? [])
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfAbandoned(cancellationToken);
                 StartTunnel(tunnel);
             }
             // A session manager needs authenticated exec channels without attaching or
             // creating a persistent shell, including when the originating tab is detached.
             if (!openShell)
+            {
+                if (!_lifecycle.TryPublishOpen())
+                    throw _lifecycle.CannotConnect();
                 return;
+            }
             bootstrapCommand = bootstrapCommandFactory?.Invoke(this) ?? bootstrapCommand;
-            cancellationToken.ThrowIfCancellationRequested();
+            ThrowIfAbandoned(cancellationToken);
             // Persistent startup supplies the new pane's integrated command through its
             // bootstrap factory. A resumed pane never gets a new injection.
             string? initialCommand = null;
@@ -201,16 +214,17 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
                 session.ShellIntegration != ShellIntegrationMode.PowerShell && bootstrapCommand is not null && IntegratedShellStream.IsSupported)
                 initialCommand = "sh -c " + RemoteShellIntegration.QuotePosix(bootstrapCommand);
 
+            ShellStream? integrated = null;
             if (initialCommand is not null)
             {
                 try
                 {
-                    _shell = IntegratedShellStream.Create(client, terminalType, columns, rows, initialCommand, cancellationToken);
+                    integrated = IntegratedShellStream.Create(client, terminalType, columns, rows, initialCommand, cancellationToken);
                     bootstrapCommand = null; // no setup is typed into this terminal
                 }
                 catch (Exception ex) when (ex is SshException or IOException or NotSupportedException or InvalidOperationException)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
+                    ThrowIfAbandoned(cancellationToken);
                     if (!client.IsConnected) throw;
                     ShellIntegrationNotice?.Invoke("Shell integration unavailable: the server rejected startup. Opening a normal shell.");
                     // Do not replay a bootstrap after an exec request may have run. A
@@ -220,26 +234,35 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             }
             // The same channel setup as integration, minus exec, so a plain shell also gets
             // the COLORTERM environment request. The public API is the fallback.
-            _shell ??= IntegratedShellStream.IsShellSupported
+            shell = integrated ?? (IntegratedShellStream.IsShellSupported
                 ? IntegratedShellStream.Create(client, terminalType, columns, rows, null, cancellationToken)
-                : client.CreateShellStream(terminalType, (uint)columns, (uint)rows, 0, 0, 64 * 1024);
-            cancellationToken.ThrowIfCancellationRequested();
+                : client.CreateShellStream(terminalType, (uint)columns, (uint)rows, 0, 0, 64 * 1024));
+            Interlocked.Exchange(ref _shell, shell);
+            ThrowIfAbandoned(cancellationToken);
             if (bootstrapCommand is not null)
             {
                 // The pty buffers this until the login shell reads stdin; its echo is short-lived
                 // (the persistent-session bootstrap clears the screen as its first action).
                 var bytes = System.Text.Encoding.UTF8.GetBytes(bootstrapCommand + "\n");
-                _shell.Write(bytes, 0, bytes.Length);
-                _shell.Flush();
+                shell.Write(bytes, 0, bytes.Length);
+                shell.Flush();
             }
+            if (!_lifecycle.TryPublishOpen())
+                throw _lifecycle.CannotConnect();
         }
         catch
         {
-            Disconnect();
+            // A failed connect is final, like a disconnect: the instance is not reused.
+            _lifecycle.BeginStop();
+            Teardown();
             throw;
         }
-        _readerCts = new CancellationTokenSource();
-        _readerTask = Task.Run(() => ReadLoop(_shell, _readerCts.Token));
+
+        // Detectors start only once the connection is open: a close is reported through
+        // Closed from here on, never while connecting (Connect throws for those).
+        var readerCts = new CancellationTokenSource();
+        Interlocked.Exchange(ref _readerCts, readerCts);
+        Interlocked.Exchange(ref _readerTask, Task.Run(() => ReadLoop(shell, readerCts.Token)));
 
         // A dead peer is not always noticed by the blocked ShellStream read or the keepalive
         // (observed: a killed server left the session "connected" indefinitely), so:
@@ -249,14 +272,26 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             TraceHook?.Invoke($"ErrorOccurred: {e.Exception.Message}");
             RaiseClosed(e.Exception);
         };
-        _watchdog = new System.Threading.Timer(_ =>
+        Interlocked.Exchange(ref _watchdog, new System.Threading.Timer(_ =>
         {
-            if (!_disposed && _client?.IsConnected != true)
+            if (_lifecycle.IsOpen && _client?.IsConnected != true)
             {
                 TraceHook?.Invoke("watchdog: client no longer connected");
                 RaiseClosed(null);
             }
-        }, null, dueTime: 5000, period: 5000);
+        }, null, dueTime: 5000, period: 5000));
+        // A Disconnect that landed after the publish may have run before these existed.
+        if (_lifecycle.IsStopped)
+            Teardown();
+    }
+
+    /// <summary>Stops a connect that was cancelled or disconnected meanwhile; the caller's
+    /// catch tears down what it already built.</summary>
+    private void ThrowIfAbandoned(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_lifecycle.IsStopped)
+            throw new OperationCanceledException("The session was closed while it was connecting.");
     }
 
     /// <summary>Installs only the shell explicitly selected on this SSH profile. Disabled
@@ -362,15 +397,14 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         return Encoding.UTF8.GetString(buffer.ToArray());
     }
 
-    /// <summary>Closed fires exactly once, from whichever detector notices first.</summary>
-    private void RaiseClosed(Exception? failure)
-    {
-        if (Interlocked.Exchange(ref _closedRaised, 1) == 0 && !_disposed)
+    /// <summary>Closed fires exactly once, from whichever detector notices first, and never
+    /// once a local disconnect has begun.</summary>
+    private void RaiseClosed(Exception? failure) =>
+        _lifecycle.TryRaiseRemoteClose(() =>
         {
-            _watchdog?.Dispose();
+            Interlocked.Exchange(ref _watchdog, null)?.Dispose();
             Closed?.Invoke(failure);
-        }
-    }
+        });
 
     // Raw-stream trace (DEBUG diagnostics; capped per connection so trace.log stays sane).
     private int _tracedBytes;
@@ -431,7 +465,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         try
         {
             var shell = _shell;
-            if (shell is null || _disposed || _client?.IsConnected != true)
+            if (shell is null || _lifecycle.IsStopped || _client?.IsConnected != true)
                 return;
             shell.Write(data, 0, data.Length);
             shell.Flush();
@@ -450,7 +484,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         try
         {
             var client = _client;
-            if (client?.IsConnected != true || _disposed)
+            if (client?.IsConnected != true || _lifecycle.IsStopped)
                 return false;
             using var cmd = client.CreateCommand(command);
             cmd.Execute();
@@ -472,7 +506,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         try
         {
             var client = _client;
-            if (client?.IsConnected != true || _disposed)
+            if (client?.IsConnected != true || _lifecycle.IsStopped)
                 return null;
             using var cmd = client.CreateCommand(command);
             var output = cmd.Execute();
@@ -496,7 +530,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         try
         {
             var client = _client;
-            if (client?.IsConnected != true || _disposed)
+            if (client?.IsConnected != true || _lifecycle.IsStopped)
                 return null;
             using var deadline = new CancellationTokenSource(timeout);
             using var cmd = client.CreateCommand(command);
@@ -525,21 +559,26 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
     /// <summary>Clean local disconnect: suppresses Closed, per the dispose-order plan.</summary>
     public void Disconnect()
     {
-        if (_disposed)
+        // A local disconnect never raises Closed. During a connect this tears down what is
+        // built so far (closing the jumps or client cuts a blocked handshake short); the
+        // connect thread finds the stop and tears down the rest.
+        if (!_lifecycle.BeginStop())
             return;
-        _disposed = true;
-        Interlocked.Exchange(ref _closedRaised, 1); // a local disconnect never raises Closed
-        _watchdog?.Dispose();
         TraceHook?.Invoke("Disconnect called");
+        Teardown();
+    }
 
-        _readerCts?.Cancel();
-        try { _shell?.Dispose(); } catch (ObjectDisposedException) { }
-        _shell = null;
-        try { _readerTask?.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
+    /// <summary>Releases whatever is published. Each field is taken by exchange, so a
+    /// Disconnect and a failing or abandoned Connect can both call this, in any order.</summary>
+    private void Teardown()
+    {
+        Interlocked.Exchange(ref _watchdog, null)?.Dispose();
+        Interlocked.Exchange(ref _readerCts, null)?.Cancel();
+        try { Interlocked.Exchange(ref _shell, null)?.Dispose(); } catch (ObjectDisposedException) { }
+        try { Interlocked.Exchange(ref _readerTask, null)?.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
 
-        _tunnels?.Dispose();
-        var client = _client;
-        _client = null;
+        Volatile.Read(ref _tunnels)?.Dispose(); // idempotent; kept so Tunnels still lists what ran
+        var client = Interlocked.Exchange(ref _client, null);
         if (client is not null)
         {
             try
@@ -551,8 +590,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             client.Dispose();
         }
         // After the client: the jumps carry its connection.
-        _jumpChain?.Dispose();
-        _jumpChain = null;
+        Interlocked.Exchange(ref _jumpChain, null)?.Dispose();
     }
 
     // ---- tunnels ----
@@ -566,7 +604,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
     /// <summary>Starts a port forward on this connection. Never throws for a tunnel that
     /// cannot start (port in use, refused by the server): the returned status says why. Blocking.</summary>
     public TunnelStatus StartTunnel(Tunnel tunnel) =>
-        _tunnels is { } tunnels && !_disposed
+        _tunnels is { } tunnels && !_lifecycle.IsStopped
             ? tunnels.Start(tunnel)
             : new TunnelStatus(tunnel, TunnelState.Failed, "The session is not connected.");
 

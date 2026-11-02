@@ -25,8 +25,9 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
         Width = 76,
     };
     private readonly DispatcherQueueTimer _timer;
+    private readonly LatestWinsRunner<double> _seeks;
     private bool _ready;
-    private bool _seekQueued;
+    private bool _initializeStarted;
     private bool _settingTimeline;
     private bool _disposed;
     private long _lastTick;
@@ -35,6 +36,7 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
     {
         _capture = capture;
         _timer = CreateTimer();
+        _seeks = new LatestWinsRunner<double>(SeekAsync, ShowPlaybackError);
         Build("Live");
     }
 
@@ -42,6 +44,7 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
     {
         _recording = recording;
         _timer = CreateTimer();
+        _seeks = new LatestWinsRunner<double>(SeekAsync, ShowPlaybackError);
         Build("Close");
     }
 
@@ -69,6 +72,8 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
             DispatcherQueue.TryEnqueue(() => ShortcutRequested?.Invoke(id, chord));
         _terminal.Ready += (_, _) =>
         {
+            if (_ready || _disposed)
+                return;
             _ready = true;
             _ = InitializeSourceSafelyAsync();
         };
@@ -125,10 +130,21 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
         Grid.SetRow(controls, 1);
         Children.Add(controls);
 
+        // Loaded fires again each time the view is re-parented; the terminal is created once.
         Loaded += async (_, _) =>
         {
-            if (!_ready)
+            if (_ready || _initializeStarted || _disposed)
+                return;
+            _initializeStarted = true;
+            try
+            {
                 await _terminal.InitializeAsync();
+            }
+            catch (Exception exception)
+            {
+                _initializeStarted = false;
+                ShowPlaybackError(exception);
+            }
         };
     }
 
@@ -147,7 +163,7 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
         {
             var snapshot = _capture.Snapshot();
             SetTimelineBounds(snapshot.EarliestTime, snapshot.LatestTime, snapshot.LatestTime);
-            await SeekAsync(snapshot.LatestTime);
+            _seeks.Request(snapshot.LatestTime);
         }
         else if (_recording is not null)
         {
@@ -181,31 +197,18 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
         UpdateTimeLabel(_timeline.Value);
     }
 
+    /// <summary>Seeks to the timeline position. One seek runs at a time; positions set while
+    /// it runs collapse into the newest, which runs next.</summary>
     private void QueueSeek()
     {
-        if (!_ready || _seekQueued)
-            return;
-        _seekQueued = DispatcherQueue.TryEnqueue(() =>
-        {
-            _seekQueued = false;
-            _ = SeekSafelyAsync(_timeline.Value);
-        });
-    }
-
-    private async Task SeekSafelyAsync(double time)
-    {
-        try
-        {
-            await SeekAsync(time);
-        }
-        catch (Exception exception)
-        {
-            ShowPlaybackError(exception);
-        }
+        if (_ready && !_disposed)
+            _seeks.Request(_timeline.Value);
     }
 
     private void ShowPlaybackError(Exception exception)
     {
+        if (_disposed)
+            return;
         SetPlaying(false);
         _time.Text = "Playback failed";
         ToolTipService.SetToolTip(_time, exception.Message);
@@ -213,6 +216,8 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
 
     private async Task SeekAsync(double time)
     {
+        if (_disposed)
+            return;
         if (_capture is not null)
         {
             var snapshot = _capture.Snapshot(time);
@@ -290,6 +295,7 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        _seeks.Stop();
         _timer.Stop();
         _terminal.Dispose();
     }

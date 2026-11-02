@@ -120,12 +120,23 @@ internal sealed class CommandTracker
     private readonly Dictionary<string, Osc3008Record> _osc3008 = new(StringComparer.Ordinal);
     private readonly List<string> _osc3008Order = [];
 
+    /// <summary>Where the shell is in OSC 133's A/B → C → D cycle.</summary>
+    internal enum CommandPhase { Idle, Prompt, Executing }
+
     private long _nextMarkId;
+    // Per connection: a reconnect can land in a shell without integration, whose commands only
+    // Enter-gated discovery and OSC 3008 can see. Cleared by ResetConnection.
     private bool _oscSeen;
-    private bool _executing;
+    private CommandPhase _phase;
     private ICommandMarker? _promptMarker;
     private int _promptCol = -1;
+    // The current command's three faces: its exact mark awaiting D (_pending), its running
+    // report (_executionPending) and its history entry (_historyOpen, which discovered marks use
+    // too). Each ends on its own signal; ResetConnection ends all three together.
     private Mark? _pending;
+    // The live command's mark while a replay runs: the replay's C and D work on its own marks
+    // (in _pending), and must neither finish this one nor lose it.
+    private Mark? _livePending;
 
     private bool _executionReporting;
     private long _executionNextId;
@@ -196,11 +207,11 @@ internal sealed class CommandTracker
                     return;
                 if (kind == 1)
                     FinishExecution(null);
-                if (kind == 1 && _executing)
-                {
-                    _executing = false;
+                if (kind == 1 && _phase == CommandPhase.Executing)
                     FireCommand("", null, exact: true);
-                }
+                // A B with no A is still the same command running (unchanged from before).
+                if (kind == 1 || _phase == CommandPhase.Idle)
+                    _phase = CommandPhase.Prompt;
                 _promptMarker?.Dispose();
                 _promptMarker = cursorMarker;
                 used = cursorMarker is not null;
@@ -210,7 +221,7 @@ internal sealed class CommandTracker
             }
             else if (kind == 3)
             {
-                _executing = true;
+                _phase = CommandPhase.Executing;
                 if (_promptMarker is { IsDisposed: false, Line: >= 0 } prompt)
                 {
                     var line = prompt.Line;
@@ -234,7 +245,7 @@ internal sealed class CommandTracker
             }
             else if (kind == 4)
             {
-                _executing = false;
+                _phase = CommandPhase.Idle;
                 FinishExecution(exit);
                 if (_pending is not null)
                 {
@@ -280,12 +291,46 @@ internal sealed class CommandTracker
         _executionReporting = enabled;
         _executionPending = null;
         _pending = null;
+        _livePending = null;
         if (!enabled)
             ClearPrompt();
     }
 
+    /// <summary>
+    /// The connection ended. Everything about "the command in progress" belonged to it: the
+    /// phase, the pending mark, the running report, the open history entry, a replay the stream
+    /// was cut in the middle of, OSC 3008 contexts and whether the shell had integration. The
+    /// open history entry is recorded with the output it has (the next shell's output is not
+    /// its); the running report and the tab's running command end without events, because a
+    /// dropped transport says nothing about how the command finished (see
+    /// <see cref="SetExecutionReporting"/>; the host clears its own state on disconnect).
+    /// Marks stay on the ruler.
+    /// </summary>
+    public void ResetConnection()
+    {
+        FlushHistory();
+        _phase = CommandPhase.Idle;
+        _pending = null;
+        _livePending = null;
+        _executionPending = null;
+        ClearPrompt();
+        _replaying = false;
+        _replayRunning = null;
+        _oscSeen = false;
+        _osc3008.Clear();
+        _osc3008Order.Clear();
+        foreach (var probe in _probes)
+            probe.Osc3008Id = null;
+        _lastPromptSignature = null;
+    }
+
+    internal CommandPhase Phase => _phase;
+
     private void FinishExecution(int? exitCode)
     {
+        // A replay's A and D are history: they finish nothing that runs now.
+        if (_replaying)
+            return;
         var pending = _executionPending;
         _executionPending = null;
         if (pending is null)
@@ -442,7 +487,10 @@ internal sealed class CommandTracker
     /// A persistent session is sending its screen again after a reattach. The marks in it
     /// are old: they are kept for the ruler, but nothing in them is run, finished or
     /// recorded now. When it ends, the running command is reported once, as it stands.
-    /// A command still running at that point is not recorded when it finishes.
+    /// A command still running at that point is not recorded when it finishes. A live
+    /// command's mark set aside at the start is not finished by the replay's D; it is
+    /// pending again afterwards unless the replay ended inside a command of its own, which
+    /// is then the one the screen shows running.
     /// </summary>
     public void SetReplaying(bool replaying)
     {
@@ -452,8 +500,12 @@ internal sealed class CommandTracker
         if (replaying)
         {
             _replayRunning = null;
+            _livePending = _pending;
+            _pending = null;
             return;
         }
+        _pending ??= _livePending;
+        _livePending = null;
         if (_replayRunning is { } running)
             RunningCommand?.Invoke(running, true);
         _replayRunning = null;
@@ -644,6 +696,8 @@ internal sealed class CommandTracker
                 HistoryFlush(entry, lost: true);
             entry.Marker.Dispose();
             _marks.RemoveAt(i);
+            if (_livePending == entry)
+                _livePending = null;
             if (_pending == entry)
                 _pending = null;
             changed = true;
@@ -940,7 +994,7 @@ internal sealed class CommandTracker
     /// reports that the command ended. Returns the label (or null).</summary>
     public (string Context, string? Platform)? ReportPromptContext(bool force)
     {
-        if (_executing || _buffer.IsAlternate)
+        if (_phase == CommandPhase.Executing || _buffer.IsAlternate)
             return null;
         var row = _buffer.CursorLine;
         var start = row;

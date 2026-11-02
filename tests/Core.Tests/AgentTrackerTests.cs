@@ -272,4 +272,108 @@ public class AgentTrackerTests
         Assert.Equal(AgentAttention.None, tracker.Current.Attention);
         Assert.Null(tracker.Current.Label);
     }
+
+    // ---- the adapter latch is scoped to the agent that reported ----
+
+    private static ProgramStatus Report(ProgramStatusState state, string app = "") =>
+        ProgramStatus.Parse($"{(int)state};0;-1\u001F\u001F{app}\u001F\u001F")
+        ?? throw new InvalidOperationException("unparsed");
+
+    [Fact]
+    public void BellsCountAgainForAnAgentStartedAfterTheAdapterOne()
+    {
+        var tracker = new AgentTracker();
+        tracker.ObserveEvent(Structured("agent;id=claude;state=complete"));
+        tracker.ObserveCommand("codex"); // no adapter installed for this one
+
+        Assert.True(tracker.ObserveEvent(AgentOsc.Bell()));
+        Assert.Equal(AgentAttention.Signal, tracker.Current.Attention);
+    }
+
+    [Fact]
+    public void Osc9CountsAgainAfterAShellTitleRetiresTheAdapterAgent()
+    {
+        var tracker = new AgentTracker();
+        tracker.ObserveEvent(Structured("agent;id=claude;state=working"));
+        tracker.ObserveTitle("bash");
+        tracker.ObserveProcesses(["bash", "codex"]);
+
+        Assert.True(tracker.ObserveEvent(AgentOsc.ParseNotify("Task finished")));
+        Assert.Equal(AgentAttention.Signal, tracker.Current.Attention);
+        Assert.Equal("codex", tracker.Current.Key);
+    }
+
+    [Fact]
+    public void BellsCountAgainAfterTheAdapterSaysTheAgentEnded()
+    {
+        var tracker = new AgentTracker();
+        tracker.ObserveEvent(Structured("agent;id=claude;state=working"));
+        tracker.ObserveEvent(Structured("agent;id=shell"));
+        tracker.ObserveProcesses(["codex"]);
+
+        Assert.True(tracker.ObserveEvent(AgentOsc.Bell()));
+        Assert.Equal(AgentSource.Process, tracker.Current.Source);
+    }
+
+    [Fact]
+    public void SourceIsDetectionOnceTheAdapterRecordIsGone()
+    {
+        var tracker = new AgentTracker();
+        tracker.ObserveCommand("claude");
+        tracker.ObserveProgramStatus(Report(ProgramStatusState.Working, "claude"));
+        Assert.Equal(AgentSource.Structured, tracker.Current.Source);
+
+        tracker.ObserveProgramStatus(ProgramStatus.Cleared);
+        Assert.Equal("claude", tracker.Current.Key);
+        Assert.Equal(AgentSource.Command, tracker.Current.Source);
+        // Its adapter has stopped reporting, so a bell is news again.
+        Assert.True(tracker.ObserveEvent(AgentOsc.Bell()));
+    }
+
+    [Fact]
+    public void SourceIsTheCommandForAnAgentStartedAfterAnAdapterOne()
+    {
+        var tracker = new AgentTracker();
+        tracker.ObserveEvent(Structured("agent;id=claude;state=working"));
+        tracker.ObserveCommand("codex");
+        Assert.Equal(AgentSource.Command, tracker.Current.Source);
+    }
+
+    [Fact]
+    public void BellsStayIgnoredWhileTheAdapterAgentRuns()
+    {
+        var tracker = new AgentTracker();
+        tracker.ObserveCommand("claude");
+        tracker.ObserveEvent(Structured("agent;id=claude;state=complete"));
+        tracker.ObserveTitle("claude"); // a title naming the same agent is no reset
+        tracker.ObserveUserInput();
+
+        Assert.False(tracker.ObserveEvent(AgentOsc.Bell()));
+    }
+
+    [Fact]
+    public void LiftingSuppressionDoesNotBringBackAStaleBadge()
+    {
+        var tracker = new AgentTracker();
+        tracker.ObserveEvent(Structured("agent;id=claude;state=needs-approval;label=Delete%20file"));
+        tracker.SetManualOverride("none");
+        // While suppressed, the agent exits; nothing is observed.
+        tracker.ObserveCommand("ls");
+        tracker.SetManualOverride(null);
+
+        Assert.False(tracker.Current.IsAgent);
+        Assert.Equal(AgentAttention.None, tracker.Current.Attention);
+        Assert.Null(tracker.Current.Label);
+    }
+
+    [Fact]
+    public void ClearingASessionDefaultOfNoneForgetsWhatWasShowingBefore()
+    {
+        var tracker = new AgentTracker();
+        tracker.ObserveEvent(Structured("agent;id=claude;state=needs-answer"));
+        tracker.SessionDefault = AgentIdentities.None;
+        tracker.SessionDefault = null;
+
+        Assert.Equal(AgentSnapshot.Empty, tracker.Current);
+    }
 }

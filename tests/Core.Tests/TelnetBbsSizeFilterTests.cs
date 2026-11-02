@@ -35,8 +35,9 @@ public sealed class TelnetBbsSizeFilterTests
     [InlineData("\u001b[12;30H\u001b[6n")]
     [InlineData("\u001b[255Bhello\u001b[6n")]
     [InlineData("\u001b[999")]
-    [InlineData("\u001b]title\u001b[255B\u001b[255C\u001b[6n\u0007")]
-    [InlineData("\u001bP\u001b[18t\u001b\\")]
+    [InlineData("\u001b]title [6n 18t\u0007\u001b[6n")]
+    [InlineData("\u001bPdata\u001b\\\u001b[6n")]
+    [InlineData("\u001b]8;;http://x\u001b\\link\u001b]8;;\u001b\\")]
     public void OrdinaryOutputAndCursorQueries_AreUnchanged(string text)
     {
         var filter = new TelnetBbsSizeFilter();
@@ -47,6 +48,75 @@ public sealed class TelnetBbsSizeFilterTests
         output.AddRange(filter.Process([], replies, flush: true));
         Assert.Equal(text, Encoding.ASCII.GetString([.. output]));
         Assert.Empty(replies);
+    }
+
+    [Theory]
+    [InlineData("\u001b]title\u001b[18t", "\u001b]title")] // ESC that is not ST ends the string
+    [InlineData("\u001bPdata\u0018\u001b[18t", "\u001bPdata\u0018")] // CAN aborts it
+    [InlineData("\u001b_apc\u001a\u001b[18t", "\u001b_apc\u001a")] // and so does SUB
+    public void AnAbortedString_DoesNotHideTheNextProbe(string text, string expected)
+    {
+        foreach (var chunk in new[] { 1, text.Length })
+        {
+            var filter = new TelnetBbsSizeFilter();
+            var output = new List<byte>();
+            var replies = new List<byte>();
+            var bytes = Encoding.ASCII.GetBytes(text);
+            for (var offset = 0; offset < bytes.Length; offset += chunk)
+                output.AddRange(filter.Process(bytes.AsSpan(offset, Math.Min(chunk, bytes.Length - offset)), replies));
+            Assert.Equal(expected, Encoding.ASCII.GetString([.. output]));
+            Assert.Equal("\u001b[8;25;80t", Encoding.ASCII.GetString([.. replies]));
+        }
+    }
+
+    [Theory]
+    [InlineData("\u001b")]
+    [InlineData("menu\u001b[999B")]
+    [InlineData("\u001b[255;255H")]
+    public void HeldOutput_IsReleasedByAFlush(string text)
+    {
+        var filter = new TelnetBbsSizeFilter();
+        var output = new List<byte>(filter.Process(Encoding.ASCII.GetBytes(text), []));
+        Assert.True(filter.HasHeldOutput);
+        output.AddRange(filter.FlushHeld());
+        Assert.False(filter.HasHeldOutput);
+        Assert.Equal(text, Encoding.ASCII.GetString([.. output]));
+    }
+
+    [Fact]
+    public void AFlushedEscape_CanStillOpenAString()
+    {
+        var filter = new TelnetBbsSizeFilter();
+        var replies = new List<byte>();
+        var output = new List<byte>(filter.Process("\u001b"u8, replies));
+        output.AddRange(filter.FlushHeld());
+        output.AddRange(filter.Process("]x\u001b[18t\u0007"u8, replies));
+        // The ESC inside the string ends it, so the query is answered, not shown.
+        Assert.Equal("\u001b]x\u0007", Encoding.ASCII.GetString([.. output]));
+        Assert.Equal("\u001b[8;25;80t", Encoding.ASCII.GetString([.. replies]));
+    }
+
+    [Fact]
+    public async Task Connection_ReleasesAHeldCursorMoveWhenTheServerGoesQuiet()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var session = new TelnetTerminalSession();
+        var received = new List<byte>();
+        var done = new TaskCompletionSource();
+        session.OutputReceived += data =>
+        {
+            lock (received)
+            {
+                received.AddRange(data.ToArray());
+                if (Encoding.ASCII.GetString([.. received]).EndsWith("\u001b[999B"))
+                    done.TrySetResult();
+            }
+        };
+        session.Connect("127.0.0.1", ((IPEndPoint)listener.LocalEndpoint).Port, "xterm", 80, 25, report80x25: true);
+        using var peer = await listener.AcceptTcpClientAsync();
+        await peer.GetStream().WriteAsync("Press a key\u001b[999B"u8.ToArray());
+        await done.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]

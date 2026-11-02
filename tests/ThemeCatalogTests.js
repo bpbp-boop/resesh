@@ -117,11 +117,11 @@ test("the command palette is built from theme surfaces, not Fluent defaults", ()
 test("the command palette composes above terminal surfaces without visibility workarounds", () => {
   assert.match(
     mainWindow,
-    /ShowCommandPalette\(bool openedFromTerminal = false\)[\s\S]*?CommandPalette\.Open\(commands\)/,
+    /void ShowCommandPalette\(\)[\s\S]*?CommandPalette\.Open\(commands\)/,
   );
   assert.match(
     mainWindow,
-    /CloseCommandPalette\(\)[\s\S]*?CommandPalette\.Close\(\);[\s\S]*?RestorePaletteFocus\(\)/,
+    /CloseCommandPalette\(bool restoreFocus\)[\s\S]*?CommandPalette\.Close\(\);[\s\S]*?RestoreOverlayFocus\(focus\)/,
   );
   assert.doesNotMatch(mainWindow, /SetTerminalHostsVisible/);
 });

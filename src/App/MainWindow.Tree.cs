@@ -42,20 +42,28 @@ public sealed partial class MainWindow
 
     private void SetSplitterActive(object sender, bool active)
     {
-        if (sender is CommunityToolkit.WinUI.Controls.GridSplitter splitter
-            && _splitterLines.TryGetValue(splitter, out var line))
+        if (sender is not CommunityToolkit.WinUI.Controls.GridSplitter splitter)
+            return;
+        if (!_splitterLines.TryGetValue(splitter, out var line))
         {
-            if (active)
-                _activeSplitters.Add(splitter);
-            else
-                _activeSplitters.Remove(splitter);
-            line.Background = SplitterBrush(line, active);
-            SplitterHighlight.SetLineThickness(
-                line,
-                columns: splitter.ResizeDirection == CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns,
-                active);
-            UpdatePaneFocusFrame();
+            // A splitter dropped by a layout rebuild reports going to rest when it unloads.
+            // It must leave the active set even though its line is gone, or the focus frame
+            // would stay hidden; it is never shown again, so it may not become active.
+            if (!active && _activeSplitters.Remove(splitter))
+                UpdatePaneFocusFrame();
+            return;
         }
+
+        if (active)
+            _activeSplitters.Add(splitter);
+        else
+            _activeSplitters.Remove(splitter);
+        line.Background = SplitterBrush(line, active);
+        SplitterHighlight.SetLineThickness(
+            line,
+            columns: splitter.ResizeDirection == CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns,
+            active);
+        UpdatePaneFocusFrame();
     }
 
     /// <summary>Gutters stay neutral; pane focus is drawn by <see cref="UpdatePaneFocusFrame"/>.</summary>
@@ -162,12 +170,19 @@ public sealed partial class MainWindow
     /// TreeViewItem ignores IsExpanded applied while its children aren't realized yet
     /// (container recycling), so after each rebuild we push the view-model state onto the
     /// realized containers, re-queueing until the tree settles (expanding a node realizes
-    /// its children on a later tick).
+    /// its children on a later tick). Only the latest rebuild's chain runs: an older one
+    /// would push a superseded tree's state and multiply the passes on rapid rebuilds.
     /// </summary>
-    private void ScheduleExpansionSync(int remainingPasses = 10)
+    private void ScheduleExpansionSync() => ScheduleExpansionPass(++_expansionSyncGeneration, 10);
+
+    private int _expansionSyncGeneration;
+
+    private void ScheduleExpansionPass(int generation, int remainingPasses)
     {
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
+            if (generation != _expansionSyncGeneration || _windowClosed)
+                return;
             var changed = false;
 
             void Sync(IEnumerable<TreeNodeViewModel> nodes)
@@ -201,7 +216,7 @@ public sealed partial class MainWindow
                 var timer = DispatcherQueue.CreateTimer();
                 timer.Interval = TimeSpan.FromMilliseconds(50);
                 timer.IsRepeating = false;
-                timer.Tick += (_, _) => ScheduleExpansionSync(remainingPasses - 1);
+                timer.Tick += (_, _) => ScheduleExpansionPass(generation, remainingPasses - 1);
                 timer.Start();
             }
         });
