@@ -1959,3 +1959,16 @@ is removed, so "π - project" and "~/src" are untouched.
 - The plain-text log renderer holds at most 1024 unfinished rows (the topmost is written
   out early) and 8192 characters per row, and line feeds stop counting at row 65535. A
   hostile stream could otherwise make it hold gigabytes.
+
+## 2026-11-02 - The exit prompt counts sessions when it appears and brings its window forward
+- Closing a window with open sessions waits for any dialog already queued on that window
+  (`ModalDialogPresenter.WaitForQueuedDialogsAsync`) before it counts sessions and builds
+  the prompt, so the count isn't from before a host-key or close dialog was answered. If no
+  sessions are left by then, the window just closes.
+- A session that joins the window while the prompt is open (dragged in, a jump-list launch)
+  was not part of the question, so a confirmed prompt asks again. Sessions closing meanwhile
+  only make "Exit" safer and are not re-asked.
+- Every close request that needs the prompt calls `BringToFront`. A taskbar close can come
+  while the window is minimized, and a second X while the prompt waits behind another of
+  the window's dialogs used to do nothing visible; the dialog that must be answered first
+  is now in view. The other dialog is not dismissed: its answer may matter (a host key).

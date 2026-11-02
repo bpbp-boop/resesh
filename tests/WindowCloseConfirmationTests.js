@@ -13,10 +13,13 @@ test("all window-close actions use the shared open-session confirmation guard", 
   assert.match(services, /void IMainWindowServices\.CloseWindow\(\) => Close\(\);/);
 
   const handler = source.match(
-    /private void AppWindow_Closing[\s\S]*?\n    }\r?\n\r?\n    private async Task ConfirmWindowCloseAsync/)?.[0] ?? "";
+    /private void AppWindow_Closing[\s\S]*?\n    }\r?\n\r?\n    private bool NeedsCloseConfirmation/)?.[0] ?? "";
 
   assert.match(handler, /if \(_closeConfirmed \|\| !ViewModel\.AllTabs\.Any\(\)\)/);
   assert.match(handler, /args\.Cancel = true/);
+  // A repeated close request while the prompt waits brings the window forward rather than
+  // looking dead.
+  assert.match(handler, /args\.Cancel = true;[\s\S]*?BringToFront\(\);\s*if \(_closePromptOpen\)\s*return;/);
   assert.match(handler, /ConfirmWindowCloseAsync\(\)/);
 });
 
@@ -24,7 +27,11 @@ test("the shared close dialog confirms exit unless no sessions remain", () => {
   const method = source.match(
     /private async Task ConfirmWindowCloseAsync[\s\S]*?\n    }\r?\n\r?\n    private void PinButton_Click/)?.[0] ?? "";
 
-  assert.match(method, /if \(count == 0\)[\s\S]*?_closeConfirmed = true;[\s\S]*?Close\(\);[\s\S]*?return;/);
+  // The count is taken after the dialogs queued ahead of the prompt are answered.
+  assert.match(method, /WaitForQueuedDialogsAsync\(xamlRoot\);\s*if \(_windowClosed\)\s*return;\s*if \(!NeedsCloseConfirmation\(\)\)\s*\{\s*_closeConfirmed = true;\s*Close\(\);\s*return;[\s\S]*?var count = sessions\.Count;/);
+  // A session that arrived while the prompt was open was not part of the question.
+  assert.match(method, /if \(!confirmed \|\| _windowClosed\)\s*return;\s*if \(ViewModel\.AllTabs\.Any\([^;]*!sessions\.Contains\(tab\)\)\)\s*continue;/);
+  assert.match(method, /catch \(Exception ex\)\s*\{\s*App\.ReportRecoverableError\(ex\);\s*\}\s*finally\s*\{\s*_closePromptOpen = false;/);
   assert.match(method, /"Exit resesh\?"/);
   assert.match(method, /\$"Are you sure you want to exit\?/);
   assert.match(method, /"Exit",\s*acceptY: true/);

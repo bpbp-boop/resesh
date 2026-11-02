@@ -1009,11 +1009,15 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         // open sessions, but let an empty window close immediately.
         if (_closeConfirmed || !ViewModel.AllTabs.Any())
             return;
-        if (!App.Settings.Current.ConfirmCloseActiveSessions
-            || !ViewModel.AllTabs.Any(tab => !tab.IsAppPage))
+        if (!NeedsCloseConfirmation())
             return;
 
         args.Cancel = true;
+        // The prompt shows inside this window. A close from the taskbar can arrive while the
+        // window is minimized or behind others, and a second click while the prompt waits
+        // behind another of this window's dialogs would otherwise look dead: bring the
+        // window forward so the dialog that has to be answered first is in view.
+        BringToFront();
         if (_closePromptOpen)
             return;
 
@@ -1021,30 +1025,53 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         _ = ConfirmWindowCloseAsync();
     }
 
+    private bool NeedsCloseConfirmation() =>
+        App.Settings.Current.ConfirmCloseActiveSessions && ViewModel.AllTabs.Any(tab => !tab.IsAppPage);
+
+    /// <remarks>Waits for dialogs queued ahead of it before counting sessions, so the count is
+    /// current when the prompt appears. A session that arrives while the prompt is open (a
+    /// tab dragged in, a jump-list launch) wasn't part of the question, so the prompt asks
+    /// again; sessions that close meanwhile only make the answer safer.</remarks>
     private async Task ConfirmWindowCloseAsync()
     {
         try
         {
-            var count = ViewModel.AllTabs.Count(tab => !tab.IsAppPage);
-            if (count == 0)
+            while (true)
             {
-                _closeConfirmed = true;
-                Close();
-                return;
-            }
+                if (Root.XamlRoot is { } xamlRoot)
+                    await ModalDialogPresenter.WaitForQueuedDialogsAsync(xamlRoot);
+                if (_windowClosed)
+                    return;
+                if (!NeedsCloseConfirmation())
+                {
+                    _closeConfirmed = true;
+                    Close();
+                    return;
+                }
 
-            var sessionText = count == 1 ? "session" : "sessions";
-            var pronoun = count == 1 ? "it" : "them";
-            if (await ConfirmDialog.ConfirmAsync(
+                var sessions = ViewModel.AllTabs.Where(tab => !tab.IsAppPage).ToHashSet();
+                var count = sessions.Count;
+                var sessionText = count == 1 ? "session" : "sessions";
+                var pronoun = count == 1 ? "it" : "them";
+                var confirmed = await ConfirmDialog.ConfirmAsync(
                     Root.XamlRoot,
                     "Exit resesh?",
                     $"Are you sure you want to exit? You have {count} open {sessionText}. Exiting will close {pronoun}.",
                     "Exit",
-                    acceptY: true))
-            {
+                    acceptY: true);
+                if (!confirmed || _windowClosed)
+                    return;
+                if (ViewModel.AllTabs.Any(tab => !tab.IsAppPage && !sessions.Contains(tab)))
+                    continue;
+
                 _closeConfirmed = true;
                 Close();
+                return;
             }
+        }
+        catch (Exception ex)
+        {
+            App.ReportRecoverableError(ex);
         }
         finally
         {
