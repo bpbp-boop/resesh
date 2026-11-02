@@ -115,6 +115,72 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             StatsSurface = FrameStats.NextSurfaceId();
     }
 
+    /// <summary>The renderer has no usable device objects: a device loss tore them down and
+    /// rebuilding failed, or another renderer recreated the shared device since they were made.
+    /// Under <see cref="DeviceGate"/>.</summary>
+    private bool NeedsResources => _dc is null || _generation != s_generation || s_device is null;
+
+    /// <summary>Makes sure the device objects exist, rebuilding them (and the shared device)
+    /// when a device loss left them missing. False when they could not be made; the caller
+    /// skips the frame and tries again later (<see cref="RetryDelay"/>).</summary>
+    public bool EnsureResources()
+    {
+        lock (DeviceGate)
+            return EnsureResourcesLocked(notify: true);
+    }
+
+    /// <summary>How long a caller waits before trying again after <see cref="EnsureResources"/>
+    /// failed: device creation is what failed, and it is not cheap.</summary>
+    public static TimeSpan RetryDelay => TimeSpan.FromMilliseconds(SharedRetryMs);
+
+    private const int SharedRetryMs = 1000;
+    private static long s_nextSharedAttemptMs;
+
+    private bool EnsureResourcesLocked(bool notify)
+    {
+        if (_disposed)
+            return false;
+        if (!NeedsResources)
+            return true;
+        if (s_device is null && Environment.TickCount64 < s_nextSharedAttemptMs)
+            return false;
+        try
+        {
+            if (s_device is null)
+            {
+                try
+                {
+                    EnsureShared();
+                }
+                catch
+                {
+                    s_nextSharedAttemptMs = Environment.TickCount64 + SharedRetryMs;
+                    throw;
+                }
+            }
+            DisposeDeviceResources();
+            CreateDeviceResources();
+            if (_fontFamilyList is { } family)
+                SetFontLocked(family, _emSize);
+            if (PixelWidth > 0 && PixelHeight > 0)
+            {
+                // The swap chain is gone: ResizeLocked makes a new one at the same size.
+                ResizeLocked(PixelWidth, PixelHeight, 0, 0);
+                SetCompositionScaleLocked(_compositionScaleX, _compositionScaleY);
+            }
+        }
+        catch (Exception exception)
+        {
+            // Leave nothing half-built: the next attempt starts over.
+            DisposeDeviceResources();
+            TerminalSurface.TraceHook?.Invoke($"renderer resources could not be rebuilt: {exception.Message}");
+            return false;
+        }
+        if (notify)
+            SwapChainChanged?.Invoke();
+        return true;
+    }
+
     private void CreateDeviceResources()
     {
         _dc = s_d2dDevice!.CreateDeviceContext(DeviceContextOptions.None);
@@ -188,21 +254,14 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 renderer.SwapChainChanged?.Invoke();
             }
             DisposeShared();
-            EnsureShared();
+            s_nextSharedAttemptMs = 0; // a fresh loss tries at once
+            // Each renderer rebuilds on its own and survives its own failure (and the shared
+            // device's): one that fails here is left needing resources, and rebuilds when its
+            // surface next draws, resizes or sets a font.
             foreach (var renderer in renderers)
-            {
-                if (renderer._disposed)
-                    continue;
-                renderer.CreateDeviceResources();
-                if (renderer._fontFamilyList is { } family)
-                    renderer.SetFont(family, renderer._emSize);
-                if (renderer.PixelWidth > 0 && renderer.PixelHeight > 0)
-                {
-                    renderer.Resize(renderer.PixelWidth, renderer.PixelHeight);
-                    renderer.SetCompositionScale(renderer._compositionScaleX, renderer._compositionScaleY);
-                }
-            }
+                renderer.EnsureResourcesLocked(notify: false);
             // Notify only after every renderer is rebuilt; callbacks can schedule another frame.
+            // A renderer that failed is notified too: its panel must let go of the old chain.
             foreach (var renderer in renderers)
                 if (!renderer._disposed)
                     renderer.SwapChainChanged?.Invoke();
@@ -218,7 +277,18 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     public void SetFont(string fontFamilyList, float emPixels)
     {
         lock (DeviceGate)
+        {
+            if (NeedsResources)
+            {
+                // Kept for the rebuild, which loads it; without one, nothing can measure yet
+                // and the cell keeps its last size until a rebuild succeeds.
+                _fontFamilyList = fontFamilyList;
+                _emSize = emPixels;
+                EnsureResourcesLocked(notify: true);
+                return;
+            }
             SetFontLocked(fontFamilyList, emPixels);
+        }
     }
 
     private void SetFontLocked(string fontFamilyList, float emPixels)
@@ -332,7 +402,20 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     public bool Resize(int pixelWidth, int pixelHeight, int capacityWidth = 0, int capacityHeight = 0)
     {
         lock (DeviceGate)
+        {
+            if (NeedsResources)
+            {
+                // Recorded for the rebuild, which makes the swap chain at this size and
+                // announces it through SwapChainChanged.
+                PixelWidth = Math.Max(1, pixelWidth);
+                PixelHeight = Math.Max(1, pixelHeight);
+                _capacityWidth = Math.Max(_capacityWidth, capacityWidth);
+                _capacityHeight = Math.Max(_capacityHeight, capacityHeight);
+                EnsureResourcesLocked(notify: true);
+                return false;
+            }
             return ResizeLocked(pixelWidth, pixelHeight, capacityWidth, capacityHeight);
+        }
     }
 
     private bool ResizeLocked(int pixelWidth, int pixelHeight, int capacityWidth, int capacityHeight)
@@ -401,7 +484,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     private void ClearLocked(uint color)
     {
-        if (_disposed || _swapChain is null || _canvas is null)
+        if (_disposed || NeedsResources || _swapChain is null || _canvas is null)
             return;
         _dc.BeginDraw();
         SetBrush(Rgb(color));
@@ -517,7 +600,9 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private bool DrawLocked(TerminalCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
         bool cursorShown, bool focused, uint selectionColor, bool full)
     {
-        if (_disposed || _swapChain is null || _canvas is null)
+        // Resources a device loss left missing, or made on a device since replaced, are rebuilt
+        // first; a renderer that missed a recovery (or whose rebuild failed) catches up here.
+        if (!EnsureResourcesLocked(notify: true) || _swapChain is null || _canvas is null)
             return false;
         var observedGeneration = _generation;
         if (_runGlyphs.Length < cols)

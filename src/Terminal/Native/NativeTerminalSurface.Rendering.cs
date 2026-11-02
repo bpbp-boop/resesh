@@ -75,6 +75,27 @@ public sealed unsafe partial class NativeTerminalSurface
 
     private void ForceFull() => Volatile.Write(ref _forceFull, 1);
 
+    private Timer? _rendererRetry;
+
+    private void ScheduleRendererRetry()
+    {
+        if (_disposed)
+            return;
+        _rendererRetry ??= new Timer(_ =>
+        {
+            ForceFull();
+            RequestFrame();
+        });
+        try
+        {
+            _rendererRetry.Change(TerminalRenderer.RetryDelay, Timeout.InfiniteTimeSpan);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Disposed meanwhile.
+        }
+    }
+
     private void StartRenderThread()
     {
         if (_renderThread is not null)
@@ -242,7 +263,16 @@ public sealed unsafe partial class NativeTerminalSurface
             return default;
         if (_renderingPaused)
             return new FrameEffects { Annotate = true }; // nothing to draw, but command tracking follows the output
-        if (!_loaded || _replaying || !_visible || _cells == null || _renderer.SwapChain is null)
+        if (!_loaded || _replaying || !_visible || _cells == null)
+            return default;
+        if (!_renderer.EnsureResources())
+        {
+            // A device loss whose rebuild failed: nothing else asks for frames while this
+            // terminal is blank, so come back for another attempt.
+            ScheduleRendererRetry();
+            return default;
+        }
+        if (_renderer.SwapChain is null)
             return default;
         if ((long)Columns * Rows > _cellCapacity || Rows > _dirtyCapacity)
             return default; // a failed resize must not read a frame into the previous, smaller buffers
