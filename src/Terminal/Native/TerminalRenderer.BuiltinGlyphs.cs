@@ -4,8 +4,8 @@ using Vortice.Mathematics;
 
 namespace Resesh.Terminal.Native;
 
-// Draws the characters in BuiltinGlyphs: boxes as whole-pixel rectangles, and the arcs, diagonals
-// and Powerline shapes as paths clipped to their cell.
+// Draws the characters in BuiltinGlyphs: boxes as whole-pixel rectangles, and the arcs, diagonals,
+// wedges, circles and Powerline shapes as paths clipped to their cell.
 internal sealed unsafe partial class TerminalRenderer
 {
     // Light box-drawing line thickness in pixels, from the font's underline; heavy is twice it.
@@ -18,12 +18,17 @@ internal sealed unsafe partial class TerminalRenderer
     /// a glyph's boxes overlap where its lines join and would show through each other otherwise.</summary>
     private void DrawBuiltinGlyph(uint codepoint, float left, float top, uint foreground, uint background, float alpha)
     {
-        alpha *= BuiltinGlyphs.ShadeOf(codepoint);
         Color4 fg = Rgb(foreground), bg = Rgb(background);
-        SetBrush(new Color4(bg.R + (fg.R - bg.R) * alpha, bg.G + (fg.G - bg.G) * alpha, bg.B + (fg.B - bg.B) * alpha, 1));
+        Color4 Mix(float a) => new(bg.R + (fg.R - bg.R) * a, bg.G + (fg.G - bg.G) * a, bg.B + (fg.B - bg.B) * a, 1);
+        if (BuiltinGlyphs.HasShadedBackdrop(codepoint))
+        {
+            SetBrush(Mix(alpha * 0.5f));
+            _dc.FillRectangle(new Rect(left, top, CellWidth, CellHeight), _brush);
+        }
+        SetBrush(Mix(alpha * BuiltinGlyphs.ShadeOf(codepoint)));
         if (BuiltinGlyphs.IsVector(codepoint))
         {
-            DrawVectorGlyph(codepoint, left, top);
+            DrawVectorGlyph(codepoint, left, top, bg);
             return;
         }
         Span<BuiltinGlyphs.Box> boxes = stackalloc BuiltinGlyphs.Box[BuiltinGlyphs.MaxBoxes];
@@ -32,7 +37,7 @@ internal sealed unsafe partial class TerminalRenderer
             _dc.FillRectangle(new Rect(left + box.Left, top + box.Top, box.Right - box.Left, box.Bottom - box.Top), _brush);
     }
 
-    private void DrawVectorGlyph(uint codepoint, float left, float top)
+    private void DrawVectorGlyph(uint codepoint, float left, float top, Color4 background)
     {
         float width = CellWidth, height = CellHeight;
         _dc.Transform = Matrix3x2.CreateTranslation(left, top);
@@ -40,6 +45,9 @@ internal sealed unsafe partial class TerminalRenderer
         _dc.PushAxisAlignedClip(new Rect(0, 0, width, height), AntialiasMode.Aliased);
         switch (codepoint)
         {
+            case >= 0x1FB00:
+                DrawLegacyGlyph(codepoint, width, height, background);
+                break;
             case 0x2571 or 0xE0BB or 0xE0BD: // ╱
                 DrawDiagonal(width, height, rising: true);
                 break;
@@ -59,6 +67,38 @@ internal sealed unsafe partial class TerminalRenderer
         }
         _dc.PopAxisAlignedClip();
         _dc.Transform = Matrix3x2.Identity;
+    }
+
+    /// <summary>Symbols for Legacy Computing: circles, lines (cut out of a solid cell for the
+    /// inverted ones) or filled polygons, all from BuiltinGlyphs' geometry.</summary>
+    private void DrawLegacyGlyph(uint codepoint, float width, float height, Color4 background)
+    {
+        if (BuiltinGlyphs.Circle(codepoint, width, height, out var center, out var radius, out var filled))
+        {
+            if (filled)
+                _dc.FillEllipse(new Ellipse(center, radius, radius), _brush);
+            else
+            {
+                // Inset by half the line so the outline stays inside the circle's edge.
+                var inset = radius - _boxThickness / 2f;
+                _dc.DrawEllipse(new Ellipse(center, inset, inset), _brush, _boxThickness);
+            }
+            return;
+        }
+        Span<BuiltinGlyphs.Segment> segments = stackalloc BuiltinGlyphs.Segment[BuiltinGlyphs.MaxSegments];
+        var count = BuiltinGlyphs.Segments(codepoint, width, height, _boxThickness, segments);
+        if (count > 0)
+        {
+            if (BuiltinGlyphs.IsInverted(codepoint))
+            {
+                _dc.FillRectangle(new Rect(0, 0, width, height), _brush);
+                SetBrush(background);
+            }
+            foreach (var segment in segments[..count])
+                _dc.DrawLine(segment.From, segment.To, _brush, _boxThickness);
+            return;
+        }
+        _dc.FillGeometry(GlyphGeometry(codepoint), _brush);
     }
 
     /// <summary>Corner to corner, run slightly past both so the clipped ends fill the corners and
@@ -98,6 +138,14 @@ internal sealed unsafe partial class TerminalRenderer
                 case 0xE0BA: AddPolyline(sink, true, new(w, 0), new(w, h), new(0, h)); break;
                 case 0xE0BC: AddPolyline(sink, true, new(0, 0), new(w, 0), new(0, h)); break;
                 case 0xE0BE: AddPolyline(sink, true, new(0, 0), new(w, 0), new(w, h)); break;
+                default:
+                {
+                    Span<Vector2> points = stackalloc Vector2[BuiltinGlyphs.MaxPoints];
+                    var count = BuiltinGlyphs.Polygon(codepoint, w, h, points);
+                    if (count > 0)
+                        AddPolyline(sink, true, points[..count]);
+                    break;
+                }
             }
             sink.Close();
         }

@@ -1725,3 +1725,17 @@ is removed, so "π - project" and "~/src" are untouched.
   cleaned, so a snapshot followed by a live update loses no rows.
 - Search highlights keep their previous spans on snapshot frames; they refresh on the next
   read outside a hold.
+
+## 2026-11-02 - Symbols for Legacy Computing and octants are drawn built in
+- notcurses-info's character chart showed empty boxes for wedges, triangles, eighth blocks,
+  diagonals and octants: Cascadia Mono and the fallback fonts don't have them. They are now
+  drawn like box drawing, following Ghostty's sprite font: U+1FB3C-1FBAF, U+1FBBD-1FBBF,
+  U+1FBCE-1FBEF and the octants U+1CD00-1CDE5. The segmented digits (U+1FBF0-1FBF9) and
+  the remaining pictures of the block stay with the font, as in Ghostty.
+- Geometry lives in `BuiltinGlyphs` (boxes, polygons, line segments and circles) so it is
+  tested without a window; the renderer only draws it. Glyphs that are half medium shade
+  and half solid fill the cell at half coverage first, and the inverted diagonals fill the
+  cell and stroke their lines in the background color.
+- The diagonal fills (U+1FB98, U+1FB99) space their lines exactly rather than rounding the
+  spacing as Ghostty does, which left the cell corners bare at some sizes.
+- Checkerboards cap their rows at 16 so very tall cells stay within `MaxBoxes`.
