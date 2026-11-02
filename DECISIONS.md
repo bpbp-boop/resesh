@@ -1706,3 +1706,22 @@ fallback when nothing set a title) never counts. The leading status glyph agents
 their titles (Claude's "✳" and braille spinner, Codex's spinner) is dropped from the tab,
 since it changes several times a second; only a lone non-ASCII symbol followed by a space
 is removed, so "π - project" and "~/src" are untouched.
+
+## 2026-11-02 - Synchronized output draws the last completed frame during floods
+- notcurses-demo's grid scene froze the screen for its whole 67 seconds: it sends 475 KB
+  synchronized (mode 2026) frames back to back, faster than they arrived over SSH, so the
+  terminal was mid-frame at nearly every instant. The renderer checks once per composition
+  and almost never landed in the microseconds between one frame's end and the next's start,
+  and the one-second hold timeout restarts with every frame, so nothing was ever drawn.
+- Once a read finds the terminal held, `rvt_write` cuts its parse slices just after each
+  `CSI ? 2026 l` (matching across slices and writes) and snapshots the render state there.
+  A held read with a snapshot copies its rows and still reports `render_held`, so the
+  surface draws them and keeps polling. Reads that find no hold turn snapshots off again,
+  so ordinary output pays nothing. Shim ABI 11.
+- `rs_lock` guards the render state between the writer's snapshot and `rvt_read_frame`.
+  The reader takes it before the terminal lock; the writer, already holding the terminal
+  lock, only tries it and skips that snapshot if the renderer is busy, so the two can't
+  deadlock. libghostty-vt's render state accumulates dirty rows across updates until
+  cleaned, so a snapshot followed by a live update loses no rows.
+- Search highlights keep their previous spans on snapshot frames; they refresh on the next
+  read outside a hold.

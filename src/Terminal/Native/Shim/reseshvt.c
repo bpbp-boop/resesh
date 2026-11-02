@@ -22,7 +22,7 @@ __declspec(dllimport) uint64_t __stdcall GetTickCount64(void);
 __declspec(dllimport) int __stdcall QueryPerformanceCounter(int64_t* count);
 __declspec(dllimport) int __stdcall QueryPerformanceFrequency(int64_t* frequency);
 
-#define RVT_ABI_VERSION 10
+#define RVT_ABI_VERSION 11
 
 // ---- events -------------------------------------------------------------------------------
 
@@ -101,7 +101,7 @@ typedef struct {
   uint64_t scroll_total;  // rows in the scrollable area
   uint64_t scroll_offset; // first viewport row within it
   uint64_t scroll_len;    // viewport rows
-  uint8_t render_held;    // no frame published; keep polling until release or the 1s timeout
+  uint8_t render_held;    // mid-frame: keep polling until release or the 1s timeout; rows, if any, are the last completed frame
   uint8_t mouse_shape;    // GhosttyMouseShape the program requested through OSC 22
 } RvtFrameInfo;
 
@@ -132,6 +132,15 @@ typedef struct {
   uint32_t cell_w, cell_h, screen_w, screen_h;
   bool render_held;
   uint64_t hold_started_ms;
+  // Synchronized-output snapshots (see rvt_write). rs_lock guards rs, it, cells and the snap_
+  // fields; rvt_read_frame takes it before the terminal lock, the writer only ever tries it.
+  RvtSrwLock rs_lock;
+  volatile bool wants_snapshot; // the renderer found the terminal mid-frame: snapshot frame ends
+  bool hold_released;           // a hold ended during the current slice
+  bool snap_ready;              // rs holds a completed frame the renderer hasn't read
+  uint8_t esu_match;            // bytes of "ESC [ ? 2026 l" matched at the end of the last slice
+  GhosttyTerminalScrollbar snap_bar;
+  uint8_t snap_alternate, snap_mouse_shape;
   uint64_t compress_activity; // libghostty-vt activity token when compression was last scheduled
   bool compress_scheduled;    // RVT_EVENT_COMPRESS sent and rvt_compress hasn't finished
 } RvtTerm;
@@ -215,6 +224,7 @@ static void on_render_hold(GhosttyTerminal term, void* user, bool held) {
   RvtTerm* t = (RvtTerm*)user;
   // This callback runs with our terminal lock held, at the exact start of the hold.
   if (held) t->hold_started_ms = GetTickCount64();
+  else t->hold_released = true;
   t->render_held = held;
 }
 
@@ -382,6 +392,7 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
   RvtTerm* t = (RvtTerm*)calloc(1, sizeof *t);
   if (!t) return NULL;
   InitializeSRWLock(&t->lock);
+  InitializeSRWLock(&t->rs_lock);
   t->on_event = on_event;
   t->user = user;
   if (ghostty_terminal_new(NULL, &t->term, cols, rows) != GHOSTTY_SUCCESS ||
@@ -527,12 +538,57 @@ static void let_waiter_in(RvtTerm* t) {
   } while (__atomic_load_n(&t->waiting, __ATOMIC_SEQ_CST) > 0 && now - start < limit);
 }
 
+// Synchronized output (mode 2026) holds the renderer until the program ends its frame. When
+// frames arrive back to back faster than they parse (notcurses' grid demo sends 475 KB
+// frames), the terminal is nearly always mid-frame, the renderer's once-per-composition
+// check never lands between frames, and the screen freezes on the last frame drawn before
+// the flood. So once the renderer has been turned away, the writer cuts its slices just
+// after each "end synchronized update" and snapshots the completed frame into the render
+// state, which the renderer draws while the next frame is still arriving.
+static const uint8_t RVT_ESU[] = { 0x1B, '[', '?', '2', '0', '2', '6', 'l' };
+
+// Length of the slice up to and including the first ESU, or n. The match carries across
+// slices and writes, so a sequence split between two SSH reads still cuts.
+static size_t cut_after_esu(RvtTerm* t, const uint8_t* p, size_t n) {
+  uint8_t m = t->esu_match;
+  for (size_t i = 0; i < n; i++) {
+    if (p[i] == RVT_ESU[m]) {
+      if (++m == sizeof RVT_ESU) { t->esu_match = 0; return i + 1; }
+    } else {
+      m = p[i] == 0x1B ? 1 : 0;
+    }
+  }
+  t->esu_match = m;
+  return n;
+}
+
+// Under the terminal lock, right after a frame ended. Skipped when the renderer is reading
+// the render state: it is about to take the terminal lock and will see the frame itself or
+// poll again.
+static void snapshot_frame(RvtTerm* t) {
+  if (!TryAcquireSRWLockExclusive(&t->rs_lock)) return;
+  ghostty_render_state_begin_update(t->rs, t->term);
+  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &t->snap_bar);
+  t->snap_alternate = alternate_active(t) ? 1 : 0;
+  GhosttyMouseShape shape = GHOSTTY_MOUSE_SHAPE_TEXT;
+  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_MOUSE_SHAPE, &shape);
+  t->snap_mouse_shape = (uint8_t)shape;
+  ghostty_render_state_end_update(t->rs);
+  t->snap_ready = true;
+  ReleaseSRWLockExclusive(&t->rs_lock);
+}
+
 RVT_API void rvt_write(RvtTerm* t, const uint8_t* data, size_t len) {
   size_t offset = 0;
   do {
     size_t n = len - offset < RVT_WRITE_SLICE ? len - offset : RVT_WRITE_SLICE;
+    const bool snapshots = __atomic_load_n(&t->wants_snapshot, __ATOMIC_RELAXED);
+    if (snapshots) n = cut_after_esu(t, data + offset, n);
+    else t->esu_match = 0;
     AcquireSRWLockExclusive(&t->lock);
+    t->hold_released = false;
     ghostty_terminal_vt_write(t->term, data + offset, n);
+    if (snapshots && t->hold_released && !t->render_held) snapshot_frame(t);
     unlock(t);
     offset += n;
     if (offset < len) let_waiter_in(t);
@@ -544,6 +600,7 @@ RVT_API void rvt_resize(RvtTerm* t, uint16_t cols, uint16_t rows, uint32_t cell_
   t->cell_w = cell_w; t->cell_h = cell_h;
   t->screen_w = cols * cell_w; t->screen_h = rows * cell_h;
   ghostty_terminal_resize(t->term, cols, rows, cell_w, cell_h);
+  t->snap_ready = false; // sized for the old grid
   unlock(t);
 }
 
@@ -630,10 +687,11 @@ static void apply_spans(const RvtTerm* t, RvtCell* row, uint16_t y, uint16_t col
 // Captures the terminal under the lock (cheap), then copies dirty rows into out[y * cols + x]
 // outside it, flags them in dirty_rows and cleans the render state. force_all re-reads every
 // row (after a resize or a lost frame). Returns the number of rows copied.
-// During synchronized output, copies nothing and only sets dirty/dirty_rows to zero and
-// render_held to one. The caller retains its previous frame and polls for release.
-RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, uint8_t* dirty_rows,
-                           int force_all, RvtFrameInfo* info) {
+// During synchronized output render_held is one and the caller keeps polling for release. If
+// a frame completed since the last read (see snapshot_frame), its rows are copied as usual;
+// otherwise nothing is copied, dirty/dirty_rows are zero and the caller keeps its previous frame.
+static int read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, uint8_t* dirty_rows,
+                      int force_all, RvtFrameInfo* info) {
   GhosttyTerminalScrollbar bar = { 0 };
   lock(t);
   if (t->render_held && GetTickCount64() - t->hold_started_ms >= 1000) {
@@ -643,23 +701,34 @@ RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t row
     t->render_held = false;
   }
   info->render_held = t->render_held ? 1 : 0;
-  if (t->render_held) {
+  __atomic_store_n(&t->wants_snapshot, t->render_held, __ATOMIC_RELAXED);
+  const bool snapshot = t->render_held && t->snap_ready;
+  if (t->render_held && !snapshot) {
     info->dirty = 0;
     info->dirty_rows = 0;
     unlock(t);
     return 0;
   }
-  ghostty_render_state_begin_update(t->rs, t->term);
-  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &bar);
-  info->alternate = alternate_active(t) ? 1 : 0;
-  GhosttyMouseShape shape = GHOSTTY_MOUSE_SHAPE_TEXT;
-  ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_MOUSE_SHAPE, &shape);
-  info->mouse_shape = (uint8_t)shape;
-  uint32_t old_hash = t->span_hash;
-  collect_spans(t, rows);
-  if (t->span_hash != old_hash) force_all = 1; // highlights moved: repaint every row
-  unlock(t);
-  ghostty_render_state_end_update(t->rs);
+  t->snap_ready = false;
+  if (snapshot) {
+    // The render state already holds the frame; search highlights keep their last spans.
+    bar = t->snap_bar;
+    info->alternate = t->snap_alternate;
+    info->mouse_shape = t->snap_mouse_shape;
+    unlock(t);
+  } else {
+    ghostty_render_state_begin_update(t->rs, t->term);
+    ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &bar);
+    info->alternate = alternate_active(t) ? 1 : 0;
+    GhosttyMouseShape shape = GHOSTTY_MOUSE_SHAPE_TEXT;
+    ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_MOUSE_SHAPE, &shape);
+    info->mouse_shape = (uint8_t)shape;
+    uint32_t old_hash = t->span_hash;
+    collect_spans(t, rows);
+    if (t->span_hash != old_hash) force_all = 1; // highlights moved: repaint every row
+    unlock(t);
+    ghostty_render_state_end_update(t->rs);
+  }
   info->scroll_total = bar.total;
   info->scroll_offset = bar.offset;
   info->scroll_len = bar.len;
@@ -767,6 +836,14 @@ RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t row
   }
   info->dirty_rows = (uint16_t)count;
   ghostty_render_state_clean(t->rs);
+  return count;
+}
+
+RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, uint8_t* dirty_rows,
+                           int force_all, RvtFrameInfo* info) {
+  AcquireSRWLockExclusive(&t->rs_lock);
+  int count = read_frame(t, out, cols, rows, dirty_rows, force_all, info);
+  ReleaseSRWLockExclusive(&t->rs_lock);
   return count;
 }
 

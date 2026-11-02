@@ -406,6 +406,79 @@ public sealed unsafe class NativeFrameTests
     }
 
     [WindowsNativeFact]
+    public void BackToBackSynchronizedFramesShowTheLastCompletedFrame()
+    {
+        using var terminal = new NativeTerminal();
+        terminal.Write("old");
+        terminal.ReadFrame(forceAll: true);
+        terminal.Write("\u001b[?2026h\rnew");
+        Assert.Equal(0, terminal.ReadFrame()); // turned away: frame ends are snapshotted from now on
+        // The next frame begins before the renderer looks again.
+        terminal.Write("\u001b[?2026l\u001b[?2026h\rxyz");
+        Assert.True(terminal.ReadFrame() > 0);
+        Assert.Equal(1, terminal.Info.RenderHeld);
+        Assert.Equal((uint)'n', terminal.Cells[0].Codepoint);
+        Assert.Equal((uint)'w', terminal.Cells[2].Codepoint);
+        // Nothing completed since: the frame stays put.
+        Array.Clear(terminal.Dirty);
+        Assert.Equal(0, terminal.ReadFrame());
+        Assert.Equal(1, terminal.Info.RenderHeld);
+        Assert.Equal((uint)'n', terminal.Cells[0].Codepoint);
+        // An end-of-frame sequence split between two writes still counts.
+        terminal.Write("\u001b[?20");
+        terminal.Write("26l\u001b[?2026h\rabc");
+        Assert.True(terminal.ReadFrame() > 0);
+        Assert.Equal(1, terminal.Info.RenderHeld);
+        Assert.Equal((uint)'x', terminal.Cells[0].Codepoint);
+        terminal.Write("\u001b[?2026l");
+        Assert.True(terminal.ReadFrame() > 0);
+        Assert.Equal(0, terminal.Info.RenderHeld);
+        Assert.Equal((uint)'a', terminal.Cells[0].Codepoint);
+    }
+
+    [WindowsNativeFact]
+    public void ASynchronizedFrameFloodKeepsDrawingWholeFrames()
+    {
+        // notcurses' grid demo over SSH: large frames back to back, arriving in paced SSH-sized
+        // reads more slowly than the renderer looks (once per composition). Each frame fills row 0 first and row 1
+        // last with the same letter, so a torn frame shows two different letters.
+        using var terminal = new NativeTerminal();
+        var flood = new StringBuilder();
+        for (var frame = 0; frame < 15; frame++)
+        {
+            var letter = (char)('A' + frame % 26);
+            flood.Append("\u001b[?2026h\u001b[1;1H").Append(letter, NativeTerminal.Columns);
+            for (var i = 0; i < 20000; i++)
+                flood.Append("\u001b[3;1H0123456789");
+            flood.Append("\u001b[2;1H").Append(letter, NativeTerminal.Columns).Append("\u001b[?2026l");
+        }
+        var bytes = Encoding.ASCII.GetBytes(flood.ToString());
+        var writer = new Thread(() =>
+        {
+            fixed (byte* data = bytes)
+            {
+                for (var offset = 0; offset < bytes.Length; offset += 32768)
+                {
+                    GhosttyNative.rvt_write(terminal.Handle, data + offset, (nuint)Math.Min(32768, bytes.Length - offset));
+                    Thread.Sleep(3);
+                }
+            }
+        });
+        writer.Start();
+        var drawn = 0;
+        while (writer.IsAlive)
+        {
+            Thread.Sleep(16);
+            if (terminal.ReadFrame() == 0 || terminal.Info.RenderHeld == 0)
+                continue;
+            drawn++;
+            Assert.Equal(terminal.Cells[0].Codepoint, terminal.Cells[NativeTerminal.Columns].Codepoint);
+        }
+        writer.Join();
+        Assert.True(drawn >= 4, $"only {drawn} frames drawn during the flood");
+    }
+
+    [WindowsNativeFact]
     public void TerminalResetReleasesSynchronizedOutput()
     {
         using var terminal = new NativeTerminal();

@@ -251,10 +251,12 @@ public sealed unsafe partial class NativeTerminalSurface
         var frameStart = FrameStats.Enabled ? FrameStats.Now() : 0;
         var rows = GhosttyNative.rvt_read_frame(_term, _cells, (ushort)Columns, (ushort)Rows, _dirty, full ? 1 : 0, &info);
         var readEnd = FrameStats.Enabled ? FrameStats.Now() : 0;
-        if (info.RenderHeld != 0)
+        // Synchronized output: poll through the native timeout even without more output.
+        // Rows read during a hold are a frame that completed before the current one began
+        // (back-to-back frames); with none, nothing is published, not even cursor/scroll metadata.
+        var held = info.RenderHeld != 0;
+        if (held && rows == 0)
         {
-            // Poll through the native synchronized-output timeout even without more output.
-            // Nothing from a held frame, including cursor/scroll metadata, is published.
             if (full)
                 ForceFull();
             return new FrameEffects { Poll = true };
@@ -271,7 +273,7 @@ public sealed unsafe partial class NativeTerminalSurface
                 _highlighter.ApplyRow(new Span<TerminalCell>(_cells + y * Columns, Columns), _highlightGrapheme ??= x => GraphemeAt(x, _highlightRow));
             }
         }
-        var effects = new FrameEffects { HasInfo = true, Annotate = rows > 0 || full };
+        var effects = new FrameEffects { HasInfo = true, Annotate = rows > 0 || full, Poll = held };
         var hoverSpans = _hoverSpans;
         if (rows > 0 && hoverSpans.Length > 0)
         {
