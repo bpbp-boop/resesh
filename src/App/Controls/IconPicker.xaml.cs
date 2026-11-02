@@ -134,14 +134,21 @@ public sealed partial class IconPicker : UserControl
     {
         var matches = _choices.Where(choice => choice.Matches(filter)).ToList();
         _refilling = true;
-        _groups.Source = matches
-            .GroupBy(choice => choice.Group)
-            .Select(group => new IconPickerGroup(group.Key, group))
-            .ToList();
-        // A new source makes a new view, so the grid takes it each time.
-        IconGrid.ItemsSource = _groups.View;
-        IconGrid.SelectedItem = Selected is not null && matches.Contains(Selected) ? Selected : null;
-        _refilling = false;
+        try
+        {
+            _groups.Source = matches
+                .GroupBy(choice => choice.Group)
+                .Select(group => new IconPickerGroup(group.Key, group))
+                .ToList();
+            // A new source makes a new view, so the grid takes it each time.
+            IconGrid.ItemsSource = _groups.View;
+            IconGrid.SelectedItem = Selected is not null && matches.Contains(Selected) ? Selected : null;
+        }
+        finally
+        {
+            // A failed refill must not leave picking an icon ignored for good.
+            _refilling = false;
+        }
         NoMatchText.Visibility = matches.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 

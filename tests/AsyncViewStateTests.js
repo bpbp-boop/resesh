@@ -65,3 +65,8 @@ test("only the newest font scan fills the font picker", () => {
   assert.match(refresh, /var version = \+\+_refreshVersion;/);
   assert.match(refresh, /version != _refreshVersion/);
 });
+
+test("the icon picker re-enables selection even if a refill throws", () => {
+  const picker = read("Controls", "IconPicker.xaml.cs");
+  assert.match(methodBody(picker, "private void ApplyFilter("), /_refilling = true;\s+try[\s\S]*finally[\s\S]*_refilling = false;/);
+});
