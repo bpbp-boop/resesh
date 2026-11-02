@@ -42,20 +42,28 @@ public sealed partial class MainWindow
 
     private void SetSplitterActive(object sender, bool active)
     {
-        if (sender is CommunityToolkit.WinUI.Controls.GridSplitter splitter
-            && _splitterLines.TryGetValue(splitter, out var line))
+        if (sender is not CommunityToolkit.WinUI.Controls.GridSplitter splitter)
+            return;
+        if (!_splitterLines.TryGetValue(splitter, out var line))
         {
-            if (active)
-                _activeSplitters.Add(splitter);
-            else
-                _activeSplitters.Remove(splitter);
-            line.Background = SplitterBrush(line, active);
-            SplitterHighlight.SetLineThickness(
-                line,
-                columns: splitter.ResizeDirection == CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns,
-                active);
-            UpdatePaneFocusFrame();
+            // A splitter dropped by a layout rebuild reports going to rest when it unloads.
+            // It must leave the active set even though its line is gone, or the focus frame
+            // would stay hidden; it is never shown again, so it may not become active.
+            if (!active && _activeSplitters.Remove(splitter))
+                UpdatePaneFocusFrame();
+            return;
         }
+
+        if (active)
+            _activeSplitters.Add(splitter);
+        else
+            _activeSplitters.Remove(splitter);
+        line.Background = SplitterBrush(line, active);
+        SplitterHighlight.SetLineThickness(
+            line,
+            columns: splitter.ResizeDirection == CommunityToolkit.WinUI.Controls.GridSplitter.GridResizeDirection.Columns,
+            active);
+        UpdatePaneFocusFrame();
     }
 
     /// <summary>Gutters stay neutral; pane focus is drawn by <see cref="UpdatePaneFocusFrame"/>.</summary>

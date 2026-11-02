@@ -85,10 +85,13 @@ internal sealed class SplitterHighlight
         {
             if (splitter.Visibility != Visibility.Collapsed)
                 return;
-            _pressed = false;
-            _dragging = false;
-            Leave();
+            Reset();
         });
+        // A layout rebuild (a pane closed or split by keyboard, a workspace switch) drops a
+        // splitter from the tree while it may be hovered, pressed or waiting on the hover
+        // timer. It never sees the pointer leave, so it would come back lit and its owner
+        // would go on treating it as active. Leaving the tree puts it back at rest.
+        splitter.Unloaded += (_, _) => Reset();
     }
 
     /// <summary>Calls <paramref name="apply"/> with true when the divider should be
@@ -123,6 +126,14 @@ internal sealed class SplitterHighlight
         _hoverShown = false;
         _hoverTimer.Stop();
         Update();
+    }
+
+    /// <summary>Forgets hover, press and drag, and stops the hover timer.</summary>
+    private void Reset()
+    {
+        _pressed = false;
+        _dragging = false;
+        Leave();
     }
 
     private void Release()

@@ -29,8 +29,10 @@ public sealed partial class MainWindow
     }
 
     /// <summary>Home's key: the unsaved tabs have no workspace id.</summary>
-    private static readonly Guid HomeWorkspace = Guid.Empty;
+    private static readonly Guid HomeWorkspace = WorkspaceParking.Home;
 
+    /// <summary>Every workspace the window holds but doesn't show. Never holds
+    /// <see cref="_shownWorkspace"/> (see <see cref="WorkspaceParking"/>).</summary>
     private readonly Dictionary<Guid, ParkedWorkspace> _parkedWorkspaces = [];
     private Guid _shownWorkspace = HomeWorkspace;
     private bool _railRefreshQueued;
@@ -101,10 +103,16 @@ public sealed partial class MainWindow
         EndZoomForLayoutChange();
         if (keepDraft)
             KeepShownWorkspaceDraft();
+        var previous = _shownWorkspace;
         ParkShownWorkspace();
-        if (_parkedWorkspaces.Remove(id, out var parked))
+        var wasParked = _parkedWorkspaces.Remove(id, out var parked);
+        // Switch before laying the new workspace out: FinishLayoutChange focuses panes and
+        // refreshes rails, and must not see the old workspace both shown and parked.
+        _shownWorkspace = id;
+        AssertWorkspacesConsistent();
+        if (wasParked)
         {
-            UnparkWorkspace(parked);
+            UnparkWorkspace(parked!);
         }
         else
         {
@@ -117,8 +125,6 @@ public sealed partial class MainWindow
                 FinishLayoutChange(ViewModel.Groups[0], null);
         }
 
-        var previous = _shownWorkspace;
-        _shownWorkspace = id;
         if (animate)
             PlayWorkspaceSwitchMotion(previous, id);
         App.RefreshWorkspaceRails();
@@ -153,6 +159,8 @@ public sealed partial class MainWindow
         }
         ViewModel.BackgroundGroups.AddRange(parked.Groups);
         ViewModel.Groups.Clear();
+        System.Diagnostics.Debug.Assert(!_parkedWorkspaces.ContainsKey(_shownWorkspace),
+            "Parking over a parked workspace strands its tabs.");
         _parkedWorkspaces[_shownWorkspace] = parked;
     }
 
@@ -276,11 +284,13 @@ public sealed partial class MainWindow
     /// workspace and Home starts again empty; otherwise the new workspace starts empty.</summary>
     private async Task NewWorkspaceAsync()
     {
-        var takesHome = _shownWorkspace == HomeWorkspace && ViewModel.ShownTabs.Any(tab => !tab.IsAppPage);
         var name = (await PromptAsync("New Workspace", "Workspace name", ""))?.Trim();
-        if (string.IsNullOrEmpty(name))
+        if (string.IsNullOrEmpty(name) || _windowClosed)
             return;
-        if (takesHome)
+        // Decided now, not before the prompt: another window can show a workspace here
+        // while it is open (a rail click there on a workspace this window holds), and the
+        // tabs shown then are that workspace's, not Home's.
+        if (WorkspaceParking.TakesShownTabs(_shownWorkspace, _parkedWorkspaces, ViewModel.ShownTabs))
         {
             AdoptShownTabsAsWorkspace(name);
             return;
@@ -290,17 +300,30 @@ public sealed partial class MainWindow
     }
 
     /// <summary>Saves what Home shows as a new workspace and lets that workspace keep the
-    /// tabs, so its button does not open a second copy of every connection.</summary>
-    private void AdoptShownTabsAsWorkspace(string name)
+    /// tabs, so its button does not open a second copy of every connection. Refuses unless
+    /// Home is shown: otherwise the tabs belong to a saved workspace, and the new empty Home
+    /// would replace the parked one, stranding its tabs still connected.</summary>
+    private bool AdoptShownTabsAsWorkspace(string name)
     {
+        if (!WorkspaceParking.CanAdoptShownAsNew(_shownWorkspace, _parkedWorkspaces))
+            return false;
         EndZoomForLayoutChange();
         if (WorkspaceOperations.Create(name, CaptureWorkspaceLayout()) is not { } created)
-            return;
+            return false;
         _parkedWorkspaces[HomeWorkspace] = CreateEmptyParkedWorkspace();
         _shownWorkspace = created.Id;
+        AssertWorkspacesConsistent();
         App.RefreshWorkspaceRails();
         App.RefreshWindowTitles();
+        return true;
     }
+
+    /// <summary>Checks in debug builds that the shown workspace isn't also parked.</summary>
+    [System.Diagnostics.Conditional("DEBUG")]
+    private void AssertWorkspacesConsistent() =>
+        System.Diagnostics.Debug.Assert(
+            WorkspaceParking.IsConsistent(_shownWorkspace, _parkedWorkspaces),
+            $"Workspace {_shownWorkspace} is both shown and parked.");
 
     /// <summary>Closes a workspace's tabs. With changes from its saved layout, asks whether to
     /// save them first (closing without saving drops them); otherwise asks only when sessions

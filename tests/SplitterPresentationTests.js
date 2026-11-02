@@ -114,3 +114,39 @@ test("splitters size their grab strip through SplitterHitArea so the 1px track c
       assert.doesNotMatch(creation, /\b(?:Width|Height|Margin|MinWidth|MinHeight)\s*=/);
   }
 });
+
+// A layout rebuild drops gutters that may be hovered or pressed. Left in the active set they
+// hid the focused-pane frame for the life of the window; unloading puts them back at rest.
+test("splitters dropped by a layout rebuild stop counting as active", () => {
+  const helper = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "SplitterHighlight.cs"),
+    "utf8");
+  const rebuild = source.match(/private void RebuildGroupLayout\(\)[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+  const activation = source.match(/private void SetSplitterActive[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+
+  assert.match(helper, /splitter\.Unloaded \+= \(_, _\) => Reset\(\);/);
+  assert.match(helper, /private void Reset\(\)[\s\S]*?_dragging = false;[\s\S]*?Leave\(\);/);
+  assert.match(rebuild, /_splitterLines\.Remove\(splitter\);[\s\S]*?_activeSplitters\.Remove\(splitter\);/);
+  // Going to rest leaves the set even for a splitter whose line is already gone.
+  assert.match(activation, /if \(!_splitterLines\.TryGetValue\(splitter, out var line\)\)[\s\S]*?_activeSplitters\.Remove\(splitter\)/);
+});
+
+// The opening animation fades the docked gutter in from a local Opacity of 0. Stopping the
+// storyboard alone (on a pane-mode change mid-animation) left the gutter invisible, so every
+// stop goes through one helper that restores everything the animation touches.
+test("stopping the sessions pane animation restores the pane and the gutter", () => {
+  const cancel = source.match(/private void CancelSessionsPaneAnimation\(\)[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+  assert.match(cancel, /_sessionsPaneAnimationVersion\+\+/);
+  assert.match(cancel, /_sessionsPaneStoryboard\?\.Stop\(\)/);
+  assert.match(cancel, /pane\.Opacity = 1/);
+  assert.match(cancel, /transform\.X = 0/);
+  assert.match(cancel, /TreeSplitter\.Opacity = 1/);
+  assert.match(cancel, /TreeSplitterLine\.Opacity = 1/);
+
+  // Nothing else stops the storyboard.
+  assert.equal(source.match(/_sessionsPaneStoryboard\?\.Stop\(\)/g)?.length, 1);
+  const paneMode = source.match(/private void UpdatePaneMode\(\)[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+  assert.match(paneMode, /CancelSessionsPaneAnimation\(\);/);
+  const start = source.match(/private void StartSessionsPaneAnimation\([\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+  assert.match(start, /^[^]*?\{\s*CancelSessionsPaneAnimation\(\);/);
+});

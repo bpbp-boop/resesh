@@ -21,6 +21,7 @@
     <Compile Include="../../src/App/Interop/JumpListPlan.cs" Link="Interop/JumpListPlan.cs" />
     <Compile Include="../../src/App/Controls/TabDragLayout.cs" Link="Controls/TabDragLayout.cs" />
     <Compile Include="../../src/App/ViewModels/MainViewModel.cs" Link="ViewModels/MainViewModel.cs" />
+    <Compile Include="../../src/App/ViewModels/MainViewModel.Closing.cs" Link="ViewModels/MainViewModel.Closing.cs" />
     <Compile Include="../../src/App/ViewModels/MainViewModel.Commands.cs" Link="ViewModels/MainViewModel.Commands.cs" />
     <Compile Include="../../src/App/ViewModels/MainViewModel.Rails.cs" Link="ViewModels/MainViewModel.Rails.cs" />
     <Compile Include="../../src/App/ViewModels/MainViewModel.Tree.cs" Link="ViewModels/MainViewModel.Tree.cs" />
@@ -34,5 +35,6 @@
     <Compile Include="../../src/App/ViewModels/TreeNodeViewModel.cs" Link="ViewModels/TreeNodeViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/ViewModelEnvironment.cs" Link="ViewModels/ViewModelEnvironment.cs" />
     <Compile Include="../../src/App/ViewModels/WorkspaceRailItemViewModel.cs" Link="ViewModels/WorkspaceRailItemViewModel.cs" />
+    <Compile Include="../../src/App/ViewModels/WorkspaceParking.cs" Link="ViewModels/WorkspaceParking.cs" />
   </ItemGroup>
 </Project>

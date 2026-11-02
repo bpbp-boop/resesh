@@ -427,6 +427,19 @@ public sealed partial class TabGroupView
         grid.PointerExited += TabContainerGrid_PointerExited;
     }
 
+    /// <summary>The strip left the screen (its pane removed, or parked with its workspace).
+    /// A slide waiting on a layout pass and widths held for a pointer that can no longer
+    /// leave would otherwise stay stuck until the strip is shown again, and then replay.</summary>
+    private void ReleaseTabStripHolds()
+    {
+        CancelTabMotion();
+        _pointerInTabStrip = false;
+        if (!_tabWidthHoldPending)
+            return;
+        _tabWidthHoldPending = false;
+        QueueFullTabWidthRefresh();
+    }
+
     private void TabContainerGrid_PointerEntered(object sender, PointerRoutedEventArgs e) =>
         _pointerInTabStrip = true;
 
