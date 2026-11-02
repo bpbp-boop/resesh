@@ -28,6 +28,20 @@ public sealed class TelnetProtocolTests
     }
 
     [Fact]
+    public void CrNul_StaysAPairAcrossCommands_ButNotAcrossData()
+    {
+        // Commands are out of band (RFC 854): the data stream is still CR NUL.
+        Assert.Equal([(byte)'\r'], Feed(new TelnetProtocol("xterm", 80, 24), (byte)'\r', Iac, Nop, 0).Data);
+        Assert.Equal([(byte)'\r'], Feed(new TelnetProtocol("xterm", 80, 24), (byte)'\r', Iac, Sb, 99, Iac, Se, 0).Data);
+        var split = new TelnetProtocol("xterm", 80, 24);
+        Assert.Equal([(byte)'\r'], Feed(split, (byte)'\r', Iac).Data);
+        Assert.Empty(Feed(split, Nop, 0).Data);
+        // IAC IAC is the data byte 255, so the NUL after it is data too.
+        Assert.Equal([(byte)'\r', 255, 0], Feed(new TelnetProtocol("xterm", 80, 24), (byte)'\r', Iac, Iac, 0).Data);
+        Assert.Equal([(byte)'\r', (byte)'x', 0], Feed(new TelnetProtocol("xterm", 80, 24), (byte)'\r', (byte)'x', 0).Data);
+    }
+
+    [Fact]
     public void ServerWillEcho_IsAccepted_AndUnknownOptionsRefused()
     {
         var protocol = new TelnetProtocol("xterm", 80, 24);

@@ -85,6 +85,9 @@ public sealed class TelnetProtocol
                         break;
                     }
                     // NVT: CR NUL is a bare carriage return; drop the NUL outside binary mode.
+                    // Commands (IAC NOP, negotiation, SB) are not data and may sit anywhere in
+                    // the stream (RFC 854), so one between CR and NUL leaves the pair intact;
+                    // only data (IAC IAC is a data byte) ends it.
                     if (b == 0 && _afterCr && !_remote[OptBinary])
                     {
                         _afterCr = false;
