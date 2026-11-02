@@ -55,6 +55,9 @@ public sealed class TerminalCapture : IDisposable
     private int _currentRows;
     private TerminalKeyframe? _anchor;
     private TerminalDiskRecorder? _recorder;
+    // A recorder that failed under the lock, waiting to be closed and reported outside it.
+    private TerminalDiskRecorder? _failedRecorder;
+    private string? _recordingError;
     private bool _disposed;
     private bool _rewindDisabled;
 
@@ -108,6 +111,22 @@ public sealed class TerminalCapture : IDisposable
     public event Action? Changed;
     public event Action<bool, string?>? RecordingChanged;
 
+    /// <summary>The disk recording stopped because writing it failed (disk full, file gone).
+    /// Arguments are the recording's path and the reason. Raised after
+    /// <see cref="RecordingChanged"/> reports the recording stopped, on whichever thread was
+    /// writing: the terminal's output thread or a flush timer.</summary>
+    public event Action<string, string>? RecordingFailed;
+
+    /// <summary>Why the last recording stopped on its own, or null. Cleared when a new one starts.</summary>
+    public string? RecordingError
+    {
+        get
+        {
+            lock (_gate)
+                return _recordingError;
+        }
+    }
+
     /// <summary>Checks availability without building a replay slice on every output chunk.</summary>
     public bool HasRewindData
     {
@@ -147,6 +166,7 @@ public sealed class TerminalCapture : IDisposable
         {
             ArrayPool<char>.Shared.Return(rented);
         }
+        ReportRecordingFailure();
         if (appended)
             Changed?.Invoke();
     }
@@ -166,6 +186,7 @@ public sealed class TerminalCapture : IDisposable
                 ToElapsedLocked(unixTimeMilliseconds), "r",
                 string.Create(CultureInfo.InvariantCulture, $"{columns}x{rows}")));
         }
+        ReportRecordingFailure();
         if (changed)
             Changed?.Invoke();
     }
@@ -224,6 +245,9 @@ public sealed class TerminalCapture : IDisposable
         }
     }
 
+    /// <summary>Opens the recording files; null opens them on disk. Tests substitute streams that fail.</summary>
+    internal Func<string, Stream>? OpenRecordingFile { get; set; }
+
     public string StartRecording(string directory, string sessionName, string? terminalType = null)
     {
         string path;
@@ -239,13 +263,16 @@ public sealed class TerminalCapture : IDisposable
             var paths = TerminalRecordingFiles.CreatePaths(directory, sessionName, recordingStartedAt);
             _recorder = new TerminalDiskRecorder(
                 paths, sessionName, terminalType,
-                _currentColumns, _currentRows, recordingStartedAt, captureOffset);
+                _currentColumns, _currentRows, recordingStartedAt, captureOffset, OnRecorderFailed, OpenRecordingFile);
+            _recordingError = null;
             path = paths.CastPath;
         }
         RecordingChanged?.Invoke(true, path);
         return path;
     }
 
+    /// <summary>Stops and closes the recording. Throws when the final flush fails; the
+    /// recording has stopped either way.</summary>
     public string? StopRecording()
     {
         TerminalDiskRecorder? recorder;
@@ -257,15 +284,33 @@ public sealed class TerminalCapture : IDisposable
         if (recorder is null)
             return null;
         var path = recorder.Path;
-        recorder.Dispose();
-        RecordingChanged?.Invoke(false, path);
+        try
+        {
+            recorder.Dispose();
+        }
+        finally
+        {
+            RecordingChanged?.Invoke(false, path);
+        }
         return path;
     }
 
     private bool AppendLocked(TerminalRecordingEvent item)
     {
         _latestTime = Math.Max(_latestTime, item.Time);
-        _recorder?.Write(item);
+        if (_recorder is { } recorder)
+        {
+            try
+            {
+                recorder.Write(item);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Recording is a side channel: it must not take the terminal's output path (and
+                // rewind) down with it, nor fail again on every later chunk.
+                FailRecordingLocked(recorder, exception);
+            }
+        }
         if (!_retainForRewind || _rewindDisabled)
             return false;
 
@@ -273,6 +318,54 @@ public sealed class TerminalCapture : IDisposable
         _eventBytes += EventBytes(item);
         TrimLocked();
         return true;
+    }
+
+    private void FailRecordingLocked(TerminalDiskRecorder recorder, Exception exception)
+    {
+        if (_recorder != recorder)
+            return;
+        _recorder = null;
+        _failedRecorder = recorder;
+        _recordingError = $"Recording stopped: {exception.Message}";
+    }
+
+    /// <summary>A background flush failed while no output was arriving.</summary>
+    private void OnRecorderFailed(TerminalDiskRecorder recorder, Exception exception)
+    {
+        lock (_gate)
+            FailRecordingLocked(recorder, exception);
+        ReportRecordingFailure();
+    }
+
+    /// <summary>Closes a recorder that failed under the lock and tells listeners, outside it.</summary>
+    private void ReportRecordingFailure()
+    {
+        TerminalDiskRecorder? recorder;
+        string? message;
+        lock (_gate)
+        {
+            recorder = _failedRecorder;
+            _failedRecorder = null;
+            message = _recordingError;
+        }
+        if (recorder is null)
+            return;
+        CloseQuietly(recorder);
+        RecordingChanged?.Invoke(false, recorder.Path);
+        RecordingFailed?.Invoke(recorder.Path, message ?? "Recording stopped.");
+    }
+
+    /// <summary>Closing flushes what is buffered, which fails again on a full disk; the file
+    /// handles are released regardless, and the failure has already been reported.</summary>
+    private static void CloseQuietly(TerminalDiskRecorder recorder)
+    {
+        try
+        {
+            recorder.Dispose();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private double ToElapsedLocked(long unixTimeMilliseconds)
@@ -360,10 +453,13 @@ public sealed class TerminalCapture : IDisposable
             if (_disposed)
                 return;
             _disposed = true;
-            recorder = _recorder;
+            recorder = _recorder ?? _failedRecorder;
             _recorder = null;
+            _failedRecorder = null;
         }
-        recorder?.Dispose();
+        // Dispose runs as the tab closes; a final flush that fails must not take it down.
+        if (recorder is not null)
+            CloseQuietly(recorder);
     }
 }
 
@@ -412,7 +508,7 @@ internal sealed class TerminalDiskRecorder : IDisposable
 
     private static readonly byte[] NewLine = Encoding.UTF8.GetBytes(Environment.NewLine);
 
-    private readonly FileStream _cast;
+    private readonly Stream _cast;
     private readonly ArrayBufferWriter<byte> _castLine = new(4096);
     private readonly Utf8JsonWriter _castJson;
     private readonly StreamWriter _plainWriter;
@@ -424,7 +520,12 @@ internal sealed class TerminalDiskRecorder : IDisposable
     private long _lastFlushMs;
     private bool _flushScheduled;
     private bool _disposed;
+    private Exception? _failure;
+    private readonly Action<TerminalDiskRecorder, Exception>? _failed;
 
+    /// <param name="failed">Called, outside the recorder's lock, when a background flush
+    /// fails, since no caller is there to catch it.</param>
+    /// <param name="open">Opens each file; tests substitute streams that fail.</param>
     public TerminalDiskRecorder(
         TerminalRecordingPaths paths,
         string title,
@@ -432,19 +533,22 @@ internal sealed class TerminalDiskRecorder : IDisposable
         int width,
         int height,
         DateTimeOffset startedAt,
-        double captureOffset)
+        double captureOffset,
+        Action<TerminalDiskRecorder, Exception>? failed = null,
+        Func<string, Stream>? open = null)
     {
         Path = paths.CastPath;
         PlainPath = paths.LogPath;
         _startedAt = startedAt;
         _captureOffset = captureOffset;
+        _failed = failed;
 
-        FileStream? cast = null;
-        FileStream? plain = null;
+        Stream? cast = null;
+        Stream? plain = null;
         try
         {
-            cast = OpenFile(paths.CastPath);
-            plain = OpenFile(paths.LogPath);
+            cast = (open ?? OpenFile)(paths.CastPath);
+            plain = (open ?? OpenFile)(paths.LogPath);
             _plainWriter = new StreamWriter(plain, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
                 bufferSize: 16 * 1024);
             _cast = cast;
@@ -491,60 +595,80 @@ internal sealed class TerminalDiskRecorder : IDisposable
     public string Path { get; }
     public string PlainPath { get; }
 
+    /// <summary>Writes one event. Throws <see cref="IOException"/> when the disk refuses it, and
+    /// again on every later call: a half-written line must not be followed by more.</summary>
     public void Write(TerminalRecordingEvent item)
     {
         lock (_gate)
         {
             if (_disposed)
                 return;
+            if (_failure is not null)
+                throw new IOException(_failure.Message, _failure);
+            try
+            {
+                WriteLocked(item);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                _failure = exception;
+                throw;
+            }
+        }
+    }
 
-            var relativeTime = Math.Max(0, item.Time - _captureOffset);
-            // [time, type, data], as JsonSerializer writes it, without the intermediate string
-            _castLine.ResetWrittenCount();
-            _castJson.Reset(_castLine);
-            _castJson.WriteStartArray();
-            _castJson.WriteNumberValue(relativeTime);
-            _castJson.WriteStringValue(item.Type);
-            _castJson.WriteStringValue(item.Data);
-            _castJson.WriteEndArray();
-            _castJson.Flush();
-            _cast.Write(_castLine.WrittenSpan);
-            _cast.Write(NewLine);
-            if (item.IsOutput)
-            {
-                var eventTime = _startedAt.AddSeconds(relativeTime);
-                foreach (var line in _plainRenderer.Feed(item.Data, eventTime))
-                    WritePlainLine(line);
-            }
+    private void WriteLocked(TerminalRecordingEvent item)
+    {
+        var relativeTime = Math.Max(0, item.Time - _captureOffset);
+        // [time, type, data], as JsonSerializer writes it, without the intermediate string
+        _castLine.ResetWrittenCount();
+        _castJson.Reset(_castLine);
+        _castJson.WriteStartArray();
+        _castJson.WriteNumberValue(relativeTime);
+        _castJson.WriteStringValue(item.Type);
+        _castJson.WriteStringValue(item.Data);
+        _castJson.WriteEndArray();
+        _castJson.Flush();
+        _cast.Write(_castLine.WrittenSpan);
+        _cast.Write(NewLine);
+        if (item.IsOutput)
+        {
+            var eventTime = _startedAt.AddSeconds(relativeTime);
+            foreach (var line in _plainRenderer.Feed(item.Data, eventTime))
+                WritePlainLine(line);
+        }
 
-            var sinceFlush = Environment.TickCount64 - _lastFlushMs;
-            if (sinceFlush >= FlushIntervalMs)
-            {
-                FlushLocked();
-            }
-            else if (!_flushScheduled)
-            {
-                _flushScheduled = true;
-                _flushTimer.Change(FlushIntervalMs - sinceFlush, Timeout.Infinite);
-            }
+        var sinceFlush = Environment.TickCount64 - _lastFlushMs;
+        if (sinceFlush >= FlushIntervalMs)
+        {
+            FlushLocked();
+        }
+        else if (!_flushScheduled)
+        {
+            _flushScheduled = true;
+            _flushTimer.Change(FlushIntervalMs - sinceFlush, Timeout.Infinite);
         }
     }
 
     private void FlushScheduled()
     {
+        Exception? failure = null;
         lock (_gate)
         {
-            if (_disposed || !_flushScheduled)
+            if (_disposed || !_flushScheduled || _failure is not null)
                 return;
             try
             {
                 FlushLocked();
             }
-            catch (IOException)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                // The next write or Dispose reports it.
+                // Output may have stopped, so no later write would notice: report it now.
+                _failure = failure = exception;
             }
         }
+        if (failure is not null)
+            _failed?.Invoke(this, failure);
     }
 
     private void FlushLocked()
@@ -597,8 +721,8 @@ internal sealed class TerminalDiskRecorder : IDisposable
         _plainWriter.WriteLine(line.Text);
     }
 
-    private static FileStream OpenFile(string path) =>
-        new(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read, bufferSize: 64 * 1024);
+    private static Stream OpenFile(string path) =>
+        new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read, bufferSize: 64 * 1024);
 
     private static void TryDelete(string path)
     {
@@ -706,6 +830,12 @@ internal sealed class AnsiPlainTextRenderer
     // Cursor controls are untrusted output, not requests to allocate multi-gigabyte rows.
     private const int MaximumCursorPosition = ushort.MaxValue;
 
+    // Rows waiting for a newline are held in memory. Output that scatters text over thousands
+    // of rows (cursor addressing up to row 65535) or pads rows out to column 65535 could hold
+    // gigabytes; these caps keep the worst case near 16 MB. Real screens stay well inside them.
+    private const int MaximumPendingRows = 1024;
+    private const int MaximumRowLength = 8192;
+
     private readonly Dictionary<int, PlainRow> _rows = [];
     private readonly StringBuilder _csi = new();
     private AnsiState _state;
@@ -716,11 +846,12 @@ internal sealed class AnsiPlainTextRenderer
     private int _savedColumn;
     private bool _sawAbsoluteCursor;
     private DateTimeOffset _lastTimestamp;
+    private List<TimestampedPlainLine> _completed = [];
 
     public IReadOnlyList<TimestampedPlainLine> Feed(string value, DateTimeOffset timestamp)
     {
         _lastTimestamp = timestamp;
-        var completed = new List<TimestampedPlainLine>();
+        var completed = _completed = new List<TimestampedPlainLine>();
         foreach (var character in value)
         {
             switch (_state)
@@ -806,7 +937,7 @@ internal sealed class AnsiPlainTextRenderer
                 break;
             case '\n':
                 CommitRow(_row, timestamp, completed);
-                _row++;
+                NextRow();
                 break;
             case '\t':
                 do
@@ -852,11 +983,11 @@ internal sealed class AnsiPlainTextRenderer
                 break;
             case 'D':
                 CommitRow(_row, timestamp, completed);
-                _row++;
+                NextRow();
                 break;
             case 'E':
                 CommitRow(_row, timestamp, completed);
-                _row++;
+                NextRow();
                 _column = 0;
                 break;
             case 'M':
@@ -966,8 +1097,19 @@ internal sealed class AnsiPlainTextRenderer
         return Math.Min(value, MaximumCursorPosition);
     }
 
+    /// <summary>Moves down a row. Line feeds have no bottom margin here, so clamp rather than
+    /// count towards overflow over a very long recording.</summary>
+    private void NextRow() => _row = Math.Min(MaximumCursorPosition, _row + 1);
+
     private void WriteCharacter(char character, DateTimeOffset timestamp)
     {
+        if (_column >= MaximumRowLength)
+        {
+            // Past the end of what is kept, the text is dropped. The cursor still moves, up to a
+            // multiple of 8 so a tab's loop to the next stop always ends.
+            _column = Math.Min(_column + 1, MaximumCursorPosition + 1);
+            return;
+        }
         var row = GetRow();
         while (row.Text.Length < _column)
             row.Text.Append(' ');
@@ -984,6 +1126,9 @@ internal sealed class AnsiPlainTextRenderer
     {
         if (!_rows.TryGetValue(_row, out var row))
         {
+            // Too many rows waiting: the topmost is written out as it stands.
+            if (_rows.Count >= MaximumPendingRows)
+                CommitRow(_rows.Keys.Min(), _lastTimestamp, _completed);
             row = new PlainRow();
             _rows.Add(_row, row);
         }
@@ -1035,7 +1180,7 @@ internal sealed class AnsiPlainTextRenderer
     private void InsertSpaces(int count)
     {
         var row = GetRow();
-        count = Math.Min(count, Math.Max(0, MaximumCursorPosition - Math.Max(_column, row.Text.Length)));
+        count = Math.Min(count, Math.Max(0, MaximumRowLength - Math.Max(_column, row.Text.Length)));
         if (count == 0)
             return;
         while (row.Text.Length < _column)
@@ -1045,7 +1190,7 @@ internal sealed class AnsiPlainTextRenderer
 
     private void EraseCharacters(int count)
     {
-        count = Math.Min(count, Math.Max(0, MaximumCursorPosition - _column));
+        count = Math.Min(count, Math.Max(0, MaximumRowLength - _column));
         if (count == 0)
             return;
         var row = GetRow();

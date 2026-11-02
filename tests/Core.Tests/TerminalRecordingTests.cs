@@ -228,6 +228,153 @@ public sealed class TerminalRecordingTests : IDisposable
         Assert.Empty(snapshot.Events);
     }
 
+    /// <summary>A file that accepts <paramref name="capacity"/> bytes, then fails like a full disk.</summary>
+    private sealed class FullDiskStream(int capacity) : MemoryStream
+    {
+        public bool Full { get; set; }
+        public bool FlushFails { get; set; }
+
+        public override void Write(ReadOnlySpan<byte> buffer) => Write(buffer.ToArray(), 0, buffer.Length);
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            if (Full || Length + count > capacity)
+                throw new IOException("There is not enough space on the disk.");
+            base.Write(buffer, offset, count);
+        }
+
+        public override void Flush()
+        {
+            if (Full || FlushFails)
+                throw new IOException("There is not enough space on the disk.");
+        }
+    }
+
+    [Fact]
+    public void FullDiskStopsTheRecordingButNotTheTerminal()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(80, 24, startedAt: started);
+        capture.OpenRecordingFile = _ => new FullDiskStream(4096);
+        var changes = new List<bool>();
+        var failures = new List<(string Path, string Message)>();
+        capture.RecordingChanged += (recording, _) => changes.Add(recording);
+        capture.RecordingFailed += (path, message) => failures.Add((path, message));
+        var path = capture.StartRecording(_directory, "lab");
+
+        var chunk = Encoding.UTF8.GetBytes(new string('x', 1000) + "\r\n");
+        for (var index = 0; index < 10; index++)
+            capture.CaptureOutput(chunk, started.AddMilliseconds(index).ToUnixTimeMilliseconds());
+
+        Assert.False(capture.IsRecording);
+        Assert.Null(capture.RecordingPath);
+        Assert.Contains("not enough space", capture.RecordingError);
+        var failure = Assert.Single(failures);
+        Assert.Equal(path, failure.Path);
+        Assert.Contains("not enough space", failure.Message);
+        Assert.Equal([true, false], changes);
+        // Rewind kept every chunk, including those after the failure.
+        Assert.Equal(10, capture.Snapshot().Events.Count);
+        Assert.Null(capture.StopRecording());
+    }
+
+    [Fact]
+    public void FailedBackgroundFlushStopsTheRecording()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(80, 24, startedAt: started);
+        var streams = new List<FullDiskStream>();
+        capture.OpenRecordingFile = _ =>
+        {
+            var stream = new FullDiskStream(1 << 20);
+            streams.Add(stream);
+            return stream;
+        };
+        using var failed = new ManualResetEventSlim();
+        capture.RecordingFailed += (_, _) => failed.Set();
+        capture.StartRecording(_directory, "lab");
+
+        // Writes still land but flushing fails. Output then stops, so only the flush timer is
+        // left to notice (or the write itself, if this machine took over 250 ms to get here).
+        foreach (var stream in streams)
+            stream.FlushFails = true;
+        capture.CaptureOutput("hello\r\n"u8, started.ToUnixTimeMilliseconds());
+
+        Assert.True(failed.Wait(TimeSpan.FromSeconds(5)), "The failed flush was never reported.");
+        Assert.False(capture.IsRecording);
+        Assert.NotNull(capture.RecordingError);
+        capture.CaptureOutput("more\r\n"u8, started.AddSeconds(1).ToUnixTimeMilliseconds());
+    }
+
+    [Fact]
+    public void NewRecordingClearsTheLastFailure()
+    {
+        using var capture = new TerminalCapture(80, 24);
+        capture.OpenRecordingFile = _ => new FullDiskStream(512);
+        capture.StartRecording(_directory, "lab");
+        capture.CaptureOutput(Encoding.UTF8.GetBytes(new string('x', 2000)), DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        Assert.NotNull(capture.RecordingError);
+
+        capture.OpenRecordingFile = null;
+        capture.StartRecording(_directory, "lab");
+        Assert.Null(capture.RecordingError);
+        Assert.True(capture.IsRecording);
+        capture.StopRecording();
+    }
+
+    [Fact]
+    public void DisposingAfterTheDiskFillsDoesNotThrow()
+    {
+        var capture = new TerminalCapture(80, 24);
+        var streams = new List<FullDiskStream>();
+        capture.OpenRecordingFile = _ =>
+        {
+            var stream = new FullDiskStream(1 << 20);
+            streams.Add(stream);
+            return stream;
+        };
+        capture.StartRecording(_directory, "lab");
+        capture.CaptureOutput("pending\r\n"u8, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        foreach (var stream in streams)
+            stream.Full = true;
+
+        capture.Dispose();
+    }
+
+    [Fact]
+    public void PlainTextLogKeepsRowsAndLinesBounded()
+    {
+        var renderer = new AnsiPlainTextRenderer();
+        var start = DateTimeOffset.UtcNow;
+        var hostile = new StringBuilder();
+        // Text on 5000 different rows, none ever ended by a newline...
+        for (var row = 1; row <= 5000; row++)
+            hostile.Append(System.Globalization.CultureInfo.InvariantCulture, $"\u001b[{row};100Hx");
+        // ...and a line padded far past any real screen.
+        hostile.Append("\u001b[1;1H").Append('y', 100_000);
+
+        var written = renderer.Feed(hostile.ToString(), start);
+        var flushed = renderer.Flush();
+
+        // The excess rows are written out early instead of held, and nothing is lost but the
+        // columns past the cap.
+        Assert.NotEmpty(written);
+        Assert.InRange(flushed.Count, 1, 1024);
+        Assert.All(written.Concat(flushed), line => Assert.True(line.Text.Length <= 8192));
+    }
+
+    [Fact]
+    public void PlainTextLogSurvivesEndlessLineFeedsAndTabs()
+    {
+        var renderer = new AnsiPlainTextRenderer();
+        var start = DateTimeOffset.UtcNow;
+        renderer.Feed(new string('\n', 70_000), start);
+        var lines = renderer.Feed("\u001b[1;65535H\t\t\tend\n", start);
+
+        Assert.Equal("", Assert.Single(lines).Text);
+        Assert.Empty(renderer.Flush());
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))

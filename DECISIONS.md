@@ -1912,3 +1912,50 @@ is removed, so "π - project" and "~/src" are untouched.
 - A window shows exactly one workspace and never also parks it (`WorkspaceParking`; debug
   builds assert it). The + button decides whether Home's tabs become the new workspace
   after the name prompt, not before it, since another window can switch this one meanwhile.
+## 2026-11-02 - Stores have explicit load states and never save over a file they could not read
+- Every JSON store (sessions, settings, workspaces, highlights, identities, SSH keys, known
+  hosts) loads and saves through `StoreFile`, which tracks a `StoreLoadState`: `NotLoaded`,
+  `Loaded`, `RecoveredFromBackup` or `Unreadable`. Stores expose it as `LoadState`.
+- An existing file that cannot be read is copied aside (`*.unreadable-{timestamp}`). Only a
+  successful copy makes it safe to carry on and save: a corrupt file is normally copied
+  fine, so it still starts empty (or recovers from .bak) as before. A file held unshared by
+  an antivirus scanner or OneDrive cannot be copied either; the store used to run empty
+  anyway, and its first two saves rotated the user's file into .bak and then over it. Now
+  that store is `Unreadable`: whatever it could show (the .bak, or nothing) is shown, every
+  save throws `StoreReadOnlyException` (an `IOException`, so existing "could not save"
+  reporting covers it) and `LoadWarning` says to close the program and restart. A locked
+  primary with a good .bak is also read-only, because the primary is newer than the .bak.
+- Reads retry a sharing violation three times (50, 150, 300 ms) before giving up, since
+  scanners usually let go quickly.
+- A save before `Load` throws `InvalidOperationException` only while the file or its .bak
+  exists; with no file there is nothing to overwrite, and view-model tests and first-run
+  code rely on using a store fresh.
+- Known hosts keep their stricter rules: an invalid file with no good backup still blocks
+  SSH (`LoadError`), because starting empty would make a changed host key look like a new
+  host. `Check`/`Lookup` before `Load` throw too while a file exists.
+
+## 2026-11-02 - Agent bells are ignored only while an adapter-reported agent is running
+- `AgentTracker` used to latch "an adapter has spoken" for the whole connection, so after
+  one Claude Code session with hooks, bells and OSC 9 were ignored for every later agent in
+  the tab, including ones with no adapter, and the source read "reported by the agent" for
+  identities that came from a command or process. The latch is now the adapter-asserted
+  identity itself: bells are ignored while it is set, and it ends with the agent (a prompt,
+  a shell title, the process leaving, an exit event, an OSC 7501 clear, the session ending).
+  A rerun agent must report again before its bells are dropped; one stray bell in between
+  is the cost.
+- Turning agent suppression ("none") on or off forgets the agent state, because evidence is
+  ignored while suppressed and the old badge would otherwise reappear after the agent left.
+
+## 2026-11-02 - A failed disk recording stops itself; the terminal and rewind carry on
+- An `IOException` from the recorder (disk full, drive gone) used to propagate out of
+  `TerminalCapture.CaptureOutput` into the terminal's output callback, leaving the recorder
+  installed so every later chunk threw again; a failed timer flush was swallowed. Now any
+  write or flush failure detaches and closes the recorder (closing errors are ignored, the
+  failure is already known), sets `RecordingError`, raises `RecordingChanged(false, path)`
+  and then `RecordingFailed(path, message)`. In-memory rewind capture keeps going. Events
+  fire outside the capture's lock, on the output thread or the flush timer's thread.
+- The recorder remembers its first failure and refuses further writes, so a half-written
+  cast line is never followed by more.
+- The plain-text log renderer holds at most 1024 unfinished rows (the topmost is written
+  out early) and 8192 characters per row, and line feeds stop counting at row 65535. A
+  hostile stream could otherwise make it hold gigabytes.

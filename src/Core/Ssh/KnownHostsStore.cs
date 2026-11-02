@@ -50,48 +50,78 @@ public sealed class KnownHostsStore
     private static readonly JsonSerializerOptions JsonOptions = CoreJson.With(new() { WriteIndented = true });
 
     private readonly string _path;
+    private readonly StoreFile _file;
     private readonly object _gate = new();
     private Dictionary<string, KnownHostEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
 
     public string? LoadWarning { get; private set; }
     public string? LoadError { get; private set; }
-    private bool _preserveBackup;
+
+    /// <summary>Whether saves are allowed; see <see cref="StoreLoadState"/>.</summary>
+    public StoreLoadState LoadState
+    {
+        get { lock (_gate) return _file.State; }
+    }
 
     public KnownHostsStore(string path)
     {
         _path = path;
+        _file = new StoreFile(path, "Accepted host keys");
     }
 
     public static string DefaultPath =>
         AppDataPaths.Roaming("known_hosts.json");
 
+    /// <summary>
+    /// Stricter than the other stores: an invalid file with no good backup blocks SSH instead
+    /// of starting empty, because an empty list would turn a changed host key into an
+    /// innocent-looking "unknown host" prompt. A primary that cannot be read (locked) or
+    /// copied aside, with a good backup, is used read-only so the newer primary survives.
+    /// </summary>
     public void Load()
     {
         lock (_gate)
         {
             LoadWarning = null;
             LoadError = null;
-            _preserveBackup = false;
-            try
+            _entries = new(StringComparer.OrdinalIgnoreCase);
+            var primary = AtomicFile.TryRead(_path, Read, out var primaryOutcome, out var primaryError);
+            if (primary is not null)
             {
-                _entries = Read(_path);
+                _entries = primary;
+                _file.SetLoaded(StoreLoadState.Loaded, null);
+                return;
             }
-            catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException)
+
+            var backup = AtomicFile.TryRead(_path + ".bak", Read, out var backupOutcome, out var backupError);
+            if (backup is null)
             {
-                try
+                if (primaryOutcome == FileReadOutcome.Missing && backupOutcome == FileReadOutcome.Missing)
                 {
-                    _entries = Read(_path + ".bak");
-                    _preserveBackup = true;
-                    LoadWarning = "Accepted host keys were recovered from the backup file.";
+                    _file.SetLoaded(StoreLoadState.Loaded, null);
+                    return;
                 }
-                catch (Exception backupError) when (backupError is JsonException or IOException or UnauthorizedAccessException)
-                {
-                    if (error is (FileNotFoundException or DirectoryNotFoundException)
-                        && backupError is (FileNotFoundException or DirectoryNotFoundException))
-                        _entries = new(StringComparer.OrdinalIgnoreCase);
-                    else
-                        LoadError = $"Accepted host keys could not be loaded. SSH is blocked. Restore {_path} from a trusted backup and restart resesh. {error.Message}";
-                }
+                LoadError = $"Accepted host keys could not be loaded. SSH is blocked. Restore {_path} from a trusted backup and restart resesh. {primaryError ?? backupError}";
+                _file.SetLoaded(StoreLoadState.Unreadable, null);
+                return;
+            }
+
+            _entries = backup;
+            if (primaryOutcome == FileReadOutcome.Missing)
+            {
+                LoadWarning = "Accepted host keys were recovered from the backup file.";
+                _file.SetLoaded(StoreLoadState.RecoveredFromBackup, LoadWarning);
+            }
+            else if (AtomicFile.TryQuarantine(_path) is { } kept)
+            {
+                LoadWarning = $"Accepted host keys were recovered from the backup file. The unreadable file was kept as {kept}.";
+                _file.SetLoaded(StoreLoadState.RecoveredFromBackup, LoadWarning);
+            }
+            else
+            {
+                LoadWarning = $"Accepted host keys could not be read from {_path} ({primaryError}). The backup copy is in use, "
+                    + "but newly accepted host keys will not be saved. Close any program that may be holding the file and restart resesh.";
+                _file.SetLoaded(StoreLoadState.Unreadable, LoadWarning);
             }
         }
     }
@@ -195,14 +225,14 @@ public sealed class KnownHostsStore
 
     private void Save(Dictionary<string, KnownHostEntry> entries)
     {
-        AtomicFile.Write(_path, JsonSerializer.Serialize(entries, JsonOptions.Info<Dictionary<string, KnownHostEntry>>()), _preserveBackup);
+        _file.Write(JsonSerializer.Serialize(entries, JsonOptions.Info<Dictionary<string, KnownHostEntry>>()));
         _entries = entries;
-        _preserveBackup = false;
     }
 
     private void EnsureAvailable()
     {
         if (LoadError is not null) throw new IOException(LoadError);
+        _file.EnsureLoaded();
     }
 
     private static Dictionary<string, KnownHostEntry> Read(string path)

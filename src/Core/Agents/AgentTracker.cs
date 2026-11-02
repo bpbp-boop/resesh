@@ -31,9 +31,12 @@ public sealed class AgentTracker
 {
     private string? _sessionDefault;
     private string? _manual;
-    private string? _structured;      // identity asserted by an adapter, sticky until it ends
-    private bool _structuredSeen;     // an adapter spoke once: stop listening to bells
-    private string? _detected;        // identity from heuristics ("shell" is a real answer)
+    // Identity asserted by an adapter, sticky until that agent is known to be gone (a prompt,
+    // a shell title, its process leaving, an exit event, the session ending). While it is
+    // set the agent reports properly, so its bells are ignored; once it is gone, whatever
+    // runs next has to show again that it has an adapter.
+    private string? _structured;
+    private string? _detected;       // identity from heuristics ("shell" is a real answer)
     private AgentSource _detectedSource = AgentSource.Unknown;
     private AgentAttention _attention = AgentAttention.None;
     private string? _label;
@@ -55,14 +58,28 @@ public sealed class AgentTracker
     public string? SessionDefault
     {
         get => _sessionDefault;
-        set => _sessionDefault = Normalize(value);
+        set => ChangeSuppression(() => _sessionDefault = Normalize(value));
     }
 
     /// <summary>The tab-menu override; null = follow detection again.</summary>
     public string? ManualOverride => _manual;
 
     /// <summary>The user picked an identity (or "auto", or "none") from the tab menu.</summary>
-    public bool SetManualOverride(string? key) => Change(() => _manual = Normalize(key));
+    public bool SetManualOverride(string? key) => Change(() => ChangeSuppression(() => _manual = Normalize(key)));
+
+    /// <summary>Evidence is ignored while agents are suppressed, so whatever was known when
+    /// suppression started is stale by the time it ends: an agent that has since exited
+    /// would reappear with its old badge. Starting or ending suppression forgets it.</summary>
+    private void ChangeSuppression(Action change)
+    {
+        var before = Suppressed;
+        change();
+        if (Suppressed != before)
+        {
+            DropUnfinishedProgramStatus();
+            ForgetAgent(AgentSource.Unknown, detected: null);
+        }
+    }
 
     /// <summary>Whether agent icons are suppressed here (either level said "none").</summary>
     public bool Suppressed =>
@@ -99,9 +116,19 @@ public sealed class AgentTracker
             return AgentSource.Unknown;
         if (_manual is not null)
             return AgentSource.Manual;
-        if (_structured is not null || _structuredSeen)
+        if (_structured is not null)
             return AgentSource.Structured;
         return _detected is not null ? _detectedSource : AgentSource.Unknown;
+    }
+
+    /// <summary>The agent is gone: what remains is a shell (or nothing known), with no badge.</summary>
+    private void ForgetAgent(AgentSource source, string? detected = AgentIdentities.Shell)
+    {
+        _structured = null;
+        _detected = detected;
+        _detectedSource = source;
+        _label = null;
+        _attention = AgentAttention.None;
     }
 
     // ---- evidence ----
@@ -126,11 +153,11 @@ public sealed class AgentTracker
         }
         else
             ClearProgramStatus(); // an agent is starting: an old result is not its news
-        _structured = null; // back at a prompt: any adapter-reported agent is gone
-        _detected = key ?? AgentIdentities.Shell;
-        _detectedSource = AgentSource.Command;
-        _label = null;
-        _attention = key is not null ? AgentAttention.Working : AgentAttention.None;
+        // Back at a prompt: any adapter-reported agent is gone, and whatever starts now has
+        // yet to show whether it has an adapter.
+        ForgetAgent(AgentSource.Command, key ?? AgentIdentities.Shell);
+        if (key is not null)
+            _attention = AgentAttention.Working;
     });
 
     /// <summary>The terminal title changed. Identity only, and only when it names an agent —
@@ -146,11 +173,7 @@ public sealed class AgentTracker
         if (AgentDetection.IsShellTitle(title))
         {
             DropUnfinishedProgramStatus();
-            _structured = null;
-            _detected = AgentIdentities.Shell;
-            _detectedSource = AgentSource.Title;
-            _label = null;
-            _attention = AgentAttention.None;
+            ForgetAgent(AgentSource.Title);
             return;
         }
 
@@ -191,11 +214,7 @@ public sealed class AgentTracker
         // own status record is left alone: it ends at the next prompt, not on a poll.)
         if (_structured is null && _detected is null or AgentIdentities.Shell)
             return;
-        _structured = null;
-        _detected = AgentIdentities.Shell;
-        _detectedSource = AgentSource.Process;
-        _label = null;
-        _attention = AgentAttention.None;
+        ForgetAgent(AgentSource.Process);
     });
 
     /// <summary>An escape sequence arrived (structured adapter event, or a generic
@@ -207,14 +226,9 @@ public sealed class AgentTracker
 
         if (agentEvent.Source == AgentSource.Structured)
         {
-            _structuredSeen = true;
             if (agentEvent.Ended || agentEvent.Key == AgentIdentities.Shell)
             {
-                _structured = null;
-                _detected = AgentIdentities.Shell;
-                _detectedSource = AgentSource.Structured;
-                _label = null;
-                _attention = AgentAttention.None;
+                ForgetAgent(AgentSource.Structured);
                 return;
             }
             _structured = agentEvent.Key
@@ -226,9 +240,9 @@ public sealed class AgentTracker
         }
 
         // Bell / OSC 9 / OSC 777: only meaningful if an agent is already showing, never
-        // once an adapter has proven it reports properly, and never a downgrade of a
+        // while that agent's adapter is reporting properly, and never a downgrade of a
         // state that says the agent is actually blocked.
-        if (_structuredSeen || !AgentIdentities.IsAgentKey(ResolveKey()) || _attention.RequiresUser())
+        if (_structured is not null || !AgentIdentities.IsAgentKey(ResolveKey()) || _attention.RequiresUser())
             return;
         _attention = AgentAttention.Signal;
         _label = agentEvent.Label;
@@ -276,7 +290,6 @@ public sealed class AgentTracker
         }
 
         ClearProgramStatus();
-        _structuredSeen = true;
         _structured = key ?? showing;
         _attention = status.Attention;
         _label = status.Label;
@@ -316,12 +329,7 @@ public sealed class AgentTracker
     public bool ObserveEnded() => Change(() =>
     {
         DropUnfinishedProgramStatus();
-        _structured = null;
-        _structuredSeen = false;
-        _detected = null;
-        _detectedSource = AgentSource.Unknown;
-        _attention = AgentAttention.None;
-        _label = null;
+        ForgetAgent(AgentSource.Unknown, detected: null);
     });
 
     private const int MaxProgramNameLength = 40;
