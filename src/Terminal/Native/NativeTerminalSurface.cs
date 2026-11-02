@@ -120,6 +120,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private TerminalTheme _theme = TerminalThemes.Find("dark");
     private bool _copyOnSelect;
     private bool _rightClickPaste;
+    private TerminalMouseCapture _mouseCapture = TerminalMouseCapture.Scroll;
     private int _scrollback = 10000;
     private bool _readOnly;
     private bool _fixed80Columns;
@@ -1329,10 +1330,21 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             | (m.HasFlag(VirtualKeyModifiers.Menu) ? GhosttyNative.ModAlt : 0);
     }
 
-    /// <summary>Mouse reporting wins unless Shift is held, which selects like other terminals.</summary>
-    private bool ReportsMouse(PointerRoutedEventArgs args) =>
-        _term != IntPtr.Zero && !args.KeyModifiers.HasFlag(VirtualKeyModifiers.Shift)
-        && GhosttyNative.rvt_mouse_tracking(_term) != 0;
+    /// <summary>Whether this pointer event goes to the program rather than the terminal. Only
+    /// when the program tracks the mouse, and then by <see cref="_mouseCapture"/>: Shift
+    /// swaps the two sides, so whichever one the mode leaves out is still a Shift away.</summary>
+    private bool ReportsMouse(PointerRoutedEventArgs args, bool wheel = false)
+    {
+        if (_term == IntPtr.Zero || _mouseCapture == TerminalMouseCapture.Never
+            || GhosttyNative.rvt_mouse_tracking(_term) == 0)
+            return false;
+        var program = _mouseCapture == TerminalMouseCapture.Always || wheel;
+        return program != args.KeyModifiers.HasFlag(VirtualKeyModifiers.Shift);
+    }
+
+    /// <summary>True when only Shift selects, because the program gets plain clicks.</summary>
+    private bool ShiftSelects =>
+        _mouseCapture == TerminalMouseCapture.Always && GhosttyNative.rvt_mouse_tracking(_term) != 0;
 
     private void SendMouse(int action, int button, PointerRoutedEventArgs args)
     {
@@ -1428,9 +1440,9 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         var (x, y) = cell ?? CellAt(position.X, position.Y);
         var nanoseconds = (ulong)(System.Diagnostics.Stopwatch.GetTimestamp() * (1_000_000_000.0 / System.Diagnostics.Stopwatch.Frequency));
         // Alt+drag selects a rectangle (columns of show output); Shift+click extends, except
-        // while the app tracks the mouse: there Shift is what selects at all, so every new
-        // selection would otherwise merge into the last one.
-        var extend = kind == GestureKind.Press && Down(0x10) && GhosttyNative.rvt_mouse_tracking(_term) == 0;
+        // while the program gets plain clicks: there Shift is what selects at all, so every
+        // new selection would otherwise merge into the last one.
+        var extend = kind == GestureKind.Press && Down(0x10) && !ShiftSelects;
         var flags = (Down(0x12) ? 1 : 0) | (extend ? 2 : 0);
         GhosttyNative.rvt_gesture(_term, (int)kind, position.X, position.Y, (ushort)x, (ushort)y, nanoseconds,
             (uint)_renderer.OriginX, flags, out var autoscroll, out var clicks, out var dragged);
@@ -1507,7 +1519,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             SetZoom(_zoomDelta + steps);
             return;
         }
-        if (ReportsMouse(args))
+        if (ReportsMouse(args, wheel: true))
         {
             var notches = (int)(_wheelAccumulated / 120);
             _wheelAccumulated -= notches * 120;
@@ -1626,6 +1638,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     // ---- commands panel and history ------------------------------------------------------
 
     public override void ToggleCommandsPanel() => SetCommandsPanelOpen(!_commandsPanelOpen);
+
+    public override void SetMouseCapture(TerminalMouseCapture mode) => _mouseCapture = mode;
 
     public override void SetHistoryCapture(bool enabled)
     {

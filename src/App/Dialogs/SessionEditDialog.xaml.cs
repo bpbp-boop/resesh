@@ -58,6 +58,8 @@ public sealed partial class SessionEditDialog : ContentDialog
         DialogTheme.Apply(this);
         OverrideThemeBox.ItemsSource = new[] { new ThemeChoice("", "Use app setting") }
             .Concat(ThemeCatalog.All).ToList();
+        OverrideMouseBox.ItemsSource = MouseCaptureChoice.OverrideNames();
+        OverrideMouseBox.SelectedIndex = MouseCaptureChoice.OverrideIndex(existing?.Overrides?.MouseCapture);
         _existing = existing;
         _keyStore = keyStore;
         TitleText.Text = existing is null ? "New session" : "Edit session";
@@ -285,6 +287,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         SessionSettingsTarget.FontFamily => OverrideFontFamilyBox.FocusTarget,
         SessionSettingsTarget.FontSize => OverrideFontSizeBox,
         SessionSettingsTarget.Scrollback => OverrideScrollbackBox,
+        SessionSettingsTarget.MouseCapture => OverrideMouseBox,
         SessionSettingsTarget.AlwaysRecord => OverrideRecordingBox,
         SessionSettingsTarget.CommandHistory => OverrideHistoryBox,
         _ => NameBox,
@@ -704,6 +707,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             FontFamily = string.IsNullOrWhiteSpace(OverrideFontFamilyBox.FamilyName) ? null : OverrideFontFamilyBox.FamilyName.Trim(),
             FontSize = double.IsNaN(OverrideFontSizeBox.Value) ? null : (int)OverrideFontSizeBox.Value,
             Scrollback = double.IsNaN(OverrideScrollbackBox.Value) ? null : (int)OverrideScrollbackBox.Value,
+            MouseCapture = MouseCaptureChoice.OverrideAt(OverrideMouseBox.SelectedIndex),
             AlwaysRecord = OverrideRecordingBox.SelectedIndex switch
             {
                 1 => true,

@@ -168,6 +168,20 @@
                             AutomationProperties.AutomationId="SettingsRightClickPaste" />
                     </toolkit:SettingsCard>
                     <toolkit:SettingsCard
+                        x:Name="MouseCaptureCard"
+                        Header="Mouse in programs"
+                        Description="What programs that use the mouse, such as Claude Code, Codex and vim, receive. With scrolling only, you select, copy and right-click paste as usual. Hold Shift to do the other thing.">
+                        <ComboBox
+                            x:Name="MouseCaptureBox"
+                            MinWidth="220"
+                            ItemsSource="{x:Bind ViewModel.MouseCaptureChoices}"
+                            DisplayMemberPath="Name"
+                            x:SuppressXamlTrimWarnings="True"
+                            SelectedItem="{x:Bind ViewModel.MouseCapture, Mode=TwoWay}"
+                            AutomationProperties.Name="Mouse in programs"
+                            AutomationProperties.AutomationId="SettingsMouseCapture" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
                         x:Name="ConfirmMultilinePasteCard"
                         Header="Confirm multi-line pastes"
                         Description="Ask before pasting text that would press Enter. Skipped when the program handles pasted lines itself (bracketed paste).">

@@ -85,6 +85,39 @@ public sealed class SettingsViewModelTests
     }
 
     [Fact]
+    public void MouseCaptureDefaultsToScrollingAndSavesTheChoice()
+    {
+        var settings = Settings();
+        Assert.Equal(MouseCaptureModes.Scroll, settings.MouseCapture.Id);
+
+        settings.MouseCapture = settings.MouseCaptureChoices.Single(c => c.Id == MouseCaptureModes.Always);
+
+        Assert.Equal(MouseCaptureModes.Always, _settings.MouseCapture);
+        Assert.Equal([nameof(SettingsViewModel.MouseCapture)], _changes);
+    }
+
+    [Fact]
+    public void UnknownMouseCaptureReadsAsScrolling()
+    {
+        _settings = _settings with { MouseCapture = "sometimes" };
+
+        Assert.Equal(MouseCaptureModes.Scroll, Settings().MouseCapture.Id);
+    }
+
+    [Fact]
+    public void MouseCaptureOverrideListRoundTripsEveryChoice()
+    {
+        Assert.Equal(0, MouseCaptureChoice.OverrideIndex(null));
+        Assert.Null(MouseCaptureChoice.OverrideAt(0));
+        foreach (var choice in MouseCaptureChoice.All)
+        {
+            var index = MouseCaptureChoice.OverrideIndex(choice.Id);
+            Assert.Equal(choice.Name, MouseCaptureChoice.OverrideNames()[index]);
+            Assert.Equal(choice.Id, MouseCaptureChoice.OverrideAt(index));
+        }
+    }
+
+    [Fact]
     public void EmptiedNumberBoxAndBlankTextKeepTheSavedValue()
     {
         var settings = Settings();

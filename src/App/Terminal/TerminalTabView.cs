@@ -184,6 +184,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             fixed80Columns: Session.IsTelnet && Session.TelnetFixed80Columns);
         _terminal.SetPromptPlatform(Session.Icon);
         _terminal.SetHistoryCapture(initial.KeepCommandHistory);
+        _terminal.SetMouseCapture(MouseCapture(initial.MouseCapture));
 
         _terminal.Ready += (cols, rows) => DispatcherQueue.TryEnqueue(() =>
         {
@@ -1735,7 +1736,16 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             scrollback: effective.Scrollback);
         _terminal.ApplyHighlights(BuildHighlightPayload());
         _terminal.SetHistoryCapture(effective.KeepCommandHistory);
+        _terminal.SetMouseCapture(MouseCapture(effective.MouseCapture));
     }
+
+    private static Resesh.Terminal.TerminalMouseCapture MouseCapture(string? mode) =>
+        Core.Storage.MouseCaptureModes.Normalize(mode) switch
+        {
+            Core.Storage.MouseCaptureModes.Always => Resesh.Terminal.TerminalMouseCapture.Always,
+            Core.Storage.MouseCaptureModes.Never => Resesh.Terminal.TerminalMouseCapture.Never,
+            _ => Resesh.Terminal.TerminalMouseCapture.Scroll,
+        };
 
     // ---- command history ----
 

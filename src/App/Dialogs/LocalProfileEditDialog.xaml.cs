@@ -53,6 +53,8 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
 
         OverrideThemeBox.ItemsSource = new[] { new ThemeChoice("", "Use app setting") }.Concat(ThemeCatalog.All).ToList();
         OverrideThemeBox.SelectedIndex = 0;
+        OverrideMouseBox.ItemsSource = MouseCaptureChoice.OverrideNames();
+        OverrideMouseBox.SelectedIndex = MouseCaptureChoice.OverrideIndex(existing?.Overrides?.MouseCapture);
 
         MakeDefaultBox.IsChecked = isCurrentDefault;
         MakeDefaultBox.IsEnabled = !isCurrentDefault; // unset by picking another default, not here
@@ -109,6 +111,7 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
         SessionSettingsTarget.FontFamily => OverrideFontFamilyBox.FocusTarget,
         SessionSettingsTarget.FontSize => OverrideFontSizeBox,
         SessionSettingsTarget.Scrollback => OverrideScrollbackBox,
+        SessionSettingsTarget.MouseCapture => OverrideMouseBox,
         SessionSettingsTarget.AlwaysRecord => OverrideRecordingBox,
         SessionSettingsTarget.CommandHistory => OverrideHistoryBox,
         _ => NameBox,
@@ -206,6 +209,7 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
             FontFamily = string.IsNullOrWhiteSpace(OverrideFontFamilyBox.FamilyName) ? null : OverrideFontFamilyBox.FamilyName.Trim(),
             FontSize = double.IsNaN(OverrideFontSizeBox.Value) ? null : (int)OverrideFontSizeBox.Value,
             Scrollback = double.IsNaN(OverrideScrollbackBox.Value) ? null : (int)OverrideScrollbackBox.Value,
+            MouseCapture = MouseCaptureChoice.OverrideAt(OverrideMouseBox.SelectedIndex),
             AlwaysRecord = OverrideRecordingBox.SelectedIndex switch
             {
                 1 => true,

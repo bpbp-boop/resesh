@@ -10,6 +10,7 @@ public enum GlobalSettingsTarget
     Scrollback,
     CopyOnSelect,
     RightClickPaste,
+    MouseCapture,
     ConfirmMultilinePaste,
     ShowStatusBar,
     SessionsPaneLayout,
@@ -40,6 +41,7 @@ public enum SessionSettingsTarget
     FontFamily,
     FontSize,
     Scrollback,
+    MouseCapture,
     AlwaysRecord,
     CommandHistory,
 }

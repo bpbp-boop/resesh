@@ -145,6 +145,22 @@ public sealed partial class SettingsViewModel : ObservableObject
         set => Save(value, s => s with { RightClickPaste = value }, () => RightClickPaste);
     }
 
+    public List<MouseCaptureChoice> MouseCaptureChoices { get; } = [.. MouseCaptureChoice.All];
+
+    public MouseCaptureChoice MouseCapture
+    {
+        get
+        {
+            var saved = MouseCaptureModes.Normalize(Current.MouseCapture);
+            return MouseCaptureChoices.First(choice => choice.Id == saved);
+        }
+        set
+        {
+            if (value is not null)
+                Save(value, s => s with { MouseCapture = value.Id }, () => MouseCapture);
+        }
+    }
+
     /// <summary>SSH algorithms turned off for sessions that do not choose their own.</summary>
     public Resesh.Core.Models.SshAlgorithms? SshAlgorithms
     {
@@ -328,3 +344,25 @@ public sealed partial class SettingsViewModel : ObservableObject
 // DisplayMemberPath reads properties by name; this generates that lookup for AOT.
 [WinRT.GeneratedBindableCustomProperty]
 public sealed partial record SessionsPaneLayoutChoice(string Id, string Name);
+
+/// <summary>One option for how much of the mouse programs get, in Settings and the session editors.</summary>
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial record MouseCaptureChoice(string Id, string Name)
+{
+    public static IReadOnlyList<MouseCaptureChoice> All { get; } =
+    [
+        new(MouseCaptureModes.Scroll, "Scrolling only"),
+        new(MouseCaptureModes.Always, "Clicks and scrolling"),
+        new(MouseCaptureModes.Never, "Never"),
+    ];
+
+    /// <summary>The session editors' list: "Use app setting" first, then <see cref="All"/>.</summary>
+    public static List<string> OverrideNames() => ["Use app setting", .. All.Select(choice => choice.Name)];
+
+    /// <summary>The position of a session's override in <see cref="OverrideNames"/>.</summary>
+    public static int OverrideIndex(string? mode) =>
+        mode is null ? 0 : 1 + All.ToList().FindIndex(choice => choice.Id == MouseCaptureModes.Normalize(mode));
+
+    /// <summary>The override picked at <paramref name="index"/> in <see cref="OverrideNames"/>; null inherits.</summary>
+    public static string? OverrideAt(int index) => index >= 1 && index <= All.Count ? All[index - 1].Id : null;
+}

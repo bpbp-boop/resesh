@@ -1680,3 +1680,17 @@ background lifted 4% toward the foreground (`TerminalRuler.LaneTint`; `#0C0C0C` 
 keeps a full-strength edge in the foreground colour, where a clear boundary matters more.
 The ruler reads `AccessibilitySettings.HighContrast` when it paints, as the Terminal project
 has no theme palette of its own.
+
+## 2026-11-01 - Programs get only the scroll wheel by default
+
+Claude Code, Codex and other full-screen TUIs turn on mouse tracking, and resesh used to send
+them every click and drag unless Shift was held, as xterm does. In practice that broke the
+terminal's own selection: dragging drew the program's selection instead, copy-on-select
+copied nothing, and right-click paste needed Shift. **Settings › Terminal › Mouse in
+programs** (`AppSettings.MouseCapture`, overridable per session) now chooses what a
+tracking program gets: scrolling only (the default), clicks and scrolling (the old
+behaviour), or never. Shift swaps the two sides in the first two modes, so a click to the
+program is still Shift+click away. The wheel stays with the program by default because
+these programs draw on the alternate screen, which has no scrollback: taken locally, the
+wheel would turn into arrow keys and walk the prompt history instead of scrolling. The
+mode is a string, like `SessionsPaneLayout`, because settings.json has no enum converter.

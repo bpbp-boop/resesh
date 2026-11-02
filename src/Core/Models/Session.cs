@@ -97,6 +97,9 @@ public sealed record TerminalOverrides
     public int? FontSize { get; init; }
     public int? Scrollback { get; init; }
 
+    /// <summary>A <c>MouseCaptureModes</c> value, or null to inherit the app setting.</summary>
+    public string? MouseCapture { get; init; }
+
     /// <summary>Null inherits the app setting; true or false overrides it for this session.</summary>
     public bool? AlwaysRecord { get; init; }
 
@@ -113,6 +116,7 @@ public sealed record TerminalOverrides
     [JsonIgnore]
     public bool IsEmpty =>
         Theme is null && FontFamily is null && FontSize is null && Scrollback is null
+        && MouseCapture is null
         && AlwaysRecord is null
         && KeepCommandHistory is null
         && (EnabledRules is null || EnabledRules.Count == 0)

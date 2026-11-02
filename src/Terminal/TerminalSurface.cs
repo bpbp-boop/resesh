@@ -3,6 +3,20 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace Resesh.Terminal;
 
+/// <summary>What a program that tracks the mouse receives.</summary>
+public enum TerminalMouseCapture
+{
+    /// <summary>Clicks, drags and the wheel; Shift selects instead.</summary>
+    Always,
+
+    /// <summary>The wheel only, so the terminal keeps selecting, copying and pasting; Shift
+    /// sends a click to the program.</summary>
+    Scroll,
+
+    /// <summary>Nothing, with or without Shift.</summary>
+    Never,
+}
+
 /// <summary>
 /// Live terminal surface contract. Backends remain responsible for transport and emit raw bytes;
 /// the selected surface owns parsing, rendering, input, and viewport sizing.
@@ -85,6 +99,9 @@ public abstract partial class TerminalSurface : Grid, IDisposable
 
     /// <summary>Turns command-history capture on or off for this live terminal.</summary>
     public abstract void SetHistoryCapture(bool enabled);
+
+    /// <summary>How much of the mouse a program that turns on mouse tracking gets.</summary>
+    public abstract void SetMouseCapture(TerminalMouseCapture mode);
 
     /// <summary>Records the command still running now, with the output it has so far.</summary>
     public abstract void FlushHistory();

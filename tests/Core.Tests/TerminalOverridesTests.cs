@@ -41,5 +41,14 @@ public sealed class TerminalOverridesTests
     {
         Assert.True(new TerminalOverrides().IsEmpty);
         Assert.False(new TerminalOverrides { Scrollback = 50000 }.IsEmpty);
+        Assert.False(new TerminalOverrides { MouseCapture = MouseCaptureModes.Never }.IsEmpty);
+    }
+
+    [Fact]
+    public void WithOverrides_MouseCaptureDefaultsToScrollingAndCanBeOverridden()
+    {
+        Assert.Equal(MouseCaptureModes.Scroll, Defaults.MouseCapture);
+        var effective = Defaults.WithOverrides(new TerminalOverrides { MouseCapture = MouseCaptureModes.Always });
+        Assert.Equal(MouseCaptureModes.Always, effective.MouseCapture);
     }
 }

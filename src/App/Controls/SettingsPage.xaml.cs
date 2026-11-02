@@ -76,6 +76,7 @@ public sealed partial class SettingsPage : UserControl
         GlobalSettingsTarget.Scrollback => (ScrollbackCard, ScrollbackBox),
         GlobalSettingsTarget.CopyOnSelect => (CopyOnSelectCard, CopyOnSelectSwitch),
         GlobalSettingsTarget.RightClickPaste => (RightClickPasteCard, RightClickPasteSwitch),
+        GlobalSettingsTarget.MouseCapture => (MouseCaptureCard, MouseCaptureBox),
         GlobalSettingsTarget.ConfirmMultilinePaste => (ConfirmMultilinePasteCard, ConfirmMultilinePasteSwitch),
         GlobalSettingsTarget.ShowStatusBar => (ShowStatusBarCard, ShowStatusBarSwitch),
         GlobalSettingsTarget.SessionsPaneLayout => (SessionsPaneLayoutCard, SessionsPaneLayoutBox),
