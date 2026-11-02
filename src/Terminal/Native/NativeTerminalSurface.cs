@@ -460,7 +460,9 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _connected = false;
         if (RefreshCommands() is { } commands)
         {
-            commands.FlushHistory(); // before the divider: it is not the command's output
+            // Before the divider, which is not the command's output: records the open command
+            // and forgets everything the next connection's shell must establish afresh.
+            commands.ResetConnection();
             commands.SetExecutionReporting(false);
         }
         WriteDisplayText(Rule() + (neutral ? "\x1b[90m" : "\x1b[1;33m") +
