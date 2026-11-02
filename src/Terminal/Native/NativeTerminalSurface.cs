@@ -1761,14 +1761,21 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             {
                 _annotationTimer = DispatcherQueue.CreateTimer();
                 _annotationTimer.IsRepeating = false;
-                _annotationTimer.Tick += (_, _) =>
-                    DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RunAnnotations);
+                _annotationTimer.Tick += (_, _) => EnqueueAnnotations();
             }
             _annotationTimer.Interval = TimeSpan.FromMilliseconds(wait);
             _annotationTimer.Start();
             return;
         }
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RunAnnotations);
+        EnqueueAnnotations();
+    }
+
+    /// <summary>The dispatcher refuses work while it shuts down: then nothing is pending, or
+    /// QueueAnnotations would wait forever for a pass that never runs.</summary>
+    private void EnqueueAnnotations()
+    {
+        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RunAnnotations))
+            _annotationsPending = false;
     }
 
     private void RunAnnotations()
