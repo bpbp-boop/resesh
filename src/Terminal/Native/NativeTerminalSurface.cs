@@ -106,7 +106,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private readonly SurfaceConnection _connection = new();
     private bool _isSplit;
     private GhosttyFrameInfo _lastInfo = new() { MouseShape = GhosttyNative.MouseShapeText };
-    private ushort _suppressCharactersForKey;
+    private readonly KeyCharacterSuppression _suppressedKey = new();
     private float _fontScale;
 
     // Rewind keyframes (guarded by _termGate): same cadence as terminal.html.
@@ -932,7 +932,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         // raises a lost/got pair that is not a focus change for the program.
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ReportFocus);
         _cursorBlinkOn = true;
-        if (!focused) _suppressCharactersForKey = 0;
+        if (!focused) _suppressedKey.Clear();
         MarkCursorDirty();
         RequestFrame();
     }
@@ -996,6 +996,25 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         return n > 0 ? new string(buffer, 0, n) : string.Empty;
     }
 
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetKeyboardState(byte* keyState);
+
+    /// <summary>What the key's WM_CHAR will carry, from the full keyboard state (Ctrl and Alt
+    /// included, as TranslateMessage sees them); null for a dead key or an unreadable state.</summary>
+    private static string? CharactersTypedBy(uint virtualKey, uint scanCode)
+    {
+        var state = stackalloc byte[256];
+        if (!GetKeyboardState(state))
+            return null;
+        var buffer = stackalloc char[8];
+        var n = ToUnicodeEx(virtualKey, scanCode, state, buffer, 8, 4, GetKeyboardLayout(0));
+        return n >= 0 ? new string(buffer, 0, n) : null;
+    }
+
+    private void SuppressCharactersOf(ushort virtualKey, uint scanCode) =>
+        _suppressedKey.Suppress(virtualKey, CharactersTypedBy(virtualKey, scanCode));
+
     /// <summary>Input aimed at the find bar or scroll bar is theirs, not the shell's.</summary>
     private bool FromTerminal(RoutedEventArgs args) =>
         ReferenceEquals(args.OriginalSource, this) || ReferenceEquals(args.OriginalSource, _textInput);
@@ -1009,11 +1028,12 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         if (_composing || (int)args.Key == 229)
             return;
         var virtualKey = (ushort)args.Key;
-        if (_suppressCharactersForKey != 0 && _suppressCharactersForKey != virtualKey)
-            _suppressCharactersForKey = 0; // a missed key-up must not swallow later typing
+        var scanCode = args.KeyStatus.ScanCode;
+        _suppressedKey.KeyDown(virtualKey);
         FlushTextInput(); // text typed before this key goes first
         if (TryHandleShortcut(virtualKey))
         {
+            SuppressCharactersOf(virtualKey, scanCode);
             args.Handled = true;
             return;
         }
@@ -1025,7 +1045,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             if (args.Key == VirtualKey.Enter && _connection.RequestReconnect())
                 ReconnectRequested?.Invoke();
             args.Handled = true;
-            _suppressCharactersForKey = virtualKey;
+            SuppressCharactersOf(virtualKey, scanCode);
             return;
         }
 
@@ -1033,7 +1053,6 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         var control = Down(0x11);
         var alt = Down(0x12);
         var altGr = control && alt && Down(0xA5);
-        var scanCode = args.KeyStatus.ScanCode;
         var text = TextFor(virtualKey, scanCode, shift);
         var printable = text.Length > 0 && !char.IsControl(text[0]);
         // Plain and AltGr text reaches the text box, which knows dead keys, layouts and IMEs.
@@ -1049,7 +1068,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             && GhosttyNative.rvt_kitty_flags(_term) == 0)
         {
             args.Handled = true;
-            _suppressCharactersForKey = virtualKey;
+            SuppressCharactersOf(virtualKey, scanCode);
             SendUserInput([0x1B, 0x0D]);
             return;
         }
@@ -1074,15 +1093,14 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         if (args.Key == VirtualKey.Enter && !shift && !alt && !control)
             RefreshCommands()?.NotifyEnter();
         args.Handled = true; // also keeps Tab and the arrows from moving XAML focus
-        _suppressCharactersForKey = virtualKey;
+        SuppressCharactersOf(virtualKey, scanCode);
         if (written > 0)
             SendUserInput(new ReadOnlySpan<byte>(output, written).ToArray());
     }
 
     private void OnKeyUp(object sender, KeyRoutedEventArgs args)
     {
-        if (_suppressCharactersForKey == (ushort)args.Key)
-            _suppressCharactersForKey = 0;
+        _suppressedKey.KeyUp((ushort)args.Key);
     }
 
     /// <summary>Sends input and scrolls to the bottom. <paramref name="typed"/> is false
@@ -1111,7 +1129,6 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             ShortcutRequested?.Invoke(shortcut.Id, chord);
         else if (!RunTerminalShortcut(shortcut.Id))
             return false;
-        _suppressCharactersForKey = virtualKey;
         return true;
     }
 
