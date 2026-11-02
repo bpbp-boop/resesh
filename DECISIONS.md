@@ -1760,3 +1760,17 @@ is removed, so "π - project" and "~/src" are untouched.
 - A press that loses pointer capture drops its prepared drag preview a turn later, unless a
   drag from that strip has started: the system drag loop takes capture after
   `TabDragStarting`, and the drag needs the preview.
+
+## 2026-11-02 - Closes claim their tab and re-check after every await
+- `RequestCloseTabAsync` and `RequestCloseManyAsync` claim each tab on `MainViewModel`
+  (`TryBeginClose`/`EndClose`) for as long as their dialogs and remote-shell calls run. A
+  second request for a claimed tab (Ctrl+W again, a middle-click, a bulk close) is dropped
+  rather than queued behind the first: the first dialog already asks the question.
+- After every await they check that the window is still open and still owns the tab
+  (`MainViewModel.Owns`); a tab dragged to another window or closed meanwhile is left alone.
+  `CloseTabCore` does nothing for a tab it no longer holds, so a late caller can't throw
+  partway through a bulk close. Callers fire and forget, so failures go to
+  `App.ReportRecoverableError`.
+- A window shows exactly one workspace and never also parks it (`WorkspaceParking`; debug
+  builds assert it). The + button decides whether Home's tabs become the new workspace
+  after the name prompt, not before it, since another window can switch this one meanwhile.
