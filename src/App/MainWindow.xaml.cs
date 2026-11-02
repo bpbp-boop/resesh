@@ -30,6 +30,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     private SplitLayout<TabGroupViewModel> _groupLayout;
     private bool _closeConfirmed;
     private bool _closePromptOpen;
+    /// <summary>Set once the window has closed. Flows that awaited a dialog or the network
+    /// check it before touching the window's tabs or showing anything.</summary>
+    private bool _windowClosed;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
     private RectInt32? _normalWindowBounds;
     private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.ResolveTheme(App.Settings.Current.Theme));
@@ -132,6 +135,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         AppWindow.Closing += AppWindow_Closing;
         Closed += (_, _) =>
         {
+            _windowClosed = true;
             _uiSettings.ColorValuesChanged -= SystemColorsChanged;
             Resesh.Core.Backend.CleanupActions.Run(App.ReportRecoverableError,
                 SaveTreePaneWidth,

@@ -51,11 +51,11 @@ test("Y confirms session-close dialogs without becoming a global destructive sho
   assert.equal(singleClose.match(/acceptY: true/g)?.length, 2);
 
   const tmuxClose = source.match(
-    /private async Task RequestCloseTmuxTabAsync[\s\S]*?\n    }\r?\n\r?\n    public async Task RequestCloseManyAsync/)?.[0] ?? "";
+    /private async Task RequestCloseTmuxTabAsync[\s\S]*?\n    }\r?\n\r?\n(?:    \/\/\/.*\r?\n)*    public async Task RequestCloseManyAsync/)?.[0] ?? "";
   assert.match(tmuxClose, /AcceptsY = true/);
 
   const bulkClose = source.match(
-    /public async Task RequestCloseManyAsync[\s\S]*?\n    }\r?\n\r?\n    private void CloseTabCore/)?.[0] ?? "";
+    /public async Task RequestCloseManyAsync[\s\S]*?\n    }\r?\n\r?\n(?:    \/\/\/.*\r?\n)*    private void CloseTabCore/)?.[0] ?? "";
   assert.match(bulkClose, /acceptY: true/);
 
   const windowClose = source.match(
@@ -69,7 +69,7 @@ test("Y confirms session-close dialogs without becoming a global destructive sho
 
 test("bulk close can end persistent sessions and keeps tabs whose session survived", () => {
   const bulkTmux = source.match(
-    /private async Task RequestCloseManyWithTmuxAsync[\s\S]*?\n    }\r?\n\r?\n    private void CloseTabCore/)?.[0] ?? "";
+    /private async Task RequestCloseManyWithTmuxAsync[\s\S]*?\n    }\r?\n\r?\n(?:    \/\/\/.*\r?\n)*    private void CloseTabCore/)?.[0] ?? "";
   assert.match(bulkTmux, /OptionText = persistent\.Count == 1/);
   assert.match(bulkTmux, /AcceptsY = true/);
   assert.match(bulkTmux, /dialog\.IsOptionChecked[\s\S]*?TryEndRemoteSessionAsync\(\)/);
@@ -80,8 +80,11 @@ test("closing a tab hands off to its successor before removing the closing view"
   const closeCore = source.match(
     /private void CloseTabCore[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
   assert.match(closeCore,
-    /_groupViews\[group\]\.CloseTerminal\(\s*tab\.View as UIElement,\s*\(\) => ViewModel\.DetachTab\(tab\),\s*\(\) => \(tab\.View as IDisposable\)\?\.Dispose\(\)\);/);
+    /groupView\.CloseTerminal\(\s*tab\.View as UIElement,\s*\(\) => ViewModel\.DetachTab\(tab\),\s*\(\) => \(tab\.View as IDisposable\)\?\.Dispose\(\)\);/);
   assert.doesNotMatch(closeCore, /RemoveTerminal|ViewModel\.CloseTab/);
+  // A late close of a tab that already left the window does nothing rather than throw.
+  assert.match(closeCore, /ViewModel\.TryGroupOf\(tab\) is not \{ \} group[\s\S]*?return;/);
+  assert.doesNotMatch(closeCore, /ViewModel\.GroupOf\(/);
 
   const groupView = fs.readFileSync(
     path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"), "utf8");
@@ -94,3 +97,32 @@ test("closing a tab hands off to its successor before removing the closing view"
   assert.match(closeTerminal, /SyncTerminalVisibility\(\);\s*if \(view is not null\)\s*TerminalHost\.Children\.Remove\(view\);\s*disposeTab\(\);/);
 });
 
+
+// Closes wait on dialogs and remote shells; the tab may close, move to another window, or the
+// window may close meanwhile. Each flow claims its tabs, re-checks after every await, and
+// reports failures because its callers fire and forget.
+test("tab closes re-check the tab after every await and claim it while in flight", () => {
+  const single = source.match(
+    /public async Task RequestCloseTabAsync[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+  assert.match(single, /ViewModel\.TryBeginClose\(tab\)/);
+  assert.match(single, /catch \(Exception ex\)[\s\S]*?App\.ReportRecoverableError\(ex\)/);
+  assert.match(single, /finally[\s\S]*?ViewModel\.EndClose\(tab\)/);
+
+  const many = source.match(
+    /public async Task RequestCloseManyAsync[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+  assert.match(many, /Where\(ViewModel\.TryBeginClose\)/);
+  assert.match(many, /finally[\s\S]*?ViewModel\.EndClose\(tab\)/);
+
+  const flows = source.match(
+    /private async Task RequestCloseClaimedTabAsync[\s\S]*?\n    private void CloseTabCore/)?.[0] ?? "";
+  // Every await of a dialog or remote shell is followed by a check before closing.
+  const awaits = [...flows.matchAll(/await [^;]*?(?:ConfirmAsync|TryEndRemoteSessionAsync)\(/g)];
+  assert.ok(awaits.length >= 5);
+  for (const { 0: awaited, index } of awaits) {
+    const after = flows.slice(index + awaited.length);
+    const nextClose = after.search(/CloseTabCore\(tab\)|TogglePin\(tab\)/);
+    const nextCheck = after.search(/CanStillClose\(tab\)|_windowClosed/);
+    if (nextClose >= 0)
+      assert.ok(nextCheck >= 0 && nextCheck < nextClose, `no re-check after: ${awaited}`);
+  }
+});
