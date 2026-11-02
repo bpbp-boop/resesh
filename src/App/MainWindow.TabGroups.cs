@@ -870,16 +870,51 @@ public sealed partial class MainWindow
         }
     }
 
+    /// <remarks>Callers fire and forget. One lock or unlock prompt per tab at a time; the tab
+    /// may close, move to another window or be locked meanwhile, so it is re-checked after
+    /// the prompt rather than locked blindly with a password that would replace another.</remarks>
     public async Task LockSessionAsync(TabViewModel tab)
     {
-        if (await TextPromptDialog.PromptPasswordAsync(Root.XamlRoot, "Lock Session",
-                "Lock password (kept in memory only — not stored anywhere)", "Lock") is not { } password)
+        if (_windowClosed || tab.IsLocked || !ViewModel.TryBeginLockPrompt(tab))
             return;
-        tab.Lock(password);
-        (tab.View as TerminalTabView)?.ShowLockOverlay();
+        try
+        {
+            if (await TextPromptDialog.PromptPasswordAsync(Root.XamlRoot, "Lock Session",
+                    "Lock password (kept in memory only — not stored anywhere)", "Lock") is not { } password
+                || !CanStillClose(tab) || tab.IsLocked)
+                return;
+            tab.Lock(password);
+            (tab.View as TerminalTabView)?.ShowLockOverlay();
+        }
+        catch (Exception ex)
+        {
+            App.ReportRecoverableError(ex);
+        }
+        finally
+        {
+            ViewModel.EndLockPrompt(tab);
+        }
     }
 
     private async Task HandleUnlockAsync(TabViewModel tab, TerminalTabView view)
+    {
+        if (_windowClosed || !tab.IsLocked || !ViewModel.TryBeginLockPrompt(tab))
+            return;
+        try
+        {
+            await UnlockClaimedAsync(tab, view);
+        }
+        catch (Exception ex)
+        {
+            App.ReportRecoverableError(ex);
+        }
+        finally
+        {
+            ViewModel.EndLockPrompt(tab);
+        }
+    }
+
+    private async Task UnlockClaimedAsync(TabViewModel tab, TerminalTabView view)
     {
         var wait = tab.LockoutUntil - DateTimeOffset.Now;
         if (wait > TimeSpan.Zero)
@@ -895,7 +930,8 @@ public sealed partial class MainWindow
             XamlRoot = Root.XamlRoot,
             FieldHeader = "Unlock password",
         }.PromptAsync();
-        if (password is null)
+        // A tab that closed or moved to another window meanwhile is that window's to unlock.
+        if (password is null || !CanStillClose(tab) || !tab.IsLocked)
             return;
 
         if (tab.TryUnlock(password))
