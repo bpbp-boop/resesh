@@ -37,8 +37,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     private RectInt32? _normalWindowBounds;
     private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.ResolveTheme(App.Settings.Current.Theme));
     private int _themeApplyVersion;
-    private DependencyObject? _palettePreviousFocus;
-    private bool _paletteOpenedFromTerminal;
     private const double TreeIndentationScale = 0.5;
     private string _selectedRailTab = "sessions";
     private bool _sessionsPaneOpen;
@@ -84,7 +82,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             UIElement.KeyDownEvent,
             new KeyEventHandler(SessionTree_KeyDown),
             handledEventsToo: true);
-        CommandPalette.CloseRequested += CloseCommandPalette;
+        CommandPalette.CloseRequested += () => CloseCommandPalette(restoreFocus: true);
         CommandPalette.CommandInvoked += command => _ = ExecuteCommandPaletteEntryAsync(command);
         InitializeHistoryOverlay();
         RestoreWindowPlacement();
@@ -287,7 +285,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         switch (id)
         {
             case ShortcutIds.CommandHistory when HistoryOverlay.IsOpen:
-                CloseHistory();
+                CloseHistory(restoreFocus: true);
                 return true;
             case ShortcutIds.NextTab or ShortcutIds.PreviousTab:
                 return SelectTab(group, TabNavigation.Cycle(
@@ -325,21 +323,55 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         var parameter = descriptor.CurrentParameter ?? source;
         if (!descriptor.Command.CanExecute(parameter))
             return false;
-        _invokedFromTerminal = fromTerminal;
-        try
-        {
-            descriptor.Command.Execute(parameter);
-        }
-        finally
-        {
-            _invokedFromTerminal = false;
-        }
+        RunWithInvocationFocus(fromTerminal ? OverlayFocusSession.Terminal : null,
+            () => descriptor.Command.Execute(parameter));
         return true;
     }
 
-    /// <summary>True while a terminal-forwarded shortcut runs its command, so overlays and
-    /// dialogs it opens return focus to the terminal.</summary>
-    private bool _invokedFromTerminal;
+    /// <summary>Where focus goes back to when an overlay closes: the terminal, or the element
+    /// that had focus when it opened. Captured when the overlay opens and consumed once by
+    /// its single close path, so a later open of the same overlay can't lose or inherit it.</summary>
+    private sealed record OverlayFocusSession(DependencyObject? PreviousFocus, bool OpenedFromTerminal)
+    {
+        public static readonly OverlayFocusSession Terminal = new(null, true);
+    }
+
+    /// <summary>Set only while a command runs synchronously from a terminal-forwarded key or
+    /// the palette, so the overlays and dialogs it opens return focus where that invocation
+    /// came from. An overlay opened after the command's first await captures focus afresh.</summary>
+    private OverlayFocusSession? _invocationFocus;
+
+    private bool InvokedFromTerminal => _invocationFocus?.OpenedFromTerminal == true;
+
+    private T RunWithInvocationFocus<T>(OverlayFocusSession? focus, Func<T> run)
+    {
+        var outer = _invocationFocus;
+        _invocationFocus = focus;
+        try
+        {
+            return run();
+        }
+        finally
+        {
+            _invocationFocus = outer;
+        }
+    }
+
+    private void RunWithInvocationFocus(OverlayFocusSession? focus, Action run) =>
+        RunWithInvocationFocus(focus, () => { run(); return true; });
+
+    /// <summary>The focus an overlay opening now should return to: the running invocation's,
+    /// else the element focused at this moment.</summary>
+    private OverlayFocusSession CaptureOverlayFocus() =>
+        _invocationFocus ?? new(FocusManager.GetFocusedElement(Root.XamlRoot) as DependencyObject, false);
+
+    private void RestoreOverlayFocus(OverlayFocusSession? session)
+    {
+        if (session is { OpenedFromTerminal: false, PreviousFocus: { } previous })
+            _ = FocusManager.TryFocusAsync(previous, FocusState.Programmatic);
+        else
+            FocusActiveTerminal();
+    }
 
     /// <summary>Opens a dialog from a shortcut. WinUI allows one ContentDialog at a time, so
     /// the key does nothing while another dialog is showing.</summary>
@@ -486,36 +518,44 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private Task ShowKeyboardShortcutsAsync() => KeyboardShortcutsDialog.OpenAsync(Root.XamlRoot);
 
-    private void ShowCommandPalette(bool openedFromTerminal = false)
+    private OverlayFocusSession? _paletteFocus;
+
+    private void ShowCommandPalette()
     {
         if (CommandPalette.IsOpen)
             return;
-        if (HistoryOverlay.IsOpen)
-            HistoryOverlay.Close();
+        // The palette takes the history overlay's place, so it returns focus where the
+        // overlay would have, not to the overlay it replaced.
+        var focus = CloseHistory(restoreFocus: false) ?? CaptureOverlayFocus();
 
-        _paletteOpenedFromTerminal = openedFromTerminal;
-        _palettePreviousFocus = openedFromTerminal
-            ? null
-            : FocusManager.GetFocusedElement(Root.XamlRoot) as DependencyObject;
+        _paletteFocus = focus;
         var commands = BuildCommandPalette();
         CommandPalette.Open(commands);
     }
 
-    private void CloseCommandPalette()
+    /// <summary>The palette's only close path. Returns its focus session; restores focus to it
+    /// unless whatever replaces the palette (a command it runs, the history overlay) takes it.</summary>
+    private OverlayFocusSession? CloseCommandPalette(bool restoreFocus)
     {
         if (!CommandPalette.IsOpen)
-            return;
+            return null;
 
         CommandPalette.Close();
-        RestorePaletteFocus();
+        var focus = _paletteFocus;
+        _paletteFocus = null;
+        if (restoreFocus)
+            RestoreOverlayFocus(focus);
+        return focus;
     }
 
     private async Task ExecuteCommandPaletteEntryAsync(CommandPaletteEntry command)
     {
-        CommandPalette.Close();
+        // The command runs with the palette's focus session, so an overlay or dialog it
+        // opens returns focus where the palette would have.
+        var focus = CloseCommandPalette(restoreFocus: false);
         try
         {
-            await command.ExecuteAsync();
+            await RunWithInvocationFocus(focus, command.ExecuteAsync);
         }
         catch (Exception exception)
         {
@@ -523,26 +563,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         }
         finally
         {
-            if (!command.KeepActionFocus)
+            // An overlay opened by the command, or meanwhile, owns focus now.
+            if (!command.KeepActionFocus && !CommandPalette.IsOpen && !HistoryOverlay.IsOpen)
                 FocusActiveTerminal();
-            _palettePreviousFocus = null;
-            _paletteOpenedFromTerminal = false;
         }
-    }
-
-    private void RestorePaletteFocus()
-    {
-        if (_paletteOpenedFromTerminal)
-        {
-            FocusActiveTerminal();
-        }
-        else if (_palettePreviousFocus is { } previous)
-        {
-            _ = FocusManager.TryFocusAsync(previous, FocusState.Programmatic);
-        }
-
-        _palettePreviousFocus = null;
-        _paletteOpenedFromTerminal = false;
     }
 
     private void FocusActiveTerminal()
@@ -1087,12 +1111,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     // ---- Command history overlay ----
 
-    private DependencyObject? _historyPreviousFocus;
-    private bool _historyOpenedFromTerminal;
+    private OverlayFocusSession? _historyFocus;
 
     private void InitializeHistoryOverlay()
     {
-        HistoryOverlay.CloseRequested += CloseHistory;
+        HistoryOverlay.CloseRequested += () => CloseHistory(restoreFocus: true);
         HistoryOverlay.CanInsert = () =>
             ViewModel.ActiveTab is { View: TerminalTabView, State: TabConnectionState.Connected, IsLocked: false };
         HistoryOverlay.InsertCommand = entry =>
@@ -1100,8 +1123,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             if (ViewModel.ActiveTab?.View is not TerminalTabView view || !view.InsertText(entry.Command))
                 return false;
             // Focus belongs to the terminal now; closing must not send it back.
-            _historyPreviousFocus = null;
-            _historyOpenedFromTerminal = true;
+            if (HistoryOverlay.IsOpen)
+                _historyFocus = OverlayFocusSession.Terminal;
             return true;
         };
         HistoryOverlay.SessionNameFor = entry =>
@@ -1120,36 +1143,29 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         };
     }
 
-    private void ShowHistory(Guid? sessionId = null, bool openedFromTerminal = false)
+    private void ShowHistory(Guid? sessionId = null)
     {
-        if (CommandPalette.IsOpen)
-            CommandPalette.Close();
-        if (HistoryOverlay.IsOpen)
-        {
-            HistoryOverlay.Close();
-        }
-        else
-        {
-            _historyOpenedFromTerminal = openedFromTerminal;
-            _historyPreviousFocus = openedFromTerminal
-                ? null
-                : FocusManager.GetFocusedElement(Root.XamlRoot) as DependencyObject;
-        }
+        // Reopening keeps the overlay's focus session; replacing the palette takes the palette's.
+        var focus = CloseHistory(restoreFocus: false)
+            ?? CloseCommandPalette(restoreFocus: false)
+            ?? CaptureOverlayFocus();
+        _historyFocus = focus;
         var settings = App.Settings.Current;
         HistoryOverlay.Open(settings.KeepCommandHistory, sessionId, settings.FontFamily);
     }
 
-    private void CloseHistory()
+    /// <summary>The history overlay's only close path. Returns its focus session; restores
+    /// focus to it unless whatever replaces the overlay takes it.</summary>
+    private OverlayFocusSession? CloseHistory(bool restoreFocus)
     {
         if (!HistoryOverlay.IsOpen)
-            return;
+            return null;
         HistoryOverlay.Close();
-        if (_historyOpenedFromTerminal || _historyPreviousFocus is null)
-            FocusActiveTerminal();
-        else
-            _ = FocusManager.TryFocusAsync(_historyPreviousFocus, FocusState.Programmatic);
-        _historyPreviousFocus = null;
-        _historyOpenedFromTerminal = false;
+        var focus = _historyFocus;
+        _historyFocus = null;
+        if (restoreFocus)
+            RestoreOverlayFocus(focus);
+        return focus;
     }
 
     // ---- agent awareness (Phase 6.2) ----
