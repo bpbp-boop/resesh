@@ -19,16 +19,18 @@ public sealed class SftpSession : IDisposable
     private const int CopyBufferSize = 64 * 1024;
 
     private readonly KnownHostsStore _knownHosts;
+    private readonly Backend.BackendLifecycle _lifecycle = new();
+    // Published by exchange as soon as they exist, so a Dispose while Connect runs closes
+    // them (cutting the handshake short) and Connect, finding the stop, closes the rest.
     private SftpClient? _client;
     private SshJumpChain? _jumpChain;
-    private volatile bool _disposed;
 
     public SftpSession(KnownHostsStore knownHosts)
     {
         _knownHosts = knownHosts;
     }
 
-    public bool IsConnected => _client?.IsConnected == true;
+    public bool IsConnected => _lifecycle.IsOpen && _client?.IsConnected == true;
 
     /// <summary>The user's home directory, resolved at connect time.</summary>
     public string HomeDirectory { get; private set; } = "/";
@@ -36,36 +38,55 @@ public sealed class SftpSession : IDisposable
     /// <summary>
     /// Connects the SFTP channel. The host key is trusted only when it matches the entry
     /// already accepted through the terminal path — an unknown or changed key fails here
-    /// instead of raising a second surprise dialog.
+    /// instead of raising a second surprise dialog. A <see cref="Dispose"/> from another
+    /// thread, or <paramref name="cancellationToken"/>, abandons the connect: it throws
+    /// <see cref="OperationCanceledException"/> and leaves nothing open.
     /// </summary>
     public void Connect(Session session, string? secret,
         Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder = null,
         IReadOnlyList<SshHop>? jumps = null,
-        string? proxyPassword = null)
+        string? proxyPassword = null,
+        CancellationToken cancellationToken = default)
     {
-        if (_client is not null)
-            throw new InvalidOperationException("Session already used; create a new instance per connection.");
-
-        // Its own jump connections, like its own SSH connection. Their keys were accepted
-        // through the terminal too, so nothing here asks.
-        var via = jumps is { Count: > 0 }
-            ? SshJumpChain.Open(jumps, session.Host, session.Port, _knownHosts, interactiveResponder: interactiveResponder)
-            : null;
+        if (!_lifecycle.TryBeginConnect())
+            throw _lifecycle.CannotConnect();
         try
         {
-            ConnectClient(session, secret, interactiveResponder, via, proxyPassword);
+            ThrowIfAbandoned(cancellationToken);
+            // Its own jump connections, like its own SSH connection. Their keys were accepted
+            // through the terminal too, so nothing here asks.
+            var via = jumps is { Count: > 0 }
+                ? SshJumpChain.Open(jumps, session.Host, session.Port, _knownHosts,
+                    interactiveResponder: interactiveResponder, cancellationToken: cancellationToken)
+                : null;
+            Interlocked.Exchange(ref _jumpChain, via);
+            ThrowIfAbandoned(cancellationToken);
+            var client = ConnectClient(session, secret, interactiveResponder, via, proxyPassword, cancellationToken);
+            Interlocked.Exchange(ref _client, client);
+            ThrowIfAbandoned(cancellationToken);
+            HomeDirectory = RemotePath.Normalize(client.WorkingDirectory);
+            if (!_lifecycle.TryPublishOpen())
+                throw _lifecycle.CannotConnect();
         }
         catch
         {
-            via?.Dispose();
+            // A failed connect is final: the pane makes a new instance to retry.
+            _lifecycle.BeginStop();
+            Teardown();
             throw;
         }
-        _jumpChain = via;
     }
 
-    private void ConnectClient(Session session, string? secret,
+    private void ThrowIfAbandoned(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_lifecycle.IsStopped)
+            throw new OperationCanceledException("The file connection was closed while it was connecting.");
+    }
+
+    private SftpClient ConnectClient(Session session, string? secret,
         Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder,
-        SshJumpChain? via, string? proxyPassword)
+        SshJumpChain? via, string? proxyPassword, CancellationToken cancellationToken)
     {
         var auth = SshConnectionFactory.BuildAuthMethods(session, secret, interactiveResponder);
         var connectionInfo = SshConnectionFactory.CreateConnectionInfo(
@@ -100,11 +121,12 @@ public sealed class SftpSession : IDisposable
 
         try
         {
-            SshConnectionFactory.Connect(client, session, via, TimeSpan.FromSeconds(10), CancellationToken.None);
+            SshConnectionFactory.Connect(client, session, via, TimeSpan.FromSeconds(10), cancellationToken);
         }
         catch (Exception ex)
         {
             client.Dispose();
+            ThrowIfAbandoned(cancellationToken);
             if (hostKeyFailure is not null)
                 throw hostKeyFailure;
             throw ex as SshSessionException ?? SshConnectionFactory.Classify(ex, session, via);
@@ -114,8 +136,7 @@ public sealed class SftpSession : IDisposable
             SshConnectionFactory.DisposeAuthMethods(auth);
         }
 
-        _client = client;
-        HomeDirectory = RemotePath.Normalize(client.WorkingDirectory);
+        return client;
     }
 
     public IReadOnlyList<RemoteFileEntry> ListDirectory(string path)
@@ -201,11 +222,15 @@ public sealed class SftpSession : IDisposable
 
     public void Disconnect()
     {
-        if (_disposed)
-            return;
-        _disposed = true;
-        var client = _client;
-        _client = null;
+        if (_lifecycle.BeginStop())
+            Teardown();
+    }
+
+    /// <summary>Releases whatever is published; safe to run from both Disconnect and a
+    /// failing Connect, in either order.</summary>
+    private void Teardown()
+    {
+        var client = Interlocked.Exchange(ref _client, null);
         if (client is not null)
         {
             try
@@ -216,8 +241,8 @@ public sealed class SftpSession : IDisposable
             catch (Exception e) when (e is SshConnectionException or ObjectDisposedException or IOException) { }
             client.Dispose();
         }
-        _jumpChain?.Dispose();
-        _jumpChain = null;
+        // After the client: the jumps carry its connection.
+        Interlocked.Exchange(ref _jumpChain, null)?.Dispose();
     }
 
     public void Dispose() => Disconnect();
@@ -225,7 +250,7 @@ public sealed class SftpSession : IDisposable
     private SftpClient Require()
     {
         var client = _client;
-        if (client is null || _disposed || !client.IsConnected)
+        if (client is null || !_lifecycle.IsOpen || !client.IsConnected)
             throw new SshSessionException(SshFailureKind.HostUnreachable, "The file connection is not open.");
         return client;
     }

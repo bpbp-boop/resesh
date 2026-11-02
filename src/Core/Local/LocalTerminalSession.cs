@@ -31,10 +31,11 @@ public sealed class LocalTerminalSession : ITerminalBackend
     private int _processId;
     private Thread? _readerThread;
     private Thread? _exitThread;
-    private int _exitRaised;
     private long _lastOutputTicks;
-    private volatile bool _disposed;
-    private readonly object _exitGate = new();
+    // Exited is the lifecycle's remote close: raised under its lock, which Stop also takes,
+    // so a Stop waits out an Exited in flight and none follows it.
+    private readonly BackendLifecycle _lifecycle = new();
+    private volatile bool _processExited;
 
     public event TerminalOutputHandler? OutputReceived;
 
@@ -48,7 +49,17 @@ public sealed class LocalTerminalSession : ITerminalBackend
     public int ProcessId => _processId;
     public string? ShellIntegrationMessage { get; private set; }
 
-    public bool IsRunning => _process is not null && Volatile.Read(ref _exitRaised) == 0 && !_disposed;
+    /// <summary>
+    /// From a successful <see cref="Start"/> until <see cref="Exited"/> is raised or the
+    /// session is stopped. Deliberately still true while the final output drains after the
+    /// process ends (see <see cref="HasExited"/>): the tab must not offer a relaunch before
+    /// the exit notice has landed after that output.
+    /// </summary>
+    public bool IsRunning => _process is not null && _lifecycle.IsOpen;
+
+    /// <summary>The process has ended; its last output may still be draining before
+    /// <see cref="Exited"/>.</summary>
+    public bool HasExited => _processExited;
 
     /// <summary>
     /// Starts the shell described by the session's <see cref="LocalTarget"/> at the given
@@ -57,8 +68,8 @@ public sealed class LocalTerminalSession : ITerminalBackend
     /// </summary>
     public void Start(Session session, int columns, int rows)
     {
-        if (_process is not null || _disposed)
-            throw new InvalidOperationException("Session already used; create a new instance per launch.");
+        if (_lifecycle.State != BackendLifecycleState.NotStarted)
+            throw _lifecycle.CannotConnect();
         var target = session.Local
             ?? throw new ArgumentException("Session has no local target.", nameof(session));
         if (string.IsNullOrWhiteSpace(target.Executable))
@@ -71,10 +82,14 @@ public sealed class LocalTerminalSession : ITerminalBackend
         if (!Directory.Exists(directory))
             throw new LocalSessionException($"Starting directory not found: {directory}");
 
+        // After validation, which builds nothing and leaves the instance usable.
+        if (!_lifecycle.TryBeginConnect())
+            throw _lifecycle.CannotConnect();
         SafeFileHandle? inputRead = null, outputWrite = null;
         var attributes = IntPtr.Zero;
         var environment = IntPtr.Zero;
         var processThread = IntPtr.Zero;
+        var published = false;
         try
         {
             if (!CreatePipe(out inputRead, out _inputWrite, IntPtr.Zero, 0)
@@ -154,7 +169,13 @@ public sealed class LocalTerminalSession : ITerminalBackend
 
             _lastOutputTicks = Environment.TickCount64;
             _inputStream = new FileStream(_inputWrite!, FileAccess.Write);
-            _readerThread = new Thread(() => ReadLoop(_outputRead!)) { IsBackground = true, Name = "conpty-read" };
+            // Before the threads: the exit thread can only raise Exited for an open session.
+            // A Stop from another thread before this left the cleanup to us (below).
+            if (!_lifecycle.TryPublishOpen())
+                throw new OperationCanceledException("The session was stopped while it was starting.");
+            published = true;
+            var outputRead = _outputRead!;
+            _readerThread = new Thread(() => ReadLoop(outputRead)) { IsBackground = true, Name = "conpty-read" };
             _readerThread.Start();
             // Pin before launching the waiter: Stop may dispose the SafeHandle before the
             // thread is scheduled, but the native handle must survive both wait and exit-code read.
@@ -178,7 +199,16 @@ public sealed class LocalTerminalSession : ITerminalBackend
         {
             inputRead?.Dispose();
             outputWrite?.Dispose();
-            Stop();
+            if (published)
+            {
+                Stop();
+            }
+            else
+            {
+                // Still Connecting, or stopped while connecting: Stop leaves either to us.
+                _lifecycle.BeginStop();
+                Cleanup();
+            }
             throw;
         }
         finally
@@ -207,7 +237,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
                 if (read <= 0)
                     break; // conhost closed its write end: the console is gone
                 Interlocked.Exchange(ref _lastOutputTicks, Environment.TickCount64);
-                if (!_disposed)
+                if (!_lifecycle.IsStopped)
                     OutputReceived?.Invoke(buffer.AsSpan(0, read));
             }
         }
@@ -232,26 +262,24 @@ public sealed class LocalTerminalSession : ITerminalBackend
             process.Dispose();
             process.DangerousRelease();
         }
+        _processExited = true;
         // conhost renders the client's final output asynchronously; closing the console too
         // early drops it (observed: a fast `cmd /c echo` lost its line). Wait for the output
         // stream to go quiet, then close — which EOFs the reader — and drain it, so the exit
         // notice lands after the process's final output.
         var deadline = Environment.TickCount64 + 2000;
-        while (!_disposed && Environment.TickCount64 < deadline
+        while (!_lifecycle.IsStopped && Environment.TickCount64 < deadline
             && Environment.TickCount64 - Interlocked.Read(ref _lastOutputTicks) < 200)
         {
             Thread.Sleep(50);
         }
         CloseConsole();
         try { _readerThread?.Join(TimeSpan.FromSeconds(5)); } catch (ThreadStateException) { }
-        lock (_exitGate)
+        _lifecycle.TryRaiseRemoteClose(() =>
         {
-            if (Interlocked.Exchange(ref _exitRaised, 1) == 0 && !_disposed)
-            {
-                TraceHook?.Invoke($"local exit: pid {_processId} code {code}");
-                Exited?.Invoke(unchecked((int)code));
-            }
-        }
+            TraceHook?.Invoke($"local exit: pid {_processId} code {code}");
+            Exited?.Invoke(unchecked((int)code));
+        });
     }
 
     /// <summary>Closes the pseudoconsole exactly once (exit path and Stop/Dispose both land here).</summary>
@@ -274,7 +302,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
         try
         {
             var stream = _inputStream;
-            if (stream is null || _disposed)
+            if (stream is null || _lifecycle.IsStopped)
                 return;
             stream.Write(data, 0, data.Length);
             stream.Flush();
@@ -286,7 +314,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
     {
         lock (_consoleGate)
         {
-            if (_disposed || _console == IntPtr.Zero)
+            if (_lifecycle.IsStopped || _console == IntPtr.Zero)
                 return;
             ResizePseudoConsole(_console, new COORD
             {
@@ -329,7 +357,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
     public string? TryGetCurrentDirectory()
     {
         var process = _process;
-        if (_disposed || process is null || IntPtr.Size != 8)
+        if (_lifecycle.IsStopped || process is null || IntPtr.Size != 8)
             return null;
         var pinned = false;
         try
@@ -409,7 +437,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
     {
         lock (_jobGate)
         {
-            if (_disposed || _job == IntPtr.Zero)
+            if (_lifecycle.IsStopped || _job == IntPtr.Zero)
                 return [];
             // The list is variable length; ask with room for a typical shell tree and grow
             // once if the kernel says there are more.
@@ -448,13 +476,13 @@ public sealed class LocalTerminalSession : ITerminalBackend
     /// stop is reported by the caller). Idempotent; also the Dispose path.</summary>
     public void Stop()
     {
-        lock (_exitGate)
-        {
-            if (_disposed)
-                return;
-            _disposed = true;
-            Interlocked.Exchange(ref _exitRaised, 1);
-        }
+        if (!_lifecycle.BeginStop(out var previous))
+            return;
+        // Start is still building on another thread. It is quick and never blocks on the
+        // shell, so rather than tear handles out from under it, it finds the stop when it
+        // tries to publish and cleans up itself.
+        if (previous == BackendLifecycleState.Connecting)
+            return;
         Cleanup();
     }
 

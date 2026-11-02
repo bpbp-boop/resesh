@@ -1739,3 +1739,41 @@ is removed, so "π - project" and "~/src" are untouched.
 - The diagonal fills (U+1FB98, U+1FB99) space their lines exactly rather than rounding the
   spacing as Ghostty does, which left the cell corners bare at some sizes.
 - Checkerboards cap their rows at 16 so very tall cells stay within `MaxBoxes`.
+
+## 2026-11-02 - One lifecycle state machine for every connection backend
+- SSH, SFTP, telnet, serial and local sessions each kept their own flags (`_disposed`,
+  `_stopped`, `_closedRaised`, `_exitRaised`), checked in different orders. Two races fell
+  through the gaps. A Disconnect while Connect was still running found nothing published,
+  tore down nothing, and Connect then published a live client, shell, reader and watchdog
+  nobody owned (its detectors muted by the disposed flag, so the leak was silent). And a
+  remote close racing a local stop could raise Closed after the stop, because the
+  "already raised" exchange and the "stopped" check were separate steps.
+- `Backend.BackendLifecycle` is now the one state: NotStarted, Connecting, Open,
+  RemoteClosed, Stopped, changed only by compare-and-swap. A connect goes live only through
+  `TryPublishOpen`, which fails if a stop arrived meanwhile, and the connect thread then
+  tears down what it built. Each backend publishes resources by `Interlocked.Exchange` as
+  soon as they exist, and its teardown takes them back the same way, so a stop and an
+  abandoned connect can both tear down in any order without missing or doubling anything.
+- `TryRaiseRemoteClose` (Open → RemoteClosed) runs the Closed/Exited callback under the
+  lock `BeginStop` takes, as `LocalTerminalSession` already did with its exit gate. Once
+  Stop returns, no Closed is running or still to come. Every App handler only enqueues to
+  the dispatcher, so the wait is short, and a handler that stops from inside Closed
+  re-enters the lock on its own thread.
+- A failed connect is final (the state goes to Stopped): every caller already makes a new
+  instance per attempt, and a half-built instance being reusable was itself a leak path.
+- Local is the exception for stopping mid-start: `Start` is fast and never blocks, so a
+  `Stop` that finds it Connecting leaves the cleanup to `Start`, which finds the stop when
+  it publishes. Tearing handles out from under `CreateProcess` would be worse.
+  `IsRunning` deliberately stays true while the last output drains after the process ends
+  (`HasExited` says it ended), so a relaunch can't be offered before the exit notice lands.
+- Remote close is only possible from Open. Detectors (readers, watchdog, ErrorOccurred) start
+  after the publish; failures while connecting are reported by Connect throwing.
+- Telnet now closes the socket when a send fails. With a half-open TCP connection the reader
+  could block forever while every keystroke queued, so the tab looked connected. It also sets
+  TCP keepalive (30 s idle, 10 s interval, 3 probes), so a vanished peer is noticed in about
+  a minute.
+- `SshTunnelSet` has an internal Starting phase (the public `TunnelState` still reads Stopped
+  until the start settles, so the App's display needs no new case). A Stop, Remove or
+  Dispose during a start marks the entry. The starting thread alone holds the new port
+  until it settles under the lock, and closes it if the mark is set. A second Start of a
+  tunnel that is still starting is refused.

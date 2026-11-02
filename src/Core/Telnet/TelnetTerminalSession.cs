@@ -24,6 +24,7 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
     // enqueued under one lock, so the wire sees them in the order they were produced.
     private readonly object _gate = new();
     private readonly System.Collections.Concurrent.BlockingCollection<byte[]> _outgoing = new();
+    private readonly BackendLifecycle _lifecycle = new();
     private Socket? _socket;
     private IDisposable? _route;
     private TelnetProtocol? _protocol;
@@ -31,8 +32,14 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
     private TelnetBbsSizeFilter? _bbsSizeFilter;
     private Thread? _reader;
     private Thread? _sender;
-    private volatile bool _stopped;
-    private int _closedRaised;
+    private Exception? _sendFailure;
+
+    // TCP keepalive: a peer that vanished without a FIN or RST (a dropped VPN, a powered-off
+    // console server) is noticed within KeepAliveTime + Interval × RetryCount, about a
+    // minute, instead of never: telnet itself has no keepalive and an idle tab sends nothing.
+    internal const int KeepAliveTimeSeconds = 30;
+    internal const int KeepAliveIntervalSeconds = 10;
+    internal const int KeepAliveRetryCount = 3;
 
     public event TerminalOutputHandler? OutputReceived;
 
@@ -43,7 +50,7 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
     /// <summary>Diagnostic hook (DEBUG builds wire this to a trace log).</summary>
     public static Action<string>? TraceHook { get; set; }
 
-    public bool IsConnected => !_stopped && _socket is { Connected: true } && _closedRaised == 0;
+    public bool IsConnected => _lifecycle.IsOpen && _socket is { Connected: true };
 
     /// <summary>"address:port" actually connected to, for the status bar.</summary>
     public string RemoteEndPoint { get; private set; } = "";
@@ -53,8 +60,33 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
         CancellationToken cancellationToken = default, TelnetTextEncoding textEncoding = TelnetTextEncoding.Auto,
         bool report80x25 = false, IDisposable? route = null)
     {
-        // Whatever carries this connection (jump hosts) ends with it, connected or not.
-        lock (_gate) _route = route;
+        // Whatever carries this connection (jump hosts) ends with it, connected or not: taken
+        // under the gate, so a Dispose before or during the connect releases it either way.
+        lock (_gate)
+        {
+            if (!_lifecycle.TryBeginConnect())
+            {
+                var refused = _lifecycle.CannotConnect();
+                route?.Dispose();
+                throw refused;
+            }
+            _route = route;
+        }
+        try
+        {
+            ConnectSocket(host, port, terminalType, columns, rows, cancellationToken, textEncoding, report80x25);
+        }
+        catch
+        {
+            // A failed connect is final, like a stop: releases the route and anything built.
+            Dispose();
+            throw;
+        }
+    }
+
+    private void ConnectSocket(string host, int port, string terminalType, int columns, int rows,
+        CancellationToken cancellationToken, TelnetTextEncoding textEncoding, bool report80x25)
+    {
         if (string.IsNullOrWhiteSpace(host))
             throw new TelnetSessionException("No host set for this session.");
 
@@ -92,10 +124,13 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
             }
         }
 
+        EnableKeepAlive(socket);
         var protocol = new TelnetProtocol(terminalType, report80x25 ? 80 : columns, report80x25 ? 25 : rows);
         lock (_gate)
         {
-            if (_stopped)
+            // Dispose reads the socket under this gate after it stops, so either the
+            // publish fails here or Dispose sees the socket and closes it.
+            if (!_lifecycle.TryPublishOpen())
             {
                 socket.Dispose();
                 throw new OperationCanceledException(cancellationToken);
@@ -109,17 +144,35 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
         }
         TraceHook?.Invoke($"telnet connected {RemoteEndPoint}");
 
-        _sender = new Thread(SendLoop) { IsBackground = true, Name = "telnet-sender" };
+        // Started after the publish: a stop in between leaves them a closed socket and a
+        // completed queue, and they end without raising Closed.
+        _sender = new Thread(() => SendLoop(socket)) { IsBackground = true, Name = "telnet-sender" };
         _sender.Start();
-        _reader = new Thread(ReadLoop) { IsBackground = true, Name = "telnet-reader" };
+        _reader = new Thread(() => ReadLoop(socket)) { IsBackground = true, Name = "telnet-reader" };
         _reader.Start();
+    }
+
+    private static void EnableKeepAlive(Socket socket)
+    {
+        try
+        {
+            socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveTime, KeepAliveTimeSeconds);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveInterval, KeepAliveIntervalSeconds);
+            socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.TcpKeepAliveRetryCount, KeepAliveRetryCount);
+        }
+        catch (SocketException ex)
+        {
+            // Older stacks lack the per-socket timings; the connection works without them.
+            TraceHook?.Invoke($"telnet keepalive not set: {ex.Message}");
+        }
     }
 
     public void Write(byte[] data)
     {
         lock (_gate)
         {
-            if (_protocol is null || _stopped)
+            if (_protocol is null || _lifecycle.IsStopped)
                 return;
             EnqueueLocked(_protocol.EncodeInput(_textCodec!.EncodeInput(data)));
         }
@@ -129,7 +182,7 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
     {
         lock (_gate)
         {
-            if (_protocol is null || _stopped)
+            if (_protocol is null || _lifecycle.IsStopped)
                 return;
             EnqueueLocked(_protocol.Resize(_bbsSizeFilter is null ? columns : 80, _bbsSizeFilter is null ? rows : 25));
         }
@@ -141,7 +194,7 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
     {
         lock (_gate)
         {
-            if (_protocol is not null && !_stopped)
+            if (_protocol is not null && !_lifecycle.IsStopped)
                 EnqueueLocked(TelnetProtocol.BreakCommand());
         }
     }
@@ -150,30 +203,32 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
 
     public void Dispose()
     {
+        // Outside the gate: a Closed being raised holds the lifecycle's lock, and this waits
+        // for it rather than letting it land after the stop.
+        if (!_lifecycle.BeginStop())
+            return;
         Socket? socket;
         IDisposable? route;
         lock (_gate)
         {
             route = _route;
             _route = null;
-            if (_stopped)
-            {
-                route?.Dispose();
-                return;
-            }
-            _stopped = true;
             socket = _socket;
             _outgoing.CompleteAdding();
         }
-        if (socket is not null)
-        {
-            try { socket.Shutdown(SocketShutdown.Both); } catch (Exception ex) when (ex is SocketException or ObjectDisposedException) { }
-            socket.Dispose(); // unblocks the reader's Receive
-        }
+        CloseSocket(socket); // unblocks the reader's Receive
         route?.Dispose();
     }
 
-    private void ReadLoop()
+    private static void CloseSocket(Socket? socket)
+    {
+        if (socket is null)
+            return;
+        try { socket.Shutdown(SocketShutdown.Both); } catch (Exception ex) when (ex is SocketException or ObjectDisposedException) { }
+        socket.Dispose();
+    }
+
+    private void ReadLoop(Socket socket)
     {
         var buffer = new byte[16 * 1024];
         var data = new List<byte>(buffer.Length);
@@ -181,8 +236,7 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
         Exception? failure = null;
         try
         {
-            var socket = _socket!;
-            while (!_stopped)
+            while (!_lifecycle.IsStopped)
             {
                 var read = socket.Receive(buffer);
                 if (read == 0)
@@ -220,6 +274,8 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
         {
             failure = ex;
         }
+        // A send failure closed the socket under the reader; report the cause, not the symptom.
+        failure = Volatile.Read(ref _sendFailure) ?? failure;
 
         byte[] tail;
         lock (_gate)
@@ -229,12 +285,13 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
                 tail = _bbsSizeFilter.Process(tail, [], flush: true);
             _outgoing.CompleteAdding(); // releases the sender thread
         }
-        if (!_stopped && tail.Length > 0)
+        if (!_lifecycle.IsStopped && tail.Length > 0)
             OutputReceived?.Invoke(tail);
-        if (_stopped || Interlocked.Exchange(ref _closedRaised, 1) != 0)
-            return;
-        TraceHook?.Invoke($"telnet closed: {failure?.Message ?? "by server"}");
-        Closed?.Invoke(failure);
+        _lifecycle.TryRaiseRemoteClose(() =>
+        {
+            TraceHook?.Invoke($"telnet closed: {failure?.Message ?? "by server"}");
+            Closed?.Invoke(failure);
+        });
     }
 
     private void EnqueueLocked(byte[] bytes)
@@ -243,9 +300,8 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
             _outgoing.Add(bytes);
     }
 
-    private void SendLoop()
+    private void SendLoop(Socket socket)
     {
-        var socket = _socket!;
         try
         {
             foreach (var bytes in _outgoing.GetConsumingEnumerable())
@@ -257,9 +313,16 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
         }
         catch (Exception ex) when (ex is SocketException or ObjectDisposedException)
         {
-            // The reader observes the dead socket and reports the close.
-            if (!_stopped)
-                TraceHook?.Invoke($"telnet send failed: {ex.Message}");
+            if (_lifecycle.IsStopped)
+                return;
+            TraceHook?.Invoke($"telnet send failed: {ex.Message}");
+            // A half-open connection can fail sends while the reader waits forever, which
+            // left the tab "connected" and the queue growing with every keystroke. Close the
+            // socket so the reader ends and reports it, and stop queueing.
+            Interlocked.CompareExchange(ref _sendFailure, ex, null);
+            lock (_gate)
+                _outgoing.CompleteAdding();
+            CloseSocket(socket);
         }
     }
 }
