@@ -1773,3 +1773,17 @@ is removed, so "π - project" and "~/src" are untouched.
   is the cost.
 - Turning agent suppression ("none") on or off forgets the agent state, because evidence is
   ignored while suppressed and the old badge would otherwise reappear after the agent left.
+
+## 2026-11-02 - A failed disk recording stops itself; the terminal and rewind carry on
+- An `IOException` from the recorder (disk full, drive gone) used to propagate out of
+  `TerminalCapture.CaptureOutput` into the terminal's output callback, leaving the recorder
+  installed so every later chunk threw again; a failed timer flush was swallowed. Now any
+  write or flush failure detaches and closes the recorder (closing errors are ignored, the
+  failure is already known), sets `RecordingError`, raises `RecordingChanged(false, path)`
+  and then `RecordingFailed(path, message)`. In-memory rewind capture keeps going. Events
+  fire outside the capture's lock, on the output thread or the flush timer's thread.
+- The recorder remembers its first failure and refuses further writes, so a half-written
+  cast line is never followed by more.
+- The plain-text log renderer holds at most 1024 unfinished rows (the topmost is written
+  out early) and 8192 characters per row, and line feeds stop counting at row 65535. A
+  hostile stream could otherwise make it hold gigabytes.
