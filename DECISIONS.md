@@ -1761,3 +1761,15 @@ is removed, so "π - project" and "~/src" are untouched.
 - Known hosts keep their stricter rules: an invalid file with no good backup still blocks
   SSH (`LoadError`), because starting empty would make a changed host key look like a new
   host. `Check`/`Lookup` before `Load` throw too while a file exists.
+
+## 2026-11-02 - Agent bells are ignored only while an adapter-reported agent is running
+- `AgentTracker` used to latch "an adapter has spoken" for the whole connection, so after
+  one Claude Code session with hooks, bells and OSC 9 were ignored for every later agent in
+  the tab, including ones with no adapter, and the source read "reported by the agent" for
+  identities that came from a command or process. The latch is now the adapter-asserted
+  identity itself: bells are ignored while it is set, and it ends with the agent (a prompt,
+  a shell title, the process leaving, an exit event, an OSC 7501 clear, the session ending).
+  A rerun agent must report again before its bells are dropped; one stray bell in between
+  is the cost.
+- Turning agent suppression ("none") on or off forgets the agent state, because evidence is
+  ignored while suppressed and the old badge would otherwise reappear after the agent left.
