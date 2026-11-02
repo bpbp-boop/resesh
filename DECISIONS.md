@@ -1739,3 +1739,36 @@ is removed, so "π - project" and "~/src" are untouched.
 - The diagonal fills (U+1FB98, U+1FB99) space their lines exactly rather than rounding the
   spacing as Ghostty does, which left the cell corners bare at some sizes.
 - Checkerboards cap their rows at 16 so very tall cells stay within `MaxBoxes`.
+
+## 2026-11-02 - Frame effects carry a sequence number
+- A frame's XAML side (scroll bar, IME position, pointer shape, blink, margin) reaches the UI
+  thread two ways: the render thread posts it, merged until the dispatcher runs it, and a
+  frame the UI thread draws itself during layout (`DrawFrame`) applies it at once. The posted
+  batch could arrive after a newer direct one and put the scroll bar and IME box back where
+  an older frame had them.
+- Each drawn frame is stamped from a counter incremented under `_renderGate`, so the order is
+  drawing order whichever thread drew. The UI thread remembers the newest frame it applied and
+  drops older metadata and margin; flags that only ask for work (annotations, hover refresh,
+  polling) are always applied. Margin has its own stamp because a merged batch can carry
+  metadata from one frame and a margin change from an earlier one.
+
+## 2026-11-02 - The terminal is freed under the render lock too
+- Frames read `_term` under `_renderGate` only, and `Dispose` joins the render thread for at
+  most two seconds: a frame can wait that long on the shared device gate behind another
+  surface's device recovery. `Dispose` now frees the terminal holding `_renderGate` and then
+  `_termGate`, so a late frame either finishes first or sees `_term` zero.
+- That nesting is safe because nothing waits for `_renderGate` while holding `_termGate` off
+  the UI thread: the render thread takes only `_renderGate` and then the device gate, and the
+  output reader, compression timer and replay hold `_termGate` without touching the render
+  lock. `ApplyColors` does nest the other way, but only on the UI thread, which `Dispose` is on.
+
+## 2026-11-02 - Renderers rebuild their own device resources
+- Device-loss recovery used to rebuild every renderer in one pass and had no failure state:
+  one exception left all of them blank for good. Each renderer now checks, at every Draw,
+  Resize and SetFont, whether it has a context made on the current device and rebuilds if
+  not, creating the shared device when it is missing. Recovery is just "tear everything
+  down, let each renderer try".
+- Failed device creation is retried at most once a second (`RetryDelay`), and the surface
+  schedules a frame for the retry, because a blank terminal asks for no frames of its own.
+- The constructor still throws when no device can be made: a surface that never had one is
+  the host's error to show, not a blank terminal to retry.

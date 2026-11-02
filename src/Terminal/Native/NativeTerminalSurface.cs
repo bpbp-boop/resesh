@@ -324,11 +324,22 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _annotations?.Dispose(wait: true); // its pass may be reading the terminal freed below
         _commands?.Dispose();
         _commandBuffer?.Detach();
-        lock (_termGate)
+        // Frames read _term under _renderGate alone, and the join above gives up after two
+        // seconds (a frame can wait on the shared device behind another surface's recovery).
+        // Freeing under _renderGate as well means a frame either finishes before the free or
+        // starts after it and sees _term zero. No deadlock: the render thread takes only
+        // _renderGate (then the device gate), and _termGate's holders off the UI thread (output
+        // parsing, replay) never take _renderGate, so nothing waits for _termGate while holding
+        // _renderGate except this thread.
+        lock (_renderGate)
         {
-            if (_term != IntPtr.Zero)
-                GhosttyNative.rvt_free(_term);
-            _term = IntPtr.Zero;
+            lock (_termGate)
+            {
+                if (_term != IntPtr.Zero)
+                    GhosttyNative.rvt_free(_term);
+                _term = IntPtr.Zero;
+            }
+            _rendererRetry?.Dispose();
         }
         _compressTimer?.Dispose();
         if (_self.IsAllocated)

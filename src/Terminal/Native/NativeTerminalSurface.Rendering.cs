@@ -35,39 +35,48 @@ public sealed unsafe partial class NativeTerminalSurface
     // Render-side frame state (under _renderGate).
     private GhosttyFrameInfo _renderInfo = new() { MouseShape = GhosttyNative.MouseShapeText };
     private int _lastCursorRow = -1;
+    private long _frameSequence; // stamps each drawn frame's effects, in drawing order
 
     private readonly object _effectsGate = new();
     private FrameEffects _pendingEffects;
     private bool _effectsPosted;
+    // UI thread: the newest frame whose metadata and margin are on screen. Effects posted by the
+    // render thread can arrive after a newer frame the UI thread drew itself (DrawFrame).
+    private long _appliedInfoSequence;
+    private long _appliedMarginSequence;
 
     /// <summary>What a frame needs done on the UI thread.</summary>
     private struct FrameEffects
     {
         public bool HasInfo;          // Info is a new frame's metadata
         public GhosttyFrameInfo Info;
+        public long Sequence;         // the frame Info came from
         public bool CursorMoved;
         public bool Annotate;         // output arrived: command marks and ruler follow it
         public bool HoverMoved;       // output moved under the hovered link
         public bool MarginChanged;
         public uint? Margin;
+        public long MarginSequence;   // the frame Margin came from
         public bool Poll;             // synchronized output is holding the frame
 
         public readonly bool Any => HasInfo || Annotate || HoverMoved || MarginChanged || Poll;
 
         public void Merge(in FrameEffects next)
         {
-            if (next.HasInfo)
+            if (next.HasInfo && next.Sequence >= Sequence)
             {
                 HasInfo = true;
                 Info = next.Info;
+                Sequence = next.Sequence;
             }
             CursorMoved |= next.CursorMoved;
             Annotate |= next.Annotate;
             HoverMoved |= next.HoverMoved;
-            if (next.MarginChanged)
+            if (next.MarginChanged && next.MarginSequence >= MarginSequence)
             {
                 MarginChanged = true;
                 Margin = next.Margin;
+                MarginSequence = next.MarginSequence;
             }
             Poll |= next.Poll;
         }
@@ -210,8 +219,12 @@ public sealed unsafe partial class NativeTerminalSurface
     {
         if (_disposed)
             return;
-        if (effects.HasInfo)
+        // Effects posted by the render thread can arrive after the UI thread drew a newer frame
+        // itself and applied its effects (DrawFrame): their scroll position, IME place, pointer
+        // shape and margin are then stale and must not overwrite the newer ones.
+        if (effects.HasInfo && effects.Sequence > _appliedInfoSequence)
         {
+            _appliedInfoSequence = effects.Sequence;
             var info = effects.Info;
             _lastInfo = info;
             var blink = info.CursorBlinking != 0 && _focused && info.CursorVisible != 0;
@@ -230,8 +243,9 @@ public sealed unsafe partial class NativeTerminalSurface
             QueueAnnotations();
         if (effects.HoverMoved)
             UpdateHoverLink(_hoverCell, force: true);
-        if (effects.MarginChanged)
+        if (effects.MarginChanged && effects.MarginSequence > _appliedMarginSequence)
         {
+            _appliedMarginSequence = effects.MarginSequence;
             var color = effects.Margin ?? _theme.Background;
             Background = new SolidColorBrush(ToColor(color));
             _ruler.SetLaneBackground(color);
@@ -303,7 +317,8 @@ public sealed unsafe partial class NativeTerminalSurface
                 _highlighter.ApplyRow(new Span<TerminalCell>(_cells + y * Columns, Columns), _highlightGrapheme ??= x => GraphemeAt(x, _highlightRow));
             }
         }
-        var effects = new FrameEffects { HasInfo = true, Annotate = rows > 0 || full, Poll = held };
+        // Stamped in drawing order (under _renderGate): see ApplyEffects.
+        var effects = new FrameEffects { HasInfo = true, Annotate = rows > 0 || full, Poll = held, Sequence = ++_frameSequence };
         var hoverSpans = _hoverSpans;
         if (rows > 0 && hoverSpans.Length > 0)
         {
@@ -343,6 +358,7 @@ public sealed unsafe partial class NativeTerminalSurface
             _marginColor = _renderer.MarginColor;
             effects.MarginChanged = true;
             effects.Margin = _marginColor;
+            effects.MarginSequence = effects.Sequence;
         }
         _lastCursorRow = info.CursorVisible != 0 ? info.CursorY : -1;
         return effects;
