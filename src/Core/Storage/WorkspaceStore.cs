@@ -67,18 +67,23 @@ public sealed class WorkspaceStore
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     });
 
-    private readonly string _path;
+    private readonly StoreFile _file;
     private readonly object _gate = new();
     private List<Workspace> _workspaces = [];
     private WorkspaceLayout? _lastLayout;
     private Guid? _lastActiveWorkspaceId;
     private Dictionary<Guid, WorkspaceLayout> _drafts = [];
-    private bool _preserveBackup;
     public string? LoadWarning { get; private set; }
+
+    /// <summary>Whether saves are allowed; see <see cref="StoreLoadState"/>.</summary>
+    public StoreLoadState LoadState
+    {
+        get { lock (_gate) return _file.State; }
+    }
 
     public WorkspaceStore(string path)
     {
-        _path = path;
+        _file = new StoreFile(path, "Workspaces");
     }
 
     public static string DefaultPath => AppDataPaths.Roaming("workspaces.json");
@@ -181,10 +186,8 @@ public sealed class WorkspaceStore
     {
         lock (_gate)
         {
-            var load = AtomicFile.Load(_path, path => ParsePayload(File.ReadAllBytes(path)), "Workspaces");
-            _preserveBackup = load.PreserveBackup;
-            LoadWarning = load.Warning;
-            var data = load.Data ?? new WorkspaceStoreData { Workspaces = [] };
+            var data = _file.Load(path => ParsePayload(File.ReadAllBytes(path))) ?? new WorkspaceStoreData { Workspaces = [] };
+            LoadWarning = _file.Warning;
             _workspaces = data.Workspaces!;
             _lastLayout = data.LastLayout;
             _lastActiveWorkspaceId = data.LastActiveWorkspaceId;
@@ -337,7 +340,7 @@ public sealed class WorkspaceStore
         drafts = drafts
             .Where(draft => workspaces.Any(workspace => workspace.Id == draft.Key))
             .ToDictionary(draft => draft.Key, draft => draft.Value);
-        WriteAtomic(_path, new WorkspaceStoreData
+        _file.Write(JsonSerializer.Serialize(new WorkspaceStoreData
         {
             Workspaces = workspaces,
             LastLayout = lastLayout,
@@ -345,8 +348,7 @@ public sealed class WorkspaceStore
             Drafts = drafts.Count == 0
                 ? null
                 : drafts.Select(draft => new WorkspaceDraft { WorkspaceId = draft.Key, Layout = draft.Value }).ToList(),
-        }, _preserveBackup);
-        _preserveBackup = false;
+        }, JsonOptions.Info<WorkspaceStoreData>()));
         _workspaces = workspaces;
         _lastLayout = lastLayout;
         _lastActiveWorkspaceId = lastActiveWorkspaceId;
@@ -577,8 +579,8 @@ public sealed class WorkspaceStore
         };
     }
 
-    private static void WriteAtomic(string path, WorkspaceStoreData data, bool preserveBackup = false) =>
-        AtomicFile.Write(path, JsonSerializer.Serialize(data, JsonOptions.Info<WorkspaceStoreData>()), preserveBackup);
+    private static void WriteAtomic(string path, WorkspaceStoreData data) =>
+        AtomicFile.Write(path, JsonSerializer.Serialize(data, JsonOptions.Info<WorkspaceStoreData>()));
 
 }
 

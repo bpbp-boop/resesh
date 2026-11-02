@@ -15,20 +15,25 @@ public sealed class IdentityStore
         Converters = { CamelCaseEnumConverter.Instance },
     });
 
-    private readonly string _path;
-    private bool _preserveBackup;
+    private readonly StoreFile _file;
     private readonly object _gate = new();
     private List<Identity> _identities = [];
 
     public IdentityStore(string path)
     {
-        _path = path;
+        _file = new StoreFile(path, "Identities");
     }
 
     public static string DefaultPath => AppDataPaths.Roaming("identities.json");
 
     /// <summary>Set by <see cref="Load"/> when the file was recovered or unreadable.</summary>
     public string? LoadWarning { get; private set; }
+
+    /// <summary>Whether saves are allowed; see <see cref="StoreLoadState"/>.</summary>
+    public StoreLoadState LoadState
+    {
+        get { lock (_gate) return _file.State; }
+    }
 
     /// <summary>Raised after any change is saved.</summary>
     public event Action? Changed;
@@ -42,10 +47,8 @@ public sealed class IdentityStore
     {
         lock (_gate)
         {
-            var load = AtomicFile.Load(_path, Read, "Identities");
-            _preserveBackup = load.PreserveBackup;
-            LoadWarning = load.Warning;
-            _identities = load.Data?.Identities ?? [];
+            _identities = _file.Load(Read)?.Identities ?? [];
+            LoadWarning = _file.Warning;
         }
     }
 
@@ -165,9 +168,8 @@ public sealed class IdentityStore
     private void Save(List<Identity> candidate)
     {
         var json = JsonSerializer.Serialize(new StoreData { Identities = candidate }, JsonOptions.Info<StoreData>());
-        AtomicFile.Write(_path, json, _preserveBackup);
+        _file.Write(json);
         _identities = candidate;
-        _preserveBackup = false;
     }
 
     private static StoreData? Read(string path) =>

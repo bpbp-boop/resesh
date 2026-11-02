@@ -19,8 +19,7 @@ public sealed class HighlightsStore
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     });
 
-    private readonly string? _path;
-    private bool _preserveBackup;
+    private readonly StoreFile? _file;
     private HighlightBackupData? _draftBaseline;
     private readonly object _gate = new();
 
@@ -31,13 +30,19 @@ public sealed class HighlightsStore
 
     public HighlightsStore(string path)
     {
-        _path = path;
+        _file = new StoreFile(path, "Highlight rules");
     }
 
     private HighlightsStore() { }
 
     /// <summary>Set by <see cref="Load"/> when the file was recovered or unreadable.</summary>
     public string? LoadWarning { get; private set; }
+
+    /// <summary>Whether saves are allowed; see <see cref="StoreLoadState"/>. Drafts never save.</summary>
+    public StoreLoadState LoadState
+    {
+        get { lock (_gate) return _file?.State ?? StoreLoadState.Loaded; }
+    }
 
     /// <summary>An independent in-memory editor. Changes never write to the live store.</summary>
     public HighlightsStore CreateDraft()
@@ -123,13 +128,11 @@ public sealed class HighlightsStore
 
     public void Load()
     {
-        if (_path is null) return;
+        if (_file is null) return;
         lock (_gate)
         {
-            var load = AtomicFile.Load(_path, Read, "Highlight rules");
-            _preserveBackup = load.PreserveBackup;
-            LoadWarning = load.Warning;
-            var data = load.Data ?? new StoreData();
+            var data = _file.Load(Read) ?? new StoreData();
+            LoadWarning = _file.Warning;
             _enabled = new HashSet<string>(data.EnabledRules ?? [], StringComparer.Ordinal);
             _disabled = new HashSet<string>(data.DisabledRules ?? [], StringComparer.Ordinal);
             // A custom rule with an invalid regex is kept on disk but never offered/applied;
@@ -350,7 +353,7 @@ public sealed class HighlightsStore
 
     private void Save(StoreState candidate)
     {
-        if (_path is not null)
+        if (_file is not null)
         {
             var data = new StoreData
             {
@@ -360,14 +363,13 @@ public sealed class HighlightsStore
                 BuiltinOverrides = candidate.Overrides.Values.OrderBy(r => r.Id, StringComparer.Ordinal).ToList(),
             };
             var json = JsonSerializer.Serialize(data, JsonOptions.Info<StoreData>());
-            AtomicFile.Write(_path, json, _preserveBackup);
+            _file.Write(json);
         }
 
         _enabled = candidate.Enabled;
         _disabled = candidate.Disabled;
         _custom = candidate.Custom;
         _overrides = candidate.Overrides;
-        _preserveBackup = false;
     }
 
     private static StoreData? Read(string path)

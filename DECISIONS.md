@@ -1739,3 +1739,25 @@ is removed, so "π - project" and "~/src" are untouched.
 - The diagonal fills (U+1FB98, U+1FB99) space their lines exactly rather than rounding the
   spacing as Ghostty does, which left the cell corners bare at some sizes.
 - Checkerboards cap their rows at 16 so very tall cells stay within `MaxBoxes`.
+
+## 2026-11-02 - Stores have explicit load states and never save over a file they could not read
+- Every JSON store (sessions, settings, workspaces, highlights, identities, SSH keys, known
+  hosts) loads and saves through `StoreFile`, which tracks a `StoreLoadState`: `NotLoaded`,
+  `Loaded`, `RecoveredFromBackup` or `Unreadable`. Stores expose it as `LoadState`.
+- An existing file that cannot be read is copied aside (`*.unreadable-{timestamp}`). Only a
+  successful copy makes it safe to carry on and save: a corrupt file is normally copied
+  fine, so it still starts empty (or recovers from .bak) as before. A file held unshared by
+  an antivirus scanner or OneDrive cannot be copied either; the store used to run empty
+  anyway, and its first two saves rotated the user's file into .bak and then over it. Now
+  that store is `Unreadable`: whatever it could show (the .bak, or nothing) is shown, every
+  save throws `StoreReadOnlyException` (an `IOException`, so existing "could not save"
+  reporting covers it) and `LoadWarning` says to close the program and restart. A locked
+  primary with a good .bak is also read-only, because the primary is newer than the .bak.
+- Reads retry a sharing violation three times (50, 150, 300 ms) before giving up, since
+  scanners usually let go quickly.
+- A save before `Load` throws `InvalidOperationException` only while the file or its .bak
+  exists; with no file there is nothing to overwrite, and view-model tests and first-run
+  code rely on using a store fresh.
+- Known hosts keep their stricter rules: an invalid file with no good backup still blocks
+  SSH (`LoadError`), because starting empty would make a changed host key look like a new
+  host. `Check`/`Lookup` before `Load` throw too while a file exists.
