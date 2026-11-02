@@ -1739,3 +1739,24 @@ is removed, so "π - project" and "~/src" are untouched.
 - The diagonal fills (U+1FB98, U+1FB99) space their lines exactly rather than rounding the
   spacing as Ghostty does, which left the cell corners bare at some sizes.
 - Checkerboards cap their rows at 16 so very tall cells stay within `MaxBoxes`.
+
+## 2026-11-02 - Tab drags are one session with a deferred end
+- A tab drag between strips, panes and windows is handed off in process, not through the
+  `DataPackage`. Its state (the tab, the source view, the strip showing the insertion marker,
+  the strip scrolling under the pointer, and a phase) is one `TabDragSession` held in a
+  static on `TabGroupView`; it used to be four statics, each cleared on its own path. A
+  source that left the tree mid-drag (parked by a workspace switch, removed with its pane)
+  gets no `TabDragCompleted`, so the statics stayed set and every window kept its content
+  drop targets up.
+- The session ends on a drop, on `TabDragCompleted`, when its tab leaves the source group,
+  when the source is parked, or when the source is still out of the tree one dispatcher turn
+  after `Unloaded`. The wait matters: `RebuildGroupLayout` removes and re-adds every group
+  view in one turn, and WinUI can raise `Unloaded` after the re-add. Handlers read the
+  session through `CurrentDrag`, which ignores one whose source has no parent.
+- `TabDragCompleted` does not end the session at once. WinUI can raise it on the source
+  before the target `TabView` raises `TabStripDrop`, so the session is marked `Completing`
+  and ended on the next dispatcher turn, only if it is still the current session. A drop
+  queued behind the completion still finds it.
+- A press that loses pointer capture drops its prepared drag preview a turn later, unless a
+  drag from that strip has started: the system drag loop takes capture after
+  `TabDragStarting`, and the drag needs the preview.
