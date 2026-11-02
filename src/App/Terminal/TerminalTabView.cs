@@ -705,6 +705,9 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _spinner.IsActive = true;
         // Keep the composition terminal visible while progress or credential UI owns input.
         UpdateInputEnabled();
+        // The session's own host wins the OSC 7 host check, so a nested host that reports
+        // first doesn't get latched as this tab's machine.
+        _workingDirectory.SetKnownHosts([Session.Host, Session.Local is null ? null : Environment.MachineName]);
         _workingDirectory.Reset();
         _windowsWorkingDirectory = null;
 
