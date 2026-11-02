@@ -216,6 +216,9 @@ public sealed partial class TabViewModel : ObservableObject
                     TerminalTitle = null;
                     RunningCommand = null;
                     _runningCommandIsExact = false;
+                    _programTitleIsCurrent = false;
+                    _lastProgramTitle = null;
+                    _staleProgramTitle = null;
                     PromptContext = null;
                     ReportedWorkingDirectory = null;
                 }
@@ -525,6 +528,18 @@ public sealed partial class TabViewModel : ObservableObject
             TerminalTitle = null;
         else
             TerminalTitle = trimmed;
+        if (ProgramTitle(TerminalTitle) is { } programTitle)
+        {
+            _lastProgramTitle = programTitle;
+            // tmux pane titles outlive the program that set them, so a title already seen
+            // before this command started may belong to an earlier program.
+            if (RunningCommand is not null && programTitle != _staleProgramTitle
+                && !_programTitleIsCurrent)
+            {
+                _programTitleIsCurrent = true;
+                OnPropertyChanged(nameof(Subtitle));
+            }
+        }
         // A prompt-shaped title means the shell is drawing a prompt again. Persistent
         // sessions report the foreground shell name instead because tmux owns OSC titles.
         // These end a discovered command, but tmux can publish an old shell title
@@ -537,6 +552,24 @@ public sealed partial class TabViewModel : ObservableObject
 
     private string? _runningCommand;
     private bool _runningCommandIsExact;
+
+    // A persistent tab shows the running command over the title because tmux can report
+    // an earlier program's title late. An agent's own title (Claude Code's conversation
+    // topic) is better than its command name, so a program title that arrives after the
+    // command started, and was not already showing before it, wins again.
+    private bool _programTitleIsCurrent;
+    private string? _lastProgramTitle;
+    private string? _staleProgramTitle;
+
+    /// <summary>The title as a program set it (status glyph removed), or null for a shell
+    /// title or a bare process name, which is what tmux reports when nothing set a title.</summary>
+    private static string? ProgramTitle(string? title)
+    {
+        if (title is null || AgentDetection.IsShellTitle(title))
+            return null;
+        var display = AgentDetection.WithoutStatusGlyph(title);
+        return display != title || title.Any(char.IsWhiteSpace) ? display : null;
+    }
 
     /// <summary>
     /// Program name of the command the terminal page saw start (Enter-gated discovery or
@@ -556,7 +589,13 @@ public sealed partial class TabViewModel : ObservableObject
     /// <summary>Called (UI thread) when the page reports a command starting ("" = ended).</summary>
     public void ApplyRunningCommand(string? commandLine, bool exact = false)
     {
-        RunningCommand = CommandTitle.ProgramName(commandLine);
+        var command = CommandTitle.ProgramName(commandLine);
+        if (command != RunningCommand)
+        {
+            _staleProgramTitle = _lastProgramTitle;
+            _programTitleIsCurrent = false;
+        }
+        RunningCommand = command;
         _runningCommandIsExact = exact && RunningCommand is not null;
         // The process title may still name the interpreter until tmux's next poll.
         if (Session.Persistent && exact && RunningCommand is null)
@@ -629,7 +668,7 @@ public sealed partial class TabViewModel : ObservableObject
                 return "Preferences";
             if (Page == AppPage.Import)
                 return "Review sessions";
-            if (Session.Persistent && RunningCommand is { } persistentCommand)
+            if (Session.Persistent && RunningCommand is { } persistentCommand && !_programTitleIsCurrent)
                 return persistentCommand;
             if (TerminalTitle is not { } title)
                 return RunningCommand ?? PromptContext ?? (Session.Persistent ? ReportedWorkingDirectory : null) ?? FallbackSubtitle;
@@ -639,7 +678,7 @@ public sealed partial class TabViewModel : ObservableObject
                 && !AgentDetection.TryGetShellPromptDirectory(title, out _))
                 return PromptContext ?? ReportedWorkingDirectory ?? title;
             if (!AgentDetection.TryGetShellPromptDirectory(title, out var directory))
-                return title; // a program's own title beats a guessed command name
+                return AgentDetection.WithoutStatusGlyph(title); // a program's own title beats a guessed command name
             return RunningCommand ?? PromptContext ?? directory;
         }
     }

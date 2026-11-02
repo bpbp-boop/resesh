@@ -1694,3 +1694,15 @@ program is still Shift+click away. The wheel stays with the program by default b
 these programs draw on the alternate screen, which has no scrollback: taken locally, the
 wheel would turn into arrow keys and walk the prompt history instead of scrolling. The
 mode is a string, like `SessionsPaneLayout`, because settings.json has no enum converter.
+
+## 2026-11-02 - Agent titles beat the command name in persistent tabs
+Persistent tabs (tmux and the session agent alike) show the running command over the
+terminal title, because tmux can report an earlier program's title after a new command
+starts. That also hid an agent's own title, so a Claude Code tab read "claude" instead of
+its conversation topic. A program title now wins again when it arrives after the command
+started and is not one already seen before it: tmux pane titles outlive the program that
+set them, so an old Claude topic must not label a later `vim`. A bare process name (tmux's
+fallback when nothing set a title) never counts. The leading status glyph agents put in
+their titles (Claude's "✳" and braille spinner, Codex's spinner) is dropped from the tab,
+since it changes several times a second; only a lone non-ASCII symbol followed by a space
+is removed, so "π - project" and "~/src" are untouched.

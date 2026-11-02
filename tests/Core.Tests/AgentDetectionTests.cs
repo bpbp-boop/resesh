@@ -5,6 +5,21 @@ namespace Resesh.Core.Tests;
 public class AgentDetectionTests
 {
     [Theory]
+    [InlineData("✳ Fix login bug", "Fix login bug")]
+    [InlineData("⠐ Fix login bug", "Fix login bug")]
+    [InlineData("⠋ resesh", "resesh")]
+    [InlineData("● Review PR", "Review PR")]
+    [InlineData("· thinking", "thinking")]
+    [InlineData("Claude Code", "Claude Code")]
+    [InlineData("π - project", "π - project")]
+    [InlineData("~/src", "~/src")]
+    [InlineData("* notes", "* notes")]
+    [InlineData("✳", "✳")]
+    [InlineData("✳Fix", "✳Fix")]
+    public void StatusGlyphIsStrippedFromAgentTitles(string title, string expected) =>
+        Assert.Equal(expected, AgentDetection.WithoutStatusGlyph(title));
+
+    [Theory]
     [InlineData("claude", "claude")]
     [InlineData("  claude --resume  ", "claude")]
     [InlineData("/usr/local/bin/claude", "claude")]
