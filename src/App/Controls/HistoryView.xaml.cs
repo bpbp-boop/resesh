@@ -118,6 +118,7 @@ public sealed partial class HistoryView : UserControl
     private Run? _outputRun;
     private bool _historyEnabled;
     private bool _loaded;
+    private int _loadVersion;
     private bool _suppressFilterEvents;
     private Guid? _pendingSessionFilter;
     private FontFamily _monoFont = new("Cascadia Mono, Consolas");
@@ -181,6 +182,7 @@ public sealed partial class HistoryView : UserControl
         if (!IsOpen)
             return;
         App.History.Changed -= History_Changed;
+        _loadVersion++;
         _searchCancellation?.Cancel();
         _searchDebounce?.Stop();
         Visibility = Visibility.Collapsed;
@@ -200,8 +202,12 @@ public sealed partial class HistoryView : UserControl
                 _ = LoadAsync(keepSelection: true);
         });
 
+    /// <summary>Reads the history summary, then searches. Only the newest load applies its
+    /// result: closing the view or starting another load (reopening, a history change)
+    /// supersedes one still reading.</summary>
     private async Task LoadAsync(bool keepSelection)
     {
+        var version = ++_loadVersion;
         CommandHistorySummary summary;
         try
         {
@@ -212,7 +218,7 @@ public sealed partial class HistoryView : UserControl
             summary = new CommandHistorySummary(0, [], new Dictionary<DateOnly, int>());
             App.ReportRecoverableError(exception);
         }
-        if (!IsOpen)
+        if (version != _loadVersion || !IsOpen)
             return;
         _historyCount = summary.Count;
         _loaded = true;
@@ -289,8 +295,12 @@ public sealed partial class HistoryView : UserControl
         return timer;
     }
 
+    /// <summary>Searches with the current query, replacing any search in flight. A search
+    /// covers everything typed so far, so a debounced one still waiting is dropped; left
+    /// running it would search again and lose the selection a filter change kept.</summary>
     private async Task RunSearchAsync(bool keepSelection)
     {
+        _searchDebounce?.Stop();
         _searchCancellation?.Cancel();
         var cancellation = new CancellationTokenSource();
         _searchCancellation = cancellation;
@@ -310,6 +320,13 @@ public sealed partial class HistoryView : UserControl
         {
             App.ReportRecoverableError(exception);
             return;
+        }
+        finally
+        {
+            // Each search owns its source; a newer search only cancels it.
+            if (ReferenceEquals(_searchCancellation, cancellation))
+                _searchCancellation = null;
+            cancellation.Dispose();
         }
         if (cancellation.IsCancellationRequested || !IsOpen)
             return;
