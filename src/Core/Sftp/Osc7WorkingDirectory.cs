@@ -63,17 +63,34 @@ public static class Osc7WorkingDirectoryParser
 }
 
 /// <summary>Keeps one tab's last trusted report. A host change clears the path until the
-/// original host reports again. This prevents a nested SSH shell from steering the pane.</summary>
+/// trusted host reports again. This prevents a nested SSH shell from steering the pane.
+/// <para>
+/// The trusted host is the first one to report, unless the tab says which names the
+/// connection's own host goes by (<see cref="SetKnownHosts"/>): then a report from one of
+/// those names takes over from a first report that was not, since that first report may
+/// have come from a nested shell (a reconnect straight back into ssh-in-tmux, say). Known
+/// names are a hint, not a requirement: a host often calls itself something other than the
+/// address dialled (an IP, an alias), so an unknown name is still trusted when it is first.
+/// </para>
+/// </summary>
 public sealed class Osc7WorkingDirectoryTracker
 {
     private string? _host;
+    private bool _hostKnown;
+    private string[] _knownHosts = [];
 
     public string? Path { get; private set; }
     public bool HostMismatch { get; private set; }
 
+    /// <summary>Names the connection's own host goes by (the session's host, aliases).
+    /// Kept across <see cref="Reset"/>, which ends a connection, not the session.</summary>
+    public void SetKnownHosts(IEnumerable<string?> hosts) =>
+        _knownHosts = [.. hosts.Where(host => !string.IsNullOrWhiteSpace(host)).Select(host => NormalizeHost(host!.Trim()))];
+
     public void Reset()
     {
         _host = null;
+        _hostKnown = false;
         Path = null;
         HostMismatch = false;
     }
@@ -83,20 +100,44 @@ public sealed class Osc7WorkingDirectoryTracker
         var reportedHost = NormalizeHost(report.Host);
         if (HostMismatch && reportedHost.Length == 0)
             return;
-        if (reportedHost.Length > 0 && _host is null)
-            _host = reportedHost;
-
-        if (reportedHost.Length > 0 && _host is not null &&
-            !string.Equals(reportedHost, _host, StringComparison.OrdinalIgnoreCase))
+        if (reportedHost.Length > 0)
         {
-            Path = null;
-            HostMismatch = true;
-            return;
+            if (_host is null || !_hostKnown && IsKnown(reportedHost))
+            {
+                _host = reportedHost;
+                _hostKnown = IsKnown(reportedHost);
+            }
+            else if (!string.Equals(reportedHost, _host, StringComparison.OrdinalIgnoreCase)
+                && !(_hostKnown && IsKnown(reportedHost)))
+            {
+                Path = null;
+                HostMismatch = true;
+                return;
+            }
         }
 
         Path = report.Path;
         HostMismatch = false;
     }
+
+    /// <summary>A known name, or the same machine named with or without its domain
+    /// ("web01" and "web01.example.com"), which is how hostnames and SSH targets differ.</summary>
+    private bool IsKnown(string host)
+    {
+        foreach (var known in _knownHosts)
+        {
+            if (string.Equals(host, known, StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (System.Net.IPAddress.TryParse(host, out _) || System.Net.IPAddress.TryParse(known, out _))
+                continue;
+            if (host.Contains('.') != known.Contains('.') &&
+                string.Equals(FirstLabel(host), FirstLabel(known), StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private static string FirstLabel(string host) => host.Split('.', 2)[0];
 
     private static string NormalizeHost(string host) => host.TrimEnd('.');
 }
