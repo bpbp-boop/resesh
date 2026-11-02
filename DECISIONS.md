@@ -1772,3 +1772,14 @@ is removed, so "π - project" and "~/src" are untouched.
   schedules a frame for the retry, because a blank terminal asks for no frames of its own.
 - The constructor still throws when no device can be made: a surface that never had one is
   the host's error to show, not a blank terminal to retry.
+
+## 2026-11-02 - Command tracking state is per connection
+- `CommandTracker.ResetConnection` (called from `NotifyDisconnected`) ends everything about
+  the command in progress: the OSC 133 phase, the pending mark, the running report, the open
+  history entry, a replay whose end marker was lost with the stream, OSC 3008 contexts and
+  "shell integration seen". A reconnect can land in a different shell, so integration is
+  detected afresh rather than disabling Enter-gated discovery for the tab's lifetime.
+- The open history entry is recorded with the output it has, before the disconnect divider.
+  The running report ends without a Completed event and the tab's running command gets no
+  event, as before: a cut transport says nothing about how the command finished, and the
+  host clears its own state on disconnect. Marks stay on the ruler.
