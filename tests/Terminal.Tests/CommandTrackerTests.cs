@@ -640,6 +640,25 @@ public class CommandTrackerTests
         Assert.False(Assert.Single(h.Executions).Completed);
     }
 
+    [Fact]
+    public void ReplayedCommandEndDoesNotSetALiveMarksExit()
+    {
+        var h = new Harness();
+        h.Tracker.SetExecutionReporting(true);
+        RunUntilCut(h, "build");
+        h.Tracker.SetReplaying(true);
+        h.Semantic(4, exit: 1);
+        RunUntilCut(h, "old"); // a replayed command of its own, finished in the replay too
+        h.Semantic(4, exit: 2);
+        h.Tracker.SetReplaying(false);
+        Assert.Null(h.Tracker.Commands().Single(c => c.Text == "build").Exit);
+
+        // The live command is still the one the next live D finishes.
+        h.Semantic(4, exit: 0);
+        Assert.Equal(0, h.Tracker.Commands().Single(c => c.Text == "build").Exit);
+        Assert.Equal(2, h.Tracker.Commands().Single(c => c.Text == "old").Exit);
+    }
+
     [Theory]
     [InlineData("start=")]
     [InlineData("begin=x")]

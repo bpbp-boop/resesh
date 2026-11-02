@@ -134,6 +134,9 @@ internal sealed class CommandTracker
     // report (_executionPending) and its history entry (_historyOpen, which discovered marks use
     // too). Each ends on its own signal; ResetConnection ends all three together.
     private Mark? _pending;
+    // The live command's mark while a replay runs: the replay's C and D work on its own marks
+    // (in _pending), and must neither finish this one nor lose it.
+    private Mark? _livePending;
 
     private bool _executionReporting;
     private long _executionNextId;
@@ -288,6 +291,7 @@ internal sealed class CommandTracker
         _executionReporting = enabled;
         _executionPending = null;
         _pending = null;
+        _livePending = null;
         if (!enabled)
             ClearPrompt();
     }
@@ -307,6 +311,7 @@ internal sealed class CommandTracker
         FlushHistory();
         _phase = CommandPhase.Idle;
         _pending = null;
+        _livePending = null;
         _executionPending = null;
         ClearPrompt();
         _replaying = false;
@@ -482,7 +487,10 @@ internal sealed class CommandTracker
     /// A persistent session is sending its screen again after a reattach. The marks in it
     /// are old: they are kept for the ruler, but nothing in them is run, finished or
     /// recorded now. When it ends, the running command is reported once, as it stands.
-    /// A command still running at that point is not recorded when it finishes.
+    /// A command still running at that point is not recorded when it finishes. A live
+    /// command's mark set aside at the start is not finished by the replay's D; it is
+    /// pending again afterwards unless the replay ended inside a command of its own, which
+    /// is then the one the screen shows running.
     /// </summary>
     public void SetReplaying(bool replaying)
     {
@@ -492,8 +500,12 @@ internal sealed class CommandTracker
         if (replaying)
         {
             _replayRunning = null;
+            _livePending = _pending;
+            _pending = null;
             return;
         }
+        _pending ??= _livePending;
+        _livePending = null;
         if (_replayRunning is { } running)
             RunningCommand?.Invoke(running, true);
         _replayRunning = null;
@@ -684,6 +696,8 @@ internal sealed class CommandTracker
                 HistoryFlush(entry, lost: true);
             entry.Marker.Dispose();
             _marks.RemoveAt(i);
+            if (_livePending == entry)
+                _livePending = null;
             if (_pending == entry)
                 _pending = null;
             changed = true;
