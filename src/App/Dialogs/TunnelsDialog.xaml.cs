@@ -16,6 +16,9 @@ public sealed partial class TunnelsDialog : ContentDialog
     private readonly Func<Session?> _savedSession;
     private readonly Action<Session> _saveSession;
     private bool _busy;
+    // Tunnel operations outlive the dialog (they run on the tab); once closed, their results
+    // no longer touch it.
+    private bool _closed;
 
     /// <param name="savedSession">The tab's session as saved now, or null when it is not saved.</param>
     /// <param name="saveSession">Saves the session after its tunnel list changed.</param>
@@ -45,11 +48,16 @@ public sealed partial class TunnelsDialog : ContentDialog
         Render();
     }
 
-    private void Dialog_Closed(ContentDialog sender, ContentDialogClosedEventArgs args) =>
+    private void Dialog_Closed(ContentDialog sender, ContentDialogClosedEventArgs args)
+    {
+        _closed = true;
         _view.TunnelsChanged -= Render;
+    }
 
     private void Render()
     {
+        if (_closed)
+            return;
         var statuses = _view.Tunnels;
         var saved = _savedSession()?.Tunnels?.Select(tunnel => tunnel.Id).ToHashSet() ?? [];
         TunnelList.Children.Clear();
@@ -76,7 +84,7 @@ public sealed partial class TunnelsDialog : ContentDialog
     /// <summary>One tunnel operation at a time; the list refreshes from the tab's own event.</summary>
     private async Task RunAsync(Func<Task> work)
     {
-        if (_busy)
+        if (_busy || _closed)
             return;
         _busy = true;
         Render();
@@ -86,7 +94,8 @@ public sealed partial class TunnelsDialog : ContentDialog
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException)
         {
-            TunnelFields.ShowError(exception.Message);
+            if (!_closed)
+                TunnelFields.ShowError(exception.Message);
         }
         finally
         {
@@ -95,6 +104,9 @@ public sealed partial class TunnelsDialog : ContentDialog
         }
     }
 
+    /// <summary>Opens a tunnel and, if asked, saves it with the session. Closing the dialog
+    /// while it opens still saves it: the user asked for it with Add, and the tunnel stays
+    /// open on the tab either way. Only the dialog's own feedback is skipped.</summary>
     private Task AddAsync(Tunnel tunnel) => RunAsync(async () =>
     {
         var open = _view.Tunnels.Where(status => status.State == TunnelState.Listening).Select(status => status.Tunnel);
@@ -103,16 +115,19 @@ public sealed partial class TunnelsDialog : ContentDialog
             TunnelFields.ShowError(conflict);
             return;
         }
+        var save = SaveBox.IsChecked == true;
         var status = await _view.StartTunnelAsync(tunnel);
         if (status.State != TunnelState.Listening)
         {
             // Nothing is saved for a tunnel that never opened; the reason stays under the fields.
             await _view.RemoveTunnelAsync(tunnel.Id);
-            TunnelFields.ShowError(status.Error ?? "The tunnel could not be opened.");
+            if (!_closed)
+                TunnelFields.ShowError(status.Error ?? "The tunnel could not be opened.");
             return;
         }
-        TunnelFields.Reset();
-        if (SaveBox.IsChecked == true && _savedSession() is { } session)
+        if (!_closed)
+            TunnelFields.Reset();
+        if (save && _savedSession() is { } session)
             _saveSession(session with { Tunnels = [.. session.Tunnels ?? [], tunnel] });
     });
 }

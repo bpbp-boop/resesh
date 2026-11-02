@@ -46,3 +46,15 @@ test("remote session management connections stop when the tab closes", () => {
   assert.doesNotMatch(create, /CancellationToken\.None/);
   assert.match(methodBody(view, "public void Dispose()"), /_closing\.Cancel\(\)/);
 });
+
+test("the tunnels dialog leaves its UI alone once closed but still saves a confirmed add", () => {
+  const dialog = read("Dialogs", "TunnelsDialog.xaml.cs");
+  assert.match(methodBody(dialog, "private void Dialog_Closed("), /_closed = true;/);
+  assert.match(methodBody(dialog, "private void Render()"), /if \(_closed\)\s+return;/);
+  const add = methodBody(dialog, "private Task AddAsync(");
+  const save = add.indexOf("var save = SaveBox.IsChecked == true;");
+  assert.ok(save !== -1 && save < add.indexOf("await _view.StartTunnelAsync"), "Save choice is read before awaiting");
+  assert.match(add, /if \(!_closed\)\s+TunnelFields\.ShowError/);
+  assert.match(add, /if \(!_closed\)\s+TunnelFields\.Reset\(\)/);
+  assert.match(add, /if \(save && _savedSession\(\)/);
+});
