@@ -2312,9 +2312,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         var sftp = new SftpSession(_knownHosts);
         try
         {
-            // TODO: pass `token` to SftpSession.Connect once it takes one, so a hung connect stops.
             await Task.Run(() => sftp.Connect(session, secret, prompts => PromptKeyboardInteractiveBlocking(prompts, token),
-                route.Jumps, route.ProxyPassword));
+                route.Jumps, route.ProxyPassword, token));
             token.ThrowIfCancellationRequested();
         }
         catch
