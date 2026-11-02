@@ -1959,3 +1959,31 @@ is removed, so "π - project" and "~/src" are untouched.
 - The plain-text log renderer holds at most 1024 unfinished rows (the topmost is written
   out early) and 8192 characters per row, and line feeds stop counting at row 65535. A
   hostile stream could otherwise make it hold gigabytes.
+
+## 2026-11-02 - Enter on a disconnected terminal reconnects; nothing is sent until the host confirms
+- `NativeTerminalSurface` set its connected flag on Enter, before any reconnect ran, so keys,
+  pastes and focus reports in the gap were encoded and handed to the host, whose `_backend`
+  was still the dead connection until `ConnectAsync` replaced it one dispatcher hop later.
+  The surface now tracks `SurfaceConnection` (Connected / Disconnected / Reconnecting): only
+  `NotifyConnected` makes input live; input while Reconnecting is dropped, as it is while
+  Disconnected. Dropping matches what the host does anyway once the connect starts (it turns
+  input off with `SetInputEnabled(false)`), and nothing typed into a dead link is replayed
+  into the new shell, where it could run as a command.
+- Enter while Reconnecting raises `ReconnectRequested` again. The host ignores a request it
+  cannot start (one already in flight, an inert tab) without reporting back, so a surface
+  that refused a second Enter could be stuck waiting forever.
+
+## 2026-11-02 - Telnet Auto encoding: typed input only moves forward
+- The Auto codec's output decoder flips between UTF-8 and CP437 on each sequence it sees,
+  and `EncodeInput` used to follow it, so what a key sent depended on the last screen: one
+  stray Latin-1 byte from a UTF-8 server turned the next typed "é" into CP437, and the
+  shared UTF-8 decoder could carry half a character across a flip.
+- Input now has its own state that only moves forward: Undecided (bytes pass through, as
+  UTF-8) → CP437 on the first invalid sequence → UTF-8 for good on a three- or four-byte
+  sequence. Two-byte sequences never decide it, because adjacent DOS block characters
+  ("█▓") are valid two-byte UTF-8. The forward move to UTF-8 keeps the "CP437 BBS intro,
+  then the server switches to UTF-8" case working; never flipping back is what stops the
+  oscillation. A CP437 board whose art happens to form a three-byte sequence latches input
+  to UTF-8; forcing CP437 on the session covers that.
+- A partial typed character is held as raw bytes rather than inside a `Decoder`, so it
+  survives an encoding change between writes.
