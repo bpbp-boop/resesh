@@ -24,170 +24,213 @@ public sealed partial class MainWindow
 
     private static string BackupDataDirectory => Path.GetDirectoryName(SessionStore.DefaultPath)!;
 
-    private async Task ExportBackupAsync()
+    /// <summary>The window running a backup or import wizard, if any. One runs at a time
+    /// across the app: they write the same stores, and each is a chain of dialogs and pickers
+    /// that another wizard (or the same one from another window) would run beside.</summary>
+    private static MainWindow? s_wizardWindow;
+
+    /// <summary>Runs a wizard unless one is already running, in which case the window showing
+    /// it comes forward, since its dialog or picker is what needs answering. A failure is
+    /// shown in this window, or reported if the window has closed meanwhile.</summary>
+    private async Task RunWizardAsync(string failureTitle, Func<Task> wizard)
     {
+        if (_windowClosed)
+            return;
+        // A wizard whose window closed is abandoned: its dialogs return None and it ends.
+        if (s_wizardWindow is { _windowClosed: false } running)
+        {
+            running.BringToFront();
+            return;
+        }
+        s_wizardWindow = this;
         try
         {
-            var optionsDialog = new ExportBackupDialog(
-                App.Store.Folders, App.Store.FoldersOf(SessionKind.Local))
-            {
-                XamlRoot = Root.XamlRoot,
-            };
-            await optionsDialog.ShowModalAsync();
-            if (optionsDialog.Options is not { } options)
-                return;
+            await wizard();
+        }
+        catch (Exception ex)
+        {
+            await ShowWizardErrorAsync(failureTitle, ex);
+        }
+        finally
+        {
+            if (ReferenceEquals(s_wizardWindow, this))
+                s_wizardWindow = null;
+        }
+    }
 
-            var picker = new Windows.Storage.Pickers.FileSavePicker
-            {
-                SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
-                SuggestedFileName = $"resesh backup {DateTime.Now:yyyy-MM-dd}",
-            };
-            picker.FileTypeChoices.Add("resesh backup", [".reseshbackup"]);
-            WinRT.Interop.InitializeWithWindow.Initialize(
-                picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-            var file = await picker.PickSaveFileAsync();
-            if (file is null)
-                return;
+    private async Task ShowWizardErrorAsync(string title, Exception exception)
+    {
+        if (_windowClosed || Root.XamlRoot is null)
+        {
+            App.ReportRecoverableError(exception);
+            return;
+        }
+        try
+        {
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, title, exception.Message);
+        }
+        catch (Exception displayError)
+        {
+            App.ReportRecoverableError(displayError);
+        }
+    }
 
-            await Task.Run(() => SessionsBackup.Export(
-                file.Path,
-                BackupDataDirectory,
-                App.Store,
-                App.Settings,
-                App.KnownHosts,
-                App.Highlights,
-                App.SshKeys,
-                App.Credentials,
-                options,
-                App.Identities));
+    private Task ExportBackupAsync() => RunWizardAsync("Export failed", ExportBackupWizardAsync);
 
+    private Task ImportBackupAsync() => RunWizardAsync("Import failed", ImportBackupWizardAsync);
+
+    private Task ImportSessionsAsync() => RunWizardAsync("Import failed", ImportSessionsWizardAsync);
+
+    private async Task ExportBackupWizardAsync()
+    {
+        var optionsDialog = new ExportBackupDialog(
+            App.Store.Folders, App.Store.FoldersOf(SessionKind.Local))
+        {
+            XamlRoot = Root.XamlRoot,
+        };
+        await optionsDialog.ShowModalAsync();
+        if (optionsDialog.Options is not { } options)
+            return;
+
+        var picker = new Windows.Storage.Pickers.FileSavePicker
+        {
+            SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+            SuggestedFileName = $"resesh backup {DateTime.Now:yyyy-MM-dd}",
+        };
+        picker.FileTypeChoices.Add("resesh backup", [".reseshbackup"]);
+        WinRT.Interop.InitializeWithWindow.Initialize(
+            picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        var file = await picker.PickSaveFileAsync();
+        if (file is null || _windowClosed)
+            return;
+
+        await Task.Run(() => SessionsBackup.Export(
+            file.Path,
+            BackupDataDirectory,
+            App.Store,
+            App.Settings,
+            App.KnownHosts,
+            App.Highlights,
+            App.SshKeys,
+            App.Credentials,
+            options,
+            App.Identities));
+
+        if (!_windowClosed)
             await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Backup complete", options.IncludeSecrets
                 ? "The encrypted backup was saved. Keep its passphrase in a safe place."
                 : "The backup was saved. It does not contain passwords or key passphrases.");
-        }
-        catch (Exception ex)
-        {
-            await ShowBackupErrorAsync("Export failed", ex);
-        }
     }
 
-    private async Task ImportBackupAsync()
+    private async Task ImportBackupWizardAsync()
     {
-        try
+        var picker = new Windows.Storage.Pickers.FileOpenPicker
         {
-            var picker = new Windows.Storage.Pickers.FileOpenPicker
-            {
-                SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
-                ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
-            };
-            picker.FileTypeFilter.Add(".reseshbackup");
-            picker.FileTypeFilter.Add(".sessionsbackup"); // pre-rename backups still import
-            WinRT.Interop.InitializeWithWindow.Initialize(
-                picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-            var file = await picker.PickSingleFileAsync();
-            if (file is null)
-                return;
+            SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.DocumentsLibrary,
+            ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
+        };
+        picker.FileTypeFilter.Add(".reseshbackup");
+        picker.FileTypeFilter.Add(".sessionsbackup"); // pre-rename backups still import
+        WinRT.Interop.InitializeWithWindow.Initialize(
+            picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+        var file = await picker.PickSingleFileAsync();
+        if (file is null || _windowClosed)
+            return;
 
-            string? passphrase = null;
-            if (await Task.Run(() => SessionsBackup.IsEncrypted(file.Path)))
-            {
-                passphrase = await TextPromptDialog.PromptPasswordAsync(
-                    Root.XamlRoot, "Encrypted backup", "Backup passphrase", "Continue");
-                if (passphrase is null)
-                    return;
-            }
-
-            var package = await Task.Run(() => SessionsBackup.Read(file.Path, passphrase));
-            var conflicts = SessionsBackup.FindConflicts(App.Store, package);
-            var preview = new ImportBackupDialog(package, conflicts) { XamlRoot = Root.XamlRoot };
-            await preview.ShowModalAsync();
-            if (preview.Resolutions is not { } resolutions)
-                return;
-
-            var result = await Task.Run(() => SessionsBackup.Import(
-                package,
-                BackupDataDirectory,
-                App.Store,
-                App.Settings,
-                App.KnownHosts,
-                App.Highlights,
-                App.SshKeys,
-                App.Credentials,
-                resolutions,
-                App.Identities));
-
-            App.Icons.InvalidateCustomIcons();
-            App.Workspaces.Load();
-            App.RefreshWorkspaceMenus();
-            App.RefreshSessionsInAllWindows();
-            App.ApplySettingsToAllWindows();
-
-            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Import complete",
-                $"Added {result.Imported}, replaced {result.Replaced}, kept both for "
-                + $"{result.Duplicated}, and kept {result.Kept} existing session(s)."
-                + (result.SecretsImported > 0
-                    ? $" Imported {result.SecretsImported} saved secret(s)."
-                    : ""));
-        }
-        catch (Exception ex)
+        string? passphrase = null;
+        if (await Task.Run(() => SessionsBackup.IsEncrypted(file.Path)))
         {
-            await ShowBackupErrorAsync("Import failed", ex);
+            if (_windowClosed)
+                return;
+            passphrase = await TextPromptDialog.PromptPasswordAsync(
+                Root.XamlRoot, "Encrypted backup", "Backup passphrase", "Continue");
+            if (passphrase is null)
+                return;
         }
+
+        var package = await Task.Run(() => SessionsBackup.Read(file.Path, passphrase));
+        if (_windowClosed)
+            return;
+        var conflicts = SessionsBackup.FindConflicts(App.Store, package);
+        var preview = new ImportBackupDialog(package, conflicts) { XamlRoot = Root.XamlRoot };
+        await preview.ShowModalAsync();
+        if (preview.Resolutions is not { } resolutions)
+            return;
+
+        var result = await Task.Run(() => SessionsBackup.Import(
+            package,
+            BackupDataDirectory,
+            App.Store,
+            App.Settings,
+            App.KnownHosts,
+            App.Highlights,
+            App.SshKeys,
+            App.Credentials,
+            resolutions,
+            App.Identities));
+
+        App.Icons.InvalidateCustomIcons();
+        App.Workspaces.Load();
+        App.RefreshWorkspaceMenus();
+        App.RefreshSessionsInAllWindows();
+        App.ApplySettingsToAllWindows();
+
+        // The import has happened even if this window closed meanwhile; only the summary goes.
+        if (_windowClosed)
+            return;
+        await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Import complete",
+            $"Added {result.Imported}, replaced {result.Replaced}, kept both for "
+            + $"{result.Duplicated}, and kept {result.Kept} existing session(s)."
+            + (result.SecretsImported > 0
+                ? $" Imported {result.SecretsImported} saved secret(s)."
+                : ""));
     }
-
-    private Task ShowBackupErrorAsync(string title, Exception exception) =>
-        MessageDialog.ShowMessageAsync(Root.XamlRoot, title, exception.Message);
 
     // ---- Session import ----
 
-    private async Task ImportSessionsAsync()
+    private async Task ImportSessionsWizardAsync()
     {
-        try
+        var puttyTask = Task.Run(() => DemoMode.IsEnabled ? DemoMode.EmptyImportScan() : Core.Import.PuttyRegistryImporter.Scan());
+        var openSshTask = Task.Run(() =>
+            DemoMode.IsEnabled ? DemoMode.EmptyImportScan() : Core.Import.OpenSshConfigImporter.Scan(Core.Import.OpenSshConfigImporter.DefaultConfigPath));
+        var secureCrtTask = Task.Run(DemoMode.ScanSecureCrt);
+
+        await Task.WhenAll(puttyTask, openSshTask, secureCrtTask);
+        var puttyScan = await puttyTask;
+        var openSshScan = await openSshTask;
+        var secureCrtScan = await secureCrtTask;
+        if (_windowClosed)
+            return;
+
+        var sourceDialog = new ImportSessionsDialog(puttyScan, openSshScan, secureCrtScan)
         {
-            var puttyTask = Task.Run(() => DemoMode.IsEnabled ? DemoMode.EmptyImportScan() : Core.Import.PuttyRegistryImporter.Scan());
-            var openSshTask = Task.Run(() =>
-                DemoMode.IsEnabled ? DemoMode.EmptyImportScan() : Core.Import.OpenSshConfigImporter.Scan(Core.Import.OpenSshConfigImporter.DefaultConfigPath));
-            var secureCrtTask = Task.Run(DemoMode.ScanSecureCrt);
+            XamlRoot = Root.XamlRoot,
+        };
+        await sourceDialog.ShowModalAsync();
+        if (sourceDialog.SelectedSource is not { } source)
+            return;
 
-            await Task.WhenAll(puttyTask, openSshTask, secureCrtTask);
-            var puttyScan = await puttyTask;
-            var openSshScan = await openSshTask;
-            var secureCrtScan = await secureCrtTask;
+        var scan = await GetSelectedImportScanAsync(source, puttyScan, openSshScan, secureCrtScan);
+        if (scan is null || _windowClosed)
+            return;
 
-            var sourceDialog = new ImportSessionsDialog(puttyScan, openSshScan, secureCrtScan)
-            {
-                XamlRoot = Root.XamlRoot,
-            };
-            await sourceDialog.ShowModalAsync();
-            if (sourceDialog.SelectedSource is not { } source)
-                return;
-
-            var scan = await GetSelectedImportScanAsync(source, puttyScan, openSshScan, secureCrtScan);
-            if (scan is null)
-                return;
-
-            var sourceName = source switch
-            {
-                SessionImportSource.Putty => "PuTTY",
-                SessionImportSource.OpenSsh => "OpenSSH",
-                SessionImportSource.SecureCrt => "SecureCRT",
-                _ => throw new ArgumentOutOfRangeException(nameof(source)),
-            };
-
-            if (scan.Importable.Count == 0 && scan.Skipped.Count == 0)
-            {
-                await MessageDialog.ShowMessageAsync(Root.XamlRoot, $"Import from {sourceName}",
-                    "No importable SSH or telnet sessions were found.");
-                return;
-            }
-
-            // The review tab shows the result itself and rebuilds the tree when it imports.
-            _ = ReviewImportAsync(scan, sourceName);
-        }
-        catch (Exception ex)
+        var sourceName = source switch
         {
-            await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Import failed", ex.Message);
+            SessionImportSource.Putty => "PuTTY",
+            SessionImportSource.OpenSsh => "OpenSSH",
+            SessionImportSource.SecureCrt => "SecureCRT",
+            _ => throw new ArgumentOutOfRangeException(nameof(source)),
+        };
+
+        if (scan.Importable.Count == 0 && scan.Skipped.Count == 0)
+        {
+            await MessageDialog.ShowMessageAsync(Root.XamlRoot, $"Import from {sourceName}",
+                "No importable SSH or telnet sessions were found.");
+            return;
         }
+
+        // The review tab shows the result itself and rebuilds the tree when it imports.
+        _ = ReviewImportAsync(scan, sourceName);
     }
 
     private async Task<Core.Import.ImportScanResult?> GetSelectedImportScanAsync(
