@@ -142,7 +142,7 @@ public sealed partial class NativeTerminalSurface
             return;
         _textInput.Text = "";
         // A key the terminal already encoded can still leave its character behind.
-        if (_disposed || !_inputEnabled || _term == IntPtr.Zero || !_connected || _suppressCharactersForKey != 0)
+        if (_disposed || !_inputEnabled || _term == IntPtr.Zero || !_connection.IsLive || _suppressCharactersForKey != 0)
             return;
         SendUserInput(Encoding.UTF8.GetBytes(text));
     }

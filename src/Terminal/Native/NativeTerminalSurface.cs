@@ -103,7 +103,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private bool _readyRaised;
     private bool _reportedFocus;
     private bool _inputEnabled = true;
-    private bool _connected = true;
+    private readonly SurfaceConnection _connection = new();
     private bool _isSplit;
     private GhosttyFrameInfo _lastInfo = new() { MouseShape = GhosttyNative.MouseShapeText };
     private ushort _suppressCharactersForKey;
@@ -470,13 +470,13 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     public override void NotifyConnected()
     {
-        _connected = true;
+        _connection.Connected();
         RefreshCommands()?.SetExecutionReporting(!_readOnly);
     }
 
     public override void NotifyDisconnected(string message, string action = "reconnect", bool neutral = false)
     {
-        _connected = false;
+        _connection.Disconnected();
         if (RefreshCommands() is { } commands)
         {
             // Before the divider, which is not the command's output: records the open command
@@ -940,7 +940,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     /// <summary>Focus reporting (mode 1004): vim, tmux and others refresh or redraw on it.</summary>
     private void ReportFocus()
     {
-        if (_focused == _reportedFocus || _disposed || _term == IntPtr.Zero || _readOnly || !_connected)
+        if (_focused == _reportedFocus || _disposed || _term == IntPtr.Zero || _readOnly || !_connection.IsLive)
             return;
         _reportedFocus = _focused;
         var report = stackalloc byte[8];
@@ -1019,13 +1019,11 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         }
         if (IsModifierKey(args.Key))
             return;
-        if (!_connected)
+        if (!_connection.IsLive)
         {
-            if (args.Key == VirtualKey.Enter)
-            {
-                _connected = true; // the host reports again if the reconnect fails
+            // Not live again until the host says so: input meanwhile is dropped.
+            if (args.Key == VirtualKey.Enter && _connection.RequestReconnect())
                 ReconnectRequested?.Invoke();
-            }
             args.Handled = true;
             _suppressCharactersForKey = virtualKey;
             return;
@@ -1604,7 +1602,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void SendArrows(ushort virtualKey, int count)
     {
-        if (_readOnly || !_connected || !_inputEnabled)
+        if (_readOnly || !_connection.IsLive || !_inputEnabled)
             return;
         var output = stackalloc byte[16];
         var written = GhosttyNative.rvt_encode_key(_term, virtualKey, 0, GhosttyNative.KeyPress, null, 0, 0, output, 16);
@@ -1660,7 +1658,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private Task PasteFromClipboardAsync() => TerminalClipboard.PasteIntoAsync(text =>
     {
-        if (_disposed || _readOnly || !_connected || !_inputEnabled || string.IsNullOrEmpty(text))
+        if (_disposed || _readOnly || !_connection.IsLive || !_inputEnabled || string.IsNullOrEmpty(text))
             return;
         if (PasteInterceptor?.Invoke(text) == true)
             return;
@@ -1672,7 +1670,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     public override void SendInput(byte[] data)
     {
-        if (_disposed || !_connected || !_inputEnabled || _term == IntPtr.Zero)
+        if (_disposed || !_connection.IsLive || !_inputEnabled || _term == IntPtr.Zero)
             return;
         SendUserInput(data, typed: false);
     }
@@ -1681,7 +1679,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     /// through the PTY event and leave as <see cref="InputReceived"/>.</summary>
     public override void PasteText(string text)
     {
-        if (_disposed || _readOnly || !_connected || !_inputEnabled || _term == IntPtr.Zero || string.IsNullOrEmpty(text))
+        if (_disposed || _readOnly || !_connection.IsLive || !_inputEnabled || _term == IntPtr.Zero || string.IsNullOrEmpty(text))
             return;
         text = TerminalPaste.Normalize(text);
         if (text.Contains('\n'))
@@ -1772,7 +1770,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _commands.SetHistoryCapture(_historyCapture);
         if (_promptPlatform is not null)
             _commands.SetPromptPlatform(_promptPlatform);
-        if (_connected && !_readOnly)
+        if (_connection.IsLive && !_readOnly)
             _commands.SetExecutionReporting(true);
     }
 

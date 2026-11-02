@@ -1959,3 +1959,16 @@ is removed, so "π - project" and "~/src" are untouched.
 - The plain-text log renderer holds at most 1024 unfinished rows (the topmost is written
   out early) and 8192 characters per row, and line feeds stop counting at row 65535. A
   hostile stream could otherwise make it hold gigabytes.
+
+## 2026-11-02 - Enter on a disconnected terminal reconnects; nothing is sent until the host confirms
+- `NativeTerminalSurface` set its connected flag on Enter, before any reconnect ran, so keys,
+  pastes and focus reports in the gap were encoded and handed to the host, whose `_backend`
+  was still the dead connection until `ConnectAsync` replaced it one dispatcher hop later.
+  The surface now tracks `SurfaceConnection` (Connected / Disconnected / Reconnecting): only
+  `NotifyConnected` makes input live; input while Reconnecting is dropped, as it is while
+  Disconnected. Dropping matches what the host does anyway once the connect starts (it turns
+  input off with `SetInputEnabled(false)`), and nothing typed into a dead link is replayed
+  into the new shell, where it could run as a command.
+- Enter while Reconnecting raises `ReconnectRequested` again. The host ignores a request it
+  cannot start (one already in flight, an inert tab) without reporting back, so a surface
+  that refused a second Enter could be stuck waiting forever.
