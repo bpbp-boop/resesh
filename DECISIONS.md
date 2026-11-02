@@ -1739,3 +1739,23 @@ is removed, so "π - project" and "~/src" are untouched.
 - The diagonal fills (U+1FB98, U+1FB99) space their lines exactly rather than rounding the
   spacing as Ghostty does, which left the cell corners bare at some sizes.
 - Checkerboards cap their rows at 16 so very tall cells stay within `MaxBoxes`.
+
+## 2026-11-02 - Tab state changes only through named transitions
+- `TabViewModel.State` and `ExitCode` are read-only. The terminal view moves a tab with
+  `BeginConnecting`, `MarkConnected`, `MarkDisconnected`, `MarkExited(code)` and
+  `StartPlayback(path)`. The exit code is stored in the same step as the state, so the tab
+  text never shows a stale "exited (code N)" between two property sets.
+- App pages have their own state, `TabConnectionState.Page`, instead of borrowing
+  `Playback`; `IsPlayback` and `State == Playback` now always agree. Both are inert: every
+  transition returns false on them, so nothing can start a connect on a playback or
+  settings tab.
+- The terminal view has one connection-phase test, `CanStartConnect`: no connect in flight
+  and the tab not Connected. It replaces checking each backend's `IsConnected`. The tab
+  state moves only from that view, so the two cannot drift.
+- Input to the live terminal is decided in one place, `UpdateInputEnabled`: off while a
+  connect runs, while locked, while rewinding and after dispose. A stopped tab keeps input
+  on so Enter reconnects. Ending a connect now re-enables input even when the user
+  disconnected during it; before, the terminal stayed deaf until something else turned it
+  back on.
+- The "update identity password" offer after a rejected login runs after `ConnectAsync`
+  has ended, so Reconnect works while it is on screen; a reconnect cancels it.

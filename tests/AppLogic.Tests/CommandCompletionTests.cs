@@ -15,7 +15,7 @@ public sealed class CommandCompletionTests
     {
         var tab=Tab(); var results=new List<CommandCompletion>(); tab.CompletionRequested+=results.Add;
         tab.ObserveCommandExecution(1,"true",false,null); Assert.False(tab.CanNotifyCommandCompletion);
-        tab.State=TabConnectionState.Connected;
+        tab.MarkConnected();
         tab.ObserveCommandExecution(1,"python3 private.py",false,null);
         Assert.True(tab.ToggleCompletionNotificationCommand.CanExecute(null));
         tab.ToggleCompletionNotificationCommand.Execute(null);
@@ -33,7 +33,7 @@ public sealed class CommandCompletionTests
     public void NotificationButtonIsHiddenWhileAnAgentIsDetected()
     {
         var tab = Tab();
-        tab.State = TabConnectionState.Connected;
+        tab.MarkConnected();
         tab.ObserveCommandExecution(1, "python3 private.py", false, null);
         Assert.True(tab.ShowCompletionNotificationButton);
 
@@ -49,8 +49,8 @@ public sealed class CommandCompletionTests
     public void DisconnectCancelsAndLateCompletionCannotNotify()
     {
         var tab=Tab(); var results=new List<CommandCompletion>(); tab.CompletionRequested+=results.Add;
-        tab.State=TabConnectionState.Connected; tab.ObserveCommandExecution(1,"sleep 5",false,null);
-        tab.ToggleCompletionNotificationCommand.Execute(null); tab.State=TabConnectionState.Disconnected;
+        tab.MarkConnected(); tab.ObserveCommandExecution(1,"sleep 5",false,null);
+        tab.ToggleCompletionNotificationCommand.Execute(null); tab.MarkDisconnected();
         tab.ObserveCommandExecution(1,"",true,0); Assert.Empty(results);
         Assert.False(tab.IsCompletionNotificationArmed);
     }

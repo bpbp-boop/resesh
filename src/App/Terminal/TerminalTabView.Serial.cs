@@ -39,7 +39,7 @@ public sealed partial class TerminalTabView
             serial.Closed += ex => DispatcherQueue.TryEnqueue(() =>
             {
                 if (connection.Token.IsCancellationRequested) return;
-                _tab.State = TabConnectionState.Disconnected;
+                _tab.MarkDisconnected();
                 _tab.ConnectionSummary = "";
                 EndAgentTracking();
                 if (SerialPortList.Exists(portName))
@@ -56,7 +56,7 @@ public sealed partial class TerminalTabView
             connection.Token.ThrowIfCancellationRequested();
 
             _backend = serial;
-            _tab.State = TabConnectionState.Connected;
+            _tab.MarkConnected();
             // The tab's endpoint already reads "serial COM5 9600 8N1".
             _tab.ConnectionSummary = "";
             _terminal.NotifyConnected();
@@ -65,7 +65,7 @@ public sealed partial class TerminalTabView
         catch (SerialSessionException ex)
         {
             if (connection.Token.IsCancellationRequested) return;
-            _tab.State = TabConnectionState.Disconnected;
+            _tab.MarkDisconnected();
             if (ex.PortMissing)
             {
                 _terminal.NotifyDisconnected($"{ex.Message} Plug in the console cable; this tab connects when {portName} appears.");
@@ -77,13 +77,13 @@ public sealed partial class TerminalTabView
         catch (OperationCanceledException)
         {
             if (connection.Token.IsCancellationRequested) return;
-            _tab.State = TabConnectionState.Disconnected;
+            _tab.MarkDisconnected();
             _terminal.NotifyDisconnected("Connection cancelled.");
         }
         catch (Exception ex)
         {
             if (connection.Token.IsCancellationRequested) return;
-            _tab.State = TabConnectionState.Disconnected;
+            _tab.MarkDisconnected();
             _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}");
         }
     }

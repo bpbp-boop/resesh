@@ -248,8 +248,7 @@ public sealed partial class MainWindow
             },
         };
         var tab = ViewModel.Connect(session);
-        tab.PlaybackPath = path;
-        tab.State = TabConnectionState.Playback;
+        tab.StartPlayback(path);
         tab.ConnectionSummary = "read-only asciicast";
 
         var player = new TerminalPlayerView(recording);

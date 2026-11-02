@@ -37,7 +37,7 @@ public sealed class MainViewModelCommandTests : IDisposable
     private TabViewModel Open(MainViewModel window, Session session, TabConnectionState state, bool terminal = true)
     {
         var tab = window.Connect(session);
-        tab.State = state;
+        tab.MoveTo(state);
         if (terminal)
             _window.Terminals.Add(tab);
         return tab;
@@ -103,7 +103,6 @@ public sealed class MainViewModelCommandTests : IDisposable
     {
         var window = Window();
         var tab = Open(window, Ssh(), TabConnectionState.Playback, terminal: false);
-        tab.PlaybackPath = "demo.cast";
 
         Assert.False(window.CloneTabCommand.CanExecute(null));
         Assert.False(window.TogglePinCommand.CanExecute(null));
@@ -220,7 +219,7 @@ public sealed class MainViewModelCommandTests : IDisposable
         var verbs = new List<string?>();
         window.PropertyChanged += (_, e) => verbs.Add(e.PropertyName);
 
-        tab.State = TabConnectionState.Disconnected;
+        tab.MarkDisconnected();
 
         Assert.True(raised > 0);
         Assert.True(window.ReconnectCommand.CanExecute(null));
@@ -258,7 +257,6 @@ public sealed class MainViewModelCommandTests : IDisposable
     {
         var window = Window();
         var tab = Open(window, Ssh(), TabConnectionState.Playback, terminal: false);
-        tab.PlaybackPath = "demo.cast";
 
         var clone = window.Commands.ForShortcut(ShortcutIds.CloneTab);
         Assert.NotNull(clone);

@@ -26,7 +26,7 @@ public sealed class WorkspaceRailTests : IDisposable
         new SessionStore(Path.Combine(_directory, Guid.NewGuid() + ".json")), new Credentials(), Environment);
 
     private static TabViewModel Tab(TabConnectionState state = TabConnectionState.Connected) =>
-        new(new Session { Id = Guid.NewGuid(), Name = "edge" }, Environment) { State = state };
+        new TabViewModel(new Session { Id = Guid.NewGuid(), Name = "edge" }, Environment).MoveTo(state);
 
     [Fact]
     public void Summarize_ReportsTheMostUrgentAlert()
@@ -48,9 +48,10 @@ public sealed class WorkspaceRailTests : IDisposable
     public void Summarize_IgnoresAppPagesAndPlaybackThatAreNeverConnected()
     {
         var settings = TabViewModel.CreateAppPage(AppPage.Settings, Environment);
-        settings.State = TabConnectionState.Disconnected;
-        var playback = Tab(TabConnectionState.Disconnected);
-        playback.PlaybackPath = "x.cast";
+        var playback = Tab(TabConnectionState.Playback);
+        // Neither can be marked disconnected: both are inert.
+        Assert.False(settings.MarkDisconnected());
+        Assert.False(playback.MarkDisconnected());
 
         Assert.Equal(WorkspaceAlert.None, WorkspaceAlerts.Summarize([settings, playback]));
     }
@@ -105,7 +106,7 @@ public sealed class WorkspaceRailTests : IDisposable
             changes.Add(property);
         };
 
-        tab.State = TabConnectionState.Disconnected;
+        tab.MarkDisconnected();
 
         Assert.Contains(nameof(TabViewModel.State), changes);
     }
