@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Resesh.Terminal.Native;
 
 /// <summary>
@@ -13,16 +15,29 @@ internal static class BuiltinGlyphs
     /// bottom are exclusive.</summary>
     public readonly record struct Box(int Left, int Top, int Right, int Bottom);
 
-    /// <summary>The most boxes any glyph needs (a double-line cross, a full braille cell).</summary>
-    public const int MaxBoxes = 8;
+    /// <summary>A line stroked at the light box-drawing thickness, in cell coordinates.</summary>
+    public readonly record struct Segment(Vector2 From, Vector2 To);
 
-    /// <summary>Box drawing, block elements, braille, Powerline separators and sextants.</summary>
+    /// <summary>The most boxes any glyph needs (a checkerboard fill).</summary>
+    public const int MaxBoxes = 32;
+
+    /// <summary>The most corners any filled polygon has (a smooth mosaic).</summary>
+    public const int MaxPoints = 10;
+
+    /// <summary>The most segments any line glyph needs (a diagonal fill in a wide cell).</summary>
+    public const int MaxSegments = 64;
+
+    /// <summary>Box drawing, block elements, braille, Powerline separators, and the parts of
+    /// Symbols for Legacy Computing (and its supplement's octants) that Ghostty draws.</summary>
     public static bool Covers(uint codepoint) => codepoint is (>= 0x2500 and <= 0x259F)
-        or (>= 0x2800 and <= 0x28FF) or (>= 0xE0B0 and <= 0xE0BF) or (>= 0x1FB00 and <= 0x1FB3B);
+        or (>= 0x2800 and <= 0x28FF) or (>= 0xE0B0 and <= 0xE0BF) or (>= 0x1FB00 and <= 0x1FBAF)
+        or (>= 0x1FBBD and <= 0x1FBBF) or (>= 0x1FBCE and <= 0x1FBEF) or (>= 0x1CD00 and <= 0x1CDE5);
 
-    /// <summary>Arcs, diagonals and Powerline shapes are curves or slopes, which the renderer
-    /// draws as paths; everything else is boxes.</summary>
-    public static bool IsVector(uint codepoint) => codepoint is (>= 0x256D and <= 0x2573) or (>= 0xE0B0 and <= 0xE0BF);
+    /// <summary>Arcs, diagonals, wedges, circles and Powerline shapes are curves or slopes, which
+    /// the renderer draws as paths; everything else is boxes.</summary>
+    public static bool IsVector(uint codepoint) => codepoint is (>= 0x256D and <= 0x2573) or (>= 0xE0B0 and <= 0xE0BF)
+        or (>= 0x1FB3C and <= 0x1FB6F) or (>= 0x1FB98 and <= 0x1FBAE) or (>= 0x1FBBD and <= 0x1FBBF)
+        or (>= 0x1FBD0 and <= 0x1FBE3) or (>= 0x1FBE8 and <= 0x1FBEF);
 
     /// <summary>Coverage of the shade characters; 1 for everything else.</summary>
     public static float ShadeOf(uint codepoint) => codepoint switch
@@ -30,8 +45,16 @@ internal static class BuiltinGlyphs
         0x2591 => 0.25f,
         0x2592 => 0.5f,
         0x2593 => 0.75f,
+        (>= 0x1FB8C and <= 0x1FB90) or (>= 0x1FB9C and <= 0x1FB9F) => 0.5f, // medium shade halves and corners
         _ => 1f,
     };
+
+    /// <summary>Medium shade with a solid half on top: the renderer fills the cell at half
+    /// coverage first, then draws <see cref="Boxes"/> solid.</summary>
+    public static bool HasShadedBackdrop(uint codepoint) => codepoint is 0x1FB91 or 0x1FB92 or 0x1FB94;
+
+    /// <summary>A solid cell with <see cref="Segments"/> cut out of it in the background color.</summary>
+    public static bool IsInverted(uint codepoint) => codepoint is >= 0x1FBBD and <= 0x1FBBF;
 
     // Line style toward each edge, as "up right down left": - none, l light, h heavy, d double.
     // Dashes, arcs and diagonals are drawn separately and left as "----".
@@ -128,7 +151,315 @@ internal static class BuiltinGlyphs
                 if ((mask & 32) != 0) Fill(boxes, ref n, width, height, 0.5, 1, twoThirds, 1);
                 break;
             }
+
+            case >= 0x1FB70 and <= 0x1FB75: // vertical one eighth blocks, second column to seventh
+            {
+                var column = codepoint - 0x1FB70 + 1;
+                Fill(boxes, ref n, width, height, column / 8.0, (column + 1) / 8.0, 0, 1);
+                break;
+            }
+            case >= 0x1FB76 and <= 0x1FB7B: // horizontal one eighth blocks, second row to seventh
+            {
+                var row = codepoint - 0x1FB76 + 1;
+                Fill(boxes, ref n, width, height, 0, 1, row / 8.0, (row + 1) / 8.0);
+                break;
+            }
+            case 0x1FB7C: Block(boxes, ref n, width, height, -1, 0, 1 / 8.0, 1); Block(boxes, ref n, width, height, 0, 1, 1, 1 / 8.0); break;
+            case 0x1FB7D: Block(boxes, ref n, width, height, -1, 0, 1 / 8.0, 1); Block(boxes, ref n, width, height, 0, -1, 1, 1 / 8.0); break;
+            case 0x1FB7E: Block(boxes, ref n, width, height, 1, 0, 1 / 8.0, 1); Block(boxes, ref n, width, height, 0, -1, 1, 1 / 8.0); break;
+            case 0x1FB7F: Block(boxes, ref n, width, height, 1, 0, 1 / 8.0, 1); Block(boxes, ref n, width, height, 0, 1, 1, 1 / 8.0); break;
+            case 0x1FB80: Block(boxes, ref n, width, height, 0, -1, 1, 1 / 8.0); Block(boxes, ref n, width, height, 0, 1, 1, 1 / 8.0); break;
+            case 0x1FB81: // horizontal one eighth blocks 1, 3, 5 and 8
+                foreach (var row in (ReadOnlySpan<int>)[0, 2, 4, 7])
+                    Fill(boxes, ref n, width, height, 0, 1, row / 8.0, (row + 1) / 8.0);
+                break;
+            case >= 0x1FB82 and <= 0x1FB86: // upper one quarter .. seven eighths
+            {
+                ReadOnlySpan<double> sizes = [2 / 8.0, 3 / 8.0, 5 / 8.0, 6 / 8.0, 7 / 8.0];
+                Block(boxes, ref n, width, height, 0, -1, 1, sizes[(int)(codepoint - 0x1FB82)]);
+                break;
+            }
+            case >= 0x1FB87 and <= 0x1FB8B: // right one quarter .. seven eighths
+            {
+                ReadOnlySpan<double> sizes = [2 / 8.0, 3 / 8.0, 5 / 8.0, 6 / 8.0, 7 / 8.0];
+                Block(boxes, ref n, width, height, 1, 0, sizes[(int)(codepoint - 0x1FB87)], 1);
+                break;
+            }
+            // Medium shade halves (ShadeOf), and the solid halves over a shaded backdrop.
+            case 0x1FB8C: Block(boxes, ref n, width, height, -1, 0, 0.5, 1); break;
+            case 0x1FB8D or 0x1FB94: Block(boxes, ref n, width, height, 1, 0, 0.5, 1); break;
+            case 0x1FB8E or 0x1FB91: Block(boxes, ref n, width, height, 0, -1, 1, 0.5); break;
+            case 0x1FB8F or 0x1FB92: Block(boxes, ref n, width, height, 0, 1, 1, 0.5); break;
+            case 0x1FB90: Add(boxes, ref n, 0, 0, width, height); break;
+            case 0x1FB95 or 0x1FB96:
+                Checkerboard(codepoint == 0x1FB95 ? 0 : 1, width, height, boxes, ref n);
+                break;
+            case 0x1FB97: // heavy horizontal fill: the second and fourth quarters
+                Add(boxes, ref n, 0, height / 4, width, 2 * height / 4);
+                Add(boxes, ref n, 0, 3 * height / 4, width, height);
+                break;
+            case 0x1FBAF: // box drawings light horizontal with vertical stroke
+                LinesChar("hlhl", width, height, light, boxes, ref n);
+                break;
+            case 0x1FBCE: Block(boxes, ref n, width, height, -1, 0, 2 / 3.0, 1); break;
+            case 0x1FBCF: Block(boxes, ref n, width, height, -1, 0, 1 / 3.0, 1); break;
+            case 0x1FBE4: Block(boxes, ref n, width, height, 0, -1, 0.5, 0.5); break;
+            case 0x1FBE5: Block(boxes, ref n, width, height, 0, 1, 0.5, 0.5); break;
+            case 0x1FBE6: Block(boxes, ref n, width, height, -1, 0, 0.5, 0.5); break;
+            case 0x1FBE7: Block(boxes, ref n, width, height, 1, 0, 0.5, 0.5); break;
+
+            case >= 0x1CD00 and <= 0x1CDE5:
+            {
+                // Octants: bit 0 is the upper left eighth, then left to right, top to bottom.
+                var mask = Octants[(int)(codepoint - 0x1CD00)];
+                for (var i = 0; i < 8; i++)
+                    if ((mask & (1 << i)) != 0)
+                        Fill(boxes, ref n, width, height, i % 2 * 0.5, i % 2 * 0.5 + 0.5, i / 2 * 0.25, i / 2 * 0.25 + 0.25);
+                break;
+            }
         }
+        return n;
+    }
+
+    /// <summary>The octant patterns in codepoint order, from the Unicode names ("BLOCK
+    /// OCTANT-1235"; Ghostty's octants.txt). Patterns other characters already cover are skipped.</summary>
+    private static ReadOnlySpan<byte> Octants =>
+    [
+        0x04, 0x06, 0x07, 0x08, 0x09, 0x0B, 0x0C, 0x0D, 0x0E, 0x10, 0x11, 0x12, 0x13, 0x15, 0x16, 0x17,
+        0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
+        0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38,
+        0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A,
+        0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x51, 0x52, 0x53, 0x54, 0x56, 0x57, 0x58, 0x59, 0x5B, 0x5C, 0x5D,
+        0x5E, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D, 0x6E,
+        0x6F, 0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E,
+        0x7F, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87, 0x88, 0x89, 0x8A, 0x8B, 0x8C, 0x8D, 0x8E, 0x8F,
+        0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97, 0x98, 0x99, 0x9A, 0x9B, 0x9C, 0x9D, 0x9E, 0x9F,
+        0xA1, 0xA2, 0xA3, 0xA4, 0xA6, 0xA7, 0xA8, 0xA9, 0xAB, 0xAC, 0xAD, 0xAE, 0xB0, 0xB1, 0xB2, 0xB3,
+        0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC1, 0xC2, 0xC3, 0xC4,
+        0xC5, 0xC6, 0xC7, 0xC8, 0xC9, 0xCA, 0xCB, 0xCC, 0xCD, 0xCE, 0xCF, 0xD0, 0xD1, 0xD2, 0xD3, 0xD4,
+        0xD5, 0xD6, 0xD7, 0xD8, 0xD9, 0xDA, 0xDB, 0xDC, 0xDD, 0xDE, 0xDF, 0xE0, 0xE1, 0xE2, 0xE3, 0xE4,
+        0xE5, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF, 0xF1, 0xF2, 0xF3, 0xF4, 0xF6,
+        0xF7, 0xF8, 0xF9, 0xFB, 0xFD, 0xFE,
+    ];
+
+    /// <summary>A block of a fraction of the cell, against an edge or centered on each axis
+    /// (-1 left or top, 0 center, 1 right or bottom), sized by rounding like Ghostty's.</summary>
+    private static void Block(Span<Box> boxes, ref int n, int width, int height, int horizontal, int vertical,
+        double widthFraction, double heightFraction)
+    {
+        int w = Round(width * widthFraction), h = Round(height * heightFraction);
+        var x = horizontal < 0 ? 0 : horizontal > 0 ? width - w : (width - w) / 2;
+        var y = vertical < 0 ? 0 : vertical > 0 ? height - h : (height - h) / 2;
+        Add(boxes, ref n, x, y, x + w, y + h);
+    }
+
+    /// <summary>Four squares across and about as many down as keep them square; capped so the
+    /// boxes fit <see cref="MaxBoxes"/> in very tall cells.</summary>
+    private static void Checkerboard(int parity, int width, int height, Span<Box> boxes, ref int n)
+    {
+        const int across = 4;
+        var down = Math.Clamp(Round(4.0 * height / Math.Max(1, width)), 1, MaxBoxes * 2 / across);
+        for (var x = 0; x < across; x++)
+            for (var y = 0; y < down; y++)
+                if ((x + y) % 2 == parity)
+                    Add(boxes, ref n, width * x / across, height * y / down, width * (x + 1) / across, height * (y + 1) / down);
+    }
+
+    /// <summary>Fills <paramref name="points"/> with the corners of a filled vector glyph from
+    /// Symbols for Legacy Computing and returns how many; 0 for glyphs that are not polygons.
+    /// Polygons may touch themselves at a point (two triangles meeting at the center).</summary>
+    public static int Polygon(uint codepoint, float width, float height, Span<Vector2> points)
+    {
+        Vector2 topLeft = new(0, 0), topRight = new(width, 0), bottomRight = new(width, height), bottomLeft = new(0, height);
+        var center = new Vector2(MathF.Round(width / 2, MidpointRounding.AwayFromZero),
+            MathF.Round(height / 2, MidpointRounding.AwayFromZero));
+        switch (codepoint)
+        {
+            case >= 0x1FB3C and <= 0x1FB67:
+                return Mosaic(Mosaics[(int)(codepoint - 0x1FB3C)], width, height, points);
+            case >= 0x1FB68 and <= 0x1FB6F:
+            {
+                // Triangles from an edge to the center: left, top, right, bottom, first cut out of
+                // a full cell and then on their own. Corners run clockwise from the top left, so
+                // edge i goes from corner i to corner i + 1.
+                ReadOnlySpan<Vector2> corners = [topLeft, topRight, bottomRight, bottomLeft];
+                ReadOnlySpan<int> edges = [3, 0, 1, 2];
+                var edge = edges[(int)(codepoint - 0x1FB68) % 4];
+                if (codepoint >= 0x1FB6C)
+                    return Points(points, corners[edge], corners[(edge + 1) % 4], center);
+                return Points(points, corners[(edge + 1) % 4], corners[(edge + 2) % 4], corners[(edge + 3) % 4], corners[edge], center);
+            }
+            case 0x1FB9A: return Points(points, topLeft, topRight, center, bottomRight, bottomLeft, center);   // upper and lower triangles
+            case 0x1FB9B: return Points(points, topLeft, center, topRight, bottomRight, center, bottomLeft);   // left and right triangles
+            case 0x1FB9C: return Points(points, topLeft, bottomLeft, topRight);       // upper left half, shaded
+            case 0x1FB9D: return Points(points, topLeft, bottomRight, topRight);      // upper right
+            case 0x1FB9E: return Points(points, bottomLeft, bottomRight, topRight);   // lower right
+            case 0x1FB9F: return Points(points, topLeft, bottomLeft, bottomRight);    // lower left
+        }
+        return 0;
+    }
+
+    /// <summary>Fills <paramref name="segments"/> for a line glyph from Symbols for Legacy
+    /// Computing and returns how many; 0 for glyphs that are not lines.</summary>
+    public static int Segments(uint codepoint, float width, float height, int light, Span<Segment> segments)
+    {
+        var n = 0;
+        float w = width, h = height;
+        switch (codepoint)
+        {
+            case 0x1FB98 or 0x1FB99:
+            {
+                // Diagonal fill: parallel lines about a stroke apart, running past the cell to be
+                // clipped. Ghostty rounds the spacing, which leaves the corners bare at some sizes;
+                // exact spacing makes the lines reach both corners.
+                var count = Math.Clamp((int)width / (2 * Math.Max(1, light)), 1, (MaxSegments - 1) / 2);
+                var stride = w / count;
+                for (var i = -count; i <= count; i++)
+                {
+                    var x = i * stride;
+                    segments[n++] = codepoint == 0x1FB98
+                        ? new Segment(new(x, 0), new(w + x, h))   // upper left to lower right
+                        : new Segment(new(w + x, 0), new(x, h));  // upper right to lower left
+                }
+                break;
+            }
+            case (>= 0x1FBA0 and <= 0x1FBAE) or 0x1FBBE or 0x1FBBF:
+            {
+                // Lines between the midpoints of the edges, cutting off each named corner.
+                ReadOnlySpan<byte> corners = [1, 2, 4, 8, 5, 10, 12, 3, 9, 6, 14, 13, 11, 7, 15]; // 1 tl, 2 tr, 4 bl, 8 br
+                var mask = codepoint switch { 0x1FBBE => 8, 0x1FBBF => 15, _ => corners[(int)(codepoint - 0x1FBA0)] };
+                // The odd pixel goes to the far side, as Ghostty's does.
+                float cx = MathF.Ceiling(w / 2), cy = MathF.Ceiling(h / 2);
+                if ((mask & 1) != 0) segments[n++] = new(new(cx, 0), new(0, cy));
+                if ((mask & 2) != 0) segments[n++] = new(new(cx, 0), new(w, cy));
+                if ((mask & 4) != 0) segments[n++] = new(new(cx, h), new(0, cy));
+                if ((mask & 8) != 0) segments[n++] = new(new(cx, h), new(w, cy));
+                break;
+            }
+            case 0x1FBBD: // the light diagonal cross
+                segments[n++] = new(new(0, 0), new(w, h));
+                segments[n++] = new(new(w, 0), new(0, h));
+                break;
+            case >= 0x1FBD0 and <= 0x1FBDF:
+            {
+                // Diagonals between corners and edge midpoints, as fractions of the cell: each
+                // entry is x0 y0 x1 y1, and the last eight are pairs joined in the middle.
+                ReadOnlySpan<byte> halves =
+                [
+                    2, 1, 0, 2,  2, 0, 0, 1,  0, 0, 2, 1,  0, 1, 2, 2,  0, 0, 1, 2,  1, 0, 2, 2,  2, 0, 1, 2,  1, 0, 0, 2,
+                    0, 0, 1, 1, 1, 1, 2, 0,   2, 0, 1, 1, 1, 1, 2, 2,   0, 2, 1, 1, 1, 1, 2, 2,   0, 0, 1, 1, 1, 1, 0, 2,
+                    0, 0, 1, 2, 1, 2, 2, 0,   2, 0, 0, 1, 0, 1, 2, 2,   0, 2, 1, 0, 1, 0, 2, 2,   0, 0, 2, 1, 2, 1, 0, 2,
+                ];
+                var index = (int)(codepoint - 0x1FBD0);
+                var (start, lines) = index < 8 ? (index * 4, 1) : (32 + (index - 8) * 8, 2);
+                for (var i = 0; i < lines; i++)
+                {
+                    var p = halves.Slice(start + i * 4, 4);
+                    segments[n++] = new(new(w * p[0] / 2, h * p[1] / 2), new(w * p[2] / 2, h * p[3] / 2));
+                }
+                break;
+            }
+        }
+        return n;
+    }
+
+    /// <summary>The circles of Symbols for Legacy Computing: a circle the size of the cell's
+    /// shorter side centered on an edge or corner, clipped to the cell, filled or outlined.</summary>
+    public static bool Circle(uint codepoint, float width, float height, out Vector2 center, out float radius, out bool filled)
+    {
+        (float X, float Y)? at = codepoint switch
+        {
+            0x1FBE0 or 0x1FBE8 => (0.5f, 0),
+            0x1FBE1 or 0x1FBE9 => (1, 0.5f),
+            0x1FBE2 or 0x1FBEA => (0.5f, 1),
+            0x1FBE3 or 0x1FBEB => (0, 0.5f),
+            0x1FBEC => (1, 0),
+            0x1FBED => (0, 1),
+            0x1FBEE => (1, 1),
+            0x1FBEF => (0, 0),
+            _ => null,
+        };
+        center = at is { } c ? new Vector2(c.X * width, c.Y * height) : default;
+        radius = 0.5f * MathF.Min(width, height);
+        filled = codepoint >= 0x1FBE8;
+        return at is not null;
+    }
+
+    private static int Points(Span<Vector2> points, params ReadOnlySpan<Vector2> corners)
+    {
+        corners.CopyTo(points);
+        return corners.Length;
+    }
+
+    /// <summary>Smooth mosaics as a 3x4 grid, top row first: '#' marks the filled points of the
+    /// grid, and the outline runs through them on the cell edge (left, upper and lower thirds,
+    /// bottom, center) clockwise from the top left. Slopes are drawn as '/' and '\' for the
+    /// reader; only '#' matters. Transcribed from Ghostty's table.</summary>
+    private static readonly string[] Mosaics =
+    [
+        /* 1FB3C */ "..." + "..." + "#.." + "##.",
+        /* 1FB3D */ "..." + "..." + "#\\." + "###",
+        /* 1FB3E */ "..." + "#.." + "#\\." + "##.",
+        /* 1FB3F */ "..." + "#.." + "##." + "###",
+        /* 1FB40 */ "#.." + "#.." + "##." + "##.",
+        /* 1FB41 */ "/##" + "###" + "###" + "###",
+        /* 1FB42 */ "./#" + "###" + "###" + "###",
+        /* 1FB43 */ ".##" + ".##" + "###" + "###",
+        /* 1FB44 */ "..#" + ".##" + "###" + "###",
+        /* 1FB45 */ ".##" + ".##" + ".##" + "###",
+        /* 1FB46 */ "..." + "./#" + "###" + "###",
+        /* 1FB47 */ "..." + "..." + "..#" + ".##",
+        /* 1FB48 */ "..." + "..." + "./#" + "###",
+        /* 1FB49 */ "..." + "..#" + "./#" + ".##",
+        /* 1FB4A */ "..." + "..#" + ".##" + "###",
+        /* 1FB4B */ "..#" + "..#" + ".##" + ".##",
+        /* 1FB4C */ "##\\" + "###" + "###" + "###",
+        /* 1FB4D */ "#\\." + "###" + "###" + "###",
+        /* 1FB4E */ "##." + "##." + "###" + "###",
+        /* 1FB4F */ "#.." + "##." + "###" + "###",
+        /* 1FB50 */ "##." + "##." + "##." + "###",
+        /* 1FB51 */ "..." + "#\\." + "###" + "###",
+        /* 1FB52 */ "###" + "###" + "###" + "\\##",
+        /* 1FB53 */ "###" + "###" + "###" + ".\\#",
+        /* 1FB54 */ "###" + "###" + ".##" + ".##",
+        /* 1FB55 */ "###" + "###" + ".##" + "..#",
+        /* 1FB56 */ "###" + ".##" + ".##" + ".##",
+        /* 1FB57 */ "##." + "#.." + "..." + "...",
+        /* 1FB58 */ "###" + "#/." + "..." + "...",
+        /* 1FB59 */ "##." + "#/." + "#.." + "...",
+        /* 1FB5A */ "###" + "##." + "#.." + "...",
+        /* 1FB5B */ "##." + "##." + "#.." + "#..",
+        /* 1FB5C */ "###" + "###" + "#/." + "...",
+        /* 1FB5D */ "###" + "###" + "###" + "##/",
+        /* 1FB5E */ "###" + "###" + "###" + "#/.",
+        /* 1FB5F */ "###" + "###" + "##." + "##.",
+        /* 1FB60 */ "###" + "###" + "##." + "#..",
+        /* 1FB61 */ "###" + "##." + "##." + "##.",
+        /* 1FB62 */ ".##" + "..#" + "..." + "...",
+        /* 1FB63 */ "###" + ".\\#" + "..." + "...",
+        /* 1FB64 */ ".##" + ".\\#" + "..#" + "...",
+        /* 1FB65 */ "###" + ".##" + "..#" + "...",
+        /* 1FB66 */ ".##" + ".##" + "..#" + "..#",
+        /* 1FB67 */ "###" + "###" + ".\\#" + "...",
+    ];
+
+    /// <summary>Walks the outline points of a smooth mosaic. A point on an edge between two filled
+    /// corners is skipped, since the straight edge already passes through it.</summary>
+    private static int Mosaic(string pattern, float width, float height, Span<Vector2> points)
+    {
+        bool On(int row, int column) => pattern[row * 3 + column] == '#';
+        float left = 0, center = width / 2, right = width, top = 0, upper = height / 3, lower = 2 * height / 3, bottom = height;
+        var n = 0;
+        if (On(0, 0)) points[n++] = new(left, top);
+        if (On(1, 0) && !(On(0, 0) && On(2, 0))) points[n++] = new(left, upper);
+        if (On(2, 0) && !(On(1, 0) && On(3, 0))) points[n++] = new(left, lower);
+        if (On(3, 0)) points[n++] = new(left, bottom);
+        if (On(3, 1) && !(On(3, 0) && On(3, 2))) points[n++] = new(center, bottom);
+        if (On(3, 2)) points[n++] = new(right, bottom);
+        if (On(2, 2) && !(On(3, 2) && On(1, 2))) points[n++] = new(right, lower);
+        if (On(1, 2) && !(On(2, 2) && On(0, 2))) points[n++] = new(right, upper);
+        if (On(0, 2)) points[n++] = new(right, top);
+        if (On(0, 1) && !(On(0, 2) && On(0, 0))) points[n++] = new(center, top);
         return n;
     }
 

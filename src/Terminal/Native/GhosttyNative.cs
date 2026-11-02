@@ -19,7 +19,7 @@ internal struct GhosttyFrameInfo
     public ulong ScrollTotal;
     public ulong ScrollOffset;
     public ulong ScrollLength;
-    public byte RenderHeld; // no frame published; request another frame for release/timeout
+    public byte RenderHeld; // mid-frame: request another frame for release/timeout; any rows read are the last completed frame
     public byte MouseShape; // GhosttyMouseShape the program requested through OSC 22
 }
 
@@ -44,7 +44,7 @@ internal static unsafe partial class GhosttyNative
 {
     public const int CompressDone = 0, CompressPending = 1, CompressWait = 2;
     private const string Library = "reseshvt";
-    private const int ExpectedAbi = 10;
+    private const int ExpectedAbi = 11;
 
     private static readonly Lazy<string?> LoadError = new(Load);
 

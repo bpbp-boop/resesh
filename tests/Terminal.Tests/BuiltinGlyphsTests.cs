@@ -51,8 +51,30 @@ public class BuiltinGlyphsTests
         Enumerable.Range(0x2500, 0x80).Select(c => (uint)c)
             .Concat(Enumerable.Range(0x2580, 0x20).Select(c => (uint)c))
             .Concat(Enumerable.Range(0x2800, 0x100).Select(c => (uint)c))
-            .Concat(Enumerable.Range(0x1FB00, 0x3C).Select(c => (uint)c))
-            .Where(c => !BuiltinGlyphs.IsVector(c));
+            .Concat(Enumerable.Range(0x1FB00, 0x100).Select(c => (uint)c))
+            .Concat(Enumerable.Range(0x1CD00, 0xE6).Select(c => (uint)c))
+            .Where(c => BuiltinGlyphs.Covers(c) && !BuiltinGlyphs.IsVector(c));
+
+    private static IEnumerable<uint> LegacyVectorGlyphs() =>
+        Enumerable.Range(0x1FB00, 0x100).Select(c => (uint)c).Where(c => BuiltinGlyphs.Covers(c) && BuiltinGlyphs.IsVector(c));
+
+    /// <summary>Twice the signed area of a polygon (the shoelace formula).</summary>
+    private static float Area(ReadOnlySpan<System.Numerics.Vector2> points)
+    {
+        var sum = 0f;
+        for (var i = 0; i < points.Length; i++)
+        {
+            var (a, b) = (points[i], points[(i + 1) % points.Length]);
+            sum += a.X * b.Y - b.X * a.Y;
+        }
+        return MathF.Abs(sum) / 2;
+    }
+
+    private static float PolygonArea(uint codepoint, int width, int height)
+    {
+        Span<System.Numerics.Vector2> points = stackalloc System.Numerics.Vector2[BuiltinGlyphs.MaxPoints];
+        return Area(points[..BuiltinGlyphs.Polygon(codepoint, width, height, points)]);
+    }
 
     [Theory, MemberData(nameof(Sizes))]
     public void EveryGlyphStaysInsideItsCell(int width, int height, int light)
@@ -151,7 +173,7 @@ public class BuiltinGlyphsTests
         Span<BuiltinGlyphs.Box> boxes = stackalloc BuiltinGlyphs.Box[BuiltinGlyphs.MaxBoxes];
         Assert.Equal(0, BuiltinGlyphs.Boxes(0x2800, width, height, light, boxes));
         Assert.Equal(8, BuiltinGlyphs.Boxes(0x28FF, width, height, light, boxes));
-        var all = boxes.ToArray();
+        var all = boxes[..8].ToArray();
         // Two columns of four rows, the same in every column and row.
         Assert.Equal(2, all.Select(b => b.Left).Distinct().Count());
         Assert.Equal(4, all.Select(b => b.Top).Distinct().Count());
@@ -183,12 +205,119 @@ public class BuiltinGlyphsTests
         Assert.False(third[0, height - 1]);
     }
 
+    [Theory, MemberData(nameof(Sizes))]
+    public void EighthsAndCheckerboardsTileTheCell(int width, int height, int light)
+    {
+        // The left and right one eighth blocks plus the six vertical eighths between them.
+        var columns = Paint(0x258F, width, height, light);
+        foreach (var codepoint in new uint[] { 0x1FB70, 0x1FB71, 0x1FB72, 0x1FB73, 0x1FB74, 0x1FB75, 0x2595 })
+            columns = Union(columns, Paint(codepoint, width, height, light));
+        Assert.True(Full(columns));
+        var rows = Paint(0x2594, width, height, light);
+        foreach (var codepoint in new uint[] { 0x1FB76, 0x1FB77, 0x1FB78, 0x1FB79, 0x1FB7A, 0x1FB7B, 0x2581 })
+            rows = Union(rows, Paint(codepoint, width, height, light));
+        Assert.True(Full(rows));
+        Assert.True(Full(Paint(0x1FB95, width, height, light), Paint(0x1FB96, width, height, light)));
+        Assert.False(Paint(0x1FB96, width, height, light)[0, 0]);
+    }
+
+    private static bool[,] Union(bool[,] a, bool[,] b)
+    {
+        for (var x = 0; x < a.GetLength(0); x++)
+            for (var y = 0; y < a.GetLength(1); y++)
+                a[x, y] |= b[x, y];
+        return a;
+    }
+
+    [Theory, MemberData(nameof(Sizes))]
+    public void OctantsCoverTheirEighths(int width, int height, int light)
+    {
+        var third = Paint(0x1CD00, width, height, light); // octant 3: left, second quarter down
+        Assert.True(third[0, height * 3 / 8]);
+        Assert.False(third[0, 0]);
+        Assert.False(third[width - 1, height * 3 / 8]);
+        // U+1CDE5 is every octant but the first, the top quarter of the left half.
+        var allButFirst = Paint(0x1CDE5, width, height, light);
+        Assert.False(allButFirst[0, 0]);
+        Assert.True(allButFirst[width - 1, 0]);
+        Assert.True(allButFirst[0, height - 1]);
+    }
+
+    [Theory, MemberData(nameof(Sizes))]
+    public void LegacyShapesStayInsideTheirCell(int width, int height, int light)
+    {
+        Span<System.Numerics.Vector2> points = stackalloc System.Numerics.Vector2[BuiltinGlyphs.MaxPoints];
+        Span<BuiltinGlyphs.Segment> segments = stackalloc BuiltinGlyphs.Segment[BuiltinGlyphs.MaxSegments];
+        foreach (var codepoint in LegacyVectorGlyphs())
+        {
+            var polygon = BuiltinGlyphs.Polygon(codepoint, width, height, points);
+            var lines = BuiltinGlyphs.Segments(codepoint, width, height, light, segments);
+            var circle = BuiltinGlyphs.Circle(codepoint, width, height, out _, out _, out _);
+            // Every vector glyph from the block is exactly one kind of shape.
+            Assert.Equal(1, (polygon > 0 ? 1 : 0) + (lines > 0 ? 1 : 0) + (circle ? 1 : 0));
+            if (polygon > 0)
+            {
+                Assert.True(polygon >= 3, $"U+{codepoint:X4}");
+                foreach (var p in points[..polygon])
+                    Assert.True(p.X >= 0 && p.X <= width && p.Y >= 0 && p.Y <= height, $"U+{codepoint:X4} leaves its cell: {p}");
+                Assert.True(Area(points[..polygon]) > 0, $"U+{codepoint:X4}");
+            }
+        }
+    }
+
+    [Theory, MemberData(nameof(Sizes))]
+    public void TrianglesAndTheirCutOutsMakeAWholeCell(int width, int height, int light)
+    {
+        _ = light;
+        float cell = width * height;
+        for (uint i = 0; i < 4; i++)
+            Assert.Equal(cell, PolygonArea(0x1FB68 + i, width, height) + PolygonArea(0x1FB6C + i, width, height), 3);
+        // Opposite corner triangles halve the cell.
+        Assert.Equal(cell, PolygonArea(0x1FB9C, width, height) + PolygonArea(0x1FB9E, width, height), 3);
+        // The lower left wedge and the cell with that wedge cut away.
+        Assert.Equal(cell, PolygonArea(0x1FB3C, width, height) + PolygonArea(0x1FB52, width, height), 3);
+    }
+
+    [Fact]
+    public void MosaicsFollowTheirPictures()
+    {
+        Span<System.Numerics.Vector2> points = stackalloc System.Numerics.Vector2[BuiltinGlyphs.MaxPoints];
+        // U+1FB3C, lower left: from the left edge's lower third down to the bottom center.
+        var n = BuiltinGlyphs.Polygon(0x1FB3C, 9, 18, points);
+        Assert.Equal([new(0, 12), new(0, 18), new(4.5f, 18)], points[..n].ToArray());
+        // U+1FB41 is the cell without its top left corner: the corner point is replaced by the
+        // left edge's upper third and the top center.
+        n = BuiltinGlyphs.Polygon(0x1FB41, 9, 18, points);
+        Assert.Equal([new(0, 6), new(0, 18), new(9, 18), new(9, 0), new(4.5f, 0)], points[..n].ToArray());
+    }
+
+    [Fact]
+    public void LineGlyphsCountTheirStrokes()
+    {
+        Span<BuiltinGlyphs.Segment> segments = stackalloc BuiltinGlyphs.Segment[BuiltinGlyphs.MaxSegments];
+        Assert.Equal(4, BuiltinGlyphs.Segments(0x1FBAE, 9, 18, 1, segments));  // all four corners
+        Assert.Equal(3, BuiltinGlyphs.Segments(0x1FBAA, 9, 18, 1, segments));  // three corners
+        Assert.Equal(1, BuiltinGlyphs.Segments(0x1FBD4, 9, 18, 1, segments));  // upper left to lower center
+        Assert.Equal(new BuiltinGlyphs.Segment(new(0, 0), new(4.5f, 18)), segments[0]);
+        Assert.Equal(2, BuiltinGlyphs.Segments(0x1FBDF, 9, 18, 1, segments));  // a chevron through the right middle
+        Assert.Equal(new(9, 9), segments[0].To);
+        Assert.Equal(segments[0].To, segments[1].From);
+        Assert.True(BuiltinGlyphs.IsInverted(0x1FBBF));
+        Assert.Equal(4, BuiltinGlyphs.Segments(0x1FBBF, 9, 18, 1, segments));
+        // A diagonal fill reaches across the whole cell with room to spare, whatever the size.
+        foreach (var width in new[] { 5, 9, 22, 200 })
+            Assert.InRange(BuiltinGlyphs.Segments(0x1FB98, width, 2 * width, 1, segments), 3, BuiltinGlyphs.MaxSegments);
+    }
+
     [Fact]
     public void CoversTheSharedRangesAndNothingAdjacent()
     {
-        foreach (var codepoint in new uint[] { 0x2500, 0x257F, 0x2580, 0x259F, 0x2800, 0x28FF, 0xE0B0, 0xE0BF, 0x1FB00, 0x1FB3B })
+        foreach (var codepoint in new uint[] { 0x2500, 0x257F, 0x2580, 0x259F, 0x2800, 0x28FF, 0xE0B0, 0xE0BF, 0x1FB00, 0x1FB3B,
+                     0x1FB3C, 0x1FBAF, 0x1FBBD, 0x1FBBF, 0x1FBCE, 0x1FBEF, 0x1CD00, 0x1CDE5 })
             Assert.True(BuiltinGlyphs.Covers(codepoint), $"U+{codepoint:X4}");
-        foreach (var codepoint in new uint[] { 'a', 0x24FF, 0x25A0, 0x27FF, 0x2900, 0xE0A0, 0xE0AF, 0xE0C0, 0x1FB3C })
+        // Segmented digits and the rest of the block's pictures stay with the font.
+        foreach (var codepoint in new uint[] { 'a', 0x24FF, 0x25A0, 0x27FF, 0x2900, 0xE0A0, 0xE0AF, 0xE0C0,
+                     0x1FAFF, 0x1FBB0, 0x1FBBC, 0x1FBC0, 0x1FBCD, 0x1FBF0, 0x1FBF9, 0x1CCFF, 0x1CDE6 })
             Assert.False(BuiltinGlyphs.Covers(codepoint), $"U+{codepoint:X4}");
         Assert.True(BuiltinGlyphs.IsVector('╭'));
         Assert.True(BuiltinGlyphs.IsVector('╳'));
