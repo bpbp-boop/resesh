@@ -172,7 +172,7 @@ public sealed class ConnectionLifecycleTests : IDisposable
     }
 
     [Fact]
-    public void Telnet_ServerCloseAfterLocalStop_RaisesNothing()
+    public async Task Telnet_ServerCloseAfterLocalStop_RaisesNothing()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -182,19 +182,19 @@ public sealed class ConnectionLifecycleTests : IDisposable
         telnet.Closed += _ => Interlocked.Increment(ref closed);
         var accept = listener.AcceptSocketAsync();
         telnet.Connect("127.0.0.1", port, "xterm", 80, 24);
-        using var server = accept.GetAwaiter().GetResult();
+        using var server = await accept;
         Assert.True(telnet.IsConnected);
 
         telnet.Stop();
         server.Close();
-        Thread.Sleep(200);
+        await Task.Delay(200);
 
         Assert.Equal(0, Volatile.Read(ref closed));
         Assert.False(telnet.IsConnected);
     }
 
     [Fact]
-    public void Telnet_ServerClose_RaisesClosedOnce()
+    public async Task Telnet_ServerClose_RaisesClosedOnce()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -209,7 +209,7 @@ public sealed class ConnectionLifecycleTests : IDisposable
         };
         var accept = listener.AcceptSocketAsync();
         telnet.Connect("127.0.0.1", port, "xterm", 80, 24);
-        using (var server = accept.GetAwaiter().GetResult())
+        using (var server = await accept)
             server.Shutdown(SocketShutdown.Both);
 
         Assert.True(closed.Wait(TimeSpan.FromSeconds(5)));

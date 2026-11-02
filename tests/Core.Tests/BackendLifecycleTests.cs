@@ -156,7 +156,7 @@ public sealed class BackendLifecycleTests
     }
 
     [Fact]
-    public void RemoteCloseAndStopRacingNeverRaiseAfterTheStopReturns()
+    public async Task RemoteCloseAndStopRacingNeverRaiseAfterTheStopReturns()
     {
         for (var i = 0; i < 500; i++)
         {
@@ -177,7 +177,7 @@ public sealed class BackendLifecycleTests
                 lifecycle.BeginStop(out previous);
                 Volatile.Write(ref stopReturned, 1);
             });
-            Task.WaitAll(remote, local);
+            await Task.WhenAll(remote, local);
 
             Assert.False(raisedLate);
             // Exactly one won: either Closed was raised before the stop, or the stop came first.

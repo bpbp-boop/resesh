@@ -238,14 +238,25 @@ public sealed class StoreLoadStateTests : IDisposable
         var original = Seed("sessions");
         var store = Open("sessions", StorePath);
         var held = Lock(StorePath);
-        var release = Task.Run(async () =>
+        var retries = 0;
+        // Let go when the first retry is about to wait, as a scanner would, rather than on a
+        // timer that a busy machine can run late.
+        AtomicFile.BeforeSharingViolationRetry = () =>
         {
-            await Task.Delay(30);
+            retries++;
             held.Dispose();
-        });
-        store.Load();
-        release.Wait();
+        };
+        try
+        {
+            store.Load();
+        }
+        finally
+        {
+            AtomicFile.BeforeSharingViolationRetry = null;
+            held.Dispose();
+        }
 
+        Assert.Equal(1, retries);
         Assert.Equal(StoreLoadState.Loaded, store.State);
         Assert.Null(store.Warning);
         store.Mutate();

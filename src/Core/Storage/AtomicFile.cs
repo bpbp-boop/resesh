@@ -51,6 +51,12 @@ internal static class AtomicFile
     internal static TimeSpan[] SharingViolationRetryDelays { get; set; } =
         [TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(150), TimeSpan.FromMilliseconds(300)];
 
+    /// <summary>Test hook run before each sharing-violation retry, so a test can let go of the
+    /// file at a known point instead of racing a timer. Per thread: the retry runs on the
+    /// reading thread, and other tests holding locks in parallel must not see it.</summary>
+    [ThreadStatic]
+    internal static Action? BeforeSharingViolationRetry;
+
     public static void Write(string path, string contents, bool preserveBackup = false)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -131,6 +137,7 @@ internal static class AtomicFile
             }
             catch (IOException e) when (IsSharingViolation(e) && attempt < SharingViolationRetryDelays.Length)
             {
+                BeforeSharingViolationRetry?.Invoke();
                 Thread.Sleep(SharingViolationRetryDelays[attempt]);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
