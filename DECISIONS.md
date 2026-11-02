@@ -1787,3 +1787,14 @@ is removed, so "π - project" and "~/src" are untouched.
   stopped: the pane stops waiting and disposes the session if it ever arrives.
 - SFTP sessions are always disposed off the UI thread, including a stale one replaced on
   reconnect.
+
+## 2026-11-02 - SSHFS drive letters are reserved app-wide
+- Two tabs opening Explorer at once both picked the same free drive letter, and the
+  second tab's mount check (`Directory.Exists`) then passed on the first tab's drive.
+  `DriveLetterReservations.Shared` hands out letters under a lock and keeps each reserved
+  until its mount fails or is disposed, so concurrent mounts get different letters.
+- The 20-second wait for the drive takes the tab's cancellation token: closing the tab
+  stops it and kills sshfs. `SshfsMount.HasExited` answers true after Dispose instead of
+  throwing on the disposed process.
+- A second "Open in Explorer" while the tab's mount is coming up waits for that mount and
+  then opens its own folder, instead of doing nothing.

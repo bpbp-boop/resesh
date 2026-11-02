@@ -2223,10 +2223,12 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     }
 
     private Interop.SshfsMount? _sshfsMount;
-    private bool _sshfsMounting;
+    private Task<Interop.SshfsMount?>? _sshfsMounting;
+    private readonly CancellationTokenSource _sshfsCancel = new(); // cancelled when the tab closes
 
     /// <summary>Opens a local directory directly. Remote sessions mount the SFTP path
-    /// through SSHFS first.</summary>
+    /// through SSHFS first. A second request while the mount comes up waits for the same
+    /// mount and then opens its own folder.</summary>
     private async Task OpenInExplorerAsync(string path)
     {
         if (Session.IsLocal)
@@ -2242,28 +2244,50 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         var mount = _sshfsMount;
         if (mount is not { IsAlive: true })
         {
-            if (_sshfsMounting)
-                return;
-            _sshfsMounting = true;
+            var mounting = _sshfsMounting ??= MountSshfsAsync(session);
             try
             {
-                mount?.Dispose();
-                var password = session.AuthMethod == AuthMethod.Password ? _secret : null;
-                mount = await Task.Run(() => Interop.SshfsIntegration.Mount(session, _knownHosts, password));
-                if (_disposed)
-                {
-                    // The tab closed during the mount; its Dispose could not see this process.
-                    mount.Dispose();
-                    return;
-                }
-                _sshfsMount = mount;
+                mount = await mounting;
             }
             finally
             {
-                _sshfsMounting = false;
+                if (ReferenceEquals(_sshfsMounting, mounting))
+                    _sshfsMounting = null;
             }
+            if (mount is null || _disposed)
+                return; // the tab closed during the mount
         }
         Interop.SshfsIntegration.OpenInExplorer(mount.Root, path);
+    }
+
+    private async Task<Interop.SshfsMount?> MountSshfsAsync(Session session)
+    {
+        var token = _sshfsCancel.Token;
+        var stale = _sshfsMount;
+        _sshfsMount = null;
+        var password = session.AuthMethod == AuthMethod.Password ? _secret : null;
+        Interop.SshfsMount mount;
+        try
+        {
+            // Killing a dead mount's process can wait, so it happens off the UI thread too.
+            mount = await Task.Run(() =>
+            {
+                stale?.Dispose();
+                return Interop.SshfsIntegration.Mount(session, _knownHosts, password, token);
+            }, token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            return null;
+        }
+        if (_disposed)
+        {
+            // The tab closed during the mount; its Dispose could not see this process.
+            _ = Task.Run(mount.Dispose);
+            return null;
+        }
+        _sshfsMount = mount;
+        return mount;
     }
 
     /// <summary>Connect factory handed to the pane: reuses the tab's resolved secret
@@ -2372,6 +2396,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _agentPoll = null;
         CleanupActions.Run(App.ReportRecoverableError,
             () => _connection.Dispose(),
+            () => _sshfsCancel.Cancel(), // an SSHFS mount still coming up stops waiting and is killed
             () => _tmuxReservation.Dispose(),
             () => { if (IsFilePaneOpen) SaveFilePaneWidth(); },
             () => _filePane?.Dispose(),
