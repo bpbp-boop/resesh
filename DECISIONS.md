@@ -1905,7 +1905,8 @@ is removed, so "π - project" and "~/src" are untouched.
   second request for a claimed tab (Ctrl+W again, a middle-click, a bulk close) is dropped
   rather than queued behind the first: the first dialog already asks the question.
 - After every await they check that the window is still open and still owns the tab
-  (`MainViewModel.Owns`); a tab dragged to another window or closed meanwhile is left alone.
+  (`MainViewModel.Owns`); a tab closed meanwhile is left alone. (A tab dragged to another
+  window meanwhile: see "A confirmed tab close follows the tab" below.)
   `CloseTabCore` does nothing for a tab it no longer holds, so a late caller can't throw
   partway through a bulk close. Callers fire and forget, so failures go to
   `App.ReportRecoverableError`.
@@ -1972,3 +1973,14 @@ is removed, so "π - project" and "~/src" are untouched.
   while the window is minimized, and a second X while the prompt waits behind another of
   the window's dialogs used to do nothing visible; the dialog that must be answered first
   is now in view. The other dialog is not dismissed: its answer may matter (a host key).
+
+## 2026-11-02 - A confirmed tab close follows the tab to another window
+- A single-tab close whose dialog was answered "Close" closes the tab in whichever open
+  window holds it now (`CloseOwnerOf`, via `App.WindowFor`). The answer was about that tab,
+  so a drag to another window while the dialog was open (or a workspace taken over by
+  another window) no longer quietly cancels it. Unpinning and the "could not end the
+  persistent session" message happen in that window too.
+- The claim stays on the window that asked. The new window may start its own close of the
+  tab meanwhile; whichever acts first wins and the other finds the tab gone.
+- Bulk closes ("close others", "to the right", "all") are about this window's tabs and still
+  leave a tab that moved away alone: it is no longer among the tabs the question described.

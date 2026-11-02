@@ -128,8 +128,29 @@ test("tab closes re-check the tab after every await and claim it while in flight
   for (const { 0: awaited, index } of awaits) {
     const after = flows.slice(index + awaited.length);
     const nextClose = after.search(/CloseTabCore\(tab\)|TogglePin\(tab\)/);
-    const nextCheck = after.search(/CanStillClose\(tab\)|_windowClosed/);
+    const nextCheck = after.search(/CanStillClose\(tab\)|CloseOwnerOf\(tab\)|_windowClosed/);
     if (nextClose >= 0)
       assert.ok(nextCheck >= 0 && nextCheck < nextClose, `no re-check after: ${awaited}`);
   }
+});
+
+// A single-tab close answers a question about that tab, so if the tab was dragged to another
+// window while the dialog was open, the window that holds it now closes it. Bulk closes are
+// about this window's tabs and leave a tab that moved away alone.
+test("a confirmed single-tab close follows the tab to the window that holds it now", () => {
+  const owner = source.match(/private MainWindow\? CloseOwnerOf\(TabViewModel tab\) =>[\s\S]*?;\r?\n/)?.[0] ?? "";
+  assert.match(owner, /CanStillClose\(tab\) \? this\s*: App\.WindowFor\(tab\) is \{ _windowClosed: false \} other \? other\s*: null/);
+
+  const single = source.match(
+    /private async Task RequestCloseClaimedTabAsync[\s\S]*?\n    \/\/\/ <summary>Bulk close/)?.[0] ?? "";
+  // After the first await, only the current owner closes or unpins the tab.
+  const afterFirstAwait = single.slice(single.indexOf("await "));
+  assert.doesNotMatch(afterFirstAwait, /(?<![.\w])(?:CloseTabCore|TogglePin)\(tab\)/);
+  assert.match(single, /pinnedOwner\.TogglePin\(tab\);\s*pinnedOwner\.CloseTabCore\(tab\);/);
+  assert.match(single, /CloseOwnerOf\(tab\) is \{ \} owner\)\s*owner\.CloseTabCore\(tab\);/);
+  assert.match(single, /owner\.TogglePin\(tab\);\s*owner\.CloseTabCore\(tab\);/);
+
+  const bulk = source.match(
+    /private async Task RequestCloseClaimedManyAsync[\s\S]*?\n    \/\/\/ <summary>Closes the tab now/)?.[0] ?? "";
+  assert.doesNotMatch(bulk, /CloseOwnerOf/);
 });

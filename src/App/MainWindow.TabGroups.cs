@@ -321,6 +321,14 @@ public sealed partial class MainWindow
     /// may have closed.</summary>
     private bool CanStillClose(TabViewModel tab) => !_windowClosed && ViewModel.Owns(tab);
 
+    /// <summary>The open window that holds the tab now, for a single-tab close whose dialog was
+    /// answered: the answer was about the tab, so if it was dragged to another window
+    /// meanwhile the close follows it there. Null once the tab has closed.</summary>
+    private MainWindow? CloseOwnerOf(TabViewModel tab) =>
+        CanStillClose(tab) ? this
+        : App.WindowFor(tab) is { _windowClosed: false } other ? other
+        : null;
+
     private async Task RequestCloseClaimedTabAsync(TabViewModel tab)
     {
         if (tab.IsAppPage
@@ -350,16 +358,16 @@ public sealed partial class MainWindow
         {
             // Pinned tabs need the extra deliberate step; one dialog covers both.
             if (!await ConfirmAsync("Tab Is Pinned", $"\"{tab.Header}\" is pinned.{detail}", "Unpin and Close", acceptY: true)
-                || !CanStillClose(tab))
+                || CloseOwnerOf(tab) is not { } pinnedOwner)
                 return;
             if (tab.IsPinned)
-                TogglePin(tab);
-            CloseTabCore(tab);
+                pinnedOwner.TogglePin(tab);
+            pinnedOwner.CloseTabCore(tab);
             return;
         }
         if (await ConfirmAsync("Close Tab", $"Close \"{tab.Header}\"?{detail}", "Close", acceptY: true)
-            && CanStillClose(tab))
-            CloseTabCore(tab);
+            && CloseOwnerOf(tab) is { } owner)
+            owner.CloseTabCore(tab);
     }
 
     private async Task RequestCloseTmuxTabAsync(TabViewModel tab, TerminalTabView view)
@@ -377,19 +385,19 @@ public sealed partial class MainWindow
             Note = "This ends everything running in the persistent session. Leave the check box clear to keep it running.",
         };
 
-        if (!await dialog.ConfirmAsync() || !CanStillClose(tab))
+        if (!await dialog.ConfirmAsync() || CloseOwnerOf(tab) is null)
             return;
         if (dialog.IsOptionChecked && !await view.TryEndRemoteSessionAsync())
         {
-            if (CanStillClose(tab))
-                await ShowEndRemoteSessionFailureAsync(tab);
+            if (CloseOwnerOf(tab) is { } failedOwner)
+                await failedOwner.ShowEndRemoteSessionFailureAsync(tab);
             return;
         }
-        if (!CanStillClose(tab))
+        if (CloseOwnerOf(tab) is not { } owner)
             return;
         if (tab.IsPinned)
-            TogglePin(tab);
-        CloseTabCore(tab);
+            owner.TogglePin(tab);
+        owner.CloseTabCore(tab);
     }
 
     /// <summary>Bulk close: the context menu's close others, to the right, in the group, and
