@@ -361,6 +361,21 @@ static GhosttyString on_xtversion(GhosttyTerminal term, void* user) {
   return s;
 }
 
+// XTWINOPS size queries (CSI 14/16/18/19 t) and mode 2048 resize reports. Without this
+// callback libghostty-vt ignores them, so programs that ask (esctest2 before every test,
+// TUIs over SSH) wait for a reply that never comes. Runs under the lock, inside rvt_write.
+static bool on_size(GhosttyTerminal term, void* user, GhosttySizeReportSize* out) {
+  RvtTerm* t = (RvtTerm*)user;
+  uint16_t cols = 0, rows = 0;
+  ghostty_terminal_get(term, GHOSTTY_TERMINAL_DATA_COLS, &cols);
+  ghostty_terminal_get(term, GHOSTTY_TERMINAL_DATA_ROWS, &rows);
+  out->columns = cols;
+  out->rows = rows;
+  out->cell_width = t->cell_w;
+  out->cell_height = t->cell_h;
+  return true;
+}
+
 RVT_API int rvt_abi_version(void) { return RVT_ABI_VERSION; }
 
 RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, RvtEventFn on_event, void* user) {
@@ -420,6 +435,7 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_PROGRESS_REPORT, (const void*)on_progress);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS, (const void*)on_program_status);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_XTVERSION, (const void*)on_xtversion);
+  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SIZE, (const void*)on_size);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_RENDER_HOLD, (const void*)on_render_hold);
   ghostty_terminal_compression_activity(t->term, &t->compress_activity);
   return t;

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Resesh.Core.Agents;
@@ -129,6 +130,22 @@ public static class AgentDetection
             return CommandNames.GetValueOrDefault(name);
         }
         return null;
+    }
+
+    /// <summary>A title without the status glyph agents put in front of it: Claude Code's
+    /// "✳" and braille spinner, Codex's spinner, "●" and the like. The glyph changes many
+    /// times a second while an agent works, which is noise on a tab. Only a single non-ASCII
+    /// symbol followed by a space counts, so "~/src" and "π - project" are left alone.</summary>
+    public static string WithoutStatusGlyph(string title)
+    {
+        var span = title.AsSpan().TrimStart();
+        if (span.Length < 2 || span[0] < 0x80 || !char.IsWhiteSpace(span[1]))
+            return title;
+        var category = char.GetUnicodeCategory(span[0]);
+        if (category is not (UnicodeCategory.OtherSymbol or UnicodeCategory.OtherPunctuation))
+            return title;
+        var rest = span[1..].Trim();
+        return rest.IsEmpty ? title : rest.ToString();
     }
 
     /// <summary>The agent named by a terminal title, or null. Conservative on purpose:

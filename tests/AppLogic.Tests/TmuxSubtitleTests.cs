@@ -103,6 +103,53 @@ public sealed class TmuxSubtitleTests
     }
 
     [Fact]
+    public void AgentTitleReplacesCommandNameWithoutItsSpinner()
+    {
+        var tab = Tab();
+        tab.State = TabConnectionState.Connected;
+        tab.ApplyTerminalTitle("bash");
+        tab.ApplyRunningCommand("claude --resume", exact: true);
+        Assert.Equal("claude", tab.Subtitle);
+        tab.ApplyTerminalTitle("✳ Claude Code");
+        Assert.Equal("Claude Code", tab.Subtitle);
+        tab.ApplyTerminalTitle("⠐ Fix login bug");
+        Assert.Equal("Fix login bug", tab.Subtitle);
+        tab.ApplyTerminalTitle("✳ Fix login bug");
+        Assert.Equal("Fix login bug", tab.Subtitle);
+        tab.ApplyRunningCommand("", exact: true);
+        tab.ApplyTerminalTitle("bash");
+        tab.ApplyReportedWorkingDirectory(new("server", "/srv"));
+        Assert.Equal("/srv", tab.Subtitle);
+    }
+
+    [Fact]
+    public void StickyTmuxTitleFromEarlierProgramDoesNotReplaceNewCommand()
+    {
+        var tab = Tab();
+        tab.State = TabConnectionState.Connected;
+        tab.ApplyRunningCommand("claude", exact: true);
+        tab.ApplyTerminalTitle("✳ Fix login bug");
+        tab.ApplyRunningCommand("", exact: true);
+        tab.ApplyTerminalTitle("bash");
+
+        tab.ApplyRunningCommand("vim notes.txt", exact: true);
+        tab.ApplyTerminalTitle("⠂ Fix login bug"); // tmux's pane title outlived claude
+        Assert.Equal("vim", tab.Subtitle);
+        tab.ApplyTerminalTitle("python3"); // a bare process name is tmux's fallback
+        Assert.Equal("vim", tab.Subtitle);
+        tab.ApplyTerminalTitle("notes.txt - VIM");
+        Assert.Equal("notes.txt - VIM", tab.Subtitle);
+    }
+
+    [Fact]
+    public void PlainSshTitleDropsAgentSpinner()
+    {
+        var tab = Tab(persistent: false);
+        tab.ApplyTerminalTitle("✳ Fix login bug");
+        Assert.Equal("Fix login bug", tab.Subtitle);
+    }
+
+    [Fact]
     public void PlainSshTitlePriorityDoesNotChange()
     {
         var tab = Tab(persistent: false);

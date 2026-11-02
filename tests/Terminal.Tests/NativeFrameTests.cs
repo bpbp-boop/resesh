@@ -182,6 +182,35 @@ public sealed unsafe class NativeFrameTests
     }
 
     [WindowsNativeFact]
+    public void SizeQueriesAreAnswered()
+    {
+        Assert.Null(GhosttyNative.TryLoad());
+        var events = t_events = [];
+        var handle = GhosttyNative.rvt_new(80, 24, 100, &CollectEvent, IntPtr.Zero);
+        try
+        {
+            GhosttyNative.rvt_resize(handle, 100, 30, 9, 18);
+            string Ask(string query)
+            {
+                events.Clear();
+                var bytes = Encoding.UTF8.GetBytes(query);
+                fixed (byte* data = bytes)
+                    GhosttyNative.rvt_write(handle, data, (nuint)bytes.Length);
+                return Encoding.UTF8.GetString(Assert.Single(events, e => e.Kind == (int)GhosttyEventKind.Pty).Data);
+            }
+
+            // esctest2 asks for the size in cells before every test and waits for the answer.
+            Assert.Equal("\u001b[8;30;100t", Ask("\u001b[18t"));
+            Assert.Equal("\u001b[6;18;9t", Ask("\u001b[16t"));
+            Assert.Equal("\u001b[4;540;900t", Ask("\u001b[14t"));        }
+        finally
+        {
+            GhosttyNative.rvt_free(handle);
+            t_events = null;
+        }
+    }
+
+    [WindowsNativeFact]
     public void GlyphProtocolProbeAndRegistrationGetNoReply()
     {
         Assert.Null(GhosttyNative.TryLoad());
