@@ -232,6 +232,23 @@ public sealed class SshConnectivityTests : IDisposable
 
         using var probe = new Socket(SocketType.Stream, ProtocolType.Tcp);
         Assert.ThrowsAny<SocketException>(() => probe.Connect(IPAddress.Loopback, port));
+        chain.Dispose(); // a second dispose is a no-op
+    }
+
+    [Fact]
+    public void AnEarlierForwardFailureIsNotReportedForANewAttempt()
+    {
+        using var bastion = new TestSshHost("bastion");
+        var deadPort = TestSshHost.FreePort();
+        using var chain = SshJumpChain.Open([Hop(bastion)], "127.0.0.1", deadPort, _knownHosts, _ => true);
+        chain.RecordForwardFailure(new InvalidOperationException("stale failure"));
+        var target = new Session { Name = "target", Host = "127.0.0.1", Port = deadPort, Username = "test" };
+
+        var failure = Assert.Throws<SshSessionException>(() => chain.Probe(target, TimeSpan.FromSeconds(5), default));
+
+        Assert.Equal(SshFailureKind.HostUnreachable, failure.Kind);
+        Assert.DoesNotContain("stale failure", failure.Message);
+        Assert.Null(chain.ForwardFailure);
     }
 
     [Fact]
