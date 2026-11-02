@@ -279,6 +279,12 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _capture.Changed += OnCaptureChanged;
         _capture.RecordingChanged += (_, _) =>
             DispatcherQueue.TryEnqueue(SyncCaptureState);
+        // A write failure (a full disk, say) stops the recording but not the terminal.
+        _capture.RecordingFailed += (_, message) => DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_disposed)
+                _terminal.WriteNotice(message);
+        });
         SyncCaptureState();
     }
 
