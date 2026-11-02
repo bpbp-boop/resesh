@@ -1,6 +1,6 @@
 namespace Resesh.App.ViewModels;
 
-// Bookkeeping for tab closes that wait on the user or the network before they happen.
+// Bookkeeping for tab closes and lock prompts that wait on the user or the network.
 public sealed partial class MainViewModel
 {
     private readonly HashSet<TabViewModel> _closingTabs = [];
@@ -25,4 +25,18 @@ public sealed partial class MainViewModel
 
     /// <summary>Releases a claim from <see cref="TryBeginClose"/>, whether the tab closed or not.</summary>
     public void EndClose(TabViewModel tab) => _closingTabs.Remove(tab);
+
+    private readonly HashSet<TabViewModel> _lockPromptTabs = [];
+
+    /// <summary>Whether a lock or unlock prompt for the tab is open or queued.</summary>
+    public bool IsLockPromptOpen(TabViewModel tab) => _lockPromptTabs.Contains(tab);
+
+    /// <summary>Claims the tab for a lock or unlock prompt. False when the window doesn't own
+    /// it or a prompt for it is already waiting, so a second "Lock Session…" can't queue a
+    /// second password that silently replaces the first, and a second unlock click can't
+    /// count a stale attempt. Release every successful claim with <see cref="EndLockPrompt"/>.</summary>
+    public bool TryBeginLockPrompt(TabViewModel tab) => Owns(tab) && _lockPromptTabs.Add(tab);
+
+    /// <summary>Releases a claim from <see cref="TryBeginLockPrompt"/>.</summary>
+    public void EndLockPrompt(TabViewModel tab) => _lockPromptTabs.Remove(tab);
 }

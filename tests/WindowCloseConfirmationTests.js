@@ -13,10 +13,13 @@ test("all window-close actions use the shared open-session confirmation guard", 
   assert.match(services, /void IMainWindowServices\.CloseWindow\(\) => Close\(\);/);
 
   const handler = source.match(
-    /private void AppWindow_Closing[\s\S]*?\n    }\r?\n\r?\n    private async Task ConfirmWindowCloseAsync/)?.[0] ?? "";
+    /private void AppWindow_Closing[\s\S]*?\n    }\r?\n\r?\n    private bool NeedsCloseConfirmation/)?.[0] ?? "";
 
   assert.match(handler, /if \(_closeConfirmed \|\| !ViewModel\.AllTabs\.Any\(\)\)/);
   assert.match(handler, /args\.Cancel = true/);
+  // A repeated close request while the prompt waits brings the window forward rather than
+  // looking dead.
+  assert.match(handler, /args\.Cancel = true;[\s\S]*?BringToFront\(\);\s*if \(_closePromptOpen\)\s*return;/);
   assert.match(handler, /ConfirmWindowCloseAsync\(\)/);
 });
 
@@ -24,7 +27,11 @@ test("the shared close dialog confirms exit unless no sessions remain", () => {
   const method = source.match(
     /private async Task ConfirmWindowCloseAsync[\s\S]*?\n    }\r?\n\r?\n    private void PinButton_Click/)?.[0] ?? "";
 
-  assert.match(method, /if \(count == 0\)[\s\S]*?_closeConfirmed = true;[\s\S]*?Close\(\);[\s\S]*?return;/);
+  // The count is taken after the dialogs queued ahead of the prompt are answered.
+  assert.match(method, /WaitForQueuedDialogsAsync\(xamlRoot\);\s*if \(_windowClosed\)\s*return;\s*if \(!NeedsCloseConfirmation\(\)\)\s*\{\s*_closeConfirmed = true;\s*Close\(\);\s*return;[\s\S]*?var count = sessions\.Count;/);
+  // A session that arrived while the prompt was open was not part of the question.
+  assert.match(method, /if \(!confirmed \|\| _windowClosed\)\s*return;\s*if \(ViewModel\.AllTabs\.Any\([^;]*!sessions\.Contains\(tab\)\)\)\s*continue;/);
+  assert.match(method, /catch \(Exception ex\)\s*\{\s*App\.ReportRecoverableError\(ex\);\s*\}\s*finally\s*\{\s*_closePromptOpen = false;/);
   assert.match(method, /"Exit resesh\?"/);
   assert.match(method, /\$"Are you sure you want to exit\?/);
   assert.match(method, /"Exit",\s*acceptY: true/);
@@ -121,8 +128,29 @@ test("tab closes re-check the tab after every await and claim it while in flight
   for (const { 0: awaited, index } of awaits) {
     const after = flows.slice(index + awaited.length);
     const nextClose = after.search(/CloseTabCore\(tab\)|TogglePin\(tab\)/);
-    const nextCheck = after.search(/CanStillClose\(tab\)|_windowClosed/);
+    const nextCheck = after.search(/CanStillClose\(tab\)|CloseOwnerOf\(tab\)|_windowClosed/);
     if (nextClose >= 0)
       assert.ok(nextCheck >= 0 && nextCheck < nextClose, `no re-check after: ${awaited}`);
   }
+});
+
+// A single-tab close answers a question about that tab, so if the tab was dragged to another
+// window while the dialog was open, the window that holds it now closes it. Bulk closes are
+// about this window's tabs and leave a tab that moved away alone.
+test("a confirmed single-tab close follows the tab to the window that holds it now", () => {
+  const owner = source.match(/private MainWindow\? CloseOwnerOf\(TabViewModel tab\) =>[\s\S]*?;\r?\n/)?.[0] ?? "";
+  assert.match(owner, /CanStillClose\(tab\) \? this\s*: App\.WindowFor\(tab\) is \{ _windowClosed: false \} other \? other\s*: null/);
+
+  const single = source.match(
+    /private async Task RequestCloseClaimedTabAsync[\s\S]*?\n    \/\/\/ <summary>Bulk close/)?.[0] ?? "";
+  // After the first await, only the current owner closes or unpins the tab.
+  const afterFirstAwait = single.slice(single.indexOf("await "));
+  assert.doesNotMatch(afterFirstAwait, /(?<![.\w])(?:CloseTabCore|TogglePin)\(tab\)/);
+  assert.match(single, /pinnedOwner\.TogglePin\(tab\);\s*pinnedOwner\.CloseTabCore\(tab\);/);
+  assert.match(single, /CloseOwnerOf\(tab\) is \{ \} owner\)\s*owner\.CloseTabCore\(tab\);/);
+  assert.match(single, /owner\.TogglePin\(tab\);\s*owner\.CloseTabCore\(tab\);/);
+
+  const bulk = source.match(
+    /private async Task RequestCloseClaimedManyAsync[\s\S]*?\n    \/\/\/ <summary>Closes the tab now/)?.[0] ?? "";
+  assert.doesNotMatch(bulk, /CloseOwnerOf/);
 });

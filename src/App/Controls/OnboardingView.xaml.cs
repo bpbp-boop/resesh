@@ -210,16 +210,29 @@ public sealed partial class OnboardingView : UserControl, IDisposable
             "SecureCRT");
     }
 
+    private bool _reviewOpen;
+
+    /// <remarks>One review at a time: every import button is off until the review tab imports
+    /// or closes. A second click used to open a second review tab, and both could commit.</remarks>
     private async Task PreviewAndCommitImportAsync(
         ImportScanResult scan,
         Button button,
         TextBlock label,
         string source)
     {
+        if (_reviewOpen || ReviewImport is null)
+            return;
+        _reviewOpen = true;
+        Button[] buttons = [PuttyImportButton, OpenSshImportButton, SecureCrtImportButton];
+        var wasEnabled = buttons.Select(b => b.IsEnabled).ToArray();
+        foreach (var b in buttons)
+            b.IsEnabled = false;
+        var committed = false;
         try
         {
-            if (ReviewImport is null || await ReviewImport(scan, source) is not { } outcome)
+            if (await ReviewImport(scan, source) is not { } outcome)
                 return;
+            committed = true;
             var (imported, duplicates, identities) = outcome;
 
             var identityNote = identities.Count switch
@@ -229,7 +242,6 @@ public sealed partial class OnboardingView : UserControl, IDisposable
                 _ => $"Created {identities.Count} identities: {string.Join(", ", identities)}.",
             };
             _sessionsChanged();
-            button.IsEnabled = false;
             label.Text = $"{imported} imported";
             label.Foreground = Brush("OnboardingAccentTextBrush");
             ImportStatus.Severity = InfoBarSeverity.Success;
@@ -247,6 +259,13 @@ public sealed partial class OnboardingView : UserControl, IDisposable
             ImportStatus.Title = $"{source} import failed";
             ImportStatus.Message = exception.Message;
             ImportStatus.IsOpen = true;
+        }
+        finally
+        {
+            _reviewOpen = false;
+            // A source that imported stays off; the others go back to how they were.
+            for (var i = 0; i < buttons.Length; i++)
+                buttons[i].IsEnabled = wasEnabled[i] && !(committed && ReferenceEquals(buttons[i], button));
         }
     }
 

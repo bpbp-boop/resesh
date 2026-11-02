@@ -42,3 +42,14 @@ test("the review lists names, targets, folders, and logins with an explicit impo
   assert.match(importXaml, /x:Name="ImportButton"[\s\S]*?Click="Import_Click"/);
   assert.match(importCode, /visible\.Where\(c => FolderPaths\.IsSelfOrDescendant\(c\.FolderPath, folder\)\)/);
 });
+
+test("Welcome runs one import review at a time", () => {
+  const preview = onboarding.match(
+    /private async Task PreviewAndCommitImportAsync[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+  assert.match(preview, /if \(_reviewOpen \|\| ReviewImport is null\)\s*return;\s*_reviewOpen = true;/);
+  // Every import button is off before the review is awaited, and restored in finally.
+  assert.match(preview,
+    /\[PuttyImportButton, OpenSshImportButton, SecureCrtImportButton\][\s\S]*?b\.IsEnabled = false;[\s\S]*?await ReviewImport\(scan, source\)/);
+  assert.match(preview,
+    /finally\s*\{\s*_reviewOpen = false;[\s\S]*?buttons\[i\]\.IsEnabled = wasEnabled\[i\] && !\(committed && ReferenceEquals\(buttons\[i\], button\)\);/);
+});

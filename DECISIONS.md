@@ -1905,7 +1905,8 @@ is removed, so "π - project" and "~/src" are untouched.
   second request for a claimed tab (Ctrl+W again, a middle-click, a bulk close) is dropped
   rather than queued behind the first: the first dialog already asks the question.
 - After every await they check that the window is still open and still owns the tab
-  (`MainViewModel.Owns`); a tab dragged to another window or closed meanwhile is left alone.
+  (`MainViewModel.Owns`); a tab closed meanwhile is left alone. (A tab dragged to another
+  window meanwhile: see "A confirmed tab close follows the tab" below.)
   `CloseTabCore` does nothing for a tab it no longer holds, so a late caller can't throw
   partway through a bulk close. Callers fire and forget, so failures go to
   `App.ReportRecoverableError`.
@@ -1987,3 +1988,26 @@ is removed, so "π - project" and "~/src" are untouched.
   to UTF-8; forcing CP437 on the session covers that.
 - A partial typed character is held as raw bytes rather than inside a `Decoder`, so it
   survives an encoding change between writes.
+## 2026-11-02 - The exit prompt counts sessions when it appears and brings its window forward
+- Closing a window with open sessions waits for any dialog already queued on that window
+  (`ModalDialogPresenter.WaitForQueuedDialogsAsync`) before it counts sessions and builds
+  the prompt, so the count isn't from before a host-key or close dialog was answered. If no
+  sessions are left by then, the window just closes.
+- A session that joins the window while the prompt is open (dragged in, a jump-list launch)
+  was not part of the question, so a confirmed prompt asks again. Sessions closing meanwhile
+  only make "Exit" safer and are not re-asked.
+- Every close request that needs the prompt calls `BringToFront`. A taskbar close can come
+  while the window is minimized, and a second X while the prompt waits behind another of
+  the window's dialogs used to do nothing visible; the dialog that must be answered first
+  is now in view. The other dialog is not dismissed: its answer may matter (a host key).
+
+## 2026-11-02 - A confirmed tab close follows the tab to another window
+- A single-tab close whose dialog was answered "Close" closes the tab in whichever open
+  window holds it now (`CloseOwnerOf`, via `App.WindowFor`). The answer was about that tab,
+  so a drag to another window while the dialog was open (or a workspace taken over by
+  another window) no longer quietly cancels it. Unpinning and the "could not end the
+  persistent session" message happen in that window too.
+- The claim stays on the window that asked. The new window may start its own close of the
+  tab meanwhile; whichever acts first wins and the other finds the tab gone.
+- Bulk closes ("close others", "to the right", "all") are about this window's tabs and still
+  leave a tab that moved away alone: it is no longer among the tabs the question described.
