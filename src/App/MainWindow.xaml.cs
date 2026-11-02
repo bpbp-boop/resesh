@@ -785,15 +785,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         // The floating pane starts closed; docking restores the saved state.
         _paneOverlay = overlay;
         _overlayPaneShown = false;
-        _sessionsPaneStoryboard?.Stop();
-        _sessionsPaneStoryboard = null;
-        if (_animatedSessionsPane is { } pane)
-        {
-            pane.Opacity = 1;
-            if (pane.RenderTransform is TranslateTransform transform)
-                transform.X = 0;
-            _animatedSessionsPane = null;
-        }
+        CancelSessionsPaneAnimation();
         ApplySessionsRailLayout();
     }
 

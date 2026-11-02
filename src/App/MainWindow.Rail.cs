@@ -159,21 +159,35 @@ public sealed partial class MainWindow
         _ => SessionsPane,
     };
 
+    /// <summary>Stops the sessions pane animation, if one is running, and puts back every
+    /// value it touches: the pane's opacity and slide, and the docked gutter's opacity, which
+    /// an opening animation starts from 0 as a local value. Stopping the storyboard alone
+    /// leaves those, so a pane-mode change mid-animation left the gutter invisible. Every
+    /// stop goes through here.</summary>
+    private void CancelSessionsPaneAnimation()
+    {
+        // A storyboard that was stopped must not run its completion if it still fires.
+        _sessionsPaneAnimationVersion++;
+        _sessionsPaneStoryboard?.Stop();
+        _sessionsPaneStoryboard = null;
+        if (_animatedSessionsPane is { } pane)
+        {
+            pane.Opacity = 1;
+            if (pane.RenderTransform is TranslateTransform transform)
+                transform.X = 0;
+            _animatedSessionsPane = null;
+        }
+        TreeSplitter.Opacity = 1;
+        TreeSplitterLine.Opacity = 1;
+    }
+
     private void StartSessionsPaneAnimation(
         bool opening,
         double? distance = null,
         bool animateChrome = true)
     {
+        CancelSessionsPaneAnimation();
         var animationVersion = ++_sessionsPaneAnimationVersion;
-        _sessionsPaneStoryboard?.Stop();
-        if (_animatedSessionsPane is { } previousPane)
-        {
-            previousPane.Opacity = 1;
-            if (previousPane.RenderTransform is TranslateTransform previousTransform)
-                previousTransform.X = 0;
-        }
-        TreeSplitter.Opacity = 1;
-        TreeSplitterLine.Opacity = 1;
 
         var pane = SelectedSessionsPane();
         var transform = pane.RenderTransform as TranslateTransform;
@@ -258,13 +272,8 @@ public sealed partial class MainWindow
                 TreeColumn.Width = new GridLength(opening ? _sessionsPaneWidth : 0);
                 TreeColumn.MinWidth = opening ? 180 : 0;
             }
-            storyboard.Stop();
-            pane.Opacity = 1;
-            transform.X = 0;
-            TreeSplitter.Opacity = 1;
-            TreeSplitterLine.Opacity = 1;
-            _sessionsPaneStoryboard = null;
-            _animatedSessionsPane = null;
+            // Stopping drops the animated values; restore the local ones they would reveal.
+            CancelSessionsPaneAnimation();
             if (!opening && !SessionsPaneShown)
                 ApplySessionsRailLayout();
         };
