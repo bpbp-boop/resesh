@@ -1864,29 +1864,49 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         return ConnectAsync(isReconnect: false);
     }
 
-    /// <summary>Creates an exec-only connection owned and disposed by the manager.</summary>
-    public async Task<SshTerminalSession?> CreateRemoteManagementConnectionAsync()
+    /// <summary>Creates an exec-only connection owned and disposed by the manager. Null when
+    /// the login was cancelled, or the tab closed or <paramref name="cancellationToken"/> was
+    /// cancelled before the connection was up; the connect is abandoned then, not left
+    /// running.</summary>
+    public async Task<SshTerminalSession?> CreateRemoteManagementConnectionAsync(CancellationToken cancellationToken = default)
     {
-        var route = await ResolveRouteAsync(CancellationToken.None);
-        var resolved = route is null ? null : await ResolveSshCredentialAsync(Session, CancellationToken.None);
-        if (resolved is null) return null;
-        var (profile, secret, _) = resolved;
-        var connection = new SshTerminalSession(_knownHosts)
-        {
-            HostKeyDecision = info => ConfirmHostKeyBlocking(info, CancellationToken.None),
-        };
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_closing.Token, cancellationToken);
+        var token = linked.Token;
+        SshTerminalSession? connection = null;
         try
         {
-            await Task.Run(() => connection.Connect(profile, secret, Session.TerminalType, 80, 24,
-                interactiveResponder: prompts => PromptKeyboardInteractiveBlocking(prompts, CancellationToken.None),
-                openShell: false,
-                jumps: route!.Jumps,
-                proxyPassword: route.ProxyPassword));
+            var route = await ResolveRouteAsync(token);
+            var resolved = route is null ? null : await ResolveSshCredentialAsync(Session, token);
+            if (resolved is null || token.IsCancellationRequested) return null;
+            var (profile, secret, _) = resolved;
+            var session = connection = new SshTerminalSession(_knownHosts)
+            {
+                HostKeyDecision = info => ConfirmHostKeyBlocking(info, token),
+            };
+            // The token stops the connect only until versions are exchanged; disconnecting
+            // also cuts a stalled key exchange or login short (safe mid-connect).
+            using (token.Register(session.Disconnect))
+            {
+                await Task.Run(() => session.Connect(profile, secret, Session.TerminalType, 80, 24,
+                    interactiveResponder: prompts => PromptKeyboardInteractiveBlocking(prompts, token),
+                    cancellationToken: token,
+                    openShell: false,
+                    jumps: route!.Jumps,
+                    proxyPassword: route.ProxyPassword));
+            }
+            token.ThrowIfCancellationRequested();
             return connection;
+        }
+        catch (Exception) when (token.IsCancellationRequested)
+        {
+            // Cut short by the tab closing; the disconnect fails the connect with whatever
+            // SSH.NET throws, which is not worth reporting.
+            connection?.Dispose();
+            return null;
         }
         catch
         {
-            connection.Dispose();
+            connection?.Dispose();
             throw;
         }
     }
@@ -2230,7 +2250,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
     private Interop.SshfsMount? _sshfsMount;
     private Task<Interop.SshfsMount?>? _sshfsMounting;
-    private readonly CancellationTokenSource _sshfsCancel = new(); // cancelled when the tab closes
+    private readonly CancellationTokenSource _closing = new(); // cancelled when the tab closes (SSHFS mounts, management connections)
 
     /// <summary>Opens a local directory directly. Remote sessions mount the SFTP path
     /// through SSHFS first. A second request while the mount comes up waits for the same
@@ -2268,7 +2288,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
     private async Task<Interop.SshfsMount?> MountSshfsAsync(Session session)
     {
-        var token = _sshfsCancel.Token;
+        var token = _closing.Token;
         var stale = _sshfsMount;
         _sshfsMount = null;
         var password = session.AuthMethod == AuthMethod.Password ? _secret : null;
@@ -2401,7 +2421,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _agentPoll = null;
         CleanupActions.Run(App.ReportRecoverableError,
             () => _connection.Dispose(),
-            () => _sshfsCancel.Cancel(), // an SSHFS mount still coming up stops waiting and is killed
+            () => _closing.Cancel(), // SSHFS mounts and management connections still coming up stop
             () => _tmuxReservation.Dispose(),
             () => { if (IsFilePaneOpen) SaveFilePaneWidth(); },
             () => _filePane?.Dispose(),

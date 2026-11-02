@@ -36,3 +36,13 @@ test("history loads apply only the newest result", () => {
   assert.match(load, /version != _loadVersion \|\| !IsOpen/);
   assert.match(methodBody(history, "public void Close()"), /_loadVersion\+\+/);
 });
+
+test("remote session management connections stop when the tab closes", () => {
+  const view = read("Terminal", "TerminalTabView.cs");
+  const create = methodBody(view, "public async Task<SshTerminalSession?> CreateRemoteManagementConnectionAsync(");
+  assert.match(create, /CreateLinkedTokenSource\(_closing\.Token, cancellationToken\)/);
+  assert.match(create, /token\.Register\(session\.Disconnect\)/);
+  assert.match(create, /cancellationToken: token/);
+  assert.doesNotMatch(create, /CancellationToken\.None/);
+  assert.match(methodBody(view, "public void Dispose()"), /_closing\.Cancel\(\)/);
+});
