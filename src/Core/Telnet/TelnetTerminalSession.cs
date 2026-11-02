@@ -238,6 +238,7 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
         {
             while (!_lifecycle.IsStopped)
             {
+                ReleaseHeldOutput(socket);
                 var read = socket.Receive(buffer);
                 if (read == 0)
                     break;
@@ -292,6 +293,23 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
             TraceHook?.Invoke($"telnet closed: {failure?.Message ?? "by server"}");
             Closed?.Invoke(failure);
         });
+    }
+
+    /// <summary>The BBS size filter holds output that could begin a probe until the rest
+    /// arrives. Before blocking for more, give the rest a moment; if nothing comes, the held
+    /// bytes go out as they are, so a screen that ends in a cursor move is not frozen.</summary>
+    private void ReleaseHeldOutput(Socket socket)
+    {
+        bool held;
+        lock (_gate)
+            held = _bbsSizeFilter is { HasHeldOutput: true };
+        if (!held || socket.Poll(TelnetBbsSizeFilter.HoldLimit, SelectMode.SelectRead))
+            return;
+        byte[] output;
+        lock (_gate)
+            output = _bbsSizeFilter!.FlushHeld();
+        if (output.Length > 0 && !_lifecycle.IsStopped)
+            OutputReceived?.Invoke(output);
     }
 
     private void EnqueueLocked(byte[] bytes)
