@@ -1820,3 +1820,61 @@ is removed, so "π - project" and "~/src" are untouched.
   The running report ends without a Completed event and the tab's running command gets no
   event, as before: a cut transport says nothing about how the command finished, and the
   host clears its own state on disconnect. Marks stay on the ruler.
+## 2026-11-02 - Tab state changes only through named transitions
+- `TabViewModel.State` and `ExitCode` are read-only. The terminal view moves a tab with
+  `BeginConnecting`, `MarkConnected`, `MarkDisconnected`, `MarkExited(code)` and
+  `StartPlayback(path)`. The exit code is stored in the same step as the state, so the tab
+  text never shows a stale "exited (code N)" between two property sets.
+- App pages have their own state, `TabConnectionState.Page`, instead of borrowing
+  `Playback`; `IsPlayback` and `State == Playback` now always agree. Both are inert: every
+  transition returns false on them, so nothing can start a connect on a playback or
+  settings tab.
+- The terminal view has one connection-phase test, `CanStartConnect`: no connect in flight
+  and the tab not Connected. It replaces checking each backend's `IsConnected`. The tab
+  state moves only from that view, so the two cannot drift.
+- Input to the live terminal is decided in one place, `UpdateInputEnabled`: off while a
+  connect runs, while locked, while rewinding and after dispose. A stopped tab keeps input
+  on so Enter reconnects. Ending a connect now re-enables input even when the user
+  disconnected during it; before, the terminal stayed deaf until something else turned it
+  back on.
+- The "update identity password" offer after a rejected login runs after `ConnectAsync`
+  has ended, so Reconnect works while it is on screen; a reconnect cancels it.
+
+## 2026-11-02 - Queued dialogs belong to whoever asked
+- `ShowModalAsync` takes an optional `CancellationToken`. The per-window queue made a
+  closed tab's credential or host-key prompt appear minutes later (callers only abandoned
+  the wait with `WaitAsync`, so the dialog itself stayed queued). Now a dialog cancelled
+  while queued is never shown, and one on screen is hidden; both return
+  `ContentDialogResult.None`, the same answer as the user pressing Cancel.
+- Every `ConnectDialogs` method takes the token, and the terminal view passes its
+  connection's token, so closing a tab or starting another connect takes its prompts away.
+- A dialog with no `XamlRoot`, or whose window has closed, returns `None` instead of
+  throwing; most of these run fire-and-forget on the dispatcher, where a throw went
+  unobserved.
+
+## 2026-11-02 - File pane state is explicit; the latest navigation wins
+- `FilePaneActivity` (headless, tested in AppLogic.Tests) holds the pane's state: Idle,
+  Loading, Operating, Failed (first listing failed) or Disposed, plus whether any listing
+  ever loaded. The pane used to infer "never loaded" from an empty list, so an empty
+  folder's Retry jumped home and its later failures covered the pane with the full error.
+- A navigation asked for while another loads cancels that load and runs next; only the
+  latest queued one survives. One asked for during a file operation gets the same
+  "Another file operation is still running." status the operations already gave, instead
+  of being dropped silently.
+- Every navigation has its own `CancellationTokenSource`, cancelled by a newer navigation
+  and by `Dispose`. The connect factory takes the token (linked with the tab's connection
+  token). `SftpSession.Connect` does not take one yet, so a hung connect is abandoned, not
+  stopped: the pane stops waiting and disposes the session if it ever arrives.
+- SFTP sessions are always disposed off the UI thread, including a stale one replaced on
+  reconnect.
+
+## 2026-11-02 - SSHFS drive letters are reserved app-wide
+- Two tabs opening Explorer at once both picked the same free drive letter, and the
+  second tab's mount check (`Directory.Exists`) then passed on the first tab's drive.
+  `DriveLetterReservations.Shared` hands out letters under a lock and keeps each reserved
+  until its mount fails or is disposed, so concurrent mounts get different letters.
+- The 20-second wait for the drive takes the tab's cancellation token: closing the tab
+  stops it and kills sshfs. `SshfsMount.HasExited` answers true after Dispose instead of
+  throwing on the disposed process.
+- A second "Open in Explorer" while the tab's mount is coming up waits for that mount and
+  then opens its own folder, instead of doing nothing.

@@ -157,7 +157,7 @@ public static class PresentationValues
                 TabConnectionState.Connected => Rgb(0x16C60C),
                 TabConnectionState.Connecting => Rgb(0xFFB900),
                 TabConnectionState.Exited => Rgb(0x8A8A8A),
-                TabConnectionState.Playback => Rgb(0x0078D4),
+                TabConnectionState.Playback or TabConnectionState.Page => Rgb(0x0078D4),
                 _ => Rgb(0xE74856),
             };
 

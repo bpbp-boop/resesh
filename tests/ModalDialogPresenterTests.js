@@ -64,3 +64,22 @@ test("closing a workspace confirms through the shared modal presenter", () => {
   assert.match(confirm, /ConfirmDialog\.ConfirmAsync\(/);
   assert.match(sharedConfirm, /await this\.ShowModalAsync\(\)/);
 });
+
+test("a cancelled asker's dialog is never shown, or is hidden", () => {
+  assert.match(presenter, /ShowModalAsync\(\s*this ContentDialog dialog, CancellationToken cancellationToken = default\)/);
+  assert.match(presenter, /dialogGate\.WaitAsync\(cancellationToken\)/);
+  assert.match(presenter, /cancellationToken\.Register\([\s\S]*?dialog\.Hide/);
+  assert.doesNotMatch(presenter, /throw new InvalidOperationException/);
+});
+
+test("terminal tabs hand their connection token to every connect dialog", () => {
+  const terminal = read("Terminal", "TerminalTabView.cs");
+  const calls = [...terminal.matchAll(/ConnectDialogs\.\w+\(([\s\S]*?)\)\)?;/g)];
+  assert.ok(calls.length >= 8);
+  for (const [call, args] of calls) {
+    if (/CancellationToken\.None/.test(call))
+      continue;
+    assert.match(args, /\btoken\b/, call);
+    assert.doesNotMatch(call, /\.WaitAsync\(/, call);
+  }
+});
