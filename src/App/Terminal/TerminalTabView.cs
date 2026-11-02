@@ -1085,7 +1085,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             $"The server rejected the {(remembered ? "remembered" : "saved")} password. "
                 + $"New password for {identity.Username} ({usedBy})",
             saveLabel: remembered ? null : "Save for every session using this identity",
-            primaryText: "Update and reconnect").WaitAsync(token);
+            primaryText: "Update and reconnect",
+            cancellationToken: token);
         if (result is not { } update || _disposed || token.IsCancellationRequested)
             return;
         if (remembered)
@@ -1292,7 +1293,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             try
             {
                 if (token.IsCancellationRequested) return;
-                tcs.TrySetResult(await ConnectDialogs.SelectTmuxSessionAsync(XamlRoot, Session.Name, choose.Sessions));
+                tcs.TrySetResult(await ConnectDialogs.SelectTmuxSessionAsync(XamlRoot, Session.Name, choose.Sessions, token));
             }
             catch (Exception ex)
             {
@@ -1453,7 +1454,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             XamlRoot,
             PromptTitle(target, "Connect to"),
             $"Password for {session.Username}@{target.Host} ({identity.Name}){PromptPurpose(target)}",
-            saveLabel: ask ? null : "Save for every session using this identity").WaitAsync(token);
+            saveLabel: ask ? null : "Save for every session using this identity",
+            cancellationToken: token);
         token.ThrowIfCancellationRequested();
         if (result is not { } cred)
             return null;
@@ -1480,7 +1482,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         var result = await ConnectDialogs.PromptCredentialAsync(
             XamlRoot,
             PromptTitle(target, "Connect to"),
-            $"Password for {target.Username}@{target.Host}{PromptPurpose(target)}").WaitAsync(token);
+            $"Password for {target.Username}@{target.Host}{PromptPurpose(target)}",
+            cancellationToken: token);
         token.ThrowIfCancellationRequested();
         if (result is not { } cred)
             return null;
@@ -1500,7 +1503,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             target,
             login.Username,
             canRemember: saved,
-            identityMissing: login.IdentityMissing).WaitAsync(token);
+            identityMissing: login.IdentityMissing,
+            cancellationToken: token);
         token.ThrowIfCancellationRequested();
         if (answer is null)
             return null;
@@ -1596,7 +1600,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             var prompted = await ConnectDialogs.PromptCredentialAsync(
                 XamlRoot,
                 $"Unlock {key.Name}",
-                notice is null ? $"Passphrase for {key.Name}" : $"{notice} Passphrase for {key.Name}").WaitAsync(token);
+                notice is null ? $"Passphrase for {key.Name}" : $"{notice} Passphrase for {key.Name}",
+                cancellationToken: token);
             token.ThrowIfCancellationRequested();
             if (prompted is null)
                 return null;
@@ -1623,7 +1628,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         }
         catch (SshKeyChangedException change)
         {
-            if (!await ConnectDialogs.ConfirmChangedPrivateKeyAsync(XamlRoot, change).WaitAsync(token))
+            if (!await ConnectDialogs.ConfirmChangedPrivateKeyAsync(XamlRoot, change, token))
                 throw new OperationCanceledException("SSH key replacement was not accepted.");
             return await Task.Run(() => _sshKeys.Validate(keyId, passphrase, acceptChanged: true), token).WaitAsync(token);
         }
@@ -1702,7 +1707,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             try
             {
                 if (token.IsCancellationRequested) return;
-                tcs.TrySetResult(await ConnectDialogs.ConfirmHostKeyAsync(XamlRoot, info, RouteStep(_dialling)));
+                tcs.TrySetResult(await ConnectDialogs.ConfirmHostKeyAsync(XamlRoot, info, RouteStep(_dialling), token));
             }
             catch (Exception ex)
             {
@@ -1723,7 +1728,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             {
                 if (token.IsCancellationRequested) return;
                 tcs.TrySetResult(await ConnectDialogs.PromptKeyboardInteractiveAsync(
-                    XamlRoot, PromptTitle(_dialling ?? Session, "Authenticate to"), prompts));
+                    XamlRoot, PromptTitle(_dialling ?? Session, "Authenticate to"), prompts, token));
             }
             catch (Exception ex)
             {

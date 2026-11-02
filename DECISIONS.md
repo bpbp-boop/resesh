@@ -1759,3 +1759,15 @@ is removed, so "π - project" and "~/src" are untouched.
   back on.
 - The "update identity password" offer after a rejected login runs after `ConnectAsync`
   has ended, so Reconnect works while it is on screen; a reconnect cancels it.
+
+## 2026-11-02 - Queued dialogs belong to whoever asked
+- `ShowModalAsync` takes an optional `CancellationToken`. The per-window queue made a
+  closed tab's credential or host-key prompt appear minutes later (callers only abandoned
+  the wait with `WaitAsync`, so the dialog itself stayed queued). Now a dialog cancelled
+  while queued is never shown, and one on screen is hidden; both return
+  `ContentDialogResult.None`, the same answer as the user pressing Cancel.
+- Every `ConnectDialogs` method takes the token, and the terminal view passes its
+  connection's token, so closing a tab or starting another connect takes its prompts away.
+- A dialog with no `XamlRoot`, or whose window has closed, returns `None` instead of
+  throwing; most of these run fire-and-forget on the dispatcher, where a throw went
+  unobserved.
