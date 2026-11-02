@@ -594,7 +594,13 @@ public sealed partial class MainWindow
 
         GroupArea.Children.Clear();
         foreach (var splitter in _splitterLines.Keys.Where(splitter => splitter != TreeSplitter).ToList())
+        {
             _splitterLines.Remove(splitter);
+            // A gutter hovered or pressed as the layout changes (a pane closed or split by
+            // keyboard, say) never reports going to rest before it goes; left in the set,
+            // it would hide the focused-pane frame for the life of the window.
+            _activeSplitters.Remove(splitter);
+        }
         _paneGutters.Clear();
         GroupArea.Children.Add(BuildGroupLayoutElement(_groupLayout.Root));
         UpdateRulerPresentations();

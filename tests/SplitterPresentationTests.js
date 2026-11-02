@@ -114,3 +114,19 @@ test("splitters size their grab strip through SplitterHitArea so the 1px track c
       assert.doesNotMatch(creation, /\b(?:Width|Height|Margin|MinWidth|MinHeight)\s*=/);
   }
 });
+
+// A layout rebuild drops gutters that may be hovered or pressed. Left in the active set they
+// hid the focused-pane frame for the life of the window; unloading puts them back at rest.
+test("splitters dropped by a layout rebuild stop counting as active", () => {
+  const helper = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "SplitterHighlight.cs"),
+    "utf8");
+  const rebuild = source.match(/private void RebuildGroupLayout\(\)[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+  const activation = source.match(/private void SetSplitterActive[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+
+  assert.match(helper, /splitter\.Unloaded \+= \(_, _\) => Reset\(\);/);
+  assert.match(helper, /private void Reset\(\)[\s\S]*?_dragging = false;[\s\S]*?Leave\(\);/);
+  assert.match(rebuild, /_splitterLines\.Remove\(splitter\);[\s\S]*?_activeSplitters\.Remove\(splitter\);/);
+  // Going to rest leaves the set even for a splitter whose line is already gone.
+  assert.match(activation, /if \(!_splitterLines\.TryGetValue\(splitter, out var line\)\)[\s\S]*?_activeSplitters\.Remove\(splitter\)/);
+});
