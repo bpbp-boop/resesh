@@ -19,7 +19,7 @@ namespace Resesh.App.Controls;
 public sealed partial class FilePaneView : UserControl, IDisposable
 {
     private readonly Func<Session> _session;
-    private readonly Func<Task<SftpSession>>? _connectFactory;
+    private readonly Func<CancellationToken, Task<SftpSession>>? _connectFactory;
     private readonly Func<string, Task> _openInExplorer;
     private readonly LocalFileSystem? _localFiles;
 
@@ -62,12 +62,14 @@ public sealed partial class FilePaneView : UserControl, IDisposable
 
     private SftpSession? _sftp;
     private string _currentPath = "/";
-    private bool _busy;
+    private readonly FilePaneActivity _activity = new();
     private CancellationTokenSource? _opCts;
+    private CancellationTokenSource? _navCts;
     private readonly TransferProgressBuffer _transferProgress = new();
     private readonly DispatcherTimer _transferTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
     private RemoteFileEntry? _menuEntry;
-    private bool _disposed;
+    private bool IsDisposed => _activity.State == FilePaneState.Disposed;
+    private bool IsBusy => _activity.IsBusy;
 
     public event Action? CloseRequested;
 
@@ -82,7 +84,7 @@ public sealed partial class FilePaneView : UserControl, IDisposable
     public string CurrentPath => _currentPath;
 
     public FilePaneView(
-        Func<Session> session, Func<Task<SftpSession>> connectFactory, Func<string, Task> openInExplorer)
+        Func<Session> session, Func<CancellationToken, Task<SftpSession>> connectFactory, Func<string, Task> openInExplorer)
         : this(session, connectFactory, openInExplorer, localFiles: null)
     {
     }
@@ -95,7 +97,7 @@ public sealed partial class FilePaneView : UserControl, IDisposable
 
     private FilePaneView(
         Func<Session> session,
-        Func<Task<SftpSession>>? connectFactory,
+        Func<CancellationToken, Task<SftpSession>>? connectFactory,
         Func<string, Task> openInExplorer,
         LocalFileSystem? localFiles)
     {
@@ -133,7 +135,7 @@ public sealed partial class FilePaneView : UserControl, IDisposable
         };
         var retry = new Button { Content = "Retry", HorizontalAlignment = HorizontalAlignment.Center };
         // Before the first successful listing there is no meaningful current path — retry to home.
-        retry.Click += (_, _) => _ = NavigateAsync(_list.Items.Count == 0 ? null : _currentPath);
+        retry.Click += (_, _) => _ = NavigateAsync(_activity.RetryTarget(_currentPath).Path);
         _errorPanel.Children.Add(_errorText);
         _errorPanel.Children.Add(retry);
 
@@ -186,7 +188,7 @@ public sealed partial class FilePaneView : UserControl, IDisposable
             AllowDrop = true;
             DragOver += (_, e) =>
             {
-                if (e.DataView.Contains(StandardDataFormats.StorageItems) && !_busy)
+                if (e.DataView.Contains(StandardDataFormats.StorageItems) && !IsBusy)
                 {
                     e.AcceptedOperation = DataPackageOperation.Copy;
                     e.DragUIOverride.Caption = $"Upload to {_currentPath}";
@@ -197,7 +199,7 @@ public sealed partial class FilePaneView : UserControl, IDisposable
 
         Loaded += (_, _) =>
         {
-            if (_list.Items.Count == 0)
+            if (!_activity.HasListing && !_activity.IsBusy)
                 _ = NavigateAsync(null);
         };
     }
@@ -330,15 +332,15 @@ public sealed partial class FilePaneView : UserControl, IDisposable
         _open.Visibility = single is not null && (_localFiles is not null || single.IsDirectory)
             ? Visibility.Visible
             : Visibility.Collapsed;
-        _download.IsEnabled = selection.Count > 0 && !_busy;
+        _download.IsEnabled = selection.Count > 0 && !IsBusy;
         _downloadOpen.Visibility = single is { IsDirectory: false } ? Visibility.Visible : Visibility.Collapsed;
-        _downloadOpen.IsEnabled = !_busy;
-        _rename.IsEnabled = single is not null && !_busy;
-        _permissions.IsEnabled = single is not null && !_busy;
-        _delete.IsEnabled = selection.Count > 0 && !_busy;
-        _mkdir.IsEnabled = !_busy;
-        _uploadFiles.IsEnabled = !_busy;
-        _refresh.IsEnabled = !_busy;
+        _downloadOpen.IsEnabled = !IsBusy;
+        _rename.IsEnabled = single is not null && !IsBusy;
+        _permissions.IsEnabled = single is not null && !IsBusy;
+        _delete.IsEnabled = selection.Count > 0 && !IsBusy;
+        _mkdir.IsEnabled = !IsBusy;
+        _uploadFiles.IsEnabled = !IsBusy;
+        _refresh.IsEnabled = !IsBusy;
 
         _menu.ShowAt(_list, e.GetPosition(_list));
         e.Handled = true;
@@ -408,13 +410,40 @@ public sealed partial class FilePaneView : UserControl, IDisposable
     // ---- connection + navigation ----
 
     /// <summary>Navigates to a directory (null = profile home) and refreshes the listing.
-    /// A notice replaces the item-count status after a successful fallback.</summary>
+    /// A notice replaces the item-count status after a successful fallback. A navigation
+    /// asked for while another loads cancels that one and runs next (the latest wins);
+    /// while a file operation runs it is refused with a status line.</summary>
     public async Task NavigateAsync(string? path, string? notice = null)
     {
-        if (_busy || _disposed)
-            return;
-        _busy = true;
+        var navigation = new FileNavigation(path, notice);
+        switch (_activity.RequestNavigation(navigation))
+        {
+            case NavigationRequest.Queued:
+                _navCts?.Cancel();
+                return;
+            case NavigationRequest.Refused:
+                if (!IsDisposed)
+                    ShowStatus("Another file operation is still running.", isError: true);
+                return;
+        }
         _loading.IsActive = true;
+        while (true)
+        {
+            var listed = await LoadAsync(navigation);
+            if (_activity.EndNavigation(listed) is not { } next)
+                break;
+            navigation = next;
+        }
+        if (!IsDisposed)
+            _loading.IsActive = false;
+    }
+
+    /// <summary>One listing. True when it loaded; false when it failed or was cancelled.</summary>
+    private async Task<bool> LoadAsync(FileNavigation navigation)
+    {
+        using var cts = new CancellationTokenSource();
+        _navCts = cts;
+        var token = cts.Token;
         _errorPanel.Visibility = Visibility.Collapsed;
         try
         {
@@ -422,29 +451,37 @@ public sealed partial class FilePaneView : UserControl, IDisposable
             IReadOnlyList<RemoteFileEntry> entries;
             if (_localFiles is { } localFiles)
             {
-                target = localFiles.ResolveDirectory(path, _currentPath);
-                entries = await Task.Run(() => localFiles.ListDirectory(target));
+                target = localFiles.ResolveDirectory(navigation.Path, _currentPath);
+                entries = await Task.Run(() => localFiles.ListDirectory(target), token).WaitAsync(token);
             }
             else
             {
-                var sftp = await EnsureConnectedAsync();
-                target = RemotePath.ResolveShellPath(path, sftp.HomeDirectory) ??
+                var sftp = await EnsureConnectedAsync(token);
+                target = RemotePath.ResolveShellPath(navigation.Path, sftp.HomeDirectory) ??
                     throw new InvalidOperationException("The terminal did not report an absolute remote path.");
-                entries = await Task.Run(() => sftp.ListDirectory(target));
+                entries = await Task.Run(() => sftp.ListDirectory(target), token).WaitAsync(token);
             }
             _currentPath = target;
             _pathBox.Text = target;
             PopulateList(entries);
-            if (notice is not null)
+            if (navigation.Notice is { } notice)
                 ShowStatus(notice, isError: true);
             else
                 ShowStatus($"{entries.Count} item{(entries.Count == 1 ? "" : "s")}", isError: false);
+            return true;
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // Superseded by a newer navigation, or the pane closed: that one reports.
+            return false;
         }
         catch (Exception ex) when (IsExpected(ex))
         {
-            // A failed navigation into a subfolder keeps the old listing; a failed
-            // initial load shows the retry overlay.
-            if (_list.Items.Count == 0)
+            if (IsDisposed)
+                return false;
+            // A failed navigation keeps the listing already shown (even an empty folder);
+            // only a pane that never loaded shows the retry overlay.
+            if (!_activity.HasListing)
             {
                 _errorText.Text = ex.Message;
                 _errorPanel.Visibility = Visibility.Visible;
@@ -453,29 +490,58 @@ public sealed partial class FilePaneView : UserControl, IDisposable
             {
                 ShowStatus(ex.Message, isError: true);
             }
+            return false;
         }
         finally
         {
-            _busy = false;
-            _loading.IsActive = false;
+            if (ReferenceEquals(_navCts, cts))
+                _navCts = null;
         }
     }
 
-    private async Task<SftpSession> EnsureConnectedAsync()
+    /// <summary>The pane's SFTP channel, connecting it when needed. A cancelled wait
+    /// abandons a connect still in flight; whatever it produces is disposed.</summary>
+    private async Task<SftpSession> EnsureConnectedAsync(CancellationToken token)
     {
         if (_sftp?.IsConnected == true)
             return _sftp;
-        _sftp?.Dispose();
+        DisposeOffUiThread(_sftp);
         _sftp = null;
-        var sftp = await (_connectFactory?.Invoke()
-            ?? throw new InvalidOperationException("This pane has no SFTP connection factory."));
-        if (_disposed)
+        var factory = _connectFactory
+            ?? throw new InvalidOperationException("This pane has no SFTP connection factory.");
+        var connect = factory(token);
+        SftpSession sftp;
+        try
         {
-            await Task.Run(sftp.Dispose);
-            throw new ObjectDisposedException(nameof(FilePaneView));
+            sftp = await connect.WaitAsync(token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            _ = connect.ContinueWith(
+                abandoned =>
+                {
+                    if (abandoned.IsCompletedSuccessfully)
+                        abandoned.Result.Dispose();
+                    else
+                        _ = abandoned.Exception; // observed: nobody is waiting for it
+                },
+                CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default);
+            throw;
+        }
+        if (IsDisposed || token.IsCancellationRequested)
+        {
+            DisposeOffUiThread(sftp);
+            throw new OperationCanceledException(token);
         }
         _sftp = sftp;
         return sftp;
+    }
+
+    /// <summary>SFTP teardown can block on the network, so it never runs on the UI thread.</summary>
+    private static void DisposeOffUiThread(SftpSession? sftp)
+    {
+        if (sftp is not null)
+            _ = Task.Run(sftp.Dispose);
     }
 
     private void PopulateList(IReadOnlyList<RemoteFileEntry> entries)
@@ -550,18 +616,18 @@ public sealed partial class FilePaneView : UserControl, IDisposable
 
     private async Task RunOperationAsync(string failurePrefix, Func<SftpSession, CancellationToken, Task> work, bool refreshAfter = true)
     {
-        if (_busy || _disposed)
+        if (!_activity.TryBeginOperation())
         {
-            ShowStatus("Another file operation is still running.", isError: true);
+            if (!IsDisposed)
+                ShowStatus("Another file operation is still running.", isError: true);
             return;
         }
-        _busy = true;
         _opCts = new CancellationTokenSource();
         _transferProgress.Start();
         _transferTimer.Start();
         try
         {
-            var sftp = await EnsureConnectedAsync();
+            var sftp = await EnsureConnectedAsync(_opCts.Token);
             await work(sftp, _opCts.Token);
         }
         catch (OperationCanceledException)
@@ -576,13 +642,13 @@ public sealed partial class FilePaneView : UserControl, IDisposable
         {
             _transferTimer.Stop();
             _transferProgress.Stop();
-            _busy = false;
+            _activity.EndOperation();
             _opCts.Dispose();
             _opCts = null;
             _transferStrip.Visibility = Visibility.Collapsed;
             TransferProgressChanged?.Invoke(TerminalProgress.None);
         }
-        if (refreshAfter && !_disposed)
+        if (refreshAfter && !IsDisposed)
             await NavigateAsync(_currentPath);
     }
 
@@ -598,7 +664,7 @@ public sealed partial class FilePaneView : UserControl, IDisposable
 
     private void RenderTransferProgress()
     {
-        if (_disposed || _transferProgress.TakeLatest() is not { } progress)
+        if (IsDisposed || _transferProgress.TakeLatest() is not { } progress)
             return;
         var (verb, name, index, count, done, total) = progress;
         _transferStrip.Visibility = Visibility.Visible;
@@ -839,9 +905,14 @@ public sealed partial class FilePaneView : UserControl, IDisposable
 
     private async Task RunLocalOperationAsync(string failurePrefix, Action<LocalFileSystem> work)
     {
-        if (_busy || _disposed || _localFiles is not { } localFiles)
+        if (_localFiles is not { } localFiles)
             return;
-        _busy = true;
+        if (!_activity.TryBeginOperation())
+        {
+            if (!IsDisposed)
+                ShowStatus("Another file operation is still running.", isError: true);
+            return;
+        }
         try
         {
             await Task.Run(() => work(localFiles));
@@ -852,9 +923,9 @@ public sealed partial class FilePaneView : UserControl, IDisposable
         }
         finally
         {
-            _busy = false;
+            _activity.EndOperation();
         }
-        if (!_disposed)
+        if (!IsDisposed)
             await NavigateAsync(_currentPath);
     }
 
@@ -971,15 +1042,16 @@ public sealed partial class FilePaneView : UserControl, IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        if (IsDisposed)
             return;
-        _disposed = true;
+        _activity.Dispose();
         _transferTimer.Stop();
         _transferProgress.Stop();
         _opCts?.Cancel();
+        _navCts?.Cancel(); // a hung connect or listing stops waiting; its result is discarded
+        _loading.IsActive = false;
         var sftp = _sftp;
         _sftp = null;
-        if (sftp is not null)
-            _ = Task.Run(sftp.Dispose); // network teardown off the UI thread
+        DisposeOffUiThread(sftp);
     }
 }

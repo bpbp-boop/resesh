@@ -2267,16 +2267,18 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     }
 
     /// <summary>Connect factory handed to the pane: reuses the tab's resolved secret
-    /// (prompting only if the tab never connected) and the shared host-key trust.</summary>
-    private async Task<SftpSession> CreateSftpSessionAsync()
+    /// (prompting only if the tab never connected) and the shared host-key trust. Stops when
+    /// the pane gives up (a newer navigation, Cancel, the pane closing) or the tab reconnects.</summary>
+    private async Task<SftpSession> CreateSftpSessionAsync(CancellationToken paneToken)
     {
-        var connection = _connection;
-        connection.Token.ThrowIfCancellationRequested();
-        var route = _resolvedRoute ?? await ResolveRouteAsync(connection.Token);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_connection.Token, paneToken);
+        var token = linked.Token;
+        token.ThrowIfCancellationRequested();
+        var route = _resolvedRoute ?? await ResolveRouteAsync(token);
         var resolved = route is null ? null
             : _resolvedSshSession is { } active ? new ResolvedSshCredential(active, _secret ?? "")
-            : await ResolveSshCredentialAsync(Session, connection.Token);
-        connection.Token.ThrowIfCancellationRequested();
+            : await ResolveSshCredentialAsync(Session, token);
+        token.ThrowIfCancellationRequested();
         if (route is null || resolved is null)
             throw new SshSessionException(SshFailureKind.AuthenticationFailed, "No credential provided.");
         var (session, secret, _) = resolved;
@@ -2286,9 +2288,10 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         var sftp = new SftpSession(_knownHosts);
         try
         {
-            await Task.Run(() => sftp.Connect(session, secret, prompts => PromptKeyboardInteractiveBlocking(prompts, connection.Token),
+            // TODO: pass `token` to SftpSession.Connect once it takes one, so a hung connect stops.
+            await Task.Run(() => sftp.Connect(session, secret, prompts => PromptKeyboardInteractiveBlocking(prompts, token),
                 route.Jumps, route.ProxyPassword));
-            connection.Token.ThrowIfCancellationRequested();
+            token.ThrowIfCancellationRequested();
         }
         catch
         {

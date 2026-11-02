@@ -1771,3 +1771,19 @@ is removed, so "π - project" and "~/src" are untouched.
 - A dialog with no `XamlRoot`, or whose window has closed, returns `None` instead of
   throwing; most of these run fire-and-forget on the dispatcher, where a throw went
   unobserved.
+
+## 2026-11-02 - File pane state is explicit; the latest navigation wins
+- `FilePaneActivity` (headless, tested in AppLogic.Tests) holds the pane's state: Idle,
+  Loading, Operating, Failed (first listing failed) or Disposed, plus whether any listing
+  ever loaded. The pane used to infer "never loaded" from an empty list, so an empty
+  folder's Retry jumped home and its later failures covered the pane with the full error.
+- A navigation asked for while another loads cancels that load and runs next; only the
+  latest queued one survives. One asked for during a file operation gets the same
+  "Another file operation is still running." status the operations already gave, instead
+  of being dropped silently.
+- Every navigation has its own `CancellationTokenSource`, cancelled by a newer navigation
+  and by `Dispose`. The connect factory takes the token (linked with the tab's connection
+  token). `SftpSession.Connect` does not take one yet, so a hung connect is abandoned, not
+  stopped: the pane stops waiting and disposes the session if it ever arrives.
+- SFTP sessions are always disposed off the UI thread, including a stale one replaced on
+  reconnect.

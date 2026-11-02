@@ -14,6 +14,7 @@
     <ProjectReference Include="../../src/Core/Resesh.Core.csproj" />
     <!-- Execute the production view models without loading a WinUI application. -->
     <Compile Include="../../src/App/Controls/TransferProgressBuffer.cs" Link="Controls/TransferProgressBuffer.cs" />
+    <Compile Include="../../src/App/Controls/FilePaneActivity.cs" Link="Controls/FilePaneActivity.cs" />
     <Compile Include="../../src/App/Interop/TaskbarRelaunchPlan.cs" Link="Interop/TaskbarRelaunchPlan.cs" />
     <Compile Include="../../src/App/Interop/LaunchRequest.cs" Link="Interop/LaunchRequest.cs" />
     <Compile Include="../../src/App/Interop/JumpListPlan.cs" Link="Interop/JumpListPlan.cs" />
