@@ -58,3 +58,10 @@ test("the tunnels dialog leaves its UI alone once closed but still saves a confi
   assert.match(add, /if \(!_closed\)\s+TunnelFields\.Reset\(\)/);
   assert.match(add, /if \(save && _savedSession\(\)/);
 });
+
+test("only the newest font scan fills the font picker", () => {
+  const picker = read("Controls", "FontFamilyPicker.xaml.cs");
+  const refresh = methodBody(picker, "private async Task RefreshFontsAsync()");
+  assert.match(refresh, /var version = \+\+_refreshVersion;/);
+  assert.match(refresh, /version != _refreshVersion/);
+});
