@@ -171,13 +171,14 @@ public sealed partial class FilePaneView : UserControl, IDisposable
         Grid.SetRow(_statusText, 3);
         root.Children.Add(_statusText);
 
-        Content = new Border
+        var frame = new Border
         {
             Child = root,
             BorderThickness = new Thickness(1, 0, 0, 0),
-            BorderBrush = ThemeBrush("DividerStrokeColorDefaultBrush"),
-            Background = ThemeBrush("LayerFillColorDefaultBrush"),
         };
+        ThemeResources.SetBrush(frame, Border.BorderBrushProperty, "DividerStrokeColorDefaultBrush");
+        ThemeResources.SetBrush(frame, Border.BackgroundProperty, "LayerFillColorDefaultBrush");
+        Content = frame;
 
         BuildMenu();
 
@@ -203,11 +204,6 @@ public sealed partial class FilePaneView : UserControl, IDisposable
                 _ = NavigateAsync(null);
         };
     }
-
-    private static Brush ThemeBrush(string key) =>
-        Application.Current.Resources.TryGetValue(key, out var value) && value is Brush brush
-            ? brush
-            : new SolidColorBrush(Windows.UI.Color.FromArgb(0x33, 0x80, 0x80, 0x80));
 
     private UIElement BuildToolbar()
     {
@@ -707,9 +703,8 @@ public sealed partial class FilePaneView : UserControl, IDisposable
     {
         _statusText.Text = message;
         _statusText.Opacity = isError ? 1.0 : 0.55;
-        _statusText.Foreground = isError
-            ? ThemeBrush("SystemFillColorCriticalBrush")
-            : ThemeBrush("TextFillColorPrimaryBrush");
+        ThemeResources.SetBrush(_statusText, TextBlock.ForegroundProperty,
+            isError ? "SystemFillColorCriticalBrush" : "TextFillColorPrimaryBrush");
         _statusText.Visibility = Visibility.Visible;
     }
 

@@ -170,8 +170,8 @@ public sealed partial class HighlightRulesEditor : UserControl
     private void ShowFormStatus(string message, bool error)
     {
         FormStatus.Text = message;
-        FormStatus.Foreground = (Brush)Application.Current.Resources[
-            error ? "SystemFillColorCriticalBrush" : "SessionTreeMutedForegroundBrush"];
+        ThemeResources.SetBrush(FormStatus, TextBlock.ForegroundProperty,
+            error ? "SystemFillColorCriticalBrush" : "SessionTreeMutedForegroundBrush");
     }
 
     private void UpdateFormPreview()

@@ -125,11 +125,11 @@ public sealed partial class SshAlgorithmPicker : UserControl
             var label = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
             label.Children.Add(new TextBlock { Text = name });
             if (legacy)
-                label.Children.Add(new TextBlock
-                {
-                    Text = "legacy",
-                    Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                });
+            {
+                var tag = new TextBlock { Text = "legacy" };
+                ThemeResources.SetBrush(tag, TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+                label.Children.Add(tag);
+            }
             var box = new CheckBox { Content = label, Tag = name, MinWidth = 0 };
             AutomationProperties.SetName(box, legacy ? $"{name}, legacy" : name);
             box.Click += (_, _) => Toggle(kind);
@@ -143,10 +143,10 @@ public sealed partial class SshAlgorithmPicker : UserControl
 
         var error = new TextBlock
         {
-            Foreground = (Brush)Application.Current.Resources["SystemFillColorCriticalBrush"],
             TextWrapping = TextWrapping.Wrap,
             Visibility = Visibility.Collapsed,
         };
+        ThemeResources.SetBrush(error, TextBlock.ForegroundProperty, "SystemFillColorCriticalBrush");
         AutomationProperties.SetLiveSetting(error, Microsoft.UI.Xaml.Automation.Peers.AutomationLiveSetting.Polite);
         body.Children.Add(error);
 

@@ -23,16 +23,23 @@
                     Foreground="{StaticResource SessionTreeMutedForegroundBrush}"
                     TextTrimming="CharacterEllipsis" />
             </StackPanel>
-            <Border
-                Grid.Column="1"
-                Padding="6,1,6,2"
-                VerticalAlignment="Center"
-                CornerRadius="4"
-                BorderThickness="1"
-                Background="{StaticResource SessionInputBrush}"
-                BorderBrush="{x:Bind BadgeBorder(Item.IsAttachedElsewhere), Mode=OneWay}">
-                <TextBlock Text="{x:Bind Item.State, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" />
-            </Border>
+            <Grid Grid.Column="1" VerticalAlignment="Center">
+                <Border
+                    Padding="6,1,6,2"
+                    CornerRadius="4"
+                    BorderThickness="1"
+                    Background="{StaticResource SessionInputBrush}"
+                    BorderBrush="{StaticResource SessionChromeFrameBrush}">
+                    <TextBlock Text="{x:Bind Item.State, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" />
+                </Border>
+                <!-- Attached elsewhere: a caution outline over the frame. A ThemeResource, so it
+                     follows the dialog's theme rather than the theme the app started in. -->
+                <Border
+                    CornerRadius="4"
+                    BorderThickness="1"
+                    BorderBrush="{ThemeResource SystemFillColorCautionBrush}"
+                    Visibility="{x:Bind Item.IsAttachedElsewhere, Mode=OneWay}" />
+            </Grid>
         </Grid>
 
         <!-- The "start a new shell" option. -->
