@@ -105,8 +105,9 @@ public sealed partial class MainWindow
 
     void IMainWindowServices.CloseWindow() => Close();
 
-    // Settings is a tab, so it keeps focus. Dialogs opened by a terminal-forwarded key hand
-    // focus back to that terminal.
+    // Settings is a tab, so it keeps focus. The shortcuts dialog queues behind any dialog
+    // already open, like every dialog, and when a terminal-forwarded key opened it, hands
+    // focus back to that terminal once it closes.
 
     Task IMainWindowServices.ShowSettingsAsync(GlobalSettingsTarget target) => ShowSettingsAsync(target);
 

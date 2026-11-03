@@ -434,9 +434,8 @@ public sealed partial class TabGroupView : UserControl
         SyncTerminalVisibility();
         // A new tab is selected before its view exists, so the selection change had
         // nothing to focus. Focus it now if it is the focused group's active tab, unless
-        // the user is typing in the palette or session search.
-        if (Group.SelectedTab is { IsGroupFocused: true } tab && ReferenceEquals(tab.View, view)
-            && (view as Terminal.TerminalTabView)?.IsFocusHeldElsewhere?.Invoke() != true)
+        // the user is typing in the palette or session search (FocusTerminal checks).
+        if (Group.SelectedTab is { IsGroupFocused: true } tab && ReferenceEquals(tab.View, view))
             FocusTerminal(tab);
     }
 
@@ -935,14 +934,18 @@ public sealed partial class TabGroupView : UserControl
 
     /// <summary>Gives the tab's terminal keyboard focus once queued work settles, if this pane
     /// is shown and focused then. Several panes can change selection in one layout change;
-    /// only the one the window ends up focusing takes the keyboard.</summary>
-    private void FocusTerminal(TabViewModel? tab)
+    /// only the one the window ends up focusing takes the keyboard. A selection change the
+    /// user did not make here (a tab opening or closing in the background) leaves focus in
+    /// the palette or session search while the user types there; a click on a tab always
+    /// focuses its terminal.</summary>
+    private void FocusTerminal(TabViewModel? tab, bool userInitiated = false)
     {
         if (_isParked || tab?.View is not Terminal.TerminalTabView view)
             return;
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (!_isParked && ReferenceEquals(_host.ViewModel.FocusedGroup, Group))
+            if (!_isParked && ReferenceEquals(_host.ViewModel.FocusedGroup, Group)
+                && (userInitiated || view.IsFocusHeldElsewhere?.Invoke() != true))
                 view.FocusTerminal();
         });
     }
@@ -994,7 +997,7 @@ public sealed partial class TabGroupView : UserControl
         // focus so the TabView can finish its pointer handling before focus enters the terminal.
         if (point.Properties.IsLeftButtonPressed && tab is not null && !IsButtonSource(e.OriginalSource))
         {
-            FocusTerminal(tab);
+            FocusTerminal(tab, userInitiated: true);
             await PrepareTabDragPreviewAsync(tab, e.GetCurrentPoint(TabStripHost).Position);
         }
     }
@@ -1014,7 +1017,7 @@ public sealed partial class TabGroupView : UserControl
     private void Tabs_GotFocus(object sender, RoutedEventArgs e)
     {
         if (e.OriginalSource is TabViewItem { FocusState: FocusState.Pointer })
-            FocusTerminal(Group.SelectedTab);
+            FocusTerminal(Group.SelectedTab, userInitiated: true);
     }
 
     private void Tabs_KeyDown(object sender, KeyRoutedEventArgs e)

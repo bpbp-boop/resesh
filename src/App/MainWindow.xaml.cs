@@ -385,12 +385,16 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             FocusActiveTerminal();
     }
 
-    /// <summary>Opens a dialog from a shortcut. WinUI allows one ContentDialog at a time, so
-    /// the key does nothing while another dialog is showing.</summary>
+    /// <summary>Opens a dialog from a command. WinUI shows one ContentDialog at a time, so the
+    /// dialog queues behind any already showing (it opens through ShowModalAsync, as every
+    /// dialog does) instead of the request being dropped. Asking again while it is still
+    /// queued or open does nothing. When it closes, focus goes back to the terminal the
+    /// key came from.</summary>
     private async Task ShowThenRefocusAsync(Func<Task> show, bool refocusTerminal)
     {
-        if (VisualTreeHelper.GetOpenPopupsForXamlRoot(Root.XamlRoot).Any(popup => popup.Child is ContentDialog))
+        if (_refocusDialogPending)
             return;
+        _refocusDialogPending = true;
         try
         {
             await show();
@@ -399,9 +403,15 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             App.ReportRecoverableError(exception);
         }
+        finally
+        {
+            _refocusDialogPending = false;
+        }
         if (refocusTerminal)
             FocusActiveTerminal();
     }
+
+    private bool _refocusDialogPending;
 
     /// <summary>This window's display scale, or null until its content loads.</summary>
     internal double? RasterizationScale => Root.XamlRoot?.RasterizationScale;
@@ -424,10 +434,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         if (index < 0 || index >= group.Tabs.Count)
             return false;
         var tab = group.Tabs[index];
-        if (ReferenceEquals(group.SelectedTab, tab))
-            FocusTabContent(tab);
-        else
-            group.SelectedTab = tab; // the selection change focuses the tab's terminal
+        group.SelectedTab = tab;
+        // Asked for by a key, so it focuses even from the palette or session search, where
+        // the selection change alone would leave focus.
+        FocusTabContent(tab, userInitiated: true);
         return true;
     }
 
@@ -442,7 +452,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             return;
         group.Tabs.Move(index, target);
         group.SelectedTab = tab; // the move must not steal selection
-        FocusTabContent(tab);
+        FocusTabContent(tab, userInitiated: true);
     }
 
     /// <summary>Focuses the tab group next to <paramref name="current"/> on screen.</summary>
@@ -454,7 +464,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             FocusGroup(target);
             if (target.SelectedTab is { } selected)
-                FocusTabContent(selected);
+                FocusTabContent(selected, userInitiated: true);
         }
         return true;
     }
@@ -480,7 +490,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         MoveTabBetweenGroups(tab, target, target.Tabs.Count);
         if (slideFrom is { } from && slideTo is { } to && tab.View is UIElement view)
             SlideTabAcross(view, targetView, from, to);
-        FocusTabContent(tab);
+        FocusTabContent(tab, userInitiated: true);
         return true;
     }
 
@@ -506,13 +516,16 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     /// <summary>Gives the tab's terminal keyboard focus, once queued work settles, if its pane
     /// is still the focused one then: keyboard focus follows the focused pane, so a request
-    /// overtaken by a later focus choice does nothing.</summary>
-    private void FocusTabContent(TabViewModel tab)
+    /// overtaken by a later focus choice does nothing. Unless the user asked for this tab
+    /// (a key, a click), focus stays in the palette or session search while they type there,
+    /// as it does for a tab that finishes opening.</summary>
+    private void FocusTabContent(TabViewModel tab, bool userInitiated = false)
     {
         if (tab.View is TerminalTabView view)
             DispatcherQueue.TryEnqueue(() =>
             {
-                if (ReferenceEquals(ViewModel.TryGroupOf(tab), ViewModel.FocusedGroup))
+                if (ReferenceEquals(ViewModel.TryGroupOf(tab), ViewModel.FocusedGroup)
+                    && (userInitiated || !IsTypingInSearch))
                     view.FocusTerminal();
             });
     }
@@ -591,10 +604,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         }
     }
 
+    /// <summary>Focuses the active terminal at the end of something the user did (an overlay
+    /// or dialog closing, Escape, a workspace switch), so it focuses even from search.</summary>
     private void FocusActiveTerminal()
     {
         if (ViewModel.ActiveTab is { } tab)
-            FocusTabContent(tab);
+            FocusTabContent(tab, userInitiated: true);
     }
 
     /// <summary>The palette lists the view model's available commands, plus two things only

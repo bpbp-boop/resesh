@@ -49,7 +49,7 @@ test("keyboard focus only lands in the pane that is focused when it is given", (
   assert.match(terminal, /TryEnqueue\([\s\S]*?ReferenceEquals\(_host\.ViewModel\.FocusedGroup, Group\)[\s\S]*?view\.FocusTerminal\(\)/);
   const content = member(windowCode, "private void FocusTabContent");
   assert.match(content, /TryEnqueue\([\s\S]*?ReferenceEquals\(ViewModel\.TryGroupOf\(tab\), ViewModel\.FocusedGroup\)/);
-  assert.match(member(windowCode, "private void FocusActiveTerminal"), /FocusTabContent\(tab\)/);
+  assert.match(member(windowCode, "private void FocusActiveTerminal"), /FocusTabContent\(tab, userInitiated: true\)/);
 });
 
 test("tabs move between panes through one primitive", () => {
