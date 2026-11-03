@@ -26,6 +26,17 @@ public sealed class SessionEndpointTests
     }
 
     [Fact]
+    public void Ipv6HostsTakeBracketsOnlyBeforeAPort()
+    {
+        var v6 = new Session { Host = "::1", Port = 2222, Username = "ops" };
+        Assert.Equal("ops@[::1]:2222", SessionEndpoint.Format(v6, new() { Username = "ops" }));
+        Assert.Equal("::1", SessionEndpoint.Format(v6 with { Port = 22 }));
+        Assert.Equal("[::1]:22", SessionEndpoint.Format(v6 with { Port = 22 }, new() { ShowDefaultPort = true }));
+        Assert.Equal("telnet [2001:db8::5]:2003",
+            SessionEndpoint.Format(new Session { Kind = SessionKind.Telnet, Host = "2001:db8::5", Port = 2003 }, new() { ShowProtocol = true }));
+    }
+
+    [Fact]
     public void UnsetPortReadsAsTheDefaultEverywhere()
     {
         Assert.Equal("web01", SessionEndpoint.Format(Ssh(0)));

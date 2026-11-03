@@ -101,10 +101,11 @@ public static class PuttyRegistryImporter
         var proxyMethod = values.TryGetValue("ProxyMethod", out var method) && method is int methodValue ? methodValue : 0;
         var proxyHost = (GetString(values, "ProxyHost") ?? "").Trim();
 
-        // PuTTY allows HostName to be "user@host"
+        // PuTTY allows HostName to be "user@host"; the last '@' ends the user, as in
+        // quick connect and OpenSSH, so "john@corp@host" logs in as "john@corp".
         var username = rawUser;
         var host = rawHost;
-        var atIndex = rawHost.IndexOf('@');
+        var atIndex = rawHost.LastIndexOf('@');
         if (atIndex >= 0)
         {
             if (string.IsNullOrWhiteSpace(username))
@@ -125,7 +126,7 @@ public static class PuttyRegistryImporter
             Name = decodedName,
             FolderPath = "",
             RelativePath = $"PuTTY/{decodedName}",
-            Host = host.Trim(),
+            Host = HostPort.Unbracket(host),
             Port = port,
             Username = username.Trim(),
             Protocol = protocol == "SSH" ? "SSH2" : protocol,

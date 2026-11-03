@@ -74,6 +74,25 @@ public sealed class PuttyRegistryImporterTests
     }
 
     [Fact]
+    public void ParseSession_UserEndsAtTheLastAt_AndIpv6LosesItsBrackets()
+    {
+        var candidate = PuttyRegistryImporter.ParseSession("corp", new Dictionary<string, object?>
+        {
+            ["HostName"] = "john@corp@bastion.example",
+            ["Protocol"] = "ssh",
+        });
+        Assert.Equal("bastion.example", candidate.Host);
+        Assert.Equal("john@corp", candidate.Username);
+
+        var v6 = PuttyRegistryImporter.ParseSession("v6", new Dictionary<string, object?>
+        {
+            ["HostName"] = "[2001:db8::1]",
+            ["Protocol"] = "ssh",
+        });
+        Assert.Equal("2001:db8::1", v6.Host);
+    }
+
+    [Fact]
     public void ParseSession_TelnetWithoutPort_DefaultsTo23_AndOtherProtocolsStaySkipped()
     {
         var telnet = PuttyRegistryImporter.ParseSession("ts", new Dictionary<string, object?>

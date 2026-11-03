@@ -86,7 +86,8 @@ public static class SessionEndpoint
     private static string Address(SessionKind kind, string? host, int port, bool showDefaultPort)
     {
         var effective = EffectivePort(kind, port);
-        return showDefaultPort || effective != DefaultPort(kind) ? $"{host}:{effective}" : host ?? "";
+        // An IPv6 literal takes brackets before a port, or "::1:2222" reads as one address.
+        return showDefaultPort || effective != DefaultPort(kind) ? HostPort.WithPort(host, effective) : host ?? "";
     }
 
     private static string LocalShell(string? executable, LocalShellDisplay display)

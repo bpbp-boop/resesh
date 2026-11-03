@@ -125,6 +125,8 @@ public sealed class ConnectivityStorageTests : IDisposable
     [InlineData("ops@bastion:2222", "bastion")]
     [InlineData("edge, ops@core:22", "core")]
     [InlineData("[2001:db8::1]:22", "2001:db8::1")]
+    [InlineData("ops@2001:db8::1", "2001:db8::1")]
+    [InlineData("john@corp@bastion", "bastion")]
     [InlineData("none", null)]
     [InlineData("ssh://ops@bastion", null)]
     [InlineData("", null)]

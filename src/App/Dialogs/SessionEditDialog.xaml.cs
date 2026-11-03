@@ -666,7 +666,7 @@ public sealed partial class SessionEditDialog : ContentDialog
             Kind = telnet ? SessionKind.Telnet : serial ? SessionKind.Serial : SessionKind.Ssh,
             Name = NameBox.Text.Trim(),
             FolderPath = FolderPaths.Normalize(FolderBox.Text),
-            Host = serial ? "" : HostBox.Text.Trim(),
+            Host = serial ? "" : HostPort.Unbracket(HostBox.Text),
             Port = serial ? 0 : Math.Clamp(port, 1, 65535),
             Serial = serial
                 ? new SerialTarget

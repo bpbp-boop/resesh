@@ -29,6 +29,42 @@ public sealed class QuickConnectTargetTests
         Assert.False(QuickConnectTarget.TryParse(input, "me", out _));
 
     [Theory]
+    [InlineData("ssh ::1", "::1", 22, "me@::1")]
+    [InlineData("ssh 2001:db8::22", "2001:db8::22", 22, "me@2001:db8::22")]
+    [InlineData("ssh [::1]:2222", "::1", 2222, "me@[::1]:2222")]
+    [InlineData("root@[2001:db8::1]", "2001:db8::1", 22, "root@2001:db8::1")]
+    [InlineData("ops@web01:2222", "web01", 2222, "ops@web01:2222")]
+    [InlineData("john@corp@web01", "web01", 22, "john@corp@web01")]
+    public void SshTargets_ReadIpv6AsOpenSshDoes_AndNameTheirPort(string input, string host, int port, string name)
+    {
+        Assert.True(QuickConnectTarget.TryParse(input, "me", out var session));
+        Assert.Equal(SessionKind.Ssh, session.Kind);
+        Assert.Equal(host, session.Host);
+        Assert.Equal(port, session.Port);
+        Assert.Equal(name, session.Name);
+    }
+
+    [Theory]
+    [InlineData("telnet ::1", "::1", 23, "::1")]
+    [InlineData("telnet ::1 2003", "::1", 2003, "[::1]:2003")]
+    [InlineData("telnet [::1]:2003", "::1", 2003, "[::1]:2003")]
+    [InlineData("telnet ts1:2003", "ts1", 2003, "ts1:2003")]
+    public void TelnetTargets_ReadIpv6AsOpenSshDoes(string input, string host, int port, string name)
+    {
+        Assert.True(QuickConnectTarget.TryParse(input, "me", out var session));
+        Assert.Equal(host, session.Host);
+        Assert.Equal(port, session.Port);
+        Assert.Equal(name, session.Name);
+    }
+
+    [Theory]
+    [InlineData("telnet [::1]:23 2003")]
+    [InlineData("ssh [::1")]
+    [InlineData("ssh web01:abc")]
+    public void Ipv6AndPortMistakes_AreRejected(string input) =>
+        Assert.False(QuickConnectTarget.TryParse(input, "me", out _));
+
+    [Theory]
     [InlineData("serial COM5", "COM5 9600 8N1")]
     [InlineData("serial com5 115200", "COM5 115200 8N1")]
     [InlineData("serial COM5:115200", "COM5 115200 8N1")]

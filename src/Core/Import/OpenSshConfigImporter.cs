@@ -156,14 +156,7 @@ public static class OpenSshConfigImporter
         if (string.IsNullOrEmpty(last) || last.Equals("none", StringComparison.OrdinalIgnoreCase)
             || last.Contains("://", StringComparison.Ordinal))
             return null;
-        last = last[(last.LastIndexOf('@') + 1)..];
-        // A bracketed IPv6 literal keeps its colons; otherwise a single colon is the port.
-        if (last.StartsWith('['))
-            return last.IndexOf(']') is > 0 and var close ? last[1..close] : null;
-        var colon = last.IndexOf(':');
-        if (colon >= 0 && colon == last.LastIndexOf(':'))
-            last = last[..colon];
-        return last.Length == 0 ? null : last;
+        return Models.HostPort.TrySplit(last[(last.LastIndexOf('@') + 1)..], out var host, out _) ? host : null;
     }
 
     private static bool Matches(string pattern, string host) =>
