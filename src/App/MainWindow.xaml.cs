@@ -1294,7 +1294,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         return page;
     }
 
-    /// <summary>Re-reads this window's Settings page after another window or command changed settings.</summary>
+    /// <summary>Re-reads this window's Settings pages, and Welcome, which shows some of the same
+    /// settings, after another window or command changed settings.</summary>
     private void RefreshSettingsPage(SettingsViewModel? source)
     {
         // Dragging Settings between windows can leave two Settings tabs in one window.
@@ -1302,6 +1303,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             if (tab.View is SettingsPage page && !ReferenceEquals(page.ViewModel, source))
                 page.ViewModel.Refresh();
+            else if (tab.View is OnboardingView welcome)
+                welcome.Refresh(App.Settings.Current);
         }
     }
 

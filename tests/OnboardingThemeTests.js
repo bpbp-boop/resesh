@@ -83,7 +83,14 @@ test("Welcome import states and completion behavior are consistent", () => {
   assert.match(xaml, /AutomationProperties\.Name="Review OpenSSH sessions"/);
   assert.match(xaml, /AutomationProperties\.Name="Review SecureCRT sessions"/);
   assert.match(xaml, /x:Name="FinishSetupButton"[\s\S]*?HorizontalAlignment="Right"/);
-  assert.match(codeBehind, /FinishSetupButton\.IsEnabled = _savedSettings\.OnboardingCompleted != true/);
+  // Welcome compares with the settings saved now, not a copy taken when it opened.
+  assert.match(codeBehind, /FinishSetupButton\.IsEnabled = _choices\.HasChanges\(App\.Settings\.Current\)/);
+  assert.match(codeBehind, /_previewTheme\(App\.Settings\.Current\.Theme\)/);
+  assert.doesNotMatch(codeBehind, /_savedSettings/);
+  // Settings changed in any window reach an open Welcome, like the Settings pages.
+  const windowCode = require("./support/mainWindowSource");
+  assert.match(windowCode, /tab\.View is OnboardingView welcome\)\s*welcome\.Refresh\(App\.Settings\.Current\)/);
+  assert.match(codeBehind, /App\.Identities\.Changed \+= OnStoreChanged/);
 });
 
 test("Welcome uses native control resources in High Contrast", () => {
