@@ -1,0 +1,43 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.PasteConfirmDialog"
+    Style="{StaticResource DefaultContentDialogStyle}"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    PrimaryButtonText="Paste"
+    CloseButtonText="Cancel"
+    DefaultButton="Close">
+
+    <ContentDialog.Resources>
+        <!-- Room for long device config lines (Junos, MD-CLI); the default caps dialogs at
+             548 px. The dialog still only grows as wide as the longest line needs. -->
+        <x:Double x:Key="ContentDialogMaxWidth">960</x:Double>
+        <FontFamily x:Key="CodeFont">Cascadia Mono, Consolas</FontFamily>
+    </ContentDialog.Resources>
+
+    <StackPanel Spacing="12">
+        <TextBlock Text="{x:Bind Message}" TextWrapping="Wrap" />
+        <!-- Lines are not wrapped, so indentation in a config reads as it will on the device;
+             a long line scrolls sideways instead. -->
+        <Border
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="4">
+            <ScrollViewer
+                HorizontalScrollMode="Auto"
+                HorizontalScrollBarVisibility="Auto"
+                VerticalScrollMode="Disabled"
+                VerticalScrollBarVisibility="Disabled">
+                <TextBlock
+                    Text="{x:Bind Preview}"
+                    FontFamily="{StaticResource CodeFont}"
+                    FontSize="12"
+                    TextWrapping="NoWrap"
+                    IsTextSelectionEnabled="True"
+                    Padding="12,8,12,12"
+                    AutomationProperties.Name="Paste preview" />
+            </ScrollViewer>
+        </Border>
+        <CheckBox x:Name="DontAskBox" Content="Don't ask again (turn it back on in Settings › Terminal)" />
+    </StackPanel>
+</ContentDialog>
