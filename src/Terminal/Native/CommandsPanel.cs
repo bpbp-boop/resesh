@@ -130,8 +130,7 @@ internal sealed partial class CommandsPanel : Grid
         _count.Foreground = _mutedBrush;
         _close.Foreground = _mutedBrush;
         _list.Foreground = _foregroundBrush;
-        var family = fontFamily.Split(',')[0].Trim().Trim('"', '\'');
-        _list.FontFamily = new FontFamily(family.Length == 0 ? "Cascadia Mono" : family);
+        _list.FontFamily = new FontFamily(TerminalDefaults.PrimaryFamily(fontFamily));
     }
 
     /// <summary>Rebinds the list when the marks changed; keeps scroll position otherwise.</summary>

@@ -121,7 +121,7 @@ public sealed partial class HistoryView : UserControl
     private int _loadVersion;
     private bool _suppressFilterEvents;
     private Guid? _pendingSessionFilter;
-    private FontFamily _monoFont = new("Cascadia Mono, Consolas");
+    private FontFamily _monoFont = new(Resesh.Core.Storage.FontFamilies.Default);
 
     public event Action? CloseRequested;
 
