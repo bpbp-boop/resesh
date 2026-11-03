@@ -89,7 +89,7 @@ test("the pinned sessions list follows Home's pinned tabs, including when a wind
   assert.match(member(app, "internal static void SavePinnedSessions"), /PinnedSessions\.ToSave\([\s\S]*?window\.HomeTabs[\s\S]*?app\._windows\.Count\)/);
   assert.match(app, /_windows\.Remove\(window\);\s*QueuePinnedSessionsSave\(\);/);
   // A closing window saves before its tabs go, so the last one keeps a change still queued.
-  assert.match(windowCode, /SaveWorkspacesOnClose,\s*App\.SavePinnedSessions,\s*ViewModel\.CloseAllTabs\);/);
+  assert.match(windowCode, /SaveWorkspacesOnClose,\s*App\.SavePinnedSessions,\s*ViewModel\.CloseAllTabs[,)]/);
   assert.match(windowCode, /group\.Tabs\.CollectionChanged \+= \(_, _\) =>[\s\S]*?App\.QueuePinnedSessionsSave\(\);/);
   assert.match(windowCode, /nameof\(TabViewModel\.IsPinned\)\)\s*App\.QueuePinnedSessionsSave\(\);/);
   assert.match(member(windowCode, "public void RestorePinnedSessions"), /PinnedSessions\.ToRestore\(ids, App\.Workspaces\.Workspaces\)/);
