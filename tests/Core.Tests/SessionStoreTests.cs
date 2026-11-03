@@ -59,6 +59,64 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     [Fact]
+    public void SetFolderIdentity_KeepsTheFolderAfterItsSessionsMoveOut()
+    {
+        var store = NewStore();
+        var session = NewSession(folder: "Prod");
+        store.Add(session);
+        var identityId = Guid.NewGuid();
+
+        store.SetFolderIdentity("Prod", identityId);
+        store.MoveToFolder(session.Id, "");
+
+        // The folder stays, showing the identity it holds, rather than vanishing while the
+        // identity waits to log in whatever is made at "Prod" next.
+        Assert.Equal(["Prod"], store.Folders);
+        Assert.Equal(["Prod"], NewStore().Folders);
+        Assert.Equal(identityId, store.FolderIdentity("Prod"));
+        store.DeleteFolder("Prod");
+        Assert.Empty(store.Folders);
+        Assert.Null(store.FolderIdentity("Prod"));
+    }
+
+    [Fact]
+    public void SetFolderIdentity_OnTheRootAddsNoFolder()
+    {
+        var store = NewStore();
+
+        store.SetFolderIdentity("", Guid.NewGuid());
+
+        Assert.Empty(store.Folders);
+        Assert.Empty(store.ExplicitFoldersOf(SessionKind.Ssh));
+    }
+
+    [Fact]
+    public void Load_FolderSettingWithNoFolder_BringsTheFolderBack()
+    {
+        // Written by builds that let a folder identity outlive its implicit folder.
+        var identityId = Guid.NewGuid();
+        File.WriteAllText(StorePath, $$"""
+            {"sessions":[],"folders":[],"folderSettings":[{"path":"Prod/Web","identityId":"{{identityId}}"},{"path":"","identityId":"{{identityId}}"}]}
+            """);
+
+        var store = NewStore();
+
+        Assert.Equal(["Prod", "Prod/Web"], store.Folders);
+        Assert.Equal(["Prod/Web"], store.ExplicitFoldersOf(SessionKind.Ssh));
+        Assert.Equal(identityId, store.FolderIdentity("Prod/Web"));
+    }
+
+    [Fact]
+    public void MergeFolderSettings_MakesTheirFoldersExplicit()
+    {
+        var store = NewStore();
+
+        store.MergeFolderSettings([new FolderSettings { Path = "Branch", IdentityId = Guid.NewGuid() }]);
+
+        Assert.Equal(["Branch"], store.ExplicitFoldersOf(SessionKind.Ssh));
+    }
+
+    [Fact]
     public void Load_MissingFile_YieldsEmptyStore()
     {
         Assert.Empty(NewStore().Sessions);

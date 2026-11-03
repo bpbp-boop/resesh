@@ -90,8 +90,27 @@ public sealed class SessionStore
                 .Where(f => f.IdentityId is not null)
                 .DistinctBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+            // Older builds attached identities to folders that existed only through their
+            // sessions; once those moved away the identity stayed, unseen, and logged in any
+            // folder later made at that path. Keep such folders so the identity shows.
+            _folders = WithSettingFolders(_folders, _folderSettings);
         }
     }
+
+    /// <summary>The folders of one kind that were created (or are kept by a folder setting),
+    /// without those that exist only because a session is in them. Backups carry these, so a
+    /// restore does not make folders that come and go with their sessions permanent.</summary>
+    public IReadOnlyList<string> ExplicitFoldersOf(SessionKind kind)
+    {
+        lock (_gate)
+            return FolderListOf(kind).ToList();
+    }
+
+    /// <summary><paramref name="folders"/> plus the folder of every non-root setting. A folder
+    /// with settings is always explicit: it must not vanish when its last session moves out
+    /// while its identity lives on, to be inherited by whatever is made there next.</summary>
+    private static List<string> WithSettingFolders(List<string> folders, IEnumerable<FolderSettings> settings) =>
+        UnionFolders(folders, settings.Select(setting => setting.Path));
 
     // ---- Folder settings (remote tree only; local profiles have no logins) ----
 
@@ -109,7 +128,8 @@ public sealed class SessionStore
             return _folderSettings.FirstOrDefault(f => f.Path.Equals(folderPath, StringComparison.OrdinalIgnoreCase))?.IdentityId;
     }
 
-    /// <summary>Attaches an identity to a remote-tree folder, or detaches it with null.</summary>
+    /// <summary>Attaches an identity to a remote-tree folder, or detaches it with null.
+    /// Attaching makes the folder explicit, so it outlives the sessions in it.</summary>
     public void SetFolderIdentity(string folderPath, Guid? identityId)
     {
         folderPath = FolderPaths.Normalize(folderPath);
@@ -123,7 +143,7 @@ public sealed class SessionStore
                 folderSettings.RemoveAt(index);
             if (identityId is not null)
                 folderSettings.Add(new FolderSettings { Path = folderPath, IdentityId = identityId });
-            Save(folderSettings: folderSettings);
+            Save(folders: WithSettingFolders(_folders, folderSettings), folderSettings: folderSettings);
         }
     }
 
@@ -132,19 +152,27 @@ public sealed class SessionStore
     {
         lock (_gate)
         {
-            List<FolderSettings>? folderSettings = null;
-            foreach (var setting in settings)
-            {
-                var path = FolderPaths.Normalize(setting.Path);
-                if (setting.IdentityId is null
-                    || (folderSettings ?? _folderSettings).Any(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
-                    continue;
-                folderSettings ??= _folderSettings.ToList();
-                folderSettings.Add(setting with { Path = path });
-            }
-            if (folderSettings is not null)
-                Save(folderSettings: folderSettings);
+            var folderSettings = MergedFolderSettings(_folderSettings, settings);
+            if (!ReferenceEquals(folderSettings, _folderSettings))
+                Save(folders: WithSettingFolders(_folders, folderSettings), folderSettings: folderSettings);
         }
+    }
+
+    /// <summary><paramref name="destination"/> plus each incoming setting for a folder that has
+    /// none; the same list when nothing is added.</summary>
+    private static List<FolderSettings> MergedFolderSettings(List<FolderSettings> destination, IEnumerable<FolderSettings> incoming)
+    {
+        List<FolderSettings>? candidate = null;
+        foreach (var setting in incoming)
+        {
+            var path = FolderPaths.Normalize(setting.Path);
+            if (setting.IdentityId is null
+                || (candidate ?? destination).Any(f => f.Path.Equals(path, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            candidate ??= destination.ToList();
+            candidate.Add(setting with { Path = path });
+        }
+        return candidate ?? destination;
     }
 
     /// <summary>Detaches an identity everywhere: folders drop it, sessions that chose it
@@ -323,13 +351,15 @@ public sealed class SessionStore
 
     /// <summary>
     /// Adds or replaces a prepared set of imported sessions and unions its explicit folders
-    /// into this store. The caller resolves conflicts and final ids before this method runs.
-    /// The complete merge is saved in one atomic write.
+    /// and folder settings (for folders that have none here) into this store. The caller
+    /// resolves conflicts and final ids before this method runs. The complete merge is saved
+    /// in one atomic write, so sessions never land without the folder logins they inherit.
     /// </summary>
     public void ApplyImport(
         IEnumerable<Session> sessions,
         IEnumerable<string> folders,
-        IEnumerable<string> localFolders)
+        IEnumerable<string> localFolders,
+        IEnumerable<FolderSettings>? folderSettings = null)
     {
         lock (_gate)
         {
@@ -344,9 +374,10 @@ public sealed class SessionStore
                     candidateSessions.Add(session);
             }
 
-            var candidateFolders = UnionFolders(_folders, folders);
+            var candidateFolderSettings = MergedFolderSettings(_folderSettings, folderSettings ?? []);
+            var candidateFolders = WithSettingFolders(UnionFolders(_folders, folders), candidateFolderSettings);
             var candidateLocalFolders = UnionFolders(_localFolders, localFolders);
-            Save(candidateSessions, candidateFolders, candidateLocalFolders);
+            Save(candidateSessions, candidateFolders, candidateLocalFolders, candidateFolderSettings);
         }
     }
 
