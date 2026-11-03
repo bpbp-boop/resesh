@@ -196,7 +196,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>The status bar's tooltip: the active tab's connection details while it is
     /// connected, otherwise none.</summary>
-    public string? StatusDetails => ActiveTab is { State: TabConnectionState.Connected, IsLocked: false, ConnectionDetails.Length: > 0 } tab
+    public string? StatusDetails => ActiveTab is { AcceptsCommands: true, ConnectionDetails.Length: > 0 } tab
         ? tab.ConnectionDetails
         : null;
 

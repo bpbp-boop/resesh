@@ -733,7 +733,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     /// false when nothing was inserted, so the caller can keep its place.</summary>
     public async Task<bool> InsertTextAsync(string text)
     {
-        if (_disposed || _tab.IsLocked || _tab.State != TabConnectionState.Connected)
+        if (_disposed || !_tab.AcceptsCommands)
             return false;
         if (!await PasteForReviewAsync(text))
             return false;
@@ -856,6 +856,60 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             _terminal.SetInputEnabled(enabled);
     }
 
+    // ---- what every transport does with its connection ----
+    // Local, telnet, SSH and serial differ in how they connect; once connected, they draw
+    // output, end and fail the same way. A connection whose token is cancelled has been
+    // replaced (reconnect), stopped (Disconnect) or closed with the tab, so it reports
+    // nothing. Leaving the connected state clears what described the connection (TabViewModel).
+
+    /// <summary>Draws a backend's output as it arrives, and marks the tab when nobody is
+    /// looking. The handler runs on the backend's reader thread.</summary>
+    private void FollowOutput(ITerminalBackend backend, TerminalConnectionLifetime connection) =>
+        backend.OutputReceived += data =>
+        {
+            if (connection.Token.IsCancellationRequested) return;
+            _terminal.WriteOutput(data);
+            // Benign cross-thread reads: worst case is one redundant enqueue.
+            if (!_tab.IsActive && !_tab.HasUnseenOutput)
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
+                });
+        };
+
+    /// <summary>The live connection ended by itself: the tab stops (a local process exits,
+    /// with its code) and agent tracking ends; the caller then says why. False, and nothing
+    /// changes, when the connection was already cancelled.</summary>
+    private bool ConnectionEnded(TerminalConnectionLifetime connection, bool exited = false, int? exitCode = null)
+    {
+        if (connection.Token.IsCancellationRequested)
+            return false;
+        if (exited)
+            _tab.MarkExited(exitCode);
+        else
+            _tab.MarkDisconnected();
+        EndAgentTracking();
+        return true;
+    }
+
+    /// <summary>A connect or launch did not come up: the tab shows it failed, and the
+    /// terminal why. False, and nothing changes, when the connection was already cancelled.</summary>
+    private bool ConnectFailed(TerminalConnectionLifetime connection, string message, string action = "reconnect")
+    {
+        if (connection.Token.IsCancellationRequested)
+            return false;
+        _tab.MarkDisconnected();
+        _terminal.NotifyDisconnected(message, action);
+        return true;
+    }
+
+    /// <summary>What to say for a connect that ended in something its transport does not
+    /// describe: a login prompt cancelled, or an unexpected error.</summary>
+    private static string FailureMessage(Exception exception, bool credentialDeclined = false) =>
+        exception is OperationCanceledException
+            ? credentialDeclined ? "No credential provided." : "Connection cancelled."
+            : $"Unexpected error: {exception.Message}";
+
     /// <summary>Local lifecycle: start the ConPTY process; a later natural exit keeps the
     /// tab open, reports the exit code neutrally, and Enter/Restart relaunches.</summary>
     private async Task LaunchLocalAsync(bool isReconnect)
@@ -867,23 +921,11 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 _terminal.WriteDivider(); // restart-in-place: scrollback preserved
 
             var local = new LocalTerminalSession();
-            local.OutputReceived += data =>
-            {
-                if (connection.Token.IsCancellationRequested) return;
-                _terminal.WriteOutput(data);
-                if (!_tab.IsActive && !_tab.HasUnseenOutput)
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
-                    });
-            };
+            FollowOutput(local, connection);
             local.Exited += code => DispatcherQueue.TryEnqueue(() =>
             {
-                if (connection.Token.IsCancellationRequested) return;
-                _tab.MarkExited(code);
-                _tab.ConnectionSummary = "";
-                EndAgentTracking();
-                _terminal.NotifyDisconnected($"Process exited with code {code}.", action: "restart", neutral: true);
+                if (ConnectionEnded(connection, exited: true, exitCode: code))
+                    _terminal.NotifyDisconnected($"Process exited with code {code}.", action: "restart", neutral: true);
             });
 
             var cols = _terminal.Columns;
@@ -896,25 +938,20 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
             _backend = local;
             ResizeBackend(_terminal.Columns, _terminal.Rows);
-            _tab.MarkConnected();
-            _tab.ConnectionSummary = $"pid {local.ProcessId}";
+            _tab.MarkConnected(summary: $"pid {local.ProcessId}");
             _terminal.NotifyConnected();
             FocusTerminalOnConnect();
             StartAgentPolling();
         }
         catch (OperationCanceledException) when (connection.Token.IsCancellationRequested) { }
+        // Launch failure (unlike a normal exit) is an error state — red dot, warning text.
         catch (LocalSessionException ex)
         {
-            if (connection.Token.IsCancellationRequested) return;
-            // Launch failure (unlike a normal exit) is an error state — red dot, warning text.
-            _tab.MarkDisconnected();
-            _terminal.NotifyDisconnected(ex.Message, action: "restart");
+            ConnectFailed(connection, ex.Message, action: "restart");
         }
         catch (Exception ex)
         {
-            if (connection.Token.IsCancellationRequested) return;
-            _tab.MarkDisconnected();
-            _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}", action: "restart");
+            ConnectFailed(connection, $"Unexpected error: {ex.Message}", action: "restart");
         }
     }
 
@@ -935,26 +972,14 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             _terminal.WriteNotice($"Connecting to {Session.Host}:{SessionEndpoint.EffectivePort(Session)} over telnet (unencrypted){RouteDescription(Session with { Proxy = null })} …");
 
             var telnet = new TelnetTerminalSession();
-            telnet.OutputReceived += data =>
-            {
-                if (connection.Token.IsCancellationRequested) return;
-                _terminal.WriteOutput(data);
-                if (!_tab.IsActive && !_tab.HasUnseenOutput)
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
-                    });
-            };
+            FollowOutput(telnet, connection);
             // The server closing and a jump host dying can both be reported; the first says it.
             var ended = false;
             string? jumpLost = null;
             void EndTelnet(string message)
             {
-                if (ended || connection.Token.IsCancellationRequested) return;
+                if (ended || !ConnectionEnded(connection)) return;
                 ended = true;
-                _tab.MarkDisconnected();
-                _tab.ConnectionSummary = "";
-                EndAgentTracking();
                 _terminal.NotifyDisconnected(message);
             }
             telnet.Closed += ex => DispatcherQueue.TryEnqueue(() =>
@@ -999,36 +1024,24 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             if (jumpLost is not null)
             {
                 telnet.Dispose();
-                _tab.MarkDisconnected();
-                _terminal.NotifyDisconnected($"Connection lost: {jumpLost}");
+                ConnectFailed(connection, $"Connection lost: {jumpLost}");
                 return;
             }
             _backend = telnet;
             ResizeBackend(_terminal.Columns, _terminal.Rows);
-            _tab.MarkConnected();
-            _tab.ConnectionSummary = jumpSessions.Count == 0
+            _tab.MarkConnected(summary: jumpSessions.Count == 0
                 ? $"telnet • {telnet.RemoteEndPoint} • unencrypted"
-                : $"telnet • {Session.Host}:{SessionEndpoint.EffectivePort(Session)} via {jumpSessions[^1].Name} • unencrypted past the jump host";
+                : $"telnet • {Session.Host}:{SessionEndpoint.EffectivePort(Session)} via {jumpSessions[^1].Name} • unencrypted past the jump host");
             _terminal.NotifyConnected();
             FocusTerminalOnConnect();
         }
         catch (Exception ex) when (ex is TelnetSessionException or SshSessionException)
         {
-            if (connection.Token.IsCancellationRequested) return;
-            _tab.MarkDisconnected();
-            _terminal.NotifyDisconnected(ex.Message);
-        }
-        catch (OperationCanceledException)
-        {
-            if (connection.Token.IsCancellationRequested) return;
-            _tab.MarkDisconnected();
-            _terminal.NotifyDisconnected(credentialDeclined ? "No credential provided." : "Connection cancelled.");
+            ConnectFailed(connection, ex.Message);
         }
         catch (Exception ex)
         {
-            if (connection.Token.IsCancellationRequested) return;
-            _tab.MarkDisconnected();
-            _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}");
+            ConnectFailed(connection, FailureMessage(ex, credentialDeclined));
         }
     }
 
@@ -1057,8 +1070,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             // Before any jump host is dialled; the login resolved for each host is checked again.
             if (MissingUsername(target, App.Logins.Resolve(target)) is { } noUsername)
             {
-                _tab.MarkDisconnected();
-                _terminal.NotifyDisconnected(noUsername);
+                ConnectFailed(connection, noUsername);
                 return null;
             }
 
@@ -1115,24 +1127,11 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                     UpdateSshSummary();
                 TunnelsChanged?.Invoke();
             });
-            session.OutputReceived += data =>
-            {
-                if (connection.Token.IsCancellationRequested) return;
-                _terminal.WriteOutput(data);
-                // Benign cross-thread reads: worst case is one redundant enqueue.
-                if (!_tab.IsActive && !_tab.HasUnseenOutput)
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
-                    });
-            };
+            FollowOutput(session, connection);
             session.Closed += ex => DispatcherQueue.TryEnqueue(() =>
             {
-                if (connection.Token.IsCancellationRequested) return;
-                _tab.MarkDisconnected();
-                _tab.ConnectionSummary = "";
-                EndAgentTracking();
-                _terminal.NotifyDisconnected(ex is null ? "Connection closed." : $"Connection lost: {ex.Message}");
+                if (ConnectionEnded(connection))
+                    _terminal.NotifyDisconnected(ex is null ? "Connection closed." : $"Connection lost: {ex.Message}");
             });
 
             var cols = _terminal.Columns;
@@ -1183,9 +1182,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         }
         catch (SshSessionException ex)
         {
-            if (connection.Token.IsCancellationRequested) return null;
-            _tab.MarkDisconnected();
-            _terminal.NotifyDisconnected(ex.Message);
+            if (!ConnectFailed(connection, ex.Message)) return null;
             // A jump host that refused its login says nothing about this session's identity.
             // The offer waits until ConnectAsync has ended, so Reconnect works while it shows;
             // a reconnect cancels this connection's token, which takes the offer down.
@@ -1201,17 +1198,9 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                     }
                 };
         }
-        catch (OperationCanceledException)
-        {
-            if (connection.Token.IsCancellationRequested) return null;
-            _tab.MarkDisconnected();
-            _terminal.NotifyDisconnected(credentialDeclined ? "No credential provided." : "Connection cancelled.");
-        }
         catch (Exception ex)
         {
-            if (connection.Token.IsCancellationRequested) return null;
-            _tab.MarkDisconnected();
-            _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}");
+            ConnectFailed(connection, FailureMessage(ex, credentialDeclined));
         }
         finally
         {
@@ -2147,8 +2136,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     /// when there is nothing to send it on, so a shortcut can fall through.</summary>
     public bool SendBreak()
     {
-        if (_disposed || _tab.IsLocked || _tab.State != TabConnectionState.Connected
-            || _backend is not IBreakSender sender)
+        if (_disposed || !_tab.AcceptsCommands || _backend is not IBreakSender sender)
             return false;
         sender.SendBreak();
         return true;
@@ -2161,7 +2149,6 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _connection.Dispose();
         _backend = null;
         _ssh = null;
-        _tab.ConnectionSummary = "";
         EndAgentTracking();
         if (Session.IsLocal)
         {
@@ -2405,7 +2392,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     /// the pane is closed. Remote folders use the existing SSHFS mount.</summary>
     public async Task OpenFileExplorerAsync()
     {
-        if (!HasFileExplorer || _disposed || _tab.IsLocked || _tab.State != TabConnectionState.Connected)
+        if (!HasFileExplorer || _disposed || !_tab.AcceptsCommands)
             return;
         try
         {

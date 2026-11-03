@@ -229,8 +229,7 @@ internal static class TabStripActionState
 
     /// <summary>The terminal folder is only known on a live, unlocked connection with files.</summary>
     public static bool CurrentFolderEnabled(TabViewModel? tab) =>
-        tab?.Capabilities.FilePane == true &&
-        tab.State == TabConnectionState.Connected && !tab.IsLocked;
+        tab?.Capabilities.FilePane == true && tab.AcceptsCommands;
 
     public static string FilePaneLabel(bool isOpen) => isOpen ? "Hide File Pane" : "Show File Pane";
     public static string CommandsLabel(bool isOpen) => isOpen ? "Hide commands" : "Show commands";

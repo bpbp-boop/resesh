@@ -163,4 +163,65 @@ public sealed class TabStateTests
 
         Assert.Null(tab.RunningCommand);
     }
+
+    private static TabViewModel Ssh() =>
+        new(new Session { Name = "web", Host = "web.example", Username = "admin" }, Environment);
+
+    [Theory]
+    [InlineData(TabConnectionState.Disconnected)]
+    [InlineData(TabConnectionState.Exited)]
+    [InlineData(TabConnectionState.Connecting)]
+    public void WhatDescribedAConnectionGoesWithIt(TabConnectionState next)
+    {
+        var tab = Ssh();
+        tab.MarkConnected(summary: "aes256-gcm@openssh.com • SHA256:abc");
+        tab.ConnectionDetails = "Cipher: aes256-gcm@openssh.com";
+        Assert.Equal("aes256-gcm@openssh.com • SHA256:abc", tab.ConnectionSummary);
+
+        tab.MoveTo(next);
+
+        // No transport has to clear these; a reconnect over telnet must not show SSH's.
+        Assert.Equal("", tab.ConnectionSummary);
+        Assert.Equal("", tab.ConnectionDetails);
+    }
+
+    [Fact]
+    public void ConnectingDescribesTheNewConnectionInTheSameStep()
+    {
+        var tab = Local();
+        var summaryWhenConnected = (string?)null;
+        tab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TabViewModel.ConnectionSummary))
+                summaryWhenConnected = tab.State == TabConnectionState.Connected ? tab.ConnectionSummary : null;
+        };
+
+        tab.MarkConnected(summary: "pid 42");
+
+        Assert.Equal("pid 42", summaryWhenConnected);
+    }
+
+    [Theory]
+    [InlineData(TabConnectionState.Connecting, false)]
+    [InlineData(TabConnectionState.Connected, false)]
+    [InlineData(TabConnectionState.Disconnected, true)]
+    [InlineData(TabConnectionState.Exited, true)]
+    [InlineData(TabConnectionState.Playback, false)]
+    public void OnlyAnEndedConnectionIsStopped(TabConnectionState state, bool stopped) =>
+        Assert.Equal(stopped, Local().MoveTo(state).IsStopped);
+
+    [Fact]
+    public void CommandsActOnlyOnALiveUnlockedConnection()
+    {
+        var tab = Ssh();
+        Assert.False(tab.AcceptsCommands); // still connecting
+        tab.MarkConnected();
+        Assert.True(tab.AcceptsCommands);
+        tab.Lock("secret");
+        Assert.False(tab.AcceptsCommands);
+        Assert.True(tab.TryUnlock("secret"));
+        Assert.True(tab.AcceptsCommands);
+        tab.MarkDisconnected();
+        Assert.False(tab.AcceptsCommands);
+    }
 }

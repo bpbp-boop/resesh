@@ -988,7 +988,7 @@ public sealed partial class TabGroupView : UserControl
     {
         if (e.Key == Windows.System.VirtualKey.Enter
             && Group.SelectedTab is { } tab
-            && IsStopped(tab)
+            && tab.IsStopped
             && !IsButtonSource(e.OriginalSource))
         {
             _host.ReconnectTab(tab);
@@ -1080,7 +1080,7 @@ public sealed partial class TabGroupView : UserControl
         _close.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.CloseTab);
         _closeDisconnected = Item("Close Disconnected Tabs", tab =>
             _ = _host.RequestCloseManyAsync(
-                Group.Tabs.Where(IsStopped).ToList(),
+                Group.Tabs.Where(tab => tab.IsStopped).ToList(),
                 "disconnected tab(s) in this group"));
         _closeOthers = Item("Close Other Tabs", tab =>
             _ = _host.RequestCloseManyAsync(Group.Tabs.Where(t => t != tab).ToList(), "other tab(s)"));
@@ -1140,9 +1140,6 @@ public sealed partial class TabGroupView : UserControl
         return menu;
     }
 
-    private static bool IsStopped(TabViewModel tab) =>
-        tab.State is TabConnectionState.Disconnected or TabConnectionState.Exited;
-
     private static Visibility VisibleIf(bool visible) => visible ? Visibility.Visible : Visibility.Collapsed;
 
     private void ConfigureMenuFor(TabViewModel tab)
@@ -1163,7 +1160,7 @@ public sealed partial class TabGroupView : UserControl
         _manageRemote.Visibility = VisibleIf(MainViewModel.ShowsManageRemoteSessions(tab));
         _tunnels.Visibility = VisibleIf(MainViewModel.ShowsManageTunnels(tab));
         // Bulk closes skip pinned tabs, so they're only offered when an unpinned tab qualifies.
-        _closeDisconnected.IsEnabled = Group.Tabs.Any(t => IsStopped(t) && !t.IsPinned);
+        _closeDisconnected.IsEnabled = Group.Tabs.Any(t => t.IsStopped && !t.IsPinned);
         _closeOthers.IsEnabled = Group.Tabs.Any(t => t != tab && !t.IsPinned);
         _closeRight.IsEnabled = Group.Tabs.Skip(Group.Tabs.IndexOf(tab) + 1).Any(t => !t.IsPinned);
         _pin.Text = tab.IsPinned ? "Unpin Tab" : "Pin Tab";
@@ -1174,7 +1171,7 @@ public sealed partial class TabGroupView : UserControl
         _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
         var filePaneCwd = caps.FilePane;
         _filePaneCwd.Visibility = filePaneCwd ? Visibility.Visible : Visibility.Collapsed;
-        _filePaneCwd.IsEnabled = filePaneCwd && !tab.IsLocked && tab.State == TabConnectionState.Connected;
+        _filePaneCwd.IsEnabled = TabStripActionState.CurrentFolderEnabled(tab);
         _workingFolder.Visibility = caps.LocalWorkingFolder && !tab.IsPlayback
             ? Visibility.Visible
             : Visibility.Collapsed;

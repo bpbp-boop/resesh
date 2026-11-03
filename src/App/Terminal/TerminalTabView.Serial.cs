@@ -26,22 +26,10 @@ public sealed partial class TerminalTabView
             _terminal.WriteNotice($"Opening {target.Describe()} …");
 
             var serial = new SerialTerminalSession();
-            serial.OutputReceived += data =>
-            {
-                if (connection.Token.IsCancellationRequested) return;
-                _terminal.WriteOutput(data);
-                if (!_tab.IsActive && !_tab.HasUnseenOutput)
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
-                    });
-            };
+            FollowOutput(serial, connection);
             serial.Closed += ex => DispatcherQueue.TryEnqueue(() =>
             {
-                if (connection.Token.IsCancellationRequested) return;
-                _tab.MarkDisconnected();
-                _tab.ConnectionSummary = "";
-                EndAgentTracking();
+                if (!ConnectionEnded(connection)) return;
                 if (SerialPortList.Exists(portName))
                     _terminal.NotifyDisconnected($"{portName} stopped working: {ex?.Message ?? "the driver closed it"}.");
                 else
@@ -56,35 +44,23 @@ public sealed partial class TerminalTabView
             connection.Token.ThrowIfCancellationRequested();
 
             _backend = serial;
+            // No summary: the tab's endpoint already reads "serial COM5 9600 8N1".
             _tab.MarkConnected();
-            // The tab's endpoint already reads "serial COM5 9600 8N1".
-            _tab.ConnectionSummary = "";
             _terminal.NotifyConnected();
             FocusTerminalOnConnect();
         }
+        catch (SerialSessionException ex) when (ex.PortMissing)
+        {
+            if (ConnectFailed(connection, $"{ex.Message} Plug in the console cable; this tab connects when {portName} appears."))
+                WatchForSerialPort(portName, connection);
+        }
         catch (SerialSessionException ex)
         {
-            if (connection.Token.IsCancellationRequested) return;
-            _tab.MarkDisconnected();
-            if (ex.PortMissing)
-            {
-                _terminal.NotifyDisconnected($"{ex.Message} Plug in the console cable; this tab connects when {portName} appears.");
-                WatchForSerialPort(portName, connection);
-            }
-            else
-                _terminal.NotifyDisconnected(ex.Message);
-        }
-        catch (OperationCanceledException)
-        {
-            if (connection.Token.IsCancellationRequested) return;
-            _tab.MarkDisconnected();
-            _terminal.NotifyDisconnected("Connection cancelled.");
+            ConnectFailed(connection, ex.Message);
         }
         catch (Exception ex)
         {
-            if (connection.Token.IsCancellationRequested) return;
-            _tab.MarkDisconnected();
-            _terminal.NotifyDisconnected($"Unexpected error: {ex.Message}");
+            ConnectFailed(connection, FailureMessage(ex));
         }
     }
 
