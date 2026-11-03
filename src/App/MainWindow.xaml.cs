@@ -104,10 +104,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         AppWindow.SetIcon(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"));
         InitializeTitleBar();
         InitializeNarrowLayout();
-        // Lets the icon catalog rasterize at true device pixels (XamlRoot is null until
-        // the content loads; the catalog falls back to scale 1 and re-renders on demand).
-        App.Icons.ScaleProvider = () => Root.XamlRoot?.RasterizationScale ?? 1.0;
-        App.Brands.ScaleProvider = () => Root.XamlRoot?.RasterizationScale ?? 1.0;
         AttachGroupView(ViewModel.Groups[0]);
         RebuildGroupLayout();
         ViewModel.TreeRebuilt += () =>
@@ -406,6 +402,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         if (refocusTerminal)
             FocusActiveTerminal();
     }
+
+    /// <summary>This window's display scale, or null until its content loads.</summary>
+    internal double? RasterizationScale => Root.XamlRoot?.RasterizationScale;
 
     /// <summary>True while the user is typing in the command palette or the session filter,
     /// so tabs that finish opening in the background leave keyboard focus there.</summary>
