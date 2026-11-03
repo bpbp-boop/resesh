@@ -2322,3 +2322,20 @@ one home:
 - **Filters** match terms through `SessionSearch`: every term must match some field, and a
   term may match what the item sits in (its folder, the Local root, the row's login), so
   "local pwsh" and "prod web" both work in the tree, the import list and the sessions table.
+
+## 2026-11-03 - Uploads replace by rename only when nothing but the contents changes
+
+SSH.NET's `SftpClient.Get(path)` first asks the server for the path's realpath (OpenSSH
+follows symlinks there) and then lstats the result, so `.bashrc -> dotfiles/bashrc` reads as a
+regular file and `IsSymbolicLink` is false. The upload that renamed a temporary file over the
+target therefore replaced the link with a plain file. The upload now also resolves only the
+folder and compares: when `Get`'s `FullName` differs from folder + name, the name is a link and
+the upload writes through it in place, as before the temporary-file change.
+
+A rename also gives the file the new file's owner and group (only root can give a file away)
+and breaks hard links. So the temporary file is stat'ed once created and the rename is used only
+when its owner and group match the existing file's; otherwise, and when the server refuses the
+rename or the delete (a sticky folder such as `/tmp`, where only a file's owner may replace it),
+the temporary file is removed and the upload overwrites in place. SFTP v3 does not report a
+link count, so a hard-linked file the login owns still loses its other names; that is the
+same as `scp`'s and most editors' save-by-rename and is accepted.

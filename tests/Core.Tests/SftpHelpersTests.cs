@@ -313,3 +313,36 @@ public sealed class TmuxCurrentPathTests
         Assert.Equal(0, TmuxPersistence.NextAvailableSlot(Array.Empty<int>()));
     }
 }
+
+/// <summary>When an upload over an existing file may go to a temporary file renamed into place,
+/// and when it must write through the existing one instead.</summary>
+public sealed class SftpOverwriteTests
+{
+    [Fact]
+    public void ARegularFileWhoseNameResolvesToItselfIsReplacedByRename() =>
+        Assert.True(SftpSession.ReplacesByRename(true, false, "/home/u/notes.txt", "/home/u/notes.txt"));
+
+    [Fact]
+    public void ASymlinkIsWrittenThrough()
+    {
+        // SSH.NET's Get resolves the link on the server and lstats the target, so a link to a
+        // regular file reports a regular file at the target's path.
+        Assert.False(SftpSession.ReplacesByRename(true, false, "/home/u/dotfiles/bashrc", "/home/u/.bashrc"));
+        Assert.False(SftpSession.ReplacesByRename(true, true, "/home/u/.bashrc", "/home/u/.bashrc"));
+    }
+
+    [Fact]
+    public void AnythingElseOrAnUnresolvedFolderIsWrittenInPlace()
+    {
+        Assert.False(SftpSession.ReplacesByRename(false, false, "/dev/null", "/dev/null"));
+        Assert.False(SftpSession.ReplacesByRename(true, false, "/home/u/notes.txt", null));
+    }
+
+    [Fact]
+    public void OnlyAFileTheLoginWouldOwnTheSameWayIsReplacedByRename()
+    {
+        Assert.True(SftpSession.KeepsOwnership(1000, 1000, 1000, 1000));
+        Assert.False(SftpSession.KeepsOwnership(0, 0, 1000, 1000));
+        Assert.False(SftpSession.KeepsOwnership(1000, 50, 1000, 1000));
+    }
+}

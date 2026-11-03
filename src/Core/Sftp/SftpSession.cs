@@ -218,34 +218,25 @@ public sealed class SftpSession : IDisposable
     /// written in place and deleted if the upload fails. An existing regular file (which the
     /// user agreed to overwrite) is not truncated first: the upload goes to a temporary file
     /// beside it, takes its permissions, and is renamed over it once complete, so a dropped
-    /// connection leaves the old file intact. Where that cannot work (a symlink, which a
-    /// rename would replace rather than write through, or a folder that refuses new files)
-    /// the file is overwritten in place, as SFTP clients usually do.
+    /// connection leaves the old file intact. Where a rename would change more than the
+    /// contents the file is overwritten in place, as SFTP clients usually do: a symlink (a
+    /// rename replaces the link instead of writing through it), a file owned by another user
+    /// or group (a rename gives it the login's), and a folder that refuses new files or the
+    /// rename (a sticky /tmp).
     /// </summary>
     public void Upload(string localPath, string remotePath, Action<long>? progress, CancellationToken token)
     {
         var client = Require();
         using var local = File.OpenRead(localPath);
         var existing = TryGetFile(client, remotePath);
-        if (existing is { IsRegularFile: true, IsSymbolicLink: false }
-            && TryOpenTemporary(client, remotePath) is var (temporary, remote))
+        if (existing is not null
+            && ReplacesByRename(existing.IsRegularFile, existing.IsSymbolicLink, existing.FullName, LinkPath(client, remotePath))
+            && TryUploadBeside(client, local, existing, remotePath, progress, token))
         {
-            try
-            {
-                using (remote)
-                    CopyWithProgress(local, remote, progress, token);
-                token.ThrowIfCancellationRequested();
-                TryCopyPermissions(client, existing, temporary);
-            }
-            catch
-            {
-                TryDeleteRemote(client, temporary);
-                throw;
-            }
-            ReplaceRemote(client, temporary, remotePath);
             return;
         }
 
+        local.Position = 0;
         var created = existing is null;
         try
         {
@@ -259,6 +250,70 @@ public sealed class SftpSession : IDisposable
             TryDeleteRemote(client, remotePath);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Whether an existing file can be replaced by renaming a finished upload over it.
+    /// <paramref name="resolvedPath"/> is where the server resolved the path: SSH.NET's Get
+    /// asks the server's realpath, which follows a symlink, and then lstats the result, so a
+    /// link reads as the regular file it points at. <paramref name="linkPath"/> is the path
+    /// with only its folder resolved. When they differ the name is a link, and a rename would
+    /// replace the link rather than write through it.
+    /// </summary>
+    internal static bool ReplacesByRename(bool isRegularFile, bool isSymbolicLink, string resolvedPath, string? linkPath) =>
+        isRegularFile && !isSymbolicLink && linkPath is not null && string.Equals(resolvedPath, linkPath, StringComparison.Ordinal);
+
+    /// <summary>Whether the temporary file, created by the login, would leave the replaced file
+    /// with its owner and group. A rename keeps the new file's, and only root can give a file
+    /// away, so another user's file is written in place.</summary>
+    internal static bool KeepsOwnership(int existingUser, int existingGroup, int uploadUser, int uploadGroup) =>
+        existingUser == uploadUser && existingGroup == uploadGroup;
+
+    /// <summary>The path with its folder resolved by the server and its name as given: a
+    /// symlink's own path. Null when the folder cannot be resolved.</summary>
+    private static string? LinkPath(SftpClient client, string path)
+    {
+        try
+        {
+            return RemotePath.Join(client.Get(RemotePath.Parent(path)).FullName, RemotePath.FileName(path));
+        }
+        catch (Exception e) when (e is SshException or IOException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Uploads to a temporary file and renames it over <paramref name="remotePath"/>.
+    /// False, with nothing left behind and the target untouched, when that would change the
+    /// file's owner or group or the folder refuses the temporary file or the rename; the
+    /// caller then overwrites in place.</summary>
+    private static bool TryUploadBeside(
+        SftpClient client, Stream local, ISftpFile existing, string remotePath, Action<long>? progress, CancellationToken token)
+    {
+        if (TryOpenTemporary(client, remotePath) is not var (temporary, remote))
+            return false;
+        try
+        {
+            using (remote)
+            {
+                if (TryGetFile(client, temporary) is not { } created
+                    || !KeepsOwnership(existing.UserId, existing.GroupId, created.UserId, created.GroupId))
+                {
+                    remote.Dispose();
+                    TryDeleteRemote(client, temporary);
+                    return false;
+                }
+                CopyWithProgress(local, remote, progress, token);
+            }
+            token.ThrowIfCancellationRequested();
+            TryCopyPermissions(client, existing, temporary);
+        }
+        catch
+        {
+            TryDeleteRemote(client, temporary);
+            throw;
+        }
+        return ReplaceRemote(client, temporary, remotePath);
     }
 
     private static ISftpFile? TryGetFile(SftpClient client, string path)
@@ -291,16 +346,23 @@ public sealed class SftpSession : IDisposable
 
     /// <summary>Moves the finished upload over the target: one atomic posix-rename where the
     /// server offers it (OpenSSH does), else delete then rename, since plain SFTP rename
-    /// refuses to replace a file. Either way the upload is complete before the old file goes.</summary>
-    private static void ReplaceRemote(SftpClient client, string temporary, string remotePath)
+    /// refuses to replace a file. Either way the upload is complete before the old file goes.
+    /// False, with the upload removed and the old file untouched, when the server refuses to
+    /// replace it (a sticky folder, where only a file's owner may), so the caller writes in place.</summary>
+    private static bool ReplaceRemote(SftpClient client, string temporary, string remotePath)
     {
         try
         {
             client.RenameFile(temporary, remotePath, isPosix: true);
-            return;
+            return true;
         }
         catch (NotSupportedException)
         {
+        }
+        catch (SftpPermissionDeniedException)
+        {
+            TryDeleteRemote(client, temporary);
+            return false;
         }
         catch
         {
@@ -310,6 +372,11 @@ public sealed class SftpSession : IDisposable
         try
         {
             client.DeleteFile(remotePath);
+        }
+        catch (SftpPermissionDeniedException)
+        {
+            TryDeleteRemote(client, temporary);
+            return false;
         }
         catch
         {
@@ -326,6 +393,7 @@ public sealed class SftpSession : IDisposable
             throw new IOException(
                 $"{RemotePath.FileName(remotePath)} was uploaded but could not be renamed into place. It was kept as {temporary}.", e);
         }
+        return true;
     }
 
     private static void TryCopyPermissions(SftpClient client, ISftpFile original, string path)
