@@ -2,12 +2,61 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using Resesh.Core.Ssh;
+using Resesh.Core.Storage;
 
 namespace Resesh.Core.Tests;
 
 public sealed class KnownHostsStoreTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("known-hosts-tests").FullName;
+
+    [Fact]
+    public void Load_EndpointsDifferingOnlyInCaseAreMergedNotFatal()
+    {
+        // Early builds keyed entries case-sensitively after a reload, so both spellings exist.
+        var path = Path.Combine(_dir, "known_hosts.json");
+        byte[] blob = [0, 0, 0, 11, .. "ssh-ed25519"u8.ToArray(), 1, 2, 3];
+        var sha = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(blob)).TrimEnd('=');
+        File.WriteAllText(path, $$"""
+            {
+              "Host.example:22": { "KeyType": "ssh-ed25519", "Sha256": "{{sha}}" },
+              "host.example:22": { "KeyType": "ssh-ed25519", "Sha256": "{{sha}}", "PublicKeyBase64": "{{Convert.ToBase64String(blob)}}" },
+              "Other.example:22": { "KeyType": "ssh-ed25519", "Sha256": "first" },
+              "other.example:22": { "KeyType": "ssh-ed25519", "Sha256": "second" }
+            }
+            """);
+
+        var store = new KnownHostsStore(path);
+        store.Load();
+
+        Assert.Null(store.LoadError);
+        Assert.Equal(StoreLoadState.Loaded, store.LoadState);
+        Assert.Equal(2, store.Entries.Count);
+        // Same key: the copy with the public key blob wins.
+        Assert.NotNull(store.Lookup("HOST.example", 22)!.PublicKeyBase64);
+        // Different keys: the ordinally first spelling ("O" < "o") wins; the other host key
+        // gets the mismatch prompt, never silent trust.
+        Assert.Equal(HostKeyVerdict.Match, store.Check("other.example", 22, "ssh-ed25519", "first"));
+        Assert.Equal(HostKeyVerdict.Mismatch, store.Check("other.example", 22, "ssh-ed25519", "second"));
+    }
+
+    [Fact]
+    public void Load_NullEntryFallsBackToBackup()
+    {
+        var path = Path.Combine(_dir, "known_hosts.json");
+        var store = new KnownHostsStore(path);
+        store.Load();
+        store.Accept("kept.example", 22, "ssh-ed25519", "abc");
+        store.Accept("second.example", 22, "ssh-ed25519", "def");
+        File.WriteAllText(path, "{\"kept.example:22\": null}");
+
+        var reloaded = new KnownHostsStore(path);
+        reloaded.Load();
+
+        Assert.Null(reloaded.LoadError);
+        Assert.Equal(StoreLoadState.RecoveredFromBackup, reloaded.LoadState);
+        Assert.Equal(HostKeyVerdict.Match, reloaded.Check("kept.example", 22, "ssh-ed25519", "abc"));
+    }
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
@@ -16,6 +65,23 @@ public sealed class KnownHostsStoreTests : IDisposable
         var store = new KnownHostsStore(Path.Combine(_dir, "known_hosts.json"));
         store.Load();
         return store;
+    }
+
+    [Fact]
+    public void BracketedIpv6Host_IsTheSameServerAsTheBareAddress()
+    {
+        var store = NewStore();
+        store.Accept("[::1]", 2222, "ssh-ed25519", "abc");
+
+        Assert.Equal(HostKeyVerdict.Match, store.Check("::1", 2222, "ssh-ed25519", "abc"));
+    }
+
+    [Fact]
+    public void KnownHostsLine_DoesNotDoubleBracketAnIpv6Host()
+    {
+        var blob = HostKey("ssh-ed25519");
+        var entry = new KnownHostEntry("ssh-ed25519", Fingerprint(blob), Convert.ToBase64String(blob));
+        Assert.StartsWith("[::1]:2222 ", entry.ToKnownHostsLine("[::1]", 2222));
     }
 
     [Fact]

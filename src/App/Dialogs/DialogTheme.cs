@@ -124,5 +124,9 @@ internal static class DialogTheme
             dialog.Resources[key] = brush;
     }
 
+    /// <summary>Only for the palette brushes App.xaml declares outside its theme dictionaries,
+    /// which <see cref="ThemeVisualPalette.ApplyToAppResources"/> recolors in place: the app
+    /// lookup finds the one shared brush. A themed key would resolve against the startup
+    /// theme here; use <see cref="ThemeResources"/> for those.</summary>
     private static Brush Brush(string key) => (Brush)Application.Current.Resources[key];
 }

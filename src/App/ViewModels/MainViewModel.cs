@@ -293,11 +293,15 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>Removes and disposes the tab. Collapsing empty groups is the window's job.</summary>
-    public void CloseTab(TabViewModel tab)
+    /// <summary>Applies a Rename prompt's answer, trimmed. The prompt starts from the shown
+    /// header, so accepting it unchanged (or empty, or cancelled) changes nothing: setting the
+    /// override then would freeze a header that otherwise follows the session's name.</summary>
+    public static void RenameTab(TabViewModel tab, string? title)
     {
-        DetachTab(tab);
-        (tab.View as IDisposable)?.Dispose();
+        title = title?.Trim();
+        if (string.IsNullOrEmpty(title) || title == tab.Header)
+            return;
+        tab.TitleOverride = title;
     }
 
     public void CloseAllTabs()
@@ -484,6 +488,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ForgetDeleted(removed.Select(session => session.Id).ToList());
     }
 
+    /// <summary>Deletes folders and sessions in one store write, so a failed save deletes
+    /// none of them rather than the ones before the failure.</summary>
+    public void DeleteFoldersAndSessions(IReadOnlyList<(string Path, SessionKind Kind)> folders, IEnumerable<Guid> sessionIds)
+    {
+        var removed = _store.DeleteMany(folders, sessionIds);
+        foreach (var (path, kind) in folders)
+        {
+            ForgetExpansion(_expansion, path, kind);
+            ForgetExpansion(_filterExpansion, path, kind);
+        }
+        ForgetDeleted(removed.Select(session => session.Id).ToList());
+    }
+
     /// <summary>Moves the expansion state of a folder and every folder beneath it to their new paths.</summary>
     private static void MoveExpansion(Dictionary<string, bool> expansion, string oldPath, string newPath, SessionKind kind)
     {
@@ -658,17 +675,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         // A matching folder reveals its complete subtree. Otherwise only matching leaves
         // and their ancestors are projected into the filtered view.
+        // Each term may match the session or what it sits in, its folder path or the Local
+        // root's name, so "local pwsh" finds the pwsh profile as "prod web" finds web in prod.
         var matchingSshFolders = IsSearching
             ? MatchingFolders(_treeSshFolders, query)
             : [];
         var matchingLocalFolders = IsSearching
-            ? MatchingFolders(_treeLocalFolders, query)
+            ? MatchingFolders(_treeLocalFolders, query, TreeNodeViewModel.LocalRootName)
             : [];
-        var localRootMatches = IsSearching && "Local".Contains(query, StringComparison.OrdinalIgnoreCase);
+        var localRootMatches = IsSearching && SessionSearch.MatchesAll(query, TreeNodeViewModel.LocalRootName);
         var sessions = !IsSearching
             ? allSessions
-            : allSessions.Where(s => SessionSearch.Matches(s, query)
-                || (s.IsLocal && localRootMatches)
+            : allSessions.Where(s => SessionSearch.Matches(s, query, s.IsLocal ? TreeNodeViewModel.LocalRootName : null)
                 || IsUnderMatchingFolder(s, s.IsLocal ? matchingLocalFolders : matchingSshFolders)).ToList();
         MatchCount = sessions.Count;
         var localSessions = sessions.Where(s => s.IsLocal).ToList();
@@ -769,8 +787,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         TreeRebuilt?.Invoke();
     }
 
-    private static List<string> MatchingFolders(IEnumerable<string> folders, string query) =>
-        folders.Where(path => path.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+    private static List<string> MatchingFolders(IEnumerable<string> folders, string query, string? root = null) =>
+        folders.Where(path => SessionSearch.MatchesAll(query, path, root)).ToList();
 
     private static bool IsUnderMatchingFolder(Session session, IEnumerable<string> folders) =>
         folders.Any(folder => FolderPaths.IsSelfOrDescendant(session.FolderPath, folder));

@@ -104,7 +104,7 @@ internal static class SshConnectionFactory
             var reason = via.ForwardFailure ?? ex.Message;
             return new SshSessionException(
                 SshFailureKind.HostUnreachable,
-                $"The jump host could not reach {session.Host}:{session.Port}: {reason}", ex);
+                $"The jump host could not reach {session.Host}:{Models.SessionEndpoint.EffectivePort(session)}: {reason}", ex);
         }
         return Classify(ex);
     }
@@ -127,22 +127,20 @@ internal static class SshConnectionFactory
                 _ => ProxyTypes.Socks5,
             };
             // SSH.NET sends a login to the proxy only when it has a username.
-            var proxyUser = string.IsNullOrWhiteSpace(proxy.Username) ? null : proxy.Username.Trim();
-            info = new ConnectionInfo(session.Host, session.Port, session.Username, type,
+            var proxyUser = JumpRoute.ProxyUsername(session);
+            info = new ConnectionInfo(session.Host, Models.SessionEndpoint.EffectivePort(session), session.Username, type,
                 proxy.Host, proxy.Port, proxyUser, proxyUser is null ? null : proxyPassword ?? "", auth);
         }
         else
-            info = new ConnectionInfo(session.Host, session.Port, session.Username, auth);
+            info = new ConnectionInfo(session.Host, Models.SessionEndpoint.EffectivePort(session), session.Username, auth);
         info.Timeout = timeout;
         SshAlgorithmPolicy.Apply(info, session);
-        SshHostKeyTypes.PreferTrusted(info, knownHosts?.Lookup(session.Host, session.Port));
+        SshHostKeyTypes.PreferTrusted(info, knownHosts?.Lookup(session.Host, Models.SessionEndpoint.EffectivePort(session)));
         return info;
     }
 
-    /// <summary>The proxy a session connects through, or null when it has none, it is
-    /// incomplete, or a jump host reaches the session instead.</summary>
-    internal static Models.ProxySettings? ActiveProxy(Session session) =>
-        session.JumpHostId is null && session.Proxy is { Host.Length: > 0, Port: > 0 and <= 65535 } proxy ? proxy : null;
+    /// <inheritdoc cref="JumpRoute.ActiveProxy"/>
+    internal static Models.ProxySettings? ActiveProxy(Session session) => JumpRoute.ActiveProxy(session);
 
     /// <summary>Fast check that the first thing dialled answers, so an unreachable host or
     /// proxy fails in seconds. Behind a jump the check goes through its forwarded port.</summary>
@@ -165,7 +163,7 @@ internal static class SshConnectionFactory
             }
             return;
         }
-        PreflightTcp(session.Host, session.Port, timeout, cancellationToken);
+        PreflightTcp(session.Host, Models.SessionEndpoint.EffectivePort(session), timeout, cancellationToken);
     }
 
     /// <summary>What a host-key check decided, read after the connect attempt.</summary>
@@ -193,18 +191,18 @@ internal static class SshConnectionFactory
             cancellationToken.ThrowIfCancellationRequested();
             var sha256 = Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(e.HostKey)).TrimEnd('=');
             check.Fingerprint = $"{e.HostKeyName} SHA256:{sha256}";
-            var verdict = knownHosts.Check(session.Host, session.Port, e.HostKeyName, sha256);
+            var verdict = knownHosts.Check(session.Host, Models.SessionEndpoint.EffectivePort(session), e.HostKeyName, sha256);
             switch (verdict)
             {
                 case HostKeyVerdict.Match:
-                    knownHosts.BackfillHostKey(session.Host, session.Port, e.HostKeyName, e.HostKey);
+                    knownHosts.BackfillHostKey(session.Host, Models.SessionEndpoint.EffectivePort(session), e.HostKeyName, e.HostKey);
                     e.CanTrust = true;
                     break;
                 default:
                     // Unknown key, or a changed key (the dialog demands typed confirmation
                     // for the latter). Default-deny when no handler is wired.
                     var previous = verdict == HostKeyVerdict.Mismatch
-                        ? knownHosts.Lookup(session.Host, session.Port)
+                        ? knownHosts.Lookup(session.Host, Models.SessionEndpoint.EffectivePort(session))
                         : null;
                     if (previous is not null
                         && SshHostKeyTypes.TrustedTypeTurnedOff(client.ConnectionInfo, session, previous, e.HostKeyName) is { } turnedOff)
@@ -213,16 +211,16 @@ internal static class SshConnectionFactory
                         e.CanTrust = false;
                         break;
                     }
-                    var info = new HostKeyInfo(session.Host, session.Port, e.HostKeyName, sha256, verdict, previous);
+                    var info = new HostKeyInfo(session.Host, Models.SessionEndpoint.EffectivePort(session), e.HostKeyName, sha256, verdict, previous);
                     var trusted = decision?.Invoke(info) ?? false;
                     cancellationToken.ThrowIfCancellationRequested();
                     if (trusted)
-                        knownHosts.Accept(session.Host, session.Port, e.HostKeyName, sha256, e.HostKey);
+                        knownHosts.Accept(session.Host, Models.SessionEndpoint.EffectivePort(session), e.HostKeyName, sha256, e.HostKey);
                     else
                         check.Failure = verdict == HostKeyVerdict.Mismatch
                             ? new SshSessionException(
                                 SshFailureKind.HostKeyMismatch,
-                                $"Host key for {session.Host}:{session.Port} has CHANGED (now {e.HostKeyName} SHA256:{sha256}). " +
+                                $"Host key for {session.Host}:{Models.SessionEndpoint.EffectivePort(session)} has CHANGED (now {e.HostKeyName} SHA256:{sha256}). " +
                                 "This may indicate a man-in-the-middle attack. Connection refused.")
                             : new SshSessionException(
                                 SshFailureKind.HostKeyRejected, "Host key was not accepted.");
@@ -263,12 +261,12 @@ internal static class SshConnectionFactory
         catch (OperationCanceledException ex) when (!reached && !cancellationToken.IsCancellationRequested)
         {
             throw new SshSessionException(
-                SshFailureKind.HostUnreachable, $"Could not reach {session.Host}:{session.Port} (connection timed out).", ex);
+                SshFailureKind.HostUnreachable, $"Could not reach {session.Host}:{Models.SessionEndpoint.EffectivePort(session)} (connection timed out).", ex);
         }
         catch (System.Net.Sockets.SocketException ex) when (!reached)
         {
             throw new SshSessionException(
-                SshFailureKind.HostUnreachable, $"Could not reach {session.Host}:{session.Port}: {ex.Message}", ex);
+                SshFailureKind.HostUnreachable, $"Could not reach {session.Host}:{Models.SessionEndpoint.EffectivePort(session)}: {ex.Message}", ex);
         }
         finally
         {

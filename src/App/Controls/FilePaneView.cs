@@ -171,13 +171,14 @@ public sealed partial class FilePaneView : UserControl, IDisposable
         Grid.SetRow(_statusText, 3);
         root.Children.Add(_statusText);
 
-        Content = new Border
+        var frame = new Border
         {
             Child = root,
             BorderThickness = new Thickness(1, 0, 0, 0),
-            BorderBrush = ThemeBrush("DividerStrokeColorDefaultBrush"),
-            Background = ThemeBrush("LayerFillColorDefaultBrush"),
         };
+        ThemeResources.SetBrush(frame, Border.BorderBrushProperty, "DividerStrokeColorDefaultBrush");
+        ThemeResources.SetBrush(frame, Border.BackgroundProperty, "LayerFillColorDefaultBrush");
+        Content = frame;
 
         BuildMenu();
 
@@ -203,11 +204,6 @@ public sealed partial class FilePaneView : UserControl, IDisposable
                 _ = NavigateAsync(null);
         };
     }
-
-    private static Brush ThemeBrush(string key) =>
-        Application.Current.Resources.TryGetValue(key, out var value) && value is Brush brush
-            ? brush
-            : new SolidColorBrush(Windows.UI.Color.FromArgb(0x33, 0x80, 0x80, 0x80));
 
     private UIElement BuildToolbar()
     {
@@ -457,8 +453,8 @@ public sealed partial class FilePaneView : UserControl, IDisposable
             else
             {
                 var sftp = await EnsureConnectedAsync(token);
-                target = RemotePath.ResolveShellPath(navigation.Path, sftp.HomeDirectory) ??
-                    throw new InvalidOperationException("The terminal did not report an absolute remote path.");
+                target = RemotePath.ResolveShellPath(navigation.Path, sftp.HomeDirectory, _currentPath) ??
+                    throw new InvalidOperationException("Paths starting with ~user aren't supported. Type the full path.");
                 entries = await Task.Run(() => sftp.ListDirectory(target), token).WaitAsync(token);
             }
             _currentPath = target;
@@ -707,9 +703,8 @@ public sealed partial class FilePaneView : UserControl, IDisposable
     {
         _statusText.Text = message;
         _statusText.Opacity = isError ? 1.0 : 0.55;
-        _statusText.Foreground = isError
-            ? ThemeBrush("SystemFillColorCriticalBrush")
-            : ThemeBrush("TextFillColorPrimaryBrush");
+        ThemeResources.SetBrush(_statusText, TextBlock.ForegroundProperty,
+            isError ? "SystemFillColorCriticalBrush" : "TextFillColorPrimaryBrush");
         _statusText.Visibility = Visibility.Visible;
     }
 
@@ -854,6 +849,7 @@ public sealed partial class FilePaneView : UserControl, IDisposable
             // Plan the full file list up front (recursing into directories) for stable progress.
             var files = new List<(RemoteFileEntry Entry, string Local)>();
             var openTargets = new List<string>();
+            var writtenPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             await Task.Run(() =>
             {
                 var plannedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -884,16 +880,22 @@ public sealed partial class FilePaneView : UserControl, IDisposable
                     index++;
                     Directory.CreateDirectory(Path.GetDirectoryName(local)!);
                     ReportTransfer("Downloading", entry.Name, index, files.Count, 0, entry.Size);
-                    sftp.Download(
+                    // Download may pick "name (2).ext" when something appeared at the planned
+                    // path since planning; open what was actually written.
+                    var written = sftp.Download(
                         entry.FullPath, local,
                         done => ReportTransfer("Downloading", entry.Name, index, files.Count, done, entry.Size),
                         token);
+                    writtenPaths[local] = written;
                 }
             }, token);
 
             ShowStatus($"Downloaded {files.Count} file{(files.Count == 1 ? "" : "s")} to {targetDir}", isError: false);
-            foreach (var path in openTargets)
+            foreach (var planned in openTargets)
+            {
+                var path = writtenPaths.GetValueOrDefault(planned, planned);
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+            }
         }, refreshAfter: false);
     }
 
@@ -948,24 +950,29 @@ public sealed partial class FilePaneView : UserControl, IDisposable
             await NavigateAsync(_currentPath);
     }
 
+    /// <summary>Takes the trimmed name. Local names follow the download rule, so trailing dots
+    /// and spaces and device names (CON, COM1) are refused here rather than by Windows.</summary>
     private bool IsInvalidName(string name) =>
-        _localFiles is null ? name.Contains('/') : name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0;
+        _localFiles is null ? !RemotePath.IsValidName(name) : !WindowsDownloadPath.IsValidName(name);
 
     // ---- rename / delete / mkdir / chmod ----
+
+    private string InvalidNameMessage => _localFiles is null
+        ? "That name can't be used: it is \".\" or \"..\", or contains '/'."
+        : "That name can't be used on Windows: it contains a character such as \\ / : * ? \" < > |, ends in a dot or space, or is a device name like CON.";
 
     private async Task RenameAsync()
     {
         if (SelectedEntries() is not [{ } entry])
             return;
-        var newName = await PromptAsync("Rename", "New name", entry.Name);
-        if (string.IsNullOrWhiteSpace(newName) || newName == entry.Name)
+        var trimmed = (await PromptAsync("Rename", "New name", entry.Name))?.Trim();
+        if (string.IsNullOrEmpty(trimmed) || trimmed == entry.Name)
             return;
-        if (IsInvalidName(newName))
+        if (IsInvalidName(trimmed))
         {
-            ShowStatus("The name contains an invalid character.", isError: true);
+            ShowStatus(InvalidNameMessage, isError: true);
             return;
         }
-        var trimmed = newName.Trim();
         if (_localFiles is not null)
         {
             await RunLocalOperationAsync("Rename failed", files =>
@@ -1009,15 +1016,14 @@ public sealed partial class FilePaneView : UserControl, IDisposable
 
     private async Task CreateFolderAsync()
     {
-        var name = await PromptAsync("New Folder", "Folder name", "");
-        if (string.IsNullOrWhiteSpace(name))
+        var trimmed = (await PromptAsync("New Folder", "Folder name", ""))?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
             return;
-        if (IsInvalidName(name))
+        if (IsInvalidName(trimmed))
         {
-            ShowStatus("The name contains an invalid character.", isError: true);
+            ShowStatus(InvalidNameMessage, isError: true);
             return;
         }
-        var trimmed = name.Trim();
         if (_localFiles is not null)
         {
             await RunLocalOperationAsync("Create folder failed", files =>

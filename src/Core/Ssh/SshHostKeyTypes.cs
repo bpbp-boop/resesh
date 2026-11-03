@@ -24,6 +24,21 @@ public static class SshHostKeyTypes
     public static bool SameKey(string algorithm, string other) =>
         string.Equals(Family(algorithm), Family(other), StringComparison.Ordinal);
 
+    /// <summary>The host key algorithms an OpenSSH client can use, from the key types its
+    /// <c>ssh -Q key</c> lists. Releases older than <c>ssh -Q key-sig</c> list only key types,
+    /// but have signed with SHA-2 for RSA since 7.2, so <c>ssh-rsa</c> (and its certificate)
+    /// implies the <c>rsa-sha2-*</c> algorithms. Without them an RSA host would be offered only
+    /// <c>ssh-rsa</c>, which OpenSSH 8.8 and later servers refuse, or nothing when it is off.</summary>
+    public static IReadOnlyCollection<string> AlgorithmsForKeyTypes(IEnumerable<string> keyTypes)
+    {
+        var names = new HashSet<string>(keyTypes, StringComparer.Ordinal);
+        if (names.Contains("ssh-rsa"))
+            names.UnionWith(["rsa-sha2-256", "rsa-sha2-512"]);
+        if (names.Contains(RsaCert))
+            names.UnionWith(["rsa-sha2-256-cert-v01@openssh.com", "rsa-sha2-512-cert-v01@openssh.com"]);
+        return names;
+    }
+
     /// <summary>"RSA", "Ed25519", "ECDSA P-256", with " certificate" for certificates.</summary>
     public static string Describe(string algorithm)
     {

@@ -6,14 +6,34 @@ namespace Resesh.Core.Sftp;
 /// </summary>
 public static class RemotePath
 {
-    /// <summary>Collapses duplicate slashes and trims the trailing slash (except for root).</summary>
+    /// <summary>Collapses duplicate slashes, "." and ".." (lexically, as POSIX "cd -L" does:
+    /// ".." at root stays at root) and trims the trailing slash (except for root).</summary>
     public static string Normalize(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
             return "/";
-        var parts = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        return parts.Length == 0 ? "/" : "/" + string.Join('/', parts);
+        var parts = new List<string>();
+        foreach (var part in path.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (part == ".")
+                continue;
+            if (part == "..")
+            {
+                if (parts.Count > 0)
+                    parts.RemoveAt(parts.Count - 1);
+                continue;
+            }
+            parts.Add(part);
+        }
+        return parts.Count == 0 ? "/" : "/" + string.Join('/', parts);
     }
+
+    /// <summary>A directory the remote side reported (OSC 7, the /proc probe, tmux, the
+    /// session agent, shell integration), or null when it is not one to act on: not
+    /// absolute, or holding any control character, C1 included, which could steer the
+    /// terminal when the path is shown.</summary>
+    public static string? FromUntrusted(string? path) =>
+        string.IsNullOrEmpty(path) || !path.StartsWith('/') || path.Any(char.IsControl) ? null : Normalize(path);
 
     public static string Join(string directory, string name)
     {
@@ -21,9 +41,10 @@ public static class RemotePath
         return dir == "/" ? "/" + name : dir + "/" + name;
     }
 
-    /// <summary>Resolves an absolute shell path or a path below '~' against the SFTP home.
-    /// Other relative text is not a safe remote directory and returns null.</summary>
-    public static string? ResolveShellPath(string? path, string homeDirectory)
+    /// <summary>Resolves path box or shell text: absolute, "~" or below it (against the SFTP
+    /// home), or relative to <paramref name="currentDirectory"/> (home when there is none
+    /// yet), as a shell's cd would. Null for "~user", whose home only the server knows.</summary>
+    public static string? ResolveShellPath(string? path, string homeDirectory, string? currentDirectory = null)
     {
         if (string.IsNullOrWhiteSpace(path))
             return Normalize(homeDirectory);
@@ -32,8 +53,12 @@ public static class RemotePath
         if (trimmed == "~")
             return Normalize(homeDirectory);
         if (trimmed.StartsWith("~/", StringComparison.Ordinal))
-            return Join(homeDirectory, trimmed[2..]);
-        return trimmed.StartsWith('/') ? Normalize(trimmed) : null;
+            return Normalize(Join(homeDirectory, trimmed[2..]));
+        if (trimmed.StartsWith('~'))
+            return null;
+        if (trimmed.StartsWith('/'))
+            return Normalize(trimmed);
+        return Normalize(Join(currentDirectory is ['/', ..] ? currentDirectory : homeDirectory, trimmed));
     }
 
     /// <summary>Parent directory; the parent of root is root.</summary>
@@ -45,6 +70,11 @@ public static class RemotePath
         var cut = normalized.LastIndexOf('/');
         return cut == 0 ? "/" : normalized[..cut];
     }
+
+    /// <summary>A name a new or renamed remote entry can take: POSIX forbids only '/' and NUL,
+    /// but "." and ".." name the folder itself and its parent.</summary>
+    public static bool IsValidName(string name) =>
+        name.Length > 0 && name is not "." and not ".." && name.IndexOfAny(['/', '\0']) < 0;
 
     public static string FileName(string path)
     {

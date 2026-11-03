@@ -47,8 +47,18 @@ public sealed class IdentityStore
     {
         lock (_gate)
         {
-            _identities = _file.Load(Read)?.Identities ?? [];
-            LoadWarning = _file.Warning;
+            try
+            {
+                _identities = _file.Load(Read)?.Identities ?? [];
+                LoadWarning = _file.Warning;
+            }
+            catch
+            {
+                // Bad data is handled by the load itself; a throw here is a bug, and
+                // a half-filled or empty store must not replace the file: refuse saves.
+                _file.RefuseSaves();
+                throw;
+            }
         }
     }
 
@@ -172,8 +182,30 @@ public sealed class IdentityStore
         _identities = candidate;
     }
 
-    private static StoreData? Read(string path) =>
-        JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<StoreData>());
+    private static StoreData? Read(string path)
+    {
+        var data = JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<StoreData>());
+        // Inside the loader, so a bad file falls back to .bak instead of failing later.
+        Validate(data?.Identities);
+        return data;
+    }
+
+    /// <summary>The one check for stored identities, used by the loader and by backup reading:
+    /// no null entries or text, which naming, login resolution and the editor dereference.</summary>
+    internal static void Validate(IEnumerable<Identity?>? identities)
+    {
+        if (identities?.Any(identity => identity is null || identity.Name is null
+                || identity.Username is null || identity.Notes is null) == true)
+            throw new InvalidDataException("The identity list contains an invalid identity.");
+    }
+
+    /// <summary>Throws unless a save may replace the file now; lets an import refuse before it
+    /// changes anything.</summary>
+    internal void EnsureWritable()
+    {
+        lock (_gate)
+            _file.EnsureWritable();
+    }
 
     internal sealed class StoreData
     {

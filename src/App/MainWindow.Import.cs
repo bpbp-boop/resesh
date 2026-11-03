@@ -116,7 +116,8 @@ public sealed partial class MainWindow
             App.SshKeys,
             App.Credentials,
             options,
-            App.Identities));
+            App.Identities,
+            App.Workspaces));
 
         if (!_windowClosed)
             await MessageDialog.ShowMessageAsync(Root.XamlRoot, "Backup complete", options.IncludeSecrets

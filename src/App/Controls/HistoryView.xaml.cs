@@ -128,7 +128,7 @@ public sealed partial class HistoryView : UserControl
 
     /// <summary>Types the command at the active terminal's prompt. Returns false when no
     /// connected terminal can take it.</summary>
-    public Func<CommandHistoryEntry, bool>? InsertCommand { get; set; }
+    public Func<CommandHistoryEntry, Task<bool>>? InsertCommand { get; set; }
 
     /// <summary>Whether a connected terminal tab is active right now.</summary>
     public Func<bool>? CanInsert { get; set; }
@@ -499,13 +499,7 @@ public sealed partial class HistoryView : UserControl
         return date.ToString(format, CultureInfo.CurrentCulture);
     }
 
-    internal static string FormatDuration(TimeSpan duration) => duration.TotalSeconds switch
-    {
-        < 1 => $"{duration.TotalMilliseconds:0} ms",
-        < 60 => $"{duration.TotalSeconds:0.#} s",
-        < 3600 => $"{(int)duration.TotalMinutes} min {duration.Seconds} s",
-        _ => $"{(int)duration.TotalHours} h {duration.Minutes} min",
-    };
+    internal static string FormatDuration(TimeSpan duration) => ElapsedText.Short(duration);
 
     // ---- selection and detail ----
 
@@ -748,11 +742,13 @@ public sealed partial class HistoryView : UserControl
 
     // ---- actions ----
 
-    private void InsertSelected()
+    /// <summary>Closes only once the command is inserted: a confirmation the user cancels
+    /// leaves the history open where it was.</summary>
+    private async Task InsertSelectedAsync()
     {
         if (_selected is not { } entry || InsertCommand is null)
             return;
-        if (InsertCommand(entry))
+        if (await InsertCommand(entry) && IsOpen)
             CloseRequested?.Invoke();
     }
 
@@ -764,7 +760,7 @@ public sealed partial class HistoryView : UserControl
         OpenSession(entry);
     }
 
-    private void InsertButton_Click(object sender, RoutedEventArgs e) => InsertSelected();
+    private void InsertButton_Click(object sender, RoutedEventArgs e) => _ = InsertSelectedAsync();
 
     private void OpenSessionButton_Click(object sender, RoutedEventArgs e) => OpenSelectedSession();
 
@@ -783,20 +779,7 @@ public sealed partial class HistoryView : UserControl
             ShowCopied(CopyOutputText);
     }
 
-    private static bool CopyText(string text)
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(text);
-            Clipboard.SetContent(package);
-            return true;
-        }
-        catch (Exception exception) when (exception is System.Runtime.InteropServices.COMException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
+    private static bool CopyText(string text) => Resesh.Terminal.TextClipboard.TryCopy(text);
 
     private void ShowCopied(TextBlock? label)
     {
@@ -953,7 +936,7 @@ public sealed partial class HistoryView : UserControl
                 MoveSelection(chord == 0 ? -10 : 10);
                 break;
             case ShortcutIds.HistoryInsert when inNavigator:
-                InsertSelected();
+                _ = InsertSelectedAsync();
                 break;
             case ShortcutIds.HistoryOpenSession when inNavigator:
                 OpenSelectedSession();

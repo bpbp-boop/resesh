@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Resesh.Core.Models;
 using Resesh.Core.Storage;
 
 namespace Resesh.Core.Ssh;
@@ -18,6 +19,8 @@ public sealed record KnownHostEntry(string KeyType, string Sha256, string? Publi
     /// <summary>OpenSSH uses the blob's key type, not the negotiated signature algorithm.</summary>
     public string ToKnownHostsLine(string host, int port)
     {
+        // Older sessions may hold an IPv6 host in brackets; OpenSSH wants them only around host:port.
+        host = HostPort.Unbracket(host);
         if (string.IsNullOrEmpty(PublicKeyBase64))
             throw new IOException("No public host key is stored. Connect the terminal first, then open Explorer again.");
         if (string.IsNullOrWhiteSpace(host) || host.Any(c => char.IsWhiteSpace(c) || c is ',' or '*' or '?' or '!' or '|'))
@@ -82,46 +85,57 @@ public sealed class KnownHostsStore
     {
         lock (_gate)
         {
-            LoadWarning = null;
-            LoadError = null;
-            _entries = new(StringComparer.OrdinalIgnoreCase);
-            var primary = AtomicFile.TryRead(_path, Read, out var primaryOutcome, out var primaryError);
-            if (primary is not null)
+            try
             {
-                _entries = primary;
-                _file.SetLoaded(StoreLoadState.Loaded, null);
-                return;
-            }
-
-            var backup = AtomicFile.TryRead(_path + ".bak", Read, out var backupOutcome, out var backupError);
-            if (backup is null)
-            {
-                if (primaryOutcome == FileReadOutcome.Missing && backupOutcome == FileReadOutcome.Missing)
+                LoadWarning = null;
+                LoadError = null;
+                _entries = new(StringComparer.OrdinalIgnoreCase);
+                var primary = AtomicFile.TryRead(_path, Read, out var primaryOutcome, out var primaryError);
+                if (primary is not null)
                 {
+                    _entries = primary;
                     _file.SetLoaded(StoreLoadState.Loaded, null);
                     return;
                 }
-                LoadError = $"Accepted host keys could not be loaded. SSH is blocked. Restore {_path} from a trusted backup and restart resesh. {primaryError ?? backupError}";
-                _file.SetLoaded(StoreLoadState.Unreadable, null);
-                return;
-            }
 
-            _entries = backup;
-            if (primaryOutcome == FileReadOutcome.Missing)
-            {
-                LoadWarning = "Accepted host keys were recovered from the backup file.";
-                _file.SetLoaded(StoreLoadState.RecoveredFromBackup, LoadWarning);
+                var backup = AtomicFile.TryRead(_path + ".bak", Read, out var backupOutcome, out var backupError);
+                if (backup is null)
+                {
+                    if (primaryOutcome == FileReadOutcome.Missing && backupOutcome == FileReadOutcome.Missing)
+                    {
+                        _file.SetLoaded(StoreLoadState.Loaded, null);
+                        return;
+                    }
+                    LoadError = $"Accepted host keys could not be loaded. SSH is blocked. Restore {_path} from a trusted backup and restart resesh. {primaryError ?? backupError}";
+                    _file.SetLoaded(StoreLoadState.Unreadable, null);
+                    return;
+                }
+
+                _entries = backup;
+                if (primaryOutcome == FileReadOutcome.Missing)
+                {
+                    LoadWarning = "Accepted host keys were recovered from the backup file.";
+                    _file.SetLoaded(StoreLoadState.RecoveredFromBackup, LoadWarning);
+                }
+                else if (AtomicFile.TryQuarantine(_path) is { } kept)
+                {
+                    LoadWarning = $"Accepted host keys were recovered from the backup file. The unreadable file was kept as {kept}.";
+                    _file.SetLoaded(StoreLoadState.RecoveredFromBackup, LoadWarning);
+                }
+                else
+                {
+                    LoadWarning = $"Accepted host keys could not be read from {_path} ({primaryError}). The backup copy is in use, "
+                        + "but newly accepted host keys will not be saved. Close any program that may be holding the file and restart resesh.";
+                    _file.SetLoaded(StoreLoadState.Unreadable, LoadWarning);
+                }
             }
-            else if (AtomicFile.TryQuarantine(_path) is { } kept)
+            catch
             {
-                LoadWarning = $"Accepted host keys were recovered from the backup file. The unreadable file was kept as {kept}.";
-                _file.SetLoaded(StoreLoadState.RecoveredFromBackup, LoadWarning);
-            }
-            else
-            {
-                LoadWarning = $"Accepted host keys could not be read from {_path} ({primaryError}). The backup copy is in use, "
-                    + "but newly accepted host keys will not be saved. Close any program that may be holding the file and restart resesh.";
-                _file.SetLoaded(StoreLoadState.Unreadable, LoadWarning);
+                // Bad data is handled by the load itself; a throw here is a bug, and
+                // a half-filled or empty store must not replace the file: refuse saves.
+                _file.RefuseSaves();
+                LoadError ??= $"Accepted host keys could not be loaded. SSH is blocked. Restart resesh, and restore {_path} from a trusted backup if this happens again.";
+                throw;
             }
         }
     }
@@ -235,15 +249,48 @@ public sealed class KnownHostsStore
         _file.EnsureLoaded();
     }
 
-    private static Dictionary<string, KnownHostEntry> Read(string path)
+    private static Dictionary<string, KnownHostEntry> Read(string path) =>
+        Validate(JsonSerializer.Deserialize(
+            File.ReadAllText(path), JsonOptions.Info<Dictionary<string, KnownHostEntry>>())
+            ?? throw new InvalidDataException("The host-key file is empty."));
+
+    /// <summary>
+    /// The one check for accepted host keys, used by the loader and by backup reading. Returns
+    /// them keyed case-insensitively, as lookups are. Endpoints that differ only in case (the
+    /// first builds keyed them case-sensitively after a reload) are merged, not rejected, so
+    /// such a file never blocks SSH: the copy carrying the public key blob wins if both hold
+    /// the same key, else the ordinally first spelling. Both were accepted by the user, and a
+    /// connection to the host that offers the other key still gets the mismatch warning.
+    /// </summary>
+    internal static Dictionary<string, KnownHostEntry> Validate(IReadOnlyDictionary<string, KnownHostEntry> entries)
     {
-        var entries = JsonSerializer.Deserialize(
-            File.ReadAllText(path), JsonOptions.Info<Dictionary<string, KnownHostEntry>>()) ?? throw new JsonException("The host-key file is empty.");
-        if (entries.Any(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null
-            || string.IsNullOrWhiteSpace(pair.Value.KeyType) || string.IsNullOrWhiteSpace(pair.Value.Sha256)))
-            throw new JsonException("The host-key file contains an invalid entry.");
-        return new(entries, StringComparer.OrdinalIgnoreCase);
+        var merged = new Dictionary<string, KnownHostEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, stored) in entries.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            KnownHostEntry? value = stored; // JSON can hold null whatever the type says
+            if (string.IsNullOrWhiteSpace(key) || value is null
+                || string.IsNullOrWhiteSpace(value.KeyType) || string.IsNullOrWhiteSpace(value.Sha256))
+                throw new InvalidDataException("The host-key data contains an invalid entry.");
+            if (!merged.TryGetValue(key, out var existing))
+                merged[key] = value;
+            else if (existing.Sha256 == value.Sha256 && string.IsNullOrEmpty(existing.PublicKeyBase64)
+                && !string.IsNullOrEmpty(value.PublicKeyBase64))
+                merged[key] = value;
+        }
+        return merged;
     }
 
-    private static string Key(string host, int port) => $"{host}:{port}";
+    /// <summary>Throws unless a save may replace the file now (and SSH is not blocked by a file
+    /// that could not be loaded); lets an import refuse before it changes anything.</summary>
+    internal void EnsureWritable()
+    {
+        lock (_gate)
+        {
+            EnsureAvailable();
+            _file.EnsureWritable();
+        }
+    }
+
+    /// <summary>One key per server: "[::1]" saved by older quick connects is the same host as "::1".</summary>
+    private static string Key(string host, int port) => $"{HostPort.Unbracket(host)}:{port}";
 }

@@ -109,13 +109,14 @@ public sealed partial class TunnelForm : UserControl
         label.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
         if (!string.IsNullOrEmpty(detail))
         {
-            label.Children.Add(new TextBlock
+            var caption = new TextBlock
             {
                 Text = detail,
                 TextWrapping = TextWrapping.Wrap,
                 Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-            });
+            };
+            ThemeResources.SetBrush(caption, TextBlock.ForegroundProperty, "TextFillColorSecondaryBrush");
+            label.Children.Add(caption);
         }
         row.Children.Add(label);
         var button = new Button { Content = action, VerticalAlignment = VerticalAlignment.Center };

@@ -25,14 +25,15 @@ public sealed partial class MainWindow
 
     public void ToggleZoom(TabViewModel tab)
     {
+        // A toggle is always the user's (a key, the zoom button, a menu).
         if (_zoom is null)
-            ZoomTab(tab);
+            ZoomTab(tab, userInitiated: true);
         else
-            Unzoom();
+            Unzoom(userInitiated: true);
     }
 
     /// <summary>Gathers every pane's tabs into the tab's own pane and shows it alone.</summary>
-    public void ZoomTab(TabViewModel tab)
+    public void ZoomTab(TabViewModel tab, bool userInitiated = false)
     {
         if (_zoom is not null || !ViewModel.IsSplit || !ViewModel.AllTabs.Contains(tab))
             return;
@@ -61,11 +62,11 @@ public sealed partial class MainWindow
         _zoom = new ZoomState(target, indices[target], snapshot, layout);
         ViewModel.IsZoomed = true;
 
-        FinishLayoutChange(target, tab);
+        FinishLayoutChange(target, tab, userInitiated);
     }
 
     /// <summary>Puts every tab back into the pane it came from, at the sizes it had.</summary>
-    public void Unzoom()
+    public void Unzoom(bool userInitiated = false)
     {
         if (_zoom is not { } zoom)
             return;
@@ -90,7 +91,7 @@ public sealed partial class MainWindow
                     PlaceTab(tabs[position], zoomed, position);
                 zoomed.SelectedTab = restore.Selected[surviving[0]];
             }
-            FinishLayoutChange(zoomed, zoomed.SelectedTab);
+            FinishLayoutChange(zoomed, zoomed.SelectedTab, userInitiated);
             return;
         }
 
@@ -125,7 +126,7 @@ public sealed partial class MainWindow
         RebuildWorkspaceSplitLayout([.. surviving.Select(index => groupFor[index])], layout);
 
         var focused = groupFor.GetValueOrDefault(restore.FocusedGroup) ?? groupFor[surviving[0]];
-        FinishLayoutChange(focused, focused.SelectedTab);
+        FinishLayoutChange(focused, focused.SelectedTab, userInitiated);
     }
 
     /// <summary>Called before anything rebuilds the panes (a split, a workspace): the
@@ -180,16 +181,17 @@ public sealed partial class MainWindow
 
     /// <summary>Lays out the panes again and focuses one. Panes created for the change select
     /// their tab once they load, which would focus them; <see cref="FocusGroup"/> takes focus
-    /// back after they settle, unless the caller chooses another pane first.</summary>
-    private void FinishLayoutChange(TabGroupViewModel focused, TabViewModel? tab)
+    /// back after they settle, unless the caller chooses another pane first. A change the user
+    /// asked for (<paramref name="userInitiated"/>) focuses the terminal even from search.</summary>
+    private void FinishLayoutChange(TabGroupViewModel focused, TabViewModel? tab, bool userInitiated = false)
     {
         SyncGroupOrder();
         ViewModel.OnGroupsChanged();
         RebuildGroupLayout();
-        FocusGroup(focused);
+        FocusGroup(focused, userInitiated);
         ViewModel.SyncGroupFocus();
         if (tab is not null)
-            FocusTabContent(tab);
+            FocusTabContent(tab, userInitiated);
     }
 
     private void RefreshTabGroupActions()

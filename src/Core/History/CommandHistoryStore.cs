@@ -678,12 +678,15 @@ public sealed class CommandHistoryStore
                 CultureInfo.InvariantCulture, DateTimeStyles.None, out _));
 
     /// <summary>Moves monthly JSON-lines files into the database, then deletes them. Damaged
-    /// lines (a torn write) are skipped; ids make a repeated import harmless.</summary>
+    /// lines (a torn write) are skipped; ids make a repeated import harmless. A file with a
+    /// line that did not parse is copied aside first, so whatever it held is not lost with
+    /// it; one that cannot be copied aside is kept, and imported again next time.</summary>
     private void ImportLegacyFiles(SqliteConnection connection)
     {
         var files = LegacyFiles().ToList();
         if (files.Count == 0)
             return;
+        var damaged = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         using (var transaction = connection.BeginTransaction())
         using (var command = connection.CreateCommand())
@@ -702,6 +705,7 @@ public sealed class CommandHistoryStore
                     }
                     catch (JsonException)
                     {
+                        damaged.Add(file);
                         continue;
                     }
                     if (entry is { Command.Length: > 0 })
@@ -711,6 +715,9 @@ public sealed class CommandHistoryStore
             transaction.Commit();
         }
         foreach (var file in files)
-            File.Delete(file);
+        {
+            if (!damaged.Contains(file) || AtomicFile.TryQuarantine(file) is not null)
+                File.Delete(file);
+        }
     }
 }

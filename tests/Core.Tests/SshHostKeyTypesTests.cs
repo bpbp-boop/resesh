@@ -83,6 +83,21 @@ public sealed class SshHostKeyTypesTests : IDisposable
     }
 
     [Fact]
+    public void UnsetPort_DialsAndTrustsTheDefaultPort()
+    {
+        // The tree shows an unset port as the default, so the connection dials it and checks
+        // the keys trusted for it, rather than dialling port 0.
+        var store = NewStore();
+        store.Accept("edge.example", 22, "ecdsa-sha2-nistp256", "abc");
+        var info = Info(Host() with { Port = 0 }, store);
+
+        Assert.Equal(22, info.Port);
+        Assert.Equal("ecdsa-sha2-nistp256", info.HostKeyAlgorithms.Keys.First());
+        Assert.Equal(23, SessionEndpoint.EffectivePort(new Session { Kind = SessionKind.Telnet, Port = -1 }));
+        Assert.Equal(2222, SessionEndpoint.EffectivePort(Host() with { Port = 2222 }));
+    }
+
+    [Fact]
     public void Negotiated_MarksLegacyAndFoldsAeadMacs()
     {
         var modern = new SshNegotiated("curve25519-sha256", "aes256-gcm@openssh.com", "aes256-gcm@openssh.com",

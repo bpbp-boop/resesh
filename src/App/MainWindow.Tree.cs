@@ -66,10 +66,10 @@ public sealed partial class MainWindow
     }
 
     /// <summary>Gutters stay neutral; pane focus is drawn by <see cref="UpdatePaneFocusFrame"/>.</summary>
-    private Microsoft.UI.Xaml.Media.Brush SplitterBrush(Border line, bool active)
+    private Microsoft.UI.Xaml.Media.Brush? SplitterBrush(Border line, bool active)
     {
         if (active)
-            return (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSplitterHoverBrush"];
+            return ThemeResources.Brush(line, "SessionSplitterHoverBrush");
 
         return new Microsoft.UI.Xaml.Media.SolidColorBrush(
             _paneGutters.Contains(line) ? _themePalette.PaneBorder : _themePalette.Divider);
@@ -337,7 +337,7 @@ public sealed partial class MainWindow
     }
 
     private void FilterBox_GotFocus(object sender, RoutedEventArgs e) =>
-        FilterFieldBorder.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSplitterHoverBrush"];
+        FilterFieldBorder.BorderBrush = ThemeResources.Brush(FilterFieldBorder, "SessionSplitterHoverBrush");
 
     private void FilterBox_LostFocus(object sender, RoutedEventArgs e) =>
         FilterFieldBorder.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(_themePalette.Divider);

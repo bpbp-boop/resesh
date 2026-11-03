@@ -18,7 +18,7 @@ public interface ITabGroupHost
     /// <summary>The window is minimized or hidden, so nothing in it is on screen.</summary>
     bool IsWindowHidden { get; }
     /// <summary>The user or the app chose this pane.</summary>
-    void FocusGroup(TabGroupViewModel group);
+    void FocusGroup(TabGroupViewModel group, bool userInitiated = false);
 
     /// <summary>The pane's tab strip changed its selection.</summary>
     void FocusGroupForSelection(TabGroupViewModel group);
@@ -28,7 +28,7 @@ public interface ITabGroupHost
     void SplitDown(TabViewModel tab);
     void SplitTab(TabViewModel tab, TabGroupViewModel targetGroup, SplitDirection direction);
     void ToggleZoom(TabViewModel tab);
-    void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex);
+    void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex, bool userInitiated = false);
     void TransferTabToGroup(
         TabViewModel tab,
         ITabGroupHost sourceHost,
@@ -434,9 +434,8 @@ public sealed partial class TabGroupView : UserControl
         SyncTerminalVisibility();
         // A new tab is selected before its view exists, so the selection change had
         // nothing to focus. Focus it now if it is the focused group's active tab, unless
-        // the user is typing in the palette or session search.
-        if (Group.SelectedTab is { IsGroupFocused: true } tab && ReferenceEquals(tab.View, view)
-            && (view as Terminal.TerminalTabView)?.IsFocusHeldElsewhere?.Invoke() != true)
+        // the user is typing in the palette or session search (FocusTerminal checks).
+        if (Group.SelectedTab is { IsGroupFocused: true } tab && ReferenceEquals(tab.View, view))
             FocusTerminal(tab);
     }
 
@@ -935,14 +934,18 @@ public sealed partial class TabGroupView : UserControl
 
     /// <summary>Gives the tab's terminal keyboard focus once queued work settles, if this pane
     /// is shown and focused then. Several panes can change selection in one layout change;
-    /// only the one the window ends up focusing takes the keyboard.</summary>
-    private void FocusTerminal(TabViewModel? tab)
+    /// only the one the window ends up focusing takes the keyboard. A selection change the
+    /// user did not make here (a tab opening or closing in the background) leaves focus in
+    /// the palette or session search while the user types there; a click on a tab always
+    /// focuses its terminal.</summary>
+    private void FocusTerminal(TabViewModel? tab, bool userInitiated = false)
     {
         if (_isParked || tab?.View is not Terminal.TerminalTabView view)
             return;
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (!_isParked && ReferenceEquals(_host.ViewModel.FocusedGroup, Group))
+            if (!_isParked && ReferenceEquals(_host.ViewModel.FocusedGroup, Group)
+                && (userInitiated || view.IsFocusHeldElsewhere?.Invoke() != true))
                 view.FocusTerminal();
         });
     }
@@ -994,7 +997,7 @@ public sealed partial class TabGroupView : UserControl
         // focus so the TabView can finish its pointer handling before focus enters the terminal.
         if (point.Properties.IsLeftButtonPressed && tab is not null && !IsButtonSource(e.OriginalSource))
         {
-            FocusTerminal(tab);
+            FocusTerminal(tab, userInitiated: true);
             await PrepareTabDragPreviewAsync(tab, e.GetCurrentPoint(TabStripHost).Position);
         }
     }
@@ -1014,7 +1017,7 @@ public sealed partial class TabGroupView : UserControl
     private void Tabs_GotFocus(object sender, RoutedEventArgs e)
     {
         if (e.OriginalSource is TabViewItem { FocusState: FocusState.Pointer })
-            FocusTerminal(Group.SelectedTab);
+            FocusTerminal(Group.SelectedTab, userInitiated: true);
     }
 
     private void Tabs_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -1332,8 +1335,7 @@ public sealed partial class TabGroupView : UserControl
     private async Task RenameTabAsync(TabViewModel tab)
     {
         var title = await Dialogs.TextPromptDialog.PromptAsync(XamlRoot, "Rename Tab", "Tab title", tab.Header, "Rename");
-        if (!string.IsNullOrWhiteSpace(title))
-            tab.TitleOverride = title.Trim();
+        MainViewModel.RenameTab(tab, title);
     }
 
     // ---- drag between groups ----

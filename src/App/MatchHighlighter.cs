@@ -60,7 +60,7 @@ public static class MatchHighlighter
             {
                 Text = text.Substring(nextIndex, nextLength),
                 FontWeight = FontWeights.SemiBold,
-                Foreground = (Brush)Application.Current.Resources["SessionSplitterHoverBrush"],
+                Foreground = ThemeResources.Brush(block, "SessionSplitterHoverBrush"),
             });
             position = nextIndex + nextLength;
         }

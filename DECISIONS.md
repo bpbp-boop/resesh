@@ -2090,3 +2090,252 @@ could disagree. The rules that replaced them:
   workflow or WiX (ghostty cache keys, the signed vs unsigned MSI steps, the app user model
   id, project URLs) are guarded by `tests/BuildMetadataTests.js` rather than restructured,
   because the signing steps can't be verified off CI.
+
+## 2026-11-03 - One parser each for host:port, remote folders and key paths
+
+Parsing and formatting that had been copied and had drifted now has one home each:
+
+- **Host and port.** `HostPort` reads text as OpenSSH does: a colon is a port separator only
+  when it is the text's single colon, so a bare IPv6 literal ("::1", "2001:db8::22") is a
+  host with no port, and a port on IPv6 needs brackets ("[::1]:2222"). Hosts are stored
+  **without** brackets (quick connect, PuTTY import and the session editor strip them);
+  known_hosts and `SessionEndpoint` add them back before a port. User text ends at the
+  **last** '@' everywhere, so "john@corp@host" logs in as "john@corp".
+- **Remote working directories.** Every report of the remote shell's folder (OSC 7, OSC
+  3008, the /proc probe, shell integration, tmux, the session agent) goes through
+  `RemotePath.FromUntrusted`: absolute, no `char.IsControl` character (C1 included, since
+  U+009B is CSI to a terminal), normalised. tmux lines are trimmed only of their line
+  ending, as folder names can end in a space.
+- **Lexical "..".** `RemotePath.Normalize` collapses "." and ".." without asking the server,
+  as `cd -L` does: "/a/link/.." is "/a" even when "link" is a symlink elsewhere. That is
+  what the user typed or the shell reported, and it keeps the path box and Up in step; a
+  physical resolution would cost a round trip per navigation. Relative path-box text
+  resolves from the folder shown; "~user" is refused because only the server knows it.
+- **File names typed in the file pane.** Local names follow `WindowsDownloadPath`'s rule
+  (no trailing dot or space, no device names), remote names refuse "." and "..".
+- **Key file paths.** `KeyFilePath.Normalize` (quotes, environment variables, "~", relative
+  to the user's home rather than the process's current directory) is shared by imports,
+  `SshKeyStore` and the import identity planner, so one file is one key however it is
+  written.
+- **Import duplicates** match on kind as well as name, host and port.
+
+## 2026-11-03 - Side connections reuse the live connection's login and route
+The file pane, Manage Remote Sessions and the File Explorer (SSHFS) mount each made their own
+connection and each picked its login and route a little differently: management resolved the
+saved session afresh (so an edit since the connect, or a session with no username, sent it
+somewhere else or asked for "Password for @host"), and the file pane could pair a reconnect's
+new login with the previous connect's route. Now the SSH connect publishes one `LiveLogin`
+(the login as applied, its secret and the resolved route) together with the Connected state,
+and every side connection uses it only while the tab is Connected. The file pane refuses while
+the tab is connecting (it lists its folder again once the tab is up); the Explorer mount
+refuses on a stopped tab, like the file pane. Manage Remote Sessions on a stopped tab still
+resolves from the saved session, since nothing live exists, and uses the persistence backend
+the attached connect chose (`AttachedPersistence`) rather than re-reading `SessionAgent`.
+- **Prompts name their own connection's host.** Each connection keeps its own "dialling"
+  record (host and route) for host-key and keyboard-interactive titles; there was one field
+  per tab, reset only on the telnet path.
+- **One username check, one proxy test.** `MissingUsername` decides for every host every
+  connection resolves (own login or identity, jump or target) and throws one exception type;
+  `JumpRoute.ActiveProxy`/`ProxyUsername` are the single "goes through a proxy" and "sends a
+  proxy login" tests used by the dialer, the proxy password, the route description and the
+  SSHFS refusal.
+- **Secrets stay with their host.** A replacement identity password typed after the target
+  rejected it is used only by the target, not by a jump host that resolves the same identity
+  first. A key's passphrase falls back to the session's own password credential only for the
+  session's own login (the 2026-08-18 migration case), never for an identity's key.
+- **SSHFS follows the algorithm settings and key checks.** The mount passes `KexAlgorithms`,
+  `Ciphers`, `MACs` and `HostKeyAlgorithms` built from `SshAlgorithmPolicy.Offered`, so it
+  offers what our connections offer (legacy ones included, as SSH.NET does by default). SSH.NET's
+  names are OpenSSH's, but an older OpenSSH stops on a name it lacks (`mlkem768x25519-sha256`,
+  for instance), so each list is cut to what SSHFS-Win's own `ssh -Q` reports; if that cannot
+  be asked, only what is turned off is removed, with OpenSSH's `-list` form, which ignores
+  unknown names. Host keys are limited to the trusted key's type: an explicit
+  `HostKeyAlgorithms` stops OpenSSH preferring the type it has a key for, and the mount's
+  known_hosts holds only that key. The key file is checked against its registered fingerprint
+  first, and `AuthMethod.None` logs in with `PreferredAuthentications=none`.
+- **Dead jump hosts.** TCP keepalive on a telnet socket through a jump only reaches the
+  loopback forward, and SSH.NET does not always notice a jump that vanished, so
+  `SshJumpChain` now watches its links (`ErrorOccurred` plus a 5-second `IsConnected` poll, as
+  `SshTerminalSession` does for its own client) and raises `Lost`. Telnet tabs end on it, and
+  SSH sessions through a jump close on it too.
+
+## 2026-11-03 - Input, text and colour rules shared between the app and the terminal
+
+- **History insert is a paste for review.** `TerminalTabView.InsertText` goes through the
+  safe-paste path. Without bracketed paste a line break presses Enter, so a multi-line insert
+  always asks first, even with "Confirm multi-line paste" off: insert promises not to run
+  anything, and that setting's opt-out would not silence it, so the dialog hides it. A
+  trailing line break is dropped. Slow-paste sessions pace it like any paste.
+- **Paced paste tells the tracker about Enter.** Chunks still go out raw through `SendInput`
+  (2026-10-30); `SendInput(bytes, pressesEnter: true)` for each chunk that ends a line runs
+  the same `NotifyEnter` a typed Enter and an unbracketed `PasteText` run, once per line.
+- **Clipboard copies** all go through `Resesh.Terminal.TextClipboard.TryCopy`: catches every
+  failure (CLIPBRD_E_CANT_OPEN when another program holds the clipboard) and flushes, so the
+  copy outlives resesh. It lives in the Terminal project because the app references it.
+- **Labels from the wire.** `AgentText.Sanitize` keeps valid surrogate pairs (emoji) and drops
+  lone surrogates, C0/C1 controls, format characters (bidi overrides) and private use in every
+  plane; a zero width joiner between two characters is kept so emoji sequences survive. OSC
+  0/2 titles go through it in `TabViewModel.ApplyTerminalTitle`.
+- **OSC 3008** parsers in Core and the terminal refuse C1 as well as C0 and DEL, and read the
+  same fields: `type` only on `start`, `exit`/`status` only on `end`, status any digit string
+  up to 255. The terminal cannot reference Core, so `tests/Shared/Osc3008Vectors.cs` is
+  compiled into both test projects and checked against each parser.
+- **`#rrggbb` colours** are read only by `Resesh.Terminal.HexColor` (highlighter, session
+  colour tags, rule editor): '#' and six ASCII hex digits, nothing else. A rule with no colour
+  paints the default white; a rule with an unreadable colour is skipped by the terminal, and
+  the editor now agrees instead of showing white: an empty swatch, "invalid color, not
+  applied", and left out of the combined preview. Skipping, not defaulting, because the
+  stored value is wrong and painting a colour nobody chose would hide that; editing the
+  rule shows the value and Save asks for #RRGGBB. Editor previews compile with the
+  highlighter's `RegexOptions.CultureInvariant`.
+- **Primary font.** `TerminalDefaults.FamilyNames` is the renderer's reading of a font list
+  (no blanks, repeats or generic `monospace`), and the renderer's fallback chain starts with
+  the default list. `TerminalDefaults.PrimaryFamily(list, isInstalled)` gives the commands
+  panel and ruler card the family the renderer draws: the first installed named family, else
+  the first installed default. `FontFamilies.Primary` (the settings page) never treats
+  `monospace` as the font; it does not check installation, because the picker shows what
+  the user chose.
+- **Text on a colour** (High Contrast highlight text, the welcome page) is black or white by
+  the higher WCAG contrast ratio (`ColorContrast`), not gamma-encoded Rec.709 against 128.
+
+## 2026-11-03 - Scratch profiles keep their own passwords and logs
+
+`--data-dir` runs used the real Windows Credential Manager, so deleting a session in a scratch
+copy (or the startup key migration, which moves session passphrases onto keys and deletes the
+session copies) deleted the user's real passwords. Only the default profile uses Credential
+Manager now. `--demo` keeps secrets in memory, as before. A `--data-dir` profile keeps them in
+`credentials.json` in its folder, each secret encrypted with DPAPI for the current Windows user
+(`ProtectedFileCredentialService`, P/Invoke to `CryptProtectData`, so AOT-safe and no extra
+package), and saved like every store: atomically, never over a file it could not read. File
+rather than memory so a test profile keeps its passwords across restarts. Existing scratch
+profiles ask for their passwords once. An entry DPAPI cannot decrypt (the folder came from
+another user) reads as no saved password.
+
+The same run also wrote crash.log and trace.log to the real `%LOCALAPPDATA%\Resesh`. Logs go
+to the data folder for demo and `--data-dir` runs (`Program.LogDirectory`), and About's logs
+folder points there. `ShellIntegrationScripts.Materialize` still writes to
+`%LOCALAPPDATA%\Resesh\shell-integration\<version>`: the scripts are fixed per app version,
+hold no user data, and every profile can share them. The one-time `%APPDATA%\Sessions` rename
+migration runs only for the default profile.
+
+The command line is parsed once into `DataProfile` (options match case-insensitively, the
+first `--data-dir` wins and is made absolute, `--demo` wins over `--data-dir`), and the data
+folder, relaunch command, jump list, sign-in and credential choice all read it. Before, the
+relaunch command passed a relative `--data-dir` through unchanged (a taskbar relaunch opened
+another folder), `--DEMO` turned demo mode on but was dropped from the relaunch command, and a
+trailing `--data-dir` with no folder opened the real data while turning the jump list off. A
+`--data-dir` without a usable folder now stops with a message instead of opening real data.
+
+Credential Manager failures were raw `Win32Exception`s that the Settings and identity handlers
+(which catch `IOException`) let through. They are `CredentialStoreException : IOException` now,
+and every backend refuses a secret over Credential Manager's 2560-byte blob limit (1280
+characters) before anything is saved, with a message that says so.
+
+## 2026-11-03 - One validation per store, shared with backups
+
+Each store has one `Validate` that its loader runs (so bad data throws `InvalidDataException`
+and `.bak` recovery kicks in) and that `SessionsBackup.Read` runs on the matching archive
+entry. Identities and SSH keys had no loader validation (`{"identities":[null]}` or a null name
+loaded and crashed later), and backups checked only sessions: a null `pinnedSessionIds` threw in
+the middle of an import after keys, identities, sessions and passwords were written, and a null
+known-host entry was saved and crashed the next connect. The archive adds only its own rules
+(lists present, ids unique, references between files) and now parses `workspaces.json` at read
+time too. Duplicate session ids are still rejected only in backups: a store file that has them
+was written by an older build and loading it beats falling back to `.bak`.
+
+Known hosts with endpoints that differ only in case (v1 reloaded the file into a case-sensitive
+dictionary, so both spellings could be saved) threw `ArgumentException` from the loader, which
+`AtomicFile` does not treat as a bad file, so it escaped the startup load and the app would not
+start. They are merged deterministically instead of rejected, because rejecting would block SSH
+for those users: the same key keeps the copy with the public key blob, different keys keep the
+ordinally first spelling. Both were accepted by the user, and the other key still gets the
+mismatch prompt. Startup also loads each store in its own try/catch, so an unexpected loader
+bug is logged and shown and the other stores still load (the failed one stays unloaded and
+refuses to save).
+
+`SessionsBackup.Import` checks every store it saves (sessions, settings, known hosts,
+highlights, keys, identities, workspaces) is writable, and every secret fits Credential Manager,
+before it changes anything, instead of failing halfway. Export takes workspaces from the
+`WorkspaceStore`'s memory like the other stores, not a raw copy of the file (a damaged file made
+every backup unrestorable, a store running from `.bak` exported the damaged primary, and the
+unshared read could block a save). An empty workspace store exports no `workspaces.json`, so
+restoring that backup leaves the target's workspaces alone; before, an existing empty file was
+exported and restoring it deleted them. Custom icons are written through `AtomicFile.WriteBytes`
+(no `.bak`), and `AtomicFile` removes its temp file when a write fails.
+
+`SshKeyStore` raises `Changed` after a save succeeds, like the identity and session stores, and
+Settings' identities section listens, so keys added in one window, migrated at startup or merged
+by an import show in every open Settings page.
+
+## 2026-11-03 - SFTP transfers never leave a partial file
+
+Downloads open the local file with `FileMode.CreateNew`: the pane picks a free name when it
+plans the transfer, and something created there in the meantime is no longer overwritten (the
+next free "name (2).ext" is used and returned). Because the file is always one the download
+created, any failure deletes it, not just a cancel; a network error used to leave a truncated
+file that looked complete.
+
+An upload over an existing regular file goes to a hidden `.name.resesh-xxxxxxxx.part` beside it,
+takes the old file's permission bits, and is renamed over it only when complete, so a dropped
+connection leaves the old file intact instead of truncated. SSH.NET's `RenameFile(..., isPosix:
+true)` sends `posix-rename@openssh.com` (atomic replace; OpenSSH, including Windows OpenSSH,
+offers it) and throws `NotSupportedException` when the server lacks it; then the old file is
+deleted and plain SFTP rename (which refuses to replace) moves the upload in, and if that last
+step fails the upload is kept under its temporary name and the error says where. Symlinks (a
+rename would replace the link instead of writing through it) and folders that refuse new files
+are still overwritten in place. Ownership is not carried over by the rename; that needs root,
+which an SFTP user rarely is. Checked against a user-mode Windows OpenSSH sshd: new upload,
+overwrite, cancelled overwrite (old file intact, no `.part` left), download name clash and
+cancelled download.
+
+## 2026-11-03 - One rule each for UI behaviour that had drifted
+
+A second audit found UI logic repeated in several places that no longer agreed. Each now has
+one home:
+
+- **Failed session-tree saves** (sessions.json locked or read-only) are caught by the tree
+  commands themselves and shown as the operation notice, as a failed drag-move already was,
+  however the command ran: tree key, context menu, forwarded shortcut or palette. A
+  multi-selection delete is one store write (`SessionStore.DeleteMany`), so a failure deletes
+  nothing rather than the items before it.
+- **Folder rename** trims the name and refuses `/` and `\`, asking again: `FolderPaths.Combine`
+  would nest the folder instead of renaming it. Moving a folder is not a rename.
+- **Theme brushes in code** come from `ThemeResources`, never `Application.Current.Resources`
+  for a themed key. The app's RequestedTheme is fixed at startup, so the app lookup answers
+  for the startup theme; `ThemeResources` resolves against the element's ActualTheme (High
+  Contrast's dictionary when it is on) and re-applies on ActualThemeChanged. Brushes App.xaml
+  declares outside its theme dictionaries and `ThemeVisualPalette` recolours in place (the
+  `Session*` palette) are one shared instance and may still be read through the app.
+- **Motion** asks `AppMotion.Enabled`, the only reader of Windows' animation setting; the
+  sessions pane slide now honours it too.
+- **Icon raster scale** for a lookup that names none is the most recently active open
+  window's, set once by the app; a window no longer overwrites it for all the others.
+  Lookups take an explicit scale where the caller knows its XamlRoot.
+- **Focus held by search**: a background change (a tab opening, closing or being selected
+  by the app) never moves focus out of the palette or session filter. Focus requests the
+  user made (clicking a tab, tab-switching keys, Escape, an overlay closing) pass
+  `userInitiated` and still focus the terminal. The shortcuts dialog queues behind an open
+  dialog like every other instead of being dropped.
+- **Tab close decisions** (`MainViewModel.PlanClose`) live in the view model, where tests
+  run them; the window shows the planned dialog and removes the tab with `DetachTab`. The
+  test-only `CloseTab` is gone.
+- **Filters** match terms through `SessionSearch`: every term must match some field, and a
+  term may match what the item sits in (its folder, the Local root, the row's login), so
+  "local pwsh" and "prod web" both work in the tree, the import list and the sessions table.
+
+## 2026-11-03 - Uploads replace by rename only when nothing but the contents changes
+
+SSH.NET's `SftpClient.Get(path)` first asks the server for the path's realpath (OpenSSH
+follows symlinks there) and then lstats the result, so `.bashrc -> dotfiles/bashrc` reads as a
+regular file and `IsSymbolicLink` is false. The upload that renamed a temporary file over the
+target therefore replaced the link with a plain file. The upload now also resolves only the
+folder and compares: when `Get`'s `FullName` differs from folder + name, the name is a link and
+the upload writes through it in place, as before the temporary-file change.
+
+A rename also gives the file the new file's owner and group (only root can give a file away)
+and breaks hard links. So the temporary file is stat'ed once created and the rename is used only
+when its owner and group match the existing file's; otherwise, and when the server refuses the
+rename or the delete (a sticky folder such as `/tmp`, where only a file's owner may replace it),
+the temporary file is removed and the upload overwrites in place. SFTP v3 does not report a
+link count, so a hard-linked file the login owns still loses its other names; that is the
+same as `scp`'s and most editors' save-by-rename and is accepted.

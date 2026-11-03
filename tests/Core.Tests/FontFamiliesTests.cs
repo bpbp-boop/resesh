@@ -29,6 +29,16 @@ public class FontFamiliesTests
     }
 
     [Fact]
+    public void TheGenericMonospaceIsNeverTheFont()
+    {
+        Assert.Equal("Fira Code", FontFamilies.Primary("monospace, Fira Code"));
+        Assert.Equal("monospace, Consolas", FontFamilies.Fallbacks("monospace, Fira Code, Consolas"));
+        Assert.Equal("Geist Mono, monospace, Consolas", FontFamilies.WithPrimary("monospace, Fira Code, Consolas", "Geist Mono"));
+        Assert.Equal("Fira Code, Consolas", FontFamilies.WithFallbacks("monospace, Fira Code", "Consolas"));
+        Assert.Equal("", FontFamilies.Primary("monospace"));
+    }
+
+    [Fact]
     public void WithFallbacksKeepsTheFont()
     {
         Assert.Equal("Cascadia Mono, Symbols Nerd Font Mono",

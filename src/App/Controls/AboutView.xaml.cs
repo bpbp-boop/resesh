@@ -30,7 +30,7 @@ public sealed partial class AboutView : UserControl
     ];
 
     private readonly string _dataFolder = Program.DataDirectory;
-    private readonly string _logsFolder = AppDataPaths.Local();
+    private readonly string _logsFolder = Program.LogDirectory;
     private int _copyFeedbackVersion;
 
     public AboutView()
@@ -75,9 +75,8 @@ public sealed partial class AboutView : UserControl
 
     private void CopyDetails_Click(object sender, RoutedEventArgs e)
     {
-        var package = new DataPackage();
-        package.SetText(AppBuildInfo.DetailsText());
-        Clipboard.SetContent(package);
+        if (!Resesh.Terminal.TextClipboard.TryCopy(AppBuildInfo.DetailsText()))
+            return;
 
         // Brief confirmation in place, then back to the normal label.
         var version = ++_copyFeedbackVersion;

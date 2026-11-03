@@ -169,6 +169,27 @@ public class AgentOscTests
         Assert.Equal("abcde…", AgentText.Sanitize("abcdefghij", 5));
     }
 
+    [Theory]
+    [InlineData("🚀 prod", "🚀 prod")]
+    [InlineData("𠜎 build", "𠜎 build")]
+    [InlineData("👨\u200D👩\u200D👧 family", "👨\u200D👩\u200D👧 family")]
+    [InlineData("evil\u202Etxt.exe", "eviltxt.exe")] // bidi override
+    [InlineData("x\uE000\U000F0000\U00100000y", "xy")] // private use, BMP and supplementary
+    [InlineData("tag\U000E0041s", "tags")] // tag characters (Format)
+    [InlineData("csi\u009B31m here", "csi 31m here")] // C1 control
+    [InlineData("\u200Dleading", "leading")] // a joiner joining nothing
+    public void SanitizeKeepsCharactersAndDropsInvisibleOnes(string raw, string expected) =>
+        Assert.Equal(expected, AgentText.Sanitize(raw, 80));
+
+    [Fact]
+    public void SanitizeDropsLoneSurrogates() =>
+        // Built at run time: attribute strings cannot hold a lone surrogate.
+        Assert.Equal("abc", AgentText.Sanitize(new string(['a', '\uD800', 'b', '\uDC00', 'c']), 80));
+
+    [Fact]
+    public void SanitizeNeverCutsASurrogatePair() =>
+        Assert.Equal("ab…", AgentText.Sanitize("ab🚀cd", 3));
+
     [Fact]
     public void StructuredLabelsAreTruncatedToTheDocumentedLimit()
     {

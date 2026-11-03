@@ -13,6 +13,11 @@ public sealed class RemotePathTests
     [InlineData("/home//user/", "/home/user")]
     [InlineData("home/user", "/home/user")]
     [InlineData("/var/log", "/var/log")]
+    [InlineData("/var/log/..", "/var")]
+    [InlineData("/var/./log/", "/var/log")]
+    [InlineData("/var/log/../../..", "/")]
+    [InlineData("/..", "/")]
+    [InlineData("/a/.../b", "/a/.../b")]
     public void Normalize_collapses_and_roots(string input, string expected) =>
         Assert.Equal(expected, RemotePath.Normalize(input));
 
@@ -27,6 +32,7 @@ public sealed class RemotePathTests
     [InlineData("/", "/")]
     [InlineData("/etc", "/")]
     [InlineData("/home/user/docs", "/home/user")]
+    [InlineData("/var/log/..", "/")]
     public void Parent_of_root_is_root(string path, string expected) =>
         Assert.Equal(expected, RemotePath.Parent(path));
 
@@ -42,9 +48,43 @@ public sealed class RemotePathTests
     [InlineData("~", "/home/boden", "/home/boden")]
     [InlineData("~/work", "/home/boden", "/home/boden/work")]
     [InlineData("/var/log", "/home/boden", "/var/log")]
-    [InlineData("relative/path", "/home/boden", null)]
-    public void ResolveShellPath_accepts_only_home_or_absolute_paths(string? path, string home, string? expected) =>
+    [InlineData("~/work/../src", "/home/boden", "/home/boden/src")]
+    [InlineData("relative/path", "/home/boden", "/home/boden/relative/path")]
+    [InlineData("~alice/work", "/home/boden", null)]
+    public void ResolveShellPath_resolves_home_absolute_and_relative_paths(string? path, string home, string? expected) =>
         Assert.Equal(expected, RemotePath.ResolveShellPath(path, home));
+
+    [Theory]
+    [InlineData("logs", "/var", "/var/logs")]
+    [InlineData("..", "/var/log", "/var")]
+    [InlineData("../..", "/var/log", "/")]
+    [InlineData("./x/../y", "/srv", "/srv/y")]
+    [InlineData("logs", null, "/home/boden/logs")]
+    public void ResolveShellPath_takes_relative_paths_from_the_current_folder(string path, string? current, string expected) =>
+        Assert.Equal(expected, RemotePath.ResolveShellPath(path, "/home/boden", current));
+
+    [Theory]
+    [InlineData("/var/log", "/var/log")]
+    [InlineData("/srv/app/../web/", "/srv/web")]
+    [InlineData("relative", null)]
+    [InlineData("", null)]
+    [InlineData(null, null)]
+    [InlineData("/tmp/a\u0007b", null)]
+    [InlineData("/tmp/a\u009bb", null)] // C1 CSI: a terminal control as much as ESC [
+    [InlineData("/tmp/a\u007fb", null)]
+    public void FromUntrusted_accepts_only_absolute_paths_without_controls(string? path, string? expected) =>
+        Assert.Equal(expected, RemotePath.FromUntrusted(path));
+
+    [Theory]
+    [InlineData("notes.txt", true)]
+    [InlineData("...", true)]
+    [InlineData("back\\slash", true)]
+    [InlineData("", false)]
+    [InlineData(".", false)]
+    [InlineData("..", false)]
+    [InlineData("a/b", false)]
+    public void IsValidName_refuses_dot_names_and_slashes(string name, bool valid) =>
+        Assert.Equal(valid, RemotePath.IsValidName(name));
 
     [Fact]
     public void UniqueName_returns_original_when_free()
@@ -95,8 +135,17 @@ public sealed class WindowsDownloadPathTests
     [InlineData("LPT9")]
     [InlineData("file.")]
     [InlineData("file ")]
-    public void ValidateName_rejects_names_that_are_unsafe_on_Windows(string name) =>
+    public void ValidateName_rejects_names_that_are_unsafe_on_Windows(string name)
+    {
         Assert.Throws<InvalidDataException>(() => WindowsDownloadPath.ValidateName(name));
+        Assert.False(WindowsDownloadPath.IsValidName(name));
+    }
+
+    [Theory]
+    [InlineData("notes.txt")]
+    [InlineData(".config")]
+    [InlineData("CONFIG")]
+    public void IsValidName_accepts_ordinary_names(string name) => Assert.True(WindowsDownloadPath.IsValidName(name));
 
     [Fact]
     public void Combine_rejects_a_parent_outside_the_download_root()
@@ -207,6 +256,13 @@ public sealed class TmuxCurrentPathTests
         Assert.Equal("/home/b", TmuxPersistence.ParseCurrentPath(output, Id, 1));
     }
 
+    [Fact]
+    public void ParseCurrentPath_keeps_a_trailing_space_in_the_folder_name()
+    {
+        Assert.Equal("/srv/old ", TmuxPersistence.ParseCurrentPath("saabbccddeeff 1 /srv/old \r\n", Id, 0));
+        Assert.Null(TmuxPersistence.ParseCurrentPath("saabbccddeeff 1 /srv/\u009b31m\n", Id, 0));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("sother000000 1 /etc")]                // wrong session
@@ -255,5 +311,38 @@ public sealed class TmuxCurrentPathTests
     {
         Assert.Equal(3, TmuxPersistence.NextAvailableSlot(new[] { 0, 2, 1 }));
         Assert.Equal(0, TmuxPersistence.NextAvailableSlot(Array.Empty<int>()));
+    }
+}
+
+/// <summary>When an upload over an existing file may go to a temporary file renamed into place,
+/// and when it must write through the existing one instead.</summary>
+public sealed class SftpOverwriteTests
+{
+    [Fact]
+    public void ARegularFileWhoseNameResolvesToItselfIsReplacedByRename() =>
+        Assert.True(SftpSession.ReplacesByRename(true, false, "/home/u/notes.txt", "/home/u/notes.txt"));
+
+    [Fact]
+    public void ASymlinkIsWrittenThrough()
+    {
+        // SSH.NET's Get resolves the link on the server and lstats the target, so a link to a
+        // regular file reports a regular file at the target's path.
+        Assert.False(SftpSession.ReplacesByRename(true, false, "/home/u/dotfiles/bashrc", "/home/u/.bashrc"));
+        Assert.False(SftpSession.ReplacesByRename(true, true, "/home/u/.bashrc", "/home/u/.bashrc"));
+    }
+
+    [Fact]
+    public void AnythingElseOrAnUnresolvedFolderIsWrittenInPlace()
+    {
+        Assert.False(SftpSession.ReplacesByRename(false, false, "/dev/null", "/dev/null"));
+        Assert.False(SftpSession.ReplacesByRename(true, false, "/home/u/notes.txt", null));
+    }
+
+    [Fact]
+    public void OnlyAFileTheLoginWouldOwnTheSameWayIsReplacedByRename()
+    {
+        Assert.True(SftpSession.KeepsOwnership(1000, 1000, 1000, 1000));
+        Assert.False(SftpSession.KeepsOwnership(0, 0, 1000, 1000));
+        Assert.False(SftpSession.KeepsOwnership(1000, 50, 1000, 1000));
     }
 }

@@ -57,15 +57,34 @@ internal static class AtomicFile
     [ThreadStatic]
     internal static Action? BeforeSharingViolationRetry;
 
-    public static void Write(string path, string contents, bool preserveBackup = false)
+    public static void Write(string path, string contents, bool preserveBackup = false) =>
+        Write(path, temporary => File.WriteAllText(temporary, contents), preserveBackup ? null : path + ".bak");
+
+    /// <summary>Replaces a file that is not a store (a custom icon): the same temp-and-swap,
+    /// with no .bak beside it.</summary>
+    public static void WriteBytes(string path, byte[] contents) =>
+        Write(path, temporary => File.WriteAllBytes(temporary, contents), backupPath: null);
+
+    /// <summary>Writes a temp file beside <paramref name="path"/> and swaps it in, so readers see
+    /// the old file or the new one, never a torn one. A failed write removes its temp file.</summary>
+    private static void Write(string path, Action<string> writeTemporary, string? backupPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporary = path + ".tmp";
-        File.WriteAllText(temporary, contents);
-        if (File.Exists(path))
-            File.Replace(temporary, path, preserveBackup ? null : path + ".bak");
-        else
-            File.Move(temporary, path);
+        try
+        {
+            writeTemporary(temporary);
+            if (File.Exists(path))
+                File.Replace(temporary, path, backupPath);
+            else
+                File.Move(temporary, path);
+        }
+        catch
+        {
+            try { File.Delete(temporary); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
     /// <summary>
@@ -202,14 +221,19 @@ internal sealed class StoreFile(string path, string contents)
         Warning = warning;
     }
 
-    /// <summary>Throws when the store has not loaded a file that exists. A programming error
-    /// rather than a disk problem: the empty in-memory state is not what the file holds. With
-    /// no file at all there is nothing to misrepresent or overwrite, so that is allowed.</summary>
+    /// <summary>Throws when the store has not loaded a file that exists: the empty in-memory
+    /// state is not what the file holds. With no file at all there is nothing to misrepresent
+    /// or overwrite, so that is allowed. A <see cref="StoreReadOnlyException"/>, so the callers
+    /// that report a failed write report this too instead of crashing.</summary>
     public void EnsureLoaded()
     {
         if (State == StoreLoadState.NotLoaded && (File.Exists(Path) || File.Exists(Path + ".bak")))
-            throw new InvalidOperationException($"{contents} must be loaded before they are used or saved.");
+            throw new StoreReadOnlyException($"{contents} were not saved: they were never loaded from {Path}. Restart resesh.");
     }
+
+    /// <summary>The store's load failed partway (a loader bug, not bad data): whatever it holds
+    /// may be half of the file, so every save is refused, as for a file that could not be read.</summary>
+    public void RefuseSaves() => State = StoreLoadState.Unreadable;
 
     /// <summary>Throws unless a save may replace the file now.</summary>
     public void EnsureWritable()

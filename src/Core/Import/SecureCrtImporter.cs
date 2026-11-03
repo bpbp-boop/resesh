@@ -378,7 +378,10 @@ public static class SecureCrtImporter
         return true;
     }
 
-    /// <summary>True when a session with the candidate's name, host, and port already exists.</summary>
+    /// <summary>True when a session of the candidate's kind with its name, host, and port
+    /// already exists. A telnet line and an SSH session can share a name and an address
+    /// (a console server answers both), so the kind has to match too. Hosts compare without
+    /// IPv6 brackets, which older builds kept in a saved session's host.</summary>
     public static bool IsDuplicate(SessionStore store, ImportCandidate candidate) =>
         IsDuplicate(store.Sessions, candidate);
 
@@ -387,7 +390,9 @@ public static class SecureCrtImporter
             s.Name.Equals(candidate.Name, StringComparison.OrdinalIgnoreCase)
             && (candidate.IsSerial
                 ? s.IsSerial && string.Equals(s.Serial?.PortName, candidate.Serial!.PortName, StringComparison.OrdinalIgnoreCase)
-                : s.Host.Equals(candidate.Host, StringComparison.OrdinalIgnoreCase) && s.Port == candidate.Port));
+                : s.Kind == (candidate.IsTelnet ? SessionKind.Telnet : SessionKind.Ssh)
+                    && HostPort.Unbracket(s.Host).Equals(HostPort.Unbracket(candidate.Host), StringComparison.OrdinalIgnoreCase)
+                    && s.Port == candidate.Port));
 
     /// <summary>
     /// Adds the selected candidates (SSH, telnet or serial, from any importer), skipping any

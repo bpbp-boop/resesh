@@ -50,6 +50,11 @@ public static class SessionEndpoint
     /// <summary>The port a connection uses: an unset (zero or negative) port means the default.</summary>
     public static int EffectivePort(SessionKind kind, int port) => port > 0 ? port : DefaultPort(kind);
 
+    /// <summary>The port an SSH, SFTP or telnet connection to the session dials and its host
+    /// keys are stored under, so what is dialled matches what is shown. Not for serial
+    /// sessions, which have no TCP port.</summary>
+    public static int EffectivePort(Session session) => EffectivePort(session.Kind, session.Port);
+
     public static string Format(Session session, EndpointStyle style = default)
     {
         ArgumentNullException.ThrowIfNull(session);
@@ -86,7 +91,8 @@ public static class SessionEndpoint
     private static string Address(SessionKind kind, string? host, int port, bool showDefaultPort)
     {
         var effective = EffectivePort(kind, port);
-        return showDefaultPort || effective != DefaultPort(kind) ? $"{host}:{effective}" : host ?? "";
+        // An IPv6 literal takes brackets before a port, or "::1:2222" reads as one address.
+        return showDefaultPort || effective != DefaultPort(kind) ? HostPort.WithPort(host, effective) : host ?? "";
     }
 
     private static string LocalShell(string? executable, LocalShellDisplay display)

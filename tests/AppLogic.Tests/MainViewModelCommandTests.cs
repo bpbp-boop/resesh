@@ -13,6 +13,7 @@ public sealed class MainViewModelCommandTests : IDisposable
     private readonly SessionStore _store;
     private IReadOnlyList<Guid> _recentIds = [];
     private string _recordingDirectory = "";
+    private List<Exception>? _reported;
 
     public MainViewModelCommandTests() =>
         _store = new SessionStore(Path.Combine(_directory, "sessions.json"));
@@ -26,7 +27,7 @@ public sealed class MainViewModelCommandTests : IDisposable
         ShowAgentIcons = () => true,
         IsSessionVisible = _ => true,
         ApplySessionSettings = _ => { },
-        ReportError = exception => throw exception,
+        ReportError = exception => (_reported ?? throw exception).Add(exception),
         RecentSessionIds = () => _recentIds,
         SaveRecentSessionIds = ids => _recentIds = ids,
         RecordingDirectory = () => _recordingDirectory,
@@ -661,6 +662,130 @@ public sealed class MainViewModelCommandTests : IDisposable
 
         Assert.Contains("Sites/South", _store.Folders);
         Assert.DoesNotContain("Sites/North", _store.Folders);
+    }
+
+    // ---- Closing ----
+
+    [Fact]
+    public void ClosePlanFollowsTheSettingAndThePin()
+    {
+        var window = Window();
+        var tab = Open(window, Ssh("router"), TabConnectionState.Connected);
+
+        Assert.Equal(TabCloseKind.Now, window.PlanClose(tab, confirmActiveSessions: false).Kind);
+        Assert.Equal(
+            new TabClosePlan(TabCloseKind.Confirm, "Close Tab", "Close \"router\"? The session is still connected.", "Close"),
+            window.PlanClose(tab, confirmActiveSessions: true));
+
+        tab.IsPinned = true;
+        Assert.Equal(
+            new TabClosePlan(TabCloseKind.ConfirmPinned, "Tab Is Pinned", "\"router\" is pinned. The session is still connected.", "Unpin and Close"),
+            window.PlanClose(tab, confirmActiveSessions: false));
+
+        tab.MarkDisconnected();
+        Assert.Equal("\"router\" is pinned.", window.PlanClose(tab, confirmActiveSessions: true).Message);
+    }
+
+    [Fact]
+    public void ClosePlanOffersToEndAnAttachedPersistentShell()
+    {
+        var window = Window();
+        var tab = Open(window, Ssh("router") with { Persistent = true }, TabConnectionState.Connecting);
+        tab.MarkConnected(remoteSessionSlot: 1);
+
+        Assert.Equal(
+            new TabClosePlan(TabCloseKind.ConfirmPersistent, "Close Tab", "Close \"router\"?", "Close Tab"),
+            window.PlanClose(tab, confirmActiveSessions: true));
+
+        // Without a terminal there is no shell to end; the plain question explains why it stays.
+        _window.Terminals.Remove(tab);
+        Assert.Equal(
+            "Close \"router\"? The remote session keeps running (persistent) — connecting again resumes it.",
+            window.PlanClose(tab, confirmActiveSessions: true).Message);
+    }
+
+    [Fact]
+    public void AppPagesCloseWithoutAsking()
+    {
+        var window = Window();
+        var tab = Open(window, Ssh("router"), TabConnectionState.Connected);
+        tab.IsPinned = true;
+        var welcome = TabViewModel.CreateAppPage(AppPage.Welcome, Environment());
+
+        Assert.Equal(TabCloseKind.Now, window.PlanClose(welcome, confirmActiveSessions: true).Kind);
+        Assert.Equal("Close 2 tab(s)? 1 of them is still connected.", MainViewModel.CloseManyMessage([tab, welcome], "tab(s)"));
+    }
+
+    [Fact]
+    public void RenamingATabToItsShownHeaderKeepsFollowingTheSession()
+    {
+        var window = Window();
+        var session = Ssh("router");
+        _store.Add(session);
+        var tab = Open(window, session, TabConnectionState.Connected);
+
+        MainViewModel.RenameTab(tab, " router ");
+        MainViewModel.RenameTab(tab, "   ");
+        MainViewModel.RenameTab(tab, null);
+
+        Assert.Null(tab.TitleOverride);
+        MainViewModel.RenameTab(tab, "  core  ");
+        Assert.Equal("core", tab.TitleOverride);
+    }
+
+    [Fact]
+    public async Task RenameFolderTrimsAndRefusesSeparators()
+    {
+        _store.CreateFolder("Sites/North");
+        var window = Window();
+        var north = window.RootNodes.Single(n => n.Name == "Sites").Children.Single();
+        _window.PromptAnswers.Enqueue("East/West");
+        _window.PromptAnswers.Enqueue("  South  ");
+
+        await window.RenameFolderCommand.ExecuteAsync(north);
+
+        Assert.Equal(["Sites", "Sites/South"], _store.Folders.Order());
+    }
+
+    [Fact]
+    public async Task RenameFolderToItsOwnNameChangesNothing()
+    {
+        var (window, _, folder, _) = Tree();
+        _window.PromptAnswers.Enqueue(" Core ");
+
+        await window.RenameFolderCommand.ExecuteAsync(folder);
+
+        Assert.Equal(["Core"], _store.Folders);
+    }
+
+    [Fact]
+    public async Task FailedTreeDeleteIsReportedAndDeletesNothing()
+    {
+        var (window, _, folder, session) = Tree();
+        _reported = [];
+        window.TreeSelection.SelectOnly(folder);
+        window.TreeSelection.Toggle(session);
+
+        using (File.Open(Path.Combine(_directory, "sessions.json"), FileMode.Open, FileAccess.Read, FileShare.None))
+            await window.DeleteSelectionCommand.ExecuteAsync(null);
+
+        Assert.IsAssignableFrom<IOException>(Assert.Single(_reported));
+        Assert.Equal(3, _store.Sessions.Count);
+        Assert.Equal(["Core"], _store.Folders);
+    }
+
+    [Fact]
+    public async Task FailedFolderRenameIsReported()
+    {
+        var (window, _, folder, _) = Tree();
+        _reported = [];
+        _window.PromptAnswers.Enqueue("Edge");
+
+        using (File.Open(Path.Combine(_directory, "sessions.json"), FileMode.Open, FileAccess.Read, FileShare.None))
+            await window.EditSelectionCommand.ExecuteAsync(new List<TreeNodeViewModel> { folder });
+
+        Assert.Single(_reported);
+        Assert.Equal(["Core"], _store.Folders);
     }
 
     [Fact]

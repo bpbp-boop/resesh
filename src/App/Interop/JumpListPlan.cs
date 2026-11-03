@@ -17,11 +17,13 @@ internal sealed record JumpListPlan(IReadOnlyList<JumpListItem> Pinned, IReadOnl
     public static JumpListPlan For(
         IReadOnlyList<Guid> pinnedIds,
         IReadOnlyList<Guid> recentIds,
-        Func<Guid, Session?> find)
+        Func<Guid, Session?> find,
+        Func<Session, string>? loginUsername = null)
     {
-        var pinned = Items(pinnedIds, find, int.MaxValue);
+        var login = loginUsername ?? (session => session.Username);
+        var pinned = Items(pinnedIds, find, login, int.MaxValue);
         var shown = pinned.Select(item => item.Arguments).ToHashSet();
-        var recent = Items(recentIds, find, RecentLimit + shown.Count)
+        var recent = Items(recentIds, find, login, RecentLimit + shown.Count)
             .Where(item => !shown.Contains(item.Arguments))
             .Take(RecentLimit)
             .ToList();
@@ -37,25 +39,40 @@ internal sealed record JumpListPlan(IReadOnlyList<JumpListItem> Pinned, IReadOnl
 
     public static string ArgumentsFor(Guid sessionId) => $"{LaunchRequest.SessionOption} {sessionId:D}";
 
-    private static List<JumpListItem> Items(IReadOnlyList<Guid> ids, Func<Guid, Session?> find, int limit) =>
+    private static List<JumpListItem> Items(
+        IReadOnlyList<Guid> ids, Func<Guid, Session?> find, Func<Session, string> login, int limit) =>
         ids.Distinct()
             .Select(find)
             .OfType<Session>()
             .Take(limit)
-            .Select(session => new JumpListItem(Title(session), ArgumentsFor(session.Id), Description(session)))
+            .Select(session =>
+            {
+                var description = Description(session, login);
+                return new JumpListItem(Title(session, description), ArgumentsFor(session.Id), description);
+            })
             .ToList();
 
     // The shell shows titles on one line and truncates them; keep them readable.
-    private static string Title(Session session) =>
-        string.IsNullOrWhiteSpace(session.Name) ? Description(session) : session.Name.Trim();
+    private static string Title(Session session, string description) =>
+        string.IsNullOrWhiteSpace(session.Name) ? description : session.Name.Trim();
 
-    private static string Description(Session session) => session switch
+    /// <summary>Where the session connects, as its tab shows it: the login it will use (an
+    /// identity's or a folder's, not only its own) and any non-default port. The protocol
+    /// is named, since a jump list item has no other cue that a target is telnet. A host
+    /// session with no host yet reads as its name, not a bare "user@".</summary>
+    private static string Description(Session session, Func<Session, string> login)
     {
-        { IsLocal: true } => "Local terminal",
-        { Host: "" } => session.Name,
-        { Username: "" } => session.Host,
-        _ => $"{session.Username}@{session.Host}",
-    };
+        if (session.IsLocal)
+            return "Local terminal";
+        if (session.Kind is SessionKind.Ssh or SessionKind.Telnet && string.IsNullOrWhiteSpace(session.Host))
+            return session.Name;
+        var endpoint = SessionEndpoint.Format(session, new()
+        {
+            Username = session.Kind == SessionKind.Ssh ? login(session) : null,
+            ShowProtocol = true,
+        });
+        return string.IsNullOrEmpty(endpoint) ? session.Name : endpoint;
+    }
 
     /// <summary>Plans are compared before rewriting the jump list, which the shell persists.</summary>
     public bool SameAs(JumpListPlan? other) =>

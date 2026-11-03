@@ -4,24 +4,30 @@ namespace Resesh.Core.Search;
 
 /// <summary>
 /// Case-insensitive substring search over name, host, username, folder path, and notes.
+/// A query is whitespace-separated terms, and every term must match some field: "prod web"
+/// finds web servers in the prod folder. Every filter in the app matches this way.
 /// </summary>
 public static class SessionSearch
 {
-    public static bool Matches(Session session, string? query)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-            return true;
-
-        // Every whitespace-separated term must match at least one field.
-        var terms = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return terms.All(term =>
+    /// <param name="alsoSearched">More text a term may match instead of a session field: what
+    /// a list shows beside the session (its login), or the tree root it sits under ("Local").</param>
+    public static bool Matches(Session session, string? query, params string?[] alsoSearched) =>
+        Terms(query).All(term =>
             Contains(session.Name, term)
             || Contains(session.Host, term)
             || Contains(session.Username, term)
             || Contains(session.FolderPath, term)
             || Contains(session.Notes, term)
-            || Contains(session.Local?.Executable, term));
-    }
+            || Contains(session.Local?.Executable, term)
+            || alsoSearched.Any(text => Contains(text, term)));
+
+    /// <summary>Whether every term of the query matches one of the texts. True for an empty query.</summary>
+    public static bool MatchesAll(string? query, params string?[] texts) =>
+        Terms(query).All(term => texts.Any(text => Contains(text, term)));
+
+    private static string[] Terms(string? query) => string.IsNullOrWhiteSpace(query)
+        ? []
+        : query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     public static IReadOnlyList<Session> Filter(IEnumerable<Session> sessions, string? query) =>
         sessions.Where(s => Matches(s, query)).ToList();

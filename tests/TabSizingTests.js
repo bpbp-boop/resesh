@@ -63,7 +63,7 @@ test("tab changes slide every tab from where it was drawn once layout settles", 
   // New tabs fade in alongside the slide rather than after it.
   assert.match(motion, /SetTranslation\(container, 0\);\s*FadeInTab\(container\);/);
   // The system "Animation effects" setting turns all of it off.
-  assert.match(motion, /MotionSettings\.AnimationsEnabled/);
+  assert.match(motion, /MotionEnabled => AppMotion\.Enabled/);
 });
 
 test("the divider gap and the active tab move together", () => {
@@ -91,7 +91,7 @@ test("layout rebuilds snap tab motion instead of animating re-parented strips", 
     path.join(__dirname, "..", "src", "App", "MainWindow.Workspaces.cs"),
     "utf8");
   assert.match(window, /foreach \(var groupView in _groupViews\.Values\)\s*\{\s*groupView\.SuppressTabMotion\(\);/);
-  assert.match(window, /_groupViews\[sourceGroup\]\.SuppressTabMotion\(\);\s*MoveTabBetweenGroups\(tab, newGroup, 0\);/);
+  assert.match(window, /_groupViews\[sourceGroup\]\.SuppressTabMotion\(\);\s*(?:\/\/.*\s*)*MoveTabBetweenGroups\(tab, newGroup, 0, userInitiated: true\);/);
   assert.match(workspaces, /private void ApplyWorkspaceLayout\([^)]*\)\s*\{[\s\S]{0,200}?groupView\.SuppressTabMotion\(\);/);
 });
 

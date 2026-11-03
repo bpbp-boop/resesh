@@ -33,8 +33,17 @@ public sealed partial class SettingsPage
             if (IdentitiesSection.Visibility == Visibility.Visible)
                 RefreshIdentities();
         });
-        Loaded += (_, _) => App.Identities.Changed += OnChanged;
-        Unloaded += (_, _) => App.Identities.Changed -= OnChanged;
+        // Keys are listed here too, and can change in another window's Settings or an import.
+        Loaded += (_, _) =>
+        {
+            App.Identities.Changed += OnChanged;
+            App.SshKeys.Changed += OnChanged;
+        };
+        Unloaded += (_, _) =>
+        {
+            App.Identities.Changed -= OnChanged;
+            App.SshKeys.Changed -= OnChanged;
+        };
     }
 
     private void RefreshIdentities()
@@ -210,10 +219,10 @@ public sealed partial class SettingsPage
         var copy = new Button { Content = "Copy public key", IsEnabled = key.PublicKey is { Length: > 0 } };
         copy.Click += (_, _) =>
         {
-            var package = new DataPackage();
-            package.SetText(key.PublicKey);
-            Clipboard.SetContent(package);
-            ShowIdentityStatus(InfoBarSeverity.Success, $"The public key of {key.Name} was copied.");
+            if (key.PublicKey is { Length: > 0 } publicKey && Resesh.Terminal.TextClipboard.TryCopy(publicKey))
+                ShowIdentityStatus(InfoBarSeverity.Success, $"The public key of {key.Name} was copied.");
+            else
+                ShowIdentityStatus(InfoBarSeverity.Error, "The clipboard is busy in another program. Try copying again.");
         };
         var more = new DropDownButton { Content = "More" };
         var menu = new MenuFlyout();
@@ -258,8 +267,8 @@ public sealed partial class SettingsPage
 
     private async Task RenameKeyAsync(SshKeyReference key)
     {
-        var name = await TextPromptDialog.PromptAsync(XamlRoot, "Rename SSH key", "Name", key.Name, "Rename");
-        if (string.IsNullOrWhiteSpace(name) || name == key.Name)
+        var name = (await TextPromptDialog.PromptAsync(XamlRoot, "Rename SSH key", "Name", key.Name, "Rename"))?.Trim();
+        if (string.IsNullOrEmpty(name) || name == key.Name)
             return;
         try
         {

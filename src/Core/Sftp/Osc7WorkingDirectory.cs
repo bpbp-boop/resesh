@@ -36,15 +36,15 @@ public static class Osc7WorkingDirectoryParser
             return false;
         }
 
-        if (!path.StartsWith('/') || path.Any(IsControl))
+        if (RemotePath.FromUntrusted(path) is not { } directory)
             return false;
 
-        workingDirectory = new Osc7WorkingDirectory(host, RemotePath.Normalize(path));
+        workingDirectory = new Osc7WorkingDirectory(host, directory);
         return true;
     }
 
     private static bool ValidHost(string host) =>
-        !host.Any(character => IsControl(character) || character is '@' or '\\' or '%');
+        !host.Any(character => char.IsControl(character) || character is '@' or '\\' or '%');
 
     private static bool ValidPercentEncoding(string value)
     {
@@ -59,7 +59,6 @@ public static class Osc7WorkingDirectoryParser
         return true;
     }
 
-    private static bool IsControl(char character) => character < ' ' || character == '\u007f';
 }
 
 /// <summary>Keeps one tab's last trusted report. A host change clears the path until the

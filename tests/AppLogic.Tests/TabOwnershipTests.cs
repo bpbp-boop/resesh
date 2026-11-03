@@ -38,7 +38,7 @@ public sealed class TabOwnershipTests : IDisposable
         group.SelectedTab = tabs[selected];
         // Model the native control selecting another item during its removal handler.
         group.Tabs.CollectionChanged += (_, _) => group.SelectedTab = group.Tabs.LastOrDefault();
-        window.CloseTab(tabs[closed]);
+        window.DetachTab(tabs[closed]);
         Assert.Same(tabs[expected], group.SelectedTab);
         Assert.True(tabs[expected].IsActive);
         Assert.False(tabs[closed].IsActive);
@@ -50,7 +50,7 @@ public sealed class TabOwnershipTests : IDisposable
     {
         var window = Window();
         var tab = window.Connect(new Session { Id = Guid.NewGuid() });
-        window.CloseTab(tab);
+        window.DetachTab(tab);
         Assert.Null(window.FocusedGroup.SelectedTab);
         Assert.False(tab.IsActive);
     }

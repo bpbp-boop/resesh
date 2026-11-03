@@ -78,11 +78,9 @@ public sealed partial class ImportCandidateVm : ImportRow
 
     public string AccessibleName => $"{Name}, {Endpoint}, {LoginDetail}";
 
-    public bool Matches(string filter) => filter.Length == 0
-        || Name.Contains(filter, StringComparison.OrdinalIgnoreCase)
-        || Candidate.Host.Contains(filter, StringComparison.OrdinalIgnoreCase)
-        || Candidate.Username.Contains(filter, StringComparison.OrdinalIgnoreCase)
-        || Candidate.FolderPath.Contains(filter, StringComparison.OrdinalIgnoreCase);
+    /// <summary>Every term of the filter matches one of the fields, as in the session tree.</summary>
+    public bool Matches(string filter) => Resesh.Core.Search.SessionSearch.MatchesAll(
+        filter, Name, Candidate.Host, Candidate.Username, Candidate.FolderPath);
 }
 
 /// <summary>A folder in the review list. Its checkbox covers every session below it,

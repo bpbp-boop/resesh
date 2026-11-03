@@ -37,7 +37,7 @@ public sealed class WindowsCredentialService : ICredentialService
             var error = Marshal.GetLastWin32Error();
             if (error == ErrorNotFound)
                 return null;
-            throw new Win32Exception(error);
+            throw Failure("read from", error);
         }
 
         try
@@ -61,6 +61,7 @@ public sealed class WindowsCredentialService : ICredentialService
 
     private static void WriteTarget(string target, Guid id, string secret)
     {
+        CredentialStoreException.ThrowIfTooLong(secret);
         var blob = Encoding.Unicode.GetBytes(secret);
         var blobPtr = Marshal.AllocHGlobal(blob.Length);
         try
@@ -76,7 +77,7 @@ public sealed class WindowsCredentialService : ICredentialService
                 UserName = id.ToString("D"),
             };
             if (!CredWrite(ref cred, 0))
-                throw new Win32Exception(Marshal.GetLastWin32Error());
+                throw Failure("saved in", Marshal.GetLastWin32Error());
         }
         finally
         {
@@ -110,8 +111,18 @@ public sealed class WindowsCredentialService : ICredentialService
         {
             var error = Marshal.GetLastWin32Error();
             if (error != ErrorNotFound)
-                throw new Win32Exception(error);
+                throw Failure("deleted from", error);
         }
+    }
+
+    /// <summary>Credential Manager failures surface as <see cref="CredentialStoreException"/>
+    /// (an IOException), which every store-write handler already reports.</summary>
+    private static CredentialStoreException Failure(string action, int error)
+    {
+        var win32 = new Win32Exception(error);
+        return new CredentialStoreException(
+            $"The password could not be {action} Windows Credential Manager: {win32.Message}",
+            win32);
     }
 
     private static string SessionTarget(Guid sessionId) => SessionTargetPrefix + sessionId.ToString("D");

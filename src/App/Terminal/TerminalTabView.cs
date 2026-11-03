@@ -81,11 +81,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     private Border? _paneSplitterLine;
     private ThemeVisualPalette _chromePalette = ThemeVisualPalette.For(App.ResolveTheme(App.Settings.Current.Theme));
     private bool _paneSplitterActive;
-    private string? _secret;
-    private Session? _resolvedSshSession;
-    private ResolvedRoute? _resolvedRoute;
-    private volatile Session? _dialling;   // the host the connect thread is on, for prompts
-    private IReadOnlyList<Session> _routeSessions = [];   // this connect's jump hosts, in dialling order
+    private LiveLogin? _liveLogin;
     private const double DefaultFilePaneWidth = 340;
     private HighlightsStore? _highlightPreview;
     private string? _historyDirectory;
@@ -731,12 +727,16 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     }
 
     /// <summary>Types text at the prompt as a paste, without pressing Enter, so the user
-    /// reviews a command from history before it runs.</summary>
-    public bool InsertText(string text)
+    /// reviews a command from history before it runs. It goes through safe paste, so a
+    /// multi-line command that would run line by line (no bracketed paste) always asks
+    /// first, and a slow-paste session gets it slowly. Completes once that is answered:
+    /// false when nothing was inserted, so the caller can keep its place.</summary>
+    public async Task<bool> InsertTextAsync(string text)
     {
         if (_disposed || _tab.IsLocked || _tab.State != TabConnectionState.Connected)
             return false;
-        _terminal.PasteText(text);
+        if (!await PasteForReviewAsync(text))
+            return false;
         _terminal.FocusTerminal();
         return true;
     }
@@ -811,6 +811,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _connection = new TerminalConnectionLifetime();
         _backend = null;
         _ssh = null;
+        _liveLogin = null;
 
         // Work that must wait until the connect has fully ended (spinner off, Reconnect
         // available again), such as asking for a replacement password.
@@ -930,9 +931,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             // A jump host carries the telnet connection inside SSH as far as the jump.
             // Its login is asked for when the connect reaches it, as for an SSH session.
             var jumpSessions = JumpRoute.Resolve(Session, App.Store.Find);
-            _routeSessions = jumpSessions;
             var jumps = new List<SshHop>();
-            _terminal.WriteNotice($"Connecting to {Session.Host}:{Session.Port} over telnet (unencrypted){RouteDescription(Session with { Proxy = null })} …");
+            _terminal.WriteNotice($"Connecting to {Session.Host}:{SessionEndpoint.EffectivePort(Session)} over telnet (unencrypted){RouteDescription(Session with { Proxy = null })} …");
 
             var telnet = new TelnetTerminalSession();
             telnet.OutputReceived += data =>
@@ -945,43 +945,70 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                         if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
                     });
             };
-            telnet.Closed += ex => DispatcherQueue.TryEnqueue(() =>
+            // The server closing and a jump host dying can both be reported; the first says it.
+            var ended = false;
+            string? jumpLost = null;
+            void EndTelnet(string message)
             {
-                if (connection.Token.IsCancellationRequested) return;
+                if (ended || connection.Token.IsCancellationRequested) return;
+                ended = true;
                 _tab.MarkDisconnected();
                 _tab.ConnectionSummary = "";
                 EndAgentTracking();
-                _terminal.NotifyDisconnected(ex is null ? "Connection closed by the remote host." : $"Connection lost: {ex.Message}");
-            });
+                _terminal.NotifyDisconnected(message);
+            }
+            telnet.Closed += ex => DispatcherQueue.TryEnqueue(() =>
+                EndTelnet(ex is null ? "Connection closed by the remote host." : $"Connection lost: {ex.Message}"));
 
             var cols = _terminal.Columns;
             var rows = _terminal.Rows;
             _backendSize = BackendSize(cols, rows); // telnet's window size has no pixels
+            var dialling = new Dialling(jumpSessions);
             await connection.StartAsync(telnet, () =>
             {
                 var via = jumpSessions.Count == 0 ? null : SshJumpChain.Open(
-                    jumpSessions.Select(jump => new SshHop(jump, null)).ToList(), Session.Host, Session.Port, _knownHosts,
-                    info => ConfirmHostKeyBlocking(info, connection.Token),
-                    prompts => PromptKeyboardInteractiveBlocking(prompts, connection.Token),
-                    connection.Token, host => _dialling = host,
+                    jumpSessions.Select(jump => new SshHop(jump, null)).ToList(), Session.Host, SessionEndpoint.EffectivePort(Session), _knownHosts,
+                    info => ConfirmHostKeyBlocking(info, dialling, connection.Token),
+                    prompts => PromptKeyboardInteractiveBlocking(prompts, dialling, connection.Token),
+                    connection.Token, host => dialling.Host = host,
                     hop =>
                     {
-                        var login = ResolveJumpLoginBlocking(hop, jumps, connection.Token);
+                        var login = ResolveJumpLoginBlocking(hop, jumps, jumpSessions, connection.Token);
                         credentialDeclined = login is null;
                         return login;
                     });
-                _dialling = null;
-                telnet.Connect(via?.Host ?? Session.Host, via?.Port ?? Session.Port, Session.TerminalType, cols, rows,
+                // TCP keepalive on telnet's socket only reaches the loopback forward, so a
+                // jump that dies is watched for on the jump itself.
+                if (via is not null)
+                    via.Lost += reason => DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (connection.Token.IsCancellationRequested) return;
+                        if (!ReferenceEquals(_backend, telnet))
+                        {
+                            jumpLost = reason; // still connecting: reported once that ends
+                            return;
+                        }
+                        telnet.Dispose(); // raises no Closed; this reports the end instead
+                        EndTelnet($"Connection lost: {reason}");
+                    });
+                telnet.Connect(via?.Host ?? Session.Host, via?.Port ?? SessionEndpoint.EffectivePort(Session), Session.TerminalType, cols, rows,
                     connection.Token, Session.TelnetEncoding, Session.TelnetReport80x25, via);
             });
             connection.Token.ThrowIfCancellationRequested();
 
+            if (jumpLost is not null)
+            {
+                telnet.Dispose();
+                _tab.MarkDisconnected();
+                _terminal.NotifyDisconnected($"Connection lost: {jumpLost}");
+                return;
+            }
             _backend = telnet;
             ResizeBackend(_terminal.Columns, _terminal.Rows);
             _tab.MarkConnected();
             _tab.ConnectionSummary = jumpSessions.Count == 0
                 ? $"telnet • {telnet.RemoteEndPoint} • unencrypted"
-                : $"telnet • {Session.Host}:{Session.Port} via {jumpSessions[^1].Name} • unencrypted past the jump host";
+                : $"telnet • {Session.Host}:{SessionEndpoint.EffectivePort(Session)} via {jumpSessions[^1].Name} • unencrypted past the jump host";
             _terminal.NotifyConnected();
             FocusTerminalOnConnect();
         }
@@ -1027,38 +1054,37 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         }
         try
         {
-            if (target.Login == SessionLogin.Own && string.IsNullOrWhiteSpace(target.Username))
+            // Before any jump host is dialled; the login resolved for each host is checked again.
+            if (MissingUsername(target, App.Logins.Resolve(target)) is { } noUsername)
             {
                 _tab.MarkDisconnected();
-                _terminal.NotifyDisconnected(
-                    "No username set for this session. Right-click it in the tree and choose Edit… to add one.");
+                _terminal.NotifyDisconnected(noUsername);
                 return null;
             }
 
             // Logins are asked for hop by hop as the connect reaches each host, jump hosts
             // first, so a jump that fails stops before anything is typed for the next one.
             var jumpSessions = JumpRoute.Resolve(target, App.Store.Find);
-            _routeSessions = jumpSessions;
             var jumps = new List<SshHop>();
             string? proxyPassword = null;
+            ResolvedSshCredential? targetLogin = null;
             if (isReconnect)
                 _terminal.WriteDivider();
             SshHop? ResolveLogin(SshHop hop)
             {
                 var login = hop.Session.Id != target.Id
-                    ? ResolveJumpLoginBlocking(hop, jumps, connection.Token)
+                    ? ResolveJumpLoginBlocking(hop, jumps, jumpSessions, connection.Token)
                     : RunOnUiBlocking(async () =>
                     {
-                        var resolved = await ResolveSshCredentialAsync(target, connection.Token);
+                        var resolved = await ResolveSshCredentialAsync(target, jumpSessions, connection.Token);
                         connection.Token.ThrowIfCancellationRequested();
                         if (resolved is null)
                             return null;
-                        _secret = resolved.Secret; // reused by the file pane's SFTP connection
-                        _resolvedSshSession = resolved.Session;
+                        targetLogin = resolved;
                         proxyPassword = ProxyPassword(target);
                         authenticatingWith = resolved.IdentitySecret;
                         _terminal.WriteNotice(
-                            $"Connecting to {resolved.Session.Username}@{target.Host}:{target.Port}{RouteDescription(target)} …");
+                            $"Connecting to {resolved.Session.Username}@{target.Host}:{SessionEndpoint.EffectivePort(target)}{RouteDescription(target)} …");
                         return new SshHop(resolved.Session, resolved.Secret, proxyPassword);
                     }, connection.Token);
                 credentialDeclined = login is null;
@@ -1068,10 +1094,11 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             // Connect and its integration diagnostics run on the backend worker.
             // Terminal notices must be delivered on this view's UI thread.
             var uiDispatcher = DispatcherQueue;
+            var dialling = new Dialling(jumpSessions);
             var session = new SshTerminalSession(_knownHosts)
             {
-                HostKeyDecision = info => ConfirmHostKeyBlocking(info, connection.Token),
-                Connecting = host => _dialling = host,
+                HostKeyDecision = info => ConfirmHostKeyBlocking(info, dialling, connection.Token),
+                Connecting = host => dialling.Host = host,
                 ShellIntegrationNotice = message => uiDispatcher.TryEnqueue(() =>
                 {
                     if (!_disposed && !connection.Token.IsCancellationRequested)
@@ -1118,24 +1145,27 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             await connection.StartAsync(session, () => session.Connect(
                 target, null, target.TerminalType, cols, rows,
                 bootstrapCommandFactory: bootstrapFactory,
-                interactiveResponder: prompts => PromptKeyboardInteractiveBlocking(prompts, connection.Token),
+                interactiveResponder: prompts => PromptKeyboardInteractiveBlocking(prompts, dialling, connection.Token),
                 cancellationToken: connection.Token,
                 jumps: jumpSessions.Select(jump => new SshHop(jump, null)).ToList(),
                 tunnels: target.Tunnels,
                 resolveLogin: ResolveLogin,
                 pixelWidth: size.PixelWidth,
                 pixelHeight: size.PixelHeight));
-            _resolvedRoute = new ResolvedRoute(jumps, proxyPassword);
             connection.Token.ThrowIfCancellationRequested();
             attached = true;
             _resumeTmuxSlot = null;
+            // Published with the Connected state below, all at once: the side connections
+            // that reuse it never see a new login with the old route.
+            var live = _liveLogin = new LiveLogin(
+                targetLogin?.Session ?? target, targetLogin?.Secret ?? "", new ResolvedRoute(jumps, proxyPassword));
 
             _backend = session;
             _ssh = session;
             ResizeBackend(_terminal.Columns, _terminal.Rows);
             // The one record of what this connection reached and which persistent shell it
             // holds; leaving the connected state clears both.
-            _tab.MarkConnected(_resolvedSshSession ?? target, persistent && _hasTmuxTarget ? _tmuxSlot : null);
+            _tab.MarkConnected(live.Session, persistent && _hasTmuxTarget ? _tmuxSlot : null);
             UpdateSshSummary();
             TunnelsChanged?.Invoke();
             _terminal.NotifyConnected();
@@ -1500,19 +1530,45 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
     /// <summary>How a connect reaches its host: the jump hosts in the order they are
     /// dialled (logins applied), and the password for the session's own proxy.</summary>
-    private sealed record ResolvedRoute(IReadOnlyList<SshHop> Jumps, string? ProxyPassword);
+    private sealed record ResolvedRoute(IReadOnlyList<SshHop> Jumps, string? ProxyPassword)
+    {
+        public IReadOnlyList<Session> Sessions => Jumps.Select(jump => jump.Session).ToList();
+    }
+
+    /// <summary>The login (applied to the session, as <see cref="TabViewModel.ConnectedSession"/>
+    /// holds it), secret and route the live SSH connection was made with.</summary>
+    private sealed record LiveLogin(Session Session, string Secret, ResolvedRoute Route);
+
+    /// <summary>What the file pane, Manage Remote Sessions and the Explorer mount connect
+    /// with: the live connection's login and route, and only while the tab is Connected.
+    /// During a reconnect the previous one no longer describes anything that is up.</summary>
+    private LiveLogin? CurrentLogin => _tab.State == TabConnectionState.Connected ? _liveLogin : null;
+
+    /// <summary>The host one connection is dialling, for its prompts' titles, and the jump
+    /// hosts on its route. Each connection (terminal, file pane, management) has its own, so
+    /// a prompt never names the host another connection last dialled.</summary>
+    private sealed class Dialling(IReadOnlyList<Session> route)
+    {
+        private volatile Session? _host;
+
+        public IReadOnlyList<Session> Route { get; } = route;
+
+        public Session? Host
+        {
+            get => _host;
+            set => _host = value;
+        }
+    }
 
     /// <summary>Resolves every jump host's login the way the session's own is resolved.
     /// Null when a prompt was cancelled; throws when the chain itself is broken.</summary>
     private async Task<ResolvedRoute?> ResolveRouteAsync(CancellationToken token)
     {
         var jumps = new List<SshHop>();
-        foreach (var jump in JumpRoute.Resolve(Session, App.Store.Find))
+        var route = JumpRoute.Resolve(Session, App.Store.Find);
+        foreach (var jump in route)
         {
-            if (jump.Login == SessionLogin.Own && string.IsNullOrWhiteSpace(jump.Username))
-                throw new SshSessionException(SshFailureKind.Other,
-                    $"The jump host {jump.Name} has no username. Edit it to add one.") { JumpSessionId = jump.Id };
-            var resolved = await ResolveSshCredentialAsync(jump, token);
+            var resolved = await ResolveSshCredentialAsync(jump, route, token);
             token.ThrowIfCancellationRequested();
             if (resolved is null)
                 return null;
@@ -1521,10 +1577,9 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         return new ResolvedRoute(jumps, ProxyPassword(Session));
     }
 
+    /// <summary>The saved password for the proxy the connection really uses, when it sends a login.</summary>
     private string? ProxyPassword(Session session) =>
-        session.JumpHostId is null && session.Proxy is { Username.Length: > 0 }
-            ? _credentials.ReadProxy(session.Id)
-            : null;
+        JumpRoute.ProxyUsername(session) is not null ? _credentials.ReadProxy(session.Id) : null;
 
     /// <summary>" via bastion → core", or the proxy, for the connecting notice; empty when direct.</summary>
     private static string RouteDescription(Session session)
@@ -1539,30 +1594,55 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         {
             return "";
         }
-        return session.Proxy is { Host.Length: > 0 } proxy ? $" via {proxy.Label}" : "";
+        return JumpRoute.ActiveProxy(session) is { } proxy ? $" via {proxy.Label}" : "";
     }
 
-    /// <summary>A password typed after a rejection but not saved: used once by the next connect.</summary>
+    /// <summary>A password typed after the session's own host rejected an identity's password,
+    /// but not saved: used once, by the next login to that host (never a jump host's, which
+    /// resolves first and may use the same identity).</summary>
     private (Guid IdentityId, string Secret)? _pendingIdentitySecret;
 
-    /// <summary>Resolves the login (own, chosen identity, folder identity, or a prompt) and its secret.</summary>
-    private async Task<ResolvedSshCredential?> ResolveSshCredentialAsync(Session target, CancellationToken token)
+    /// <summary>Why <paramref name="host"/> cannot log in for want of a username, or null when
+    /// <paramref name="login"/> has one or will ask for one. Every connection (terminal, file
+    /// pane, management, jump hosts) checks each host through this.</summary>
+    private string? MissingUsername(Session host, ResolvedLogin login)
+    {
+        if (login.Source == LoginSource.None || !string.IsNullOrWhiteSpace(login.Username))
+            return null;
+        var jump = host.Id != Session.Id;
+        if (login.Source == LoginSource.Session)
+            return jump
+                ? $"The jump host {host.Name} has no username. Edit it to add one."
+                : "No username set for this session. Right-click it in the tree and choose Edit… to add one.";
+        var usedBy = jump ? $" (used by the jump host {host.Name})" : "";
+        return $"The identity '{login.Identity!.Name}'{usedBy} has no username. "
+            + $"Edit it in {SettingsCatalog.PathTo(SettingsSection.Identities)}.";
+    }
+
+    /// <summary>Resolves the login (own, chosen identity, folder identity, or a prompt) and its secret.
+    /// <paramref name="route"/> is the jump hosts of the connection being made, which names a
+    /// jump host's place in its prompts; not the terminal's last route, which a side
+    /// connection for a stopped tab may not share.</summary>
+    private async Task<ResolvedSshCredential?> ResolveSshCredentialAsync(
+        Session target, IReadOnlyList<Session> route, CancellationToken token)
     {
         var login = App.Logins.Resolve(target);
+        if (MissingUsername(target, login) is { } noUsername)
+            throw new SshSessionException(SshFailureKind.Other, noUsername)
+            {
+                JumpSessionId = target.Id != Session.Id ? target.Id : null,
+            };
         if (login.Source == LoginSource.None)
             return await PromptLoginAsync(target, login, token);
         if (login.Source == LoginSource.Session)
-            return await ResolveOwnCredentialAsync(target, token);
+            return await ResolveOwnCredentialAsync(target, route, token);
 
         var identity = login.Identity!;
         var session = login.ApplyTo(target);
-        if (string.IsNullOrWhiteSpace(session.Username))
-            throw new InvalidOperationException(
-                $"The identity '{identity.Name}' has no username. Edit it in {SettingsCatalog.PathTo(SettingsSection.Identities)}.");
         if (identity.Proof == IdentityProof.Key)
-            return await ResolvePrivateKeyAsync(session, token);
+            return await ResolvePrivateKeyAsync(session, sessionLogin: false, token);
 
-        if (_pendingIdentitySecret is { } pending && pending.IdentityId == identity.Id)
+        if (target.Id == Session.Id && _pendingIdentitySecret is { } pending && pending.IdentityId == identity.Id)
         {
             _pendingIdentitySecret = null;
             return new ResolvedSshCredential(session, pending.Secret);
@@ -1574,8 +1654,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
         var result = await ConnectDialogs.PromptCredentialAsync(
             XamlRoot,
-            PromptTitle(target, "Connect to"),
-            $"Password for {session.Username}@{target.Host} ({identity.Name}){PromptPurpose(target)}",
+            PromptTitle(target, "Connect to", route),
+            $"Password for {session.Username}@{target.Host} ({identity.Name}){PromptPurpose(target, route)}",
             saveLabel: ask ? null : "Save for every session using this identity",
             cancellationToken: token);
         token.ThrowIfCancellationRequested();
@@ -1589,13 +1669,14 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     }
 
     /// <summary>The session's own credential: a session password or a registered key.</summary>
-    private async Task<ResolvedSshCredential?> ResolveOwnCredentialAsync(Session target, CancellationToken token)
+    private async Task<ResolvedSshCredential?> ResolveOwnCredentialAsync(
+        Session target, IReadOnlyList<Session> route, CancellationToken token)
     {
         if (target.AuthMethod == AuthMethod.None)
             return new ResolvedSshCredential(target, "");
 
         if (target.AuthMethod == AuthMethod.PrivateKey)
-            return await ResolvePrivateKeyAsync(target, token);
+            return await ResolvePrivateKeyAsync(target, sessionLogin: true, token);
 
         var stored = _credentials.Read(target.Id);
         if (!string.IsNullOrEmpty(stored))
@@ -1603,8 +1684,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
         var result = await ConnectDialogs.PromptCredentialAsync(
             XamlRoot,
-            PromptTitle(target, "Connect to"),
-            $"Password for {target.Username}@{target.Host}{PromptPurpose(target)}",
+            PromptTitle(target, "Connect to", route),
+            $"Password for {target.Username}@{target.Host}{PromptPurpose(target, route)}",
             cancellationToken: token);
         token.ThrowIfCancellationRequested();
         if (result is not { } cred)
@@ -1666,7 +1747,10 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         return new ResolvedSshCredential(session, answer.Password);
     }
 
-    private async Task<ResolvedSshCredential?> ResolvePrivateKeyAsync(Session session, CancellationToken token)
+    /// <summary>A registered key's login. <paramref name="sessionLogin"/>: the session's own
+    /// login, whose passphrase a migrated session may still keep under its own credential
+    /// (DECISIONS 2026-08-18); an identity's key never falls back to the session password.</summary>
+    private async Task<ResolvedSshCredential?> ResolvePrivateKeyAsync(Session session, bool sessionLogin, CancellationToken token)
     {
         if (session.PrivateKeyId is not { } keyId || _sshKeys.Find(keyId) is not { } key)
             throw new InvalidOperationException("The session does not have a registered SSH key.");
@@ -1675,7 +1759,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 $"The SSH key '{key.Name}' is unavailable. Locate it in {SettingsCatalog.PathTo(SettingsSection.Identities)}.", key.Path);
 
         var secret = key.IsEncrypted == true
-            ? _credentials.ReadKey(keyId) ?? _credentials.Read(session.Id)
+            ? _credentials.ReadKey(keyId) ?? (sessionLogin ? _credentials.Read(session.Id) : null)
             : null;
 
         SshKeyReference validated;
@@ -1756,26 +1840,27 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         }
     }
 
-    /// <summary>Where <paramref name="host"/> sits on this connect's route when it is a jump
-    /// host ("Jump host 1 of 2: bastion"), or null for the session itself.</summary>
-    private string? RouteStep(Session? host)
+    /// <summary>Where <paramref name="host"/> sits on <paramref name="route"/>, the jump hosts
+    /// of the connection asking, when it is a jump host ("Jump host 1 of 2: bastion"), or null
+    /// for the session itself.</summary>
+    private static string? RouteStep(Session? host, IReadOnlyList<Session> route)
     {
-        var jumps = _routeSessions;
-        for (var index = 0; index < jumps.Count; index++)
+        for (var index = 0; index < route.Count; index++)
         {
-            if (jumps[index].Id == host?.Id)
-                return jumps.Count == 1 ? $"Jump host: {host.Name}" : $"Jump host {index + 1} of {jumps.Count}: {host.Name}";
+            if (route[index].Id == host?.Id)
+                return route.Count == 1 ? $"Jump host: {host.Name}" : $"Jump host {index + 1} of {route.Count}: {host.Name}";
         }
         return null;
     }
 
     /// <summary>A prompt title that says which host is asking: the jump host's place on
     /// the route, or "<paramref name="verb"/> name" for the session itself.</summary>
-    private string PromptTitle(Session host, string verb) => RouteStep(host) ?? $"{verb} {host.Name}";
+    private static string PromptTitle(Session host, string verb, IReadOnlyList<Session> route) =>
+        RouteStep(host, route) ?? $"{verb} {host.Name}";
 
     /// <summary>" (on the way to target)" for a jump host's prompt; empty for the session's own.</summary>
-    private string PromptPurpose(Session host) =>
-        RouteStep(host) is null ? "" : $" (on the way to {Session.Name})";
+    private string PromptPurpose(Session host, IReadOnlyList<Session> route) =>
+        RouteStep(host, route) is null ? "" : $" (on the way to {Session.Name})";
 
     /// <summary>Runs UI work for the connect thread and waits for it: a login prompt in the
     /// middle of a connect, like the host-key decision.</summary>
@@ -1803,25 +1888,24 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
     /// <summary>Asks for one jump host's login when the connect reaches it, and says in the
     /// terminal that it is being dialled. Null when the prompt was cancelled.</summary>
-    private SshHop? ResolveJumpLoginBlocking(SshHop hop, List<SshHop> resolvedJumps, CancellationToken token) =>
+    private SshHop? ResolveJumpLoginBlocking(
+        SshHop hop, List<SshHop> resolvedJumps, IReadOnlyList<Session> route, CancellationToken token) =>
         RunOnUiBlocking(async () =>
         {
             var jump = hop.Session;
-            if (jump.Login == SessionLogin.Own && string.IsNullOrWhiteSpace(jump.Username))
-                throw new InvalidOperationException("it has no username. Edit the session to add one.");
-            var resolved = await ResolveSshCredentialAsync(jump, token);
+            var resolved = await ResolveSshCredentialAsync(jump, route, token);
             token.ThrowIfCancellationRequested();
             if (resolved is null)
                 return null;
             var login = new SshHop(resolved.Session, resolved.Secret, ProxyPassword(jump));
             resolvedJumps.Add(login);
             _terminal.WriteNotice(
-                $"Connecting to jump host {jump.Name} ({resolved.Session.Username}@{jump.Host}:{jump.Port}){RouteDescription(jump)} …");
+                $"Connecting to jump host {jump.Name} ({resolved.Session.Username}@{jump.Host}:{SessionEndpoint.EffectivePort(jump)}){RouteDescription(jump)} …");
             return login;
         }, token);
 
     /// <summary>Marshals the host-key decision onto the UI thread; called from the connect thread.</summary>
-    private bool ConfirmHostKeyBlocking(HostKeyInfo info, CancellationToken token)
+    private bool ConfirmHostKeyBlocking(HostKeyInfo info, Dialling dialling, CancellationToken token)
     {
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!DispatcherQueue.TryEnqueue(async () =>
@@ -1829,7 +1913,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             try
             {
                 if (token.IsCancellationRequested) return;
-                tcs.TrySetResult(await ConnectDialogs.ConfirmHostKeyAsync(XamlRoot, info, RouteStep(_dialling), token));
+                tcs.TrySetResult(await ConnectDialogs.ConfirmHostKeyAsync(XamlRoot, info, RouteStep(dialling.Host, dialling.Route), token));
             }
             catch (Exception ex)
             {
@@ -1841,7 +1925,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
     /// <summary>Marshals server keyboard-interactive challenges onto the UI thread.</summary>
     private IReadOnlyList<string>? PromptKeyboardInteractiveBlocking(
-        IReadOnlyList<KeyboardInteractivePrompt> prompts, CancellationToken token)
+        IReadOnlyList<KeyboardInteractivePrompt> prompts, Dialling dialling, CancellationToken token)
     {
         var tcs = new TaskCompletionSource<IReadOnlyList<string>?>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!DispatcherQueue.TryEnqueue(async () =>
@@ -1850,7 +1934,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             {
                 if (token.IsCancellationRequested) return;
                 tcs.TrySetResult(await ConnectDialogs.PromptKeyboardInteractiveAsync(
-                    XamlRoot, PromptTitle(_dialling ?? Session, "Authenticate to"), prompts, token));
+                    XamlRoot, PromptTitle(dialling.Host ?? Session, "Authenticate to", dialling.Route), prompts, token));
             }
             catch (Exception ex)
             {
@@ -1984,7 +2068,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     /// <summary>Creates an exec-only connection owned and disposed by the manager. Null when
     /// the login was cancelled, or the tab closed or <paramref name="cancellationToken"/> was
     /// cancelled before the connection was up; the connect is abandoned then, not left
-    /// running.</summary>
+    /// running. A connected tab's manager reaches the host the terminal did, with its login
+    /// and route; a stopped tab's resolves them from the saved session.</summary>
     public async Task<SshTerminalSession?> CreateRemoteManagementConnectionAsync(CancellationToken cancellationToken = default)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_closing.Token, cancellationToken);
@@ -1992,23 +2077,34 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         SshTerminalSession? connection = null;
         try
         {
-            var route = await ResolveRouteAsync(token);
-            var resolved = route is null ? null : await ResolveSshCredentialAsync(Session, token);
-            if (resolved is null || token.IsCancellationRequested) return null;
+            ResolvedRoute? route;
+            ResolvedSshCredential? resolved;
+            if (CurrentLogin is { } live)
+                (route, resolved) = (live.Route, new ResolvedSshCredential(live.Session, live.Secret));
+            else
+            {
+                if (MissingUsername(Session, App.Logins.Resolve(Session)) is { } noUsername)
+                    throw new InvalidOperationException(noUsername);
+                route = await ResolveRouteAsync(token);
+                resolved = route is null ? null : await ResolveSshCredentialAsync(Session, route.Sessions, token);
+            }
+            if (route is null || resolved is null || token.IsCancellationRequested) return null;
             var (profile, secret, _) = resolved;
+            var dialling = new Dialling(route.Sessions);
             var session = connection = new SshTerminalSession(_knownHosts)
             {
-                HostKeyDecision = info => ConfirmHostKeyBlocking(info, token),
+                HostKeyDecision = info => ConfirmHostKeyBlocking(info, dialling, token),
+                Connecting = host => dialling.Host = host,
             };
             // The token stops the connect only until versions are exchanged; disconnecting
             // also cuts a stalled key exchange or login short (safe mid-connect).
             using (token.Register(session.Disconnect))
             {
                 await Task.Run(() => session.Connect(profile, secret, Session.TerminalType, 80, 24,
-                    interactiveResponder: prompts => PromptKeyboardInteractiveBlocking(prompts, token),
+                    interactiveResponder: prompts => PromptKeyboardInteractiveBlocking(prompts, dialling, token),
                     cancellationToken: token,
                     openShell: false,
-                    jumps: route!.Jumps,
+                    jumps: route.Jumps,
                     proxyPassword: route.ProxyPassword));
             }
             token.ThrowIfCancellationRequested();
@@ -2027,6 +2123,11 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             throw;
         }
     }
+
+    /// <summary>The backend keeping the persistent shell the live connection is attached to,
+    /// as that connect chose it; null when the tab is not attached to one, and the session's
+    /// settings decide (<see cref="ResolvePersistenceBlocking"/>).</summary>
+    public PersistenceBackend? AttachedPersistence => _tab.RemoteSessionSlot is not null ? _persistence : null;
 
     /// <summary>
     /// Kills the persistent shell this tab's live connection is attached to, and only that
@@ -2189,7 +2290,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         if (_paneSplitterLine is null)
             return;
         _paneSplitterLine.Background = _paneSplitterActive
-            ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSplitterHoverBrush"]
+            ? ThemeResources.Brush(_paneSplitterLine, "SessionSplitterHoverBrush")
             : new Microsoft.UI.Xaml.Media.SolidColorBrush(_chromePalette.Divider);
     }
 
@@ -2385,19 +2486,20 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             OpenLocalDirectoryInExplorer(path);
             return;
         }
-        // The connection the terminal made (or will make): its login and route, not the
-        // session's settings as edited since.
-        var session = _tab.ConnectedSession ?? _resolvedSshSession ?? Session;
+        // The connection the terminal made: its login and route, not the session's settings
+        // as edited since. Like the file pane, the mount follows the terminal.
+        var live = CurrentLogin
+            ?? throw new InvalidOperationException("The session is disconnected. Reconnect it to open its files in File Explorer.");
+        var session = live.Session;
         // SSHFS-Win dials the host itself, so it cannot follow a jump host or proxy.
-        if (session.JumpHostId is not null || session.Proxy is { Host.Length: > 0 }
-            || _resolvedRoute is { Jumps.Count: > 0 })
+        if (live.Route.Jumps.Count > 0 || session.JumpHostId is not null || JumpRoute.ActiveProxy(session) is not null)
             throw new IOException("File Explorer connects straight to the host, so it cannot open a session "
                 + "reached through a jump host or proxy. Use the file pane instead.");
         var mount = _sshfsMount;
         // A mount made for another target (the session was edited and reconnected) is replaced.
         if (mount is not { IsAlive: true } || _sshfsTarget != SshfsTarget(session))
         {
-            var mounting = _sshfsMounting ??= MountSshfsAsync(session);
+            var mounting = _sshfsMounting ??= MountSshfsAsync(session, live.Secret);
             try
             {
                 mount = await mounting;
@@ -2413,25 +2515,32 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         Interop.SshfsIntegration.OpenInExplorer(mount.Root, path);
     }
 
-    private async Task<Interop.SshfsMount?> MountSshfsAsync(Session session)
+    private async Task<Interop.SshfsMount?> MountSshfsAsync(Session session, string secret)
     {
         var token = _closing.Token;
         var stale = _sshfsMount;
         _sshfsMount = null;
-        var password = session.AuthMethod == AuthMethod.Password ? _secret : null;
+        var password = session.AuthMethod == AuthMethod.Password ? secret : null;
         Interop.SshfsMount mount;
         try
         {
+            // The key file is checked against its registered fingerprint, as every
+            // connection's is; the terminal's check was made when it connected.
+            var keyPath = session.AuthMethod == AuthMethod.PrivateKey ? await ValidateSshfsKeyAsync(session, token) : null;
             // Killing a dead mount's process can wait, so it happens off the UI thread too.
             mount = await Task.Run(() =>
             {
                 stale?.Dispose();
-                return Interop.SshfsIntegration.Mount(session, _knownHosts, password, token);
+                return Interop.SshfsIntegration.Mount(session, _knownHosts, password, keyPath, token);
             }, token);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             return null;
+        }
+        catch (OperationCanceledException)
+        {
+            throw new IOException("The changed SSH key was not accepted.");
         }
         if (_disposed)
         {
@@ -2444,37 +2553,61 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         return mount;
     }
 
-    /// <summary>What an SSHFS mount was made for: host, port and login.</summary>
-    private static string SshfsTarget(Session session) =>
-        $"{session.Username}@{session.Host}:{session.Port}|{session.AuthMethod}|{session.PrivateKeyPath}";
+    /// <summary>The key file an Explorer mount logs in with, once its fingerprint is checked.</summary>
+    private async Task<string> ValidateSshfsKeyAsync(Session session, CancellationToken token)
+    {
+        const string encrypted = "The key is passphrase-protected, and sshfs cannot prompt for it. "
+            + "Use a passphrase-free key for the Explorer mount.";
+        if (session.PrivateKeyId is not { } keyId || _sshKeys.Find(keyId) is not { } registered)
+            throw new IOException("The session does not have a registered SSH key.");
+        if (registered.IsEncrypted == true)
+            throw new IOException(encrypted);
+        SshKeyReference key;
+        try
+        {
+            key = await ValidateKeyAsync(keyId, null, token);
+        }
+        catch (SshKeyPassphraseException)
+        {
+            throw new IOException(encrypted);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new IOException(ex.Message, ex);
+        }
+        if (key.IsEncrypted == true)
+            throw new IOException(encrypted);
+        return key.Path;
+    }
 
-    /// <summary>Connect factory handed to the pane: reuses the tab's resolved secret
-    /// (prompting only if the tab never connected) and the shared host-key trust. Stops when
-    /// the pane gives up (a newer navigation, Cancel, the pane closing) or the tab reconnects.</summary>
+    /// <summary>What an SSHFS mount was made for: host, port and login (the registered key,
+    /// whose current file the mount reads, not a path the session once had).</summary>
+    private static string SshfsTarget(Session session) =>
+        $"{session.Username}@{session.Host}:{SessionEndpoint.EffectivePort(session)}|{session.AuthMethod}|"
+        + (session.AuthMethod == AuthMethod.PrivateKey ? session.PrivateKeyId?.ToString() : null);
+
+    /// <summary>Connect factory handed to the pane: reuses the live connection's login, secret
+    /// and route and the shared host-key trust. Stops when the pane gives up (a newer
+    /// navigation, Cancel, the pane closing) or the tab reconnects.</summary>
     private async Task<SftpSession> CreateSftpSessionAsync(CancellationToken paneToken)
     {
-        // The pane follows the terminal: a tab whose connection ended browses nothing.
-        if (_tab.State is TabConnectionState.Disconnected or TabConnectionState.Exited)
-            throw new InvalidOperationException("The session is disconnected. Reconnect it to browse its files.");
+        // The pane follows the terminal: a tab whose connection ended browses nothing, and
+        // one still connecting has no login and route yet (a reconnect's are not published
+        // until it is up). The pane lists its folder again once the tab is Connected.
+        if (_tab.State == TabConnectionState.Connecting)
+            throw new InvalidOperationException("The session is still connecting. Its files appear once it is connected.");
+        var live = CurrentLogin
+            ?? throw new InvalidOperationException("The session is disconnected. Reconnect it to browse its files.");
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_connection.Token, paneToken);
         var token = linked.Token;
         token.ThrowIfCancellationRequested();
-        var route = _resolvedRoute ?? await ResolveRouteAsync(token);
-        var resolved = route is null ? null
-            : _resolvedSshSession is { } active ? new ResolvedSshCredential(active, _secret ?? "")
-            : await ResolveSshCredentialAsync(Session, token);
-        token.ThrowIfCancellationRequested();
-        if (route is null || resolved is null)
-            throw new SshSessionException(SshFailureKind.AuthenticationFailed, "No credential provided.");
-        var (session, secret, _) = resolved;
-        _secret = secret;
-        _resolvedSshSession = session;
-        _resolvedRoute = route;
+        var (session, secret, route) = live;
+        var dialling = new Dialling(route.Sessions);
         var sftp = new SftpSession(_knownHosts);
         try
         {
-            await Task.Run(() => sftp.Connect(session, secret, prompts => PromptKeyboardInteractiveBlocking(prompts, token),
-                route.Jumps, route.ProxyPassword, token));
+            await Task.Run(() => sftp.Connect(session, secret, prompts => PromptKeyboardInteractiveBlocking(prompts, dialling, token),
+                route.Jumps, route.ProxyPassword, token, host => dialling.Host = host));
             token.ThrowIfCancellationRequested();
         }
         catch
@@ -2570,8 +2703,6 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _backend = null;
         _ssh = null;
         _capture = null;
-        _secret = null;
-        _resolvedSshSession = null;
-        _resolvedRoute = null;
+        _liveLogin = null;
     }
 }

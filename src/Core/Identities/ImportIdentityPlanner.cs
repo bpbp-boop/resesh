@@ -229,7 +229,7 @@ public static class ImportIdentityPlanner
             return "";
         try
         {
-            return Path.GetFullPath(Environment.ExpandEnvironmentVariables(path.Trim().Trim('"')));
+            return KeyFilePath.Normalize(path);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {

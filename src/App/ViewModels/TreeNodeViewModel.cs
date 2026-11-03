@@ -53,8 +53,11 @@ public sealed partial class TreeNodeViewModel : ObservableObject
 
     public bool IsFolder => Session is null;
 
+    /// <summary>The Local root's name, which a tree filter term may also match.</summary>
+    public const string LocalRootName = "Local";
+
     public string Name => IsLocalRoot
-        ? "Local"
+        ? LocalRootName
         : Session?.Name ?? Resesh.Core.Storage.FolderPaths.Name(FolderPath);
 
     public string HostSummary => Session is null

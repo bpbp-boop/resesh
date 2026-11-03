@@ -179,9 +179,7 @@ public sealed partial class SessionsManagerView : UserControl
             _ => true,
         };
         // Every term must match a session field or the Login column (identity name included).
-        return loginMatches && query.Split(' ', StringSplitOptions.RemoveEmptyEntries).All(term =>
-            SessionSearch.Matches(row.Session, term)
-            || row.Login.Contains(term, StringComparison.OrdinalIgnoreCase));
+        return loginMatches && SessionSearch.Matches(row.Session, query, row.Login);
     }
 
     private void ShowRows(HashSet<Guid> selectedIds)

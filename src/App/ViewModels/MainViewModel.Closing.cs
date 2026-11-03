@@ -1,5 +1,20 @@
 namespace Resesh.App.ViewModels;
 
+/// <summary>What closing one tab asks first.</summary>
+public enum TabCloseKind
+{
+    /// <summary>Close at once: an app page, or confirmation is off for an unpinned tab.</summary>
+    Now,
+    Confirm,
+    /// <summary>One dialog both unpins and closes.</summary>
+    ConfirmPinned,
+    /// <summary>The tab is attached to a persistent shell: the dialog offers to end it too.</summary>
+    ConfirmPersistent,
+}
+
+/// <summary>The confirmation a tab close shows, decided before any dialog is built.</summary>
+public sealed record TabClosePlan(TabCloseKind Kind, string Title = "", string Message = "", string PrimaryText = "");
+
 // Bookkeeping for tab closes and lock prompts that wait on the user or the network.
 public sealed partial class MainViewModel
 {
@@ -25,6 +40,43 @@ public sealed partial class MainViewModel
 
     /// <summary>Releases a claim from <see cref="TryBeginClose"/>, whether the tab closed or not.</summary>
     public void EndClose(TabViewModel tab) => _closingTabs.Remove(tab);
+
+    /// <summary>What closing the tab asks first. The window's close pathway shows the dialog
+    /// this describes, then removes the tab with <see cref="DetachTab"/>.</summary>
+    public TabClosePlan PlanClose(TabViewModel tab, bool confirmActiveSessions)
+    {
+        if (tab.IsAppPage || (!tab.IsPinned && !confirmActiveSessions))
+            return new(TabCloseKind.Now);
+
+        if (tab.IsAttachedToRemoteSession && HasTerminal(tab))
+        {
+            return tab.IsPinned
+                ? new(TabCloseKind.ConfirmPersistent, "Tab Is Pinned",
+                    $"\"{tab.Header}\" is pinned. Closing the tab also unpins it.", "Unpin and Close")
+                : new(TabCloseKind.ConfirmPersistent, "Close Tab", $"Close \"{tab.Header}\"?", "Close Tab");
+        }
+
+        var detail = tab.State != TabConnectionState.Connected
+            ? ""
+            : tab.IsLocal
+                ? " The process is still running — closing stops it and everything it started."
+                : tab.IsAttachedToRemoteSession
+                    ? " The remote session keeps running (persistent) — connecting again resumes it."
+                    : " The session is still connected.";
+        return tab.IsPinned
+            ? new(TabCloseKind.ConfirmPinned, "Tab Is Pinned", $"\"{tab.Header}\" is pinned.{detail}", "Unpin and Close")
+            : new(TabCloseKind.Confirm, "Close Tab", $"Close \"{tab.Header}\"?{detail}", "Close");
+    }
+
+    /// <summary>The question a bulk close asks ("Close 3 other tab(s)? 1 of them is still
+    /// connected.").</summary>
+    public static string CloseManyMessage(IReadOnlyCollection<TabViewModel> tabs, string description)
+    {
+        var connected = tabs.Count(t => t.State == TabConnectionState.Connected);
+        return connected > 0
+            ? $"Close {tabs.Count} {description}? {connected} of them {(connected == 1 ? "is" : "are")} still connected."
+            : $"Close {tabs.Count} {description}?";
+    }
 
     private readonly HashSet<TabViewModel> _lockPromptTabs = [];
 

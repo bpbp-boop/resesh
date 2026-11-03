@@ -10,6 +10,7 @@ public sealed class Osc7WorkingDirectoryTests
     [InlineData("file:///var/log", "", "/var/log")]
     [InlineData("file://server/home/what?#now", "server", "/home/what?#now")]
     [InlineData("file://server//home///boden/", "server", "/home/boden")]
+    [InlineData("file://server/home/boden/../work", "server", "/home/work")]
     public void Parser_accepts_valid_file_uris(string payload, string host, string path)
     {
         Assert.True(Osc7WorkingDirectoryParser.TryParse(payload, out var result));
@@ -26,6 +27,7 @@ public sealed class Osc7WorkingDirectoryTests
     [InlineData("file://server/home/%2")]
     [InlineData("file://server/home/%GG")]
     [InlineData("file://server/home/%00bad")]
+    [InlineData("file://server/home/%C2%9B31m")] // C1 CSI, which a terminal acts on like ESC [
     public void Parser_rejects_untrusted_payloads(string? payload) =>
         Assert.False(Osc7WorkingDirectoryParser.TryParse(payload, out _));
 

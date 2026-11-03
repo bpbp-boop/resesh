@@ -236,6 +236,61 @@ public sealed class SshConnectivityTests : IDisposable
     }
 
     [Fact]
+    public void AJumpThatDropsIsReportedLost()
+    {
+        // What runs through the chain (telnet, say) only sees its loopback socket.
+        var bastion = new TestSshHost("bastion");
+        using var target = new TestSshHost("target");
+        using var chain = SshJumpChain.Open([Hop(bastion)], "127.0.0.1", target.Port, _knownHosts, _ => true);
+        using var lost = new ManualResetEventSlim();
+        string? reason = null;
+        chain.Lost += message =>
+        {
+            reason = message;
+            lost.Set();
+        };
+
+        bastion.Dispose();
+
+        Assert.True(lost.Wait(TimeSpan.FromSeconds(20)), "the chain did not notice its jump going away");
+        Assert.Contains("bastion", reason);
+    }
+
+    [Fact]
+    public void AJumpLostBeforeAnyoneListenedIsReportedToLateSubscribers()
+    {
+        // The connection through the chain subscribes only after Open returns; a jump that
+        // drops in between must still end it.
+        var bastion = new TestSshHost("bastion");
+        using var target = new TestSshHost("target");
+        using var chain = SshJumpChain.Open([Hop(bastion)], "127.0.0.1", target.Port, _knownHosts, _ => true);
+        using var first = new ManualResetEventSlim();
+        chain.Lost += _ => first.Set();
+        bastion.Dispose();
+        Assert.True(first.Wait(TimeSpan.FromSeconds(20)), "the chain did not notice its jump going away");
+
+        string? late = null;
+        chain.Lost += message => late = message;
+
+        Assert.Contains("bastion", late);
+    }
+
+    [Fact]
+    public void ClosingTheChainIsNotReportedLost()
+    {
+        using var bastion = new TestSshHost("bastion");
+        using var target = new TestSshHost("target");
+        var chain = SshJumpChain.Open([Hop(bastion)], "127.0.0.1", target.Port, _knownHosts, _ => true);
+        var lost = false;
+        chain.Lost += _ => lost = true;
+
+        chain.Dispose();
+        Thread.Sleep(6000); // past one watchdog poll
+
+        Assert.False(lost);
+    }
+
+    [Fact]
     public void AnEarlierForwardFailureIsNotReportedForANewAttempt()
     {
         using var bastion = new TestSshHost("bastion");

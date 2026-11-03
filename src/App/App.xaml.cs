@@ -50,8 +50,10 @@ public partial class App : Application
 
     /// <summary>A file in the data folder every store, backup and the single-instance key share.</summary>
     private static string DataFile(string fileName) => Path.Combine(Program.DataDirectory, fileName);
-    public static Resesh.App.Icons.SessionIconCatalog Icons { get; } = new();
-    public static Resesh.App.Icons.BrandIconImages Brands { get; } = new();
+    // One catalog for every window, so the scale an icon is drawn at comes from the window
+    // in use, not from whichever window set it last (and not 1 once that window closed).
+    public static Resesh.App.Icons.SessionIconCatalog Icons { get; } = new() { ScaleProvider = RasterizationScale };
+    public static Resesh.App.Icons.BrandIconImages Brands { get; } = new() { ScaleProvider = RasterizationScale };
 
     /// <summary>Built-in local profiles whose shell is installed right now (set once at
     /// launch by discovery). Built-ins outside this set are hidden, not deleted.</summary>
@@ -105,20 +107,41 @@ public partial class App : Application
     {
         if (_settingsLoad is not null)
             return;
-        if (!DemoMode.IsEnabled)
+        // Only the real profile moves the real pre-rename folder; a scratch run leaves it alone.
+        if (Program.UsesDefaultDataDirectory)
             MigrateLegacyDataDir();
         // Connections read the algorithm defaults from whatever settings are saved when they start.
         Resesh.Core.Ssh.SshAlgorithmPolicy.AppDefaultsSource = () => Settings.Current.SshAlgorithms;
-        _settingsLoad = Task.Run(Settings.Load);
+        _settingsLoad = Task.Run(() => LoadStore("Settings", Settings.Load));
         _storesLoad = Task.Run(() =>
         {
-            Store.Load();
-            SshKeys.Load();
-            Identities.Load();
-            KnownHosts.Load();
-            Highlights.Load();
-            Workspaces.Load();
+            LoadStore("Sessions", Store.Load);
+            LoadStore("SSH keys", SshKeys.Load);
+            LoadStore("Identities", Identities.Load);
+            LoadStore("Accepted host keys", KnownHosts.Load);
+            LoadStore("Highlights", Highlights.Load);
+            LoadStore("Workspaces", Workspaces.Load);
         });
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentQueue<string> StoreLoadFailures = new();
+
+    /// <summary>Loads one store. Bad data is handled inside each loader (it recovers from .bak
+    /// or refuses to save); anything else that escapes is a bug, and it must not stop the
+    /// other stores loading or the app starting. The store then refuses every save (its Load
+    /// marks it so, and one that never loaded refuses too) with a StoreReadOnlyException, an
+    /// IOException the UI reports, and the failure is shown with the other load notices.</summary>
+    private static void LoadStore(string contents, Action load)
+    {
+        try
+        {
+            load();
+        }
+        catch (Exception exception)
+        {
+            LogCrash(exception);
+            StoreLoadFailures.Enqueue($"{contents} could not be loaded ({exception.Message}). Changes to them will not be saved.");
+        }
     }
 
     /// <summary>One-time rename migration: %APPDATA%\Sessions → %APPDATA%\Resesh.
@@ -172,7 +195,7 @@ public partial class App : Application
 
         try
         {
-            var dir = AppDataPaths.Local();
+            var dir = Program.LogDirectory;
             Directory.CreateDirectory(dir);
             File.AppendAllText(Path.Combine(dir, "crash.log"), $"[{DateTime.Now:O}] {ex}\n\n");
         }
@@ -234,11 +257,13 @@ public partial class App : Application
             SessionsChanged?.Invoke();
             RefreshJumpList(); // sessions were renamed, added or deleted
         });
-        // An identity's username shows in tab endpoints without any session changing.
+        // An identity's username shows in tab endpoints and jump list descriptions without
+        // any session changing.
         Identities.Changed += () => RunOnUiThread(() =>
         {
             foreach (var tab in AllTabs)
                 tab.NotifyLoginChanged();
+            RefreshJumpList();
         });
         var window = CreateWindowCore();
         if (Settings.Current.ReopenLastLayoutAtStartup)
@@ -254,7 +279,9 @@ public partial class App : Application
             {
                 Settings.LoadWarning, Store.LoadWarning, SshKeys.LoadWarning, Identities.LoadWarning, Highlights.LoadWarning,
                 Workspaces.LoadWarning, KnownHosts.LoadWarning, KnownHosts.LoadError,
+                (Credentials as ProtectedFileCredentialService)?.LoadWarning,
             }
+            .Concat(StoreLoadFailures)
             .Where(message => message is not null).ToList();
         if (loadMessages.Count > 0)
             window.ShowOperationNotice("Stored data needs attention", string.Join("\n", loadMessages));
@@ -493,6 +520,18 @@ public partial class App : Application
             window.SetTabContentDropTargetsVisibleCore(visible);
     }
 
+    /// <summary>The rasterization scale of the most recently active open window, else of any
+    /// open window, else 1. XamlRoot is null until a window's content loads.</summary>
+    private static double RasterizationScale()
+    {
+        if (Current is not App app)
+            return 1.0;
+        var window = app._lastActiveWindow is { } last && app._windows.Contains(last)
+            ? last
+            : app._windows.FirstOrDefault(open => open.RasterizationScale is not null);
+        return window?.RasterizationScale ?? 1.0;
+    }
+
     private MainWindow CreateWindowCore()
     {
         var window = new MainWindow();
@@ -564,7 +603,8 @@ public partial class App : Application
         var settings = Settings.Current;
         // Recent here lists what the Recent pane lists: saved sessions that are visible.
         var plan = JumpListPlan.For(settings.PinnedSessionIds, settings.RecentSessionIds,
-                id => Store.Find(id) is { } session && IsSessionVisible(session) ? session : null)
+                id => Store.Find(id) is { } session && IsSessionVisible(session) ? session : null,
+                LoginUsername)
             .Without(_removedJumpListItems);
         if (plan.SameAs(_jumpList))
             return;

@@ -118,7 +118,23 @@ public sealed class CommandHistoryTests : IDisposable
         Assert.Equal(TimeSpan.FromHours(10), imported.StartedAt.Offset);
         Assert.False(File.Exists(Path.Combine(_directory, "2026-09.jsonl")));
         Assert.True(File.Exists(Path.Combine(_directory, "notes.jsonl")));
+        // The torn line is dropped from the import, but the file it was in is kept aside.
+        var kept = Assert.Single(Directory.GetFiles(_directory, "2026-09.jsonl.unreadable-*"));
+        Assert.Contains("torn", File.ReadAllText(kept));
         Assert.Single(NewStore().Snapshot());
+    }
+
+    [Fact]
+    public void CleanMonthlyJsonFileIsRemovedWithoutACopy()
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(Path.Combine(_directory, "2026-08.jsonl"),
+            "{\"id\":\"b1\",\"sessionName\":\"web01\",\"kind\":\"ssh\",\"target\":\"root@web01\",\"command\":\"ls\","
+            + "\"exitCode\":0,\"startedAt\":\"2026-08-27T10:00:00+10:00\",\"exact\":true}\n");
+
+        Assert.Single(NewStore().Snapshot());
+
+        Assert.Empty(Directory.GetFiles(_directory, "2026-08.jsonl*"));
     }
 
     [Fact]

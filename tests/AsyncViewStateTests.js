@@ -47,6 +47,18 @@ test("remote session management connections stop when the tab closes", () => {
   assert.match(methodBody(view, "public void Dispose()"), /_closing\.Cancel\(\)/);
 });
 
+test("login prompts name a jump host's place on the route being dialled", () => {
+  // A stopped tab's management connection resolves its own route; a shared "last route"
+  // field would label its prompts from whatever the terminal dialled last.
+  const view = read("Terminal", "TerminalTabView.cs");
+  assert.doesNotMatch(view, /_routeSessions/);
+  assert.match(view, /private static string\? RouteStep\(Session\? host, IReadOnlyList<Session> route\)/);
+  const create = methodBody(view, "public async Task<SshTerminalSession?> CreateRemoteManagementConnectionAsync(");
+  assert.match(create, /ResolveSshCredentialAsync\(Session, route\.Sessions, token\)/);
+  const resolveRoute = methodBody(view, "private async Task<ResolvedRoute?> ResolveRouteAsync(");
+  assert.match(resolveRoute, /ResolveSshCredentialAsync\(jump, route, token\)/);
+});
+
 test("the tunnels dialog leaves its UI alone once closed but still saves a confirmed add", () => {
   const dialog = read("Dialogs", "TunnelsDialog.xaml.cs");
   assert.match(methodBody(dialog, "private void Dialog_Closed("), /_closed = true;/);
@@ -69,4 +81,25 @@ test("only the newest font scan fills the font picker", () => {
 test("the icon picker re-enables selection even if a refill throws", () => {
   const picker = read("Controls", "IconPicker.xaml.cs");
   assert.match(methodBody(picker, "private void ApplyFilter("), /_refilling = true;\s+try[\s\S]*finally[\s\S]*_refilling = false;/);
+});
+
+test("history closes only after an inserted command was accepted", () => {
+  // A shell without bracketed paste asks before a multi-line insert; cancelling that must
+  // leave the history open where the user was.
+  const history = read("Controls", "HistoryView.xaml.cs");
+  assert.match(history, /public Func<CommandHistoryEntry, Task<bool>>\? InsertCommand/);
+  assert.match(methodBody(history, "private async Task InsertSelectedAsync("), /if \(await InsertCommand\(entry\) && IsOpen\)\s*CloseRequested\?\.Invoke\(\);/);
+  const view = read("Terminal", "TerminalTabView.cs");
+  assert.match(methodBody(view, "public async Task<bool> InsertTextAsync("), /await PasteForReviewAsync\(text\)/);
+  const paste = read("Terminal", "TerminalTabView.Paste.cs");
+  assert.match(methodBody(paste, "private async Task<bool> PasteForReviewAsync("), /return await paste;/);
+  assert.match(methodBody(paste, "private async Task<bool> PasteAsync("), /if \(confirm && !await ConfirmPasteAsync\(text, insert\)\)[\s\S]*?return false;/);
+});
+
+test("the paste confirmation's button names the action its title asks about", () => {
+  const xaml = read("Dialogs", "PasteConfirmDialog.xaml");
+  assert.doesNotMatch(xaml, /PrimaryButtonText=/);
+  assert.match(read("Dialogs", "PasteConfirmDialog.xaml.cs"), /PrimaryButtonText = verb;/);
+  const confirm = methodBody(read("Terminal", "TerminalTabView.Paste.cs"), "private async Task<bool> ConfirmPasteAsync(");
+  assert.match(confirm, /var verb = insert \? "Insert" : "Paste";[\s\S]*?new PasteConfirmDialog\(\s*[^,]+,\s*verb,/);
 });

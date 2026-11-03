@@ -273,8 +273,11 @@ public sealed partial class MainWindow
     /// a workspace being discarded) is ignored, so the focused pane is always a shown one.</summary>
     /// <remarks>Panes laid out by the same change select their tabs as they load, and a
     /// selection focuses its pane (<see cref="FocusGroupForSelection"/>). The choice is
-    /// re-asserted once they settle, unless another explicit choice came after it.</remarks>
-    public void FocusGroup(TabGroupViewModel group)
+    /// re-asserted once they settle, unless another explicit choice came after it. A choice
+    /// the user made (<paramref name="userInitiated"/>: a split, zoom or close they asked for)
+    /// then also focuses the pane's terminal while they type in search, as the command would
+    /// from the terminal; the app's own choices leave a focus held by search alone.</remarks>
+    public void FocusGroup(TabGroupViewModel group, bool userInitiated = false)
     {
         if (ViewModel.IsBackgroundGroup(group))
         {
@@ -288,13 +291,17 @@ public sealed partial class MainWindow
         var intent = ++_focusIntent;
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            if (intent != _focusIntent || ReferenceEquals(ViewModel.FocusedGroup, group)
-                || !ViewModel.Groups.Contains(group))
+            if (intent != _focusIntent || !ViewModel.Groups.Contains(group))
                 return;
-            SetFocusedGroup(group);
-            ViewModel.SyncGroupFocus();
+            if (!ReferenceEquals(ViewModel.FocusedGroup, group))
+            {
+                SetFocusedGroup(group);
+                ViewModel.SyncGroupFocus();
+            }
+            else if (!userInitiated)
+                return;
             if (group.SelectedTab is { } selected)
-                FocusTabContent(selected);
+                FocusTabContent(selected, userInitiated);
         });
     }
 
@@ -377,51 +384,29 @@ public sealed partial class MainWindow
 
     private async Task RequestCloseClaimedTabAsync(TabViewModel tab)
     {
-        if (tab.IsAppPage
-            || (!tab.IsPinned && !App.Settings.Current.ConfirmCloseActiveSessions))
+        var plan = ViewModel.PlanClose(tab, App.Settings.Current.ConfirmCloseActiveSessions);
+        switch (plan.Kind)
         {
-            CloseTabCore(tab);
-            return;
-        }
-
-        if (tab.IsAttachedToRemoteSession
-            && tab.View is TerminalTabView tmuxView)
-        {
-            await RequestCloseTmuxTabAsync(tab, tmuxView);
-            return;
-        }
-
-        var detail = tab.State != TabConnectionState.Connected
-            ? ""
-            : tab.IsLocal
-                ? " The process is still running — closing stops it and everything it started."
-                : tab.IsAttachedToRemoteSession
-                    ? " The remote session keeps running (persistent) — connecting again resumes it."
-                    : " The session is still connected.";
-        if (tab.IsPinned)
-        {
-            // Pinned tabs need the extra deliberate step; one dialog covers both.
-            if (!await ConfirmAsync("Tab Is Pinned", $"\"{tab.Header}\" is pinned.{detail}", "Unpin and Close", acceptY: true)
-                || CloseOwnerOf(tab) is not { } pinnedOwner)
+            case TabCloseKind.Now:
+                CloseTabCore(tab, userInitiated: true);
                 return;
-            if (tab.IsPinned)
-                pinnedOwner.TogglePin(tab);
-            pinnedOwner.CloseTabCore(tab);
-            return;
+            case TabCloseKind.ConfirmPersistent when tab.View is TerminalTabView tmuxView:
+                await RequestCloseTmuxTabAsync(tab, tmuxView, plan);
+                return;
         }
-        if (await ConfirmAsync("Close Tab", $"Close \"{tab.Header}\"?{detail}", "Close", acceptY: true)
-            && CloseOwnerOf(tab) is { } owner)
-            owner.CloseTabCore(tab);
+
+        // A pinned tab needs the extra deliberate step; one dialog covers both.
+        if (!await ConfirmAsync(plan.Title, plan.Message, plan.PrimaryText, acceptY: true)
+            || CloseOwnerOf(tab) is not { } owner)
+            return;
+        if (plan.Kind == TabCloseKind.ConfirmPinned && tab.IsPinned)
+            owner.TogglePin(tab);
+        owner.CloseTabCore(tab, userInitiated: true);
     }
 
-    private async Task RequestCloseTmuxTabAsync(TabViewModel tab, TerminalTabView view)
+    private async Task RequestCloseTmuxTabAsync(TabViewModel tab, TerminalTabView view, TabClosePlan plan)
     {
-        var dialog = new ConfirmDialog(
-            tab.IsPinned ? "Tab Is Pinned" : "Close Tab",
-            tab.IsPinned
-                ? $"\"{tab.Header}\" is pinned. Closing the tab also unpins it."
-                : $"Close \"{tab.Header}\"?",
-            tab.IsPinned ? "Unpin and Close" : "Close Tab")
+        var dialog = new ConfirmDialog(plan.Title, plan.Message, plan.PrimaryText)
         {
             XamlRoot = Root.XamlRoot,
             AcceptsY = true,
@@ -441,7 +426,7 @@ public sealed partial class MainWindow
             return;
         if (tab.IsPinned)
             owner.TogglePin(tab);
-        owner.CloseTabCore(tab);
+        owner.CloseTabCore(tab, userInitiated: true);
     }
 
     /// <summary>Bulk close: the context menu's close others, to the right, in the group, and
@@ -478,10 +463,7 @@ public sealed partial class MainWindow
             return;
         }
 
-        var connected = tabs.Count(t => t.State == TabConnectionState.Connected);
-        var message = connected > 0
-            ? $"Close {tabs.Count} {description}? {connected} of them {(connected == 1 ? "is" : "are")} still connected."
-            : $"Close {tabs.Count} {description}?";
+        var message = MainViewModel.CloseManyMessage(tabs, description);
         var persistent = tabs.Where(t => t.IsAttachedToRemoteSession && t.View is TerminalTabView).ToList();
         if (persistent.Count > 0)
         {
@@ -540,7 +522,14 @@ public sealed partial class MainWindow
 
     /// <summary>Closes the tab now. Does nothing for a tab the window no longer holds (closed
     /// already, or moved to another window), so a late caller can't throw midway.</summary>
-    private void CloseTabCore(TabViewModel tab) => RemoveTabCore(tab, dispose: true);
+    /// <paramref name="userInitiated"/>: the user closed it, so the tab that takes its place
+    /// gets keyboard focus even while they type in search, as it would from the terminal.
+    private void CloseTabCore(TabViewModel tab, bool userInitiated = false)
+    {
+        RemoveTabCore(tab, dispose: true);
+        if (userInitiated && ViewModel.FocusedGroup.SelectedTab is { } next)
+            FocusTabContent(next, userInitiated: true);
+    }
 
     /// <summary>THE way a tab leaves this window: closed, with its view disposed, or handed to
     /// another window with its session still running. Its pane picks a neighbour and settles
@@ -601,7 +590,8 @@ public sealed partial class MainWindow
             StepPaneAside(_groupViews[newGroup], _groupViews[sourceGroup]);
         // The tab strip snaps; the panes move once the layout is rebuilt.
         _groupViews[sourceGroup].SuppressTabMotion();
-        MoveTabBetweenGroups(tab, newGroup, 0);
+        // Every split is one the user asked for (a key, a menu, a tab dropped on a pane edge).
+        MoveTabBetweenGroups(tab, newGroup, 0, userInitiated: true);
         RebuildGroupLayout();
     }
 
@@ -616,14 +606,14 @@ public sealed partial class MainWindow
 
     }
 
-    public void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex)
+    public void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex, bool userInitiated = false)
     {
         var source = ViewModel.GroupOf(tab);
         if (source == targetGroup)
             return;
 
         PlaceTab(tab, targetGroup, targetIndex, select: true);
-        FocusGroup(targetGroup);
+        FocusGroup(targetGroup, userInitiated);
         // The setter no-ops when targetGroup was already focused; the moved tab still
         // needs its group-focus flag refreshed.
         ViewModel.SyncGroupFocus();
@@ -1074,8 +1064,10 @@ public sealed partial class MainWindow
             using var connection = await view.CreateRemoteManagementConnectionAsync();
             if (connection is null) return;
             var openSlots = App.TmuxSlots.ReservedSlots(tab.Session.Id);
-            // Looks for the session agent on the host, but never uploads it from here.
-            var persistence = await Task.Run(() => view.ResolvePersistenceBlocking(connection, mayUpload: false, CancellationToken.None));
+            // The backend the attached shell runs under, as its connect chose it; otherwise the
+            // session's settings decide, looking for the agent on the host but never uploading it.
+            var persistence = view.AttachedPersistence
+                ?? await Task.Run(() => view.ResolvePersistenceBlocking(connection, mayUpload: false, CancellationToken.None));
             slot = await RemoteSessionsDialog.ManageAsync(Root.XamlRoot, tab.Session.Name,
                 tab.Session.Id, openSlots, persistence,
                 () => Task.Run(() => connection.RunCommand(persistence.ManagementCommand())),

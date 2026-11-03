@@ -321,15 +321,17 @@ public static class TmuxPersistence
 
     /// <summary>The active pane's cwd for this session/slot, or null when absent from the
     /// <see cref="CurrentPathCommand"/> output. Paths may contain spaces; session names
-    /// (hex-derived) cannot.</summary>
+    /// (hex-derived) cannot. Only the line ending is trimmed: a folder name can end in a
+    /// space.</summary>
     public static string? ParseCurrentPath(string output, Guid id, int slot)
     {
         var name = SessionName(id, slot);
         foreach (var line in output.Split('\n'))
         {
-            var parts = line.Trim().Split(' ', 3);
-            if (parts is [var session, "1", var path] && session == name && path.StartsWith('/'))
-                return path;
+            var parts = line.TrimEnd('\r').Split(' ', 3);
+            if (parts is [var session, "1", var path] && session == name
+                && Sftp.RemotePath.FromUntrusted(path) is { } directory)
+                return directory;
         }
         return null;
     }

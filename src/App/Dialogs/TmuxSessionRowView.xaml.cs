@@ -1,6 +1,5 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
 
 namespace Resesh.App.Dialogs;
 
@@ -18,7 +17,4 @@ public sealed partial class TmuxSessionRowView : UserControl
     }
 
     public TmuxSessionRowView() => InitializeComponent();
-
-    public Brush BadgeBorder(bool attachedElsewhere) =>
-        (Brush)Application.Current.Resources[attachedElsewhere ? "SystemFillColorCautionBrush" : "SessionChromeFrameBrush"];
 }

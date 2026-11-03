@@ -19,20 +19,31 @@ public static class FontFamilies
     public static string Join(IEnumerable<string> names) =>
         string.Join(", ", Split(string.Join(",", names)));
 
-    /// <summary>The font itself: the list's first entry.</summary>
-    public static string Primary(string? list) => Split(list).FirstOrDefault() ?? "";
+    /// <summary>The CSS generic <c>monospace</c> names no font: the terminal skips it, so it
+    /// is never the font, only a fallback.</summary>
+    public static bool IsGeneric(string name) => name.Equals("monospace", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Everything after the first entry, as a list.</summary>
-    public static string Fallbacks(string? list) => Join(Split(list).Skip(1));
+    /// <summary>The font itself: the list's first named family, as the terminal reads it
+    /// (its TerminalDefaults.FamilyNames).</summary>
+    public static string Primary(string? list) => Split(list).FirstOrDefault(name => !IsGeneric(name)) ?? "";
+
+    /// <summary>Everything but the font, as a list.</summary>
+    public static string Fallbacks(string? list) => Join(WithoutPrimary(list));
 
     /// <summary>The list with its font replaced (or added) and the fallbacks kept. A font that
     /// was also a fallback moves to the front rather than appearing twice.</summary>
     public static string WithPrimary(string? list, string primary) =>
-        Join(Split(primary).Concat(Split(list).Skip(1)));
+        Join(Split(primary).Concat(WithoutPrimary(list)));
 
     /// <summary>The list with the same font and new fallbacks.</summary>
     public static string WithFallbacks(string? list, string fallbacks) =>
-        Join(Split(list).Take(1).Concat(Split(fallbacks)));
+        Join(Split(Primary(list)).Concat(Split(fallbacks)));
+
+    private static IEnumerable<string> WithoutPrimary(string? list)
+    {
+        var primary = Primary(list);
+        return Split(list).Where(name => !name.Equals(primary, StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>A session's font in front of the app's list, so a session that only names a
     /// font still gets the app's fallbacks.</summary>

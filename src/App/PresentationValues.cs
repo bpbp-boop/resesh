@@ -218,7 +218,6 @@ public static class PresentationValues
 
     // NavigationViewSelectionIndicatorHeight: the marker is the native selection pill's shape.
     private const double RailMarkerFullHeight = 16;
-    private static readonly Windows.UI.ViewManagement.UISettings MotionSettings = new();
 
     /// <summary>The workspace marker is drawn at full height and scaled, so a change of state
     /// animates through its ScaleTransition instead of snapping.</summary>
@@ -227,7 +226,7 @@ public static class PresentationValues
 
     /// <summary>Matches the workspace slide; zero when Windows animation effects are off.</summary>
     public static TimeSpan RailMarkerDuration =>
-        MotionSettings.AnimationsEnabled ? TimeSpan.FromMilliseconds(170) : TimeSpan.Zero;
+        AppMotion.Enabled ? TimeSpan.FromMilliseconds(170) : TimeSpan.Zero;
 
     /// <summary>The alert dot's colour: amber when an agent waits, red for a dropped
     /// session, the accent for unseen output — the tab strip's own meanings.</summary>
@@ -248,6 +247,7 @@ public static class PresentationValues
         _ => null,
     };
 
+    // Only for the Session* brushes ThemeVisualPalette recolours in place: one shared instance.
     private static Brush ResourceBrush(string key) =>
         (Brush)Application.Current.Resources[key];
 
@@ -255,29 +255,22 @@ public static class PresentationValues
     /// dictionaries, with a High Contrast variant in system colors.</summary>
     private enum Status { Info, Success, Caution, Critical, Neutral }
 
-    // Read on each call rather than cached: the app-level lookup follows High Contrast.
+    // Read on each call rather than cached, so a change to High Contrast is picked up.
+    // The status brushes are the same in Light and Dark; only High Contrast differs.
     private static Windows.UI.Color StatusColor(Status status) =>
-        ((SolidColorBrush)ResourceBrush(status switch
+        ((SolidColorBrush)ThemeResources.ContrastBrush(status switch
         {
             Status.Info => "SessionStatusInfoBrush",
             Status.Success => "SessionStatusSuccessBrush",
             Status.Caution => "SessionStatusCautionBrush",
             Status.Critical => "SessionStatusCriticalBrush",
             _ => "SessionStatusNeutralBrush",
-        })).Color;
+        })!).Color;
 
-    private static Windows.UI.Color ParseColor(string? value)
-    {
-        if (value is { Length: 7 } && value[0] == '#'
-            && byte.TryParse(value.AsSpan(1, 2), System.Globalization.NumberStyles.HexNumber, null, out var red)
-            && byte.TryParse(value.AsSpan(3, 2), System.Globalization.NumberStyles.HexNumber, null, out var green)
-            && byte.TryParse(value.AsSpan(5, 2), System.Globalization.NumberStyles.HexNumber, null, out var blue))
-        {
-            return Windows.UI.Color.FromArgb(255, red, green, blue);
-        }
-
-        return Windows.UI.Color.FromArgb(0, 0, 0, 0);
-    }
+    /// <summary>A stored <c>#rrggbb</c>, read as the terminal reads highlight colours;
+    /// transparent when it is not one.</summary>
+    private static Windows.UI.Color ParseColor(string? value) =>
+        Resesh.Terminal.HexColor.Parse(value) is { } rgb ? Rgb(rgb) : Windows.UI.Color.FromArgb(0, 0, 0, 0);
 
     private static Windows.UI.Color Rgb(uint rgb) => Windows.UI.Color.FromArgb(
         255,

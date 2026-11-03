@@ -88,20 +88,30 @@ public sealed class SessionStore
     {
         lock (_gate)
         {
-            var data = _file.Load(Read) ?? new StoreData();
-            LoadWarning = _file.Warning;
-            _sessions = data.Sessions ?? [];
-            _folders = data.Folders ?? [];
-            _localFolders = data.LocalFolders ?? [];
-            _folderSettings = (data.FolderSettings ?? [])
-                .Select(f => f with { Path = FolderPaths.Normalize(f.Path) })
-                .Where(f => f.IdentityId is not null)
-                .DistinctBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            // Older builds attached identities to folders that existed only through their
-            // sessions; once those moved away the identity stayed, unseen, and logged in any
-            // folder later made at that path. Keep such folders so the identity shows.
-            _folders = WithSettingFolders(_folders, _folderSettings);
+            try
+            {
+                var data = _file.Load(Read) ?? new StoreData();
+                LoadWarning = _file.Warning;
+                _sessions = data.Sessions ?? [];
+                _folders = data.Folders ?? [];
+                _localFolders = data.LocalFolders ?? [];
+                _folderSettings = (data.FolderSettings ?? [])
+                    .Select(f => f with { Path = FolderPaths.Normalize(f.Path) })
+                    .Where(f => f.IdentityId is not null)
+                    .DistinctBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                // Older builds attached identities to folders that existed only through their
+                // sessions; once those moved away the identity stayed, unseen, and logged in any
+                // folder later made at that path. Keep such folders so the identity shows.
+                _folders = WithSettingFolders(_folders, _folderSettings);
+            }
+            catch
+            {
+                // Bad data is handled by the load itself; a throw here is a bug, and
+                // a half-filled or empty store must not replace the file: refuse saves.
+                _file.RefuseSaves();
+                throw;
+            }
         }
     }
 
@@ -506,6 +516,39 @@ public sealed class SessionStore
         }
     }
 
+    /// <summary>
+    /// Deletes folders (each with everything under it) and sessions in one write, so a save
+    /// that fails deletes none of them. Returns the removed sessions so the caller can delete
+    /// their credentials.
+    /// </summary>
+    public IReadOnlyList<Session> DeleteMany(IEnumerable<(string Path, SessionKind Kind)> folders, IEnumerable<Guid> sessionIds)
+    {
+        lock (_gate)
+        {
+            var targets = folders
+                .Select(folder => (Path: FolderPaths.Normalize(folder.Path), folder.Kind))
+                .Where(folder => folder.Path.Length > 0)
+                .ToList();
+            var ids = sessionIds.ToHashSet();
+            bool Removes(Session session) =>
+                ids.Contains(session.Id) || targets.Any(folder => IsInFolder(session, folder.Path, folder.Kind));
+            bool FolderGoes(string path, SessionKind kind) =>
+                targets.Any(folder => folder.Kind == kind && FolderPaths.IsSelfOrDescendant(path, folder.Path));
+
+            var removed = _sessions.Where(Removes).ToList();
+            if (removed.Count == 0 && targets.Count == 0)
+                return [];
+            Save(
+                sessions: _sessions.Where(session => !Removes(session)).ToList(),
+                folders: _folders.Where(path => !FolderGoes(path, SessionKind.Ssh)).ToList(),
+                localFolders: _localFolders.Where(path => !FolderGoes(path, SessionKind.Local)).ToList(),
+                folderSettings: _folderSettings
+                    .Where(setting => setting.Path.Length == 0 || !FolderGoes(setting.Path, SessionKind.Ssh))
+                    .ToList());
+            return removed;
+        }
+    }
+
     private void Save(
         List<Session>? sessions = null,
         List<string>? folders = null,
@@ -536,13 +579,31 @@ public sealed class SessionStore
     private static StoreData? Read(string path)
     {
         var data = JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<StoreData>());
-        if (data?.Sessions?.Any(session => session is null || session.Name is null
-                || session.Host is null || session.Username is null || session.FolderPath is null) == true
-            || data?.FolderSettings?.Any(setting => setting is null) == true)
-        {
-            throw new InvalidDataException("The sessions file contains an invalid session or folder setting.");
-        }
+        Validate(data?.Sessions, data?.Folders, data?.LocalFolders, data?.FolderSettings);
         return data;
+    }
+
+    /// <summary>The one check for stored sessions and folders, used by the loader (so a bad
+    /// file falls back to .bak) and by backup reading: no null entries or required text.</summary>
+    internal static void Validate(IEnumerable<Session?>? sessions, IEnumerable<string?>? folders,
+        IEnumerable<string?>? localFolders, IEnumerable<FolderSettings?>? folderSettings)
+    {
+        if (sessions?.Any(session => session is null || session.Name is null
+                || session.Host is null || session.Username is null || session.FolderPath is null) == true
+            || folders?.Any(folder => folder is null) == true
+            || localFolders?.Any(folder => folder is null) == true
+            || folderSettings?.Any(setting => setting is null || setting.Path is null) == true)
+        {
+            throw new InvalidDataException("The sessions data contains an invalid session, folder or folder setting.");
+        }
+    }
+
+    /// <summary>Throws unless a save may replace the file now; lets an import refuse before it
+    /// changes anything.</summary>
+    internal void EnsureWritable()
+    {
+        lock (_gate)
+            _file.EnsureWritable();
     }
 
     internal sealed class StoreData

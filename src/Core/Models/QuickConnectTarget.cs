@@ -2,7 +2,8 @@ namespace Resesh.Core.Models;
 
 /// <summary>
 /// Parses quick-connect text into an ad-hoc (unsaved) session: "ssh user@host",
-/// "user@host:2222", "telnet host", "telnet host:2003" or "telnet host 2003" (the classic
+/// "user@host:2222", "ssh [2001:db8::1]:2222" (IPv6 as in OpenSSH, see
+/// <see cref="HostPort"/>), "telnet host", "telnet host:2003" or "telnet host 2003" (the classic
 /// telnet command form — terminal servers put console lines on high ports, so the port
 /// must be easy to type), or "serial COM5", "serial COM5 115200", "serial COM5:115200 7E1".
 /// A bare hostname or port only counts with an explicit "ssh "/"telnet "/"serial " prefix,
@@ -33,18 +34,18 @@ public static class QuickConnectTarget
             user = text[..at];
             text = text[(at + 1)..];
         }
-        if (!TrySplitPort(text, SessionEndpoint.DefaultSshPort, out var host, out var port) || at == 0)
+        if (!HostPort.TrySplit(text, out var host, out var explicitPort) || at == 0)
             return false;
 
         var username = user.Length > 0 ? user : defaultUsername;
         session = new Session
         {
-            Name = $"{username}@{host}",
             Host = host,
-            Port = port,
+            Port = explicitPort ?? SessionEndpoint.DefaultSshPort,
             Username = username,
             AuthMethod = AuthMethod.Password,
         };
+        session = session with { Name = SessionEndpoint.Format(session, new() { Username = username }) };
         return true;
     }
 
@@ -52,33 +53,25 @@ public static class QuickConnectTarget
     {
         session = null;
         var parts = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        string host;
-        int port;
-        switch (parts.Length)
-        {
-            case 1:
-                if (!TrySplitPort(parts[0], SessionEndpoint.DefaultTelnetPort, out host, out port))
-                    return false;
-                break;
-            case 2:
-                host = parts[0];
-                if (host.Contains(':') || !int.TryParse(parts[1], out port) || port is < 1 or > 65535)
-                    return false;
-                break;
-            default:
-                return false;
-        }
+        if (parts.Length is < 1 or > 2 || !HostPort.TrySplit(parts[0], out var host, out var explicitPort))
+            return false;
+        var port = explicitPort ?? SessionEndpoint.DefaultTelnetPort;
+        // "telnet host 2003": the port is the second word, so the host must not carry one too.
+        if (parts.Length == 2 && (explicitPort is not null
+                || !int.TryParse(parts[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out port)
+                || port is < 1 or > 65535))
+            return false;
         if (host.Contains('@'))
             return false; // telnet has no username in the target; the server prompts
 
         session = new Session
         {
             Kind = SessionKind.Telnet,
-            Name = port == SessionEndpoint.DefaultTelnetPort ? host : $"{host}:{port}",
             Host = host,
             Port = port,
             AuthMethod = AuthMethod.None,
         };
+        session = session with { Name = SessionEndpoint.Format(session) };
         return true;
     }
 
@@ -135,19 +128,5 @@ public static class QuickConnectTarget
             StopBits = text[2] == '2' ? SerialStopBits.Two : SerialStopBits.One,
         };
         return true;
-    }
-
-    private static bool TrySplitPort(string text, int defaultPort, out string host, out int port)
-    {
-        host = text;
-        port = defaultPort;
-        var colon = text.LastIndexOf(':');
-        if (colon >= 0)
-        {
-            if (!int.TryParse(text[(colon + 1)..], out port) || port is < 1 or > 65535)
-                return false;
-            host = text[..colon];
-        }
-        return host.Length > 0;
     }
 }

@@ -22,9 +22,98 @@ public sealed class SshJumpChain : IDisposable
     // The last link's forward: only its failures explain a connection to the target.
     private volatile ForwardedPortLocal? _lastForward;
     private int _disposed;
+    private int _lost;
+    private Timer? _watchdog;
+    private readonly Lock _lostGate = new();
+    private Action<string>? _lostHandlers;
+    private string? _lostReason;
 
     private SshJumpChain()
     {
+    }
+
+    /// <summary>
+    /// Raised once, on a background thread, when a jump's own SSH connection fails or drops
+    /// after the chain opened; the argument says which jump and why. What runs through the
+    /// chain does not always hear of it: the forwarded loopback socket stays up when a jump
+    /// dies without closing (SSH.NET does not always notice either, so the links are also
+    /// polled), and TCP keepalive on that socket only ever reaches this machine. Never raised
+    /// after <see cref="Dispose"/>.
+    /// A jump can drop while <see cref="Open"/> is still returning, before the connection
+    /// that runs through the chain subscribes, so a handler added after the loss is called at
+    /// once, on the adding thread, with the same reason.
+    /// </summary>
+    public event Action<string>? Lost
+    {
+        add
+        {
+            if (value is null)
+                return;
+            string? reason;
+            lock (_lostGate)
+            {
+                reason = _lostReason;
+                if (reason is null)
+                {
+                    _lostHandlers += value;
+                    return;
+                }
+            }
+            if (Volatile.Read(ref _disposed) == 0)
+                value(reason);
+        }
+        remove
+        {
+            lock (_lostGate)
+                _lostHandlers -= value;
+        }
+    }
+
+    private void RaiseLost(Session jump, Exception? failure)
+    {
+        if (Volatile.Read(ref _disposed) != 0 || Interlocked.Exchange(ref _lost, 1) != 0)
+            return;
+        Interlocked.Exchange(ref _watchdog, null)?.Dispose();
+        var reason = failure is null
+            ? $"The connection to the jump host {jump.Name} was lost."
+            : $"The connection to the jump host {jump.Name} was lost: {failure.Message}";
+        Action<string>? handlers;
+        lock (_lostGate)
+        {
+            _lostReason = reason;
+            handlers = _lostHandlers;
+        }
+        handlers?.Invoke(reason);
+    }
+
+    /// <summary>Starts watching every link once the chain is complete.</summary>
+    private void Watch(IReadOnlyList<Session> jumps)
+    {
+        for (var index = 0; index < _links.Count; index++)
+        {
+            var jump = jumps[index];
+            _links[index].Client.ErrorOccurred += (_, e) => RaiseLost(jump, e.Exception);
+        }
+        var links = _links.Select(link => link.Client).ToList();
+        _watchdog = new Timer(_ =>
+        {
+            try
+            {
+                for (var index = 0; index < links.Count && Volatile.Read(ref _disposed) == 0; index++)
+                    if (!links[index].IsConnected)
+                    {
+                        RaiseLost(jumps[index], null);
+                        return;
+                    }
+            }
+            catch (ObjectDisposedException)
+            {
+                // Disposed between the check and the poll: nothing to report.
+            }
+        }, null, dueTime: 5000, period: 5000);
+        // A Dispose that ran while this was being set up could not see the timer.
+        if (Volatile.Read(ref _disposed) != 0)
+            Interlocked.Exchange(ref _watchdog, null)?.Dispose();
     }
 
     /// <summary>Always loopback: the forwarded port is never offered to the network.</summary>
@@ -70,7 +159,7 @@ public sealed class SshJumpChain : IDisposable
                 // Asked for only now, so a jump that fails stops before the next login prompt.
                 var hop = ResolveLogin(jumps[index], resolveLogin);
                 var (nextHost, nextPort) = index + 1 < jumps.Count
-                    ? (jumps[index + 1].Session.Host, jumps[index + 1].Session.Port)
+                    ? (jumps[index + 1].Session.Host, SessionEndpoint.EffectivePort(jumps[index + 1].Session))
                     : (targetHost, targetPort);
                 try
                 {
@@ -101,6 +190,7 @@ public sealed class SshJumpChain : IDisposable
                     };
                 }
             }
+            chain.Watch(jumps.Select(jump => jump.Session).ToList());
             return chain;
         }
         catch
@@ -189,7 +279,7 @@ public sealed class SshJumpChain : IDisposable
         catch (TimeoutException)
         {
             throw new SshSessionException(SshFailureKind.HostUnreachable,
-                $"{session.Host}:{session.Port} did not answer through the jump host within {timeout.TotalSeconds:0} seconds.");
+                $"{session.Host}:{SessionEndpoint.EffectivePort(session)} did not answer through the jump host within {timeout.TotalSeconds:0} seconds.");
         }
         catch (System.Net.Sockets.SocketException)
         {
@@ -200,7 +290,7 @@ public sealed class SshJumpChain : IDisposable
         // The jump reports why on its own thread, a moment after it closes the connection.
         SpinWait.SpinUntil(() => _forwardFailure is not null, TimeSpan.FromMilliseconds(250));
         throw new SshSessionException(SshFailureKind.HostUnreachable,
-            $"The jump host could not reach {session.Host}:{session.Port}"
+            $"The jump host could not reach {session.Host}:{SessionEndpoint.EffectivePort(session)}"
             + (ForwardFailure is { } reason ? $": {reason}" : "."));
     }
 
@@ -209,6 +299,7 @@ public sealed class SshJumpChain : IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
+        Interlocked.Exchange(ref _watchdog, null)?.Dispose();
         for (var index = _links.Count - 1; index >= 0; index--)
         {
             var (client, forward) = _links[index];

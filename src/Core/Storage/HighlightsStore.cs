@@ -131,19 +131,29 @@ public sealed class HighlightsStore
         if (_file is null) return;
         lock (_gate)
         {
-            var data = _file.Load(Read) ?? new StoreData();
-            LoadWarning = _file.Warning;
-            _enabled = new HashSet<string>(data.EnabledRules ?? [], StringComparer.Ordinal);
-            _disabled = new HashSet<string>(data.DisabledRules ?? [], StringComparer.Ordinal);
-            // A custom rule with an invalid regex is kept on disk but never offered/applied;
-            // dropping it silently would delete user data over a typo we let through.
-            _custom = (data.CustomRules ?? []).Where(r => !string.IsNullOrWhiteSpace(r.Id)).ToList();
-            // Same stance for overrides of built-in ids this build doesn't know (e.g. from
-            // a newer app's file): kept and re-saved, just never applied.
-            _overrides = (data.BuiltinOverrides ?? [])
-                .Where(r => !string.IsNullOrWhiteSpace(r.Id))
-                .GroupBy(r => r.Id, StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.Last(), StringComparer.Ordinal);
+            try
+            {
+                var data = _file.Load(Read) ?? new StoreData();
+                LoadWarning = _file.Warning;
+                _enabled = new HashSet<string>(data.EnabledRules ?? [], StringComparer.Ordinal);
+                _disabled = new HashSet<string>(data.DisabledRules ?? [], StringComparer.Ordinal);
+                // A custom rule with an invalid regex is kept on disk but never offered/applied;
+                // dropping it silently would delete user data over a typo we let through.
+                _custom = (data.CustomRules ?? []).Where(r => !string.IsNullOrWhiteSpace(r.Id)).ToList();
+                // Same stance for overrides of built-in ids this build doesn't know (e.g. from
+                // a newer app's file): kept and re-saved, just never applied.
+                _overrides = (data.BuiltinOverrides ?? [])
+                    .Where(r => !string.IsNullOrWhiteSpace(r.Id))
+                    .GroupBy(r => r.Id, StringComparer.Ordinal)
+                    .ToDictionary(g => g.Key, g => g.Last(), StringComparer.Ordinal);
+            }
+            catch
+            {
+                // Bad data is handled by the load itself; a throw here is a bug, and
+                // a half-filled or empty store must not replace the file: refuse saves.
+                _file.RefuseSaves();
+                throw;
+            }
         }
     }
 
@@ -376,21 +386,35 @@ public sealed class HighlightsStore
     {
         var data = JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<StoreData>());
         // Reject unusable rule collections inside the loader so .bak recovery remains available.
-        if (data?.CustomRules?.Any(rule => rule is null) == true
-            || data?.BuiltinOverrides?.Any(rule => rule is null) == true)
-        {
+        Validate(data?.EnabledRules, data?.DisabledRules, data?.CustomRules, data?.BuiltinOverrides);
+        return data;
+    }
+
+    /// <summary>The one check for highlight rules, used by the loader and by backup reading.</summary>
+    internal static void Validate(IEnumerable<string?>? enabled, IEnumerable<string?>? disabled,
+        IEnumerable<HighlightRule?>? custom, IEnumerable<HighlightRule?>? overrides)
+    {
+        if (enabled?.Any(id => id is null) == true || disabled?.Any(id => id is null) == true)
+            throw new InvalidDataException("The highlight payload contains a null rule id.");
+        if (custom?.Any(rule => rule is null) == true || overrides?.Any(rule => rule is null) == true)
             throw new InvalidDataException("The highlight payload contains a null rule.");
-        }
-        if (data?.CustomRules is { } custom)
+        if (custom is not null)
         {
             var ids = new HashSet<string>(StringComparer.Ordinal);
             foreach (var rule in custom)
             {
-                if (!string.IsNullOrWhiteSpace(rule.Id) && !ids.Add(rule.Id))
+                if (!string.IsNullOrWhiteSpace(rule!.Id) && !ids.Add(rule.Id))
                     throw new InvalidDataException("The highlight payload contains a duplicate custom rule id.");
             }
         }
-        return data;
+    }
+
+    /// <summary>Throws unless a save may replace the file now; lets an import refuse before it
+    /// changes anything.</summary>
+    internal void EnsureWritable()
+    {
+        lock (_gate)
+            _file?.EnsureWritable();
     }
 
     internal sealed class StoreData

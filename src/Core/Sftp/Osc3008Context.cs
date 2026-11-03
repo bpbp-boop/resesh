@@ -89,8 +89,9 @@ public static class Osc3008ContextParser
                     hostname = decodedHost;
                     break;
                 case "cwd" when action == Osc3008ContextAction.Start &&
-                    TryDecode(value, MaxTextLength, allowEmpty: false, out var decodedPath) && decodedPath.StartsWith('/'):
-                    cwd = RemotePath.Normalize(decodedPath);
+                    TryDecode(value, MaxTextLength, allowEmpty: false, out var decodedPath)
+                    && RemotePath.FromUntrusted(decodedPath) is { } directory:
+                    cwd = directory;
                     break;
                 case "cmdline" when action == Osc3008ContextAction.Start &&
                     TryDecode(value, MaxTextLength, allowEmpty: true, out var decodedCommand):
@@ -151,5 +152,7 @@ public static class Osc3008ContextParser
     private static bool ValidHost(string host) =>
         !host.Any(character => character is '@' or '/' or '\\');
 
-    private static bool IsControl(char character) => character < ' ' || character == '\u007f';
+    /// <summary>C0, DEL and C1: U+0080-U+009F include CSI (U+009B), which a terminal or a
+    /// label could act on, so they are refused like the 7-bit controls.</summary>
+    private static bool IsControl(char character) => char.IsControl(character);
 }
