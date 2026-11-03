@@ -783,20 +783,7 @@ public sealed partial class HistoryView : UserControl
             ShowCopied(CopyOutputText);
     }
 
-    private static bool CopyText(string text)
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(text);
-            Clipboard.SetContent(package);
-            return true;
-        }
-        catch (Exception exception) when (exception is System.Runtime.InteropServices.COMException or UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
+    private static bool CopyText(string text) => Resesh.Terminal.TextClipboard.TryCopy(text);
 
     private void ShowCopied(TextBlock? label)
     {

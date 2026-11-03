@@ -75,9 +75,8 @@ public sealed partial class AboutView : UserControl
 
     private void CopyDetails_Click(object sender, RoutedEventArgs e)
     {
-        var package = new DataPackage();
-        package.SetText(AppBuildInfo.DetailsText());
-        Clipboard.SetContent(package);
+        if (!Resesh.Terminal.TextClipboard.TryCopy(AppBuildInfo.DetailsText()))
+            return;
 
         // Brief confirmation in place, then back to the normal label.
         var version = ++_copyFeedbackVersion;

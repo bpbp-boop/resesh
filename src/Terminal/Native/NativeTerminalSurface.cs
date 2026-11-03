@@ -1691,20 +1691,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         return true;
     }
 
-    private static void CopyText(string text)
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(text);
-            Clipboard.SetContent(package);
-            Clipboard.Flush();
-        }
-        catch (Exception exception)
-        {
-            TerminalSurface.TraceHook?.Invoke($"clipboard copy failed: {exception.Message}");
-        }
-    }
+    private static void CopyText(string text) => TextClipboard.TryCopy(text);
 
     private Task PasteFromClipboardAsync() => TerminalClipboard.PasteIntoAsync(text =>
     {
