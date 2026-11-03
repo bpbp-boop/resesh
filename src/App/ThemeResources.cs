@@ -26,6 +26,12 @@ internal static class ThemeResources
     public static Brush? Brush(FrameworkElement element, string key) =>
         Lookup(element.ActualTheme, key) as Brush;
 
+    /// <summary>The brush for a key whose Light and Dark entries are the same, so only High
+    /// Contrast changes it, for callers with no element to ask (x:Bind functions). A key that
+    /// differs between Light and Dark needs <see cref="Brush(FrameworkElement, string)"/>.</summary>
+    public static Brush? ContrastBrush(string key) =>
+        Lookup(ElementTheme.Dark, key) as Brush;
+
     /// <summary>Sets a brush property from a theme resource, now and whenever the element's
     /// theme changes or it is loaded into a tree with another theme. A later call for the
     /// same property replaces the key.</summary>

@@ -69,6 +69,7 @@ test("code-built UI resolves Fluent theme brushes against its own theme", () => 
     ["Controls", "SshAlgorithmPicker.cs"],
     ["Controls", "HighlightRulesEditor.xaml.cs"],
     ["Dialogs", "TmuxSessionRowView.xaml.cs"],
+    ["Dialogs", "TunnelForm.xaml.cs"],
   ]) {
     const source = read("src", "App", ...parts);
     assert.doesNotMatch(source, fluentLookup, parts.join("/"));
@@ -76,4 +77,18 @@ test("code-built UI resolves Fluent theme brushes against its own theme", () => 
   assert.match(read("src", "App", "Controls", "FilePaneView.cs"), /ThemeResources\.SetBrush\(_statusText,/);
   assert.match(read("src", "App", "Dialogs", "TmuxSessionRowView.xaml"),
     /BorderBrush="\{ThemeResource SystemFillColorCautionBrush\}"/);
+});
+
+test("code never reads App.xaml's themed brushes through the application", () => {
+  // Their High Contrast entries differ, and the application answers for its startup theme.
+  const themed = new Set(["Dark", "Light", "HighContrast"].flatMap(theme =>
+    [...themeDictionary(theme).matchAll(/x:Key="(\w+)"/g)].map(match => match[1])));
+  assert.ok(themed.has("SessionSplitterHoverBrush"));
+  const sources = fs.readdirSync(path.join(__dirname, "..", "src", "App"), { recursive: true })
+    .filter(file => file.endsWith(".cs") && path.basename(file) !== "ThemeResources.cs");
+  for (const file of sources) {
+    const source = read("src", "App", file);
+    for (const match of source.matchAll(/Application\.Current\.Resources\s*(?:\[|\.TryGetValue\()\s*"(\w+)"/g))
+      assert.ok(!themed.has(match[1]), `${file} reads ${match[1]} through Application.Current`);
+  }
 });

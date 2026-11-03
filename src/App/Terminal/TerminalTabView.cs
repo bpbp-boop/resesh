@@ -2286,7 +2286,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         if (_paneSplitterLine is null)
             return;
         _paneSplitterLine.Background = _paneSplitterActive
-            ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SessionSplitterHoverBrush"]
+            ? ThemeResources.Brush(_paneSplitterLine, "SessionSplitterHoverBrush")
             : new Microsoft.UI.Xaml.Media.SolidColorBrush(_chromePalette.Divider);
     }
 

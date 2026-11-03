@@ -247,6 +247,7 @@ public static class PresentationValues
         _ => null,
     };
 
+    // Only for the Session* brushes ThemeVisualPalette recolours in place: one shared instance.
     private static Brush ResourceBrush(string key) =>
         (Brush)Application.Current.Resources[key];
 
@@ -254,16 +255,17 @@ public static class PresentationValues
     /// dictionaries, with a High Contrast variant in system colors.</summary>
     private enum Status { Info, Success, Caution, Critical, Neutral }
 
-    // Read on each call rather than cached: the app-level lookup follows High Contrast.
+    // Read on each call rather than cached, so a change to High Contrast is picked up.
+    // The status brushes are the same in Light and Dark; only High Contrast differs.
     private static Windows.UI.Color StatusColor(Status status) =>
-        ((SolidColorBrush)ResourceBrush(status switch
+        ((SolidColorBrush)ThemeResources.ContrastBrush(status switch
         {
             Status.Info => "SessionStatusInfoBrush",
             Status.Success => "SessionStatusSuccessBrush",
             Status.Caution => "SessionStatusCautionBrush",
             Status.Critical => "SessionStatusCriticalBrush",
             _ => "SessionStatusNeutralBrush",
-        })).Color;
+        })!).Color;
 
     /// <summary>A stored <c>#rrggbb</c>, read as the terminal reads highlight colours;
     /// transparent when it is not one.</summary>
