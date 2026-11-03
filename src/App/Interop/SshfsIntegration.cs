@@ -185,8 +185,10 @@ internal static class SshfsIntegration
                 _ => ["key-sig", "key"],
             };
             foreach (var query in queries)
+            {
                 if (QuerySsh(ssh, query) is { Count: > 0 } names)
-                    return names;
+                    return query == "key" ? SshHostKeyTypes.AlgorithmsForKeyTypes(names) : names;
+            }
             return null;
         });
 

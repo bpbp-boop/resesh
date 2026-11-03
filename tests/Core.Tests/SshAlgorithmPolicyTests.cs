@@ -264,6 +264,28 @@ public sealed class SshAlgorithmPolicyTests
     }
 
     [Fact]
+    public void OpenSshOptions_FromAKeyTypeList_StillOfferRsaSha2()
+    {
+        // An OpenSSH without "ssh -Q key-sig" answers "ssh -Q key" with key types only.
+        IReadOnlyCollection<string>? Known(SshAlgorithmKind kind) => kind == SshAlgorithmKind.HostKey
+            ? SshHostKeyTypes.AlgorithmsForKeyTypes(["ssh-ed25519", "ssh-rsa", "ssh-rsa-cert-v01@openssh.com"])
+            : Everything(kind);
+        var session = new Session { Name = "web", Host = "web" };
+
+        var hostKeys = Option(OpenSshOptions(session, "ssh-rsa", Known), "HostKeyAlgorithms").Split(',');
+        Assert.Contains("rsa-sha2-512", hostKeys);
+        Assert.Contains("rsa-sha2-256", hostKeys);
+
+        var noSha1 = session with { Algorithms = new SshAlgorithms { DisabledHostKeys = ["ssh-rsa"] } };
+        Assert.Equal(["rsa-sha2-256", "rsa-sha2-512"],
+            Option(OpenSshOptions(noSha1, "ssh-rsa", Known), "HostKeyAlgorithms").Split(',').Order(StringComparer.Ordinal));
+
+        Assert.Contains("rsa-sha2-512-cert-v01@openssh.com",
+            SshHostKeyTypes.AlgorithmsForKeyTypes(["ssh-rsa-cert-v01@openssh.com"]));
+        Assert.Equal(["ssh-ed25519"], SshHostKeyTypes.AlgorithmsForKeyTypes(["ssh-ed25519"]));
+    }
+
+    [Fact]
     public void OpenSshOptions_RefuseWhenTheTrustedTypeIsTurnedOff()
     {
         var off = SshAlgorithmPolicy.Supported(SshAlgorithmKind.HostKey).Where(name => SshHostKeyTypes.SameKey(name, "ssh-ed25519")).ToList();
