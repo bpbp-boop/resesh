@@ -698,4 +698,18 @@ public class CommandTrackerTests
     [InlineData("begin=x")]
     [InlineData("start=bad\\escape")]
     public void RejectsMalformedOsc3008(string data) => Assert.Null(CommandTracker.ParseOsc3008(data));
+
+    /// <summary>The same payloads Core's Osc3008ContextParser is checked against.</summary>
+    [Theory]
+    [MemberData(nameof(Resesh.Tests.Shared.Osc3008Vectors.All), MemberType = typeof(Resesh.Tests.Shared.Osc3008Vectors))]
+    public void ReadsOsc3008AsCoreDoes(string data, bool accepted, string? action, string? id, string? type, string? exit, int? status)
+    {
+        var parsed = CommandTracker.ParseOsc3008(data);
+        if (!accepted)
+        {
+            Assert.Null(parsed);
+            return;
+        }
+        Assert.Equal(new CommandTracker.Osc3008(action!, id!, type, exit, status), parsed);
+    }
 }
