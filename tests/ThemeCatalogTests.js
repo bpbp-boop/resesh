@@ -363,7 +363,7 @@ test("placeholder text is a step dimmer than captions, app-wide and in dialogs",
   }
   assert.match(dialogTheme, /Set\(dialog, placeholder,[\s\S]*?"TextControlPlaceholderForeground"/);
   const appSource = fs.readdirSync(path.join(__dirname, "..", "src", "App"), { recursive: true })
-    .filter(name => name.endsWith(".xaml") && !/^(?:bin|obj)[\\/]/.test(name))
+    .filter(name => name.endsWith(".xaml") && !/^(?:bin|obj|\.artifacts)[\\/]/.test(name))
     .map(name => fs.readFileSync(path.join(__dirname, "..", "src", "App", name), "utf8"))
     .join("\n");
   assert.doesNotMatch(appSource, /Placeholder\w*="\{StaticResource SessionTreeMutedForegroundBrush\}"/);

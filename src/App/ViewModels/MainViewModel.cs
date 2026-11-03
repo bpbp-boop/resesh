@@ -26,16 +26,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         kind == SessionKind.Local ? "\u0000local\u0000" + folderPath : folderPath;
 
     private string _searchText = "";
-    private TabGroupViewModel _focusedGroup;
+    private TabGroupViewModel? _focusedGroup;
 
     public ObservableCollection<TreeNodeViewModel> RootNodes { get; } = [];
 
     /// <summary>All tab groups in visual traversal order.</summary>
-    public ObservableCollection<TabGroupViewModel> Groups { get; } = [];
+    public ObservableCollection<TabGroupViewModel> Groups { get; }
 
     /// <summary>Tab groups of the window's other open workspaces. Their tabs stay connected
     /// and belong to this window, but they are not laid out until their workspace is shown.</summary>
-    public List<TabGroupViewModel> BackgroundGroups { get; } = [];
+    public ObservableCollection<TabGroupViewModel> BackgroundGroups { get; }
 
     /// <summary>Raised when a property of any tab in the window changes.</summary>
     public event Action<TabViewModel, string?>? TabChanged;
@@ -52,6 +52,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _identities = identities;
         _credentials = credentials;
         _services = services;
+        Groups = new GroupCollection(this, background: false);
+        BackgroundGroups = new GroupCollection(this, background: true);
         TreeSelection = new((node, selected) => node.IsSelected = selected);
         var initial = new TabGroupViewModel();
         Groups.Add(initial);
@@ -119,9 +121,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>The group that receives sessions opened from the tree (last-focused).</summary>
     public TabGroupViewModel FocusedGroup
     {
-        get => _focusedGroup;
+        get => _focusedGroup ?? throw new InvalidOperationException("The window has no shown group.");
         set
         {
+            if (value is null || !Groups.Contains(value))
+                throw new ArgumentException("The focused group must be shown in this window.", nameof(value));
             if (SetProperty(ref _focusedGroup, value))
             {
                 OnPropertyChanged(nameof(StatusText));
@@ -167,7 +171,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>The focused group's selected tab — what the status bar describes.</summary>
-    public TabViewModel? ActiveTab => FocusedGroup.SelectedTab;
+    public TabViewModel? ActiveTab => _focusedGroup?.SelectedTab;
 
     /// <summary>The active tab's session theme override, if any. The focused pane's border
     /// takes this theme so a session such as production is flagged where keystrokes go.</summary>
@@ -260,7 +264,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>Attaches a live tab that was detached from another window.</summary>
     public void AttachTab(TabViewModel tab, TabGroupViewModel group, int index)
     {
-        tab.PropertyChanged += Tab_PropertyChanged;
+        if (group.Window != this)
+            throw new ArgumentException("The target group must belong to this window.", nameof(group));
         group.Tabs.Insert(Math.Clamp(index, 0, group.Tabs.Count), tab);
         group.SelectedTab = tab;
         tab.IsGroupFocused = group == _focusedGroup;
@@ -273,7 +278,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public TabGroupViewModel DetachTab(TabViewModel tab)
     {
         var group = GroupOf(tab);
-        tab.PropertyChanged -= Tab_PropertyChanged;
         group.RemoveTab(tab);
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(Progress));
@@ -321,7 +325,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             foreach (var tab in group.Tabs.ToList())
             {
-                tab.PropertyChanged -= Tab_PropertyChanged;
                 Resesh.Core.Backend.CleanupActions.Run(_environment.ReportError,
                     () => (tab.View as IDisposable)?.Dispose());
             }
@@ -561,7 +564,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     {
         foreach (var tab in AllTabs)
         {
-            if (_store.Find(tab.Session.Id) is { } session && session != tab.Session)
+            if (_store.Find(tab.Session.Id) is { } session && !SessionMerge.SameValue(session, tab.Session))
             {
                 tab.Session = session;
                 // Appearance overrides take effect immediately; connection fields apply on next connect.
@@ -599,7 +602,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         foreach (var session in visible)
         {
-            if (_treeSessions[session.Id] == session)
+            if (SessionMerge.SameValue(_treeSessions[session.Id], session))
                 continue;
             _treeSessions[session.Id] = session;
             // A session the filter hides has no node, and the edit did not make it match.
@@ -625,7 +628,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             if (!_treeSessions.TryGetValue(session.Id, out var previous))
                 return true;
-            if (previous == session)
+            if (SessionMerge.SameValue(previous, session))
                 continue;
             if (previous.Kind != session.Kind
                 || !previous.FolderPath.Equals(session.FolderPath, StringComparison.Ordinal)

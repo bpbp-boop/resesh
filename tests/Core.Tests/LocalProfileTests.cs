@@ -248,6 +248,39 @@ public class LocalTargetModelTests
 public class LocalTerminalSessionTests
 {
     [Fact]
+    public async Task FailedJobAssignmentKillsTheSuspendedShellBeforeItCanRun()
+    {
+        var marker = Path.Combine(Path.GetTempPath(), "resesh-job-" + Guid.NewGuid().ToString("N"));
+        using var local = new LocalTerminalSession((_, _) => false);
+        try
+        {
+            var session = new Session
+            {
+                Kind = SessionKind.Local,
+                Local = new LocalTarget
+                {
+                    Executable = @"%SystemRoot%\System32\cmd.exe",
+                    Arguments = ["/c", $"echo started > \"{marker}\""],
+                },
+            };
+            Assert.Throws<LocalSessionException>(() => local.Start(session, 80, 24));
+            Assert.False(local.IsRunning);
+            Assert.True(local.ProcessId > 0);
+            try
+            {
+                using var process = System.Diagnostics.Process.GetProcessById(local.ProcessId);
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (ArgumentException) { } // already gone
+            Assert.False(File.Exists(marker));
+        }
+        finally
+        {
+            File.Delete(marker);
+        }
+    }
+
+    [Fact]
     public void Quote_FollowsWindowsArgumentRules()
     {
         Assert.Equal("plain", LocalTerminalSession.Quote("plain"));

@@ -168,8 +168,9 @@ public sealed partial class MainWindow
                 tab.IsGroupFocused = false;
             }
         }
-        ViewModel.BackgroundGroups.AddRange(parked.Groups);
         ViewModel.Groups.Clear();
+        foreach (var group in parked.Groups)
+            ViewModel.BackgroundGroups.Add(group);
         System.Diagnostics.Debug.Assert(!_parkedWorkspaces.ContainsKey(_shownWorkspace),
             "Parking over a parked workspace strands its tabs.");
         _parkedWorkspaces[_shownWorkspace] = parked;

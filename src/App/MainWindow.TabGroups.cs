@@ -883,17 +883,6 @@ public sealed partial class MainWindow
     public void TogglePin(TabViewModel tab)
     {
         tab.IsPinned = !tab.IsPinned;
-        if (tab.IsPinned)
-        {
-            // Pinned tabs live at the front of their group, after any already-pinned tabs.
-            var group = ViewModel.GroupOf(tab);
-            var selected = group.SelectedTab;
-            var index = group.Tabs.IndexOf(tab);
-            var target = group.Tabs.Count(t => t.IsPinned) - 1;
-            if (index != target)
-                group.Tabs.Move(index, target);
-            group.SelectedTab = selected; // the move must not steal selection
-        }
     }
 
 

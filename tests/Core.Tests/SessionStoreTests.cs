@@ -21,6 +21,126 @@ public sealed class SessionStoreTests : IDisposable
         new() { Name = name, Host = host, FolderPath = folder, Username = "admin" };
 
     [Fact]
+    public void ReturnedRecordsAndWriteInputsCannotChangeStoredState()
+    {
+        var args = new List<string> { "original" };
+        var environment = new Dictionary<string, string> { ["TEST"] = "original" };
+        var tunnel = new Tunnel { BindPort = 8080, DestinationHost = "original", DestinationPort = 80 };
+        var algorithms = new SshAlgorithms { DisabledCiphers = new List<string> { "original" } };
+        var session = NewSession(folder: "Folder") with
+        {
+            Local = new LocalTarget { Executable = "original", Arguments = args, Environment = environment },
+            Serial = new SerialTarget { PortName = "COM1" },
+            Proxy = new ProxySettings { Host = "original" },
+            Tunnels = [tunnel],
+            Algorithms = algorithms,
+            Overrides = new TerminalOverrides { EnabledRules = new List<string> { "original" } },
+        };
+        var store = NewStore();
+        store.Add(session);
+        var writes = 0;
+        store.Changed += () => writes++;
+        var file = File.ReadAllText(StorePath);
+
+        session.Name = "changed input";
+        args[0] = "changed input";
+        environment["TEST"] = "changed input";
+        tunnel.DestinationHost = "changed input";
+        algorithms.DisabledCiphers = ["changed input"];
+
+        foreach (var copy in new[] { store.Find(session.Id)!, store.Sessions[0], store.SessionsInFolder("Folder")[0] })
+        {
+            copy.Name = "changed read";
+            copy.Local!.Executable = "changed read";
+            ((string[])copy.Local.Arguments)[0] = "changed read";
+            ((Dictionary<string, string>)copy.Local.Environment!)["TEST"] = "changed read";
+            copy.Serial!.PortName = "COM2";
+            copy.Proxy!.Host = "changed read";
+            copy.Tunnels![0].DestinationHost = "changed read";
+            copy.Algorithms!.DisabledCiphers = ["changed read"];
+            ((string[])copy.Overrides!.EnabledRules!)[0] = "changed read";
+        }
+
+        var stored = store.Find(session.Id)!;
+        Assert.Equal("web-01", stored.Name);
+        Assert.Equal("original", stored.Local!.Executable);
+        Assert.Equal(["original"], stored.Local.Arguments);
+        Assert.Equal("original", stored.Local.Environment!["TEST"]);
+        Assert.Equal("COM1", stored.Serial!.PortName);
+        Assert.Equal("original", stored.Proxy!.Host);
+        Assert.Equal("original", stored.Tunnels![0].DestinationHost);
+        Assert.Equal(["original"], stored.Algorithms!.DisabledCiphers);
+        Assert.Equal(["original"], stored.Overrides!.EnabledRules);
+        Assert.Equal(file, File.ReadAllText(StorePath));
+        Assert.Equal(0, writes);
+        store.Update(stored with { Name = "saved" });
+        Assert.Equal("saved", NewStore().Find(session.Id)!.Name);
+        Assert.Equal(1, writes);
+    }
+
+    [Fact]
+    public void FolderSettingsDoNotShareMutableRecordsWithTheStore()
+    {
+        var store = NewStore();
+        var identity = Guid.NewGuid();
+        var setting = new FolderSettings { Path = "Folder", IdentityId = identity };
+        store.MergeFolderSettings([setting]);
+        setting.Path = "changed input";
+        store.FolderSettings[0].Path = "changed read";
+        Assert.Equal(identity, store.FolderIdentity("Folder"));
+    }
+
+    [Theory]
+    [InlineData("\"startingDirectory\":null")]
+    [InlineData("\"arguments\":null")]
+    [InlineData("\"arguments\":[null]")]
+    public void InvalidNestedLocalDataFallsBackToBackup(string invalidProperty)
+    {
+        var good = NewSession();
+        var store = NewStore();
+        store.Add(good);
+        File.Copy(StorePath, StorePath + ".bak");
+        File.WriteAllText(StorePath, "{\"sessions\":[{\"name\":\"bad\",\"kind\":\"local\",\"local\":{\"executable\":\"cmd.exe\"," + invalidProperty + "}}]}");
+
+        var recovered = NewStore();
+        Assert.Equal(good.Id, Assert.Single(recovered.Sessions).Id);
+        Assert.Equal(StoreLoadState.RecoveredFromBackup, recovered.LoadState);
+    }
+
+    [Fact]
+    public void DuplicateIdsInJsonFallBackToBackup()
+    {
+        var good = NewSession();
+        var store = NewStore();
+        store.Add(good);
+        File.Copy(StorePath, StorePath + ".bak");
+        File.WriteAllText(StorePath, $$"""
+            {"sessions":[{"id":"{{good.Id}}","name":"one"},{"id":"{{good.Id}}","name":"two"}]}
+            """);
+        var recovered = NewStore();
+        Assert.Equal("web-01", Assert.Single(recovered.Sessions).Name);
+        Assert.Equal(StoreLoadState.RecoveredFromBackup, recovered.LoadState);
+    }
+
+    [Fact]
+    public void InvalidWriteLeavesTheFileAndPublishedStateUnchanged()
+    {
+        var good = NewSession();
+        var store = NewStore();
+        store.Add(good);
+        var file = File.ReadAllText(StorePath);
+        var writes = 0;
+        store.Changed += () => writes++;
+        Assert.Throws<InvalidDataException>(() => store.Update(good with
+        {
+            Local = new LocalTarget { StartingDirectory = null! },
+        }));
+        Assert.Equal(file, File.ReadAllText(StorePath));
+        Assert.Null(store.Find(good.Id)!.Local);
+        Assert.Equal(0, writes);
+    }
+
+    [Fact]
     public void RoundTrip_PersistsAllFields()
     {
         var session = new Session
