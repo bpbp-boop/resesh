@@ -261,9 +261,9 @@ internal static class SshfsIntegration
     public static SshfsMount Mount(Session session, KnownHostsStore knownHosts, string? password, string? keyPath,
         CancellationToken cancellationToken = default)
     {
-        var entry = knownHosts.Lookup(session.Host, session.Port)
+        var entry = knownHosts.Lookup(session.Host, SessionEndpoint.EffectivePort(session))
             ?? throw new IOException("No trusted host key is stored. Connect the terminal first, then open Explorer again.");
-        var line = entry.ToKnownHostsLine(session.Host, session.Port);
+        var line = entry.ToKnownHostsLine(session.Host, SessionEndpoint.EffectivePort(session));
         var exe = FindSshfsExe()
             ?? throw new IOException("sshfs.exe was not found in the SSHFS-Win install.");
         switch (session.AuthMethod)
@@ -321,7 +321,7 @@ internal static class SshfsIntegration
             psi.ArgumentList.Add($"{session.Username}@{host}:/");
             psi.ArgumentList.Add($"{drive}:");
             psi.ArgumentList.Add("-p");
-            psi.ArgumentList.Add(session.Port.ToString());
+            psi.ArgumentList.Add(SessionEndpoint.EffectivePort(session).ToString());
             psi.ArgumentList.Add("-f"); // the foreground process IS the mount's lifetime
             var options = new List<string>
             {

@@ -145,7 +145,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             ThrowIfAbandoned(cancellationToken);
             // Jump hosts connect first, each asking about its own host key and login.
             var via = jumps is { Count: > 0 }
-                ? SshJumpChain.Open(jumps, session.Host, session.Port, _knownHosts, HostKeyDecision, interactiveResponder, cancellationToken, Connecting, resolveLogin)
+                ? SshJumpChain.Open(jumps, session.Host, SessionEndpoint.EffectivePort(session), _knownHosts, HostKeyDecision, interactiveResponder, cancellationToken, Connecting, resolveLogin)
                 : null;
             // Published now so a Disconnect during the rest of the connect closes the
             // jumps, which also cuts the target's handshake short.

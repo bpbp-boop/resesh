@@ -61,7 +61,7 @@ public sealed class SftpSession : IDisposable
             // Its own jump connections, like its own SSH connection. Their keys were accepted
             // through the terminal too, so nothing here asks.
             var via = jumps is { Count: > 0 }
-                ? SshJumpChain.Open(jumps, session.Host, session.Port, _knownHosts,
+                ? SshJumpChain.Open(jumps, session.Host, Models.SessionEndpoint.EffectivePort(session), _knownHosts,
                     interactiveResponder: interactiveResponder, cancellationToken: cancellationToken,
                     connecting: connecting)
                 : null;
@@ -109,17 +109,17 @@ public sealed class SftpSession : IDisposable
         client.HostKeyReceived += (_, e) =>
         {
             var sha256 = Convert.ToBase64String(SHA256.HashData(e.HostKey)).TrimEnd('=');
-            var verdict = _knownHosts.Check(session.Host, session.Port, e.HostKeyName, sha256);
+            var verdict = _knownHosts.Check(session.Host, Models.SessionEndpoint.EffectivePort(session), e.HostKeyName, sha256);
             e.CanTrust = verdict == HostKeyVerdict.Match;
             if (e.CanTrust)
-                _knownHosts.BackfillHostKey(session.Host, session.Port, e.HostKeyName, e.HostKey);
+                _knownHosts.BackfillHostKey(session.Host, Models.SessionEndpoint.EffectivePort(session), e.HostKeyName, e.HostKey);
             if (!e.CanTrust)
                 hostKeyFailure = verdict == HostKeyVerdict.Mismatch
-                    ? (_knownHosts.Lookup(session.Host, session.Port) is { } trusted
+                    ? (_knownHosts.Lookup(session.Host, Models.SessionEndpoint.EffectivePort(session)) is { } trusted
                         ? SshHostKeyTypes.TrustedTypeTurnedOff(connectionInfo, session, trusted, e.HostKeyName)
                         : null) ?? new SshSessionException(
                         SshFailureKind.HostKeyMismatch,
-                        $"Host key for {session.Host}:{session.Port} does not match the trusted key. " +
+                        $"Host key for {session.Host}:{Models.SessionEndpoint.EffectivePort(session)} does not match the trusted key. " +
                         "Reconnect the terminal to review the change.")
                     : new SshSessionException(
                         SshFailureKind.HostKeyRejected,

@@ -933,7 +933,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             var jumpSessions = JumpRoute.Resolve(Session, App.Store.Find);
             _routeSessions = jumpSessions;
             var jumps = new List<SshHop>();
-            _terminal.WriteNotice($"Connecting to {Session.Host}:{Session.Port} over telnet (unencrypted){RouteDescription(Session with { Proxy = null })} …");
+            _terminal.WriteNotice($"Connecting to {Session.Host}:{SessionEndpoint.EffectivePort(Session)} over telnet (unencrypted){RouteDescription(Session with { Proxy = null })} …");
 
             var telnet = new TelnetTerminalSession();
             telnet.OutputReceived += data =>
@@ -968,7 +968,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             await connection.StartAsync(telnet, () =>
             {
                 var via = jumpSessions.Count == 0 ? null : SshJumpChain.Open(
-                    jumpSessions.Select(jump => new SshHop(jump, null)).ToList(), Session.Host, Session.Port, _knownHosts,
+                    jumpSessions.Select(jump => new SshHop(jump, null)).ToList(), Session.Host, SessionEndpoint.EffectivePort(Session), _knownHosts,
                     info => ConfirmHostKeyBlocking(info, dialling, connection.Token),
                     prompts => PromptKeyboardInteractiveBlocking(prompts, dialling, connection.Token),
                     connection.Token, host => dialling.Host = host,
@@ -992,7 +992,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                         telnet.Dispose(); // raises no Closed; this reports the end instead
                         EndTelnet($"Connection lost: {reason}");
                     });
-                telnet.Connect(via?.Host ?? Session.Host, via?.Port ?? Session.Port, Session.TerminalType, cols, rows,
+                telnet.Connect(via?.Host ?? Session.Host, via?.Port ?? SessionEndpoint.EffectivePort(Session), Session.TerminalType, cols, rows,
                     connection.Token, Session.TelnetEncoding, Session.TelnetReport80x25, via);
             });
             connection.Token.ThrowIfCancellationRequested();
@@ -1009,7 +1009,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             _tab.MarkConnected();
             _tab.ConnectionSummary = jumpSessions.Count == 0
                 ? $"telnet • {telnet.RemoteEndPoint} • unencrypted"
-                : $"telnet • {Session.Host}:{Session.Port} via {jumpSessions[^1].Name} • unencrypted past the jump host";
+                : $"telnet • {Session.Host}:{SessionEndpoint.EffectivePort(Session)} via {jumpSessions[^1].Name} • unencrypted past the jump host";
             _terminal.NotifyConnected();
             FocusTerminalOnConnect();
         }
@@ -1086,7 +1086,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                         proxyPassword = ProxyPassword(target);
                         authenticatingWith = resolved.IdentitySecret;
                         _terminal.WriteNotice(
-                            $"Connecting to {resolved.Session.Username}@{target.Host}:{target.Port}{RouteDescription(target)} …");
+                            $"Connecting to {resolved.Session.Username}@{target.Host}:{SessionEndpoint.EffectivePort(target)}{RouteDescription(target)} …");
                         return new SshHop(resolved.Session, resolved.Secret, proxyPassword);
                     }, connection.Token);
                 credentialDeclined = login is null;
@@ -1896,7 +1896,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             var login = new SshHop(resolved.Session, resolved.Secret, ProxyPassword(jump));
             resolvedJumps.Add(login);
             _terminal.WriteNotice(
-                $"Connecting to jump host {jump.Name} ({resolved.Session.Username}@{jump.Host}:{jump.Port}){RouteDescription(jump)} …");
+                $"Connecting to jump host {jump.Name} ({resolved.Session.Username}@{jump.Host}:{SessionEndpoint.EffectivePort(jump)}){RouteDescription(jump)} …");
             return login;
         }, token);
 
@@ -2579,7 +2579,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     /// <summary>What an SSHFS mount was made for: host, port and login (the registered key,
     /// whose current file the mount reads, not a path the session once had).</summary>
     private static string SshfsTarget(Session session) =>
-        $"{session.Username}@{session.Host}:{session.Port}|{session.AuthMethod}|"
+        $"{session.Username}@{session.Host}:{SessionEndpoint.EffectivePort(session)}|{session.AuthMethod}|"
         + (session.AuthMethod == AuthMethod.PrivateKey ? session.PrivateKeyId?.ToString() : null);
 
     /// <summary>Connect factory handed to the pane: reuses the live connection's login, secret

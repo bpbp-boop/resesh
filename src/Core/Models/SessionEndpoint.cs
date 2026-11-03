@@ -50,6 +50,11 @@ public static class SessionEndpoint
     /// <summary>The port a connection uses: an unset (zero or negative) port means the default.</summary>
     public static int EffectivePort(SessionKind kind, int port) => port > 0 ? port : DefaultPort(kind);
 
+    /// <summary>The port an SSH, SFTP or telnet connection to the session dials and its host
+    /// keys are stored under, so what is dialled matches what is shown. Not for serial
+    /// sessions, which have no TCP port.</summary>
+    public static int EffectivePort(Session session) => EffectivePort(session.Kind, session.Port);
+
     public static string Format(Session session, EndpointStyle style = default)
     {
         ArgumentNullException.ThrowIfNull(session);

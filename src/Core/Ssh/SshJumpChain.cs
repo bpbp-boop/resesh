@@ -122,7 +122,7 @@ public sealed class SshJumpChain : IDisposable
                 // Asked for only now, so a jump that fails stops before the next login prompt.
                 var hop = ResolveLogin(jumps[index], resolveLogin);
                 var (nextHost, nextPort) = index + 1 < jumps.Count
-                    ? (jumps[index + 1].Session.Host, jumps[index + 1].Session.Port)
+                    ? (jumps[index + 1].Session.Host, SessionEndpoint.EffectivePort(jumps[index + 1].Session))
                     : (targetHost, targetPort);
                 try
                 {
@@ -242,7 +242,7 @@ public sealed class SshJumpChain : IDisposable
         catch (TimeoutException)
         {
             throw new SshSessionException(SshFailureKind.HostUnreachable,
-                $"{session.Host}:{session.Port} did not answer through the jump host within {timeout.TotalSeconds:0} seconds.");
+                $"{session.Host}:{SessionEndpoint.EffectivePort(session)} did not answer through the jump host within {timeout.TotalSeconds:0} seconds.");
         }
         catch (System.Net.Sockets.SocketException)
         {
@@ -253,7 +253,7 @@ public sealed class SshJumpChain : IDisposable
         // The jump reports why on its own thread, a moment after it closes the connection.
         SpinWait.SpinUntil(() => _forwardFailure is not null, TimeSpan.FromMilliseconds(250));
         throw new SshSessionException(SshFailureKind.HostUnreachable,
-            $"The jump host could not reach {session.Host}:{session.Port}"
+            $"The jump host could not reach {session.Host}:{SessionEndpoint.EffectivePort(session)}"
             + (ForwardFailure is { } reason ? $": {reason}" : "."));
     }
 
