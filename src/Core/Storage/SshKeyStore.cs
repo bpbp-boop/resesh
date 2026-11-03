@@ -206,7 +206,10 @@ public sealed class SshKeyStore
         }
     }
 
-    /// <summary>Converts legacy per-session key paths into shared key references. Files are never copied.</summary>
+    /// <summary>Converts legacy per-session key paths into shared key references. Files are never
+    /// copied. A passphrase saved on the session moves to the key: once the key holds one and
+    /// the sessions point at it, the sessions' own copies are deleted, so it lives in one place.
+    /// Runs at startup and after anything that can bring in old sessions (a backup import).</summary>
     public int MigrateLegacySessions(SessionStore sessions, ICredentialService credentials)
     {
         var legacy = sessions.Sessions
@@ -215,11 +218,12 @@ public sealed class SshKeyStore
                 && session.PrivateKeyId is null
                 && !string.IsNullOrWhiteSpace(session.PrivateKeyPath))
             .ToList();
-        var migrated = 0;
         var normalized = legacy.Select(session =>
             TryNormalizePath(session.PrivateKeyPath!, out var path) ? (Session: session, Path: path) : default)
             .Where(item => item.Session is not null)
             .ToList();
+        var updated = new List<Session>();
+        var movedSecrets = new List<Guid>();
         foreach (var group in normalized.GroupBy(item => item.Path, StringComparer.OrdinalIgnoreCase))
         {
             var key = RegisterExternal(group.Key, allowMissing: true);
@@ -230,19 +234,24 @@ public sealed class SshKeyStore
                 if (legacySecret is not null)
                     credentials.WriteKey(key.Id, legacySecret);
             }
+            var keyHasSecret = !string.IsNullOrEmpty(credentials.ReadKey(key.Id));
             foreach (var item in group)
             {
-                var session = item.Session;
-                sessions.Update(session with
+                updated.Add(item.Session with
                 {
                     PrivateKeyId = key.Id,
                     PrivateKeyPath = null,
                     PassphraseRequired = false,
                 });
-                migrated++;
+                if (keyHasSecret)
+                    movedSecrets.Add(item.Session.Id);
             }
         }
-        return migrated;
+        // One write; the sessions' copies go only once nothing still reads them.
+        sessions.UpdateMany(updated);
+        foreach (var sessionId in movedSecrets)
+            credentials.Delete(sessionId);
+        return updated.Count;
     }
 
     private static SshKeyReference ApplyInspection(SshKeyReference key, SshKeyInspection inspection) => key with

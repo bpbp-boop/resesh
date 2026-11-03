@@ -68,6 +68,53 @@ public sealed class SshKeyStoreTests : IDisposable
         Assert.Equal(Path.GetFullPath(legacy.PrivateKeyPath!), key.Path);
         Assert.Equal("key passphrase", credentials.ReadKey(key.Id));
         Assert.False(key.IsAvailable);
+        // The passphrase lives with the key only; exports with secrets stop carrying it twice.
+        Assert.Null(credentials.Read(legacy.Id));
+    }
+
+    [Fact]
+    public void MigrateLegacySessions_KeyWithItsOwnPassphrase_DropsTheSessionsStaleCopies()
+    {
+        var sessions = new SessionStore(Path.Combine(_dir.FullName, "sessions.json"));
+        sessions.Load();
+        var keyPath = Path.Combine(_dir.FullName, "shared-key");
+        var keys = new SshKeyStore(Path.Combine(_dir.FullName, "ssh-keys.json"));
+        keys.Load();
+        var key = keys.RegisterExternal(keyPath, allowMissing: true);
+        var credentials = new FakeCredentials();
+        credentials.WriteKey(key.Id, "current passphrase");
+        var first = new Session { Name = "a", Host = "a", AuthMethod = AuthMethod.PrivateKey, PrivateKeyPath = keyPath };
+        var second = new Session { Name = "b", Host = "b", AuthMethod = AuthMethod.PrivateKey, PrivateKeyPath = keyPath };
+        sessions.AddMany([first, second]);
+        credentials.Write(first.Id, "old passphrase");
+
+        Assert.Equal(2, keys.MigrateLegacySessions(sessions, credentials));
+
+        Assert.All(sessions.Sessions, session => Assert.Equal(key.Id, session.PrivateKeyId));
+        Assert.Equal("current passphrase", credentials.ReadKey(key.Id));
+        Assert.Null(credentials.Read(first.Id));
+    }
+
+    [Fact]
+    public void MigrateLegacySessions_NoPassphraseAnywhere_LeavesCredentialsAlone()
+    {
+        var sessions = new SessionStore(Path.Combine(_dir.FullName, "sessions.json"));
+        sessions.Load();
+        var legacy = new Session
+        {
+            Name = "Plain",
+            Host = "plain",
+            AuthMethod = AuthMethod.PrivateKey,
+            PrivateKeyPath = Path.Combine(_dir.FullName, "plain-key"),
+        };
+        sessions.Add(legacy);
+        var keys = new SshKeyStore(Path.Combine(_dir.FullName, "ssh-keys.json"));
+        keys.Load();
+        var credentials = new FakeCredentials();
+
+        Assert.Equal(1, keys.MigrateLegacySessions(sessions, credentials));
+        Assert.Null(credentials.ReadKey(Assert.Single(keys.Keys).Id));
+        Assert.Equal(0, keys.MigrateLegacySessions(sessions, credentials));
     }
 
     [Theory]
