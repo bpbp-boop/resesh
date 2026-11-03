@@ -89,8 +89,9 @@ public static class Osc3008ContextParser
                     hostname = decodedHost;
                     break;
                 case "cwd" when action == Osc3008ContextAction.Start &&
-                    TryDecode(value, MaxTextLength, allowEmpty: false, out var decodedPath) && decodedPath.StartsWith('/'):
-                    cwd = RemotePath.Normalize(decodedPath);
+                    TryDecode(value, MaxTextLength, allowEmpty: false, out var decodedPath)
+                    && RemotePath.FromUntrusted(decodedPath) is { } directory:
+                    cwd = directory;
                     break;
                 case "cmdline" when action == Osc3008ContextAction.Start &&
                     TryDecode(value, MaxTextLength, allowEmpty: true, out var decodedCommand):

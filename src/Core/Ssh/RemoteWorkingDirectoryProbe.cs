@@ -59,8 +59,8 @@ public static class RemoteWorkingDirectoryProbe
             {
                 var bytes = Convert.FromBase64String(reply[5..]);
                 var path = new UTF8Encoding(false, true).GetString(bytes);
-                if (path.StartsWith('/') && !path.Any(character => character < ' ' || character == '\u007f'))
-                    return new(RemoteWorkingDirectoryProbeStatus.Path, RemotePath.Normalize(path));
+                if (RemotePath.FromUntrusted(path) is { } directory)
+                    return new(RemoteWorkingDirectoryProbeStatus.Path, directory);
             }
             catch (FormatException)
             {

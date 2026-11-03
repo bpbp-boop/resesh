@@ -101,7 +101,7 @@ internal static class RemoteShellIntegration
         if (string.IsNullOrEmpty(path) || path.Length > 2048 || path.Any(char.IsControl)) return null;
         return mode == ShellIntegrationMode.PowerShell
             ? path.Length > 3 && char.IsAsciiLetter(path[0]) && path[1] == ':' && path[2] == '\\' ? path : null
-            : path.StartsWith('/') ? path : null;
+            : Sftp.RemotePath.FromUntrusted(path);
     }
 
     public static string LaunchCommand(ShellIntegrationMode mode, string directory, bool tmux = false)

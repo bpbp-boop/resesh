@@ -71,7 +71,7 @@ public abstract class PersistenceBackend
         public override string KillCommand(Guid id, IEnumerable<int> slots) => AgentPersistence.KillCommand(agentPath, id, slots);
         public override string CurrentPathCommand() => AgentPersistence.ListCommand(agentPath);
         public override string? ParseCurrentPath(string output, Guid id, int slot) =>
-            AgentPersistence.ParseSessions(output, id).FirstOrDefault(session => session.Slot == slot)
-                is { CurrentPath: ['/', ..] path } ? path : null;
+            Sftp.RemotePath.FromUntrusted(
+                AgentPersistence.ParseSessions(output, id).FirstOrDefault(session => session.Slot == slot)?.CurrentPath);
     }
 }
