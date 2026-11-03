@@ -275,6 +275,9 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             TraceHook?.Invoke($"ErrorOccurred: {e.Exception.Message}");
             RaiseClosed(e.Exception);
         };
+        // A jump that dies can leave the forwarded socket this client dialled looking alive.
+        if (Volatile.Read(ref _jumpChain) is { } chain)
+            chain.Lost += reason => RaiseClosed(new SshSessionException(SshFailureKind.HostUnreachable, reason));
         Interlocked.Exchange(ref _watchdog, new System.Threading.Timer(_ =>
         {
             if (_lifecycle.IsOpen && _client?.IsConnected != true)

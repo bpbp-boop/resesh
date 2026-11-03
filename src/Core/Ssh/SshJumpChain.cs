@@ -22,9 +22,61 @@ public sealed class SshJumpChain : IDisposable
     // The last link's forward: only its failures explain a connection to the target.
     private volatile ForwardedPortLocal? _lastForward;
     private int _disposed;
+    private int _lost;
+    private Timer? _watchdog;
 
     private SshJumpChain()
     {
+    }
+
+    /// <summary>
+    /// Raised once, on a background thread, when a jump's own SSH connection fails or drops
+    /// after the chain opened; the argument says which jump and why. What runs through the
+    /// chain does not always hear of it: the forwarded loopback socket stays up when a jump
+    /// dies without closing (SSH.NET does not always notice either, so the links are also
+    /// polled), and TCP keepalive on that socket only ever reaches this machine. Never raised
+    /// after <see cref="Dispose"/>.
+    /// </summary>
+    public event Action<string>? Lost;
+
+    private void RaiseLost(Session jump, Exception? failure)
+    {
+        if (Volatile.Read(ref _disposed) != 0 || Interlocked.Exchange(ref _lost, 1) != 0)
+            return;
+        Interlocked.Exchange(ref _watchdog, null)?.Dispose();
+        Lost?.Invoke(failure is null
+            ? $"The connection to the jump host {jump.Name} was lost."
+            : $"The connection to the jump host {jump.Name} was lost: {failure.Message}");
+    }
+
+    /// <summary>Starts watching every link once the chain is complete.</summary>
+    private void Watch(IReadOnlyList<Session> jumps)
+    {
+        for (var index = 0; index < _links.Count; index++)
+        {
+            var jump = jumps[index];
+            _links[index].Client.ErrorOccurred += (_, e) => RaiseLost(jump, e.Exception);
+        }
+        var links = _links.Select(link => link.Client).ToList();
+        _watchdog = new Timer(_ =>
+        {
+            try
+            {
+                for (var index = 0; index < links.Count && Volatile.Read(ref _disposed) == 0; index++)
+                    if (!links[index].IsConnected)
+                    {
+                        RaiseLost(jumps[index], null);
+                        return;
+                    }
+            }
+            catch (ObjectDisposedException)
+            {
+                // Disposed between the check and the poll: nothing to report.
+            }
+        }, null, dueTime: 5000, period: 5000);
+        // A Dispose that ran while this was being set up could not see the timer.
+        if (Volatile.Read(ref _disposed) != 0)
+            Interlocked.Exchange(ref _watchdog, null)?.Dispose();
     }
 
     /// <summary>Always loopback: the forwarded port is never offered to the network.</summary>
@@ -101,6 +153,7 @@ public sealed class SshJumpChain : IDisposable
                     };
                 }
             }
+            chain.Watch(jumps.Select(jump => jump.Session).ToList());
             return chain;
         }
         catch
@@ -209,6 +262,7 @@ public sealed class SshJumpChain : IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
+        Interlocked.Exchange(ref _watchdog, null)?.Dispose();
         for (var index = _links.Count - 1; index >= 0; index--)
         {
             var (client, forward) = _links[index];
