@@ -276,4 +276,29 @@ public sealed class SecureCrtImporterTests
             dir.Delete(recursive: true);
         }
     }
+
+    [Fact]
+    public void Commit_DoesNotCallATelnetLineADuplicateOfAnSshSession()
+    {
+        var dir = Directory.CreateTempSubdirectory("import-kind-test");
+        try
+        {
+            var store = new SessionStore(Path.Combine(dir.FullName, "sessions.json"));
+            store.Load();
+            store.Add(new Session { Name = "console", Host = "10.0.0.9", Port = 2003, Username = "ops" });
+            var telnet = new ImportCandidate
+            {
+                Name = "console", FolderPath = "", RelativePath = "console",
+                Host = "10.0.0.9", Port = 2003, Protocol = ImportCandidate.TelnetProtocol,
+            };
+
+            Assert.False(SecureCrtImporter.IsDuplicate(store, telnet));
+            Assert.Equal((1, 0), SecureCrtImporter.Commit(store, [telnet]));
+            Assert.True(SecureCrtImporter.IsDuplicate(store, telnet));
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
+    }
 }
