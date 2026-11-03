@@ -357,10 +357,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }, password);
     }
 
-    /// <summary>True when the session keeps its own password under its id. Identity logins
-    /// keep theirs under the identity, so moving to one drops the session's copy.</summary>
-    private static bool UsesOwnPassword(Session? session) =>
-        session is { Login: SessionLogin.Own, AuthMethod: AuthMethod.Password };
+    private static bool UsesOwnPassword(Session? session) => session?.UsesOwnPassword == true;
 
     public void DeleteSession(Session session)
     {
@@ -541,6 +538,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 tab.Session = session;
                 // Appearance overrides take effect immediately; connection fields apply on next connect.
                 _environment.ApplySessionSettings(tab);
+            }
+            else
+            {
+                // A folder identity can change the login without changing the session record.
+                tab.NotifyLoginChanged();
             }
         }
         OnPropertyChanged(nameof(ActiveSessionTheme));

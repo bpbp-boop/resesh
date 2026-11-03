@@ -72,6 +72,22 @@ public sealed class SessionStoreFollowingTests : IDisposable
     }
 
     [Fact]
+    public void FolderIdentityChangeRefreshesTabEndpointsThoughTheSessionIsUnchanged()
+    {
+        var session = Ssh("web", "prod") with { InheritLogin = true };
+        _store.Add(session);
+        var window = Window();
+        var tab = window.Connect(_store.Find(session.Id)!);
+        var raised = new List<string?>();
+        tab.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        _store.SetFolderIdentity("prod", Guid.NewGuid()); // only the folder's settings change
+
+        Assert.Contains(nameof(TabViewModel.Endpoint), raised);
+        Assert.Contains(nameof(TabViewModel.Subtitle), raised);
+    }
+
+    [Fact]
     public void PresentationEditInOneWindowIsPatchedInPlaceInEvery()
     {
         var session = Ssh("web", "prod");

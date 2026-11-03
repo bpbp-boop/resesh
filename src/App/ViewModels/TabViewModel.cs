@@ -201,6 +201,14 @@ public sealed partial class TabViewModel : ObservableObject
         }
     }
 
+    /// <summary>Re-reads the texts that show the resolved login, which a folder identity or an
+    /// identity's username can change while the session record stays the same.</summary>
+    public void NotifyLoginChanged()
+    {
+        OnPropertyChanged(nameof(Endpoint));
+        OnPropertyChanged(nameof(Subtitle));
+    }
+
     /// <summary>The tab's content control (TerminalTabView); set by the window after creation.</summary>
     public object? View
     {

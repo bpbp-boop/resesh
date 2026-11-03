@@ -164,8 +164,8 @@ public sealed partial class SessionEditDialog : ContentDialog
         AutomationProperties.SetItemStatus(field, message);
     }
 
-    private const int SshDefaultPort = 22;
-    private const int TelnetDefaultPort = 23;
+    private const int SshDefaultPort = SessionEndpoint.DefaultSshPort;
+    private const int TelnetDefaultPort = SessionEndpoint.DefaultTelnetPort;
     private bool _updatingProtocol;
 
     private bool IsTelnet => ProtocolBox.SelectedIndex == 1;

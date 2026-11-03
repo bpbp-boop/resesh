@@ -234,6 +234,12 @@ public partial class App : Application
             SessionsChanged?.Invoke();
             RefreshJumpList(); // sessions were renamed, added or deleted
         });
+        // An identity's username shows in tab endpoints without any session changing.
+        Identities.Changed += () => RunOnUiThread(() =>
+        {
+            foreach (var tab in AllTabs)
+                tab.NotifyLoginChanged();
+        });
         var window = CreateWindowCore();
         if (Settings.Current.ReopenLastLayoutAtStartup)
             window.RestoreLastLayout();
