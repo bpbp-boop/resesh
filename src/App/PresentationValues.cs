@@ -266,18 +266,10 @@ public static class PresentationValues
             _ => "SessionStatusNeutralBrush",
         })).Color;
 
-    private static Windows.UI.Color ParseColor(string? value)
-    {
-        if (value is { Length: 7 } && value[0] == '#'
-            && byte.TryParse(value.AsSpan(1, 2), System.Globalization.NumberStyles.HexNumber, null, out var red)
-            && byte.TryParse(value.AsSpan(3, 2), System.Globalization.NumberStyles.HexNumber, null, out var green)
-            && byte.TryParse(value.AsSpan(5, 2), System.Globalization.NumberStyles.HexNumber, null, out var blue))
-        {
-            return Windows.UI.Color.FromArgb(255, red, green, blue);
-        }
-
-        return Windows.UI.Color.FromArgb(0, 0, 0, 0);
-    }
+    /// <summary>A stored <c>#rrggbb</c>, read as the terminal reads highlight colours;
+    /// transparent when it is not one.</summary>
+    private static Windows.UI.Color ParseColor(string? value) =>
+        Resesh.Terminal.HexColor.Parse(value) is { } rgb ? Rgb(rgb) : Windows.UI.Color.FromArgb(0, 0, 0, 0);
 
     private static Windows.UI.Color Rgb(uint rgb) => Windows.UI.Color.FromArgb(
         255,
