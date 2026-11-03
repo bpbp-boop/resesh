@@ -36,6 +36,9 @@ public sealed class SshKeyStore
         get { lock (_gate) return _file.State; }
     }
 
+    /// <summary>Raised after any change is saved, outside the store's lock.</summary>
+    public event Action? Changed;
+
     public IReadOnlyList<SshKeyReference> Keys
     {
         get { lock (_gate) return _keys.OrderBy(key => key.Name, StringComparer.OrdinalIgnoreCase).ToList(); }
@@ -58,6 +61,7 @@ public sealed class SshKeyStore
     public SshKeyReference RegisterExternal(string path, string? name = null, bool allowMissing = false)
     {
         var normalized = NormalizePath(path);
+        SshKeyReference key;
         lock (_gate)
         {
             var existing = _keys.FirstOrDefault(key => PathsEqual(key.Path, normalized));
@@ -82,7 +86,7 @@ public sealed class SshKeyStore
                 throw new FileNotFoundException("The private-key file was not found.", normalized);
 
             var candidate = new List<SshKeyReference>(_keys);
-            var key = new SshKeyReference
+            key = new SshKeyReference
             {
                 Name = UniqueName(candidate, string.IsNullOrWhiteSpace(name)
                     ? Path.GetFileName(normalized)
@@ -96,8 +100,9 @@ public sealed class SshKeyStore
             };
             candidate.Add(key);
             Save(candidate);
-            return key;
         }
+        Changed?.Invoke();
+        return key;
     }
 
     public void Rename(Guid id, string name)
@@ -111,23 +116,26 @@ public sealed class SshKeyStore
             candidate[index] = candidate[index] with { Name = UniqueName(candidate, name.Trim(), id) };
             Save(candidate);
         }
+        Changed?.Invoke();
     }
 
     public SshKeyReference Relocate(Guid id, string path)
     {
         var normalized = NormalizePath(path);
         var inspection = SshKeyInspector.Inspect(normalized);
+        SshKeyReference updated;
         lock (_gate)
         {
             var index = IndexOf(id);
             var current = _keys[index];
             EnsureFingerprintUnchanged(current, inspection);
-            var updated = ApplyInspection(current with { Path = normalized }, inspection);
+            updated = ApplyInspection(current with { Path = normalized }, inspection);
             var candidate = new List<SshKeyReference>(_keys);
             candidate[index] = updated;
             Save(candidate);
-            return updated;
         }
+        Changed?.Invoke();
+        return updated;
     }
 
     /// <summary>Checks that the file still contains the registered public key and refreshes metadata.</summary>
@@ -138,44 +146,48 @@ public sealed class SshKeyStore
             current = _keys[IndexOf(id)];
         var inspection = SshKeyInspector.Inspect(current.Path, passphrase);
 
+        SshKeyReference updated;
         lock (_gate)
         {
             current = _keys[IndexOf(id)];
             if (!acceptChanged)
                 EnsureFingerprintUnchanged(current, inspection);
-            var updated = ApplyInspection(current, inspection);
-            if (updated != current)
-            {
-                var candidate = new List<SshKeyReference>(_keys);
-                candidate[IndexOf(id)] = updated;
-                Save(candidate);
-            }
-            return updated;
+            updated = ApplyInspection(current, inspection);
+            if (updated == current)
+                return updated;
+            var candidate = new List<SshKeyReference>(_keys);
+            candidate[IndexOf(id)] = updated;
+            Save(candidate);
         }
+        Changed?.Invoke();
+        return updated;
     }
 
     public bool Remove(Guid id)
     {
+        bool removed;
         lock (_gate)
         {
-            var removed = _keys.Any(key => key.Id == id);
+            removed = _keys.Any(key => key.Id == id);
             if (removed)
             {
                 var candidate = new List<SshKeyReference>(_keys);
                 candidate.RemoveAll(key => key.Id == id);
                 Save(candidate);
             }
-            return removed;
         }
+        if (removed)
+            Changed?.Invoke();
+        return removed;
     }
 
     /// <summary>Merges backup metadata without opening or copying any key file.</summary>
     public IReadOnlyDictionary<Guid, Guid> MergeImport(IEnumerable<SshKeyReference> importedKeys)
     {
+        var map = new Dictionary<Guid, Guid>();
+        var changed = false;
         lock (_gate)
         {
-            var map = new Dictionary<Guid, Guid>();
-            var changed = false;
             var candidate = _keys;
             foreach (var imported in importedKeys)
             {
@@ -202,8 +214,10 @@ public sealed class SshKeyStore
             }
             if (changed)
                 Save(candidate);
-            return map;
         }
+        if (changed)
+            Changed?.Invoke();
+        return map;
     }
 
     /// <summary>Converts legacy per-session key paths into shared key references. Files are never
@@ -322,8 +336,29 @@ public sealed class SshKeyStore
         _keys = candidate;
     }
 
-    private static StoreData? Read(string path) =>
-        JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<StoreData>());
+    private static StoreData? Read(string path)
+    {
+        var data = JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<StoreData>());
+        // Inside the loader, so a bad file falls back to .bak instead of failing later.
+        Validate(data?.Keys);
+        return data;
+    }
+
+    /// <summary>The one check for stored key references, used by the loader and by backup
+    /// reading: no null entries, names or paths, which every caller dereferences.</summary>
+    internal static void Validate(IEnumerable<SshKeyReference?>? keys)
+    {
+        if (keys?.Any(key => key is null || key.Name is null || key.Path is null) == true)
+            throw new InvalidDataException("The SSH key list contains an invalid key.");
+    }
+
+    /// <summary>Throws unless a save may replace the file now; lets an import refuse before it
+    /// changes anything.</summary>
+    internal void EnsureWritable()
+    {
+        lock (_gate)
+            _file.EnsureWritable();
+    }
 
     internal sealed class StoreData
     {

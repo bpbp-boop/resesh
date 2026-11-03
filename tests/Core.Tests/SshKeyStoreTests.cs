@@ -213,6 +213,52 @@ public sealed class SshKeyStoreTests : IDisposable
         Assert.Equal(firstSuccessfulSave, File.ReadAllText(path + ".bak"));
     }
 
+    [Theory]
+    [InlineData("{\"keys\":[null]}")]
+    [InlineData("{\"keys\":[{\"id\":\"6f1c1c1e-6d47-4b8e-9a53-7d41f1f3a002\",\"name\":null,\"path\":\"C:\\\\k\"}]}")]
+    [InlineData("{\"keys\":[{\"id\":\"6f1c1c1e-6d47-4b8e-9a53-7d41f1f3a002\",\"name\":\"k\",\"path\":null}]}")]
+    public void Load_InvalidKeyRecoversFromBackup(string invalid)
+    {
+        var path = Path.Combine(_dir.FullName, "ssh-keys.json");
+        var good = new SshKeyStore(path);
+        good.Load();
+        var kept = good.RegisterExternal(Path.Combine(_dir.FullName, "first"), allowMissing: true);
+        good.RegisterExternal(Path.Combine(_dir.FullName, "second"), allowMissing: true);
+        File.WriteAllText(path, invalid);
+
+        var store = new SshKeyStore(path);
+        store.Load();
+
+        Assert.Equal(StoreLoadState.RecoveredFromBackup, store.LoadState);
+        Assert.Equal(kept.Id, Assert.Single(store.Keys).Id);
+    }
+
+    [Fact]
+    public void Changes_AreAnnouncedAfterTheyAreSaved()
+    {
+        var path = Path.Combine(_dir.FullName, "ssh-keys.json");
+        var store = new SshKeyStore(path);
+        store.Load();
+        var changes = 0;
+        store.Changed += () =>
+        {
+            changes++;
+            var reloaded = new SshKeyStore(path);
+            reloaded.Load();
+            Assert.Equal(store.Keys.ToArray(), reloaded.Keys.ToArray());
+        };
+
+        var key = store.RegisterExternal(Path.Combine(_dir.FullName, "id_ed25519"), allowMissing: true);
+        store.RegisterExternal(key.Path, allowMissing: true); // already registered: no change
+        store.Rename(key.Id, "Renamed");
+        store.MergeImport([new SshKeyReference { Name = "Imported", Path = Path.Combine(_dir.FullName, "imported") }]);
+        store.MergeImport([]); // nothing new: no change
+        Assert.True(store.Remove(key.Id));
+        Assert.False(store.Remove(key.Id));
+
+        Assert.Equal(4, changes);
+    }
+
     public void Dispose() => _dir.Delete(recursive: true);
 
     private sealed class FakeCredentials : ICredentialService

@@ -2123,3 +2123,39 @@ Credential Manager failures were raw `Win32Exception`s that the Settings and ide
 (which catch `IOException`) let through. They are `CredentialStoreException : IOException` now,
 and every backend refuses a secret over Credential Manager's 2560-byte blob limit (1280
 characters) before anything is saved, with a message that says so.
+
+## 2026-11-03 - One validation per store, shared with backups
+
+Each store has one `Validate` that its loader runs (so bad data throws `InvalidDataException`
+and `.bak` recovery kicks in) and that `SessionsBackup.Read` runs on the matching archive
+entry. Identities and SSH keys had no loader validation (`{"identities":[null]}` or a null name
+loaded and crashed later), and backups checked only sessions: a null `pinnedSessionIds` threw in
+the middle of an import after keys, identities, sessions and passwords were written, and a null
+known-host entry was saved and crashed the next connect. The archive adds only its own rules
+(lists present, ids unique, references between files) and now parses `workspaces.json` at read
+time too. Duplicate session ids are still rejected only in backups: a store file that has them
+was written by an older build and loading it beats falling back to `.bak`.
+
+Known hosts with endpoints that differ only in case (v1 reloaded the file into a case-sensitive
+dictionary, so both spellings could be saved) threw `ArgumentException` from the loader, which
+`AtomicFile` does not treat as a bad file, so it escaped the startup load and the app would not
+start. They are merged deterministically instead of rejected, because rejecting would block SSH
+for those users: the same key keeps the copy with the public key blob, different keys keep the
+ordinally first spelling. Both were accepted by the user, and the other key still gets the
+mismatch prompt. Startup also loads each store in its own try/catch, so an unexpected loader
+bug is logged and shown and the other stores still load (the failed one stays unloaded and
+refuses to save).
+
+`SessionsBackup.Import` checks every store it saves (sessions, settings, known hosts,
+highlights, keys, identities, workspaces) is writable, and every secret fits Credential Manager,
+before it changes anything, instead of failing halfway. Export takes workspaces from the
+`WorkspaceStore`'s memory like the other stores, not a raw copy of the file (a damaged file made
+every backup unrestorable, a store running from `.bak` exported the damaged primary, and the
+unshared read could block a save). An empty workspace store exports no `workspaces.json`, so
+restoring that backup leaves the target's workspaces alone; before, an existing empty file was
+exported and restoring it deleted them. Custom icons are written through `AtomicFile.WriteBytes`
+(no `.bak`), and `AtomicFile` removes its temp file when a write fails.
+
+`SshKeyStore` raises `Changed` after a save succeeds, like the identity and session stores, and
+Settings' identities section listens, so keys added in one window, migrated at startup or merged
+by an import show in every open Settings page.

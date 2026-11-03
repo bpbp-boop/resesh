@@ -125,7 +125,8 @@ public static class SessionsBackup
         SshKeyStore sshKeys,
         ICredentialService credentials,
         BackupExportOptions options,
-        IdentityStore? identities = null)
+        IdentityStore? identities = null,
+        WorkspaceStore? workspaces = null)
     {
         if (options.IncludeSecrets && string.IsNullOrEmpty(options.Passphrase))
             throw new ArgumentException("A passphrase is required when secrets are included.", nameof(options));
@@ -198,13 +199,18 @@ public static class SessionsBackup
                 }
             }
 
-            var workspacesPath = Path.Combine(dataDirectory, "workspaces.json");
-            if (File.Exists(workspacesPath))
+            // From the store's memory like everything else: the file may be damaged, or the
+            // store may be running from its .bak, and a raw copy would carry that along.
+            if (workspaces is null)
+            {
+                workspaces = new WorkspaceStore(Path.Combine(dataDirectory, "workspaces.json"));
+                workspaces.Load();
+            }
+            if (workspaces.ExportBackup() is { } workspaceData)
             {
                 var entry = zip.CreateEntry("workspaces.json", CompressionLevel.Optimal);
                 using var output = entry.Open();
-                using var input = File.OpenRead(workspacesPath);
-                input.CopyTo(output);
+                output.Write(workspaceData);
             }
 
             if (options.IncludeSecrets)
@@ -287,19 +293,20 @@ public static class SessionsBackup
             if (manifest.SchemaVersion < 1 || manifest.SchemaVersion > CurrentSchemaVersion)
                 throw new InvalidDataException($"Backup schema {manifest.SchemaVersion} is not supported.");
 
+            // Each store's own validation decides what it accepts, so a backup can never bring
+            // in data its store would refuse to load. The archive adds only its own rules
+            // (required lists, unique ids, references between files).
             var sessionData = ReadRequired<BackupSessionData>(zip, "sessions.json");
-            if (sessionData.Sessions is null || sessionData.Folders is null || sessionData.LocalFolders is null
-                || sessionData.Sessions.Any(session => session is null || session.Name is null
-                    || session.Host is null || session.Username is null || session.FolderPath is null)
-                || sessionData.FolderSettings?.Any(setting => setting is null) == true)
-            {
+            if (sessionData.Sessions is null || sessionData.Folders is null || sessionData.LocalFolders is null)
                 throw new InvalidDataException("The backup contains invalid session or folder data.");
-            }
+            SessionStore.Validate(sessionData.Sessions, sessionData.Folders, sessionData.LocalFolders,
+                sessionData.FolderSettings);
             if (sessionData.Sessions.Select(s => s.Id).Distinct().Count() != sessionData.Sessions.Count)
                 throw new InvalidDataException("The backup contains duplicate session ids.");
-            var secrets = ReadOptional<Dictionary<Guid, string>>(zip, "secrets.json") ?? [];
-            var keySecrets = ReadOptional<Dictionary<Guid, string>>(zip, "key-secrets.json") ?? [];
+            var secrets = ReadSecrets(zip, "secrets.json");
+            var keySecrets = ReadSecrets(zip, "key-secrets.json");
             var sshKeys = ReadOptional<List<SshKeyReference>>(zip, "ssh-keys.json") ?? [];
+            SshKeyStore.Validate(sshKeys);
             if (sshKeys.Select(key => key.Id).Distinct().Count() != sshKeys.Count)
                 throw new InvalidDataException("The backup contains duplicate SSH key ids.");
             var sshKeyIds = sshKeys.Select(key => key.Id).ToHashSet();
@@ -323,23 +330,44 @@ public static class SessionsBackup
                 throw new InvalidDataException("A backup that contains secrets must be encrypted.");
 
             var identities = ReadOptional<List<Identity>>(zip, "identities.json") ?? [];
+            IdentityStore.Validate(identities);
             if (identities.Select(identity => identity.Id).Distinct().Count() != identities.Count)
                 throw new InvalidDataException("The backup contains duplicate identity ids.");
             if (identities.Any(identity => identity.KeyId is { } keyId && !sshKeyIds.Contains(keyId)))
                 throw new InvalidDataException("The backup contains an identity with an unknown SSH key.");
-            var identitySecrets = ReadOptional<Dictionary<Guid, string>>(zip, "identity-secrets.json") ?? [];
+            var identitySecrets = ReadSecrets(zip, "identity-secrets.json");
             if (!manifest.IncludesSecrets && identitySecrets.Count > 0)
                 throw new InvalidDataException("The backup identity secret metadata is inconsistent.");
             var identityIds = identities.Select(identity => identity.Id).ToHashSet();
             if (identitySecrets.Keys.Any(id => !identityIds.Contains(id)))
                 throw new InvalidDataException("The backup contains a password for an unknown identity.");
             // Absent from backups made before proxy passwords were carried.
-            var proxySecrets = ReadOptional<Dictionary<Guid, string>>(zip, "proxy-secrets.json") ?? [];
+            var proxySecrets = ReadSecrets(zip, "proxy-secrets.json");
             if (!manifest.IncludesSecrets && proxySecrets.Count > 0)
                 throw new InvalidDataException("The backup proxy secret metadata is inconsistent.");
             var sessionIds = sessionData.Sessions.Select(session => session.Id).ToHashSet();
             if (proxySecrets.Keys.Any(id => !sessionIds.Contains(id)))
                 throw new InvalidDataException("The backup contains a proxy password for an unknown session.");
+
+            var settings = ReadOptional<AppSettings>(zip, "settings.json") ?? new AppSettings();
+            SettingsStore.Validate(settings);
+            var knownHosts = KnownHostsStore.Validate(
+                ReadOptional<Dictionary<string, KnownHostEntry>>(zip, "known_hosts.json") ?? []);
+            var highlights = ReadOptional<HighlightBackupData>(zip, "highlights.json") ?? new HighlightBackupData();
+            HighlightsStore.Validate(highlights.EnabledRules, highlights.DisabledRules,
+                highlights.CustomRules, highlights.BuiltinOverrides);
+            // A list written as null means none, as a missing one does.
+            highlights = highlights with
+            {
+                EnabledRules = highlights.EnabledRules ?? [],
+                DisabledRules = highlights.DisabledRules ?? [],
+                CustomRules = highlights.CustomRules ?? [],
+                BuiltinOverrides = highlights.BuiltinOverrides ?? [],
+            };
+            // Checked now so a damaged layout fails the preview, not the import halfway.
+            var workspaces = ReadOptionalBytes(zip, "workspaces.json");
+            if (workspaces is not null)
+                WorkspaceStore.ParsePayload(workspaces);
 
             var icons = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in zip.Entries.Where(e => e.FullName.StartsWith("icons/", StringComparison.Ordinal)))
@@ -359,15 +387,14 @@ public static class SessionsBackup
                 Sessions = sessionData.Sessions,
                 Folders = sessionData.Folders,
                 LocalFolders = sessionData.LocalFolders,
-                Settings = ReadOptional<AppSettings>(zip, "settings.json") ?? new AppSettings(),
-                KnownHosts = ReadOptional<Dictionary<string, KnownHostEntry>>(zip, "known_hosts.json")
-                    ?? new Dictionary<string, KnownHostEntry>(StringComparer.OrdinalIgnoreCase),
-                Highlights = ReadOptional<HighlightBackupData>(zip, "highlights.json") ?? new HighlightBackupData(),
+                Settings = settings,
+                KnownHosts = knownHosts,
+                Highlights = highlights,
                 Icons = icons,
                 Secrets = secrets,
                 SshKeys = sshKeys,
                 KeySecrets = keySecrets,
-                Workspaces = ReadOptionalBytes(zip, "workspaces.json"),
+                Workspaces = workspaces,
                 Identities = identities,
                 IdentitySecrets = identitySecrets,
                 ProxySecrets = proxySecrets,
@@ -451,10 +478,17 @@ public static class SessionsBackup
         var importedWorkspaceData = package.Workspaces is null
             ? null
             : WorkspaceStore.ParsePayload(package.Workspaces);
+        // Every store an import saves refuses here, before anything changes, rather than
+        // after the stores before it were saved: an unreadable file is never written over,
+        // and a half-applied import is worse than none.
+        sessionStore.EnsureWritable();
+        settingsStore.EnsureWritable();
+        knownHostsStore.EnsureWritable();
+        highlightsStore.EnsureWritable();
+        sshKeyStore.EnsureWritable();
+        identityStore?.EnsureWritable();
         if (importedWorkspaceData is not null)
         {
-            // Workspaces are replaced through their store, so an unreadable file is refused
-            // like any other save: here, before the sessions change, rather than after.
             if (workspaceStore is null)
             {
                 workspaceStore = new WorkspaceStore(Path.Combine(dataDirectory, "workspaces.json"));
@@ -462,6 +496,9 @@ public static class SessionsBackup
             }
             workspaceStore.EnsureWritable();
         }
+        foreach (var secret in package.Secrets.Values.Concat(package.KeySecrets.Values)
+            .Concat(package.IdentitySecrets.Values).Concat(package.ProxySecrets.Values))
+            CredentialStoreException.ThrowIfTooLong(secret);
         var existingKeyIds = sshKeyStore.Keys.Select(key => key.Id).ToHashSet();
         var keyIdMap = sshKeyStore.MergeImport(package.SshKeys);
         // Identities that already exist keep their local definition and password; new ones
@@ -660,18 +697,7 @@ public static class SessionsBackup
     {
         var iconsDirectory = Path.Combine(dataDirectory, "icons");
         foreach (var (name, content) in package.Icons)
-        {
-            Directory.CreateDirectory(iconsDirectory);
-            WriteAtomic(Path.Combine(iconsDirectory, name), content);
-        }
-    }
-
-    private static void WriteAtomic(string path, byte[] content)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temp = path + ".tmp";
-        File.WriteAllBytes(temp, content);
-        File.Move(temp, path, overwrite: true);
+            AtomicFile.WriteBytes(Path.Combine(iconsDirectory, name), content);
     }
 
     private static void WriteJson<T>(ZipArchive archive, string name, T value)
@@ -692,6 +718,16 @@ public static class SessionsBackup
             return default;
         using var stream = entry.Open();
         return JsonSerializer.Deserialize(stream, JsonOptions.Info<T>());
+    }
+
+    /// <summary>Saved passwords by id. A null value would reach the credential store as a
+    /// null secret, so it fails the whole backup instead.</summary>
+    private static Dictionary<Guid, string> ReadSecrets(ZipArchive archive, string name)
+    {
+        var secrets = ReadOptional<Dictionary<Guid, string>>(archive, name) ?? [];
+        if (secrets.Values.Any(secret => secret is null))
+            throw new InvalidDataException($"The backup's {name} contains an empty entry.");
+        return secrets;
     }
 
     private static byte[]? ReadOptionalBytes(ZipArchive archive, string name)

@@ -224,12 +224,24 @@ public sealed class SettingsStore
     {
         var settings = JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<AppSettings>());
         // Validate before AtomicFile.Load accepts the primary, so recovery can use .bak.
-        if (settings is not null
-            && (settings.PinnedSessionIds is null || settings.RecentSessionIds is null))
-        {
-            throw new InvalidDataException("The settings payload contains a null session list.");
-        }
+        if (settings is not null)
+            Validate(settings);
         return settings;
+    }
+
+    /// <summary>The one check for saved settings, used by the loader and by backup reading.</summary>
+    internal static void Validate(AppSettings settings)
+    {
+        if (settings.PinnedSessionIds is null || settings.RecentSessionIds is null)
+            throw new InvalidDataException("The settings payload contains a null session list.");
+    }
+
+    /// <summary>Throws unless a save may replace the file now; lets an import refuse before it
+    /// changes anything.</summary>
+    internal void EnsureWritable()
+    {
+        lock (_gate)
+            _file.EnsureWritable();
     }
 
     /// <summary>Moves a saved session to the front of the bounded recent list.</summary>
