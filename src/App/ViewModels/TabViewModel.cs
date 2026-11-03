@@ -618,10 +618,15 @@ public sealed partial class TabViewModel : ObservableObject
         }
     }
 
+    /// <summary>The surface already caps titles at this length.</summary>
+    private const int MaxTerminalTitleLength = 512;
+
     /// <summary>Called (UI thread) when the terminal page reports a new window title.</summary>
     public void ApplyTerminalTitle(string? title)
     {
-        var trimmed = title?.Trim();
+        // The host chooses the title: line breaks, control characters and bidi overrides
+        // (which can make a label read as another host) go, as for any label from the wire.
+        var trimmed = AgentText.Sanitize(title, MaxTerminalTitleLength);
         // A tmux older than 2.6 has no #{==:} and sends our set-titles-string back verbatim;
         // that is noise, not a title, and the endpoint fallback beats showing it.
         if (string.IsNullOrEmpty(trimmed)
