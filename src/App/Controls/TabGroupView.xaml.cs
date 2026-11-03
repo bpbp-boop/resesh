@@ -1051,6 +1051,11 @@ public sealed partial class TabGroupView : UserControl
         _filePane = null!, _filePaneCwd = null!, _workingFolder = null!, _recordingsLocation = null!;
     private MenuFlyoutSubItem _highlight = null!, _agent = null!;
 
+    /// <summary>Menu items that run a window command for the menu's tab, with whether each
+    /// is enabled taken from that command's CanExecute: one rule for this menu, the Session
+    /// menu, the palette and the shortcuts.</summary>
+    private readonly List<(MenuFlyoutItem Item, Func<MainViewModel, System.Windows.Input.ICommand> Command)> _commandItems = [];
+
     private MenuFlyout BuildTabMenu()
     {
         MenuFlyoutItem Item(string text, Action<TabViewModel> action)
@@ -1064,22 +1069,35 @@ public sealed partial class TabGroupView : UserControl
             return item;
         }
 
+        MenuFlyoutItem CommandItem(string text, Func<MainViewModel, System.Windows.Input.ICommand> command)
+        {
+            var item = new MenuFlyoutItem { Text = text };
+            item.Click += (_, _) =>
+            {
+                // The tab may have changed while the menu was open; the command decides again.
+                if (_menuTab is { } tab && command(_host.ViewModel) is { } target && target.CanExecute(tab))
+                    target.Execute(tab);
+            };
+            _commandItems.Add((item, command));
+            return item;
+        }
+
         _rename = Item("Rename", tab => _ = RenameTabAsync(tab));
         _resetName = Item("Reset Name", tab => tab.TitleOverride = null);
-        _reconnect = Item("Reconnect", tab => _host.ReconnectTab(tab));
+        _reconnect = CommandItem("Reconnect", vm => vm.ReconnectCommand);
         _reconnect.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.ReconnectTab);
-        _disconnect = Item("Disconnect", tab => _host.DisconnectTab(tab));
-        _sendBreak = Item("Send Break", tab => _host.SendBreak(tab));
+        _disconnect = CommandItem("Disconnect", vm => vm.DisconnectCommand);
+        _sendBreak = CommandItem("Send Break", vm => vm.SendBreakCommand);
         _sendBreak.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SendBreak);
-        _manageRemote = Item("Manage Remote Sessions…", tab => _ = _host.ManageRemoteSessionsAsync(tab));
-        _tunnels = Item("Tunnels…", tab => _ = _host.ManageTunnelsAsync(tab));
-        _endRemote = Item("End Remote Session…", tab => _ = _host.EndRemoteSessionAsync(tab));
-        _filePane = Item("File Pane", tab => _host.ToggleFilePane(tab));
+        _manageRemote = CommandItem("Manage Remote Sessions…", vm => vm.ManageRemoteSessionsCommand);
+        _tunnels = CommandItem("Tunnels…", vm => vm.ManageTunnelsCommand);
+        _endRemote = CommandItem("End Remote Session…", vm => vm.EndRemoteSessionCommand);
+        _filePane = CommandItem("File Pane", vm => vm.ToggleFilePaneCommand);
         _filePane.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.FilePane);
         _filePaneCwd = Item("Open File Pane at Terminal Folder", tab => _ = _host.OpenFilePaneAtCurrentFolderAsync(tab));
         _workingFolder = Item("Open Working Folder", tab => _host.OpenWorkingFolder(tab));
         _recordingsLocation = Item("Open Recordings Location", tab => _ = _host.OpenRecordingsLocationAsync());
-        _close = Item("Close", tab => _ = _host.RequestCloseTabAsync(tab));
+        _close = CommandItem("Close", vm => vm.CloseTabCommand);
         _close.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.CloseTab);
         _closeDisconnected = Item("Close Disconnected Tabs", tab =>
             _ = _host.RequestCloseManyAsync(
@@ -1093,15 +1111,15 @@ public sealed partial class TabGroupView : UserControl
             _ = _host.RequestCloseManyAsync(Group.Tabs.ToList(), "tab(s) in this group"));
         _closeAll = Item("Close All Tabs", tab =>
             _ = _host.RequestCloseManyAsync(_host.ViewModel.AllTabs.ToList(), "tab(s)"));
-        _pin = Item("Pin Tab", tab => _host.TogglePin(tab));
+        _pin = CommandItem("Pin Tab", vm => vm.TogglePinCommand);
         _lock = Item("Lock Session…", tab => _ = _host.LockSessionAsync(tab));
-        _clone = Item("Clone Session", tab => _host.CloneSession(tab));
+        _clone = CommandItem("Clone Session", vm => vm.CloneTabCommand);
         _clone.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.CloneTab);
-        _split = Item("Split Right", tab => _host.SplitRight(tab));
+        _split = CommandItem("Split Right", vm => vm.SplitRightCommand);
         _split.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SplitRight);
-        _splitDown = Item("Split Down", tab => _host.SplitDown(tab));
+        _splitDown = CommandItem("Split Down", vm => vm.SplitDownCommand);
         _splitDown.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.SplitDown);
-        _zoomTab = Item("Zoom Tab", tab => _host.ToggleZoom(tab));
+        _zoomTab = CommandItem("Zoom Tab", vm => vm.ToggleZoomCommand);
         _zoomTab.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.ZoomTab);
         _options = Item("Session Options…", tab => _ = _host.OpenSessionOptionsAsync(tab));
         _highlight = new MenuFlyoutSubItem { Text = "Highlighting" };
@@ -1146,54 +1164,44 @@ public sealed partial class TabGroupView : UserControl
     private static bool IsStopped(TabViewModel tab) =>
         tab.State is TabConnectionState.Disconnected or TabConnectionState.Exited;
 
+    private static Visibility VisibleIf(bool visible) => visible ? Visibility.Visible : Visibility.Collapsed;
+
     private void ConfigureMenuFor(TabViewModel tab)
     {
         var caps = tab.Capabilities;
         var isAppPage = tab.IsAppPage;
+        var viewModel = _host.ViewModel;
+        // Enabled exactly when the Session menu, palette and shortcut would run it for this tab.
+        foreach (var (item, command) in _commandItems)
+            item.IsEnabled = command(viewModel).CanExecute(tab);
         _rename.IsEnabled = !isAppPage;
         _resetName.IsEnabled = !isAppPage && tab.TitleOverride is not null;
         // Local tabs use process verbs (Stop/Restart); remote-only actions disappear entirely.
         _reconnect.Text = caps.StartAgainVerb;
-        _reconnect.IsEnabled = !isAppPage && IsStopped(tab);
         _disconnect.Text = caps.StopVerb;
-        _disconnect.IsEnabled = !isAppPage && tab.State == TabConnectionState.Connected;
-        _sendBreak.Visibility = caps.SendBreak && !tab.IsPlayback ? Visibility.Visible : Visibility.Collapsed;
-        _sendBreak.IsEnabled = caps.SendBreak && !tab.IsLocked && tab.State == TabConnectionState.Connected;
-        // Only persistent sessions have a remote session to end; close/disconnect only detach them.
-        var endRemote = caps.RemoteSession && tab.Session.Persistent;
-        _endRemote.Visibility = endRemote ? Visibility.Visible : Visibility.Collapsed;
-        _endRemote.IsEnabled = endRemote && tab.State == TabConnectionState.Connected;
-        _manageRemote.Visibility = endRemote ? Visibility.Visible : Visibility.Collapsed;
-        _manageRemote.IsEnabled = endRemote && !tab.IsLocked && tab.State != TabConnectionState.Connecting;
-        var ssh = tab.Session.Kind == SessionKind.Ssh && !isAppPage && !tab.IsPlayback;
-        _tunnels.Visibility = ssh ? Visibility.Visible : Visibility.Collapsed;
-        _tunnels.IsEnabled = ssh && !tab.IsLocked && tab.State == TabConnectionState.Connected;
+        _sendBreak.Visibility = VisibleIf(MainViewModel.ShowsSendBreak(tab));
+        _endRemote.Visibility = VisibleIf(MainViewModel.ShowsEndRemoteSession(tab));
+        _manageRemote.Visibility = VisibleIf(MainViewModel.ShowsManageRemoteSessions(tab));
+        _tunnels.Visibility = VisibleIf(MainViewModel.ShowsManageTunnels(tab));
         // Bulk closes skip pinned tabs, so they're only offered when an unpinned tab qualifies.
         _closeDisconnected.IsEnabled = Group.Tabs.Any(t => IsStopped(t) && !t.IsPinned);
         _closeOthers.IsEnabled = Group.Tabs.Any(t => t != tab && !t.IsPinned);
         _closeRight.IsEnabled = Group.Tabs.Skip(Group.Tabs.IndexOf(tab) + 1).Any(t => !t.IsPinned);
         _pin.Text = tab.IsPinned ? "Unpin Tab" : "Pin Tab";
-        _clone.IsEnabled = !isAppPage && !tab.IsPlayback;
-        _pin.IsEnabled = !isAppPage && !tab.IsPlayback;
         _lock.IsEnabled = !isAppPage && !tab.IsPlayback && !tab.IsLocked;
-        // Splitting a lone tab would leave an empty group that immediately collapses — pointless.
-        _split.IsEnabled = Group.Tabs.Count > 1;
-        _splitDown.IsEnabled = Group.Tabs.Count > 1;
-        _zoomTab.Text = _host.ViewModel.ZoomTabTitle;
-        _zoomTab.Visibility = _host.ViewModel.IsSplit || _host.ViewModel.IsZoomed
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        _filePane.Visibility = caps.FilePane ? Visibility.Visible : Visibility.Collapsed;
+        _zoomTab.Text = viewModel.ZoomTabTitle;
+        _zoomTab.Visibility = VisibleIf(_zoomTab.IsEnabled);
+        _filePane.Visibility = VisibleIf(MainViewModel.ShowsFilePane(tab));
         _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
         var filePaneCwd = caps.FilePane;
         _filePaneCwd.Visibility = filePaneCwd ? Visibility.Visible : Visibility.Collapsed;
-        _filePaneCwd.IsEnabled = filePaneCwd && tab.State == TabConnectionState.Connected;
+        _filePaneCwd.IsEnabled = filePaneCwd && !tab.IsLocked && tab.State == TabConnectionState.Connected;
         _workingFolder.Visibility = caps.LocalWorkingFolder && !tab.IsPlayback
             ? Visibility.Visible
             : Visibility.Collapsed;
         // Session Options is disabled when the saved session was deleted while connected.
-        var sessionExists = _host.ViewModel.RankedMatches("").Any(s => s.Id == tab.Session.Id);
-        _options.IsEnabled = !isAppPage && sessionExists;
+        var sessionExists = viewModel.CanEditSessionOf(tab);
+        _options.IsEnabled = sessionExists;
         ConfigureHighlightMenu(tab, sessionExists);
         ConfigureAgentMenu(tab, sessionExists);
     }

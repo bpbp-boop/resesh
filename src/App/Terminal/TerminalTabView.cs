@@ -35,7 +35,12 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     private readonly SshKeyStore _sshKeys;
     private readonly TmuxSlotReservations.Owner _tmuxReservation;
     private int? _resumeTmuxSlot;
+    // The persistent shell a reconnect goes back to: chosen by a persistent connect (on its
+    // worker thread), dropped by a connect without persistence. What the live connection is
+    // attached to is the tab's RemoteSessionSlot, set when the connect succeeds.
     private bool _hasTmuxTarget;
+    private int _tmuxSlot;
+    private bool _connectingPersistent;
     /// <summary>What keeps this tab's persistent shell alive, chosen at each connect.</summary>
     private PersistenceBackend _persistence = PersistenceBackend.Tmux;
     private readonly TerminalSurface _terminal = TerminalSurfaceFactory.CreateLive();
@@ -49,13 +54,12 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     private bool _initialLaunchStarted;
     private int _captureColumns;
     private int _captureRows;
-    private int _backendColumns;
-    private int _backendRows;
+    private (int Columns, int Rows, int PixelWidth, int PixelHeight) _backendSize;
     private TerminalCapture? _capture;
     private TerminalPlayerView? _rewindPlayer;
     private bool _rewindAvailable;
-    private readonly Osc7WorkingDirectoryTracker _workingDirectory = new();
-    private string? _windowsWorkingDirectory;
+    private readonly WorkingDirectoryTracker _workingDirectory = new();
+    private string? _bannerPlatform; // the OS the SSH banner named, for this connection only
 
     // Agent awareness (Phase 6.2). One tracker per tab, fed only by this tab's own page
     // and backend — a session cannot describe another tab's agent, whatever it writes.
@@ -85,6 +89,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     private const double DefaultFilePaneWidth = 340;
     private HighlightsStore? _highlightPreview;
     private string? _historyDirectory;
+    private string? _enterDirectory; // the folder when Enter was last pressed
     private bool _historyWriteFailed;
 
     private Session Session => _tab.Session;
@@ -161,6 +166,11 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _terminal.InputReceived += data =>
         {
             _backend?.Write(data);
+            // A command runs in the folder it was typed in. Read it at Enter: a command found
+            // without shell integration is only marked once its echo settles, and a quick cd
+            // and the next prompt's report may have moved the folder by then.
+            if (Array.IndexOf(data, (byte)'\r') >= 0)
+                _enterDirectory = CurrentHistoryDirectory();
             // Answering is what unblocks a waiting agent, so input clears a sticky badge.
             ApplyAgent(tracker => tracker.ObserveUserInput());
         };
@@ -182,14 +192,18 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             initial.CopyOnSelect, initial.RightClickPaste, initial.Scrollback,
             BuildHighlightPayload(),
             fixed80Columns: Session.IsTelnet && Session.TelnetFixed80Columns);
-        _terminal.SetPromptPlatform(Session.Icon);
+        ApplyPromptPlatform();
         _terminal.SetHistoryCapture(initial.KeepCommandHistory);
         _terminal.SetMouseCapture(MouseCapture(initial.MouseCapture));
 
-        _terminal.Ready += (cols, rows) => DispatcherQueue.TryEnqueue(() =>
+        // Queued, while Resized is not: a Resized handled before this runs has already sent
+        // a newer size, so use the size now rather than the one Ready was raised with.
+        _terminal.Ready += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
-            ResizeBackend(cols, rows);
-            CaptureResize(cols, rows);
+            if (_disposed)
+                return;
+            ResizeBackend(_terminal.Columns, _terminal.Rows);
+            CaptureResize(_terminal.Columns, _terminal.Rows);
         });
         _terminal.TitleChanged += title => DispatcherQueue.TryEnqueue(() => _tab.ApplyTerminalTitle(SplitTmuxStatus(title, out _)));
         _terminal.CommandChanged += (text, exact) => DispatcherQueue.TryEnqueue(() => _tab.ApplyRunningCommand(text, exact));
@@ -202,28 +216,29 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             DispatcherQueue.TryEnqueue(() =>
             {
                 _tab.ApplyPromptContext(context, platform);
+                ObservePrompt(context, platform);
                 if (platform is "nokia" or "juniper" or "cisco" && Session.Icon is null)
                     IconSuggested?.Invoke(platform);
             });
+        // Every folder report goes through the one tracker, which checks its host and ranks
+        // it by recency; the tab's subtitle and every folder reader take it from there.
         _terminal.WorkingDirectoryReported += payload => DispatcherQueue.TryEnqueue(() =>
         {
             if (Osc7WorkingDirectoryParser.TryParse(payload, out var report) && report is not null)
-            {
-                _workingDirectory.Observe(report);
-                _tab.ApplyReportedWorkingDirectory(report);
-            }
+                ObserveWorkingDirectory(report);
         });
         _terminal.WindowsWorkingDirectoryReported += payload => DispatcherQueue.TryEnqueue(() =>
         {
+            // OSC 9;9 names a Windows folder: only this machine's shells send it.
             if (Session.IsLocal && Osc9WorkingDirectory.TryParse(payload, out var path))
-                _windowsWorkingDirectory = path;
+                ObserveWorkingDirectory(new Osc7WorkingDirectory(Environment.MachineName, path));
         });
         _terminal.ContextReported += payload => DispatcherQueue.TryEnqueue(() =>
         {
             if (Osc3008ContextParser.TryParse(payload, out var context) && context is
                 { Action: Osc3008ContextAction.Start, Type: "shell" or "command", WorkingDirectory: not null })
             {
-                _workingDirectory.Observe(new Osc7WorkingDirectory(
+                ObserveWorkingDirectory(new Osc7WorkingDirectory(
                     context.Hostname ?? "", context.WorkingDirectory));
             }
         });
@@ -234,16 +249,22 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             IsCommandsPanelOpen = open;
             CommandsPanelOpenChanged?.Invoke();
         });
-        // A command's folder is read when it starts: by the time its record arrives, a cd
-        // may already have moved the shell. The page sends a finished command's record
-        // before it announces the next command, so this still holds the right folder.
-        _terminal.CommandObserved += _ => DispatcherQueue.TryEnqueue(() => _historyDirectory = CurrentHistoryDirectory());
+        // A command's folder is read when it starts (at its Enter, when there was one): by
+        // the time its record arrives, a cd may already have moved the shell. The page sends
+        // a finished command's record before it announces the next command, so this still
+        // holds the right folder.
+        _terminal.CommandObserved += _ => DispatcherQueue.TryEnqueue(() =>
+        {
+            _historyDirectory = _enterDirectory ?? CurrentHistoryDirectory();
+            _enterDirectory = null;
+        });
         _terminal.CommandRecorded += record => DispatcherQueue.TryEnqueue(() => RecordHistory(record));
 
         _agent = new AgentTracker(Session.Agent);
         WireAgentSignals();
         WireProgress();
         WirePaste();
+        WireConnectionFollowers();
 
         Loaded += async (_, _) =>
         {
@@ -271,14 +292,17 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _capture = new TerminalCapture(
             columns,
             rows,
-            maximumAge: TimeSpan.FromMinutes(Math.Clamp(settings.RewindMinutes, 1, 24 * 60)),
-            maximumBytes: Math.Clamp(settings.RewindMegabytes, 1, 1024) * 1024L * 1024L,
+            maximumAge: RewindLimits.Age(settings.RewindMinutes),
+            maximumBytes: RewindLimits.Bytes(settings.RewindMegabytes),
             retainForRewind: _terminal.SupportsRewindCapture);
         _captureColumns = columns;
         _captureRows = rows;
         _capture.Changed += OnCaptureChanged;
-        _capture.RecordingChanged += (_, _) =>
-            DispatcherQueue.TryEnqueue(SyncCaptureState);
+        _capture.RecordingChanged += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        {
+            SyncCaptureState();
+            App.RefreshRecordingsInAllWindows(); // a recording appeared or was finished
+        });
         // A write failure (a full disk, say) stops the recording but not the terminal.
         _capture.RecordingFailed += (_, message) => DispatcherQueue.TryEnqueue(() =>
         {
@@ -297,13 +321,24 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _captureRows = rows;
     }
 
+    /// <summary>Tells the backend the terminal's size, unless it already has it. The size
+    /// is recorded only once it reached the shell, so a resize the transport could not send
+    /// (a channel not ready yet) is sent again with the next one.</summary>
     private void ResizeBackend(int columns, int rows)
     {
-        if (_backend is null || (_backendColumns == columns && _backendRows == rows))
+        var size = BackendSize(columns, rows);
+        if (_backend is null || _backendSize == size)
             return;
-        _backend.Resize(columns, rows);
-        _backendColumns = columns;
-        _backendRows = rows;
+        if (_backend.Resize(columns, rows, size.PixelWidth, size.PixelHeight))
+            _backendSize = size;
+    }
+
+    /// <summary>A grid size with its text area in pixels, which SSH passes to the pty so a
+    /// program asking it (TIOCGWINSZ) and one asking the terminal (CSI 14 t) agree.</summary>
+    private (int Columns, int Rows, int PixelWidth, int PixelHeight) BackendSize(int columns, int rows)
+    {
+        var (cellWidth, cellHeight) = _terminal.CellPixelSize;
+        return (columns, rows, columns * cellWidth, rows * cellHeight);
     }
 
     private void OnCaptureChanged()
@@ -383,7 +418,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         if (_capture is null || !CanRewind)
             return Task.CompletedTask;
 
-        var player = new TerminalPlayerView(_capture);
+        var player = new TerminalPlayerView(_capture, () => Session.Overrides, _terminal.ZoomedFontSize);
         player.CloseRequested += ReturnToLive;
         player.ShortcutRequested += (id, chord) => ShortcutRequested?.Invoke(id, chord);
         _rewindPlayer = player;
@@ -416,13 +451,18 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     public AgentSnapshot AgentState => _agent.Current;
 
     /// <summary>Tab menu: pin an identity, "auto" (null), or <c>AgentIdentities.None</c>.</summary>
-    public void SetAgentOverride(string? key) => ApplyAgent(tracker => tracker.SetManualOverride(key));
+    public void SetAgentOverride(string? key)
+    {
+        ApplyAgent(tracker => tracker.SetManualOverride(key));
+        StartAgentPolling(); // polling stops while agents are suppressed; "auto" resumes it
+    }
 
     /// <summary>Re-reads the session's saved default after Session Options changed it.</summary>
     public void RefreshAgentDefault()
     {
         _agent.SessionDefault = Session.Agent;
         PushAgentState();
+        StartAgentPolling();
     }
 
     /// <summary>
@@ -491,6 +531,55 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         };
     }
 
+    /// <summary>
+    /// What follows the live connection rather than the session's settings. When the
+    /// connection ends or is replaced, the file pane's SFTP connection (made with its login
+    /// and route) goes with it; when one is up again, an open pane lists its folder over the
+    /// new one. An edit to the session reaches what describes the session itself: its icon
+    /// (the prompt-reading hint) and telnet's fixed 80-column grid.
+    /// </summary>
+    private void WireConnectionFollowers()
+    {
+        var wasConnected = false;
+        _tab.PropertyChanged += (_, e) =>
+        {
+            if (_disposed)
+                return;
+            if (e.PropertyName == nameof(TabViewModel.State))
+            {
+                var connected = _tab.State == TabConnectionState.Connected;
+                if (wasConnected && !connected)
+                    _filePane?.DropConnection(_tab.State == TabConnectionState.Connecting
+                        ? null
+                        : "Disconnected. Reconnect the session to browse its files.");
+                else if (connected && !wasConnected && IsFilePaneOpen && _filePane!.IsLoaded)
+                    _ = _filePane.NavigateAsync(_filePane.CurrentPath);
+                wasConnected = connected;
+            }
+            else if (e.PropertyName == nameof(TabViewModel.Session))
+            {
+                ApplyPromptPlatform();
+                _terminal.SetFixed80Columns(Session.IsTelnet && Session.TelnetFixed80Columns);
+            }
+        };
+    }
+
+    /// <summary>How prompts are read: as the device the SSH banner named on this connection,
+    /// else as the session's icon says (no hint when it names no network OS).</summary>
+    private void ApplyPromptPlatform() => _terminal.SetPromptPlatform(_bannerPlatform ?? Session.Icon);
+
+    private void ObserveWorkingDirectory(Osc7WorkingDirectory report)
+    {
+        _workingDirectory.ObserveReport(report);
+        _tab.ApplyReportedWorkingDirectory(_workingDirectory.ReportedPath);
+    }
+
+    private void ObservePrompt(string? context, string? platform)
+    {
+        if (_workingDirectory.ObservePrompt(context, platform))
+            _tab.ApplyReportedWorkingDirectory(_workingDirectory.ReportedPath);
+    }
+
     private void SetTerminalProgress(TerminalProgress progress)
     {
         _terminalProgress = progress;
@@ -527,7 +616,9 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     private string SplitTmuxStatus(string title, out string? report)
     {
         report = null;
-        return Session.Persistent && _persistence.StatusRidesOnTitle ? TmuxStatus.SplitTitle(title, out report) : title;
+        // A title can arrive while the persistent connect that produced it is still finishing.
+        var persistent = _tab.IsAttachedToRemoteSession || _connectingPersistent;
+        return persistent && _persistence.StatusRidesOnTitle ? TmuxStatus.SplitTitle(title, out report) : title;
     }
 
     /// <summary>
@@ -574,7 +665,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     /// </summary>
     private void StartAgentPolling()
     {
-        if (_agent.Suppressed || !Session.IsLocal)
+        if (_disposed || _agent.Suppressed || _backend is not LocalTerminalSession { IsRunning: true })
             return;
         _agentPoll ??= CreateAgentPollTimer();
         if (!_agentPoll.IsRunning)
@@ -709,7 +800,11 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         // first doesn't get latched as this tab's machine.
         _workingDirectory.SetKnownHosts([Session.Host, Session.Local is null ? null : Environment.MachineName]);
         _workingDirectory.Reset();
-        _windowsWorkingDirectory = null;
+        _tab.ApplyReportedWorkingDirectory(null);
+        // What the last connection's banner said about the host does not carry over.
+        _bannerPlatform = null;
+        ApplyPromptPlatform();
+        _terminal.SetFixed80Columns(Session.IsTelnet && Session.TelnetFixed80Columns);
 
         // Tear down the previous (dead) backend so its blocked reader thread is released.
         _connection.Dispose();
@@ -792,8 +887,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
             var cols = _terminal.Columns;
             var rows = _terminal.Rows;
-            _backendColumns = cols;
-            _backendRows = rows;
+            _backendSize = BackendSize(cols, rows); // ConPTY has no pixel size to send
             await connection.StartAsync(local, () => local.Start(Session, cols, rows));
             connection.Token.ThrowIfCancellationRequested();
             if (local.ShellIntegrationMessage is { } integrationMessage)
@@ -862,8 +956,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
             var cols = _terminal.Columns;
             var rows = _terminal.Rows;
-            _backendColumns = cols;
-            _backendRows = rows;
+            _backendSize = BackendSize(cols, rows); // telnet's window size has no pixels
             await connection.StartAsync(telnet, () =>
             {
                 var via = jumpSessions.Count == 0 ? null : SshJumpChain.Open(
@@ -918,9 +1011,23 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         Identity? authenticatingWith = null;
         var credentialDeclined = false;
         var attached = false;
+        // The session as this connect found it. An edit made while it is under way (Persistent
+        // turned on, say) applies to the next connect, not to half of this one.
+        var target = Session;
+        // Resuming a chosen persistent shell (Manage Remote Sessions) attaches to it even when
+        // the session no longer starts persistent shells by itself.
+        if (_resumeTmuxSlot is not null && !target.Persistent)
+            target = target with { Persistent = true };
+        var persistent = target.Persistent;
+        if (!persistent)
+        {
+            // Not going back to a persistent shell: let another tab have it.
+            _hasTmuxTarget = false;
+            _tmuxReservation.Release();
+        }
         try
         {
-            if (Session.Login == SessionLogin.Own && string.IsNullOrWhiteSpace(Session.Username))
+            if (target.Login == SessionLogin.Own && string.IsNullOrWhiteSpace(target.Username))
             {
                 _tab.MarkDisconnected();
                 _terminal.NotifyDisconnected(
@@ -930,7 +1037,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
             // Logins are asked for hop by hop as the connect reaches each host, jump hosts
             // first, so a jump that fails stops before anything is typed for the next one.
-            var jumpSessions = JumpRoute.Resolve(Session, App.Store.Find);
+            var jumpSessions = JumpRoute.Resolve(target, App.Store.Find);
             _routeSessions = jumpSessions;
             var jumps = new List<SshHop>();
             string? proxyPassword = null;
@@ -938,20 +1045,20 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 _terminal.WriteDivider();
             SshHop? ResolveLogin(SshHop hop)
             {
-                var login = hop.Session.Id != Session.Id
+                var login = hop.Session.Id != target.Id
                     ? ResolveJumpLoginBlocking(hop, jumps, connection.Token)
                     : RunOnUiBlocking(async () =>
                     {
-                        var resolved = await ResolveSshCredentialAsync(Session, connection.Token);
+                        var resolved = await ResolveSshCredentialAsync(target, connection.Token);
                         connection.Token.ThrowIfCancellationRequested();
                         if (resolved is null)
                             return null;
                         _secret = resolved.Secret; // reused by the file pane's SFTP connection
                         _resolvedSshSession = resolved.Session;
-                        proxyPassword = ProxyPassword(Session);
+                        proxyPassword = ProxyPassword(target);
                         authenticatingWith = resolved.IdentitySecret;
                         _terminal.WriteNotice(
-                            $"Connecting to {resolved.Session.Username}@{Session.Host}:{Session.Port}{RouteDescription(Session)} …");
+                            $"Connecting to {resolved.Session.Username}@{target.Host}:{target.Port}{RouteDescription(target)} …");
                         return new SshHop(resolved.Session, resolved.Secret, proxyPassword);
                     }, connection.Token);
                 credentialDeclined = login is null;
@@ -1003,19 +1110,21 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
             var cols = _terminal.Columns;
             var rows = _terminal.Rows;
-            _backendColumns = cols;
-            _backendRows = rows;
-            Func<SshTerminalSession, string?>? bootstrapFactory = Session.Persistent
+            var size = _backendSize = BackendSize(cols, rows);
+            Func<SshTerminalSession, string?>? bootstrapFactory = persistent
                 ? connected => SelectTmuxBootstrapBlocking(connected, isReconnect, connection.Token)
                 : null;
+            _connectingPersistent = persistent;
             await connection.StartAsync(session, () => session.Connect(
-                Session, null, Session.TerminalType, cols, rows,
+                target, null, target.TerminalType, cols, rows,
                 bootstrapCommandFactory: bootstrapFactory,
                 interactiveResponder: prompts => PromptKeyboardInteractiveBlocking(prompts, connection.Token),
                 cancellationToken: connection.Token,
                 jumps: jumpSessions.Select(jump => new SshHop(jump, null)).ToList(),
-                tunnels: Session.Tunnels,
-                resolveLogin: ResolveLogin));
+                tunnels: target.Tunnels,
+                resolveLogin: ResolveLogin,
+                pixelWidth: size.PixelWidth,
+                pixelHeight: size.PixelHeight));
             _resolvedRoute = new ResolvedRoute(jumps, proxyPassword);
             connection.Token.ThrowIfCancellationRequested();
             attached = true;
@@ -1024,7 +1133,9 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             _backend = session;
             _ssh = session;
             ResizeBackend(_terminal.Columns, _terminal.Rows);
-            _tab.MarkConnected();
+            // The one record of what this connection reached and which persistent shell it
+            // holds; leaving the connected state clears both.
+            _tab.MarkConnected(_resolvedSshSession ?? target, persistent && _hasTmuxTarget ? _tmuxSlot : null);
             UpdateSshSummary();
             TunnelsChanged?.Invoke();
             _terminal.NotifyConnected();
@@ -1034,7 +1145,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             // (null; an explicit "none" also blocks this).
             if (SessionIcons.SuggestFromBanner(session.ServerBanner) is { } suggestedIcon)
             {
-                _terminal.SetPromptPlatform(suggestedIcon);
+                _bannerPlatform = suggestedIcon;
+                ApplyPromptPlatform();
                 if (Session.Icon is null)
                     IconSuggested?.Invoke(suggestedIcon);
             }
@@ -1073,6 +1185,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         }
         finally
         {
+            _connectingPersistent = false;
             if (!attached)
                 _tmuxReservation.Release();
         }
@@ -1131,8 +1244,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         // A reconnect may retain its target only while no other tab has claimed it.
         if (isReconnect && _hasTmuxTarget)
         {
-            ClaimSlot(_tab.TmuxSlot);
-            return BuildTmuxBootstrap(_tab.TmuxSlot);
+            ClaimSlot(_tmuxSlot);
+            return BuildTmuxBootstrap(_tmuxSlot);
         }
 
         var plan = _tmuxReservation.PlanConnect(remoteSessions, Session.DetachedSessions, token);
@@ -1156,7 +1269,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
         if (plan is TmuxConnectPlan.Resume resumePlan)
         {
-            _tab.TmuxSlot = resumePlan.Slot;
+            _tmuxSlot = resumePlan.Slot;
             _hasTmuxTarget = true;
             return _persistence.ResumeCommand(Session.Id, resumePlan.Slot);
         }
@@ -1187,7 +1300,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             selectedSlot = ((TmuxConnectPlan.StartNew)_tmuxReservation.PlanConnect(
                 remoteSessions, DetachedSessionAction.StartNew, token)).Slot;
         }
-        _tab.TmuxSlot = selectedSlot;
+        _tmuxSlot = selectedSlot;
         _hasTmuxTarget = true;
         return BuildTmuxBootstrap(selectedSlot);
 
@@ -1195,7 +1308,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         {
             if (!_tmuxReservation.TryReserve(slot, token))
                 throw new InvalidOperationException("That remote session was claimed by another tab. Refresh the remote sessions list.");
-            _tab.TmuxSlot = slot;
+            _tmuxSlot = slot;
             _hasTmuxTarget = true;
         }
 
@@ -1758,6 +1871,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _chromePalette = ThemeVisualPalette.For(theme);
         ApplyPaneSplitterTheme();
         _terminal.ApplyOptions(theme: App.ResolveTheme(Session.Overrides?.Theme ?? theme));
+        _rewindPlayer?.ApplyTheme(theme);
     }
 
     /// <summary>Pushes layout and interaction settings into the terminal, with this
@@ -1774,6 +1888,9 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _terminal.ApplyHighlights(BuildHighlightPayload());
         _terminal.SetHistoryCapture(effective.KeepCommandHistory);
         _terminal.SetMouseCapture(MouseCapture(effective.MouseCapture));
+        // Rewind caps are app-wide (no session override) and apply to the running capture.
+        _capture?.SetLimits(RewindLimits.Age(settings.RewindMinutes), RewindLimits.Bytes(settings.RewindMegabytes));
+        _rewindPlayer?.ApplySettings(settings);
     }
 
     private static Resesh.Terminal.TerminalMouseCapture MouseCapture(string? mode) =>
@@ -1786,26 +1903,23 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
     // ---- command history ----
 
-    private string? CurrentHistoryDirectory()
-    {
-        if (Session.IsLocal && _windowsWorkingDirectory is not null)
-            return _windowsWorkingDirectory;
-        if (!_workingDirectory.HostMismatch && _workingDirectory.Path is { } reported)
-            return reported;
-        // Network-device prompts report a CLI mode, not a folder.
-        return string.IsNullOrEmpty(_tab.PromptContextPlatform) ? _tab.PromptContext : null;
-    }
+    /// <summary>The folder for a history entry: the working-directory policy without the
+    /// backend queries, which cannot run at the moment a command starts.</summary>
+    private string? CurrentHistoryDirectory() => _workingDirectory.Known();
 
     private void RecordHistory(TerminalCommandRecord record)
     {
         if (_disposed || !App.Settings.Current.WithOverrides(Session.Overrides).KeepCommandHistory)
             return;
+        // Where the command ran: the connection's own target, which an edit to the session
+        // since it connected does not move.
+        var ranOn = _tab.ConnectedSession ?? Session;
         var entry = new CommandHistoryEntry
         {
             SessionId = Session.Id,
-            SessionName = Session.Name,
-            Kind = Session.Kind,
-            Target = CommandHistoryEntry.TargetOf(Session),
+            SessionName = ranOn.Name,
+            Kind = ranOn.Kind,
+            Target = CommandHistoryEntry.TargetOf(ranOn),
             // The command's own prompt beats the tab's folder, which may have moved on.
             WorkingDirectory = record.Directory ?? _historyDirectory ?? CurrentHistoryDirectory(),
             Command = record.CommandLine,
@@ -1915,16 +2029,17 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     }
 
     /// <summary>
-    /// Kills the remote tmux session (persistent sessions only). Waiting for the command
-    /// lets a caller close the tab only after the server accepted the request.
+    /// Kills the persistent shell this tab's live connection is attached to, and only that
+    /// one: never a slot chosen by settings the connection was not made with. Waiting for
+    /// the command lets a caller close the tab only after the server accepted the request.
     /// </summary>
     public async Task<bool> TryEndRemoteSessionAsync()
     {
         var session = _ssh;
-        return Session.Persistent
+        return _tab.RemoteSessionSlot is { } slot
             && session is not null
             && await Task.Run(() => session.TryRunCommand(
-                _persistence.KillCommand(Session.Id, _tab.TmuxSlot)));
+                _persistence.KillCommand(Session.Id, slot)));
     }
 
     /// <summary>Sends a break signal when the live backend has one (telnet, serial). Returns false
@@ -2105,50 +2220,51 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         ShowFilePane(path, failure is null ? null : $"Couldn't read the current folder ({failure}) — opened {fallback} instead.");
     }
 
+    /// <summary>
+    /// The terminal's folder for the file pane and File Explorer, in the order
+    /// <see cref="WorkingDirectoryTracker"/> documents: the shell's own report, then a query
+    /// of the backend (a persistent shell's pane folder; Linux /proc for a plain one, which
+    /// can also say the shell is not at a prompt), then the prompt's folder.
+    /// </summary>
     private async Task<(string? Path, string? Failure)> ResolveTerminalDirectoryAsync()
     {
         if (Session.IsLocal)
         {
-            var reported = await _terminal.RequestPromptContextAsync();
-            var requestedPrompt = reported is { Platform: null } ? reported.Value.Context : null;
-            var localPath = ResolveLocalTerminalDirectory(requestedPrompt, out var localFailure);
+            // Re-read the prompt now: the last report may be older than the screen.
+            if (await _terminal.RequestPromptContextAsync() is { } prompt)
+                ObservePrompt(prompt.Context, prompt.Platform);
+            var localPath = ResolveLocalTerminalDirectory(out var localFailure);
             return (localPath, localFailure);
         }
 
+        if (_workingDirectory.ReportedPath is { } reportedPath)
+            return (reportedPath, null);
+
         string? path = null;
         string? failure = null;
-        var canUsePromptFallback = true;
+        var canUsePromptFallback = !_workingDirectory.HostMismatch;
+        if (!canUsePromptFallback)
+            failure = "the shell reported a folder from another host";
         var session = _ssh;
-        if (Session.Persistent && session is not null && session.IsConnected)
+        if (_tab.RemoteSessionSlot is { } slot && session is not null && session.IsConnected)
         {
             var result = await Task.Run(() => session.RunCommand(_persistence.CurrentPathCommand()));
             if (result is null)
-                failure = "the connection did not accept the query";
+                failure ??= "the connection did not accept the query";
             else if (!result.Success)
-                failure = string.IsNullOrWhiteSpace(result.Error)
+                failure ??= string.IsNullOrWhiteSpace(result.Error)
                     ? "the persistent session query failed"
                     : $"persistent session: {result.Error.Trim()}";
             else
             {
-                path = _persistence.ParseCurrentPath(result.Output, Session.Id, _tab.TmuxSlot);
+                path = _persistence.ParseCurrentPath(result.Output, Session.Id, slot);
                 if (path is null)
-                    failure = "no matching persistent session in the reply";
+                    failure ??= "no matching persistent session in the reply";
             }
         }
-
-        if (path is null && _workingDirectory.Path is { } reportedPath)
-            path = reportedPath;
-
-        if (path is null && _workingDirectory.HostMismatch)
-        {
-            failure = "the shell reported a folder from another host";
-            canUsePromptFallback = false;
-        }
-
         // A plain Linux session can report its foreground shell's cwd through /proc on
         // a separate SSH channel. This sends no terminal input and changes no remote file.
-        if (path is null && canUsePromptFallback && !Session.Persistent &&
-            session is not null && session.IsConnected)
+        else if (canUsePromptFallback && session is not null && session.IsConnected)
         {
             var commandResult = await Task.Run(() => session.RunCommand(RemoteWorkingDirectoryProbe.Command));
             var probe = commandResult is { Success: true }
@@ -2168,8 +2284,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         }
 
         if (path is null && canUsePromptFallback && _tab.RunningCommand is null &&
-            string.IsNullOrEmpty(_tab.PromptContextPlatform) &&
-            _tab.PromptContext is { } promptPath &&
+            _workingDirectory.PromptPath is { } promptPath &&
             (promptPath == "~" || promptPath.StartsWith("~/", StringComparison.Ordinal) ||
              promptPath.StartsWith("/", StringComparison.Ordinal)))
         {
@@ -2212,19 +2327,22 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         }
     }
 
-    private string? ResolveLocalTerminalDirectory(string? requestedPrompt, out string? failure)
+    /// <summary>The local half of <see cref="ResolveTerminalDirectoryAsync"/>: the shell's
+    /// report, then the prompt's folder, each only when it names a folder that exists; the
+    /// process's own folder only when the shell has said nothing at all.</summary>
+    private string? ResolveLocalTerminalDirectory(out string? failure)
     {
         failure = null;
+        if (_workingDirectory.HostMismatch)
+        {
+            failure = "the shell reported a folder from another host";
+            return null;
+        }
         var files = new LocalFileSystem(Session.Local?.StartingDirectory);
         var candidates = new List<string>();
-        if (_windowsWorkingDirectory is not null)
-            candidates.Add(_windowsWorkingDirectory);
-        if (requestedPrompt is not null)
-            candidates.Add(requestedPrompt);
-        if (!_workingDirectory.HostMismatch && _workingDirectory.Path is { } reportedPath)
+        if (_workingDirectory.ReportedPath is { } reportedPath)
             candidates.Add(reportedPath);
-        if (_tab.RunningCommand is null && string.IsNullOrEmpty(_tab.PromptContextPlatform) &&
-            _tab.PromptContext is { } promptPath)
+        if (_tab.RunningCommand is null && _workingDirectory.PromptPath is { } promptPath)
             candidates.Add(promptPath);
 
         foreach (var candidate in candidates)
@@ -2233,25 +2351,27 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             {
                 return files.ResolveDirectory(candidate);
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                or ArgumentException or NotSupportedException)
             {
                 failure = ex.Message;
             }
         }
 
-        // cmd updates the process directory. PowerShell keeps a separate provider
-        // location, so its prompt report above must have priority over this fallback.
-        if (_backend is LocalTerminalSession local &&
+        // cmd updates the process directory, but PowerShell keeps its location apart from
+        // it, so the process folder is only a guess for a shell that has said nothing.
+        if (!_workingDirectory.HasEvidence && _backend is LocalTerminalSession local &&
             local.TryGetCurrentDirectory() is { } processDirectory)
             return processDirectory;
 
-        if (_workingDirectory.HostMismatch)
-            failure = "the shell reported a folder from another host";
-        failure ??= "the shell did not report a current folder";
+        failure ??= candidates.Count > 0
+            ? "the shell is not in a folder"
+            : "the shell did not report a current folder";
         return null;
     }
 
     private Interop.SshfsMount? _sshfsMount;
+    private string? _sshfsTarget;
     private Task<Interop.SshfsMount?>? _sshfsMounting;
     private readonly CancellationTokenSource _closing = new(); // cancelled when the tab closes (SSHFS mounts, management connections)
 
@@ -2265,13 +2385,17 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             OpenLocalDirectoryInExplorer(path);
             return;
         }
-        var session = _resolvedSshSession ?? Session;
+        // The connection the terminal made (or will make): its login and route, not the
+        // session's settings as edited since.
+        var session = _tab.ConnectedSession ?? _resolvedSshSession ?? Session;
         // SSHFS-Win dials the host itself, so it cannot follow a jump host or proxy.
-        if (Session.JumpHostId is not null || Session.Proxy is { Host.Length: > 0 })
+        if (session.JumpHostId is not null || session.Proxy is { Host.Length: > 0 }
+            || _resolvedRoute is { Jumps.Count: > 0 })
             throw new IOException("File Explorer connects straight to the host, so it cannot open a session "
                 + "reached through a jump host or proxy. Use the file pane instead.");
         var mount = _sshfsMount;
-        if (mount is not { IsAlive: true })
+        // A mount made for another target (the session was edited and reconnected) is replaced.
+        if (mount is not { IsAlive: true } || _sshfsTarget != SshfsTarget(session))
         {
             var mounting = _sshfsMounting ??= MountSshfsAsync(session);
             try
@@ -2316,14 +2440,22 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             return null;
         }
         _sshfsMount = mount;
+        _sshfsTarget = SshfsTarget(session);
         return mount;
     }
+
+    /// <summary>What an SSHFS mount was made for: host, port and login.</summary>
+    private static string SshfsTarget(Session session) =>
+        $"{session.Username}@{session.Host}:{session.Port}|{session.AuthMethod}|{session.PrivateKeyPath}";
 
     /// <summary>Connect factory handed to the pane: reuses the tab's resolved secret
     /// (prompting only if the tab never connected) and the shared host-key trust. Stops when
     /// the pane gives up (a newer navigation, Cancel, the pane closing) or the tab reconnects.</summary>
     private async Task<SftpSession> CreateSftpSessionAsync(CancellationToken paneToken)
     {
+        // The pane follows the terminal: a tab whose connection ended browses nothing.
+        if (_tab.State is TabConnectionState.Disconnected or TabConnectionState.Exited)
+            throw new InvalidOperationException("The session is disconnected. Reconnect it to browse its files.");
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(_connection.Token, paneToken);
         var token = linked.Token;
         token.ThrowIfCancellationRequested();

@@ -18,6 +18,9 @@ public sealed record SessionCapabilities
     /// <summary>tmux persistence ("End Remote Session", cwd side-channel) can apply.</summary>
     public bool RemoteSession { get; init; }
 
+    /// <summary>Port forwarding over the live connection ("Tunnels…") applies.</summary>
+    public bool Tunnels { get; init; }
+
     /// <summary>"Open Working Folder" (local starting directory in Explorer) applies.</summary>
     public bool LocalWorkingFolder { get; init; }
 
@@ -37,6 +40,7 @@ public sealed record SessionCapabilities
         RemoteFiles = true,
         HostKeys = true,
         RemoteSession = true,
+        Tunnels = true,
         StopVerb = "Disconnect",
         StartAgainVerb = "Reconnect",
     };

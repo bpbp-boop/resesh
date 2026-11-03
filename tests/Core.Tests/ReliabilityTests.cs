@@ -330,7 +330,7 @@ public sealed class ReliabilityTests : IDisposable
         public int DisposeCount;
         public TaskCompletionSource Disposed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void Write(byte[] data) { }
-        public void Resize(int columns, int rows) { }
+        public bool Resize(int columns, int rows, int pixelWidth = 0, int pixelHeight = 0) => true;
         public void Stop() => Dispose();
         public void Dispose() { Interlocked.Increment(ref DisposeCount); Disposed.TrySetResult(); }
     }

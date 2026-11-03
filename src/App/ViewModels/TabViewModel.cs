@@ -156,11 +156,33 @@ public sealed partial class TabViewModel : ObservableObject
     /// Exited. Set only by <see cref="MarkExited"/>, in the same step as the state.</summary>
     public int? ExitCode => _exitCode;
 
+    private Session? _connectedSession;
+    private int? _remoteSessionSlot;
+
     /// <summary>
-    /// Identifies the remote shell selected at connect time. Ownership lives with the
-    /// terminal view's app-wide reservation, not this display/reconnect target.
+    /// The session as the live connection reached it (login applied), or null while not
+    /// connected. <see cref="Session"/> follows edits at once, but edits to the connection
+    /// apply only at the next connect; anything describing the live connection reads this.
+    /// Set only by <see cref="MarkConnected"/>, together with the state.
     /// </summary>
-    public int TmuxSlot { get; set; }
+    public Session? ConnectedSession => _connectedSession;
+
+    /// <summary>
+    /// The persistent remote shell (tmux or session-agent slot) the live connection is
+    /// attached to, or null: not connected, or connected without persistence. The one
+    /// answer to "would ending this tab's remote session end something", whatever the
+    /// session's Persistent setting says now. The slot's ownership stays with the terminal
+    /// view's app-wide reservation.
+    /// </summary>
+    public int? RemoteSessionSlot => _remoteSessionSlot;
+
+    /// <summary>The live connection is attached to a persistent remote shell.</summary>
+    public bool IsAttachedToRemoteSession => _remoteSessionSlot is not null;
+
+    /// <summary>The session has persistent shells on its host worth managing: it is set to
+    /// keep them, or this tab is attached to one (persistence was turned off since).</summary>
+    public bool HasRemoteSessions =>
+        Capabilities.RemoteSession && (Session.Persistent || IsAttachedToRemoteSession);
 
     public Session Session
     {
@@ -211,8 +233,17 @@ public sealed partial class TabViewModel : ObservableObject
     /// <summary>A connect or local launch starts. False (and nothing changes) for an inert tab.</summary>
     public bool BeginConnecting() => TryEnter(TabConnectionState.Connecting, null);
 
-    /// <summary>The connection is up or the local process is running. Clears the exit code.</summary>
-    public bool MarkConnected() => TryEnter(TabConnectionState.Connected, null);
+    /// <summary>The connection is up or the local process is running. Clears the exit code.
+    /// <paramref name="connectedAs"/> is the session as the connection reached it (the tab's
+    /// session when null); <paramref name="remoteSessionSlot"/> the persistent shell it
+    /// attached to, if any. Both are dropped when the tab leaves the connected state.</summary>
+    public bool MarkConnected(Session? connectedAs = null, int? remoteSessionSlot = null)
+    {
+        if (IsInert)
+            return false;
+        Enter(TabConnectionState.Connected, null, connectedAs ?? _session, remoteSessionSlot);
+        return true;
+    }
 
     /// <summary>The connection ended or failed, or a local launch failed (red).</summary>
     public bool MarkDisconnected() => TryEnter(TabConnectionState.Disconnected, null);
@@ -243,14 +274,29 @@ public sealed partial class TabViewModel : ObservableObject
         return true;
     }
 
-    private void Enter(TabConnectionState state, int? exitCode)
+    private void Enter(TabConnectionState state, int? exitCode, Session? connectedAs = null, int? remoteSessionSlot = null)
     {
         var stateChanged = _state != state;
         var exitChanged = _exitCode != exitCode;
-        if (!stateChanged && !exitChanged)
+        var connectionChanged = !ReferenceEquals(_connectedSession, connectedAs) || _remoteSessionSlot != remoteSessionSlot;
+        if (!stateChanged && !exitChanged && !connectionChanged)
             return;
         _state = state;
         _exitCode = exitCode;
+        // Set before State is raised, so a listener reacting to the state sees the matching
+        // connection; any other state clears them, since a dropped connection is attached
+        // to nothing.
+        _connectedSession = connectedAs;
+        _remoteSessionSlot = remoteSessionSlot;
+        if (connectionChanged)
+        {
+            OnPropertyChanged(nameof(ConnectedSession));
+            OnPropertyChanged(nameof(RemoteSessionSlot));
+            OnPropertyChanged(nameof(IsAttachedToRemoteSession));
+            OnPropertyChanged(nameof(HasRemoteSessions));
+            OnPropertyChanged(nameof(Endpoint));
+            OnPropertyChanged(nameof(Subtitle));
+        }
         if (stateChanged)
         {
             OnPropertyChanged(nameof(State));
@@ -646,7 +692,7 @@ public sealed partial class TabViewModel : ObservableObject
         RunningCommand = command;
         _runningCommandIsExact = exact && RunningCommand is not null;
         // The process title may still name the interpreter until tmux's next poll.
-        if (Session.Persistent && exact && RunningCommand is null)
+        if (IsAttachedToRemoteSession && exact && RunningCommand is null)
             TerminalTitle = null;
     }
 
@@ -679,14 +725,18 @@ public sealed partial class TabViewModel : ObservableObject
         }
     }
 
-    /// <summary>A validated cwd report is location evidence, not a command-end signal.</summary>
-    public void ApplyReportedWorkingDirectory(Resesh.Core.Sftp.Osc7WorkingDirectory report)
+    /// <summary>The terminal's working-directory tracker's report
+    /// (<c>WorkingDirectoryTracker.ReportedPath</c>): null when the shell has not reported,
+    /// a later prompt contradicted it, or another host is reporting. Location evidence, not
+    /// a command-end signal.</summary>
+    public void ApplyReportedWorkingDirectory(string? path)
     {
         // A new location invalidates the previous prompt's display label. Once the
-        // new prompt is painted, prefer its spelling (including ~ for custom homes).
-        if (ReportedWorkingDirectory != report.Path)
+        // new prompt is painted, prefer its spelling (including ~ for custom homes). A
+        // report withdrawn by a newer prompt leaves that prompt's label in place.
+        if (path is not null && ReportedWorkingDirectory != path)
             PromptContext = null;
-        ReportedWorkingDirectory = report.Path;
+        ReportedWorkingDirectory = path;
     }
 
     /// <summary>A recognized prompt means the shell is idle in this location.</summary>
@@ -716,13 +766,14 @@ public sealed partial class TabViewModel : ObservableObject
                 return "Preferences";
             if (Page == AppPage.Import)
                 return "Review sessions";
-            if (Session.Persistent && RunningCommand is { } persistentCommand && !_programTitleIsCurrent)
+            var attached = IsAttachedToRemoteSession;
+            if (attached && RunningCommand is { } persistentCommand && !_programTitleIsCurrent)
                 return persistentCommand;
             if (TerminalTitle is not { } title)
-                return RunningCommand ?? PromptContext ?? (Session.Persistent ? ReportedWorkingDirectory : null) ?? FallbackSubtitle;
+                return RunningCommand ?? PromptContext ?? (attached ? ReportedWorkingDirectory : null) ?? FallbackSubtitle;
             // tmux deliberately reports the shell name to retire sticky program/agent
             // titles. Keep that signal, but display its reported location while idle.
-            if (Session.Persistent && AgentDetection.IsShellTitle(title)
+            if (attached && AgentDetection.IsShellTitle(title)
                 && !AgentDetection.TryGetShellPromptDirectory(title, out _))
                 return PromptContext ?? ReportedWorkingDirectory ?? title;
             if (!AgentDetection.TryGetShellPromptDirectory(title, out var directory))
@@ -731,6 +782,10 @@ public sealed partial class TabViewModel : ObservableObject
         }
     }
 
+    /// <summary>What the endpoint texts describe: the live connection while there is one,
+    /// otherwise the session as the next connect will use it.</summary>
+    private Session EndpointSession => _connectedSession ?? Session;
+
     /// <summary>Shown until a title arrives, and on hosts that never send one (network gear).</summary>
     private string FallbackSubtitle
     {
@@ -738,32 +793,40 @@ public sealed partial class TabViewModel : ObservableObject
         {
             if (PlaybackPath is not null)
                 return Path.GetFileName(PlaybackPath);
-            if (IsLocal)
+            var session = EndpointSession;
+            if (session.IsLocal)
             {
                 var directory = Environment.ExpandEnvironmentVariables(
-                    Session.Local?.StartingDirectory?.Trim() ?? "");
+                    session.Local?.StartingDirectory?.Trim() ?? "");
                 return string.IsNullOrEmpty(directory)
                     ? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
                     : directory;
             }
-            if (Session.IsSerial)
-                return Session.Serial?.PortName ?? "serial";
-            var username = Session.IsTelnet ? "" : _environment.LoginUsername(Session);
+            if (session.IsSerial)
+                return session.Serial?.PortName ?? "serial";
+            var username = session.IsTelnet ? "" : _environment.LoginUsername(session);
             return string.IsNullOrEmpty(username)
-                ? Session.Host
-                : $"{username}@{Session.Host}";
+                ? session.Host
+                : $"{username}@{session.Host}";
         }
     }
 
-    public string Endpoint => IsAppPage
-        ? ""
-        : IsLocal
-            ? Session.Local?.Executable ?? ""
-            : Session.IsTelnet
-                ? $"telnet {Session.Host}:{Session.Port}"
-                : Session.IsSerial
-                    ? $"serial {Session.Serial?.Describe()}"
-                    : $"{_environment.LoginUsername(Session)}@{Session.Host}:{Session.Port}";
+    public string Endpoint
+    {
+        get
+        {
+            if (IsAppPage)
+                return "";
+            var session = EndpointSession;
+            return session.IsLocal
+                ? session.Local?.Executable ?? ""
+                : session.IsTelnet
+                    ? $"telnet {session.Host}:{session.Port}"
+                    : session.IsSerial
+                        ? $"serial {session.Serial?.Describe()}"
+                        : $"{_environment.LoginUsername(session)}@{session.Host}:{session.Port}";
+        }
+    }
 
     public string StateText => Page switch
     {

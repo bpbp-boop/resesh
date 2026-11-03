@@ -537,6 +537,25 @@ public sealed partial class FilePaneView : UserControl, IDisposable
         return sftp;
     }
 
+    /// <summary>
+    /// The terminal's connection ended or was replaced. The pane's SFTP connection was made
+    /// with that connection's login and route, so it goes too, with any listing or transfer
+    /// running on it: the pane never keeps working on a connection the tab no longer has.
+    /// The next navigation connects again through the factory, which follows the terminal.
+    /// </summary>
+    public void DropConnection(string? notice)
+    {
+        if (IsDisposed || _localFiles is not null)
+            return;
+        _navCts?.Cancel();
+        _opCts?.Cancel();
+        var sftp = _sftp;
+        _sftp = null;
+        DisposeOffUiThread(sftp);
+        if (sftp is not null && notice is not null)
+            ShowStatus(notice, isError: true);
+    }
+
     /// <summary>SFTP teardown can block on the network, so it never runs on the UI thread.</summary>
     private static void DisposeOffUiThread(SftpSession? sftp)
     {

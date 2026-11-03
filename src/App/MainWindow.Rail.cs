@@ -36,6 +36,14 @@ public sealed partial class MainWindow
             _ = ViewModel.RefreshRecordingsAsync();
     }
 
+    /// <summary>Re-reads the Recordings list when it is on screen (a recording started or
+    /// stopped); a hidden list is read when it is next shown.</summary>
+    internal void RefreshRecordingsIfShown()
+    {
+        if (!_windowClosed && SessionsPaneShown && _selectedRailTab == "recordings")
+            _ = ViewModel.RefreshRecordingsAsync();
+    }
+
     private static string NormalizeRailTab(string? tab) => tab switch
     {
         "workspaces" => "workspaces",

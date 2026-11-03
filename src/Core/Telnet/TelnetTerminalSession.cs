@@ -178,13 +178,14 @@ public sealed class TelnetTerminalSession : ITerminalBackend, IBreakSender
         }
     }
 
-    public void Resize(int columns, int rows)
+    public bool Resize(int columns, int rows, int pixelWidth = 0, int pixelHeight = 0)
     {
         lock (_gate)
         {
             if (_protocol is null || _lifecycle.IsStopped)
-                return;
+                return false;
             EnqueueLocked(_protocol.Resize(_bbsSizeFilter is null ? columns : 80, _bbsSizeFilter is null ? rows : 25));
+            return true;
         }
     }
 

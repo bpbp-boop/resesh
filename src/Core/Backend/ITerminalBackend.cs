@@ -16,7 +16,11 @@ public interface ITerminalBackend : IDisposable
 
     void Write(byte[] data);
 
-    void Resize(int columns, int rows);
+    /// <summary>Tells the shell its new size. The pixel size is the text area's (0 when
+    /// unknown); transports without one ignore it. Returns false when the size did not
+    /// reach the shell, so the caller tries again with the next resize instead of
+    /// believing it was applied.</summary>
+    bool Resize(int columns, int rows, int pixelWidth = 0, int pixelHeight = 0);
 
     /// <summary>Ends the shell without raising the backend's closed/exited event:
     /// a user-initiated stop is reported by the caller, not the backend.</summary>

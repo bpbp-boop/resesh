@@ -47,4 +47,33 @@ public sealed class TerminalCaptureAvailabilityTests
         disabled.CaptureKeyframe(new byte[] { 1 }, 80, 24, now);
         Assert.False(disabled.HasRewindData);
     }
+
+    [Fact]
+    public void LoweringTheLimitsTrimsALiveCapture()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        using var capture = new TerminalCapture(80, 24);
+        var changes = 0;
+        capture.Changed += () => changes++;
+        capture.CaptureOutput(new byte[4096], now);
+        Assert.True(capture.HasRewindData);
+        changes = 0;
+
+        capture.SetLimits(TimeSpan.FromMinutes(30), 1024);
+
+        Assert.Equal((TimeSpan.FromMinutes(30), 1024L), capture.Limits);
+        Assert.False(capture.HasRewindData);
+        Assert.Equal(1, changes);
+    }
+
+    [Fact]
+    public void RewindLimitsClampToTheirRanges()
+    {
+        Assert.Equal(TimeSpan.FromMinutes(RewindLimits.MinimumMinutes), RewindLimits.Age(0));
+        Assert.Equal(TimeSpan.FromMinutes(RewindLimits.MaximumMinutes), RewindLimits.Age(int.MaxValue));
+        Assert.Equal(RewindLimits.MaximumMegabytes * RewindLimits.BytesPerMegabyte, RewindLimits.Bytes(4096));
+        var defaults = new Resesh.Core.Storage.AppSettings();
+        Assert.Equal(RewindLimits.DefaultMinutes, defaults.RewindMinutes);
+        Assert.Equal(RewindLimits.DefaultMegabytes, defaults.RewindMegabytes);
+    }
 }

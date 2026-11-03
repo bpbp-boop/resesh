@@ -4,7 +4,9 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
+using Resesh.Core.Models;
 using Resesh.Core.Recording;
+using Resesh.Core.Storage;
 using Resesh.Terminal;
 
 namespace Resesh.App.Terminal;
@@ -32,20 +34,30 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
     private bool _disposed;
     private long _lastTick;
 
-    public TerminalPlayerView(TerminalCapture capture)
+    // The overrides of the session whose output this plays (read live, so an edit to the
+    // session restyles the player as it does the terminal); null for a recording file.
+    private readonly Func<TerminalOverrides?> _overrides;
+    private readonly Grid _controls = new() { Padding = new Thickness(10, 7, 10, 7), ColumnSpacing = 10 };
+
+    /// <summary>Rewind of a live tab: drawn with the same effective settings as the tab's
+    /// terminal (the session's overrides, and <paramref name="fontSize"/>, the terminal's
+    /// zoomed size, when given).</summary>
+    public TerminalPlayerView(TerminalCapture capture, Func<TerminalOverrides?> overrides, int? fontSize = null)
     {
         _capture = capture;
+        _overrides = overrides;
         _timer = CreateTimer();
         _seeks = new LatestWinsRunner<double>(SeekAsync, ShowPlaybackError);
-        Build("Live");
+        Build("Live", fontSize);
     }
 
     public TerminalPlayerView(TerminalRecording recording)
     {
         _recording = recording;
+        _overrides = () => null;
         _timer = CreateTimer();
         _seeks = new LatestWinsRunner<double>(SeekAsync, ShowPlaybackError);
-        Build("Close");
+        Build("Close", fontSize: null);
     }
 
     public event Action? CloseRequested;
@@ -53,17 +65,17 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
     /// <summary>A window shortcut pressed while the player's terminal had focus.</summary>
     public event Action<string, int>? ShortcutRequested;
 
-    private void Build(string closeLabel)
+    private void Build(string closeLabel, int? fontSize)
     {
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var settings = App.Settings.Current;
-        var theme = App.ResolveTheme(settings.Theme);
+        var appTheme = App.ResolveTheme(App.Settings.Current.Theme);
+        var settings = App.Settings.Current.WithOverrides(_overrides());
         _terminal.SetInitialOptions(
-            settings.FontSize,
+            fontSize ?? settings.FontSize,
             settings.FontFamily,
-            theme,
+            App.ResolveTheme(settings.Theme),
             copyOnSelect: true,
             rightClickPaste: false,
             scrollback: settings.Scrollback,
@@ -79,12 +91,8 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
         };
         Children.Add(_terminal);
 
-        var controls = new Grid
-        {
-            Padding = new Thickness(10, 7, 10, 7),
-            ColumnSpacing = 10,
-            Background = new SolidColorBrush(ThemeVisualPalette.For(theme).InactiveTab),
-        };
+        var controls = _controls;
+        controls.Background = new SolidColorBrush(ThemeVisualPalette.For(appTheme).InactiveTab);
         controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         controls.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         controls.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -280,6 +288,29 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
                 ? elapsed.ToString(@"hh\:mm\:ss\.fff")
                 : elapsed.ToString(@"mm\:ss\.fff");
         }
+    }
+
+    /// <summary>Applies the app theme to the controls and the effective terminal theme (the
+    /// session's override, if any) to the playback, as the live terminal does.</summary>
+    public void ApplyTheme(string theme)
+    {
+        if (_disposed)
+            return;
+        theme = App.ResolveTheme(theme);
+        _controls.Background = new SolidColorBrush(ThemeVisualPalette.For(theme).InactiveTab);
+        _terminal.ApplyOptions(theme: App.ResolveTheme(_overrides()?.Theme ?? theme));
+    }
+
+    /// <summary>Applies font and scrollback settings, with the session's overrides on top.</summary>
+    public void ApplySettings(AppSettings settings)
+    {
+        if (_disposed)
+            return;
+        var effective = settings.WithOverrides(_overrides());
+        _terminal.ApplyOptions(
+            fontSize: effective.FontSize,
+            fontFamily: effective.FontFamily,
+            scrollback: effective.Scrollback);
     }
 
     /// <summary>Stops the terminal drawing while this view is in the background or its

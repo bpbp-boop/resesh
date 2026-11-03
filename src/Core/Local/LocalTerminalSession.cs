@@ -310,17 +310,17 @@ public sealed class LocalTerminalSession : ITerminalBackend
         catch (Exception e) when (e is IOException or ObjectDisposedException) { }
     }
 
-    public void Resize(int columns, int rows)
+    public bool Resize(int columns, int rows, int pixelWidth = 0, int pixelHeight = 0)
     {
         lock (_consoleGate)
         {
             if (_lifecycle.IsStopped || _console == IntPtr.Zero)
-                return;
-            ResizePseudoConsole(_console, new COORD
+                return false;
+            return ResizePseudoConsole(_console, new COORD
             {
                 X = (short)Math.Clamp(columns, 1, short.MaxValue),
                 Y = (short)Math.Clamp(rows, 1, short.MaxValue),
-            });
+            }) >= 0;
         }
     }
 
