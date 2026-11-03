@@ -2011,3 +2011,82 @@ is removed, so "π - project" and "~/src" are untouched.
   tab meanwhile; whichever acts first wins and the other finds the tab gone.
 - Bulk closes ("close others", "to the right", "all") are about this window's tabs and still
   leave a tab that moved away alone: it is no longer among the tabs the question described.
+
+## 2026-11-03 - One source of truth for state that used to drift
+An audit found about forty places where the same state lived in two or more places and
+could disagree. The rules that replaced them:
+- **Data folder.** `Program.DataDirectory` (demo folder, `--data-dir`, or %APPDATA%\Resesh)
+  is the only definition. Stores, icons, About, the single-instance key and backup all use
+  it; backup used to read and write the real profile from a scratch instance.
+- **Sessions.** `SessionStore.Changed` fires after every successful save, inside the store
+  lock, and is the only change notification for sessions: windows refresh tabs, the tree
+  and Recent from it, so a writer can no longer forget to notify. Actions on a copy (tree
+  node, Recent entry, table row) resolve the saved record by id when they run. The tree
+  rebuild-vs-patch decision compares against what the tree was built from and asks
+  `SessionSearch.Matches` itself. Tabs also re-read their endpoint on identity changes,
+  since a folder identity changes the login without changing the record.
+- **Editors** save a three-way merge (`SessionMerge.Rebase`) onto the latest stored record,
+  so a change made elsewhere while the dialog was open is kept; a session deleted mid-edit
+  is not brought back. Both editors build with `with`, and a reflection test fails if a
+  `Session` or `TerminalOverrides` property is neither merged nor listed.
+- **Folders with settings are explicit.** Attaching a folder identity makes the folder
+  explicit; orphaned folder settings are promoted to visible folders on load rather than
+  silently logging into a re-created folder. Backups carry explicit folders only.
+- **Deletes count what they delete.** Folder and multi-select delete prompts count from the
+  store with the delete's own predicate (`SessionStore.SessionsInFolder`), so telnet and
+  serial sessions and filtered-out sessions are counted. Deleted sessions are pruned from
+  saved workspaces in one write; panes that become empty are kept, matching live captures.
+- **Live connection vs saved session.** A session edit changes the saved record at once
+  but the connection only on the next connect, so everything about the live connection
+  reads `TabViewModel.ConnectedSession` and `RemoteSessionSlot`, set by `MarkConnected` and
+  cleared on any other state. End Remote Session kills only the attached slot; turning
+  Persistent on for an open tab no longer points it at slot 0. History records the target
+  the command actually ran on. The file pane drops its SFTP connection when the terminal
+  leaves Connected and an SSHFS mount is remade when its target differs, so neither keeps
+  working against an old host (a tab whose first connect failed can no longer log in to
+  the file pane on its own).
+- **Working folder.** `WorkingDirectoryTracker` takes OSC 7, OSC 9;9 and OSC 3008 through one
+  host check; the newest report wins, and a report goes stale when a later prompt
+  contradicts it (cmd started from PowerShell, `Set-Location HKLM:`, ssh without
+  integration). Every reader uses one order: newest unretired report from this host, then a
+  backend query (persistent shell pane folder or /proc), then the prompt's folder, then the
+  local process folder only when the shell said nothing.
+- **Settings reach live tabs.** SSH algorithm defaults are read live through
+  `SshAlgorithmPolicy.AppDefaultsSource`, so a backup restore takes effect without a static
+  copy to re-sync. Rewind limits, telnet's fixed 80 columns, the prompt platform hint and the
+  rewind player's theme follow setting and session edits. Numeric limits live in
+  `SettingRanges` / `RewindLimits`; NumberBox limits are set from them in code.
+- **Settings catalog.** `SettingsCatalog.Targets` is the one table of Settings targets
+  (section, property, palette title); a new `AppSettings` property needs a row or a
+  `NotInSettings` reason, enforced by a test. Section names in messages come from it.
+- **Welcome** keeps the saved values plus the user's picks (`WelcomeChoices`); a setting
+  saved elsewhere replaces the pick, Finish writes only the picks, and closing restores
+  the current saved theme.
+- **Panes and focus.** Pane sizes live on `SplitLayoutBranch.Sizes`, recorded when a resize
+  ends; a split into the same branch resets it to equal shares, closing keeps proportions.
+  `FocusGroup` is an explicit choice that cancels any queued re-assert; selection changes
+  in a parked pane never move focus, and keyboard focus requests check the pane is still
+  focused when they run.
+- **Workspaces.** Save and "Update from current layout" capture the named workspace's own
+  live layout (`LiveWorkspaceLayoutOrNull`); Update is offered only while this window holds
+  it, and "Add to current layout" only while no window does, by one rule for every menu.
+- **Pinned tabs.** `PinnedSessionIds` holds only Home's pins; pins inside a workspace live
+  in the workspace. The list is recomputed whenever tabs change and on window close: a
+  non-last window closing drops its pins, the last one keeps them.
+- **Recording folder** is resolved once (`TerminalRecordingFiles.ResolveDirectory`, with
+  environment variables expanded) for writing, listing and opening.
+- **Host text** is formatted by `SessionEndpoint` everywhere, with the default ports defined
+  once. History shows a session's current name and still matches the recorded one.
+- **Colours and themes.** Session colour tags come from `SessionColors` (case-insensitive,
+  with a "Custom" entry so an unknown tag survives an edit). Chrome colours derive from
+  `TerminalThemes`; status colours are keyed theme brushes with High Contrast variants; the
+  App.xaml palette brushes are filled by `ThemeVisualPalette.ApplyToAppResources` (app
+  resources can't be read in the `App` constructor, 0x8000FFFF).
+- **Shortcuts** shown in tooltips and the palette come from `KeyBindings`; history and
+  Welcome keys have their own scopes. Enter in the Settings sessions table now connects,
+  as in the tree; F2 edits.
+- **Build metadata.** Windows App SDK versions are pinned once in `eng/WindowsAppSdk.props`,
+  the build version step is `eng/build-version.ps1`. Duplicates that only exist in the
+  workflow or WiX (ghostty cache keys, the signed vs unsigned MSI steps, the app user model
+  id, project URLs) are guarded by `tests/BuildMetadataTests.js` rather than restructured,
+  because the signing steps can't be verified off CI.
