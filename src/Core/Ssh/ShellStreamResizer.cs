@@ -27,7 +27,10 @@ public static class ShellStreamResizer
     // the DynamicDependency below; the lookup cannot be annotated statically.
     [DynamicDependency(IntegratedShellStream.ChannelMembers, IntegratedShellStream.ChannelTypeName, "Renci.SshNet")]
     [UnconditionalSuppressMessage("Trimming", "IL2075", Justification = "DynamicDependency keeps the channel's methods.")]
-    public static bool TryResize(ShellStream? shell, int columns, int rows)
+    /// <summary>Sends a window-change request. The pixel size is the text area's, so a
+    /// program asking the pty (TIOCGWINSZ) and one asking the terminal (CSI 14 t) agree;
+    /// 0 means unknown. False when nothing was sent (no channel, or it closed).</summary>
+    public static bool TryResize(ShellStream? shell, int columns, int rows, int pixelWidth = 0, int pixelHeight = 0)
     {
         if (shell is null || ChannelField is null || columns <= 0 || rows <= 0)
             return false;
@@ -43,7 +46,8 @@ public static class ShellStreamResizer
             if (_resizeMethod is null)
                 return false;
 
-            _resizeMethod.Invoke(channel, [(uint)columns, (uint)rows, 0u, 0u]);
+            _resizeMethod.Invoke(channel,
+                [(uint)columns, (uint)rows, (uint)Math.Max(0, pixelWidth), (uint)Math.Max(0, pixelHeight)]);
             return true;
         }
         catch (TargetInvocationException)

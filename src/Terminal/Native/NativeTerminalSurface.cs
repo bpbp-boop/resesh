@@ -166,6 +166,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private int EffectiveFontSize => Math.Clamp(_fontSize + _zoomDelta, 6, 72);
 
+    public override int ZoomedFontSize => EffectiveFontSize;
+
     public NativeTerminalSurface()
     {
         if (UnavailableReason is { } reason)
@@ -636,10 +638,14 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         if (_disposed || _panel.ActualWidth <= 0 || _panel.ActualHeight <= 0)
             return;
         int cols, rows;
-        bool sizeChanged;
+        bool sizeChanged, cellChanged;
         // The render thread reads the grid size and buffers under this lock.
         lock (_renderGate)
+        {
+            var cell = (_renderer.CellWidth, _renderer.CellHeight);
             (cols, rows, sizeChanged) = RelayoutLocked();
+            cellChanged = cell != (_renderer.CellWidth, _renderer.CellHeight);
+        }
         if (!_initialized)
             return;
         if (!_readyRaised)
@@ -647,10 +653,29 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _readyRaised = true;
             Ready?.Invoke(cols, rows);
         }
-        else if (sizeChanged)
+        else if (sizeChanged || cellChanged)
         {
+            // A new font size can keep the grid and still change its pixel size, which the
+            // pty reports to programs (TIOCGWINSZ) alongside the grid.
             Resized?.Invoke(cols, rows);
         }
+    }
+
+    public override (int Width, int Height) CellPixelSize
+    {
+        get
+        {
+            lock (_renderGate)
+                return (_renderer.CellWidth, _renderer.CellHeight);
+        }
+    }
+
+    public override void SetFixed80Columns(bool fixed80Columns)
+    {
+        if (_fixed80Columns == fixed80Columns)
+            return;
+        _fixed80Columns = fixed80Columns;
+        Relayout();
     }
 
     private (int Columns, int Rows, bool SizeChanged) RelayoutLocked()

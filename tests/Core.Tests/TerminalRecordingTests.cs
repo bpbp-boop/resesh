@@ -63,6 +63,29 @@ public sealed class TerminalRecordingTests : IDisposable
     }
 
     [Fact]
+    public void RecordingFolderExpandsEnvironmentVariablesForWritersAndReaders()
+    {
+        const string variable = "RESESH_RECORDING_TEST_ROOT";
+        Environment.SetEnvironmentVariable(variable, _directory);
+        try
+        {
+            var setting = $"%{variable}%" + Path.DirectorySeparatorChar + "casts";
+            var expected = Path.Combine(_directory, "casts");
+            Assert.Equal(expected, TerminalRecordingFiles.ResolveDirectory(setting));
+
+            using var capture = new TerminalCapture(80, 24);
+            var path = capture.StartRecording(setting, "lab");
+            capture.StopRecording();
+            Assert.Equal(expected, Path.GetDirectoryName(path));
+            Assert.False(Directory.Exists(Path.GetFullPath(setting))); // no literal "%VAR%" folder
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variable, null);
+        }
+    }
+
+    [Fact]
     public void RewindTrimKeepsAFullStateAnchor()
     {
         var started = DateTimeOffset.UtcNow;

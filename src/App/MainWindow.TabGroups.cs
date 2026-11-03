@@ -384,9 +384,7 @@ public sealed partial class MainWindow
             return;
         }
 
-        if (tab.Capabilities.RemoteSession
-            && tab.Session.Persistent
-            && tab.State == TabConnectionState.Connected
+        if (tab.IsAttachedToRemoteSession
             && tab.View is TerminalTabView tmuxView)
         {
             await RequestCloseTmuxTabAsync(tab, tmuxView);
@@ -397,7 +395,7 @@ public sealed partial class MainWindow
             ? ""
             : tab.IsLocal
                 ? " The process is still running — closing stops it and everything it started."
-                : tab.Session.Persistent
+                : tab.IsAttachedToRemoteSession
                     ? " The remote session keeps running (persistent) — connecting again resumes it."
                     : " The session is still connected.";
         if (tab.IsPinned)
@@ -484,8 +482,7 @@ public sealed partial class MainWindow
         var message = connected > 0
             ? $"Close {tabs.Count} {description}? {connected} of them {(connected == 1 ? "is" : "are")} still connected."
             : $"Close {tabs.Count} {description}?";
-        var persistent = tabs.Where(t => t.Capabilities.RemoteSession && t.Session.Persistent
-            && t.State == TabConnectionState.Connected && t.View is TerminalTabView).ToList();
+        var persistent = tabs.Where(t => t.IsAttachedToRemoteSession && t.View is TerminalTabView).ToList();
         if (persistent.Count > 0)
         {
             await RequestCloseManyWithTmuxAsync(tabs, persistent, message);
@@ -1058,7 +1055,7 @@ public sealed partial class MainWindow
     public async Task ManageTunnelsAsync(TabViewModel tab)
     {
         if (tab is not { IsLocked: false, State: TabConnectionState.Connected, View: TerminalTabView view }
-            || tab.Session.Kind != SessionKind.Ssh)
+            || !tab.Capabilities.Tunnels)
             return;
         await TunnelsDialog.ManageAsync(Root.XamlRoot, view, tab.Session.Name,
             () => App.Store.Find(tab.Session.Id),
@@ -1074,8 +1071,7 @@ public sealed partial class MainWindow
 
     private static bool CanManageRemoteSessions(TabViewModel? tab) =>
         tab is { IsLocked: false, IsPlayback: false, IsAppPage: false, View: TerminalTabView }
-        && tab.Capabilities.RemoteSession && tab.Session.Persistent
-        && tab.State != TabConnectionState.Connecting;
+        && tab.HasRemoteSessions && tab.State != TabConnectionState.Connecting;
 
     public async Task ManageRemoteSessionsAsync(TabViewModel tab)
     {
@@ -1143,7 +1139,7 @@ public sealed partial class MainWindow
 
     public async Task EndRemoteSessionAsync(TabViewModel tab)
     {
-        if (tab.View is not TerminalTabView view || tab.State != TabConnectionState.Connected)
+        if (tab.View is not TerminalTabView view || !tab.IsAttachedToRemoteSession)
             return;
         var confirmed = await ConfirmAsync(
             "End Remote Session",
@@ -1180,8 +1176,7 @@ public sealed partial class MainWindow
     {
         try
         {
-            var directory = Path.GetFullPath(
-                Environment.ExpandEnvironmentVariables(App.Settings.Current.RecordingDirectory));
+            var directory = TerminalRecordingFiles.ResolveDirectory(App.Settings.Current.RecordingDirectory);
             Directory.CreateDirectory(directory);
             var startInfo = new System.Diagnostics.ProcessStartInfo
             {

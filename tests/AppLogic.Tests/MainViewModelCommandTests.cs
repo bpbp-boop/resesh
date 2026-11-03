@@ -80,9 +80,108 @@ public sealed class MainViewModelCommandTests : IDisposable
 
         Assert.True(window.DisconnectCommand.CanExecute(null));
         Assert.False(window.ReconnectCommand.CanExecute(null));
-        Assert.True(window.EndRemoteSessionCommand.CanExecute(null));
+        // A plain SSH shell has no persistent remote session to end; closing it ends it.
+        Assert.False(window.EndRemoteSessionCommand.CanExecute(null));
+        Assert.False(window.ShowEndRemoteSession);
         Assert.True(window.CloneTabCommand.CanExecute(null));
         Assert.False(window.SendBreakCommand.CanExecute(null)); // SSH has no break
+    }
+
+    // ---- Persistent remote sessions follow the live connection, not the edited session ----
+
+    [Fact]
+    public void EndRemoteSessionNeedsTheConnectionToBeAttached()
+    {
+        var window = Window();
+        var session = Ssh() with { Persistent = true };
+        var tab = Open(window, session, TabConnectionState.Connecting);
+        tab.MarkConnected(remoteSessionSlot: 2);
+
+        Assert.True(window.ShowEndRemoteSession);
+        Assert.True(window.EndRemoteSessionCommand.CanExecute(tab));
+        Assert.Equal(2, tab.RemoteSessionSlot);
+
+        // Persistence turned off while connected: the live connection still holds slot 2.
+        tab.Session = session with { Persistent = false };
+        Assert.True(window.EndRemoteSessionCommand.CanExecute(tab));
+        Assert.True(MainViewModel.ShowsManageRemoteSessions(tab));
+
+        tab.MarkDisconnected();
+        Assert.Null(tab.RemoteSessionSlot);
+        Assert.False(window.EndRemoteSessionCommand.CanExecute(tab));
+        Assert.False(MainViewModel.ShowsEndRemoteSession(tab));
+    }
+
+    [Fact]
+    public void TurningPersistenceOnDoesNotAttachALiveConnection()
+    {
+        var window = Window();
+        var session = Ssh();
+        var tab = Open(window, session, TabConnectionState.Connected);
+
+        tab.Session = session with { Persistent = true };
+
+        // Shown, so the user sees it exists for this session, but there is nothing to end yet.
+        Assert.True(MainViewModel.ShowsEndRemoteSession(tab));
+        Assert.False(tab.IsAttachedToRemoteSession);
+        Assert.False(window.EndRemoteSessionCommand.CanExecute(tab));
+    }
+
+    [Fact]
+    public void ConnectedSessionDescribesTheLiveConnectionUntilItEnds()
+    {
+        var window = Window();
+        var session = Ssh("router") with { Username = "admin", Port = 22 };
+        var tab = Open(window, session, TabConnectionState.Connecting);
+        tab.MarkConnected(session with { Username = "ops" });
+
+        tab.Session = session with { Host = "edited.example", Username = "admin" };
+
+        Assert.Equal("ops@router.example:22", tab.Endpoint);
+        tab.MarkDisconnected();
+        Assert.Null(tab.ConnectedSession);
+        Assert.Equal("admin@edited.example:22", tab.Endpoint);
+    }
+
+    // ---- The tab's right-click menu uses the same rules ----
+
+    [Fact]
+    public void TunnelsFollowCapabilitiesForAnyTab()
+    {
+        var window = Window();
+        var telnet = Open(window, Ssh("console") with { Kind = SessionKind.Telnet }, TabConnectionState.Connected);
+        var ssh = Open(window, Ssh(), TabConnectionState.Connected);
+
+        Assert.False(MainViewModel.ShowsManageTunnels(telnet));
+        Assert.False(window.ManageTunnelsCommand.CanExecute(telnet));
+        Assert.True(MainViewModel.ShowsManageTunnels(ssh));
+        Assert.True(window.ManageTunnelsCommand.CanExecute(ssh));
+    }
+
+    [Fact]
+    public void FilePaneIsUnavailableOnALockedTab()
+    {
+        var window = Window();
+        var tab = Open(window, Ssh(), TabConnectionState.Connected);
+        Assert.True(window.ToggleFilePaneCommand.CanExecute(tab));
+
+        tab.Lock("secret");
+
+        Assert.True(MainViewModel.ShowsFilePane(tab));
+        Assert.False(window.ToggleFilePaneCommand.CanExecute(tab));
+    }
+
+    [Fact]
+    public void SessionOptionsNeedTheSavedSessionNotItsTreeVisibility()
+    {
+        var window = Window();
+        var saved = Ssh("saved");
+        _store.Add(saved);
+        var savedTab = Open(window, saved, TabConnectionState.Connected);
+        var unsaved = Open(window, Ssh("deleted"), TabConnectionState.Connected);
+
+        Assert.True(window.CanEditSessionOf(savedTab));
+        Assert.False(window.CanEditSessionOf(unsaved));
     }
 
     [Theory]

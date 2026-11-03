@@ -92,7 +92,7 @@ public sealed partial class MainViewModel
 
         try
         {
-            var directory = Path.GetFullPath(Environment.ExpandEnvironmentVariables(_environment.RecordingDirectory()));
+            var directory = Core.Recording.TerminalRecordingFiles.ResolveDirectory(_environment.RecordingDirectory());
             var loader = RecordingLoader;
             var items = await Task.Run(() => loader(directory));
             if (loadVersion != _recordingsLoadVersion)

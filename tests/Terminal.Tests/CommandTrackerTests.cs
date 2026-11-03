@@ -498,6 +498,40 @@ public class CommandTrackerTests
     }
 
     [Fact]
+    public void WithdrawnPlatformHintStopsReadingPromptsAsThatDevice()
+    {
+        var h = new Harness();
+        h.Buffer.Add("server#");
+        h.Tracker.SetPromptPlatform("cisco"); // the session's icon said Cisco
+        Assert.Equal(("privileged EXEC", "cisco"), h.Tracker.ReportPromptContext(force: true));
+
+        h.Tracker.SetPromptPlatform("linux"); // the icon was changed
+        Assert.Null(h.Tracker.ReportPromptContext(force: true));
+    }
+
+    [Fact]
+    public void ScreenEvidenceOutlivesAWithdrawnHint()
+    {
+        var h = new Harness();
+        h.Buffer.Add("--- JUNOS 22.4R1 Kernel 64-bit");
+        h.Buffer.Add("admin@mx1>");
+        h.Tracker.SetPromptPlatform("juniper");
+        Assert.Equal(("operational", "juniper"), h.Tracker.ReportPromptContext(force: true));
+        h.Tracker.SetPromptPlatform(null);
+        Assert.Equal(("operational", "juniper"), h.Tracker.ReportPromptContext(force: true));
+    }
+
+    [Theory]
+    [InlineData(@"PS HKLM:\Software> ", @"HKLM:\Software")]
+    [InlineData(@"PS Cert:\> ", @"Cert:\")]
+    public void PowerShellProviderPromptReportsItsLocation(string prompt, string label)
+    {
+        var h = new Harness();
+        h.Buffer.Add(prompt);
+        Assert.Equal((label, (string?)null), h.Tracker.ReportPromptContext(force: true));
+    }
+
+    [Fact]
     public void JunosOperationalNeedsBannerOrPlatform()
     {
         var h = new Harness();

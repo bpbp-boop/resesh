@@ -266,13 +266,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     public double RewindMinutes
     {
         get => Current.RewindMinutes;
-        set => Save(value, s => s with { RewindMinutes = Whole(value, 1, 1440) ?? s.RewindMinutes }, () => RewindMinutes);
+        set => Save(value, s => s with { RewindMinutes = Whole(value, Core.Recording.RewindLimits.MinimumMinutes, Core.Recording.RewindLimits.MaximumMinutes) ?? s.RewindMinutes }, () => RewindMinutes);
     }
 
     public double RewindMegabytes
     {
         get => Current.RewindMegabytes;
-        set => Save(value, s => s with { RewindMegabytes = Whole(value, 1, 1024) ?? s.RewindMegabytes }, () => RewindMegabytes);
+        set => Save(value, s => s with { RewindMegabytes = Whole(value, Core.Recording.RewindLimits.MinimumMegabytes, Core.Recording.RewindLimits.MaximumMegabytes) ?? s.RewindMegabytes }, () => RewindMegabytes);
     }
 
     private string _historyUsageText = "";

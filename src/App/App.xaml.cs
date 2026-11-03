@@ -345,6 +345,16 @@ public partial class App : Application
         SessionsChanged?.Invoke();
     }
 
+    /// <summary>A recording started or stopped in some tab: every window showing the
+    /// Recordings list reads the folder again.</summary>
+    internal static void RefreshRecordingsInAllWindows()
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.RefreshRecordingsIfShown();
+    }
+
     /// <summary>Raised on the UI thread after saved sessions, folders or folder identities
     /// change, for views outside the tree.</summary>
     internal static event Action? SessionsChanged;

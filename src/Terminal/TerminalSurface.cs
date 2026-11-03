@@ -63,6 +63,16 @@ public abstract partial class TerminalSurface : Grid, IDisposable
     public abstract int Columns { get; protected set; }
     public abstract int Rows { get; protected set; }
 
+    /// <summary>The font size drawn now: the configured size plus the user's zoom.</summary>
+    public abstract int ZoomedFontSize { get; }
+
+    /// <summary>One cell's size in device pixels; (0, 0) before the font is measured.</summary>
+    public abstract (int Width, int Height) CellPixelSize { get; }
+
+    /// <summary>Holds the grid at 80 columns whatever the width (a telnet session that asks
+    /// for it), or lets it follow the width again.</summary>
+    public abstract void SetFixed80Columns(bool fixed80Columns);
+
     public abstract Task InitializeAsync();
     public abstract void WriteOutput(ReadOnlySpan<byte> data);
     public abstract void NotifyConnected();

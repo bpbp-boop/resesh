@@ -88,8 +88,8 @@ public sealed record AppSettings
     public int CommandHistoryDays { get; set; } = 90;
 
     /// <summary>Age and memory caps for each tab's always-on in-memory rewind stream.</summary>
-    public int RewindMinutes { get; set; } = 30;
-    public int RewindMegabytes { get; set; } = 32;
+    public int RewindMinutes { get; set; } = Recording.RewindLimits.DefaultMinutes;
+    public int RewindMegabytes { get; set; } = Recording.RewindLimits.DefaultMegabytes;
 
     /// <summary>Show the agent icon and attention badge on tabs (Phase 6.2).</summary>
     public bool ShowAgentIcons { get; set; } = true;

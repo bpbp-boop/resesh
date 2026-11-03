@@ -67,7 +67,7 @@ internal static class IntegratedShellStream
     /// <summary>Starts <paramref name="command"/> with exec, or the account's login shell
     /// when it is null.</summary>
     public static ShellStream Create(SshClient client, string terminalType, int columns, int rows,
-        string? command, CancellationToken token)
+        string? command, CancellationToken token, int pixelWidth = 0, int pixelHeight = 0)
     {
         if (command is null ? !IsShellSupported : !IsSupported)
             throw new NotSupportedException("This SSH.NET version cannot start an integrated shell.");
@@ -92,7 +92,7 @@ internal static class IntegratedShellStream
                 token.ThrowIfCancellationRequested();
             }
             if (PtyMethod!.Invoke(channel,
-                    [terminalType, (uint)columns, (uint)rows, 0u, 0u, new Dictionary<TerminalModes, uint>()]) is not true)
+                    [terminalType, (uint)columns, (uint)rows, (uint)Math.Max(0, pixelWidth), (uint)Math.Max(0, pixelHeight), new Dictionary<TerminalModes, uint>()]) is not true)
                 throw new SshException("The server rejected the terminal request.");
             token.ThrowIfCancellationRequested();
             if (command is null)

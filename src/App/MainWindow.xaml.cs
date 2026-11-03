@@ -1397,6 +1397,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             if (tab.View is TerminalTabView view)
                 view.ApplyNonThemeSettings(settings);
+            else if (tab.View is TerminalPlayerView player)
+                player.ApplySettings(settings);
             tab.NotifyAgentVisuals(); // the agent icon/badge is gated on a setting
         }
     }
@@ -1457,6 +1459,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             if (tab.View is TerminalTabView view)
                 view.ApplyTheme(theme);
+            else if (tab.View is TerminalPlayerView player)
+                player.ApplyTheme(theme);
             tab.ApplyAppTheme(theme);
         }
     }
