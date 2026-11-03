@@ -25,7 +25,6 @@ public sealed partial class MainWindow
     private readonly HashSet<Border> _paneGutters = [];
     private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _paneFocusBrush = new(Microsoft.UI.Colors.Transparent);
     private readonly HashSet<CommunityToolkit.WinUI.Controls.GridSplitter> _activeSplitters = [];
-    private readonly Dictionary<SplitLayoutBranch<TabGroupViewModel>, IReadOnlyList<double>> _savedPaneSizes = [];
 
     private void ConfigureSplitter(CommunityToolkit.WinUI.Controls.GridSplitter splitter, Border line)
     {

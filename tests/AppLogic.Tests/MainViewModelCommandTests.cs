@@ -331,10 +331,26 @@ public sealed class MainViewModelCommandTests : IDisposable
         Assert.Equal(
             [
                 "Save Current Layout as Workspace", "Switch to Home",
-                "Open Lab in New Window", "Open Lab Additively", "Close Lab",
+                "Open Lab in New Window", "Close Lab",
                 "Switch to Prod", "Open Prod in New Window", "Open Prod Additively",
             ],
             titles);
+    }
+
+    [Fact]
+    public void PaletteAddsOnlyWorkspacesNoWindowHasOpen()
+    {
+        var window = Window();
+        var lab = new Workspace { Id = Guid.NewGuid(), Name = "Lab" };
+        var prod = new Workspace { Id = Guid.NewGuid(), Name = "Prod" };
+        var test = new Workspace { Id = Guid.NewGuid(), Name = "Test" };
+        _window.WorkspaceList.AddRange([lab, prod, test]);
+        _window.OpenWorkspaces.Add(lab.Id); // parked here
+        _window.WorkspacesOpenElsewhere.Add(prod.Id);
+
+        var titles = window.Commands.PaletteCommands().Select(d => d.Title()).Where(t => t.EndsWith("Additively")).ToList();
+
+        Assert.Equal(["Open Test Additively"], titles);
     }
 
     [Fact]

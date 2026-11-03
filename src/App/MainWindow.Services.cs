@@ -93,6 +93,8 @@ public sealed partial class MainWindow
 
     bool IMainWindowServices.IsWorkspaceOpen(Guid workspaceId) => IsWorkspaceOpen(workspaceId);
 
+    bool IMainWindowServices.CanAddWorkspaceToLayout(Guid workspaceId) => CanAddWorkspaceToLayout(workspaceId);
+
     Guid? IMainWindowServices.ShownWorkspaceId => ShownWorkspaceId;
 
     void IMainWindowServices.ShowHomeWorkspace() => ShowWorkspace(HomeWorkspace);

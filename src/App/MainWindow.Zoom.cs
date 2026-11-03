@@ -45,16 +45,14 @@ public sealed partial class MainWindow
             [.. groups.Select(group => (IReadOnlyList<TabViewModel>)[.. group.Tabs])],
             [.. groups.Select(group => group.SelectedTab)],
             groups.IndexOf(ViewModel.FocusedGroup));
-        // Sizes are read from the live grids, before the rebuild discards them.
-        var layout = CaptureWorkspaceLayoutNode(
-            _groupLayout.Root, indices, GroupArea.Children.FirstOrDefault() as FrameworkElement);
+        var layout = CaptureLayoutNode(_groupLayout.Root, indices);
 
         CapturePaneMotion();
         foreach (var groupView in _groupViews.Values)
             groupView.SuppressTabMotion();
         var merged = TabZoom.Merge(snapshot.Groups, candidate => candidate.IsPinned);
         for (var index = 0; index < merged.Count; index++)
-            PlaceZoomTab(merged[index], target, index);
+            PlaceTab(merged[index], target, index);
         target.SelectedTab = tab;
 
         foreach (var group in groups.Where(group => group != target))
@@ -89,7 +87,7 @@ public sealed partial class MainWindow
             {
                 var tabs = restore.Groups[surviving[0]];
                 for (var position = 0; position < tabs.Count; position++)
-                    PlaceZoomTab(tabs[position], zoomed, position);
+                    PlaceTab(tabs[position], zoomed, position);
                 zoomed.SelectedTab = restore.Selected[surviving[0]];
             }
             FinishLayoutChange(zoomed, zoomed.SelectedTab);
@@ -116,7 +114,7 @@ public sealed partial class MainWindow
         {
             var tabs = restore.Groups[index];
             for (var position = 0; position < tabs.Count; position++)
-                PlaceZoomTab(tabs[position], groupFor[index], position);
+                PlaceTab(tabs[position], groupFor[index], position);
         }
         foreach (var index in surviving)
             groupFor[index].SelectedTab = restore.Selected[index];
@@ -172,28 +170,6 @@ public sealed partial class MainWindow
         };
     }
 
-    /// <summary>Moves a tab (and its view) to a position in a group, keeping the selection
-    /// the caller sets afterwards.</summary>
-    private void PlaceZoomTab(TabViewModel tab, TabGroupViewModel target, int index)
-    {
-        var source = ViewModel.GroupOf(tab);
-        if (ReferenceEquals(source, target))
-        {
-            var current = target.Tabs.IndexOf(tab);
-            if (current != index)
-                target.Tabs.Move(current, Math.Clamp(index, 0, target.Tabs.Count - 1));
-            return;
-        }
-
-        source.RemoveTab(tab);
-        target.Tabs.Insert(Math.Clamp(index, 0, target.Tabs.Count), tab);
-        if (tab.View is UIElement view)
-        {
-            _groupViews[source].RemoveTerminal(view);
-            _groupViews[target].AddTerminal(view);
-        }
-    }
-
     private void DropGroupView(TabGroupViewModel group)
     {
         if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(_groupViews[group]) is Panel parent)
@@ -202,6 +178,9 @@ public sealed partial class MainWindow
         ViewModel.Groups.Remove(group);
     }
 
+    /// <summary>Lays out the panes again and focuses one. Panes created for the change select
+    /// their tab once they load, which would focus them; <see cref="FocusGroup"/> takes focus
+    /// back after they settle, unless the caller chooses another pane first.</summary>
     private void FinishLayoutChange(TabGroupViewModel focused, TabViewModel? tab)
     {
         SyncGroupOrder();
@@ -211,17 +190,6 @@ public sealed partial class MainWindow
         ViewModel.SyncGroupFocus();
         if (tab is not null)
             FocusTabContent(tab);
-        // Panes created for the restore select their tab once they load, and a selection
-        // change focuses its pane. Take focus back after they settle.
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-        {
-            if (!ViewModel.Groups.Contains(focused) || ReferenceEquals(ViewModel.FocusedGroup, focused))
-                return;
-            FocusGroup(focused);
-            ViewModel.SyncGroupFocus();
-            if (focused.SelectedTab is { } selected)
-                FocusTabContent(selected);
-        });
     }
 
     private void RefreshTabGroupActions()

@@ -112,7 +112,7 @@ public sealed class WorkspaceDraftTests : IDisposable
     {
         var store = NewStore("coordinator.json");
         var lab = store.SaveAs("Lab", Layout([A]));
-        var coordinator = new WorkspaceCoordinator(store, () => Layout([A]), () => { }, (_, _) => { });
+        var coordinator = new WorkspaceCoordinator(store, _ => Layout([A]), () => { }, (_, _) => { });
 
         Assert.True(coordinator.KeepDraft(lab.Id, Layout([A, B])));
         Assert.Single(store.Workspaces[0].Groups[0].Tabs);
@@ -120,6 +120,23 @@ public sealed class WorkspaceDraftTests : IDisposable
 
         Assert.True(coordinator.DiscardDraft(lab.Id));
         Assert.False(store.HasDraft(lab.Id));
+    }
+
+    [Fact]
+    public void Coordinator_UpdatesAWorkspaceFromItsOwnLiveLayoutOnly()
+    {
+        var store = NewStore("update.json");
+        var lab = store.SaveAs("Lab", Layout([A]));
+        var prod = store.SaveAs("Prod", Layout([B]));
+        // Lab is open with a second pane; Prod is not open anywhere.
+        var live = new Dictionary<Guid, WorkspaceLayout> { [lab.Id] = Layout([A], [B]) };
+        var coordinator = new WorkspaceCoordinator(store, id => live.GetValueOrDefault(id), () => { }, (_, _) => { });
+
+        Assert.True(coordinator.Update(lab.Id));
+        Assert.False(coordinator.Update(prod.Id));
+
+        Assert.Equal(2, store.Workspaces.Single(workspace => workspace.Id == lab.Id).Groups.Count);
+        Assert.Equal(B, Assert.Single(store.Workspaces.Single(workspace => workspace.Id == prod.Id).Groups).Tabs[0].SessionId);
     }
 
     public void Dispose() => _dir.Delete(recursive: true);

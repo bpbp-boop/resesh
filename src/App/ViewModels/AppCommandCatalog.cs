@@ -143,8 +143,9 @@ public sealed class AppCommandCatalog
                     _vm.OpenWorkspaceCommand, Parameter: () => workspace);
             yield return new("Workspaces", Fixed($"Open {workspace.Name} in New Window"), "tabs groups layout separate",
                 _vm.OpenWorkspaceInNewWindowCommand, Parameter: () => workspace);
-            yield return new("Workspaces", Fixed($"Open {workspace.Name} Additively"), "tabs groups layout add",
-                _vm.OpenWorkspaceAdditivelyCommand, Parameter: () => workspace);
+            if (services.CanAddWorkspaceToLayout(workspace.Id))
+                yield return new("Workspaces", Fixed($"Open {workspace.Name} Additively"), "tabs groups layout add",
+                    _vm.OpenWorkspaceAdditivelyCommand, Parameter: () => workspace);
             if (services.IsWorkspaceOpen(workspace.Id))
                 yield return new("Workspaces", Fixed($"Close {workspace.Name}"), "workspace disconnect tabs",
                     _vm.CloseWorkspaceCommand, Parameter: () => workspace);

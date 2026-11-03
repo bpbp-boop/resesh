@@ -27,4 +27,14 @@ internal static class WorkspaceParking
     public static bool TakesShownTabs<TParked>(
         Guid shown, IReadOnlyDictionary<Guid, TParked> parked, IEnumerable<TabViewModel> shownTabs) =>
         CanAdoptShownAsNew(shown, parked) && shownTabs.Any(tab => !tab.IsAppPage);
+
+    /// <summary>Whether a workspace's tabs can be added to the shown layout. Adding opens a
+    /// new connection for each of its tabs, so a workspace a window already holds, this one
+    /// or another, is never added: its connections would be open twice.</summary>
+    public static bool CanAddToShownLayout(bool openHere, bool openElsewhere) => !openHere && !openElsewhere;
+
+    /// <summary>Whether "Update from current layout" is offered for a workspace: only while
+    /// this window holds it, shown or parked, since what it saves is that workspace's own
+    /// live layout. A workspace open nowhere here has none to save.</summary>
+    public static bool CanUpdateFromLiveLayout(bool openHere) => openHere;
 }

@@ -138,6 +138,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             Resesh.Core.Backend.CleanupActions.Run(App.ReportRecoverableError,
                 SaveTreePaneWidth,
                 SaveWorkspacesOnClose,
+                App.SavePinnedSessions,
                 ViewModel.CloseAllTabs);
         };
     }
@@ -146,14 +147,14 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         if (!showContext)
         {
-            Title = ViewModel.ActiveTab is { } tab ? $"{tab.Session.Name} - resesh" : "resesh";
+            Title = ViewModel.ActiveTab is { } tab ? $"{tab.Header} - resesh" : "resesh";
             return;
         }
 
         var workspaceName = ShownWorkspaceId is { } workspaceId
             ? App.Workspaces.Workspaces.FirstOrDefault(workspace => workspace.Id == workspaceId)?.Name
             : null;
-        Title = workspaceName ?? ViewModel.ActiveTab?.Session.Name ?? "resesh";
+        Title = workspaceName ?? ViewModel.ActiveTab?.Header ?? "resesh";
     }
 
     private void SystemColorsChanged(UISettings sender, object args)
@@ -213,7 +214,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     private TabGroupView AttachGroupView(TabGroupViewModel group)
     {
         var view = new TabGroupView(group, this);
-        group.Tabs.CollectionChanged += (_, _) => QueueWorkspaceRailRefresh();
+        group.Tabs.CollectionChanged += (_, _) =>
+        {
+            QueueWorkspaceRailRefresh();
+            App.QueuePinnedSessionsSave();
+        };
         // The initial app-wide theme pass has already run when a user creates a split.
         // Apply the live palette now so the new strip does not start with Fluent defaults.
         view.ApplyTheme(_themePalette);
@@ -489,10 +494,17 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         return origin is null ? null : GroupNavigation.FindNeighbor(groups, origin.Value, direction, preferTopmost);
     }
 
+    /// <summary>Gives the tab's terminal keyboard focus, once queued work settles, if its pane
+    /// is still the focused one then: keyboard focus follows the focused pane, so a request
+    /// overtaken by a later focus choice does nothing.</summary>
     private void FocusTabContent(TabViewModel tab)
     {
         if (tab.View is TerminalTabView view)
-            DispatcherQueue.TryEnqueue(view.FocusTerminal);
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (ReferenceEquals(ViewModel.TryGroupOf(tab), ViewModel.FocusedGroup))
+                    view.FocusTerminal();
+            });
     }
 
     private OverlappedPresenter? _presenterBeforeFullScreen;
@@ -571,8 +583,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private void FocusActiveTerminal()
     {
-        if (ViewModel.ActiveTab?.View is TerminalTabView view)
-            DispatcherQueue.TryEnqueue(view.FocusTerminal);
+        if (ViewModel.ActiveTab is { } tab)
+            FocusTabContent(tab);
     }
 
     /// <summary>The palette lists the view model's available commands, plus two things only
