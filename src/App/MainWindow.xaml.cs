@@ -164,7 +164,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             var isHighContrast = App.IsHighContrast;
             var highContrastChanged = isHighContrast != _isHighContrast;
             _isHighContrast = isHighContrast;
-            if (highContrastChanged || string.Equals(theme, "system", StringComparison.OrdinalIgnoreCase))
+            if (highContrastChanged || ThemeCatalog.IsSystem(theme))
                 ApplyThemeToApp(theme);
         });
     }
@@ -1409,18 +1409,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         var palette = ThemeVisualPalette.For(theme);
         _themePalette = palette;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionShellBrush"]).Color = palette.Shell;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionChromeBrush"]).Color = palette.Chrome;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionAccentBrush"]).Color = palette.Accent;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionInputBrush"]).Color = palette.Input;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionChromeFrameBrush"]).Color = palette.Frame;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeForegroundBrush"]).Color = palette.TreeForeground;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeMutedForegroundBrush"]).Color = palette.TreeMutedForeground;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionPlaceholderForegroundBrush"]).Color = palette.Placeholder;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeSelectionBrush"]).Color = palette.TreeSelection;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeSelectionForegroundBrush"]).Color = palette.TreeSelectionForeground;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SettingsCardBorderBrush"]).Color = palette.Frame;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SettingsCardBackgroundBrush"]).Color = palette.Input;
+        palette.ApplyToAppResources();
         RepaintSplitterLines();
         foreach (var groupView in _groupViews.Values)
             groupView.ApplyTheme(palette);

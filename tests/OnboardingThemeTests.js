@@ -30,7 +30,7 @@ test("Welcome filters the shared theme catalog through one native ComboBox", () 
   assert.match(codeBehind, /ThemeVisualPalette\.For\(resolved\)/);
   assert.match(
     codeBehind,
-    /ThemeCatalog\.All[\s\S]*?\.Where\(theme => theme\.Id != "system" && theme\.IsLight == isLight\)/);
+    /ThemeCatalog\.All[\s\S]*?\.Where\(theme => theme\.Id != ThemeIds\.System && theme\.IsLight == isLight\)/);
   assert.match(
     codeBehind,
     /ThemePicker_SelectionChanged[\s\S]*?SelectTheme\(theme\.Id\)/);
@@ -109,11 +109,8 @@ test("the palette brushes Welcome shares with the shell live at app scope", () =
     path.join(__dirname, "..", "src", "App", "MainWindow.xaml"), "utf8");
   assert.ok(!/<SolidColorBrush x:Key="SessionTree/.test(mainWindow));
 
-  const mainWindowCode = require("./support/mainWindowSource");
-  assert.match(
-    mainWindowCode,
-    /Application\.Current\.Resources\["SessionTreeForegroundBrush"\]/);
-  assert.match(
-    mainWindowCode,
-    /Application\.Current\.Resources\["SessionTreeMutedForegroundBrush"\]/);
+  const visualPalette = fs.readFileSync(
+    path.join(__dirname, "..", "src", "App", "ThemeVisualPalette.cs"), "utf8");
+  assert.match(visualPalette, /Set\("SessionTreeForegroundBrush", TreeForeground\)/);
+  assert.match(visualPalette, /Set\("SessionTreeMutedForegroundBrush", TreeMutedForeground\)/);
 });

@@ -1,0 +1,60 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const test = require("node:test");
+
+const read = (...parts) => fs.readFileSync(path.join(__dirname, "..", ...parts), "utf8");
+const appXaml = read("src", "App", "App.xaml");
+const appCode = read("src", "App", "App.xaml.cs");
+const presentation = read("src", "App", "PresentationValues.cs");
+const visualPalette = read("src", "App", "ThemeVisualPalette.cs");
+const mainWindow = require("./support/mainWindowSource");
+
+const statusBrushes = ["Info", "Success", "Caution", "Critical", "Neutral"].map(name => `SessionStatus${name}Brush`);
+
+function themeDictionary(key) {
+  const body = appXaml.match(new RegExp(`<ResourceDictionary x:Key="${key}">([\\s\\S]*?)</ResourceDictionary>`))?.[1];
+  assert.ok(body, `${key} theme dictionary`);
+  return body;
+}
+
+test("status colors are theme brushes with High Contrast variants in system colors", () => {
+  for (const key of [...statusBrushes, "SessionBadgeGlyphBrush", "SessionRecordingBrush"]) {
+    for (const theme of ["Dark", "Light"])
+      assert.match(themeDictionary(theme), new RegExp(`x:Key="${key}"`), `${key} in ${theme}`);
+    assert.match(
+      themeDictionary("HighContrast"),
+      new RegExp(`x:Key="${key}" Color="\\{ThemeResource SystemColor\\w+Color\\}"`),
+      `${key} in HighContrast`);
+  }
+});
+
+test("each status hue is typed once, in App.xaml", () => {
+  // Colour tags in the session editors are the user's choices, not status marks.
+  for (const hex of ["0078D4", "16C60C", "FFB900", "E74856"]) {
+    assert.equal(appXaml.match(new RegExp(`#${hex}`, "g"))?.length, 1, `#${hex} in App.xaml`);
+    for (const [name, source] of [["PresentationValues", presentation], ["ThemeVisualPalette", visualPalette]])
+      assert.doesNotMatch(source, new RegExp(`0x${hex}`, "i"), `${name} repeats ${hex}`);
+  }
+});
+
+test("tab dots, agent badges and workspace alerts look their colors up by key", () => {
+  for (const method of ["StateColor", "AgentBadgeColor", "WorkspaceAlertColor"]) {
+    const body = presentation.match(new RegExp(`public static Windows\\.UI\\.Color ${method}\\([\\s\\S]*?;\\r?\\n\\r?\\n`))?.[0] ?? "";
+    assert.match(body, /StatusColor\(/, method);
+    assert.doesNotMatch(body, /Rgb\(/, method);
+  }
+  for (const key of statusBrushes)
+    assert.match(presentation, new RegExp(`"${key}"`), key);
+});
+
+test("the app's palette brushes take their colors from the one palette in code", () => {
+  // Declared without colors, so App.xaml can't hold a second copy of the dark palette.
+  const declared = [...appXaml.matchAll(/<SolidColorBrush x:Key="(\w+)" \/>/g)].map(match => match[1]);
+  const applied = [...visualPalette.matchAll(/Set\("(\w+)", \w+\);/g)].map(match => match[1]);
+  assert.ok(declared.length >= 10);
+  assert.deepEqual([...declared].sort(), [...new Set(applied)].sort());
+  // At startup, before any window draws, and on every theme change after.
+  assert.match(appCode, /void OnLaunched\([\s\S]*?ThemeVisualPalette\.For\(ResolveTheme\(Settings\.Current\.Theme\)\)\.ApplyToAppResources\(\);[\s\S]*?CreateWindowCore\(/);
+  assert.match(mainWindow, /private void ApplyThemePalette\(string theme\)[\s\S]*?palette\.ApplyToAppResources\(\);/);
+});

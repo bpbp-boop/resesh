@@ -40,63 +40,69 @@ internal sealed record ThemeVisualPalette(
     private static Windows.UI.Color Hex(uint rgb) => Windows.UI.Color.FromArgb(
         255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 
+    /// <summary>The chrome for a resolved theme id (never System). Background, text and
+    /// selection come from the theme's terminal palette; <see cref="ThemeChromes"/> adds the rest.</summary>
     public static ThemeVisualPalette For(string id)
     {
         if (App.IsHighContrast)
             return HighContrast();
 
-        return id.ToLowerInvariant() switch
-        {
-        "solarized-dark" => New(0x002B36, 0x073642, 0x0B3B46, 0x839496, 0x274852),
-        "solarized-light" => New(0xFDF6E3, 0xEEE8D5, 0xE3DCC9, 0x657B83, 0xEEE8D5),
-        "dracula" => New(0x282A36, 0x21222C, 0x44475A, 0xF8F8F2, 0x44475A),
-        "one-dark" => New(0x282C34, 0x21252B, 0x3E4451, 0xABB2BF, 0x3E4451),
-        "nord" => New(0x2E3440, 0x272C36, 0x4C566A, 0xD8DEE9, 0x434C5E),
-        "gruvbox-dark" => New(0x282828, 0x1D2021, 0x504945, 0xEBDBB2, 0x504945),
-        "monokai" => New(0x272822, 0x20211C, 0x49483E, 0xF8F8F2, 0x49483E),
-        "tokyo-night" => New(0x1A1B26, 0x16161E, 0x414868, 0xC0CAF5, 0x33467C),
-        "catppuccin-mocha" => New(0x1E1E2E, 0x181825, 0x45475A, 0xCDD6F4, 0x45475A),
-        "phthalo-green" => New(0x123524, 0x0B2118, 0x2D5A48, 0xD7EEE5, 0x245A46),
-        // Cool charcoal surfaces let the pink tab accent and cyan pane focus carry
-        // the theme, with a little violet reserved for raised and selected surfaces.
-        "vaporwave" => New(0x34334B, 0x1D202D, 0x43465F, 0xEEEAF5, 0x45415E) with
-        {
-            Shell = Hex(0x272A3B),
-            Chrome = Hex(0x1D202D),
-            Input = Hex(0x151925),
-            HoverTab = Hex(0x3B3D53),
-            TreeMutedForeground = Hex(0xAFB2C8),
-            Accent = Hex(0xFF4FD8),
-            AccentBarThickness = 3,
-            PaneBorder = Hex(0x43465F),
-            PaneFocusBorder = Hex(0x55E7EF),
-        },
-        // The tab takes the terminal's wine red and a bold red accent, so a crimson
-        // tab is unmistakable even among tabs drawn with another theme. Inactive and
-        // hovered tabs are a clear red rather than the near-black strip, so a production
-        // tab still stands out when it isn't selected.
-        "crimson" => New(0x330B12, 0x1F060A, 0x5A1C26, 0xF4E4E6, 0x6B1F2C) with
-        {
-            InactiveTab = Hex(0x4A101A),
-            HoverTab = Hex(0x5C1622),
-            Accent = Hex(0xFF4D5E),
-            AccentBarThickness = 3,
-            PaneFocusBorder = Hex(0xE0384A),
-        },
-        "light" => New(0xFFFFFF, 0xF3F3F3, 0xD8D8D8, 0x383A42, 0xBFCEFF),
-            _ => New(0x0C0C0C, 0x181818, 0x2B2B2B, 0xCCCCCC, 0x264F78),
-        };
+        var terminal = Resesh.Terminal.Native.TerminalThemes.Find(id);
+        var chrome = ThemeChromes.Find(id);
+        var active = chrome.ActiveTab ?? terminal.Background;
+        var strip = chrome.Strip;
+        var divider = chrome.Divider;
+        // The surface ramp. Secondary chrome (the status bar) lifts just off the shell, and
+        // the accent stays the stock Windows blue on a hairline bar unless the theme sets both.
+        return new(
+            Shell: Hex(chrome.Shell ?? strip),
+            Chrome: chrome.Chrome is { } surface ? Hex(surface) : Blend(strip, divider),
+            Input: chrome.Input is { } input ? Hex(input) : Blend(active, strip),
+            Frame: Hex(divider),
+            Divider: Hex(divider),
+            ActiveTab: Hex(active),
+            HoverTab: chrome.HoverTab is { } hover ? Hex(hover) : Blend(active, divider),
+            InactiveTab: Hex(chrome.InactiveTab ?? strip),
+            TreeForeground: Hex(terminal.Foreground),
+            TreeMutedForeground: chrome.TreeMutedForeground is { } muted
+                ? Hex(muted)
+                : Blend(terminal.Foreground, strip),
+            TreeSelection: Hex(terminal.Selection),
+            TreeSelectionForeground: Hex(terminal.Foreground),
+            Accent: chrome.Accent is { } accent ? Hex(accent) : DefaultAccent,
+            AccentBarThickness: chrome.AccentBarThickness,
+            PaneBorder: Hex(chrome.PaneBorder ?? divider),
+            PaneFocusBorder: Hex(chrome.PaneFocusBorder ?? terminal.Selection),
+            IsHighContrast: false);
     }
 
-    /// <summary>Derives the surface ramp from a theme's five defining colors. Secondary
-    /// chrome (the status bar) lifts just off the shell, and the accent stays the stock
-    /// Windows blue on a hairline bar unless the theme overrides both.</summary>
-    private static ThemeVisualPalette New(
-        uint active, uint inactive, uint divider, uint foreground, uint selection) =>
-        new(Hex(inactive), Blend(inactive, divider), Blend(active, inactive), Hex(divider), Hex(divider),
-            Hex(active), Blend(active, divider), Hex(inactive),
-            Hex(foreground), Blend(foreground, inactive), Hex(selection), Hex(foreground),
-            Hex(0x0078D4), 1, Hex(divider), Hex(selection), false);
+    /// <summary>The stock Windows blue, for themes without an accent of their own. Defined
+    /// once in App.xaml, where the splitter and status brushes use it too.</summary>
+    private static Windows.UI.Color DefaultAccent =>
+        _defaultAccent ??= (Windows.UI.Color)Application.Current.Resources["SessionDefaultAccentColor"];
+
+    private static Windows.UI.Color? _defaultAccent;
+
+    /// <summary>Recolors the app-wide brushes custom chrome binds to. App.xaml declares them
+    /// without colors: the app applies the saved theme here before the first window opens,
+    /// so no second copy of a palette sits in XAML to drift from this one.</summary>
+    public void ApplyToAppResources()
+    {
+        var resources = Application.Current.Resources;
+        void Set(string key, Windows.UI.Color color) => ((SolidColorBrush)resources[key]).Color = color;
+        Set("SessionShellBrush", Shell);
+        Set("SessionChromeBrush", Chrome);
+        Set("SessionAccentBrush", Accent);
+        Set("SessionInputBrush", Input);
+        Set("SessionChromeFrameBrush", Frame);
+        Set("SessionTreeForegroundBrush", TreeForeground);
+        Set("SessionTreeMutedForegroundBrush", TreeMutedForeground);
+        Set("SessionPlaceholderForegroundBrush", Placeholder);
+        Set("SessionTreeSelectionBrush", TreeSelection);
+        Set("SessionTreeSelectionForegroundBrush", TreeSelectionForeground);
+        Set("SettingsCardBorderBrush", Frame);
+        Set("SettingsCardBackgroundBrush", Input);
+    }
 
     private static ThemeVisualPalette HighContrast()
     {

@@ -61,12 +61,12 @@ public partial class App : Application
     /// <summary>Resolves the System choice to the Windows color mode used right now.</summary>
     public static string ResolveTheme(string? theme)
     {
-        if (!string.Equals(theme, "system", StringComparison.OrdinalIgnoreCase))
+        if (!ThemeCatalog.IsSystem(theme))
             return ThemeCatalog.Find(theme).Id;
 
         var background = new UISettings().GetColorValue(UIColorType.Background);
         var luminance = (0.2126 * background.R) + (0.7152 * background.G) + (0.0722 * background.B);
-        return luminance >= 128 ? "light" : "dark";
+        return luminance >= 128 ? ThemeIds.Light : ThemeIds.Dark;
     }
 
     public App()
@@ -189,6 +189,10 @@ public partial class App : Application
     {
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         CommandCompletionNotifications.SetDispatcher(_dispatcherQueue);
+        // The app-wide chrome brushes are declared without colors; give them the saved
+        // theme's before any window draws with them. Not in the constructor: code can't
+        // read Application resources until it has returned.
+        ThemeVisualPalette.For(ResolveTheme(Settings.Current.Theme)).ApplyToAppResources();
 
         _storesLoad!.GetAwaiter().GetResult();
         if (DemoMode.IsEnabled)

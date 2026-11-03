@@ -117,7 +117,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private int _fontSize = TerminalDefaults.FontSize;
     private int _zoomDelta;
     private string _fontFamily = TerminalDefaults.FontFamily;
-    private TerminalTheme _theme = TerminalThemes.Find("dark");
+    private TerminalTheme _theme = TerminalThemes.Find(TerminalThemes.DefaultId);
     private bool _copyOnSelect;
     private bool _rightClickPaste;
     private TerminalMouseCapture _mouseCapture = TerminalMouseCapture.Scroll;

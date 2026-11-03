@@ -379,7 +379,7 @@
                                                     Width="10"
                                                     Height="10"
                                                     Data="{x:Bind local:PresentationValues.AgentBadgeSymbol(Agent.Attention), Mode=OneWay}"
-                                                    Stroke="{StaticResource SessionBadgeGlyphBrush}"
+                                                    Stroke="{ThemeResource SessionBadgeGlyphBrush}"
                                                     StrokeThickness="1.6"
                                                     StrokeStartLineCap="Round"
                                                     StrokeEndLineCap="Round"

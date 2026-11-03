@@ -52,7 +52,7 @@ public sealed record AppSettings
     /// discovered shell (see LocalShellDiscovery.DefaultProfile).</summary>
     public Guid? DefaultLocalProfileId { get; init; }
 
-    public string Theme { get; set; } = "dark";
+    public string Theme { get; set; } = ThemeIds.Default;
     public string FontFamily { get; set; } = FontFamilies.Default;
     public int FontSize { get; set; } = 14;
     public int Scrollback { get; set; } = 10000;

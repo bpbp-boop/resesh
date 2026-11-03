@@ -7,29 +7,35 @@
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
+            <!-- Colors used by more than one brush below, each defined once. Status colors
+                 mean the same in every theme: blue for news (unseen output, a working agent),
+                 green for connected or done, amber for waiting, red for failed or recording. -->
+            <Color x:Key="SessionDefaultAccentColor">#0078D4</Color>
+            <Color x:Key="SessionStatusSuccessColor">#16C60C</Color>
+            <Color x:Key="SessionStatusCautionColor">#FFB900</Color>
+            <Color x:Key="SessionStatusCriticalColor">#E74856</Color>
+            <Color x:Key="SessionStatusNeutralColor">#8A8A8A</Color>
             <!-- Stable instances avoid WinUI's implicit brush transitions during a live
-                 light/dark change. MainWindow mutates their colors before the frame draws. -->
-            <SolidColorBrush x:Key="SessionShellBrush" Color="#181818" />
-            <SolidColorBrush x:Key="SessionChromeBrush" Color="#1E1E1E" />
-            <SolidColorBrush x:Key="SessionAccentBrush" Color="#0078D4" />
-            <SolidColorBrush x:Key="SessionInputBrush" Color="#121212" />
-            <SolidColorBrush x:Key="SessionChromeFrameBrush" Color="#2B2B2B" />
-            <SolidColorBrush x:Key="SessionTreeForegroundBrush" Color="#CCCCCC" />
-            <SolidColorBrush x:Key="SessionTreeMutedForegroundBrush" Color="#959595" />
-            <SolidColorBrush x:Key="SessionPlaceholderForegroundBrush" Color="#777777" />
+                 light/dark change. Their colors come from ThemeVisualPalette.ApplyToAppResources,
+                 at startup and on every theme change, so the palettes live only in code. -->
+            <SolidColorBrush x:Key="SessionShellBrush" />
+            <SolidColorBrush x:Key="SessionChromeBrush" />
+            <SolidColorBrush x:Key="SessionAccentBrush" />
+            <SolidColorBrush x:Key="SessionInputBrush" />
+            <SolidColorBrush x:Key="SessionChromeFrameBrush" />
+            <SolidColorBrush x:Key="SessionTreeForegroundBrush" />
+            <SolidColorBrush x:Key="SessionTreeMutedForegroundBrush" />
+            <SolidColorBrush x:Key="SessionPlaceholderForegroundBrush" />
             <!-- Fluent draws placeholders in its secondary text color, a near match for typed text.
                  Every field app-wide takes the dimmer placeholder brush instead. -->
             <StaticResource x:Key="TextControlPlaceholderForeground" ResourceKey="SessionPlaceholderForegroundBrush" />
             <StaticResource x:Key="TextControlPlaceholderForegroundPointerOver" ResourceKey="SessionPlaceholderForegroundBrush" />
             <StaticResource x:Key="TextControlPlaceholderForegroundFocused" ResourceKey="SessionPlaceholderForegroundBrush" />
             <StaticResource x:Key="ComboBoxPlaceHolderForeground" ResourceKey="SessionPlaceholderForegroundBrush" />
-            <SolidColorBrush x:Key="SessionTreeSelectionBrush" Color="#264F78" />
-            <SolidColorBrush x:Key="SessionTreeSelectionForegroundBrush" Color="#FFFFFF" />
-            <SolidColorBrush x:Key="SettingsCardBorderBrush" Color="#2B2B2B" />
-            <SolidColorBrush x:Key="SettingsCardBackgroundBrush" Color="#121212" />
-            <!-- PresentationValues.AgentBadgeColor fills the agent badge the same in every theme,
-                 so the symbol drawn on it stays dark in every theme too. -->
-            <SolidColorBrush x:Key="SessionBadgeGlyphBrush" Color="#1B1B1B" />
+            <SolidColorBrush x:Key="SessionTreeSelectionBrush" />
+            <SolidColorBrush x:Key="SessionTreeSelectionForegroundBrush" />
+            <SolidColorBrush x:Key="SettingsCardBorderBrush" />
+            <SolidColorBrush x:Key="SettingsCardBackgroundBrush" />
             <!-- A recessed surface for sample output and code on the Settings page. -->
             <Style x:Key="PreviewSurfaceStyle" TargetType="Border">
                 <Setter Property="Padding" Value="12,10" />
@@ -43,21 +49,37 @@
                     <SolidColorBrush x:Key="SessionSurfaceBrush" Color="#181818" />
                     <SolidColorBrush x:Key="SessionFrameBrush" Color="#3C3C3C" />
                     <SolidColorBrush x:Key="SessionDividerBrush" Color="#424242" />
-                    <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="#0078D4" />
+                    <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="{StaticResource SessionDefaultAccentColor}" />
                     <!-- Dims what sits behind an overlay: the strong scrim behind a modal panel,
                          the subtle one behind the floating sessions pane. -->
                     <SolidColorBrush x:Key="SessionScrimBrush" Color="#66000000" />
                     <SolidColorBrush x:Key="SessionScrimSubtleBrush" Color="#33000000" />
-                    <SolidColorBrush x:Key="SessionRecordingBrush" Color="#E74856" />
+                    <SolidColorBrush x:Key="SessionRecordingBrush" Color="{StaticResource SessionStatusCriticalColor}" />
+                    <!-- Tab state dots, agent badges and workspace alerts; PresentationValues
+                         picks one by key. The badge symbol is drawn dark on every fill. -->
+                    <SolidColorBrush x:Key="SessionStatusInfoBrush" Color="{StaticResource SessionDefaultAccentColor}" />
+                    <SolidColorBrush x:Key="SessionStatusSuccessBrush" Color="{StaticResource SessionStatusSuccessColor}" />
+                    <SolidColorBrush x:Key="SessionStatusCautionBrush" Color="{StaticResource SessionStatusCautionColor}" />
+                    <SolidColorBrush x:Key="SessionStatusCriticalBrush" Color="{StaticResource SessionStatusCriticalColor}" />
+                    <SolidColorBrush x:Key="SessionStatusNeutralBrush" Color="{StaticResource SessionStatusNeutralColor}" />
+                    <SolidColorBrush x:Key="SessionBadgeGlyphBrush" Color="#1B1B1B" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="SessionSurfaceBrush" Color="#F3F3F3" />
                     <SolidColorBrush x:Key="SessionFrameBrush" Color="#C8C8C8" />
                     <SolidColorBrush x:Key="SessionDividerBrush" Color="#E6E6E6" />
-                    <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="#0078D4" />
+                    <SolidColorBrush x:Key="SessionSplitterHoverBrush" Color="{StaticResource SessionDefaultAccentColor}" />
                     <SolidColorBrush x:Key="SessionScrimBrush" Color="#66000000" />
                     <SolidColorBrush x:Key="SessionScrimSubtleBrush" Color="#33000000" />
-                    <SolidColorBrush x:Key="SessionRecordingBrush" Color="#E74856" />
+                    <SolidColorBrush x:Key="SessionRecordingBrush" Color="{StaticResource SessionStatusCriticalColor}" />
+                    <!-- Tab state dots, agent badges and workspace alerts; PresentationValues
+                         picks one by key. The badge symbol is drawn dark on every fill. -->
+                    <SolidColorBrush x:Key="SessionStatusInfoBrush" Color="{StaticResource SessionDefaultAccentColor}" />
+                    <SolidColorBrush x:Key="SessionStatusSuccessBrush" Color="{StaticResource SessionStatusSuccessColor}" />
+                    <SolidColorBrush x:Key="SessionStatusCautionBrush" Color="{StaticResource SessionStatusCautionColor}" />
+                    <SolidColorBrush x:Key="SessionStatusCriticalBrush" Color="{StaticResource SessionStatusCriticalColor}" />
+                    <SolidColorBrush x:Key="SessionStatusNeutralBrush" Color="{StaticResource SessionStatusNeutralColor}" />
+                    <SolidColorBrush x:Key="SessionBadgeGlyphBrush" Color="#1B1B1B" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <SolidColorBrush x:Key="SessionSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
@@ -68,6 +90,15 @@
                     <SolidColorBrush x:Key="SessionScrimBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="SessionScrimSubtleBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="SessionRecordingBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <!-- High Contrast has no status hues: badges and alerts that carry a symbol
+                         fill with the highlight and draw it in highlight text; plain news dots
+                         take the link color; an exited tab or idle agent reads as disabled text. -->
+                    <SolidColorBrush x:Key="SessionStatusInfoBrush" Color="{ThemeResource SystemColorHotlightColor}" />
+                    <SolidColorBrush x:Key="SessionStatusSuccessBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="SessionStatusCautionBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="SessionStatusCriticalBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="SessionStatusNeutralBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
+                    <SolidColorBrush x:Key="SessionBadgeGlyphBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>

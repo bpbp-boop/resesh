@@ -302,11 +302,11 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         }
     }
 
-    private void LightTheme_Click(object sender, RoutedEventArgs e) => SelectTheme("light");
+    private void LightTheme_Click(object sender, RoutedEventArgs e) => SelectTheme(ThemeIds.Light);
 
-    private void DarkTheme_Click(object sender, RoutedEventArgs e) => SelectTheme("dark");
+    private void DarkTheme_Click(object sender, RoutedEventArgs e) => SelectTheme(ThemeIds.Dark);
 
-    private void SystemTheme_Click(object sender, RoutedEventArgs e) => SelectTheme("system");
+    private void SystemTheme_Click(object sender, RoutedEventArgs e) => SelectTheme(ThemeIds.System);
 
     private void SelectTheme(string theme)
     {
@@ -320,7 +320,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
     {
         var wasUpdating = _updatingThemeUi;
         _updatingThemeUi = true;
-        var isSystem = SelectedTheme == "system";
+        var isSystem = ThemeCatalog.IsSystem(SelectedTheme);
         var isLight = !isSystem && ThemeCatalog.IsLight(SelectedTheme);
         LightThemeToggle.IsChecked = isLight;
         DarkThemeToggle.IsChecked = !isSystem && !isLight;
@@ -331,14 +331,14 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         // the palette and disables the fixed-theme picker while it follows Windows.
         if (isSystem)
         {
-            ThemePicker.ItemsSource = new[] { ThemeCatalog.Find("system") };
+            ThemePicker.ItemsSource = new[] { ThemeCatalog.Find(ThemeIds.System) };
             ThemePicker.SelectedIndex = 0;
             ThemePicker.IsEnabled = false;
         }
         else
         {
             var choices = ThemeCatalog.All
-                .Where(theme => theme.Id != "system" && theme.IsLight == isLight)
+                .Where(theme => theme.Id != ThemeIds.System && theme.IsLight == isLight)
                 .ToList();
             ThemePicker.ItemsSource = choices;
             ThemePicker.SelectedItem = choices.FirstOrDefault(theme =>
@@ -351,7 +351,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         ApplyPagePalette(palette);
         if (isSystem)
         {
-            var currentMode = resolved == "light" ? "Light" : "Dark";
+            var currentMode = resolved == ThemeIds.Light ? "Light" : "Dark";
             SystemThemeHint.Text = $"System follows your Windows color mode (currently {currentMode}). Choose Light or Dark to select a fixed color theme.";
             SystemThemeHint.Visibility = Visibility.Visible;
         }
