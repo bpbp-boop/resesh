@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="..\..\eng\WindowsAppSdk.props" />
+
   <PropertyGroup>
     <!-- The app ships as Native AOT: keep this library free of trimming and AOT warnings. -->
     <IsAotCompatible>true</IsAotCompatible>
@@ -24,8 +26,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.6" />
-    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.6" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="$(WindowsAppSdkInteractiveExperiencesVersion)" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="$(WindowsAppSdkWinUIVersion)" />
     <PackageReference Include="Vortice.Direct2D1" Version="3.8.3" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <PackageReference Include="Vortice.DXGI" Version="3.8.3" />

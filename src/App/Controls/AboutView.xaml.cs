@@ -54,9 +54,24 @@ public sealed partial class AboutView : UserControl
         GhosttyValue.Text = AppBuildInfo.GhosttyVersion is { } ghostty ? $"libghostty-vt {ghostty}" : "";
         GhosttyCard.Visibility = PresentationValues.Visible(AppBuildInfo.GhosttyVersion is not null);
 
+        WebsiteCard.Tag = AppBuildInfo.WebsiteUrl;
+        WebsiteCard.Description = Display(AppBuildInfo.WebsiteUrl);
+        ReleasesCard.Tag = AppBuildInfo.ReleasesUrl;
+        IssuesCard.Tag = AppBuildInfo.IssuesUrl;
+        SourceCard.Tag = AppBuildInfo.SourceUrl;
+        SourceCard.Description = Display(AppBuildInfo.SourceUrl);
+        LicenseCard.Tag = AppBuildInfo.LicenseUrl;
+
         DataFolderCard.Description = _dataFolder;
         LogsFolderCard.Description = _logsFolder;
         CreditsList.ItemsSource = Credits;
+    }
+
+    /// <summary>An address as the card shows it: "resesh.net", not "https://resesh.net/".</summary>
+    private static string Display(string url)
+    {
+        var uri = new Uri(url);
+        return (uri.Host + uri.AbsolutePath).TrimEnd('/');
     }
 
     private void CopyDetails_Click(object sender, RoutedEventArgs e)

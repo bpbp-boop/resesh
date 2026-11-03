@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="..\..\eng\WindowsAppSdk.props" />
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
@@ -22,7 +24,6 @@
          install is a third the size of a ReadyToRun build. Applies to dotnet publish only;
          it also turns on the trimming and AOT analyzers for this project. -->
     <PublishAot>true</PublishAot>
-    <WindowsAppSdkRuntimeVersion>2.4.0</WindowsAppSdkRuntimeVersion>
     <GhosttyVtManifest>$(MSBuildThisFileDirectory)..\..\eng\ghostty-vt.json</GhosttyVtManifest>
   </PropertyGroup>
 
@@ -52,9 +53,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="2.1.6" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="$(WindowsAppSdkInteractiveExperiencesVersion)" />
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="$(WindowsAppSdkRuntimeVersion)" GeneratePathProperty="true" />
-    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.6" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="$(WindowsAppSdkWinUIVersion)" />
     <!-- CommunityToolkit.WinUI still declares the old monolithic SDK package. Keep its
          dependency satisfied without importing that package's assets or build targets. -->
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.250108002" ExcludeAssets="all" PrivateAssets="all" />
