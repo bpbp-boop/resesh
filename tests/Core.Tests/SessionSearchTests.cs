@@ -29,6 +29,23 @@ public sealed class SessionSearchTests
         Assert.Equal(expected, SessionSearch.Filter(Fleet, query).Count);
     }
 
+    [Theory]
+    [InlineData("", true)]
+    [InlineData("prod web", true)]   // terms may match different texts
+    [InlineData("web prod", true)]
+    [InlineData("prod db", false)]   // every term must match something
+    [InlineData("  WEB  ", true)]
+    public void MatchesAll_NeedsEveryTermInSomeText(string query, bool expected) =>
+        Assert.Equal(expected, SessionSearch.MatchesAll(query, "web-01", null, "prod/eu"));
+
+    [Fact]
+    public void Matches_AlsoSearchesTextShownBesideTheSession()
+    {
+        var session = new Session { Name = "pwsh", Kind = SessionKind.Local };
+        Assert.False(SessionSearch.Matches(session, "local pwsh"));
+        Assert.True(SessionSearch.Matches(session, "local pwsh", "Local"));
+    }
+
     [Fact]
     public void Rank_PrefersNamePrefixThenNameThenHost()
     {

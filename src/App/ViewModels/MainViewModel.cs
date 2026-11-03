@@ -675,17 +675,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         // A matching folder reveals its complete subtree. Otherwise only matching leaves
         // and their ancestors are projected into the filtered view.
+        // Each term may match the session or what it sits in, its folder path or the Local
+        // root's name, so "local pwsh" finds the pwsh profile as "prod web" finds web in prod.
         var matchingSshFolders = IsSearching
             ? MatchingFolders(_treeSshFolders, query)
             : [];
         var matchingLocalFolders = IsSearching
-            ? MatchingFolders(_treeLocalFolders, query)
+            ? MatchingFolders(_treeLocalFolders, query, TreeNodeViewModel.LocalRootName)
             : [];
-        var localRootMatches = IsSearching && "Local".Contains(query, StringComparison.OrdinalIgnoreCase);
+        var localRootMatches = IsSearching && SessionSearch.MatchesAll(query, TreeNodeViewModel.LocalRootName);
         var sessions = !IsSearching
             ? allSessions
-            : allSessions.Where(s => SessionSearch.Matches(s, query)
-                || (s.IsLocal && localRootMatches)
+            : allSessions.Where(s => SessionSearch.Matches(s, query, s.IsLocal ? TreeNodeViewModel.LocalRootName : null)
                 || IsUnderMatchingFolder(s, s.IsLocal ? matchingLocalFolders : matchingSshFolders)).ToList();
         MatchCount = sessions.Count;
         var localSessions = sessions.Where(s => s.IsLocal).ToList();
@@ -786,8 +787,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         TreeRebuilt?.Invoke();
     }
 
-    private static List<string> MatchingFolders(IEnumerable<string> folders, string query) =>
-        folders.Where(path => path.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+    private static List<string> MatchingFolders(IEnumerable<string> folders, string query, string? root = null) =>
+        folders.Where(path => SessionSearch.MatchesAll(query, path, root)).ToList();
 
     private static bool IsUnderMatchingFolder(Session session, IEnumerable<string> folders) =>
         folders.Any(folder => FolderPaths.IsSelfOrDescendant(session.FolderPath, folder));

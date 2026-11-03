@@ -132,6 +132,30 @@ public sealed class SessionTreeReconcileTests : IDisposable
     }
 
     [Fact]
+    public void FilterTermsMayMatchTheFolderOrTheLocalRoot()
+    {
+        var window = Window();
+        window.AddSession(new Session { Name = "pwsh", Kind = SessionKind.Local }, null);
+        window.AddSession(new Session { Name = "cmd", Kind = SessionKind.Local }, null);
+        window.AddSession(new Session { Name = "pwsh-host", FolderPath = "prod" }, null);
+        window.AddSession(new Session { Name = "web", FolderPath = "prod" }, null);
+        window.AddSession(new Session { Name = "web", FolderPath = "lab" }, null);
+        window.CreateFolder("prod/edge");
+
+        window.SearchText = "local pwsh";
+        var local = Assert.Single(window.RootNodes);
+        Assert.True(local.IsLocalRoot);
+        Assert.Equal(["pwsh"], Describe(local.Children));
+
+        window.SearchText = "prod web";
+        Assert.Equal(["prod/", "  web"], Describe(window.RootNodes));
+
+        // A folder matching every term shows its whole subtree.
+        window.SearchText = "prod edge";
+        Assert.Equal(["prod/", "  edge/"], Describe(window.RootNodes));
+    }
+
+    [Fact]
     public void RemovedNodes_LeaveTheTree()
     {
         var window = Window();
