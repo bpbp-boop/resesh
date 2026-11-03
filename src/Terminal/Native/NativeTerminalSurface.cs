@@ -114,14 +114,14 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private long _lastKeyframeMs;
     private long _lastObservedMs;
 
-    private int _fontSize = 14;
+    private int _fontSize = TerminalDefaults.FontSize;
     private int _zoomDelta;
-    private string _fontFamily = "Cascadia Mono, Consolas, monospace";
-    private TerminalTheme _theme = TerminalThemes.Find("dark");
+    private string _fontFamily = TerminalDefaults.FontFamily;
+    private TerminalTheme _theme = TerminalThemes.Find(TerminalThemes.DefaultId);
     private bool _copyOnSelect;
     private bool _rightClickPaste;
     private TerminalMouseCapture _mouseCapture = TerminalMouseCapture.Scroll;
-    private int _scrollback = 10000;
+    private int _scrollback = TerminalDefaults.Scrollback;
     private bool _readOnly;
     private bool _fixed80Columns;
 
@@ -879,6 +879,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         var b = _theme.Background;
         var luminance = ((b >> 16) & 0xFF) * 299 + ((b >> 8) & 0xFF) * 587 + (b & 0xFF) * 114;
         _ruler.SetTheme(dark: luminance < 128_000, _theme.Background, _theme.Foreground);
+        _ruler.SetFontFamily(_fontFamily);
         lock (_renderGate)
             _marginColor = null; // the next frame reapplies an extended margin over the new theme
         ApplyTextInputStyle();
@@ -893,7 +894,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         bool rightClickPaste, int scrollback, IReadOnlyList<TerminalHighlight>? highlights = null, bool readOnly = false,
         bool fixed80Columns = false)
     {
-        _fontSize = fontSize > 0 ? fontSize : 14;
+        _fontSize = fontSize > 0 ? fontSize : TerminalDefaults.FontSize;
         _fontFamily = string.IsNullOrWhiteSpace(fontFamily) ? _fontFamily : fontFamily;
         _theme = TerminalThemes.Find(theme);
         _copyOnSelect = copyOnSelect;
@@ -911,11 +912,18 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     {
         var relayout = false;
         if (fontSize is > 0 && fontSize != _fontSize) { _fontSize = fontSize.Value; relayout = true; }
-        if (!string.IsNullOrWhiteSpace(fontFamily) && fontFamily != _fontFamily) { _fontFamily = fontFamily; relayout = true; }
+        var fontChanged = !string.IsNullOrWhiteSpace(fontFamily) && fontFamily != _fontFamily;
+        if (fontChanged) { _fontFamily = fontFamily!; relayout = true; }
         if (theme is not null)
         {
             _theme = TerminalThemes.Find(theme);
-            ApplyColors();
+            ApplyColors(); // repaints the panels in the new font too
+        }
+        else if (fontChanged)
+        {
+            // The commands panel and the ruler's card show commands in the terminal's font.
+            _commandsPanel.ApplyTheme(_theme, _fontFamily);
+            _ruler.SetFontFamily(_fontFamily);
         }
         if (copyOnSelect is { } c) _copyOnSelect = c;
         if (rightClickPaste is { } r) _rightClickPaste = r;

@@ -145,11 +145,11 @@ public sealed partial class TerminalTabView
         {
             XamlRoot = XamlRoot,
             Note = PastePlan.Preview(text),
-            OptionText = "Don't ask again (turn it back on in Settings › Terminal)",
+            OptionText = $"Don't ask again (turn it back on in {SettingsCatalog.PathTo(GlobalSettingsTarget.ConfirmMultilinePaste)})",
         };
         var confirmed = await dialog.ConfirmAsync();
         if (confirmed && dialog.IsOptionChecked)
-            App.SaveSettings(App.Settings.Current with { ConfirmMultilinePaste = false });
+            App.SaveSetting(s => s with { ConfirmMultilinePaste = false }, nameof(SettingsViewModel.ConfirmMultilinePaste));
         return confirmed;
     }
 }

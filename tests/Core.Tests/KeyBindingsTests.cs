@@ -21,6 +21,9 @@ public class KeyBindingsTests
         [
             [ShortcutScope.App, ShortcutScope.Window, ShortcutScope.Terminal],
             [ShortcutScope.App, ShortcutScope.Window, ShortcutScope.SessionTree],
+            [ShortcutScope.App, ShortcutScope.Window, ShortcutScope.CommandHistory],
+            [ShortcutScope.App, ShortcutScope.Window, ShortcutScope.HistoryCompare],
+            [ShortcutScope.App, ShortcutScope.Window, ShortcutScope.Welcome],
         ];
         foreach (var scopes in overlapping)
         {
@@ -74,6 +77,48 @@ public class KeyBindingsTests
         Assert.Equal("Alt+←", KeyBindings.Get(ShortcutIds.FocusGroupLeft).Label);
         Assert.Equal("Alt+Shift+→", KeyBindings.Get(ShortcutIds.MoveTabToGroupRight).Label);
         Assert.Equal("Ctrl+1 … Ctrl+8", KeyBindings.Get(ShortcutIds.GoToTab).Label);
+    }
+
+    [Fact]
+    public void HistorySelectionListsTheBackwardKeyFirst()
+    {
+        // The history view moves back for chord 0 and forward for chord 1.
+        Assert.Equal([VirtualKeys.Up, VirtualKeys.Down],
+            KeyBindings.Get(ShortcutIds.HistorySelect).Chords.Select(chord => chord.VirtualKey));
+        Assert.Equal([VirtualKeys.PageUp, VirtualKeys.PageDown],
+            KeyBindings.Get(ShortcutIds.HistorySelectPage).Chords.Select(chord => chord.VirtualKey));
+    }
+
+    [Fact]
+    public void HistoryKeysKeepTheirKeys()
+    {
+        Assert.Equal("Enter", KeyBindings.Get(ShortcutIds.HistoryInsert).Label);
+        Assert.Equal("Ctrl+Enter", KeyBindings.Get(ShortcutIds.HistoryOpenSession).Label);
+        Assert.Equal("F3", KeyBindings.Get(ShortcutIds.HistoryNextMatch).Label);
+        Assert.Equal("Shift+F3", KeyBindings.Get(ShortcutIds.HistoryPreviousMatch).Label);
+        Assert.Equal("F7", KeyBindings.Get(ShortcutIds.HistoryNextChange).Label);
+        Assert.Equal("Shift+F7", KeyBindings.Get(ShortcutIds.HistoryPreviousChange).Label);
+        Assert.Equal("Ctrl+Enter", KeyBindings.Get(ShortcutIds.FinishWelcome).Label);
+        Assert.Equal(ShortcutIds.HistoryClose,
+            KeyBindings.Find(VirtualKeys.Escape, KeyModifiers.None, ShortcutScope.CommandHistory)?.Binding.Id);
+        Assert.Equal(ShortcutIds.HistoryBackToResults,
+            KeyBindings.Find(VirtualKeys.Escape, KeyModifiers.None, ShortcutScope.HistoryCompare)?.Binding.Id);
+    }
+
+    [Fact]
+    public void TerminalPaletteEntriesAreTerminalActionsWithKeywords()
+    {
+        var palette = KeyBindings.All.Where(binding => binding.InTerminalPalette).ToList();
+        Assert.Equal(
+            [ShortcutIds.Paste, ShortcutIds.SelectAll, ShortcutIds.Find, ShortcutIds.ClearScrollback,
+                ShortcutIds.ZoomIn, ShortcutIds.ZoomOut, ShortcutIds.ZoomReset],
+            palette.Select(binding => binding.Id));
+        Assert.All(palette, binding => Assert.False(string.IsNullOrWhiteSpace(binding.PaletteKeywords)));
+        // Find and Paste act on the terminal, so the palette hands focus back to it first.
+        Assert.Equal([ShortcutIds.Paste, ShortcutIds.Find],
+            palette.Where(binding => binding.PaletteKeepsFocus).Select(binding => binding.Id));
+        Assert.DoesNotContain(KeyBindings.All, binding =>
+            binding.PaletteKeywords is not null && binding.Scope != ShortcutScope.Terminal);
     }
 
     [Fact]

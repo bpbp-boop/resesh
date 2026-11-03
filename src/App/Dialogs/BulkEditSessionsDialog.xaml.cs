@@ -72,8 +72,8 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
         JumpBox.SelectedIndex = 0;
 
         ColorBox.Items.Add("No change");
-        foreach (var (name, _) in SessionEditDialog.ColorChoices)
-            ColorBox.Items.Add(name);
+        foreach (var choice in SessionColors.All)
+            ColorBox.Items.Add(choice.Name);
         ColorBox.SelectedIndex = 0;
 
         var icons = new List<Choice> { NoChange };
@@ -116,7 +116,7 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
             SetJumpHost = jump.Change,
             JumpHostId = jump.JumpHostId,
             SetColor = ColorBox.SelectedIndex > 0,
-            ColorTag = ColorBox.SelectedIndex > 0 ? SessionEditDialog.ColorChoices[ColorBox.SelectedIndex - 1].Hex : null,
+            ColorTag = ColorBox.SelectedIndex > 0 ? SessionColors.All[ColorBox.SelectedIndex - 1].Hex : null,
             SetIcon = icon.Change,
             Icon = icon.Value,
             SetTheme = theme.Change,
@@ -160,6 +160,12 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
         {
             changed.Count == 1 ? "1 session will change." : $"{changed.Count} of {_sessions.Count} sessions will change.",
         };
+        var skipped = edit.PersistentSkipped(_sessions).Count;
+        if (skipped > 0)
+        {
+            parts.Add((skipped == 1 ? "1 session uses" : $"{skipped} sessions use")
+                + " PowerShell shell integration, which can't run in a persistent session, and stays as it is.");
+        }
         if (edit.Login is not null)
         {
             var ownLogins = _sessions.Count(s => s.Kind == SessionKind.Ssh && s.Login == SessionLogin.Own);

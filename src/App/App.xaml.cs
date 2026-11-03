@@ -65,12 +65,12 @@ public partial class App : Application
     /// <summary>Resolves the System choice to the Windows color mode used right now.</summary>
     public static string ResolveTheme(string? theme)
     {
-        if (!string.Equals(theme, "system", StringComparison.OrdinalIgnoreCase))
+        if (!ThemeCatalog.IsSystem(theme))
             return ThemeCatalog.Find(theme).Id;
 
         var background = new UISettings().GetColorValue(UIColorType.Background);
         var luminance = (0.2126 * background.R) + (0.7152 * background.G) + (0.0722 * background.B);
-        return luminance >= 128 ? "light" : "dark";
+        return luminance >= 128 ? ThemeIds.Light : ThemeIds.Dark;
     }
 
     public App()
@@ -187,6 +187,10 @@ public partial class App : Application
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
         _uiQueue = _dispatcherQueue;
         CommandCompletionNotifications.SetDispatcher(_dispatcherQueue);
+        // The app-wide chrome brushes are declared without colors; give them the saved
+        // theme's before any window draws with them. Not in the constructor: code can't
+        // read Application resources until it has returned.
+        ThemeVisualPalette.For(ResolveTheme(Settings.Current.Theme)).ApplyToAppResources();
 
         _storesLoad!.GetAwaiter().GetResult();
         if (DemoMode.IsEnabled)
@@ -266,7 +270,7 @@ public partial class App : Application
     /// pruned even while it is turned off, so the retention promise still holds.</summary>
     internal static void PruneCommandHistory()
     {
-        var days = Math.Clamp(Settings.Current.CommandHistoryDays, 1, 3650);
+        var days = SettingRanges.CommandHistoryDays.Clamp(Settings.Current.CommandHistoryDays);
         _ = Task.Run(() =>
         {
             try { History.Prune(days); }
@@ -419,6 +423,17 @@ public partial class App : Application
         if (property is nameof(ViewModels.SettingsViewModel.KeepCommandHistory)
             or nameof(ViewModels.SettingsViewModel.CommandHistoryDays))
             PruneCommandHistory();
+    }
+
+    /// <summary>Saves one setting changed outside the Settings page (a paste prompt, a menu) and
+    /// applies it the way the page does, so every window and every open Settings page shows it.
+    /// <paramref name="property"/> is the <see cref="ViewModels.SettingsViewModel"/> property.</summary>
+    internal static bool SaveSetting(Func<AppSettings, AppSettings> change, string property)
+    {
+        if (!SaveSettings(change(Settings.Current)))
+            return false;
+        ApplySettingChange(property);
+        return true;
     }
 
     /// <summary>Open terminals in every window re-read the saved highlighting rules.</summary>

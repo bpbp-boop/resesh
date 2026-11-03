@@ -75,7 +75,7 @@ internal sealed partial class CommandsPanel : Grid
         _close.BorderThickness = new Thickness(0);
         _close.HorizontalAlignment = HorizontalAlignment.Right;
         AutomationProperties.SetName(_close, "Close commands");
-        ToolTipService.SetToolTip(_close, "Close commands (Ctrl+Shift+O)");
+        ToolTipService.SetToolTip(_close, TerminalSurface.WithShortcut("Close commands", "terminal.commandsPanel"));
         _close.Click += (_, _) => CloseRequested?.Invoke();
 
         var header = new Grid { Margin = new Thickness(10, 5, 6, 5) };
@@ -130,8 +130,7 @@ internal sealed partial class CommandsPanel : Grid
         _count.Foreground = _mutedBrush;
         _close.Foreground = _mutedBrush;
         _list.Foreground = _foregroundBrush;
-        var family = fontFamily.Split(',')[0].Trim().Trim('"', '\'');
-        _list.FontFamily = new FontFamily(family.Length == 0 ? "Cascadia Mono" : family);
+        _list.FontFamily = new FontFamily(TerminalDefaults.PrimaryFamily(fontFamily));
     }
 
     /// <summary>Rebinds the list when the marks changed; keeps scroll position otherwise.</summary>

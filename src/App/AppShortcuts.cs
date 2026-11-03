@@ -23,13 +23,27 @@ internal static class AppShortcuts
                     chord.VirtualKey,
                     chord.Modifiers.HasFlag(KeyModifiers.Ctrl),
                     chord.Modifiers.HasFlag(KeyModifiers.Shift),
-                    chord.Modifiers.HasFlag(KeyModifiers.Alt)))]))];
+                    chord.Modifiers.HasFlag(KeyModifiers.Alt)))],
+                Label(binding.Id)))];
 
     internal static KeyboardAccelerator Accelerator(KeyChord chord) => new()
     {
         Key = (VirtualKey)chord.VirtualKey,
         Modifiers = ToVirtualKeyModifiers(chord.Modifiers),
     };
+
+    /// <summary>Adds an accelerator for each of the binding's chords, for a page whose key works
+    /// only while that page has focus.</summary>
+    internal static void AddAccelerators(Microsoft.UI.Xaml.UIElement element, string id,
+        Windows.Foundation.TypedEventHandler<KeyboardAccelerator, KeyboardAcceleratorInvokedEventArgs> invoked)
+    {
+        foreach (var chord in KeyBindings.Get(id).Chords)
+        {
+            var accelerator = Accelerator(chord);
+            accelerator.Invoked += invoked;
+            element.KeyboardAccelerators.Add(accelerator);
+        }
+    }
 
     internal static VirtualKeyModifiers ToVirtualKeyModifiers(KeyModifiers modifiers)
     {
@@ -63,6 +77,10 @@ internal static class AppShortcuts
     }
 
     internal static string Label(KeyChord chord) => string.Join("+", Parts(chord));
+
+    /// <summary>A tooltip that names the action's key, as "Next match (F3)". Tooltips take the
+    /// key from the table rather than typing it, so they cannot drift from what the key does.</summary>
+    internal static string ToolTip(string text, string id) => $"{text} ({Label(id)})";
 
     /// <summary>The keycaps of a chord. Punctuation keys are named by what the current
     /// layout prints on them: VK_OEM_2 is "/" on US keyboards and "#" on German ones.</summary>

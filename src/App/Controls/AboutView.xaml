@@ -52,39 +52,38 @@
             </Button>
         </Grid>
 
+        <!-- Each link's address comes from AppBuildInfo; the code-behind sets it as the Tag. -->
         <TextBlock Text="Links" Style="{StaticResource AboutGroupHeader}" />
         <toolkit:SettingsCard
+            x:Name="WebsiteCard"
             Header="Website"
-            Description="resesh.net"
             IsClickEnabled="True"
-            Tag="https://resesh.net/"
             Click="Link_Click">
             <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
             <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE774;" /></toolkit:SettingsCard.HeaderIcon>
         </toolkit:SettingsCard>
         <toolkit:SettingsCard
+            x:Name="ReleasesCard"
             Header="Release notes"
             Description="What changed in each version, and downloads for the latest one"
             IsClickEnabled="True"
-            Tag="https://github.com/bpbp-boop/resesh/releases"
             Click="Link_Click">
             <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
             <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE8FD;" /></toolkit:SettingsCard.HeaderIcon>
         </toolkit:SettingsCard>
         <toolkit:SettingsCard
+            x:Name="IssuesCard"
             Header="Report a problem"
             Description="Open an issue on GitHub. Copy details above first and paste them in."
             IsClickEnabled="True"
-            Tag="https://github.com/bpbp-boop/resesh/issues"
             Click="Link_Click">
             <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
             <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xEBE8;" /></toolkit:SettingsCard.HeaderIcon>
         </toolkit:SettingsCard>
         <toolkit:SettingsCard
+            x:Name="SourceCard"
             Header="Source code"
-            Description="github.com/bpbp-boop/resesh"
             IsClickEnabled="True"
-            Tag="https://github.com/bpbp-boop/resesh"
             Click="Link_Click">
             <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
             <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE943;" /></toolkit:SettingsCard.HeaderIcon>
@@ -126,10 +125,10 @@
 
         <TextBlock Text="License" Style="{StaticResource AboutGroupHeader}" />
         <toolkit:SettingsCard
+            x:Name="LicenseCard"
             Header="GNU General Public License, version 2"
             Description="resesh is free software: you can use, study, share, and change it under the terms of the GPL."
             IsClickEnabled="True"
-            Tag="https://github.com/bpbp-boop/resesh/blob/master/LICENSE"
             Click="Link_Click">
             <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
             <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE8A5;" /></toolkit:SettingsCard.HeaderIcon>

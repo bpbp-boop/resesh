@@ -12,8 +12,6 @@ namespace Resesh.App.Controls;
 /// </summary>
 public sealed partial class SettingsPage : UserControl
 {
-    private enum Section { General, Sessions, Identities, Recording, Highlighting, Agents, Shortcuts, About }
-
     private readonly HighlightsStore _highlightDraft = App.Highlights.CreateDraft();
 
     public SettingsViewModel ViewModel { get; }
@@ -25,6 +23,9 @@ public sealed partial class SettingsPage : UserControl
     {
         ViewModel = viewModel;
         InitializeComponent();
+        NumberBoxRanges.Limit(FontSizeBox, SettingRanges.FontSize);
+        NumberBoxRanges.Limit(ScrollbackBox, SettingRanges.Scrollback);
+        NumberBoxRanges.Limit(HistoryDaysBox, SettingRanges.CommandHistoryDays);
         HistoryDescription.Text =
             "Save each finished command with its output, folder, and result on this computer, and search it with "
             + $"{AppShortcuts.Label(ShortcutIds.CommandHistory)}. Output can include secrets that a server prints. "
@@ -34,13 +35,13 @@ public sealed partial class SettingsPage : UserControl
         HighlightEditorHost.Content = highlightEditor;
         HookIdentityChanges();
         SshAlgorithmsHost.Content = BuildSshAlgorithms();
-        Show(Section.General);
+        Show(SettingsSection.General);
     }
 
     /// <summary>Shows the section holding <paramref name="target"/>, scrolls to it, and focuses it.</summary>
     public void Navigate(GlobalSettingsTarget target)
     {
-        Show(SectionOf(target));
+        Show(SettingsCatalog.Of(target).Section);
         if (target == GlobalSettingsTarget.Sessions)
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, SessionsManager.FocusFilter);
         if (FieldOf(target) is not var (card, control))
@@ -53,25 +54,11 @@ public sealed partial class SettingsPage : UserControl
         });
     }
 
-    private static Section SectionOf(GlobalSettingsTarget target) => target switch
-    {
-        GlobalSettingsTarget.Recording or GlobalSettingsTarget.RecordingDirectory
-            or GlobalSettingsTarget.AlwaysRecord or GlobalSettingsTarget.RewindMinutes
-            or GlobalSettingsTarget.RewindMegabytes or GlobalSettingsTarget.CommandHistory
-            or GlobalSettingsTarget.CommandHistoryDays => Section.Recording,
-        GlobalSettingsTarget.Highlighting => Section.Highlighting,
-        GlobalSettingsTarget.Identities or GlobalSettingsTarget.SshAlgorithms => Section.Identities,
-        GlobalSettingsTarget.Sessions => Section.Sessions,
-        GlobalSettingsTarget.Agents or GlobalSettingsTarget.ShowAgentIcons
-            or GlobalSettingsTarget.AgentAlertFlash or GlobalSettingsTarget.AgentAlertSound => Section.Agents,
-        GlobalSettingsTarget.About => Section.About,
-        _ => Section.General,
-    };
-
     private (FrameworkElement Card, Control Control)? FieldOf(GlobalSettingsTarget target) => target switch
     {
         GlobalSettingsTarget.Theme => (ThemeCard, ThemeBox),
         GlobalSettingsTarget.FontFamily => (FontFamilyCard, FontFamilyBox.FocusTarget),
+        GlobalSettingsTarget.FallbackFonts => (FallbackFontsCard, FallbackFontsBox),
         GlobalSettingsTarget.FontSize => (FontSizeCard, FontSizeBox),
         GlobalSettingsTarget.Scrollback => (ScrollbackCard, ScrollbackBox),
         GlobalSettingsTarget.CopyOnSelect => (CopyOnSelectCard, CopyOnSelectSwitch),
@@ -81,6 +68,9 @@ public sealed partial class SettingsPage : UserControl
         GlobalSettingsTarget.ShowStatusBar => (ShowStatusBarCard, ShowStatusBarSwitch),
         GlobalSettingsTarget.SessionsPaneLayout => (SessionsPaneLayoutCard, SessionsPaneLayoutBox),
         GlobalSettingsTarget.ReopenLastLayout => (ReopenLastLayoutCard, ReopenLastLayoutSwitch),
+        GlobalSettingsTarget.LaunchAtSignIn => (LaunchAtSignInCard, LaunchAtSignInSwitch),
+        GlobalSettingsTarget.ConfirmCloseActiveSessions => (ConfirmCloseCard, ConfirmCloseSwitch),
+        GlobalSettingsTarget.WriteCrashReports => (CrashReportsCard, CrashReportsSwitch),
         GlobalSettingsTarget.RecordingDirectory => (RecordingDirectoryCard, RecordingDirectoryBox),
         GlobalSettingsTarget.AlwaysRecord => (AlwaysRecordCard, AlwaysRecordSwitch),
         GlobalSettingsTarget.RewindMinutes => (RewindMinutesCard, RewindMinutesBox),
@@ -95,53 +85,65 @@ public sealed partial class SettingsPage : UserControl
     };
 
     /// <summary>Saves each change that leaves every kind with something on; until then the
-    /// picker shows what is wrong and the saved setting stays as it was.</summary>
+    /// picker shows what is wrong and the saved setting stays as it was. The picker is not a
+    /// binding, so it follows the view model's change notifications itself: Settings in
+    /// another window can change the setting, and a save here writes only the kinds changed
+    /// here, so it never puts back what that window turned off.</summary>
     private SshAlgorithmPicker BuildSshAlgorithms()
     {
-        var picker = new SshAlgorithmPicker(followsApp: false) { Value = ViewModel.SshAlgorithms };
+        var shown = ViewModel.SshAlgorithms;
+        var picker = new SshAlgorithmPicker(followsApp: false) { Value = shown };
         picker.SetAppDefaults(null);
         picker.Changed += () =>
         {
             if (picker.Error is null)
-                ViewModel.SshAlgorithms = picker.Value;
+            {
+                ViewModel.ChangeSshAlgorithms(shown, picker.Value);
+                shown = ViewModel.SshAlgorithms;
+            }
+        };
+        ViewModel.PropertyChanged += (_, e) =>
+        {
+            if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName == nameof(SettingsViewModel.SshAlgorithms))
+                picker.Value = shown = ViewModel.SshAlgorithms;
         };
         return picker;
     }
 
-    private void Show(Section section)
+    private void Show(SettingsSection section)
     {
-        GeneralSection.Visibility = PresentationValues.Visible(section == Section.General);
-        SessionsSection.Visibility = PresentationValues.Visible(section == Section.Sessions);
-        IdentitiesSection.Visibility = PresentationValues.Visible(section == Section.Identities);
-        RecordingSection.Visibility = PresentationValues.Visible(section == Section.Recording);
-        HighlightingSection.Visibility = PresentationValues.Visible(section == Section.Highlighting);
-        AgentsSection.Visibility = PresentationValues.Visible(section == Section.Agents);
-        ShortcutsSection.Visibility = PresentationValues.Visible(section == Section.Shortcuts);
-        AboutSection.Visibility = PresentationValues.Visible(section == Section.About);
+        GeneralSection.Visibility = PresentationValues.Visible(section == SettingsSection.General);
+        SessionsSection.Visibility = PresentationValues.Visible(section == SettingsSection.Sessions);
+        IdentitiesSection.Visibility = PresentationValues.Visible(section == SettingsSection.Identities);
+        RecordingSection.Visibility = PresentationValues.Visible(section == SettingsSection.Recording);
+        HighlightingSection.Visibility = PresentationValues.Visible(section == SettingsSection.Highlighting);
+        AgentsSection.Visibility = PresentationValues.Visible(section == SettingsSection.Agents);
+        ShortcutsSection.Visibility = PresentationValues.Visible(section == SettingsSection.Shortcuts);
+        AboutSection.Visibility = PresentationValues.Visible(section == SettingsSection.About);
         var item = section switch
         {
-            Section.Sessions => SessionsItem,
-            Section.Identities => IdentitiesItem,
-            Section.Recording => RecordingItem,
-            Section.Highlighting => HighlightingItem,
-            Section.Agents => AgentsItem,
-            Section.Shortcuts => ShortcutsItem,
-            Section.About => AboutItem,
+            SettingsSection.Sessions => SessionsItem,
+            SettingsSection.Identities => IdentitiesItem,
+            SettingsSection.Recording => RecordingItem,
+            SettingsSection.Highlighting => HighlightingItem,
+            SettingsSection.Agents => AgentsItem,
+            SettingsSection.Shortcuts => ShortcutsItem,
+            SettingsSection.About => AboutItem,
             _ => GeneralItem,
         };
         if (!ReferenceEquals(Sections.SelectedItem, item))
             Sections.SelectedItem = item;
-        if (section == Section.Recording)
+        if (section == SettingsSection.Recording)
             ViewModel.RefreshHistoryUsage();
-        if (section == Section.Identities)
+        if (section == SettingsSection.Identities)
             RefreshIdentities();
-        if (section == Section.Sessions)
+        if (section == SettingsSection.Sessions)
             SessionsManager.Refresh();
     }
 
     private void Sections_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (args.SelectedItemContainer?.Tag is string tag && Enum.TryParse<Section>(tag, out var section))
+        if (args.SelectedItemContainer?.Tag is string tag && Enum.TryParse<SettingsSection>(tag, out var section))
             Show(section);
     }
 

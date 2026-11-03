@@ -176,7 +176,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             var isHighContrast = App.IsHighContrast;
             var highContrastChanged = isHighContrast != _isHighContrast;
             _isHighContrast = isHighContrast;
-            if (highContrastChanged || string.Equals(theme, "system", StringComparison.OrdinalIgnoreCase))
+            if (highContrastChanged || ThemeCatalog.IsSystem(theme))
                 ApplyThemeToApp(theme);
         });
     }
@@ -641,37 +641,30 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         };
     }
 
-    /// <summary>Terminal actions run in the page, as their keys do; Find keeps focus in its field.</summary>
+    /// <summary>Terminal actions run in the page, as their keys do; Find keeps focus in its field.
+    /// The table says which terminal actions the palette lists, under the titles its keys show.</summary>
     private IReadOnlyList<CommandPaletteEntry> BuildTerminalPageCommands()
     {
         if (ViewModel.ActiveTab is not { View: TerminalTabView terminal, IsLocked: false })
             return [];
 
-        var commands = new List<CommandPaletteEntry>();
-        void AddTerminal(string title, string keywords, string id, bool keepFocus = false) =>
-            commands.Add(new CommandPaletteEntry
+        return [.. KeyBindings.All
+            .Where(binding => binding.InTerminalPalette)
+            .Select(binding => new CommandPaletteEntry
             {
-                Category = "Terminal",
-                Title = title,
-                Keywords = keywords,
-                Shortcut = AppShortcuts.Label(id),
-                KeepActionFocus = keepFocus,
+                Category = KeyBindings.TerminalCategory,
+                Title = binding.Title,
+                Keywords = binding.PaletteKeywords!,
+                Shortcut = AppShortcuts.Label(binding.Id),
+                KeepActionFocus = binding.PaletteKeepsFocus,
                 ExecuteAsync = () =>
                 {
-                    if (keepFocus)
+                    if (binding.PaletteKeepsFocus)
                         terminal.FocusTerminal();
-                    terminal.InvokeTerminalShortcut(id);
+                    terminal.InvokeTerminalShortcut(binding.Id);
                     return Task.CompletedTask;
                 },
-            });
-        AddTerminal("Find", "search text scrollback", ShortcutIds.Find, keepFocus: true);
-        AddTerminal("Paste", "clipboard insert", ShortcutIds.Paste, keepFocus: true);
-        AddTerminal("Select All", "selection copy", ShortcutIds.SelectAll);
-        AddTerminal("Clear Scrollback", "history buffer reset clean", ShortcutIds.ClearScrollback);
-        AddTerminal("Zoom In", "font size bigger larger", ShortcutIds.ZoomIn);
-        AddTerminal("Zoom Out", "font size smaller", ShortcutIds.ZoomOut);
-        AddTerminal("Reset Zoom", "font size default", ShortcutIds.ZoomReset);
-        return commands;
+            })];
     }
 
     // ---- Local profiles: default launch + split-button menu ----
@@ -693,8 +686,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         string defaultFolder,
         SessionSettingsTarget initialTarget = SessionSettingsTarget.General)
     {
-        // Callers pass the copy they show (a tree node, a table row); edit the saved record.
-        existing = existing is null ? null : App.Store.Find(existing.Id) ?? existing;
+        existing = Saved(existing);
         var isCurrentDefault = existing is not null && App.Settings.Current.DefaultLocalProfileId == existing.Id;
         var dialog = new LocalProfileEditDialog(
             ViewModel.LocalFolderPathsForPicker, existing, defaultFolder, isCurrentDefault, initialTarget)
@@ -707,8 +699,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
         if (existing is null)
             ViewModel.AddSession(result, null);
+        else if (RebaseOnSaved(existing, result) is { } merged)
+            ViewModel.UpdateSession(merged, null);
         else
-            ViewModel.UpdateSession(result, null);
+            return;
         if (dialog.MakeDefault && App.Settings.Current.DefaultLocalProfileId != result.Id)
             App.SaveSettings(App.Settings.Current with { DefaultLocalProfileId = result.Id });
     }
@@ -1315,7 +1309,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         return page;
     }
 
-    /// <summary>Re-reads this window's Settings page after another window or command changed settings.</summary>
+    /// <summary>Re-reads this window's Settings pages, and Welcome, which shows some of the same
+    /// settings, after another window or command changed settings.</summary>
     private void RefreshSettingsPage(SettingsViewModel? source)
     {
         // Dragging Settings between windows can leave two Settings tabs in one window.
@@ -1323,6 +1318,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             if (tab.View is SettingsPage page && !ReferenceEquals(page.ViewModel, source))
                 page.ViewModel.Refresh();
+            else if (tab.View is OnboardingView welcome)
+                welcome.Refresh(App.Settings.Current);
         }
     }
 
@@ -1379,8 +1376,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private void SetStatusBarVisible(bool visible)
     {
-        if (App.SaveSettings(App.Settings.Current with { ShowStatusBar = visible }))
-            App.ApplySettingChange(nameof(SettingsViewModel.ShowStatusBar));
+        App.SaveSetting(s => s with { ShowStatusBar = visible }, nameof(SettingsViewModel.ShowStatusBar));
     }
 
     private void ApplySettingsToApp(AppSettings settings)
@@ -1437,18 +1433,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         var palette = ThemeVisualPalette.For(theme);
         _themePalette = palette;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionShellBrush"]).Color = palette.Shell;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionChromeBrush"]).Color = palette.Chrome;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionAccentBrush"]).Color = palette.Accent;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionInputBrush"]).Color = palette.Input;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionChromeFrameBrush"]).Color = palette.Frame;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeForegroundBrush"]).Color = palette.TreeForeground;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeMutedForegroundBrush"]).Color = palette.TreeMutedForeground;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionPlaceholderForegroundBrush"]).Color = palette.Placeholder;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeSelectionBrush"]).Color = palette.TreeSelection;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SessionTreeSelectionForegroundBrush"]).Color = palette.TreeSelectionForeground;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SettingsCardBorderBrush"]).Color = palette.Frame;
-        ((Microsoft.UI.Xaml.Media.SolidColorBrush)Application.Current.Resources["SettingsCardBackgroundBrush"]).Color = palette.Input;
+        palette.ApplyToAppResources();
         RepaintSplitterLines();
         foreach (var groupView in _groupViews.Values)
             groupView.ApplyTheme(palette);
@@ -1502,12 +1487,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     // ---- Dialog helpers ----
 
     private async Task OpenSessionEditorAsync(Session? existing, string defaultFolder,
-        SessionKind newKind = SessionKind.Ssh)
+        SessionKind newKind = SessionKind.Ssh, string? notice = null,
+        SessionSettingsTarget initialTarget = SessionSettingsTarget.General)
     {
-        // Callers pass the copy they show (a tree node, a table row); edit the saved record.
-        existing = existing is null ? null : App.Store.Find(existing.Id) ?? existing;
+        existing = Saved(existing);
         var dialog = new SessionEditDialog(ViewModel.FolderPathsForPicker, existing, defaultFolder, App.SshKeys,
-            newKind: newKind)
+            notice, initialTarget, newKind)
         {
             XamlRoot = Root.XamlRoot,
         };
@@ -1517,9 +1502,26 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
         if (existing is null)
             ViewModel.AddSession(result, dialog.Password);
+        else if (RebaseOnSaved(existing, result) is { } merged)
+            ViewModel.UpdateSession(result = merged, dialog.Password);
         else
-            ViewModel.UpdateSession(result, dialog.Password);
-        dialog.SaveProxyPassword();
+            return;
+        dialog.SaveProxyPassword(result);
+    }
+
+    /// <summary>The session as saved now: a tree node, list row or tab can hold an older copy.</summary>
+    private static Session? Saved(Session? session) =>
+        session is not null && App.Store.Find(session.Id) is { } saved ? saved : session;
+
+    /// <summary>An editor's changes applied to the session as saved now, so what changed while
+    /// it was open (a folder moved in another window, an icon suggested on connect) is kept.
+    /// Null, after a notice, when the session was deleted meanwhile: saving would bring it back.</summary>
+    private Session? RebaseOnSaved(Session original, Session edited)
+    {
+        if (App.Store.Find(original.Id) is { } latest)
+            return SessionMerge.Rebase(original, edited, latest);
+        ShowOperationNotice("Changes not saved", $"\"{original.Name}\" was deleted while it was being edited.");
+        return null;
     }
 
     private Task<string?> PromptAsync(string title, string placeholder, string initial) =>

@@ -379,7 +379,7 @@
                                                     Width="10"
                                                     Height="10"
                                                     Data="{x:Bind local:PresentationValues.AgentBadgeSymbol(Agent.Attention), Mode=OneWay}"
-                                                    Stroke="{StaticResource SessionBadgeGlyphBrush}"
+                                                    Stroke="{ThemeResource SessionBadgeGlyphBrush}"
                                                     StrokeThickness="1.6"
                                                     StrokeStartLineCap="Round"
                                                     StrokeEndLineCap="Round"
@@ -600,7 +600,7 @@
                             <FontIcon Glyph="&#xE81C;" FontSize="10" />
                     </ToggleButton>
                     <ToggleButton x:Name="ShowCommandsButton" Width="32" Height="32" Padding="0"
-                                  Click="ShowCommandsButton_Click" ToolTipService.ToolTip="Show commands (Ctrl+Shift+O)">
+                                  Click="ShowCommandsButton_Click">
                             <FontIcon Glyph="&#xE756;" FontSize="10" />
                     </ToggleButton>
                     <Rectangle x:Name="FilePaneDivider" Width="1" Height="18" Margin="2,0"
@@ -608,8 +608,7 @@
                     <!-- A quiet panel toggle: label and glyph only, tinted while the pane is
                          open. Folder actions live in the file pane's own header. -->
                     <ToggleButton x:Name="FilePaneToggle" Height="28" Padding="8,0,10,0"
-                                  Click="FilePaneToggle_Click"
-                                  ToolTipService.ToolTip="Show File Pane (Ctrl+Shift+E)">
+                                  Click="FilePaneToggle_Click">
                         <ToggleButton.Resources>
                             <ResourceDictionary>
                                 <ResourceDictionary.ThemeDictionaries>

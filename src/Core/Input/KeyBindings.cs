@@ -21,8 +21,18 @@ public enum ShortcutScope
     /// <summary>Only while a terminal has focus. The terminal handles it itself.</summary>
     Terminal,
 
-    /// <summary>Only while the session tree has focus.</summary>
+    /// <summary>Only while a list of saved sessions has focus: the session tree, or the
+    /// sessions table in Settings. Both give a key the same meaning.</summary>
     SessionTree,
+
+    /// <summary>Only while the command history search is open, browsing results.</summary>
+    CommandHistory,
+
+    /// <summary>Only while the command history compares two runs of a command.</summary>
+    HistoryCompare,
+
+    /// <summary>Only on the Welcome page.</summary>
+    Welcome,
 }
 
 /// <summary>Extra state a shortcut needs before it takes the key from the terminal.</summary>
@@ -70,8 +80,14 @@ public sealed record KeyBinding(
     IReadOnlyList<KeyChord> Chords,
     string Note = "",
     ShortcutCondition Condition = ShortcutCondition.None,
-    string? DisplayLabel = null)
+    string? DisplayLabel = null,
+    string? PaletteKeywords = null,
+    bool PaletteKeepsFocus = false)
 {
+    /// <summary>Whether the command palette lists this terminal action for the active tab.
+    /// App and window shortcuts reach the palette through the command catalog instead.</summary>
+    public bool InTerminalPalette => Scope == ShortcutScope.Terminal && PaletteKeywords is not null;
+
     /// <summary>The text menus and the command palette show next to the action.</summary>
     public string Label => DisplayLabel ?? Chords[0].Label;
 }
@@ -135,6 +151,20 @@ public static class ShortcutIds
     public const string OpenSelection = "tree.open";
     public const string EditSelection = "tree.edit";
     public const string DeleteSelection = "tree.delete";
+
+    public const string HistorySelect = "history.select";
+    public const string HistorySelectPage = "history.selectPage";
+    public const string HistoryInsert = "history.insert";
+    public const string HistoryOpenSession = "history.openSession";
+    public const string HistoryNextMatch = "history.nextMatch";
+    public const string HistoryPreviousMatch = "history.previousMatch";
+    public const string HistoryDelete = "history.delete";
+    public const string HistoryClose = "history.close";
+    public const string HistoryNextChange = "history.nextChange";
+    public const string HistoryPreviousChange = "history.previousChange";
+    public const string HistoryBackToResults = "history.backToResults";
+
+    public const string FinishWelcome = "welcome.finish";
 }
 
 /// <summary>
@@ -156,10 +186,11 @@ public static class KeyBindings
     public const string SplitCategory = "Split View";
     public const string TerminalCategory = "Terminal";
     public const string SessionTreeCategory = "Session Tree";
+    public const string CommandHistoryCategory = "Command History";
 
     /// <summary>Display order of the categories.</summary>
     public static IReadOnlyList<string> Categories { get; } =
-        [ApplicationCategory, TabsCategory, SplitCategory, TerminalCategory, SessionTreeCategory];
+        [ApplicationCategory, TabsCategory, SplitCategory, TerminalCategory, SessionTreeCategory, CommandHistoryCategory];
 
     public static IReadOnlyList<KeyBinding> All { get; } = Build();
 
@@ -198,8 +229,9 @@ public static class KeyBindings
         var list = new List<KeyBinding>();
 
         void Add(string id, string category, string title, ShortcutScope scope, KeyChord[] chords,
-            string note = "", ShortcutCondition condition = ShortcutCondition.None, string? display = null) =>
-            list.Add(new KeyBinding(id, category, title, scope, chords, note, condition, display));
+            string note = "", ShortcutCondition condition = ShortcutCondition.None, string? display = null,
+            string? palette = null, bool keepFocus = false) =>
+            list.Add(new KeyBinding(id, category, title, scope, chords, note, condition, display, palette, keepFocus));
 
         const string App = ApplicationCategory;
         Add(ShortcutIds.CommandPalette, App, "Command Palette", ShortcutScope.App, [Letter(CtrlShift, 'P')]);
@@ -273,11 +305,14 @@ public static class KeyBindings
             [Letter(CtrlShift, 'C'), Chord(Ctrl, VirtualKeys.Insert, "Insert")],
             "When text is selected. Otherwise the key goes to the shell");
         Add(ShortcutIds.Paste, Term, "Paste", ShortcutScope.Terminal,
-            [Letter(CtrlShift, 'V'), Chord(Shift, VirtualKeys.Insert, "Insert")]);
-        Add(ShortcutIds.SelectAll, Term, "Select All", ShortcutScope.Terminal, [Letter(CtrlShift, 'A')]);
-        Add(ShortcutIds.Find, Term, "Find", ShortcutScope.Terminal, [Letter(CtrlShift, 'F')]);
+            [Letter(CtrlShift, 'V'), Chord(Shift, VirtualKeys.Insert, "Insert")],
+            palette: "clipboard insert", keepFocus: true);
+        Add(ShortcutIds.SelectAll, Term, "Select All", ShortcutScope.Terminal, [Letter(CtrlShift, 'A')],
+            palette: "selection copy");
+        Add(ShortcutIds.Find, Term, "Find", ShortcutScope.Terminal, [Letter(CtrlShift, 'F')],
+            palette: "search text scrollback", keepFocus: true);
         Add(ShortcutIds.ClearScrollback, Term, "Clear Scrollback", ShortcutScope.Terminal, [Letter(CtrlShift, 'L')],
-            "Keeps the current line. Ctrl+L still clears only the screen");
+            "Keeps the current line. Ctrl+L still clears only the screen", palette: "history buffer reset clean");
         Add(ShortcutIds.ScrollPageUp, Term, "Scroll Up One Page", ShortcutScope.Terminal,
             [Chord(Shift, VirtualKeys.PageUp, "PgUp")]);
         Add(ShortcutIds.ScrollPageDown, Term, "Scroll Down One Page", ShortcutScope.Terminal,
@@ -295,11 +330,12 @@ public static class KeyBindings
         Add(ShortcutIds.Bookmark, Term, "Toggle Bookmark", ShortcutScope.Terminal, [Letter(CtrlShift, 'M')]);
         Add(ShortcutIds.ZoomIn, Term, "Zoom In", ShortcutScope.Terminal,
             [Chord(Ctrl, VirtualKeys.OemPlus, "="), Chord(Ctrl, VirtualKeys.NumpadAdd, "Num +")],
-            "Also Ctrl+mouse wheel. Zoom applies to this tab only");
+            "Also Ctrl+mouse wheel. Zoom applies to this tab only", palette: "font size bigger larger");
         Add(ShortcutIds.ZoomOut, Term, "Zoom Out", ShortcutScope.Terminal,
-            [Chord(Ctrl, VirtualKeys.Minus, "-"), Chord(Ctrl, VirtualKeys.NumpadSubtract, "Num -")]);
+            [Chord(Ctrl, VirtualKeys.Minus, "-"), Chord(Ctrl, VirtualKeys.NumpadSubtract, "Num -")],
+            palette: "font size smaller");
         Add(ShortcutIds.ZoomReset, Term, "Reset Zoom", ShortcutScope.Terminal,
-            [Chord(Ctrl, '0', "0"), Chord(Ctrl, VirtualKeys.Numpad0, "Num 0")]);
+            [Chord(Ctrl, '0', "0"), Chord(Ctrl, VirtualKeys.Numpad0, "Num 0")], palette: "font size default");
 
         const string Tree = SessionTreeCategory;
         Add(ShortcutIds.OpenSelection, Tree, "Connect or Open", ShortcutScope.SessionTree,
@@ -308,6 +344,36 @@ public static class KeyBindings
             [Chord(KeyModifiers.None, VirtualKeys.F2, "F2")]);
         Add(ShortcutIds.DeleteSelection, Tree, "Delete", ShortcutScope.SessionTree,
             [Chord(KeyModifiers.None, VirtualKeys.Delete, "Delete")], "Asks before deleting");
+
+        const string History = CommandHistoryCategory;
+        Add(ShortcutIds.HistorySelect, History, "Select Previous or Next Result", ShortcutScope.CommandHistory,
+            [Chord(KeyModifiers.None, VirtualKeys.Up, "↑"), Chord(KeyModifiers.None, VirtualKeys.Down, "↓")],
+            "From the search box or the result list", display: "↑ ↓");
+        Add(ShortcutIds.HistorySelectPage, History, "Move Ten Results", ShortcutScope.CommandHistory,
+            [Chord(KeyModifiers.None, VirtualKeys.PageUp, "PgUp"), Chord(KeyModifiers.None, VirtualKeys.PageDown, "PgDn")],
+            "From the search box or the result list");
+        Add(ShortcutIds.HistoryInsert, History, "Insert in Terminal", ShortcutScope.CommandHistory,
+            [Chord(KeyModifiers.None, VirtualKeys.Enter, "Enter")],
+            "Types the command at the active tab's prompt without running it");
+        Add(ShortcutIds.HistoryOpenSession, History, "Open Session", ShortcutScope.CommandHistory,
+            [Chord(Ctrl, VirtualKeys.Enter, "Enter")], "Connects the command's session in a new tab");
+        Add(ShortcutIds.HistoryNextMatch, History, "Next Match", ShortcutScope.CommandHistory,
+            [Chord(KeyModifiers.None, VirtualKeys.F3, "F3")], "In the selected command's output");
+        Add(ShortcutIds.HistoryPreviousMatch, History, "Previous Match", ShortcutScope.CommandHistory,
+            [Chord(Shift, VirtualKeys.F3, "F3")]);
+        Add(ShortcutIds.HistoryDelete, History, "Delete Command", ShortcutScope.CommandHistory,
+            [Chord(KeyModifiers.None, VirtualKeys.Delete, "Delete")], "From the result list. Asks before deleting");
+        Add(ShortcutIds.HistoryClose, History, "Close", ShortcutScope.CommandHistory,
+            [Chord(KeyModifiers.None, VirtualKeys.Escape, "Esc")]);
+        Add(ShortcutIds.HistoryNextChange, History, "Next Change", ShortcutScope.HistoryCompare,
+            [Chord(KeyModifiers.None, VirtualKeys.F7, "F7")], "While comparing two runs");
+        Add(ShortcutIds.HistoryPreviousChange, History, "Previous Change", ShortcutScope.HistoryCompare,
+            [Chord(Shift, VirtualKeys.F7, "F7")], "While comparing two runs");
+        Add(ShortcutIds.HistoryBackToResults, History, "Back to Results", ShortcutScope.HistoryCompare,
+            [Chord(KeyModifiers.None, VirtualKeys.Escape, "Esc")], "While comparing two runs");
+
+        Add(ShortcutIds.FinishWelcome, App, "Save and Close Welcome", ShortcutScope.Welcome,
+            [Chord(Ctrl, VirtualKeys.Enter, "Enter")], "On the Welcome page");
 
         return list;
     }
@@ -319,6 +385,7 @@ public static class VirtualKeys
     public const int Tab = 0x09;
     public const int Cancel = 0x03; // Ctrl+Pause/Break reports VK_CANCEL
     public const int Enter = 0x0D;
+    public const int Escape = 0x1B;
     public const int PageUp = 0x21;
     public const int PageDown = 0x22;
     public const int End = 0x23;
@@ -333,7 +400,9 @@ public static class VirtualKeys
     public const int NumpadAdd = 0x6B;
     public const int NumpadSubtract = 0x6D;
     public const int F2 = 0x71;
+    public const int F3 = 0x72;
     public const int F4 = 0x73;
+    public const int F7 = 0x76;
     public const int F11 = 0x7A;
     public const int OemPlus = 0xBB; // VK_OEM_PLUS: the "=/+" key
     public const int Comma = 0xBC;

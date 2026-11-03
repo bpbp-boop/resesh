@@ -76,6 +76,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     private static int? Whole(double value, int minimum, int maximum) =>
         double.IsNaN(value) ? null : Math.Clamp((int)value, minimum, maximum);
 
+    private static int? Whole(double value, IntRange range) => Whole(value, range.Minimum, range.Maximum);
+
     private static string? NonBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     // ---- General ----
@@ -124,13 +126,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     public double FontSize
     {
         get => Current.FontSize;
-        set => Save(value, s => s with { FontSize = Whole(value, 8, 32) ?? s.FontSize }, () => FontSize);
+        set => Save(value, s => s with { FontSize = Whole(value, SettingRanges.FontSize) ?? s.FontSize }, () => FontSize);
     }
 
     public double Scrollback
     {
         get => Current.Scrollback;
-        set => Save(value, s => s with { Scrollback = Whole(value, 1000, 100000) ?? s.Scrollback }, () => Scrollback);
+        set => Save(value, s => s with { Scrollback = Whole(value, SettingRanges.Scrollback) ?? s.Scrollback }, () => Scrollback);
     }
 
     public bool CopyOnSelect
@@ -166,6 +168,25 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         get => Current.SshAlgorithms;
         set => Save(value, s => s with { SshAlgorithms = value }, () => SshAlgorithms);
+    }
+
+    /// <summary>Saves the kinds the picker changed from <paramref name="shown"/> to
+    /// <paramref name="edited"/>, onto the live setting: Settings in another window may have
+    /// changed the other kinds since this page last showed them.</summary>
+    public void ChangeSshAlgorithms(Resesh.Core.Models.SshAlgorithms? shown, Resesh.Core.Models.SshAlgorithms? edited)
+    {
+        Save(edited, s =>
+        {
+            var merged = s.SshAlgorithms;
+            foreach (var kind in Resesh.Core.Ssh.SshAlgorithmPolicy.Kinds)
+            {
+                var before = Resesh.Core.Ssh.SshAlgorithmPolicy.Disabled(shown, kind);
+                var after = Resesh.Core.Ssh.SshAlgorithmPolicy.Disabled(edited, kind);
+                if (!(before ?? []).SequenceEqual(after ?? []) || (before is null) != (after is null))
+                    merged = Resesh.Core.Ssh.SshAlgorithmPolicy.With(merged, kind, after);
+            }
+            return merged == s.SshAlgorithms ? s : s with { SshAlgorithms = merged };
+        }, () => SshAlgorithms, nameof(SshAlgorithms));
     }
 
     public bool ConfirmMultilinePaste
@@ -248,7 +269,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     public double CommandHistoryDays
     {
         get => Current.CommandHistoryDays;
-        set => Save(value, s => s with { CommandHistoryDays = Whole(value, 1, 3650) ?? s.CommandHistoryDays }, () => CommandHistoryDays);
+        set => Save(value, s => s with { CommandHistoryDays = Whole(value, SettingRanges.CommandHistoryDays) ?? s.CommandHistoryDays }, () => CommandHistoryDays);
     }
 
     public string RecordingDirectory

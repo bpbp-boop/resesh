@@ -1558,7 +1558,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         var session = login.ApplyTo(target);
         if (string.IsNullOrWhiteSpace(session.Username))
             throw new InvalidOperationException(
-                $"The identity '{identity.Name}' has no username. Edit it in Settings > Identities & Keys.");
+                $"The identity '{identity.Name}' has no username. Edit it in {SettingsCatalog.PathTo(SettingsSection.Identities)}.");
         if (identity.Proof == IdentityProof.Key)
             return await ResolvePrivateKeyAsync(session, token);
 
@@ -1672,7 +1672,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             throw new InvalidOperationException("The session does not have a registered SSH key.");
         if (!key.IsAvailable)
             throw new FileNotFoundException(
-                $"The SSH key '{key.Name}' is unavailable. Locate it in Settings > Identities & Keys.", key.Path);
+                $"The SSH key '{key.Name}' is unavailable. Locate it in {SettingsCatalog.PathTo(SettingsSection.Identities)}.", key.Path);
 
         var secret = key.IsEncrypted == true
             ? _credentials.ReadKey(keyId) ?? _credentials.Read(session.Id)
@@ -1870,7 +1870,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         theme = App.ResolveTheme(theme);
         _chromePalette = ThemeVisualPalette.For(theme);
         ApplyPaneSplitterTheme();
-        _terminal.ApplyOptions(theme: App.ResolveTheme(Session.Overrides?.Theme ?? theme));
+        _terminal.ApplyOptions(theme: App.ResolveTheme(Session.Overrides.EffectiveTheme(theme)));
         _rewindPlayer?.ApplyTheme(theme);
     }
 

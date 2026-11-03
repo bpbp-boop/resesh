@@ -24,6 +24,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The terminal library's copy of the settings defaults, compared with Core's own. -->
+    <Compile Include="..\..\src\Terminal\Native\TerminalDefaults.cs" Link="Linked\TerminalDefaults.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Content Include="Fixtures\**" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\Fixtures\**" Link="Fixtures\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
