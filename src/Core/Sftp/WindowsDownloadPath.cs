@@ -29,6 +29,21 @@ public static class WindowsDownloadPath
         return name;
     }
 
+    /// <summary>True when <see cref="ValidateName"/> accepts the name: the same rule decides
+    /// downloads and names typed into the local file pane.</summary>
+    public static bool IsValidName(string name)
+    {
+        try
+        {
+            ValidateName(name);
+            return true;
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+    }
+
     public static string Combine(string rootDirectory, string parentDirectory, string remoteName)
     {
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootDirectory));

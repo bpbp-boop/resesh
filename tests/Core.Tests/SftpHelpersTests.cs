@@ -135,8 +135,17 @@ public sealed class WindowsDownloadPathTests
     [InlineData("LPT9")]
     [InlineData("file.")]
     [InlineData("file ")]
-    public void ValidateName_rejects_names_that_are_unsafe_on_Windows(string name) =>
+    public void ValidateName_rejects_names_that_are_unsafe_on_Windows(string name)
+    {
         Assert.Throws<InvalidDataException>(() => WindowsDownloadPath.ValidateName(name));
+        Assert.False(WindowsDownloadPath.IsValidName(name));
+    }
+
+    [Theory]
+    [InlineData("notes.txt")]
+    [InlineData(".config")]
+    [InlineData("CONFIG")]
+    public void IsValidName_accepts_ordinary_names(string name) => Assert.True(WindowsDownloadPath.IsValidName(name));
 
     [Fact]
     public void Combine_rejects_a_parent_outside_the_download_root()
