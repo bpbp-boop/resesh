@@ -1074,8 +1074,10 @@ public sealed partial class MainWindow
             using var connection = await view.CreateRemoteManagementConnectionAsync();
             if (connection is null) return;
             var openSlots = App.TmuxSlots.ReservedSlots(tab.Session.Id);
-            // Looks for the session agent on the host, but never uploads it from here.
-            var persistence = await Task.Run(() => view.ResolvePersistenceBlocking(connection, mayUpload: false, CancellationToken.None));
+            // The backend the attached shell runs under, as its connect chose it; otherwise the
+            // session's settings decide, looking for the agent on the host but never uploading it.
+            var persistence = view.AttachedPersistence
+                ?? await Task.Run(() => view.ResolvePersistenceBlocking(connection, mayUpload: false, CancellationToken.None));
             slot = await RemoteSessionsDialog.ManageAsync(Root.XamlRoot, tab.Session.Name,
                 tab.Session.Id, openSlots, persistence,
                 () => Task.Run(() => connection.RunCommand(persistence.ManagementCommand())),

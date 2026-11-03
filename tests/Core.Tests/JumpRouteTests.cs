@@ -104,4 +104,44 @@ public sealed class JumpRouteTests
 
         Assert.Equal([core], JumpRoute.UsersOf(edge.Id, [edge, core, db]));
     }
+    [Theory]
+    [InlineData("proxy.example", 1080, true)]
+    [InlineData("", 1080, false)]
+    [InlineData("   ", 1080, false)]
+    [InlineData("proxy.example", 0, false)]
+    [InlineData("proxy.example", 65536, false)]
+    public void ActiveProxy_NeedsAHostAndAValidPort(string host, int port, bool active)
+    {
+        var session = Ssh("web") with { Proxy = new ProxySettings { Host = host, Port = port } };
+
+        Assert.Equal(active, JumpRoute.ActiveProxy(session) is not null);
+    }
+
+    [Fact]
+    public void ActiveProxy_IsIgnoredBehindAJumpHost()
+    {
+        var session = Ssh("web", Ssh("edge")) with { Proxy = new ProxySettings { Host = "proxy.example", Username = "me" } };
+
+        Assert.Null(JumpRoute.ActiveProxy(session));
+        Assert.Null(JumpRoute.ProxyUsername(session));
+    }
+
+    [Theory]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData(" me ", "me")]
+    public void ProxyUsername_IsTrimmed_AndBlankSendsNoLogin(string username, string? expected)
+    {
+        var session = Ssh("web") with { Proxy = new ProxySettings { Host = "proxy.example", Username = username } };
+
+        Assert.Equal(expected, JumpRoute.ProxyUsername(session));
+    }
+
+    [Fact]
+    public void ProxyUsername_IsNullWhenTheProxyIsIncomplete()
+    {
+        var session = Ssh("web") with { Proxy = new ProxySettings { Host = "", Username = "me" } };
+
+        Assert.Null(JumpRoute.ProxyUsername(session));
+    }
 }

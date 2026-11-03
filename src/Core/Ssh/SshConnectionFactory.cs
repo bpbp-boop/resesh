@@ -127,7 +127,7 @@ internal static class SshConnectionFactory
                 _ => ProxyTypes.Socks5,
             };
             // SSH.NET sends a login to the proxy only when it has a username.
-            var proxyUser = string.IsNullOrWhiteSpace(proxy.Username) ? null : proxy.Username.Trim();
+            var proxyUser = JumpRoute.ProxyUsername(session);
             info = new ConnectionInfo(session.Host, session.Port, session.Username, type,
                 proxy.Host, proxy.Port, proxyUser, proxyUser is null ? null : proxyPassword ?? "", auth);
         }
@@ -139,10 +139,8 @@ internal static class SshConnectionFactory
         return info;
     }
 
-    /// <summary>The proxy a session connects through, or null when it has none, it is
-    /// incomplete, or a jump host reaches the session instead.</summary>
-    internal static Models.ProxySettings? ActiveProxy(Session session) =>
-        session.JumpHostId is null && session.Proxy is { Host.Length: > 0, Port: > 0 and <= 65535 } proxy ? proxy : null;
+    /// <inheritdoc cref="JumpRoute.ActiveProxy"/>
+    internal static Models.ProxySettings? ActiveProxy(Session session) => JumpRoute.ActiveProxy(session);
 
     /// <summary>Fast check that the first thing dialled answers, so an unreachable host or
     /// proxy fails in seconds. Behind a jump the check goes through its forwarded port.</summary>

@@ -52,6 +52,21 @@ public static class JumpRoute
         return false;
     }
 
+    /// <summary>The proxy <paramref name="session"/> is dialled through, or null when it has
+    /// none, it is incomplete, or a jump host reaches the session instead. The one test for
+    /// "goes through a proxy": what dials, what asks for the proxy password and what describes
+    /// the route all use it, so they cannot disagree about an incomplete proxy.</summary>
+    public static ProxySettings? ActiveProxy(Session session) =>
+        session.JumpHostId is null
+        && session.Proxy is { Port: > 0 and <= 65535 } proxy && !string.IsNullOrWhiteSpace(proxy.Host)
+            ? proxy
+            : null;
+
+    /// <summary>The login sent to <paramref name="session"/>'s proxy, trimmed; null when the
+    /// proxy is not used or needs no login (SSH.NET then sends none).</summary>
+    public static string? ProxyUsername(Session session) =>
+        ActiveProxy(session) is { } proxy && !string.IsNullOrWhiteSpace(proxy.Username) ? proxy.Username.Trim() : null;
+
     /// <summary>Sessions that reach their host through <paramref name="jumpId"/> directly.</summary>
     public static IReadOnlyList<Session> UsersOf(Guid jumpId, IEnumerable<Session> sessions) =>
         sessions.Where(session => session.JumpHostId == jumpId).ToList();
