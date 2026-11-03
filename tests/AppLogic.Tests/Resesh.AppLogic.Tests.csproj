@@ -37,6 +37,7 @@
     <Compile Include="../../src/App/ViewModels/SettingsTargets.cs" Link="ViewModels/SettingsTargets.cs" />
     <Compile Include="../../src/App/ViewModels/SettingsViewModel.cs" Link="ViewModels/SettingsViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/SettingsEffects.cs" Link="ViewModels/SettingsEffects.cs" />
+    <Compile Include="../../src/App/ViewModels/WindowLayout.cs" Link="ViewModels/WindowLayout.cs" />
     <Compile Include="../../src/App/ViewModels/TabViewModel.cs" Link="ViewModels/TabViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/TabGroupViewModel.cs" Link="ViewModels/TabGroupViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/TreeNodeViewModel.cs" Link="ViewModels/TreeNodeViewModel.cs" />

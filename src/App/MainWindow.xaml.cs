@@ -187,21 +187,20 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private void RestoreWindowPlacement()
     {
-        if (App.Settings.Current.WindowPlacement is not { Width: >= 320, Height: >= 240 } placement)
+        var placement = App.Settings.Current.WindowPlacement;
+        if (WindowLayout.Requested(placement) is not { } requested)
             return;
 
-        var requested = new RectInt32(placement.X, placement.Y, placement.Width, placement.Height);
-        var workArea = DisplayArea.GetFromRect(requested, DisplayAreaFallback.Nearest).WorkArea;
-        var width = Math.Min(requested.Width, workArea.Width);
-        var height = Math.Min(requested.Height, workArea.Height);
-        var x = Math.Clamp(requested.X, workArea.X, workArea.X + workArea.Width - width);
-        var y = Math.Clamp(requested.Y, workArea.Y, workArea.Y + workArea.Height - height);
-        _normalWindowBounds = new RectInt32(x, y, width, height);
+        var workArea = DisplayArea.GetFromRect(Rect(requested), DisplayAreaFallback.Nearest).WorkArea;
+        var bounds = WindowLayout.FitInto(requested, new PixelRect(workArea.X, workArea.Y, workArea.Width, workArea.Height));
+        _normalWindowBounds = Rect(bounds);
         AppWindow.MoveAndResize(_normalWindowBounds.Value);
 
-        if (placement.IsMaximized && AppWindow.Presenter is OverlappedPresenter presenter)
+        if (placement!.IsMaximized && AppWindow.Presenter is OverlappedPresenter presenter)
             presenter.Maximize();
     }
+
+    private static RectInt32 Rect(PixelRect rect) => new(rect.X, rect.Y, rect.Width, rect.Height);
 
     private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
     {
@@ -217,13 +216,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         var maximized = AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Maximized };
         var bounds = _normalWindowBounds
             ?? new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
-        if (bounds.Width < 320 || bounds.Height < 240)
-            return;
-
-        App.SaveSettings(App.Settings.Current with
-        {
-            WindowPlacement = new WindowPlacement(bounds.X, bounds.Y, bounds.Width, bounds.Height, maximized),
-        });
+        if (WindowLayout.ToSave(new PixelRect(bounds.X, bounds.Y, bounds.Width, bounds.Height), maximized) is { } placement)
+            App.SaveSettings(App.Settings.Current with { WindowPlacement = placement });
     }
 
     private TabGroupView AttachGroupView(TabGroupViewModel group)
@@ -778,12 +772,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     // Keeps the compact title bar and a usable tab area (rail + minimum tree + tabs).
     private const double MinimumWindowWidth = 740;
     private const double MinimumWindowHeight = 480;
-    private const double MinimumTabAreaWidth = 320;
-
-    // With the Automatic layout, the sessions pane floats over the tabs below this window width.
-    // It docks again only above the wider bound, so resizing near the edge doesn't flicker.
-    private const double PaneOverlayBelowWidth = 1000;
-    private const double PaneDockAboveWidth = 1060;
 
     private bool _quickConnectExpanded;
     private bool _paneOverlay;
@@ -832,13 +820,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         if (Root.XamlRoot is not { } root)
             return;
-        var width = root.Size.Width;
-        var overlay = SessionsPaneLayouts.Normalize(App.Settings.Current.SessionsPaneLayout) switch
-        {
-            SessionsPaneLayouts.Float => true,
-            SessionsPaneLayouts.Dock => false,
-            _ => _paneOverlay ? width < PaneDockAboveWidth : width < PaneOverlayBelowWidth,
-        };
+        var overlay = WindowLayout.Floats(App.Settings.Current.SessionsPaneLayout, root.Size.Width, _paneOverlay);
         if (overlay == _paneOverlay)
         {
             if (_paneOverlay && _overlayPaneShown)
@@ -855,11 +837,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     }
 
     /// <summary>The saved width, capped so the floating pane leaves the tabs in view.</summary>
-    private double OverlayPaneWidth()
-    {
-        var available = (Root.XamlRoot?.Size.Width ?? 1000) - MainArea.ColumnDefinitions[0].ActualWidth - 96;
-        return Math.Max(200, Math.Min(Math.Min(_sessionsPaneWidth, 360), available));
-    }
+    private double OverlayPaneWidth() => WindowLayout.FloatingWidth(
+        _sessionsPaneWidth, Root.XamlRoot?.Size.Width ?? 1000, MainArea.ColumnDefinitions[0].ActualWidth);
 
     private void PaneDismissLayer_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
@@ -958,12 +937,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         if (Root.XamlRoot is not { } root)
             return;
         var fixedColumns = MainArea.ColumnDefinitions[0].ActualWidth + TreeSplitterColumn.ActualWidth;
-        TreeColumn.MaxWidth = Math.Max(180, root.Size.Width - fixedColumns - MinimumTabAreaWidth);
+        TreeColumn.MaxWidth = WindowLayout.DockedMaxWidth(root.Size.Width, fixedColumns);
     }
 
     /// <summary>The tree's current width, unless the window is narrowing it below the saved width.</summary>
-    private bool TreeWidthIsUserChosen =>
-        TreeColumn.ActualWidth >= 180 && TreeColumn.ActualWidth < TreeColumn.MaxWidth - 0.5;
+    private bool TreeWidthIsUserChosen => WindowLayout.IsChosenWidth(TreeColumn.ActualWidth, TreeColumn.MaxWidth);
 
     /// <summary>Caption buttons live outside XAML theming; keep them in sync with the app theme.</summary>
     private void ApplyTitleBarButtonColors(string theme)

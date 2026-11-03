@@ -27,8 +27,8 @@ public sealed partial class MainWindow
     private void InitializeSessionsRail()
     {
         var settings = App.Settings.Current;
-        _sessionsPaneWidth = Math.Clamp(settings.TreePaneWidth ?? 280, 180, 800);
-        _selectedRailTab = NormalizeRailTab(settings.SessionsRailTab);
+        _sessionsPaneWidth = WindowLayout.PaneWidth(settings.TreePaneWidth);
+        _selectedRailTab = WindowLayout.NormalizeRailTab(settings.SessionsRailTab);
         _sessionsPaneOpen = settings.SessionsPaneOpen;
         ApplySessionsRailLayout();
         ViewModel.RefreshRecentSessions();
@@ -43,14 +43,6 @@ public sealed partial class MainWindow
         if (!_windowClosed && SessionsPaneShown && _selectedRailTab == "recordings")
             _ = ViewModel.RefreshRecordingsAsync();
     }
-
-    private static string NormalizeRailTab(string? tab) => tab switch
-    {
-        "workspaces" => "workspaces",
-        "recent" => "recent",
-        "recordings" => "recordings",
-        _ => "sessions",
-    };
 
     private void ApplySessionsRailLayout()
     {
@@ -96,7 +88,7 @@ public sealed partial class MainWindow
 
     private void SelectSessionsRailTab(string tab)
     {
-        var normalized = NormalizeRailTab(tab);
+        var normalized = WindowLayout.NormalizeRailTab(tab);
         var tabChanged = normalized != _selectedRailTab;
         var wasOpen = SessionsPaneShown;
         if (wasOpen && !_paneOverlay && TreeWidthIsUserChosen)
