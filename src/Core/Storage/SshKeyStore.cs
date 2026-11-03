@@ -289,8 +289,7 @@ public sealed class SshKeyStore
         return candidate;
     }
 
-    private static string NormalizePath(string path) => Path.GetFullPath(
-        Environment.ExpandEnvironmentVariables(path.Trim().Trim('"')));
+    private static string NormalizePath(string path) => KeyFilePath.Normalize(path);
 
     private static bool PathsEqual(string left, string right) =>
         NormalizePath(left).Equals(NormalizePath(right), StringComparison.OrdinalIgnoreCase);

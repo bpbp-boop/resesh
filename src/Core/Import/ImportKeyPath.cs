@@ -1,15 +1,15 @@
+using Resesh.Core.Storage;
+
 namespace Resesh.Core.Import;
 
 internal static class ImportKeyPath
 {
+    /// <summary>An imported key path as <see cref="KeyFilePath"/> reads it; "none" (OpenSSH's
+    /// way of saying no key) and blank text mean no key.</summary>
     public static string? Resolve(string? value, string? baseDirectory = null)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Equals("none", StringComparison.OrdinalIgnoreCase))
             return null;
-        var path = Environment.ExpandEnvironmentVariables(value.Trim().Trim('"'));
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (path.StartsWith("~/") || path.StartsWith(@"~\"))
-            path = Path.Combine(home, path[2..]);
-        return Path.GetFullPath(path, baseDirectory ?? home);
+        return KeyFilePath.Normalize(value, baseDirectory);
     }
 }
