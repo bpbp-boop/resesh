@@ -95,10 +95,24 @@ public sealed class PastePlanTests
     }
 
     [Fact]
-    public void Preview_ShowsFirstLinesAndCountsTheRest()
+    public void Preview_ShowsFirstAndLastLinesAndCountsTheMiddle()
     {
         var text = string.Join("\n", Enumerable.Range(1, 10).Select(i => $"line {i}")) + "\n";
-        Assert.Equal("line 1\nline 2\n… and 8 more", PastePlan.Preview(text, maxLines: 2));
+        Assert.Equal("line 1\nline 2\n… 5 more lines …\nline 8\nline 9\nline 10",
+            PastePlan.Preview(text, headLines: 2, tailLines: 3));
+    }
+
+    [Fact]
+    public void Preview_ShowsEverythingWhenOnlyOneLineWouldBeHidden()
+    {
+        var text = string.Join("\n", Enumerable.Range(1, 6).Select(i => $"line {i}"));
+        Assert.Equal(text, PastePlan.Preview(text, headLines: 2, tailLines: 3));
+    }
+
+    [Fact]
+    public void Preview_ShowsAShortPasteWhole()
+    {
+        Assert.Equal("a\nb", PastePlan.Preview("a\r\nb\r\n"));
     }
 
     // A UI-thread stand-in: one thread that runs everything posted to it.
