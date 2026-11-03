@@ -16,6 +16,13 @@ public sealed class KeyFilePathTests
     public void TildeAndRelativePathsResolveFromHome(string path) =>
         Assert.Equal(Path.Combine(Home, ".ssh", "id_ed25519"), KeyFilePath.Normalize(path));
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\"\"")]
+    public void BlankTextIsNotAPath(string path) =>
+        Assert.Throws<ArgumentException>(() => KeyFilePath.Normalize(path));
+
     [Fact]
     public void ABaseFolderReplacesHomeForRelativePaths() =>
         Assert.Equal(@"C:\config\keys\id", KeyFilePath.Normalize(@"keys\id", @"C:\config"));

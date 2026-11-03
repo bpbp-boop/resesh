@@ -11,10 +11,14 @@ namespace Resesh.Core.Storage;
 public static class KeyFilePath
 {
     /// <summary>The full path. Throws as <see cref="Path.GetFullPath(string, string)"/> does
-    /// for text that is not a path.</summary>
+    /// for text that is not a path, blank text included: resolved against the home folder it
+    /// would otherwise name the home folder itself, and a key list entry or a match against
+    /// one would point at a folder.</summary>
     public static string Normalize(string path, string? baseDirectory = null)
     {
         var value = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'));
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("A key file path is required.", nameof(path));
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (value == "~")
             value = home;
