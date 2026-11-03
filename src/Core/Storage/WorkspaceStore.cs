@@ -426,8 +426,29 @@ public sealed class WorkspaceStore
         };
     }
 
-    internal static void WriteImported(string path, WorkspaceStoreData data) =>
-        WriteAtomic(path, NormalizeData(data));
+    /// <summary>Replaces every workspace, the last layout and drafts with a backup's. It saves
+    /// like any other change: never over a file that could not be read, and published only
+    /// once written, so the running app sees the import without reloading the file.</summary>
+    internal void ReplaceWithImport(WorkspaceStoreData data)
+    {
+        var normalized = NormalizeData(data);
+        lock (_gate)
+        {
+            Commit(
+                normalized.Workspaces!,
+                normalized.LastLayout,
+                normalized.LastActiveWorkspaceId,
+                (normalized.Drafts ?? []).ToDictionary(draft => draft.WorkspaceId, draft => draft.Layout));
+        }
+    }
+
+    /// <summary>Throws unless a save may replace the file now; lets an import refuse before it
+    /// changes anything else.</summary>
+    internal void EnsureWritable()
+    {
+        lock (_gate)
+            _file.EnsureWritable();
+    }
 
     private static WorkspaceStoreData NormalizeData(WorkspaceStoreData data)
     {
@@ -578,9 +599,6 @@ public sealed class WorkspaceStore
             Sizes = node.Sizes.ToList(),
         };
     }
-
-    private static void WriteAtomic(string path, WorkspaceStoreData data) =>
-        AtomicFile.Write(path, JsonSerializer.Serialize(data, JsonOptions.Info<WorkspaceStoreData>()));
 
 }
 

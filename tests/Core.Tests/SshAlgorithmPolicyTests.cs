@@ -1,5 +1,6 @@
 using Resesh.Core.Models;
 using Resesh.Core.Ssh;
+using Resesh.Core.Storage;
 
 namespace Resesh.Core.Tests;
 
@@ -111,10 +112,10 @@ public sealed class SshAlgorithmPolicyTests
     [Fact]
     public void Apply_RemovesWhatIsTurnedOff_AndKeepsSshNetOrder()
     {
-        var previous = SshAlgorithmPolicy.AppDefaults;
+        var previous = SshAlgorithmPolicy.AppDefaultsSource;
         try
         {
-            SshAlgorithmPolicy.AppDefaults = new SshAlgorithms { DisabledMacs = ["hmac-sha1", "hmac-sha1-etm@openssh.com"] };
+            SshAlgorithmPolicy.AppDefaultsSource = () => new SshAlgorithms { DisabledMacs = ["hmac-sha1", "hmac-sha1-etm@openssh.com"] };
             var info = Connect(Host(new SshAlgorithms { DisabledCiphers = ["aes128-ctr", "3des-cbc"] }));
 
             var ciphers = SshAlgorithmPolicy.Supported(SshAlgorithmKind.Cipher).Where(c => c is not ("aes128-ctr" or "3des-cbc"));
@@ -124,7 +125,29 @@ public sealed class SshAlgorithmPolicyTests
         }
         finally
         {
-            SshAlgorithmPolicy.AppDefaults = previous;
+            SshAlgorithmPolicy.AppDefaultsSource = previous;
+        }
+    }
+
+    [Fact]
+    public void Apply_ReadsTheSavedSettingsWhenEachConnectionStarts()
+    {
+        // A backup import saves settings without going through the settings page; the next
+        // connection must still follow them, with no copy for the importer to refresh.
+        var settings = new SettingsStore(Path.Combine(Path.GetTempPath(), "resesh-tests", Guid.NewGuid().ToString("N"), "settings.json"));
+        var previous = SshAlgorithmPolicy.AppDefaultsSource;
+        try
+        {
+            SshAlgorithmPolicy.AppDefaultsSource = () => settings.Current.SshAlgorithms;
+            Assert.Contains("hmac-sha1", Connect(Host(null)).HmacAlgorithms.Keys);
+
+            settings.Save(settings.Current with { SshAlgorithms = new SshAlgorithms { DisabledMacs = ["hmac-sha1"] } });
+
+            Assert.DoesNotContain("hmac-sha1", Connect(Host(null)).HmacAlgorithms.Keys);
+        }
+        finally
+        {
+            SshAlgorithmPolicy.AppDefaultsSource = previous;
         }
     }
 

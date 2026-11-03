@@ -347,7 +347,7 @@ public sealed class WorkspaceStoreTests : IDisposable
     }
 
     [Fact]
-    public void WriteImported_FailedWriteLeavesStoreAndFilesUnchanged()
+    public void ReplaceWithImport_FailedWriteLeavesStoreAndFilesUnchanged()
     {
         var path = Path.Combine(_dir.FullName, "imported-workspaces.json");
         var store = new WorkspaceStore(path);
@@ -364,7 +364,7 @@ public sealed class WorkspaceStoreTests : IDisposable
         };
         Directory.CreateDirectory(path + ".tmp");
 
-        var exception = Record.Exception(() => WorkspaceStore.WriteImported(path, imported));
+        var exception = Record.Exception(() => store.ReplaceWithImport(imported));
 
         Assert.True(exception is IOException or UnauthorizedAccessException);
         Assert.Same(saved, Assert.Single(store.Workspaces));

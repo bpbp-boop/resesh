@@ -196,6 +196,12 @@ public sealed record Session
         : InheritLogin ? SessionLogin.Inherit
         : SessionLogin.Own;
 
+    /// <summary>True when the session keeps its own password under its id. Identity logins
+    /// keep theirs under the identity and keys keep a passphrase with the key, so a session
+    /// that stops using its own password should drop the stored copy.</summary>
+    [JsonIgnore]
+    public bool UsesOwnPassword => Login == SessionLogin.Own && AuthMethod == AuthMethod.Password;
+
     /// <summary>Username, auth method and key below; meaningful when <see cref="Login"/> is Own.</summary>
     public AuthMethod AuthMethod { get; set; } = AuthMethod.Password;
 
@@ -292,9 +298,6 @@ public sealed record Session
     /// icon says where the tab runs, the agent icon says what is running in it.
     /// </summary>
     public string? Agent { get; init; }
-
-    /// <summary>Set for imported sessions whose credential has not been captured yet.</summary>
-    public bool CredentialNeeded { get; init; }
 
     /// <summary>Terminal appearance overrides for this session; null = use app settings.</summary>
     public TerminalOverrides? Overrides { get; init; }

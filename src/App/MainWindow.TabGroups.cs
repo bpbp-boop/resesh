@@ -93,8 +93,6 @@ public sealed partial class MainWindow
         var view = new ImportView(scan, sourceName);
         view.CloseRequested += () => Host().CloseTabCore(tab);
         view.ManageIdentitiesRequested += () => _ = Host().ShowSettingsAsync(GlobalSettingsTarget.Identities);
-        view.Completion.ContinueWith(_ => DispatcherQueue.TryEnqueue(() => App.RefreshSessionsInAllWindows()),
-            TaskScheduler.Default);
         tab.View = view;
         _groupViews[group].AddTerminal(view);
         group.SelectedTab = tab;
