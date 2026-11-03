@@ -2090,3 +2090,43 @@ could disagree. The rules that replaced them:
   workflow or WiX (ghostty cache keys, the signed vs unsigned MSI steps, the app user model
   id, project URLs) are guarded by `tests/BuildMetadataTests.js` rather than restructured,
   because the signing steps can't be verified off CI.
+
+## 2026-11-03 - Side connections reuse the live connection's login and route
+The file pane, Manage Remote Sessions and the File Explorer (SSHFS) mount each made their own
+connection and each picked its login and route a little differently: management resolved the
+saved session afresh (so an edit since the connect, or a session with no username, sent it
+somewhere else or asked for "Password for @host"), and the file pane could pair a reconnect's
+new login with the previous connect's route. Now the SSH connect publishes one `LiveLogin`
+(the login as applied, its secret and the resolved route) together with the Connected state,
+and every side connection uses it only while the tab is Connected. The file pane refuses while
+the tab is connecting (it lists its folder again once the tab is up); the Explorer mount
+refuses on a stopped tab, like the file pane. Manage Remote Sessions on a stopped tab still
+resolves from the saved session, since nothing live exists, and uses the persistence backend
+the attached connect chose (`AttachedPersistence`) rather than re-reading `SessionAgent`.
+- **Prompts name their own connection's host.** Each connection keeps its own "dialling"
+  record (host and route) for host-key and keyboard-interactive titles; there was one field
+  per tab, reset only on the telnet path.
+- **One username check, one proxy test.** `MissingUsername` decides for every host every
+  connection resolves (own login or identity, jump or target) and throws one exception type;
+  `JumpRoute.ActiveProxy`/`ProxyUsername` are the single "goes through a proxy" and "sends a
+  proxy login" tests used by the dialer, the proxy password, the route description and the
+  SSHFS refusal.
+- **Secrets stay with their host.** A replacement identity password typed after the target
+  rejected it is used only by the target, not by a jump host that resolves the same identity
+  first. A key's passphrase falls back to the session's own password credential only for the
+  session's own login (the 2026-08-18 migration case), never for an identity's key.
+- **SSHFS follows the algorithm settings and key checks.** The mount passes `KexAlgorithms`,
+  `Ciphers`, `MACs` and `HostKeyAlgorithms` built from `SshAlgorithmPolicy.Offered`, so it
+  offers what our connections offer (legacy ones included, as SSH.NET does by default). SSH.NET's
+  names are OpenSSH's, but an older OpenSSH stops on a name it lacks (`mlkem768x25519-sha256`,
+  for instance), so each list is cut to what SSHFS-Win's own `ssh -Q` reports; if that cannot
+  be asked, only what is turned off is removed, with OpenSSH's `-list` form, which ignores
+  unknown names. Host keys are limited to the trusted key's type: an explicit
+  `HostKeyAlgorithms` stops OpenSSH preferring the type it has a key for, and the mount's
+  known_hosts holds only that key. The key file is checked against its registered fingerprint
+  first, and `AuthMethod.None` logs in with `PreferredAuthentications=none`.
+- **Dead jump hosts.** TCP keepalive on a telnet socket through a jump only reaches the
+  loopback forward, and SSH.NET does not always notice a jump that vanished, so
+  `SshJumpChain` now watches its links (`ErrorOccurred` plus a 5-second `IsConnected` poll, as
+  `SshTerminalSession` does for its own client) and raises `Lost`. Telnet tabs end on it, and
+  SSH sessions through a jump close on it too.

@@ -41,12 +41,15 @@ public sealed class SftpSession : IDisposable
     /// instead of raising a second surprise dialog. A <see cref="Dispose"/> from another
     /// thread, or <paramref name="cancellationToken"/>, abandons the connect: it throws
     /// <see cref="OperationCanceledException"/> and leaves nothing open.
+    /// <paramref name="connecting"/> hears of each host before it is dialled (jump hosts, then
+    /// the session), so a keyboard-interactive prompt can say which host is asking.
     /// </summary>
     public void Connect(Session session, string? secret,
         Func<IReadOnlyList<KeyboardInteractivePrompt>, IReadOnlyList<string>?>? interactiveResponder = null,
         IReadOnlyList<SshHop>? jumps = null,
         string? proxyPassword = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Action<Session>? connecting = null)
     {
         if (!_lifecycle.TryBeginConnect())
             throw _lifecycle.CannotConnect();
@@ -57,10 +60,12 @@ public sealed class SftpSession : IDisposable
             // through the terminal too, so nothing here asks.
             var via = jumps is { Count: > 0 }
                 ? SshJumpChain.Open(jumps, session.Host, session.Port, _knownHosts,
-                    interactiveResponder: interactiveResponder, cancellationToken: cancellationToken)
+                    interactiveResponder: interactiveResponder, cancellationToken: cancellationToken,
+                    connecting: connecting)
                 : null;
             Interlocked.Exchange(ref _jumpChain, via);
             ThrowIfAbandoned(cancellationToken);
+            connecting?.Invoke(session);
             var client = ConnectClient(session, secret, interactiveResponder, via, proxyPassword, cancellationToken);
             Interlocked.Exchange(ref _client, client);
             ThrowIfAbandoned(cancellationToken);

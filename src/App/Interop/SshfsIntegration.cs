@@ -165,6 +165,68 @@ internal static class SshfsIntegration
         return null;
     }
 
+    // What the bundled ssh knows, asked once per run: an install mid-session is picked up on restart.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<SshAlgorithmKind, IReadOnlyCollection<string>?> KnownAlgorithms = new();
+
+    /// <summary>The algorithm names SSHFS-Win's own ssh (the one <c>ssh_command</c> runs)
+    /// implements, from <c>ssh -Q</c>; null when it could not say.</summary>
+    private static IReadOnlyCollection<string>? SshKnows(string sshfsExe, SshAlgorithmKind kind) =>
+        KnownAlgorithms.GetOrAdd(kind, _ =>
+        {
+            var ssh = Path.Combine(Path.GetDirectoryName(sshfsExe)!, "ssh.exe");
+            if (!File.Exists(ssh))
+                return null;
+            // key-sig lists signature names (rsa-sha2-512 …); older releases have only key.
+            string[] queries = kind switch
+            {
+                SshAlgorithmKind.KeyExchange => ["kex"],
+                SshAlgorithmKind.Cipher => ["cipher"],
+                SshAlgorithmKind.Mac => ["mac"],
+                _ => ["key-sig", "key"],
+            };
+            foreach (var query in queries)
+                if (QuerySsh(ssh, query) is { Count: > 0 } names)
+                    return names;
+            return null;
+        });
+
+    private static HashSet<string>? QuerySsh(string ssh, string query)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = ssh,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                RedirectStandardInput = true,
+            };
+            psi.ArgumentList.Add("-Q");
+            psi.ArgumentList.Add(query);
+            using var process = Process.Start(psi);
+            if (process is null)
+                return null;
+            process.StandardInput.Close();
+            var error = process.StandardError.ReadToEndAsync();
+            var output = process.StandardOutput.ReadToEndAsync();
+            if (!process.WaitForExit(5000))
+            {
+                process.Kill(entireProcessTree: true);
+                return null;
+            }
+            _ = error.Result;
+            return process.ExitCode == 0
+                ? output.Result.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet(StringComparer.Ordinal)
+                : null;
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>A letter no drive uses and no other tab's mount holds; the caller releases it.</summary>
     private static char? ReserveFreeDriveLetter() =>
         DriveLetterReservations.Shared.Reserve(DriveInfo.GetDrives().Select(d => d.Name[0]));
@@ -190,11 +252,13 @@ internal static class SshfsIntegration
         $"{name}=\"{path.Replace('\\', '/').Replace(",", "\\,")}\"";
 
     /// <summary>
-    /// Mounts remote / on a free drive using the session's credentials and trusted host key.
-    /// Blocking (spawn + wait); run on a background thread. Passwords travel only over stdin.
-    /// Cancelling (the tab closed) stops the wait and kills sshfs.
+    /// Mounts remote / on a free drive using the session's credentials and trusted host key,
+    /// offering the SSH algorithms the session's own connections offer. Blocking (spawn +
+    /// wait); run on a background thread. Passwords travel only over stdin. A key login
+    /// passes <paramref name="keyPath"/>, the registered key's file once its fingerprint was
+    /// checked. Cancelling (the tab closed) stops the wait and kills sshfs.
     /// </summary>
-    public static SshfsMount Mount(Session session, KnownHostsStore knownHosts, string? password,
+    public static SshfsMount Mount(Session session, KnownHostsStore knownHosts, string? password, string? keyPath,
         CancellationToken cancellationToken = default)
     {
         var entry = knownHosts.Lookup(session.Host, session.Port)
@@ -202,25 +266,30 @@ internal static class SshfsIntegration
         var line = entry.ToKnownHostsLine(session.Host, session.Port);
         var exe = FindSshfsExe()
             ?? throw new IOException("sshfs.exe was not found in the SSHFS-Win install.");
-        string? keyPath = null;
-        if (session.AuthMethod == AuthMethod.PrivateKey)
+        switch (session.AuthMethod)
         {
-            // The key registry is the one record of a key's file and whether it is encrypted;
-            // a session (resolved login or not) only names the key.
-            var key = session.PrivateKeyId is { } keyId ? App.SshKeys.Find(keyId) : null;
-            if (key is null)
-                throw new IOException("the session does not have a registered SSH key.");
-            keyPath = key.Path;
-            if (string.IsNullOrEmpty(keyPath) || !File.Exists(keyPath))
-                throw new IOException($"the session's key file was not found: {keyPath}");
-            if (key.IsEncrypted == true)
-                throw new IOException("the key is passphrase-protected — sshfs cannot prompt for it. "
-                    + "Use a passphrase-free key for the Explorer mount.");
+            case AuthMethod.PrivateKey:
+                if (string.IsNullOrEmpty(keyPath) || !File.Exists(keyPath))
+                    throw new IOException($"the session's key file was not found: {keyPath}");
+                break;
+            case AuthMethod.None:
+                break;
+            default:
+                if (password is null)
+                    throw new IOException("The session's password is not available. Connect the terminal first.");
+                if (password.Contains('\n') || password.Contains('\r'))
+                    throw new IOException("SSHFS cannot send a password containing a line break through password_stdin.");
+                break;
         }
-        else if (password is null)
-            throw new IOException("The session's password is not available. Connect the terminal first.");
-        else if (password.Contains('\n') || password.Contains('\r'))
-            throw new IOException("SSHFS cannot send a password containing a line break through password_stdin.");
+        IReadOnlyList<string> algorithms;
+        try
+        {
+            algorithms = SshAlgorithmPolicy.OpenSshOptions(session, entry.KeyType, kind => SshKnows(exe, kind));
+        }
+        catch (SshSessionException ex)
+        {
+            throw new IOException(ex.Message, ex);
+        }
         cancellationToken.ThrowIfCancellationRequested();
         var drive = ReserveFreeDriveLetter() ?? throw new IOException("no free drive letter for the mount.");
         var releaseDrive = () => DriveLetterReservations.Shared.Release(drive);
@@ -264,10 +333,17 @@ internal static class SshfsIntegration
                 "uid=-1", "gid=-1", "umask=000", "create_umask=000",
                 "rellinks", "dothidden", "reconnect", "ServerAliveInterval=15",
             };
+            options.AddRange(algorithms);
             if (session.AuthMethod == AuthMethod.PrivateKey)
             {
                 options.Add(PathOption("IdentityFile", keyPath!));
                 options.Add("PreferredAuthentications=publickey");
+                options.Add("BatchMode=yes");
+            }
+            else if (session.AuthMethod == AuthMethod.None)
+            {
+                // Like the terminal's NoneAuthenticationMethod: the host lets the user in as is.
+                options.Add("PreferredAuthentications=none");
                 options.Add("BatchMode=yes");
             }
             else
@@ -284,7 +360,7 @@ internal static class SshfsIntegration
             }
             var process = Process.Start(psi) ?? throw new IOException("sshfs.exe failed to start.");
             mount = new SshfsMount(process, $"{drive}:", directory, releaseDrive);
-            if (session.AuthMethod != AuthMethod.PrivateKey)
+            if (session.AuthMethod == AuthMethod.Password)
             {
                 process.StandardInput.Write(password);
                 process.StandardInput.Write('\n');
