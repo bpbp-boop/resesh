@@ -125,8 +125,9 @@ public sealed partial class IconPicker : UserControl
     private void DrawBrandMarks()
     {
         var color = MarkColor;
+        var scale = XamlRoot?.RasterizationScale;
         foreach (var choice in _choices.Where(choice => choice.BrandKey.Length > 0))
-            choice.Image = App.Brands.Get(choice.BrandKey, BrandSize, color);
+            choice.Image = App.Brands.Get(choice.BrandKey, BrandSize, color, scale);
         ApplyFilter(FilterBox.Text);
     }
 

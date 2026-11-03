@@ -99,7 +99,7 @@ public sealed partial class WorkspaceIconDialog : ContentDialog
         PreviewGlyph.Glyph = selected.Glyph;
         PreviewPath.Data = PresentationValues.IconPathGeometry(selected.Path);
         PreviewBrand.Source = selected.BrandKey.Length > 0 && Picker.IsLoaded
-            ? App.Brands.Get(selected.BrandKey, PreviewBrandSize, Picker.MarkColor)
+            ? App.Brands.Get(selected.BrandKey, PreviewBrandSize, Picker.MarkColor, Picker.XamlRoot?.RasterizationScale)
             : null;
         PreviewMonogram.Text = CurrentInitials;
         PreviewMonogram.Visibility = PresentationValues.Visible(!isIcon);
