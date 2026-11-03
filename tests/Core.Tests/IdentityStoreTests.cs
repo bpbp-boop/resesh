@@ -140,5 +140,24 @@ public sealed class IdentityStoreTests : IDisposable
         Assert.Equal(firstSuccessfulSave, File.ReadAllText(StorePath + ".bak"));
     }
 
+    [Theory]
+    [InlineData("{\"identities\":[null]}")]
+    [InlineData("{\"identities\":[{\"id\":\"6f1c1c1e-6d47-4b8e-9a53-7d41f1f3a001\",\"name\":null,\"username\":\"u\"}]}")]
+    [InlineData("{\"identities\":[{\"id\":\"6f1c1c1e-6d47-4b8e-9a53-7d41f1f3a001\",\"name\":\"n\",\"username\":null}]}")]
+    public void Load_InvalidIdentityRecoversFromBackup(string invalid)
+    {
+        var good = new IdentityStore(StorePath);
+        good.Load();
+        var kept = good.Add(new Identity { Name = "Kept", Username = "alice" });
+        good.Add(new Identity { Name = "Second", Username = "bob" }); // rotates the first save into .bak
+        File.WriteAllText(StorePath, invalid);
+
+        var store = new IdentityStore(StorePath);
+        store.Load();
+
+        Assert.Equal(StoreLoadState.RecoveredFromBackup, store.LoadState);
+        Assert.Equal(kept.Id, Assert.Single(store.Identities).Id);
+    }
+
     public void Dispose() => _dir.Delete(recursive: true);
 }

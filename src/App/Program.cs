@@ -18,6 +18,12 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (Profile.Error is { } error)
+        {
+            // Never fall back to the real data when a scratch folder was asked for.
+            MessageBox(IntPtr.Zero, error, "resesh", 0x10 /* MB_ICONERROR */);
+            return 2;
+        }
         WinRT.ComWrappersSupport.InitializeComWrappers();
         TaskbarIntegration.SetProcessIdentity();
         var key = ActivationKey();
@@ -69,6 +75,9 @@ internal static class Program
         finally { CommandCompletionNotifications.Unregister(); }
     }
 
+    /// <summary>This run's data set, parsed once from the command line.</summary>
+    internal static DataProfile Profile { get; } = DataProfile.Parse(Environment.GetCommandLineArgs());
+
     /// <summary>The folder this run keeps its data in: the demo scratch folder, the
     /// --data-dir folder, or %APPDATA%\Resesh. The stores, custom icons, backups and the
     /// single-instance key all derive from this one answer, so they cannot disagree.</summary>
@@ -79,70 +88,22 @@ internal static class Program
     internal static string StorePath(string fileName, string defaultPath) =>
         DataDirectoryOverride is { } directory ? Path.Combine(directory, fileName) : defaultPath;
 
-    private static string? DataDirectoryOverride
-    {
-        get
-        {
-            if (DemoMode.IsEnabled)
-                return DemoMode.DataFolder;
+    /// <summary>Where crash.log and trace.log go: %LOCALAPPDATA%\Resesh for the real profile,
+    /// the data folder otherwise, so a scratch or demo run leaves the real logs alone.</summary>
+    internal static string LogDirectory => DataDirectoryOverride ?? AppDataPaths.Local();
 
-            var args = Environment.GetCommandLineArgs();
-            for (var i = 1; i < args.Length - 1; i++)
-            {
-                if (args[i] == "--data-dir")
-                    return Path.GetFullPath(args[i + 1]);
-            }
-            return null;
-        }
-    }
+    private static string? DataDirectoryOverride =>
+        Profile.IsDemo ? DemoMode.DataFolder : Profile.DataDirectory;
 
     /// <summary>False in demo mode or with --data-dir: a jump list item or a sign-in launch
     /// starts without those options, so it would open a different data folder.</summary>
-    internal static bool UsesDefaultDataDirectory =>
-        !DemoMode.IsEnabled && !Environment.GetCommandLineArgs().Contains("--data-dir");
+    internal static bool UsesDefaultDataDirectory => Profile.IsDefault;
 
-    internal static string RelaunchCommand()
-    {
-        var parts = new List<string> { QuoteCommandLineArgument(Environment.ProcessPath!) };
-        var args = Environment.GetCommandLineArgs();
-        for (var i = 1; i < args.Length; i++)
-        {
-            if (args[i] == "--demo")
-            {
-                parts.Add("--demo");
-            }
-            else if (args[i] == "--data-dir" && i + 1 < args.Length)
-            {
-                parts.Add("--data-dir");
-                parts.Add(QuoteCommandLineArgument(args[++i]));
-            }
-        }
-        return string.Join(' ', parts);
-    }
-
-    private static string QuoteCommandLineArgument(string value)
-    {
-        var result = new StringBuilder("\"");
-        var backslashes = 0;
-        foreach (var character in value)
-        {
-            if (character == '\\')
-            {
-                backslashes++;
-                continue;
-            }
-
-            result.Append('\\', character == '"' ? (backslashes * 2) + 1 : backslashes);
-            backslashes = 0;
-            result.Append(character);
-        }
-        result.Append('\\', backslashes * 2);
-        return result.Append('"').ToString();
-    }
+    internal static string RelaunchCommand() => Profile.RelaunchCommand(Environment.ProcessPath!);
 
     private static string? ActivationKey()
     {
-        if (DemoMode.IsEnabled)
+        if (Profile.IsDemo)
             return null;
 
         var normalized = Path.GetFullPath(DataDirectory)
@@ -216,4 +177,7 @@ internal static class Program
 
     [DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "MessageBoxW")]
+    private static extern int MessageBox(IntPtr owner, string text, string caption, uint type);
 }

@@ -2197,3 +2197,93 @@ the attached connect chose (`AttachedPersistence`) rather than re-reading `Sessi
   the user chose.
 - **Text on a colour** (High Contrast highlight text, the welcome page) is black or white by
   the higher WCAG contrast ratio (`ColorContrast`), not gamma-encoded Rec.709 against 128.
+
+## 2026-11-03 - Scratch profiles keep their own passwords and logs
+
+`--data-dir` runs used the real Windows Credential Manager, so deleting a session in a scratch
+copy (or the startup key migration, which moves session passphrases onto keys and deletes the
+session copies) deleted the user's real passwords. Only the default profile uses Credential
+Manager now. `--demo` keeps secrets in memory, as before. A `--data-dir` profile keeps them in
+`credentials.json` in its folder, each secret encrypted with DPAPI for the current Windows user
+(`ProtectedFileCredentialService`, P/Invoke to `CryptProtectData`, so AOT-safe and no extra
+package), and saved like every store: atomically, never over a file it could not read. File
+rather than memory so a test profile keeps its passwords across restarts. Existing scratch
+profiles ask for their passwords once. An entry DPAPI cannot decrypt (the folder came from
+another user) reads as no saved password.
+
+The same run also wrote crash.log and trace.log to the real `%LOCALAPPDATA%\Resesh`. Logs go
+to the data folder for demo and `--data-dir` runs (`Program.LogDirectory`), and About's logs
+folder points there. `ShellIntegrationScripts.Materialize` still writes to
+`%LOCALAPPDATA%\Resesh\shell-integration\<version>`: the scripts are fixed per app version,
+hold no user data, and every profile can share them. The one-time `%APPDATA%\Sessions` rename
+migration runs only for the default profile.
+
+The command line is parsed once into `DataProfile` (options match case-insensitively, the
+first `--data-dir` wins and is made absolute, `--demo` wins over `--data-dir`), and the data
+folder, relaunch command, jump list, sign-in and credential choice all read it. Before, the
+relaunch command passed a relative `--data-dir` through unchanged (a taskbar relaunch opened
+another folder), `--DEMO` turned demo mode on but was dropped from the relaunch command, and a
+trailing `--data-dir` with no folder opened the real data while turning the jump list off. A
+`--data-dir` without a usable folder now stops with a message instead of opening real data.
+
+Credential Manager failures were raw `Win32Exception`s that the Settings and identity handlers
+(which catch `IOException`) let through. They are `CredentialStoreException : IOException` now,
+and every backend refuses a secret over Credential Manager's 2560-byte blob limit (1280
+characters) before anything is saved, with a message that says so.
+
+## 2026-11-03 - One validation per store, shared with backups
+
+Each store has one `Validate` that its loader runs (so bad data throws `InvalidDataException`
+and `.bak` recovery kicks in) and that `SessionsBackup.Read` runs on the matching archive
+entry. Identities and SSH keys had no loader validation (`{"identities":[null]}` or a null name
+loaded and crashed later), and backups checked only sessions: a null `pinnedSessionIds` threw in
+the middle of an import after keys, identities, sessions and passwords were written, and a null
+known-host entry was saved and crashed the next connect. The archive adds only its own rules
+(lists present, ids unique, references between files) and now parses `workspaces.json` at read
+time too. Duplicate session ids are still rejected only in backups: a store file that has them
+was written by an older build and loading it beats falling back to `.bak`.
+
+Known hosts with endpoints that differ only in case (v1 reloaded the file into a case-sensitive
+dictionary, so both spellings could be saved) threw `ArgumentException` from the loader, which
+`AtomicFile` does not treat as a bad file, so it escaped the startup load and the app would not
+start. They are merged deterministically instead of rejected, because rejecting would block SSH
+for those users: the same key keeps the copy with the public key blob, different keys keep the
+ordinally first spelling. Both were accepted by the user, and the other key still gets the
+mismatch prompt. Startup also loads each store in its own try/catch, so an unexpected loader
+bug is logged and shown and the other stores still load (the failed one stays unloaded and
+refuses to save).
+
+`SessionsBackup.Import` checks every store it saves (sessions, settings, known hosts,
+highlights, keys, identities, workspaces) is writable, and every secret fits Credential Manager,
+before it changes anything, instead of failing halfway. Export takes workspaces from the
+`WorkspaceStore`'s memory like the other stores, not a raw copy of the file (a damaged file made
+every backup unrestorable, a store running from `.bak` exported the damaged primary, and the
+unshared read could block a save). An empty workspace store exports no `workspaces.json`, so
+restoring that backup leaves the target's workspaces alone; before, an existing empty file was
+exported and restoring it deleted them. Custom icons are written through `AtomicFile.WriteBytes`
+(no `.bak`), and `AtomicFile` removes its temp file when a write fails.
+
+`SshKeyStore` raises `Changed` after a save succeeds, like the identity and session stores, and
+Settings' identities section listens, so keys added in one window, migrated at startup or merged
+by an import show in every open Settings page.
+
+## 2026-11-03 - SFTP transfers never leave a partial file
+
+Downloads open the local file with `FileMode.CreateNew`: the pane picks a free name when it
+plans the transfer, and something created there in the meantime is no longer overwritten (the
+next free "name (2).ext" is used and returned). Because the file is always one the download
+created, any failure deletes it, not just a cancel; a network error used to leave a truncated
+file that looked complete.
+
+An upload over an existing regular file goes to a hidden `.name.resesh-xxxxxxxx.part` beside it,
+takes the old file's permission bits, and is renamed over it only when complete, so a dropped
+connection leaves the old file intact instead of truncated. SSH.NET's `RenameFile(..., isPosix:
+true)` sends `posix-rename@openssh.com` (atomic replace; OpenSSH, including Windows OpenSSH,
+offers it) and throws `NotSupportedException` when the server lacks it; then the old file is
+deleted and plain SFTP rename (which refuses to replace) moves the upload in, and if that last
+step fails the upload is kept under its temporary name and the error says where. Symlinks (a
+rename would replace the link instead of writing through it) and folders that refuse new files
+are still overwritten in place. Ownership is not carried over by the rename; that needs root,
+which an SFTP user rarely is. Checked against a user-mode Windows OpenSSH sshd: new upload,
+overwrite, cancelled overwrite (old file intact, no `.part` left), download name clash and
+cancelled download.

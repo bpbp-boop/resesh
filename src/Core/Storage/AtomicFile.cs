@@ -57,15 +57,34 @@ internal static class AtomicFile
     [ThreadStatic]
     internal static Action? BeforeSharingViolationRetry;
 
-    public static void Write(string path, string contents, bool preserveBackup = false)
+    public static void Write(string path, string contents, bool preserveBackup = false) =>
+        Write(path, temporary => File.WriteAllText(temporary, contents), preserveBackup ? null : path + ".bak");
+
+    /// <summary>Replaces a file that is not a store (a custom icon): the same temp-and-swap,
+    /// with no .bak beside it.</summary>
+    public static void WriteBytes(string path, byte[] contents) =>
+        Write(path, temporary => File.WriteAllBytes(temporary, contents), backupPath: null);
+
+    /// <summary>Writes a temp file beside <paramref name="path"/> and swaps it in, so readers see
+    /// the old file or the new one, never a torn one. A failed write removes its temp file.</summary>
+    private static void Write(string path, Action<string> writeTemporary, string? backupPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporary = path + ".tmp";
-        File.WriteAllText(temporary, contents);
-        if (File.Exists(path))
-            File.Replace(temporary, path, preserveBackup ? null : path + ".bak");
-        else
-            File.Move(temporary, path);
+        try
+        {
+            writeTemporary(temporary);
+            if (File.Exists(path))
+                File.Replace(temporary, path, backupPath);
+            else
+                File.Move(temporary, path);
+        }
+        catch
+        {
+            try { File.Delete(temporary); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
     /// <summary>

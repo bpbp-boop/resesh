@@ -36,16 +36,20 @@ internal static class DemoMode
         return SecureCrtImporter.Scan(root);
     }
 
-    public static bool IsEnabled { get; } = Environment.GetCommandLineArgs()
-        .Skip(1)
-        .Any(arg => arg.Equals("--demo", StringComparison.OrdinalIgnoreCase));
+    public static bool IsEnabled => Program.Profile.IsDemo;
 
     public static string DataFolder => DataDirectory.Value;
 
     public static string StorePath(string fileName) => Path.Combine(DataDirectory.Value, fileName);
 
+    /// <summary>Only the real profile uses Windows Credential Manager. Demo secrets live in
+    /// memory; a --data-dir profile keeps its own encrypted file in its folder, so deleting a
+    /// session there (or the key migration at startup) can never touch a real password.</summary>
     public static ICredentialService CreateCredentialService() =>
-        IsEnabled ? new MemoryCredentialService() : new WindowsCredentialService();
+        IsEnabled ? new MemoryCredentialService()
+        : Program.Profile.DataDirectory is { } directory
+            ? new ProtectedFileCredentialService(Path.Combine(directory, ProtectedFileCredentialService.FileName))
+            : new WindowsCredentialService();
 
     public static void Seed(SessionStore store)
     {
@@ -175,7 +179,11 @@ internal static class DemoMode
 
         public string? Read(Guid sessionId) => _secrets.GetValueOrDefault(sessionId);
 
-        public void Write(Guid sessionId, string secret) => _secrets[sessionId] = secret;
+        public void Write(Guid sessionId, string secret)
+        {
+            CredentialStoreException.ThrowIfTooLong(secret);
+            _secrets[sessionId] = secret;
+        }
 
         public void Delete(Guid sessionId) => _secrets.Remove(sessionId);
     }

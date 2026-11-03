@@ -376,21 +376,35 @@ public sealed class HighlightsStore
     {
         var data = JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<StoreData>());
         // Reject unusable rule collections inside the loader so .bak recovery remains available.
-        if (data?.CustomRules?.Any(rule => rule is null) == true
-            || data?.BuiltinOverrides?.Any(rule => rule is null) == true)
-        {
+        Validate(data?.EnabledRules, data?.DisabledRules, data?.CustomRules, data?.BuiltinOverrides);
+        return data;
+    }
+
+    /// <summary>The one check for highlight rules, used by the loader and by backup reading.</summary>
+    internal static void Validate(IEnumerable<string?>? enabled, IEnumerable<string?>? disabled,
+        IEnumerable<HighlightRule?>? custom, IEnumerable<HighlightRule?>? overrides)
+    {
+        if (enabled?.Any(id => id is null) == true || disabled?.Any(id => id is null) == true)
+            throw new InvalidDataException("The highlight payload contains a null rule id.");
+        if (custom?.Any(rule => rule is null) == true || overrides?.Any(rule => rule is null) == true)
             throw new InvalidDataException("The highlight payload contains a null rule.");
-        }
-        if (data?.CustomRules is { } custom)
+        if (custom is not null)
         {
             var ids = new HashSet<string>(StringComparer.Ordinal);
             foreach (var rule in custom)
             {
-                if (!string.IsNullOrWhiteSpace(rule.Id) && !ids.Add(rule.Id))
+                if (!string.IsNullOrWhiteSpace(rule!.Id) && !ids.Add(rule.Id))
                     throw new InvalidDataException("The highlight payload contains a duplicate custom rule id.");
             }
         }
-        return data;
+    }
+
+    /// <summary>Throws unless a save may replace the file now; lets an import refuse before it
+    /// changes anything.</summary>
+    internal void EnsureWritable()
+    {
+        lock (_gate)
+            _file?.EnsureWritable();
     }
 
     internal sealed class StoreData

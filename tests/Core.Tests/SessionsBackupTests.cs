@@ -33,7 +33,9 @@ public sealed class SessionsBackupTests : IDisposable
         Directory.CreateDirectory(Path.Combine(source.Directory, "icons"));
         File.WriteAllText(Path.Combine(source.Directory, "icons", "lab.svg"), "<svg/>");
         File.WriteAllText(Path.Combine(source.Directory, "recording.cast"), "must not be exported");
-        File.WriteAllText(Path.Combine(source.Directory, "workspaces.json"), "{\"workspaces\":[]}");
+        var sourceWorkspaces = new WorkspaceStore(Path.Combine(source.Directory, "workspaces.json"));
+        sourceWorkspaces.Load();
+        var savedWorkspace = sourceWorkspaces.SaveAs("Ops", new WorkspaceLayout { Groups = [new WorkspaceGroup()] });
 
         var path = Path.Combine(_dir.FullName, "filtered.reseshbackup");
         SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
@@ -50,7 +52,7 @@ public sealed class SessionsBackupTests : IDisposable
         Assert.Equal("light", package.Settings.Theme);
         Assert.Single(package.KnownHosts);
         Assert.Equal("<svg/>", Encoding.UTF8.GetString(package.Icons["lab.svg"]));
-        Assert.Equal("{\"workspaces\":[]}", Encoding.UTF8.GetString(package.Workspaces!));
+        Assert.Equal(savedWorkspace.Id, Assert.Single(WorkspaceStore.ParsePayload(package.Workspaces!).Workspaces!).Id);
         using var archive = ZipFile.OpenRead(path);
         Assert.DoesNotContain(archive.Entries, e => e.FullName.Contains("recording", StringComparison.OrdinalIgnoreCase));
     }
@@ -754,6 +756,127 @@ public sealed class SessionsBackupTests : IDisposable
 
         Assert.Empty(target.Sessions.Sessions);
         Assert.Equal(before, File.ReadAllBytes(workspacePath));
+    }
+
+    [Fact]
+    public void Export_TakesWorkspacesFromTheStoreNotTheFile()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "workspace-memory-source"));
+        var workspacePath = Path.Combine(source.Directory, "workspaces.json");
+        var live = new WorkspaceStore(workspacePath);
+        live.Load();
+        var saved = live.SaveAs("Live", new WorkspaceLayout { Groups = [new WorkspaceGroup()] });
+        // Damaged on disk after loading: a raw copy would make every backup unrestorable.
+        File.WriteAllText(workspacePath, "{ damaged");
+
+        var path = Path.Combine(_dir.FullName, "workspace-memory.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
+            new BackupExportOptions(), workspaces: live);
+
+        var package = SessionsBackup.Read(path);
+        Assert.Equal(saved.Id, Assert.Single(WorkspaceStore.ParsePayload(package.Workspaces!).Workspaces!).Id);
+    }
+
+    [Fact]
+    public void Export_EmptyWorkspaceStoreLeavesWorkspacesOutOfTheBackup()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "workspace-empty-source"));
+        var live = new WorkspaceStore(Path.Combine(source.Directory, "workspaces.json"));
+        live.Load();
+        var path = Path.Combine(_dir.FullName, "workspace-empty.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
+            new BackupExportOptions(), workspaces: live);
+
+        Assert.Null(SessionsBackup.Read(path).Workspaces);
+    }
+
+    [Theory]
+    [InlineData("settings.json", "{\"pinnedSessionIds\":null}")]
+    [InlineData("known_hosts.json", "{\"host:22\":null}")]
+    [InlineData("highlights.json", "{\"customRules\":[null]}")]
+    [InlineData("identities.json", "[null]")]
+    [InlineData("identities.json", "[{\"id\":\"6f1c1c1e-6d47-4b8e-9a53-7d41f1f3a001\",\"name\":null}]")]
+    [InlineData("ssh-keys.json", "[{\"id\":\"6f1c1c1e-6d47-4b8e-9a53-7d41f1f3a002\",\"name\":\"k\",\"path\":null}]")]
+    [InlineData("workspaces.json", "{\"workspaces\":[null]}")]
+    public void Read_RejectsDataItsStoreWouldRefuseToLoad(string entry, string json)
+    {
+        var path = Path.Combine(_dir.FullName, "invalid-" + Guid.NewGuid().ToString("N") + ".reseshbackup");
+        var source = CreateStores(Path.Combine(_dir.FullName, "invalid-source-" + Guid.NewGuid().ToString("N")));
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials, new BackupExportOptions());
+        using (var archive = ZipFile.Open(path, ZipArchiveMode.Update))
+        {
+            archive.GetEntry(entry)?.Delete();
+            using var writer = new StreamWriter(archive.CreateEntry(entry).Open());
+            writer.Write(json);
+        }
+
+        Assert.Throws<InvalidDataException>(() => SessionsBackup.Read(path));
+    }
+
+    [Fact]
+    public void Import_ReadOnlyStoreIsRefusedBeforeAnythingChanges()
+    {
+        var imported = Ssh("Would import", "would-import.example", "");
+        var package = EmptyPackage() with
+        {
+            Sessions = [imported],
+            KnownHosts = new Dictionary<string, KnownHostEntry> { ["would-import.example:22"] = new("ssh-ed25519", "abc") },
+        };
+        var target = CreateStores(Path.Combine(_dir.FullName, "readonly-highlights-target"));
+        var highlightsPath = Path.Combine(target.Directory, "highlights.json");
+        target.Highlights.MergeBackup(new HighlightBackupData { DisabledRules = ["seed"] });
+        var highlights = new HighlightsStore(highlightsPath);
+        using (new FileStream(highlightsPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            highlights.Load();
+        Assert.Equal(StoreLoadState.Unreadable, highlights.LoadState);
+
+        Assert.Throws<StoreReadOnlyException>(() => SessionsBackup.Import(package, target.Directory,
+            target.Sessions, target.Settings, target.KnownHosts, highlights, target.SshKeys,
+            target.Credentials, new Dictionary<Guid, BackupConflictResolution>()));
+
+        Assert.Empty(target.Sessions.Sessions);
+        Assert.Empty(target.KnownHosts.Entries);
+    }
+
+    [Fact]
+    public void Import_TooLongSecretIsRefusedBeforeAnythingChanges()
+    {
+        var imported = Ssh("Would import", "would-import.example", "");
+        var package = EmptyPackage() with
+        {
+            Sessions = [imported],
+            Secrets = new Dictionary<Guid, string> { [imported.Id] = new('x', CredentialStoreException.MaxSecretLength + 1) },
+        };
+        var target = CreateStores(Path.Combine(_dir.FullName, "long-secret-target"));
+
+        Assert.Throws<CredentialStoreException>(() => SessionsBackup.Import(package, target.Directory,
+            target.Sessions, target.Settings, target.KnownHosts, target.Highlights, target.SshKeys,
+            target.Credentials, new Dictionary<Guid, BackupConflictResolution>()));
+
+        Assert.Empty(target.Sessions.Sessions);
+    }
+
+    [Fact]
+    public void Import_IconsLeaveNoTemporaryOrBackupFiles()
+    {
+        var target = CreateStores(Path.Combine(_dir.FullName, "icon-target"));
+        var icons = Path.Combine(target.Directory, "icons");
+        Directory.CreateDirectory(icons);
+        File.WriteAllText(Path.Combine(icons, "lab.svg"), "<svg old/>");
+        var package = EmptyPackage() with
+        {
+            Icons = new Dictionary<string, byte[]> { ["lab.svg"] = Encoding.UTF8.GetBytes("<svg new/>") },
+        };
+
+        SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>());
+
+        Assert.Equal("<svg new/>", File.ReadAllText(Path.Combine(icons, "lab.svg")));
+        Assert.Equal(["lab.svg"], Directory.GetFiles(icons).Select(Path.GetFileName));
     }
 
     private static BackupPackage EmptyPackage(int schemaVersion = SessionsBackup.CurrentSchemaVersion) => new()

@@ -536,13 +536,31 @@ public sealed class SessionStore
     private static StoreData? Read(string path)
     {
         var data = JsonSerializer.Deserialize(File.ReadAllText(path), JsonOptions.Info<StoreData>());
-        if (data?.Sessions?.Any(session => session is null || session.Name is null
-                || session.Host is null || session.Username is null || session.FolderPath is null) == true
-            || data?.FolderSettings?.Any(setting => setting is null) == true)
-        {
-            throw new InvalidDataException("The sessions file contains an invalid session or folder setting.");
-        }
+        Validate(data?.Sessions, data?.Folders, data?.LocalFolders, data?.FolderSettings);
         return data;
+    }
+
+    /// <summary>The one check for stored sessions and folders, used by the loader (so a bad
+    /// file falls back to .bak) and by backup reading: no null entries or required text.</summary>
+    internal static void Validate(IEnumerable<Session?>? sessions, IEnumerable<string?>? folders,
+        IEnumerable<string?>? localFolders, IEnumerable<FolderSettings?>? folderSettings)
+    {
+        if (sessions?.Any(session => session is null || session.Name is null
+                || session.Host is null || session.Username is null || session.FolderPath is null) == true
+            || folders?.Any(folder => folder is null) == true
+            || localFolders?.Any(folder => folder is null) == true
+            || folderSettings?.Any(setting => setting is null || setting.Path is null) == true)
+        {
+            throw new InvalidDataException("The sessions data contains an invalid session, folder or folder setting.");
+        }
+    }
+
+    /// <summary>Throws unless a save may replace the file now; lets an import refuse before it
+    /// changes anything.</summary>
+    internal void EnsureWritable()
+    {
+        lock (_gate)
+            _file.EnsureWritable();
     }
 
     internal sealed class StoreData

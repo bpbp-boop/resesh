@@ -33,8 +33,17 @@ public sealed partial class SettingsPage
             if (IdentitiesSection.Visibility == Visibility.Visible)
                 RefreshIdentities();
         });
-        Loaded += (_, _) => App.Identities.Changed += OnChanged;
-        Unloaded += (_, _) => App.Identities.Changed -= OnChanged;
+        // Keys are listed here too, and can change in another window's Settings or an import.
+        Loaded += (_, _) =>
+        {
+            App.Identities.Changed += OnChanged;
+            App.SshKeys.Changed += OnChanged;
+        };
+        Unloaded += (_, _) =>
+        {
+            App.Identities.Changed -= OnChanged;
+            App.SshKeys.Changed -= OnChanged;
+        };
     }
 
     private void RefreshIdentities()

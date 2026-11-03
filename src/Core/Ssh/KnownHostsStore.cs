@@ -235,14 +235,46 @@ public sealed class KnownHostsStore
         _file.EnsureLoaded();
     }
 
-    private static Dictionary<string, KnownHostEntry> Read(string path)
+    private static Dictionary<string, KnownHostEntry> Read(string path) =>
+        Validate(JsonSerializer.Deserialize(
+            File.ReadAllText(path), JsonOptions.Info<Dictionary<string, KnownHostEntry>>())
+            ?? throw new InvalidDataException("The host-key file is empty."));
+
+    /// <summary>
+    /// The one check for accepted host keys, used by the loader and by backup reading. Returns
+    /// them keyed case-insensitively, as lookups are. Endpoints that differ only in case (the
+    /// first builds keyed them case-sensitively after a reload) are merged, not rejected, so
+    /// such a file never blocks SSH: the copy carrying the public key blob wins if both hold
+    /// the same key, else the ordinally first spelling. Both were accepted by the user, and a
+    /// connection to the host that offers the other key still gets the mismatch warning.
+    /// </summary>
+    internal static Dictionary<string, KnownHostEntry> Validate(IReadOnlyDictionary<string, KnownHostEntry> entries)
     {
-        var entries = JsonSerializer.Deserialize(
-            File.ReadAllText(path), JsonOptions.Info<Dictionary<string, KnownHostEntry>>()) ?? throw new JsonException("The host-key file is empty.");
-        if (entries.Any(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null
-            || string.IsNullOrWhiteSpace(pair.Value.KeyType) || string.IsNullOrWhiteSpace(pair.Value.Sha256)))
-            throw new JsonException("The host-key file contains an invalid entry.");
-        return new(entries, StringComparer.OrdinalIgnoreCase);
+        var merged = new Dictionary<string, KnownHostEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, stored) in entries.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            KnownHostEntry? value = stored; // JSON can hold null whatever the type says
+            if (string.IsNullOrWhiteSpace(key) || value is null
+                || string.IsNullOrWhiteSpace(value.KeyType) || string.IsNullOrWhiteSpace(value.Sha256))
+                throw new InvalidDataException("The host-key data contains an invalid entry.");
+            if (!merged.TryGetValue(key, out var existing))
+                merged[key] = value;
+            else if (existing.Sha256 == value.Sha256 && string.IsNullOrEmpty(existing.PublicKeyBase64)
+                && !string.IsNullOrEmpty(value.PublicKeyBase64))
+                merged[key] = value;
+        }
+        return merged;
+    }
+
+    /// <summary>Throws unless a save may replace the file now (and SSH is not blocked by a file
+    /// that could not be loaded); lets an import refuse before it changes anything.</summary>
+    internal void EnsureWritable()
+    {
+        lock (_gate)
+        {
+            EnsureAvailable();
+            _file.EnsureWritable();
+        }
     }
 
     private static string Key(string host, int port) => $"{host}:{port}";

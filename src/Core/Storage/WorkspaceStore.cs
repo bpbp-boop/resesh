@@ -384,7 +384,19 @@ public sealed class WorkspaceStore
         drafts = drafts
             .Where(draft => workspaces.Any(workspace => workspace.Id == draft.Key))
             .ToDictionary(draft => draft.Key, draft => draft.Value);
-        _file.Write(JsonSerializer.Serialize(new WorkspaceStoreData
+        _file.Write(Serialize(workspaces, lastLayout, lastActiveWorkspaceId, drafts));
+        _workspaces = workspaces;
+        _lastLayout = lastLayout;
+        _lastActiveWorkspaceId = lastActiveWorkspaceId;
+        _drafts = drafts;
+    }
+
+    private static string Serialize(
+        List<Workspace> workspaces,
+        WorkspaceLayout? lastLayout,
+        Guid? lastActiveWorkspaceId,
+        Dictionary<Guid, WorkspaceLayout> drafts) =>
+        JsonSerializer.Serialize(new WorkspaceStoreData
         {
             Workspaces = workspaces,
             LastLayout = lastLayout,
@@ -392,11 +404,23 @@ public sealed class WorkspaceStore
             Drafts = drafts.Count == 0
                 ? null
                 : drafts.Select(draft => new WorkspaceDraft { WorkspaceId = draft.Key, Layout = draft.Value }).ToList(),
-        }, JsonOptions.Info<WorkspaceStoreData>()));
-        _workspaces = workspaces;
-        _lastLayout = lastLayout;
-        _lastActiveWorkspaceId = lastActiveWorkspaceId;
-        _drafts = drafts;
+        }, JsonOptions.Info<WorkspaceStoreData>());
+
+    /// <summary>What the store holds, in its file format, for a backup; null when it holds
+    /// nothing. Taken from memory like every other store's backup data, never copied from
+    /// disk: a damaged file, or a store running from its .bak, must not end up in the archive.
+    /// An empty store exports nothing, so importing that backup leaves workspaces alone
+    /// rather than deleting them.</summary>
+    internal byte[]? ExportBackup()
+    {
+        lock (_gate)
+        {
+            _file.EnsureLoaded();
+            if (_workspaces.Count == 0 && _lastLayout is null && _drafts.Count == 0)
+                return null;
+            return System.Text.Encoding.UTF8.GetBytes(
+                Serialize(_workspaces, _lastLayout, _lastActiveWorkspaceId, _drafts));
+        }
     }
 
     internal static WorkspaceStoreData ParsePayload(byte[] payload)

@@ -30,7 +30,7 @@ public sealed partial class AboutView : UserControl
     ];
 
     private readonly string _dataFolder = Program.DataDirectory;
-    private readonly string _logsFolder = AppDataPaths.Local();
+    private readonly string _logsFolder = Program.LogDirectory;
     private int _copyFeedbackVersion;
 
     public AboutView()
