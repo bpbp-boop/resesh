@@ -13,6 +13,7 @@ public sealed class MainViewModelCommandTests : IDisposable
     private readonly SessionStore _store;
     private IReadOnlyList<Guid> _recentIds = [];
     private string _recordingDirectory = "";
+    private List<Exception>? _reported;
 
     public MainViewModelCommandTests() =>
         _store = new SessionStore(Path.Combine(_directory, "sessions.json"));
@@ -26,7 +27,7 @@ public sealed class MainViewModelCommandTests : IDisposable
         ShowAgentIcons = () => true,
         IsSessionVisible = _ => true,
         ApplySessionSettings = _ => { },
-        ReportError = exception => throw exception,
+        ReportError = exception => (_reported ?? throw exception).Add(exception),
         RecentSessionIds = () => _recentIds,
         SaveRecentSessionIds = ids => _recentIds = ids,
         RecordingDirectory = () => _recordingDirectory,
@@ -661,6 +662,61 @@ public sealed class MainViewModelCommandTests : IDisposable
 
         Assert.Contains("Sites/South", _store.Folders);
         Assert.DoesNotContain("Sites/North", _store.Folders);
+    }
+
+    [Fact]
+    public async Task RenameFolderTrimsAndRefusesSeparators()
+    {
+        _store.CreateFolder("Sites/North");
+        var window = Window();
+        var north = window.RootNodes.Single(n => n.Name == "Sites").Children.Single();
+        _window.PromptAnswers.Enqueue("East/West");
+        _window.PromptAnswers.Enqueue("  South  ");
+
+        await window.RenameFolderCommand.ExecuteAsync(north);
+
+        Assert.Equal(["Sites", "Sites/South"], _store.Folders.Order());
+    }
+
+    [Fact]
+    public async Task RenameFolderToItsOwnNameChangesNothing()
+    {
+        var (window, _, folder, _) = Tree();
+        _window.PromptAnswers.Enqueue(" Core ");
+
+        await window.RenameFolderCommand.ExecuteAsync(folder);
+
+        Assert.Equal(["Core"], _store.Folders);
+    }
+
+    [Fact]
+    public async Task FailedTreeDeleteIsReportedAndDeletesNothing()
+    {
+        var (window, _, folder, session) = Tree();
+        _reported = [];
+        window.TreeSelection.SelectOnly(folder);
+        window.TreeSelection.Toggle(session);
+
+        using (File.Open(Path.Combine(_directory, "sessions.json"), FileMode.Open, FileAccess.Read, FileShare.None))
+            await window.DeleteSelectionCommand.ExecuteAsync(null);
+
+        Assert.IsAssignableFrom<IOException>(Assert.Single(_reported));
+        Assert.Equal(3, _store.Sessions.Count);
+        Assert.Equal(["Core"], _store.Folders);
+    }
+
+    [Fact]
+    public async Task FailedFolderRenameIsReported()
+    {
+        var (window, _, folder, _) = Tree();
+        _reported = [];
+        _window.PromptAnswers.Enqueue("Edge");
+
+        using (File.Open(Path.Combine(_directory, "sessions.json"), FileMode.Open, FileAccess.Read, FileShare.None))
+            await window.EditSelectionCommand.ExecuteAsync(new List<TreeNodeViewModel> { folder });
+
+        Assert.Single(_reported);
+        Assert.Equal(["Core"], _store.Folders);
     }
 
     [Fact]

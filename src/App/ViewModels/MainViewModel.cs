@@ -484,6 +484,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         ForgetDeleted(removed.Select(session => session.Id).ToList());
     }
 
+    /// <summary>Deletes folders and sessions in one store write, so a failed save deletes
+    /// none of them rather than the ones before the failure.</summary>
+    public void DeleteFoldersAndSessions(IReadOnlyList<(string Path, SessionKind Kind)> folders, IEnumerable<Guid> sessionIds)
+    {
+        var removed = _store.DeleteMany(folders, sessionIds);
+        foreach (var (path, kind) in folders)
+        {
+            ForgetExpansion(_expansion, path, kind);
+            ForgetExpansion(_filterExpansion, path, kind);
+        }
+        ForgetDeleted(removed.Select(session => session.Id).ToList());
+    }
+
     /// <summary>Moves the expansion state of a folder and every folder beneath it to their new paths.</summary>
     private static void MoveExpansion(Dictionary<string, bool> expansion, string oldPath, string newPath, SessionKind kind)
     {

@@ -80,6 +80,31 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     [Fact]
+    public void DeleteMany_RemovesFoldersOfBothKindsAndSessionsInOneWrite()
+    {
+        var store = NewStore();
+        store.CreateFolder("Prod/Web");
+        store.CreateFolder("Tools", SessionKind.Local);
+        var web = NewSession("web", "Prod/Web");
+        var loose = NewSession("loose");
+        var kept = NewSession("kept", "Lab");
+        var profile = new Session { Name = "pwsh", Kind = SessionKind.Local, FolderPath = "Tools" };
+        store.AddMany([web, loose, kept, profile]);
+        store.SetFolderIdentity("Prod", Guid.NewGuid());
+        var writes = 0;
+        store.Changed += () => writes++;
+
+        var removed = store.DeleteMany([("Prod", SessionKind.Ssh), ("Tools", SessionKind.Local)], [loose.Id]);
+
+        Assert.Equal(1, writes);
+        Assert.Equal(["web", "loose", "pwsh"], removed.Select(s => s.Name));
+        Assert.Equal(["kept"], NewStore().Sessions.Select(s => s.Name));
+        Assert.Equal(["Lab"], NewStore().Folders);
+        Assert.Empty(NewStore().FoldersOf(SessionKind.Local));
+        Assert.Null(store.FolderIdentity("Prod"));
+    }
+
+    [Fact]
     public void SetFolderIdentity_OnTheRootAddsNoFolder()
     {
         var store = NewStore();

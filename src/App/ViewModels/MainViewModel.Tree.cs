@@ -130,7 +130,7 @@ public sealed partial class MainViewModel
     [RelayCommand(CanExecute = nameof(CanEditSelection),
         AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
     private Task EditSelectionAsync(IReadOnlyList<TreeNodeViewModel>? nodes) =>
-        SelectionOrCurrent(nodes) switch
+        ReportingStoreFailures(() => SelectionOrCurrent(nodes) switch
         {
             // The editor starts from the saved record, not the node's copy of it.
             [{ Session: { } node }] => CurrentSession(node.Id) switch
@@ -141,7 +141,7 @@ public sealed partial class MainViewModel
             },
             [{ IsFolder: true, IsLocalRoot: false } folder] => RenameFolderAsync(folder),
             _ => Task.CompletedTask,
-        };
+        });
 
     private bool CanEditSelection(IReadOnlyList<TreeNodeViewModel>? nodes) =>
         SelectionOrCurrent(nodes) is [{ Session: not null }] or [{ IsFolder: true, IsLocalRoot: false }];
@@ -150,12 +150,12 @@ public sealed partial class MainViewModel
     [RelayCommand(CanExecute = nameof(CanDeleteSelection),
         AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
     private Task DeleteSelectionAsync(IReadOnlyList<TreeNodeViewModel>? nodes) =>
-        SelectionOrCurrent(nodes) switch
+        ReportingStoreFailures(() => SelectionOrCurrent(nodes) switch
         {
             [{ Session: { } session }] => DeleteSessionAsync(session),
             [{ IsFolder: true, IsLocalRoot: false } folder] => DeleteFolderAsync(folder),
             var items => DeleteNodesAsync(items),
-        };
+        });
 
     private bool CanDeleteSelection(IReadOnlyList<TreeNodeViewModel>? nodes) =>
         SelectionOrCurrent(nodes) is { Count: > 0 } items && !items.All(node => node.IsLocalRoot);
@@ -164,32 +164,67 @@ public sealed partial class MainViewModel
 
     /// <summary>A new session inside the folder: a local profile in the Local scope, SSH elsewhere.</summary>
     [RelayCommand(AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
-    private Task NewSessionInFolderAsync(TreeNodeViewModel folder) => folder.IsLocalScope
+    private Task NewSessionInFolderAsync(TreeNodeViewModel folder) => ReportingStoreFailures(() => folder.IsLocalScope
         ? Services.EditLocalProfileAsync(existing: null, defaultFolder: folder.FolderPath)
-        : Services.EditSessionAsync(existing: null, defaultFolder: folder.FolderPath);
+        : Services.EditSessionAsync(existing: null, defaultFolder: folder.FolderPath));
 
     [RelayCommand(AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
-    private async Task NewSubfolderAsync(TreeNodeViewModel folder)
+    private Task NewSubfolderAsync(TreeNodeViewModel folder) => ReportingStoreFailures(async () =>
     {
         var location = folder.IsLocalRoot ? "under Local" : $"inside {folder.FolderPath}";
         var name = await Services.PromptAsync("New Folder", $"Folder name ({location})", "");
         if (!string.IsNullOrWhiteSpace(name))
             CreateFolder(FolderPaths.Combine(folder.FolderPath, name), KindOf(folder));
-    }
+    });
 
     [RelayCommand(AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
-    private async Task RenameFolderAsync(TreeNodeViewModel folder)
+    private Task RenameFolderAsync(TreeNodeViewModel folder) => ReportingStoreFailures(async () =>
     {
-        var name = await Services.PromptAsync("Rename Folder", "New name", folder.Name);
-        if (string.IsNullOrWhiteSpace(name) || name == folder.Name)
+        if (await PromptFolderNameAsync(folder.Name) is not { } name || name == folder.Name)
             return;
         var newPath = FolderPaths.Combine(FolderPaths.Parent(folder.FolderPath), name);
         RenameFolder(folder.FolderPath, newPath, KindOf(folder));
+    });
+
+    /// <summary>Asks for a folder's new name, trimmed; null when cancelled or left empty. A
+    /// separator would move the folder instead of renaming it (the path nests), so a name
+    /// with one is refused and asked for again.</summary>
+    private async Task<string?> PromptFolderNameAsync(string current)
+    {
+        var placeholder = "New name";
+        var initial = current;
+        while (true)
+        {
+            var name = (await Services.PromptAsync("Rename Folder", placeholder, initial))?.Trim();
+            if (string.IsNullOrEmpty(name))
+                return null;
+            if (name.IndexOfAny(['/', '\\']) < 0)
+                return name;
+            placeholder = "A folder name cannot contain / or \\";
+            initial = name;
+        }
+    }
+
+    /// <summary>Runs a tree command that writes the session store. The tree's keys, the
+    /// context menu, forwarded shortcuts and the palette all run these through the command,
+    /// so a save that fails (sessions.json locked or read-only) is reported here, the way a
+    /// failed drag-move is, instead of escaping as an unobserved task exception.</summary>
+    private async Task ReportingStoreFailures(Func<Task> write)
+    {
+        try
+        {
+            await write();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            _environment.ReportError(exception);
+        }
     }
 
     /// <summary>Attaches an identity to a remote folder; local folders have no logins.</summary>
     [RelayCommand(AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
-    private Task SetFolderIdentityAsync(TreeNodeViewModel folder) => Services.SetFolderIdentityAsync(folder.FolderPath);
+    private Task SetFolderIdentityAsync(TreeNodeViewModel folder) =>
+        ReportingStoreFailures(() => Services.SetFolderIdentityAsync(folder.FolderPath));
 
     [RelayCommand]
     private void SetDefaultLocalProfile(Session profile) => _environment.SetDefaultLocalProfile(profile.Id);
@@ -263,11 +298,11 @@ public sealed partial class MainViewModel
         if (!await Services.ConfirmAsync("Delete Selection", message))
             return;
 
-        // Folders first; sessions already removed with a folder become harmless no-ops.
-        foreach (var folder in folders)
-            DeleteFolder(folder.FolderPath, KindOf(folder));
-        foreach (var node in sessions)
-            DeleteSession(node.Session!);
+        // One write for the whole selection, as Settings > Sessions deletes: a failed save
+        // leaves everything in place instead of only what came after the failure.
+        DeleteFoldersAndSessions(
+            folders.Select(folder => (folder.FolderPath, KindOf(folder))).ToList(),
+            sessions.Select(node => node.Session!.Id));
     }
 
     // ---- Context menu ----

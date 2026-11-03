@@ -506,6 +506,39 @@ public sealed class SessionStore
         }
     }
 
+    /// <summary>
+    /// Deletes folders (each with everything under it) and sessions in one write, so a save
+    /// that fails deletes none of them. Returns the removed sessions so the caller can delete
+    /// their credentials.
+    /// </summary>
+    public IReadOnlyList<Session> DeleteMany(IEnumerable<(string Path, SessionKind Kind)> folders, IEnumerable<Guid> sessionIds)
+    {
+        lock (_gate)
+        {
+            var targets = folders
+                .Select(folder => (Path: FolderPaths.Normalize(folder.Path), folder.Kind))
+                .Where(folder => folder.Path.Length > 0)
+                .ToList();
+            var ids = sessionIds.ToHashSet();
+            bool Removes(Session session) =>
+                ids.Contains(session.Id) || targets.Any(folder => IsInFolder(session, folder.Path, folder.Kind));
+            bool FolderGoes(string path, SessionKind kind) =>
+                targets.Any(folder => folder.Kind == kind && FolderPaths.IsSelfOrDescendant(path, folder.Path));
+
+            var removed = _sessions.Where(Removes).ToList();
+            if (removed.Count == 0 && targets.Count == 0)
+                return [];
+            Save(
+                sessions: _sessions.Where(session => !Removes(session)).ToList(),
+                folders: _folders.Where(path => !FolderGoes(path, SessionKind.Ssh)).ToList(),
+                localFolders: _localFolders.Where(path => !FolderGoes(path, SessionKind.Local)).ToList(),
+                folderSettings: _folderSettings
+                    .Where(setting => setting.Path.Length == 0 || !FolderGoes(setting.Path, SessionKind.Ssh))
+                    .ToList());
+            return removed;
+        }
+    }
+
     private void Save(
         List<Session>? sessions = null,
         List<string>? folders = null,
