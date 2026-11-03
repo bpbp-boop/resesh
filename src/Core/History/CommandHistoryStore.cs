@@ -171,10 +171,20 @@ public sealed class CommandHistoryStore
                 where.Add($"e.started_at >= {Parameter(since.ToUnixTimeMilliseconds())}");
             if (query.Until is { } until)
                 where.Add($"e.started_at < {Parameter(until.ToUnixTimeMilliseconds())}");
+            // Rows keep the session name they were recorded under; a session renamed since
+            // also matches by its current name, which only the caller knows.
+            string OrRenamed(string text)
+            {
+                var ids = query.SessionsNamedLike(text);
+                return ids.Count == 0
+                    ? ""
+                    : $" OR e.session_id IN ({string.Join(", ", ids.Select(id => Parameter(id.ToString("D"))))})";
+            }
+
             foreach (var host in parsed.Hosts)
             {
                 var value = Parameter(host);
-                where.Add($"({Contains("e.session_name", value)} OR {Contains("e.target", value)})");
+                where.Add($"({Contains("e.session_name", value)} OR {Contains("e.target", value)}{OrRenamed(host)})");
             }
             foreach (var directory in parsed.Directories)
                 where.Add(Contains("e.directory", Parameter(directory)));
@@ -185,14 +195,19 @@ public sealed class CommandHistoryStore
             var indexed = new List<string>();
             foreach (var term in parsed.Terms)
             {
+                var renamed = OrRenamed(term);
                 if (term.Length >= MinimumIndexedTermLength)
                 {
-                    indexed.Add($"{{{string.Join(' ', searchedColumns)}}} : \"{term.Replace("\"", "\"\"")}\"");
+                    var expression = $"{{{string.Join(' ', searchedColumns)}}} : \"{term.Replace("\"", "\"\"")}\"";
+                    if (renamed.Length == 0)
+                        indexed.Add(expression);
+                    else
+                        where.Add($"(e.id IN (SELECT rowid FROM entry_fts WHERE entry_fts MATCH {Parameter(expression)}){renamed})");
                 }
                 else
                 {
                     var value = Parameter(term);
-                    where.Add("(" + string.Join(" OR ", searchedColumns.Select(column => Contains("e." + column, value))) + ")");
+                    where.Add("(" + string.Join(" OR ", searchedColumns.Select(column => Contains("e." + column, value))) + renamed + ")");
                 }
             }
 

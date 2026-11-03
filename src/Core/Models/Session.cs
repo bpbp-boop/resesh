@@ -172,7 +172,7 @@ public sealed record Session
 
     public string Host { get; set; } = "";
 
-    public int Port { get; set; } = 22;
+    public int Port { get; set; } = SessionEndpoint.DefaultSshPort;
 
     /// <summary>The login name. With <see cref="Login"/> Own it is this session's username;
     /// otherwise a non-empty value overrides the identity's username and keeps its proof.</summary>

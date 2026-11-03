@@ -30,7 +30,12 @@ internal sealed class FakeMainWindowServices : IMainWindowServices
         return Task.CompletedTask;
     }
 
-    public void ConnectSession(Session session) => Record($"Connect {session.Name}");
+    public List<Session> ConnectedSessions { get; } = [];
+    public void ConnectSession(Session session)
+    {
+        ConnectedSessions.Add(session);
+        Record($"Connect {session.Name}");
+    }
     public List<(Session Session, TabGroupViewModel Group)> PaneConnections { get; } = [];
     public void ConnectSession(Session session, TabGroupViewModel group) => PaneConnections.Add((session, group));
     public void ConnectInNewWindow(IReadOnlyList<Session> sessions) =>

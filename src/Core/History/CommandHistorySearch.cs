@@ -21,6 +21,24 @@ public sealed record CommandHistoryQuery
     /// <summary>Exclusive end: only commands that started before it.</summary>
     public DateTimeOffset? Until { get; init; }
     public bool SearchOutput { get; init; } = true;
+
+    /// <summary>Current names of saved sessions, by id. Entries of a session listed here also
+    /// match its current name (free text and <c>host:</c>), so a renamed session is found under
+    /// its new name; the name recorded with each command still matches too.</summary>
+    public IReadOnlyDictionary<Guid, string>? SessionNames { get; init; }
+
+    /// <summary>Saved sessions whose current name contains <paramref name="text"/>.</summary>
+    internal IReadOnlyList<Guid> SessionsNamedLike(string text) =>
+        SessionNames is null
+            ? []
+            : SessionNames.Where(pair => pair.Value.Contains(text, StringComparison.OrdinalIgnoreCase))
+                .Select(pair => pair.Key)
+                .ToList();
+
+    /// <summary>Whether the entry's session currently has a name containing <paramref name="text"/>.</summary>
+    internal bool CurrentNameContains(CommandHistoryEntry entry, string text) =>
+        entry.SessionId is { } id && SessionNames is not null && SessionNames.TryGetValue(id, out var name)
+        && name.Contains(text, StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>The search box split into free-text terms and filters.</summary>
@@ -155,13 +173,15 @@ public static class CommandHistorySearch
                 continue;
             if (parsed.ExitCode is { } exit && entry.ExitCode != exit)
                 continue;
-            if (!parsed.Hosts.All(host => Contains(entry.SessionName, host) || Contains(entry.Target, host)))
+            if (!parsed.Hosts.All(host => Contains(entry.SessionName, host) || Contains(entry.Target, host)
+                    || query.CurrentNameContains(entry, host)))
                 continue;
             if (!parsed.Directories.All(directory => Contains(entry.WorkingDirectory, directory)))
                 continue;
             if (!parsed.Terms.All(term =>
                     Contains(entry.Command, term)
                     || Contains(entry.SessionName, term)
+                    || query.CurrentNameContains(entry, term)
                     || Contains(entry.Target, term)
                     || Contains(entry.WorkingDirectory, term)
                     || (query.SearchOutput && Contains(entry.Output, term))))

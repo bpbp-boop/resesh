@@ -388,4 +388,54 @@ public sealed class WorkspaceStoreTests : IDisposable
     {
         Groups = [new WorkspaceGroup()],
     };
+
+    [Fact]
+    public void RemoveSessions_PrunesSavedLayoutsDraftsAndTheLastLayoutInOneWrite()
+    {
+        var path = Path.Combine(_dir.FullName, "prune.json");
+        var kept = Guid.NewGuid();
+        var deleted = Guid.NewGuid();
+        var other = Guid.NewGuid();
+        var store = new WorkspaceStore(path);
+        store.Load();
+        WorkspaceLayout Layout(params Guid[][] groups) => new()
+        {
+            Groups = groups.Select(ids => new WorkspaceGroup
+            {
+                Tabs = ids.Select(id => new WorkspaceTabReference { SessionId = id }).ToList(),
+                ActiveTabIndex = Math.Max(ids.Length - 1, 0),
+            }).ToList(),
+            Layout = groups.Length == 1
+                ? new WorkspaceLayoutNode { GroupIndex = 0 }
+                : new WorkspaceLayoutNode
+                {
+                    Orientation = SplitOrientation.Columns,
+                    Children = Enumerable.Range(0, groups.Length).Select(i => new WorkspaceLayoutNode { GroupIndex = i }).ToList(),
+                },
+        };
+        var both = store.SaveAs("Both", Layout([kept, deleted], [deleted]));
+        var drafted = store.SaveAs("Drafted", Layout([kept]));
+        var unrelated = store.SaveAs("Unrelated", Layout([other]));
+        // A draft whose only change is the deleted session is no change once it is gone.
+        store.SetDraft(drafted.Id, Layout([kept, deleted]));
+        store.SetDraft(unrelated.Id, Layout([other, deleted, kept]));
+        store.SaveLastLayout(Layout([deleted, kept]));
+
+        Assert.True(store.RemoveSessions([deleted]));
+
+        var loaded = new WorkspaceStore(path);
+        loaded.Load();
+        var saved = loaded.Workspaces.Single(w => w.Id == both.Id);
+        Assert.Equal([kept], saved.Groups[0].Tabs.Select(t => t.SessionId));
+        Assert.Empty(saved.Groups[1].Tabs); // the pane stays, as it does in a window showing it
+        Assert.Equal(0, saved.Groups[0].ActiveTabIndex);
+        Assert.False(loaded.HasDraft(drafted.Id));
+        Assert.Equal([other, kept], loaded.DraftOf(unrelated.Id)!.Groups[0].Tabs.Select(t => t.SessionId));
+        Assert.Equal([kept], loaded.LastLayout!.Groups[0].Tabs.Select(t => t.SessionId));
+        Assert.False(loaded.HasChanges(both.Id, Layout([kept], [])));
+
+        var written = File.GetLastWriteTimeUtc(path);
+        Assert.False(loaded.RemoveSessions([Guid.NewGuid()]));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(path));
+    }
 }

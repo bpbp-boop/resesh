@@ -28,11 +28,8 @@ public sealed class SessionRow
         Folder = session.IsLocal
             ? FolderPaths.Combine("Local", session.FolderPath)
             : session.FolderPath.Length == 0 ? "—" : session.FolderPath;
-        Host = session.IsLocal
-            ? Path.GetFileName(session.Local?.Executable ?? "")
-            : session.IsSerial
-                ? session.Serial?.Describe() ?? ""
-            : session.Port == (session.IsTelnet ? 23 : 22) ? session.Host : $"{session.Host}:{session.Port}";
+        // The Type column names the protocol, so the host needs no prefix.
+        Host = SessionEndpoint.Format(session);
         Login = login switch
         {
             null => "",
@@ -432,8 +429,9 @@ public sealed partial class SessionsManagerView : UserControl
         }
         if (await BulkEditSessionsDialog.EditAsync(XamlRoot, selected) is not { } edit)
             return;
-        var changed = edit.ApplyTo(selected);
-        if (Save(owner => owner.UpdateSessions(changed)))
+        // The rows are copies from when the table was filled; the edit applies to the saved records.
+        IReadOnlyList<Session> changed = [];
+        if (Save(owner => changed = owner.EditSessions(selected.Select(session => session.Id), edit)))
         {
             ShowStatus(InfoBarSeverity.Success, changed.Count == 0
                 ? "The selected sessions already had those settings."
@@ -599,7 +597,8 @@ public sealed partial class SessionsManagerView : UserControl
             if (!await confirm.ConfirmAsync())
                 return;
         }
-        if (Save(owner => owner.UpdateSessions(changed)))
+        // Decided on the rows shown; saved onto the records as they are now.
+        if (Save(owner => changed = owner.EditSessions(selected.Select(session => session.Id), edit)))
             ShowStatus(InfoBarSeverity.Success, $"{Count(changed.Count, "session")} set to {outcome}.{skippedNote}");
     }
 }

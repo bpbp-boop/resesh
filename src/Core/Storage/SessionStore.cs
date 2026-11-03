@@ -47,6 +47,14 @@ public sealed class SessionStore
         get { lock (_gate) return _file.State; }
     }
 
+    /// <summary>
+    /// Raised after every successful save, whatever wrote it, so copies of sessions held
+    /// elsewhere (tabs, the tree, other windows) can re-read them. Raised on the writing
+    /// thread while the store is still locked: handlers see exactly the saved state and may
+    /// read the store, but must not wait on another thread that uses it.
+    /// </summary>
+    public event Action? Changed;
+
     public IReadOnlyList<Session> Sessions
     {
         get { lock (_gate) return _sessions.ToList(); }
@@ -454,6 +462,20 @@ public sealed class SessionStore
         return candidate;
     }
 
+    /// <summary>The sessions <see cref="DeleteFolder"/> would remove with this folder: every
+    /// session in its tree (telnet and serial sessions share the SSH tree) under it.</summary>
+    public IReadOnlyList<Session> SessionsInFolder(string folderPath, SessionKind kind = SessionKind.Ssh)
+    {
+        folderPath = FolderPaths.Normalize(folderPath);
+        if (folderPath.Length == 0)
+            return [];
+        lock (_gate)
+            return _sessions.Where(s => IsInFolder(s, folderPath, kind)).ToList();
+    }
+
+    private static bool IsInFolder(Session session, string folderPath, SessionKind kind) =>
+        session.FolderScope == kind && FolderPaths.IsSelfOrDescendant(session.FolderPath, folderPath);
+
     /// <summary>
     /// Deletes a folder of one kind and everything under it. Returns the removed sessions
     /// so the caller can delete their credentials.
@@ -466,12 +488,8 @@ public sealed class SessionStore
             if (folderPath.Length == 0)
                 return [];
 
-            var removed = _sessions
-                .Where(s => s.FolderScope == kind && FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath))
-                .ToList();
-            var sessions = _sessions
-                .Where(s => s.FolderScope != kind || !FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath))
-                .ToList();
+            var removed = _sessions.Where(s => IsInFolder(s, folderPath, kind)).ToList();
+            var sessions = _sessions.Where(s => !IsInFolder(s, folderPath, kind)).ToList();
             var folders = FolderListOf(kind)
                 .Where(f => !FolderPaths.IsSelfOrDescendant(f, folderPath))
                 .ToList();
@@ -512,6 +530,7 @@ public sealed class SessionStore
         _folders = folders;
         _localFolders = localFolders;
         _folderSettings = folderSettings;
+        Changed?.Invoke();
     }
 
     private static StoreData? Read(string path)

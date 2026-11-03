@@ -503,4 +503,49 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Equal("A", FolderPaths.Parent("A/B"));
         Assert.Equal("", FolderPaths.Parent("A"));
     }
+
+    [Fact]
+    public void Changed_IsRaisedAfterEverySavedChangeOnly()
+    {
+        var store = NewStore();
+        var session = NewSession();
+        var changes = 0;
+        store.Changed += () =>
+        {
+            changes++;
+            Assert.NotNull(store.Find(session.Id)); // handlers see the saved state
+        };
+
+        store.Add(session);
+        store.SetFolderIdentity("", Guid.NewGuid());
+        store.DetachIdentity(store.FolderIdentity("")!.Value);
+        store.MoveToFolder(session.Id, ""); // already there: nothing to save
+        Assert.Equal(3, changes);
+
+        using (new FileStream(StorePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            Assert.ThrowsAny<IOException>(() => store.Update(session with { Name = "renamed" }));
+        Assert.Equal(3, changes);
+        Assert.Equal("web-01", store.Find(session.Id)!.Name);
+    }
+
+    [Fact]
+    public void SessionsInFolder_IsWhatDeleteFolderRemoves()
+    {
+        var store = NewStore();
+        store.AddMany(
+        [
+            NewSession("ssh", "Lab"),
+            NewSession("telnet", "Lab/Consoles") with { Kind = SessionKind.Telnet },
+            NewSession("serial", "Lab") with { Kind = SessionKind.Serial, Serial = new SerialTarget { PortName = "COM3" } },
+            NewSession("elsewhere", "Prod"),
+            new Session { Name = "pwsh", Kind = SessionKind.Local, FolderPath = "Lab", Local = new LocalTarget { Executable = "pwsh.exe" } },
+        ]);
+
+        var counted = store.SessionsInFolder("Lab").Select(s => s.Name).Order().ToList();
+        var deleted = store.DeleteFolder("Lab").Select(s => s.Name).Order().ToList();
+
+        Assert.Equal(["serial", "ssh", "telnet"], counted);
+        Assert.Equal(counted, deleted);
+        Assert.Equal(["elsewhere", "pwsh"], store.Sessions.Select(s => s.Name).Order());
+    }
 }
