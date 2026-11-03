@@ -198,7 +198,6 @@ public sealed class ImportIdentityPlannerTests : IDisposable
         Assert.Equal(netops.Id, resolver.Resolve(store.Sessions.Single(s => s.Name == "b")).Identity!.Id);
         var own = store.Sessions.Single(s => s.Name == "d");
         Assert.Equal((SessionLogin.Own, "local"), (own.Login, own.Username));
-        Assert.True(own.CredentialNeeded);
     }
 
     public void Dispose() => _dir.Delete(recursive: true);

@@ -293,9 +293,6 @@ public sealed record Session
     /// </summary>
     public string? Agent { get; init; }
 
-    /// <summary>Set for imported sessions whose credential has not been captured yet.</summary>
-    public bool CredentialNeeded { get; init; }
-
     /// <summary>Terminal appearance overrides for this session; null = use app settings.</summary>
     public TerminalOverrides? Overrides { get; init; }
 }

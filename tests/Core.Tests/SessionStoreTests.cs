@@ -35,13 +35,27 @@ public sealed class SessionStoreTests : IDisposable
             PassphraseRequired = true,
             Notes = "core switch",
             ColorTag = "#FF8800",
-            CredentialNeeded = true,
             Overrides = new TerminalOverrides { Theme = "light", FontSize = 18 },
         };
         NewStore().Add(session);
 
         var reloaded = NewStore().Find(session.Id);
         Assert.Equal(session, reloaded);
+    }
+
+    [Fact]
+    public void Load_IgnoresFieldsNoLongerKept()
+    {
+        // credentialNeeded was saved by imports until it was dropped as never read.
+        var id = Guid.NewGuid();
+        File.WriteAllText(StorePath, $$"""
+            {"sessions":[{"id":"{{id}}","name":"core-sw-3","host":"192.168.1.3","username":"netops","folderPath":"","credentialNeeded":true}]}
+            """);
+
+        var store = NewStore();
+
+        Assert.Null(store.LoadWarning);
+        Assert.Equal("core-sw-3", store.Find(id)?.Name);
     }
 
     [Fact]

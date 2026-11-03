@@ -782,7 +782,6 @@ public sealed partial class SessionEditDialog : ContentDialog
             ColorTag = ColorChoices[Math.Max(0, ColorBox.SelectedIndex)].Hex,
             Icon = SelectedIcon,
             Agent = _existing?.Agent,
-            CredentialNeeded = _existing?.CredentialNeeded ?? false,
             JumpHostId = via == 1 ? (JumpBox.SelectedItem as JumpChoice)?.Id : null,
             Proxy = proxy,
             Tunnels = !ssh || _tunnels.Count == 0 ? null : _tunnels.ToList(),

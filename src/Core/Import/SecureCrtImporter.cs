@@ -509,7 +509,6 @@ public static class SecureCrtImporter
                 Username = candidate.Username,
                 AuthMethod = key is null ? AuthMethod.Password : AuthMethod.PrivateKey,
                 PrivateKeyId = key?.Id,
-                CredentialNeeded = key is null,
             });
             imported++;
         }
