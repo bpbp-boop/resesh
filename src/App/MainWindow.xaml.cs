@@ -1127,8 +1127,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
                 _historyFocus = OverlayFocusSession.Terminal;
             return true;
         };
-        HistoryOverlay.SessionNameFor = entry =>
-            entry.SessionId is { } id && App.Store.Find(id) is { } session ? session.Name : null;
+        HistoryOverlay.SessionNames = () => App.Store.Sessions.ToDictionary(session => session.Id, session => session.Name);
         HistoryOverlay.OpenSession = entry =>
         {
             if (entry.SessionId is { } id && App.Store.Find(id) is { } session)

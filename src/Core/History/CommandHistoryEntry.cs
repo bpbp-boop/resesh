@@ -98,6 +98,14 @@ public sealed record CommandHistoryEntry
         });
     }
 
+    /// <summary>The name to show for the entry's session: its current name while the session
+    /// is saved (<paramref name="currentNames"/>, by id), else the name recorded with the
+    /// command, so a renamed session is not shown under its old name.</summary>
+    public string DisplaySessionName(IReadOnlyDictionary<Guid, string>? currentNames) =>
+        SessionId is { } id && currentNames is not null && currentNames.TryGetValue(id, out var name)
+            ? name
+            : SessionName;
+
     /// <summary>This entry with oversized fields cut down to the stored limits.</summary>
     public CommandHistoryEntry Normalized()
     {
