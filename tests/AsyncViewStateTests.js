@@ -47,6 +47,18 @@ test("remote session management connections stop when the tab closes", () => {
   assert.match(methodBody(view, "public void Dispose()"), /_closing\.Cancel\(\)/);
 });
 
+test("login prompts name a jump host's place on the route being dialled", () => {
+  // A stopped tab's management connection resolves its own route; a shared "last route"
+  // field would label its prompts from whatever the terminal dialled last.
+  const view = read("Terminal", "TerminalTabView.cs");
+  assert.doesNotMatch(view, /_routeSessions/);
+  assert.match(view, /private static string\? RouteStep\(Session\? host, IReadOnlyList<Session> route\)/);
+  const create = methodBody(view, "public async Task<SshTerminalSession?> CreateRemoteManagementConnectionAsync(");
+  assert.match(create, /ResolveSshCredentialAsync\(Session, route\.Sessions, token\)/);
+  const resolveRoute = methodBody(view, "private async Task<ResolvedRoute?> ResolveRouteAsync(");
+  assert.match(resolveRoute, /ResolveSshCredentialAsync\(jump, route, token\)/);
+});
+
 test("the tunnels dialog leaves its UI alone once closed but still saves a confirmed add", () => {
   const dialog = read("Dialogs", "TunnelsDialog.xaml.cs");
   assert.match(methodBody(dialog, "private void Dialog_Closed("), /_closed = true;/);
