@@ -88,20 +88,30 @@ public sealed class SessionStore
     {
         lock (_gate)
         {
-            var data = _file.Load(Read) ?? new StoreData();
-            LoadWarning = _file.Warning;
-            _sessions = data.Sessions ?? [];
-            _folders = data.Folders ?? [];
-            _localFolders = data.LocalFolders ?? [];
-            _folderSettings = (data.FolderSettings ?? [])
-                .Select(f => f with { Path = FolderPaths.Normalize(f.Path) })
-                .Where(f => f.IdentityId is not null)
-                .DistinctBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            // Older builds attached identities to folders that existed only through their
-            // sessions; once those moved away the identity stayed, unseen, and logged in any
-            // folder later made at that path. Keep such folders so the identity shows.
-            _folders = WithSettingFolders(_folders, _folderSettings);
+            try
+            {
+                var data = _file.Load(Read) ?? new StoreData();
+                LoadWarning = _file.Warning;
+                _sessions = data.Sessions ?? [];
+                _folders = data.Folders ?? [];
+                _localFolders = data.LocalFolders ?? [];
+                _folderSettings = (data.FolderSettings ?? [])
+                    .Select(f => f with { Path = FolderPaths.Normalize(f.Path) })
+                    .Where(f => f.IdentityId is not null)
+                    .DistinctBy(f => f.Path, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                // Older builds attached identities to folders that existed only through their
+                // sessions; once those moved away the identity stayed, unseen, and logged in any
+                // folder later made at that path. Keep such folders so the identity shows.
+                _folders = WithSettingFolders(_folders, _folderSettings);
+            }
+            catch
+            {
+                // Bad data is handled by the load itself; a throw here is a bug, and
+                // a half-filled or empty store must not replace the file: refuse saves.
+                _file.RefuseSaves();
+                throw;
+            }
         }
     }
 

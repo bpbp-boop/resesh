@@ -85,46 +85,57 @@ public sealed class KnownHostsStore
     {
         lock (_gate)
         {
-            LoadWarning = null;
-            LoadError = null;
-            _entries = new(StringComparer.OrdinalIgnoreCase);
-            var primary = AtomicFile.TryRead(_path, Read, out var primaryOutcome, out var primaryError);
-            if (primary is not null)
+            try
             {
-                _entries = primary;
-                _file.SetLoaded(StoreLoadState.Loaded, null);
-                return;
-            }
-
-            var backup = AtomicFile.TryRead(_path + ".bak", Read, out var backupOutcome, out var backupError);
-            if (backup is null)
-            {
-                if (primaryOutcome == FileReadOutcome.Missing && backupOutcome == FileReadOutcome.Missing)
+                LoadWarning = null;
+                LoadError = null;
+                _entries = new(StringComparer.OrdinalIgnoreCase);
+                var primary = AtomicFile.TryRead(_path, Read, out var primaryOutcome, out var primaryError);
+                if (primary is not null)
                 {
+                    _entries = primary;
                     _file.SetLoaded(StoreLoadState.Loaded, null);
                     return;
                 }
-                LoadError = $"Accepted host keys could not be loaded. SSH is blocked. Restore {_path} from a trusted backup and restart resesh. {primaryError ?? backupError}";
-                _file.SetLoaded(StoreLoadState.Unreadable, null);
-                return;
-            }
 
-            _entries = backup;
-            if (primaryOutcome == FileReadOutcome.Missing)
-            {
-                LoadWarning = "Accepted host keys were recovered from the backup file.";
-                _file.SetLoaded(StoreLoadState.RecoveredFromBackup, LoadWarning);
+                var backup = AtomicFile.TryRead(_path + ".bak", Read, out var backupOutcome, out var backupError);
+                if (backup is null)
+                {
+                    if (primaryOutcome == FileReadOutcome.Missing && backupOutcome == FileReadOutcome.Missing)
+                    {
+                        _file.SetLoaded(StoreLoadState.Loaded, null);
+                        return;
+                    }
+                    LoadError = $"Accepted host keys could not be loaded. SSH is blocked. Restore {_path} from a trusted backup and restart resesh. {primaryError ?? backupError}";
+                    _file.SetLoaded(StoreLoadState.Unreadable, null);
+                    return;
+                }
+
+                _entries = backup;
+                if (primaryOutcome == FileReadOutcome.Missing)
+                {
+                    LoadWarning = "Accepted host keys were recovered from the backup file.";
+                    _file.SetLoaded(StoreLoadState.RecoveredFromBackup, LoadWarning);
+                }
+                else if (AtomicFile.TryQuarantine(_path) is { } kept)
+                {
+                    LoadWarning = $"Accepted host keys were recovered from the backup file. The unreadable file was kept as {kept}.";
+                    _file.SetLoaded(StoreLoadState.RecoveredFromBackup, LoadWarning);
+                }
+                else
+                {
+                    LoadWarning = $"Accepted host keys could not be read from {_path} ({primaryError}). The backup copy is in use, "
+                        + "but newly accepted host keys will not be saved. Close any program that may be holding the file and restart resesh.";
+                    _file.SetLoaded(StoreLoadState.Unreadable, LoadWarning);
+                }
             }
-            else if (AtomicFile.TryQuarantine(_path) is { } kept)
+            catch
             {
-                LoadWarning = $"Accepted host keys were recovered from the backup file. The unreadable file was kept as {kept}.";
-                _file.SetLoaded(StoreLoadState.RecoveredFromBackup, LoadWarning);
-            }
-            else
-            {
-                LoadWarning = $"Accepted host keys could not be read from {_path} ({primaryError}). The backup copy is in use, "
-                    + "but newly accepted host keys will not be saved. Close any program that may be holding the file and restart resesh.";
-                _file.SetLoaded(StoreLoadState.Unreadable, LoadWarning);
+                // Bad data is handled by the load itself; a throw here is a bug, and
+                // a half-filled or empty store must not replace the file: refuse saves.
+                _file.RefuseSaves();
+                LoadError ??= $"Accepted host keys could not be loaded. SSH is blocked. Restart resesh, and restore {_path} from a trusted backup if this happens again.";
+                throw;
             }
         }
     }

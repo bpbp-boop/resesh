@@ -47,8 +47,18 @@ public sealed class IdentityStore
     {
         lock (_gate)
         {
-            _identities = _file.Load(Read)?.Identities ?? [];
-            LoadWarning = _file.Warning;
+            try
+            {
+                _identities = _file.Load(Read)?.Identities ?? [];
+                LoadWarning = _file.Warning;
+            }
+            catch
+            {
+                // Bad data is handled by the load itself; a throw here is a bug, and
+                // a half-filled or empty store must not replace the file: refuse saves.
+                _file.RefuseSaves();
+                throw;
+            }
         }
     }
 

@@ -189,12 +189,22 @@ public sealed class WorkspaceStore
     {
         lock (_gate)
         {
-            var data = _file.Load(path => ParsePayload(File.ReadAllBytes(path))) ?? new WorkspaceStoreData { Workspaces = [] };
-            LoadWarning = _file.Warning;
-            _workspaces = data.Workspaces!;
-            _lastLayout = data.LastLayout;
-            _lastActiveWorkspaceId = data.LastActiveWorkspaceId;
-            _drafts = (data.Drafts ?? []).ToDictionary(draft => draft.WorkspaceId, draft => draft.Layout);
+            try
+            {
+                var data = _file.Load(path => ParsePayload(File.ReadAllBytes(path))) ?? new WorkspaceStoreData { Workspaces = [] };
+                LoadWarning = _file.Warning;
+                _workspaces = data.Workspaces!;
+                _lastLayout = data.LastLayout;
+                _lastActiveWorkspaceId = data.LastActiveWorkspaceId;
+                _drafts = (data.Drafts ?? []).ToDictionary(draft => draft.WorkspaceId, draft => draft.Layout);
+            }
+            catch
+            {
+                // Bad data is handled by the load itself; a throw here is a bug, and
+                // a half-filled or empty store must not replace the file: refuse saves.
+                _file.RefuseSaves();
+                throw;
+            }
         }
     }
 

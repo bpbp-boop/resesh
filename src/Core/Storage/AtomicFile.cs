@@ -221,14 +221,19 @@ internal sealed class StoreFile(string path, string contents)
         Warning = warning;
     }
 
-    /// <summary>Throws when the store has not loaded a file that exists. A programming error
-    /// rather than a disk problem: the empty in-memory state is not what the file holds. With
-    /// no file at all there is nothing to misrepresent or overwrite, so that is allowed.</summary>
+    /// <summary>Throws when the store has not loaded a file that exists: the empty in-memory
+    /// state is not what the file holds. With no file at all there is nothing to misrepresent
+    /// or overwrite, so that is allowed. A <see cref="StoreReadOnlyException"/>, so the callers
+    /// that report a failed write report this too instead of crashing.</summary>
     public void EnsureLoaded()
     {
         if (State == StoreLoadState.NotLoaded && (File.Exists(Path) || File.Exists(Path + ".bak")))
-            throw new InvalidOperationException($"{contents} must be loaded before they are used or saved.");
+            throw new StoreReadOnlyException($"{contents} were not saved: they were never loaded from {Path}. Restart resesh.");
     }
+
+    /// <summary>The store's load failed partway (a loader bug, not bad data): whatever it holds
+    /// may be half of the file, so every save is refused, as for a file that could not be read.</summary>
+    public void RefuseSaves() => State = StoreLoadState.Unreadable;
 
     /// <summary>Throws unless a save may replace the file now.</summary>
     public void EnsureWritable()

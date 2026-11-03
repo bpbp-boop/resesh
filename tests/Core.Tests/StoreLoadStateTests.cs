@@ -202,7 +202,7 @@ public sealed class StoreLoadStateTests : IDisposable
         var store = Open(kind, StorePath);
 
         Assert.Equal(StoreLoadState.NotLoaded, store.State);
-        Assert.Throws<InvalidOperationException>(store.Mutate);
+        Assert.Throws<StoreReadOnlyException>(store.Mutate);
         Assert.Equal(original, File.ReadAllText(StorePath));
     }
 
@@ -295,10 +295,24 @@ public sealed class StoreLoadStateTests : IDisposable
     }
 
     [Fact]
+    public void ALoadThatThrowsPartwayRefusesSaves()
+    {
+        // The app keeps starting when a store's loader throws; the store must then refuse to
+        // save whatever part of the file it holds, as an IOException the UI reports.
+        File.WriteAllText(StorePath, "{}");
+        var file = new StoreFile(StorePath, "Things");
+        file.Load(_ => new object());
+        file.RefuseSaves();
+
+        Assert.Throws<StoreReadOnlyException>(() => file.Write("{\"replaced\":true}"));
+        Assert.Equal("{}", File.ReadAllText(StorePath));
+    }
+
+    [Fact]
     public void KnownHosts_CheckBeforeLoad_IsRefusedWhenAFileExists()
     {
         Seed("knownHosts");
         var store = new KnownHostsStore(StorePath);
-        Assert.Throws<InvalidOperationException>(() => store.Check("host0", 22, "ssh-ed25519", "abc"));
+        Assert.Throws<StoreReadOnlyException>(() => store.Check("host0", 22, "ssh-ed25519", "abc"));
     }
 }

@@ -128,8 +128,9 @@ public partial class App : Application
 
     /// <summary>Loads one store. Bad data is handled inside each loader (it recovers from .bak
     /// or refuses to save); anything else that escapes is a bug, and it must not stop the
-    /// other stores loading or the app starting. The store stays unloaded, so it refuses to
-    /// save over the file it never read, and the failure is shown with the other load notices.</summary>
+    /// other stores loading or the app starting. The store then refuses every save (its Load
+    /// marks it so, and one that never loaded refuses too) with a StoreReadOnlyException, an
+    /// IOException the UI reports, and the failure is shown with the other load notices.</summary>
     private static void LoadStore(string contents, Action load)
     {
         try

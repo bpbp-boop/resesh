@@ -131,19 +131,29 @@ public sealed class HighlightsStore
         if (_file is null) return;
         lock (_gate)
         {
-            var data = _file.Load(Read) ?? new StoreData();
-            LoadWarning = _file.Warning;
-            _enabled = new HashSet<string>(data.EnabledRules ?? [], StringComparer.Ordinal);
-            _disabled = new HashSet<string>(data.DisabledRules ?? [], StringComparer.Ordinal);
-            // A custom rule with an invalid regex is kept on disk but never offered/applied;
-            // dropping it silently would delete user data over a typo we let through.
-            _custom = (data.CustomRules ?? []).Where(r => !string.IsNullOrWhiteSpace(r.Id)).ToList();
-            // Same stance for overrides of built-in ids this build doesn't know (e.g. from
-            // a newer app's file): kept and re-saved, just never applied.
-            _overrides = (data.BuiltinOverrides ?? [])
-                .Where(r => !string.IsNullOrWhiteSpace(r.Id))
-                .GroupBy(r => r.Id, StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.Last(), StringComparer.Ordinal);
+            try
+            {
+                var data = _file.Load(Read) ?? new StoreData();
+                LoadWarning = _file.Warning;
+                _enabled = new HashSet<string>(data.EnabledRules ?? [], StringComparer.Ordinal);
+                _disabled = new HashSet<string>(data.DisabledRules ?? [], StringComparer.Ordinal);
+                // A custom rule with an invalid regex is kept on disk but never offered/applied;
+                // dropping it silently would delete user data over a typo we let through.
+                _custom = (data.CustomRules ?? []).Where(r => !string.IsNullOrWhiteSpace(r.Id)).ToList();
+                // Same stance for overrides of built-in ids this build doesn't know (e.g. from
+                // a newer app's file): kept and re-saved, just never applied.
+                _overrides = (data.BuiltinOverrides ?? [])
+                    .Where(r => !string.IsNullOrWhiteSpace(r.Id))
+                    .GroupBy(r => r.Id, StringComparer.Ordinal)
+                    .ToDictionary(g => g.Key, g => g.Last(), StringComparer.Ordinal);
+            }
+            catch
+            {
+                // Bad data is handled by the load itself; a throw here is a bug, and
+                // a half-filled or empty store must not replace the file: refuse saves.
+                _file.RefuseSaves();
+                throw;
+            }
         }
     }
 

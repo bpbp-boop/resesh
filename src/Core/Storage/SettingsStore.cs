@@ -201,11 +201,21 @@ public sealed class SettingsStore
     {
         lock (_gate)
         {
-            var data = _file.Load(Read);
-            Current = data ?? new AppSettings { OnboardingCompleted = File.Exists(_file.Path) ? null : false };
-            LoadWarning = data is null && _file.Warning is not null
-                ? _file.Warning + " Default settings are in use."
-                : _file.Warning;
+            try
+            {
+                var data = _file.Load(Read);
+                Current = data ?? new AppSettings { OnboardingCompleted = File.Exists(_file.Path) ? null : false };
+                LoadWarning = data is null && _file.Warning is not null
+                    ? _file.Warning + " Default settings are in use."
+                    : _file.Warning;
+            }
+            catch
+            {
+                // Bad data is handled by the load itself; a throw here is a bug, and
+                // a half-filled or empty store must not replace the file: refuse saves.
+                _file.RefuseSaves();
+                throw;
+            }
         }
     }
 
