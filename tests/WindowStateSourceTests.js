@@ -35,13 +35,33 @@ test("a parked pane's selection never moves focus, and focus only goes to a show
   assert.match(selection, /if \(!_isParked\)\s*_host\.FocusGroupForSelection\(Group\);/);
   assert.doesNotMatch(selection, /_host\.FocusGroup\(/);
 
-  const focus = member(windowCode, "public void FocusGroup\\(TabGroupViewModel group\\)");
+  const focus = member(windowCode, "public void FocusGroup\\(TabGroupViewModel group, bool userInitiated = false\\)");
   assert.match(focus, /ParkedWorkspaceOf\(group\) is not \{ \} workspace\)\s*return;/);
   assert.match(focus, /if \(!ViewModel\.Groups\.Contains\(group\)\)\s*return;/);
   // The queued re-assert yields to any later explicit choice.
   assert.match(focus, /var intent = \+\+_focusIntent;[\s\S]*?intent != _focusIntent/);
   assert.match(member(windowCode, "public void FocusGroupForSelection"), /ViewModel\.Groups\.Contains\(group\)/);
   assert.doesNotMatch(member(windowCode, "private void FinishLayoutChange"), /TryEnqueue/);
+});
+
+test("splits, zooms and closes the user asked for move focus out of search to the terminal", () => {
+  // Typing in the session filter holds focus there against background changes, but a
+  // layout command is the user's, so its pane's terminal takes focus.
+  const focus = member(windowCode, "public void FocusGroup\\(TabGroupViewModel group, bool userInitiated = false\\)");
+  assert.match(focus, /else if \(!userInitiated\)\s*return;/);
+  assert.match(focus, /FocusTabContent\(selected, userInitiated\)/);
+  const finish = member(windowCode, "private void FinishLayoutChange");
+  assert.match(finish, /FocusGroup\(focused, userInitiated\)/);
+  assert.match(finish, /FocusTabContent\(tab, userInitiated\)/);
+  const toggle = member(windowCode, "public void ToggleZoom");
+  assert.match(toggle, /ZoomTab\(tab, userInitiated: true\)/);
+  assert.match(toggle, /Unzoom\(userInitiated: true\)/);
+  assert.match(member(windowCode, "public void SplitTab"), /MoveTabBetweenGroups\(tab, newGroup, 0, userInitiated: true\)/);
+  assert.match(member(windowCode, "public void MoveTabBetweenGroups"), /FocusGroup\(targetGroup, userInitiated\)/);
+  const close = member(windowCode, "private void CloseTabCore");
+  assert.match(close, /if \(userInitiated && ViewModel\.FocusedGroup\.SelectedTab is \{ \} next\)\s*FocusTabContent\(next, userInitiated: true\)/);
+  const single = member(windowCode, "private async Task RequestCloseClaimedTabAsync");
+  assert.match(single, /case TabCloseKind\.Now:\s*CloseTabCore\(tab, userInitiated: true\);/);
 });
 
 test("keyboard focus only lands in the pane that is focused when it is given", () => {

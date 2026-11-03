@@ -91,7 +91,7 @@ test("layout rebuilds snap tab motion instead of animating re-parented strips", 
     path.join(__dirname, "..", "src", "App", "MainWindow.Workspaces.cs"),
     "utf8");
   assert.match(window, /foreach \(var groupView in _groupViews\.Values\)\s*\{\s*groupView\.SuppressTabMotion\(\);/);
-  assert.match(window, /_groupViews\[sourceGroup\]\.SuppressTabMotion\(\);\s*MoveTabBetweenGroups\(tab, newGroup, 0\);/);
+  assert.match(window, /_groupViews\[sourceGroup\]\.SuppressTabMotion\(\);\s*(?:\/\/.*\s*)*MoveTabBetweenGroups\(tab, newGroup, 0, userInitiated: true\);/);
   assert.match(workspaces, /private void ApplyWorkspaceLayout\([^)]*\)\s*\{[\s\S]{0,200}?groupView\.SuppressTabMotion\(\);/);
 });
 

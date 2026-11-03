@@ -18,7 +18,7 @@ public interface ITabGroupHost
     /// <summary>The window is minimized or hidden, so nothing in it is on screen.</summary>
     bool IsWindowHidden { get; }
     /// <summary>The user or the app chose this pane.</summary>
-    void FocusGroup(TabGroupViewModel group);
+    void FocusGroup(TabGroupViewModel group, bool userInitiated = false);
 
     /// <summary>The pane's tab strip changed its selection.</summary>
     void FocusGroupForSelection(TabGroupViewModel group);
@@ -28,7 +28,7 @@ public interface ITabGroupHost
     void SplitDown(TabViewModel tab);
     void SplitTab(TabViewModel tab, TabGroupViewModel targetGroup, SplitDirection direction);
     void ToggleZoom(TabViewModel tab);
-    void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex);
+    void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex, bool userInitiated = false);
     void TransferTabToGroup(
         TabViewModel tab,
         ITabGroupHost sourceHost,

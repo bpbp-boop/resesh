@@ -273,8 +273,11 @@ public sealed partial class MainWindow
     /// a workspace being discarded) is ignored, so the focused pane is always a shown one.</summary>
     /// <remarks>Panes laid out by the same change select their tabs as they load, and a
     /// selection focuses its pane (<see cref="FocusGroupForSelection"/>). The choice is
-    /// re-asserted once they settle, unless another explicit choice came after it.</remarks>
-    public void FocusGroup(TabGroupViewModel group)
+    /// re-asserted once they settle, unless another explicit choice came after it. A choice
+    /// the user made (<paramref name="userInitiated"/>: a split, zoom or close they asked for)
+    /// then also focuses the pane's terminal while they type in search, as the command would
+    /// from the terminal; the app's own choices leave a focus held by search alone.</remarks>
+    public void FocusGroup(TabGroupViewModel group, bool userInitiated = false)
     {
         if (ViewModel.IsBackgroundGroup(group))
         {
@@ -288,13 +291,17 @@ public sealed partial class MainWindow
         var intent = ++_focusIntent;
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
-            if (intent != _focusIntent || ReferenceEquals(ViewModel.FocusedGroup, group)
-                || !ViewModel.Groups.Contains(group))
+            if (intent != _focusIntent || !ViewModel.Groups.Contains(group))
                 return;
-            SetFocusedGroup(group);
-            ViewModel.SyncGroupFocus();
+            if (!ReferenceEquals(ViewModel.FocusedGroup, group))
+            {
+                SetFocusedGroup(group);
+                ViewModel.SyncGroupFocus();
+            }
+            else if (!userInitiated)
+                return;
             if (group.SelectedTab is { } selected)
-                FocusTabContent(selected);
+                FocusTabContent(selected, userInitiated);
         });
     }
 
@@ -381,7 +388,7 @@ public sealed partial class MainWindow
         switch (plan.Kind)
         {
             case TabCloseKind.Now:
-                CloseTabCore(tab);
+                CloseTabCore(tab, userInitiated: true);
                 return;
             case TabCloseKind.ConfirmPersistent when tab.View is TerminalTabView tmuxView:
                 await RequestCloseTmuxTabAsync(tab, tmuxView, plan);
@@ -394,7 +401,7 @@ public sealed partial class MainWindow
             return;
         if (plan.Kind == TabCloseKind.ConfirmPinned && tab.IsPinned)
             owner.TogglePin(tab);
-        owner.CloseTabCore(tab);
+        owner.CloseTabCore(tab, userInitiated: true);
     }
 
     private async Task RequestCloseTmuxTabAsync(TabViewModel tab, TerminalTabView view, TabClosePlan plan)
@@ -419,7 +426,7 @@ public sealed partial class MainWindow
             return;
         if (tab.IsPinned)
             owner.TogglePin(tab);
-        owner.CloseTabCore(tab);
+        owner.CloseTabCore(tab, userInitiated: true);
     }
 
     /// <summary>Bulk close: the context menu's close others, to the right, in the group, and
@@ -515,7 +522,14 @@ public sealed partial class MainWindow
 
     /// <summary>Closes the tab now. Does nothing for a tab the window no longer holds (closed
     /// already, or moved to another window), so a late caller can't throw midway.</summary>
-    private void CloseTabCore(TabViewModel tab) => RemoveTabCore(tab, dispose: true);
+    /// <paramref name="userInitiated"/>: the user closed it, so the tab that takes its place
+    /// gets keyboard focus even while they type in search, as it would from the terminal.
+    private void CloseTabCore(TabViewModel tab, bool userInitiated = false)
+    {
+        RemoveTabCore(tab, dispose: true);
+        if (userInitiated && ViewModel.FocusedGroup.SelectedTab is { } next)
+            FocusTabContent(next, userInitiated: true);
+    }
 
     /// <summary>THE way a tab leaves this window: closed, with its view disposed, or handed to
     /// another window with its session still running. Its pane picks a neighbour and settles
@@ -576,7 +590,8 @@ public sealed partial class MainWindow
             StepPaneAside(_groupViews[newGroup], _groupViews[sourceGroup]);
         // The tab strip snaps; the panes move once the layout is rebuilt.
         _groupViews[sourceGroup].SuppressTabMotion();
-        MoveTabBetweenGroups(tab, newGroup, 0);
+        // Every split is one the user asked for (a key, a menu, a tab dropped on a pane edge).
+        MoveTabBetweenGroups(tab, newGroup, 0, userInitiated: true);
         RebuildGroupLayout();
     }
 
@@ -591,14 +606,14 @@ public sealed partial class MainWindow
 
     }
 
-    public void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex)
+    public void MoveTabBetweenGroups(TabViewModel tab, TabGroupViewModel targetGroup, int targetIndex, bool userInitiated = false)
     {
         var source = ViewModel.GroupOf(tab);
         if (source == targetGroup)
             return;
 
         PlaceTab(tab, targetGroup, targetIndex, select: true);
-        FocusGroup(targetGroup);
+        FocusGroup(targetGroup, userInitiated);
         // The setter no-ops when targetGroup was already focused; the moved tab still
         // needs its group-focus flag refreshed.
         ViewModel.SyncGroupFocus();

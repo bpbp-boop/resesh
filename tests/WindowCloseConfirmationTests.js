@@ -86,7 +86,7 @@ test("bulk close can end persistent sessions and keeps tabs whose session surviv
 test("closing a tab hands off to its successor before removing the closing view", () => {
   // Closing is one path: every close, a workspace replacing or discarding its tabs, and a
   // tab handed to another window (which keeps its view) go through RemoveTabCore.
-  assert.match(source, /private void CloseTabCore\(TabViewModel tab\) => RemoveTabCore\(tab, dispose: true\);/);
+  assert.match(source, /private void CloseTabCore\(TabViewModel tab, bool userInitiated = false\)\s*\{\s*RemoveTabCore\(tab, dispose: true\);/);
   assert.match(source, /public void DetachTabForTransfer\(TabViewModel tab\) => RemoveTabCore\(tab, dispose: false\);/);
   assert.doesNotMatch(source, /ViewModel\.CloseTab\(/);
   const closeCore = source.match(
@@ -132,7 +132,7 @@ test("tab closes re-check the tab after every await and claim it while in flight
   assert.ok(awaits.length >= 5);
   for (const { 0: awaited, index } of awaits) {
     const after = flows.slice(index + awaited.length);
-    const nextClose = after.search(/CloseTabCore\(tab\)|TogglePin\(tab\)/);
+    const nextClose = after.search(/CloseTabCore\(tab[,)]|TogglePin\(tab\)/);
     const nextCheck = after.search(/CanStillClose\(tab\)|CloseOwnerOf\(tab\)|_windowClosed/);
     if (nextClose >= 0)
       assert.ok(nextCheck >= 0 && nextCheck < nextClose, `no re-check after: ${awaited}`);
@@ -150,10 +150,10 @@ test("a confirmed single-tab close follows the tab to the window that holds it n
     /private async Task RequestCloseClaimedTabAsync[\s\S]*?\n    \/\/\/ <summary>Bulk close/)?.[0] ?? "";
   // After the first await, only the current owner closes or unpins the tab.
   const afterFirstAwait = single.slice(single.indexOf("await "));
-  assert.doesNotMatch(afterFirstAwait, /(?<![.\w])(?:CloseTabCore|TogglePin)\(tab\)/);
+  assert.doesNotMatch(afterFirstAwait, /(?<![.\w])(?:CloseTabCore|TogglePin)\(tab[,)]/);
   assert.match(single, /CloseOwnerOf\(tab\) is not \{ \} owner\)\s*return;/);
-  assert.match(single, /TabCloseKind\.ConfirmPinned && tab\.IsPinned\)\s*owner\.TogglePin\(tab\);\s*owner\.CloseTabCore\(tab\);/);
-  assert.match(single, /owner\.TogglePin\(tab\);\s*owner\.CloseTabCore\(tab\);/);
+  assert.match(single, /TabCloseKind\.ConfirmPinned && tab\.IsPinned\)\s*owner\.TogglePin\(tab\);\s*owner\.CloseTabCore\(tab, userInitiated: true\);/);
+  assert.match(single, /owner\.TogglePin\(tab\);\s*owner\.CloseTabCore\(tab, userInitiated: true\);/);
 
   const bulk = source.match(
     /private async Task RequestCloseClaimedManyAsync[\s\S]*?\n    \/\/\/ <summary>Closes the tab now/)?.[0] ?? "";
