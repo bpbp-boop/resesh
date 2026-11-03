@@ -849,6 +849,7 @@ public sealed partial class FilePaneView : UserControl, IDisposable
             // Plan the full file list up front (recursing into directories) for stable progress.
             var files = new List<(RemoteFileEntry Entry, string Local)>();
             var openTargets = new List<string>();
+            var writtenPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             await Task.Run(() =>
             {
                 var plannedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -879,16 +880,22 @@ public sealed partial class FilePaneView : UserControl, IDisposable
                     index++;
                     Directory.CreateDirectory(Path.GetDirectoryName(local)!);
                     ReportTransfer("Downloading", entry.Name, index, files.Count, 0, entry.Size);
-                    sftp.Download(
+                    // Download may pick "name (2).ext" when something appeared at the planned
+                    // path since planning; open what was actually written.
+                    var written = sftp.Download(
                         entry.FullPath, local,
                         done => ReportTransfer("Downloading", entry.Name, index, files.Count, done, entry.Size),
                         token);
+                    writtenPaths[local] = written;
                 }
             }, token);
 
             ShowStatus($"Downloaded {files.Count} file{(files.Count == 1 ? "" : "s")} to {targetDir}", isError: false);
-            foreach (var path in openTargets)
+            foreach (var planned in openTargets)
+            {
+                var path = writtenPaths.GetValueOrDefault(planned, planned);
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true });
+            }
         }, refreshAfter: false);
     }
 
