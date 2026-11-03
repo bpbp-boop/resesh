@@ -1691,20 +1691,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         return true;
     }
 
-    private static void CopyText(string text)
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(text);
-            Clipboard.SetContent(package);
-            Clipboard.Flush();
-        }
-        catch (Exception exception)
-        {
-            TerminalSurface.TraceHook?.Invoke($"clipboard copy failed: {exception.Message}");
-        }
-    }
+    private static void CopyText(string text) => TextClipboard.TryCopy(text);
 
     private Task PasteFromClipboardAsync() => TerminalClipboard.PasteIntoAsync(text =>
     {
@@ -1718,10 +1705,13 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     public override bool BracketedPaste =>
         !_disposed && _term != IntPtr.Zero && GhosttyNative.rvt_bracketed_paste(_term) == 1;
 
-    public override void SendInput(byte[] data)
+    public override void SendInput(byte[] data, bool pressesEnter = false)
     {
         if (_disposed || !_connection.IsLive || !_inputEnabled || _term == IntPtr.Zero)
             return;
+        // As for a typed Enter: checked before the input round-trips.
+        if (pressesEnter)
+            RefreshCommands()?.NotifyEnter();
         SendUserInput(data, typed: false);
     }
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace Resesh.Core.Agents;
@@ -203,35 +204,48 @@ public static class AgentText
     {
         if (string.IsNullOrEmpty(text))
             return null;
-        var builder = new StringBuilder(Math.Min(text.Length, maxLength + 1));
+        var builder = new StringBuilder(Math.Min(text.Length, maxLength + 2));
         var lastWasSpace = false;
-        foreach (var ch in text)
+        for (var i = 0; i < text.Length && builder.Length <= maxLength; i++)
         {
-            // Control characters, line breaks and the private-use/format ranges agents like
-            // to decorate output with all collapse to a single space.
-            var isSpace = char.IsWhiteSpace(ch) || char.IsControl(ch);
-            if (isSpace)
+            var ch = text[i];
+            // Control characters (C0 and C1) and line breaks collapse to a single space.
+            if (char.IsWhiteSpace(ch) || char.IsControl(ch))
             {
                 if (builder.Length > 0 && !lastWasSpace)
                     builder.Append(' ');
                 lastWasSpace = true;
                 continue;
             }
-            if (char.GetUnicodeCategory(ch) is System.Globalization.UnicodeCategory.Format
-                or System.Globalization.UnicodeCategory.PrivateUse
-                or System.Globalization.UnicodeCategory.Surrogate)
+            // A valid pair (an emoji, CJK extension B) is one character and is kept unless it
+            // is supplementary private use or a tag; a lone surrogate is dropped.
+            var width = char.IsHighSurrogate(ch) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]) ? 2 : 1;
+            var category = width == 2
+                ? CharUnicodeInfo.GetUnicodeCategory(char.ConvertToUtf32(ch, text[i + 1]))
+                : char.GetUnicodeCategory(ch);
+            // Format characters include the bidi overrides (U+202E) that make a label read
+            // backwards; private use is the icon fonts agents decorate output with. A zero
+            // width joiner between two characters only glues an emoji sequence together.
+            var joiner = ch == '\u200D' && builder.Length > 0 && !lastWasSpace
+                && i + 1 < text.Length && !char.IsWhiteSpace(text[i + 1]) && !char.IsControl(text[i + 1]);
+            if (!joiner && category is UnicodeCategory.Format or UnicodeCategory.PrivateUse
+                or UnicodeCategory.Surrogate)
             {
+                i += width - 1;
                 continue;
             }
-            builder.Append(ch);
+            builder.Append(text, i, width);
+            i += width - 1;
             lastWasSpace = false;
-            if (builder.Length > maxLength)
-                break;
         }
 
         var result = builder.ToString().TrimEnd();
         if (result.Length == 0)
             return null;
-        return result.Length > maxLength ? result[..maxLength].TrimEnd() + "…" : result;
+        if (result.Length <= maxLength)
+            return result;
+        // Never cut a surrogate pair in half.
+        var cut = char.IsLowSurrogate(result[maxLength]) ? maxLength - 1 : maxLength;
+        return result[..cut].TrimEnd() + "…";
     }
 }

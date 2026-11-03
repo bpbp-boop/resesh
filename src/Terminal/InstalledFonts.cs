@@ -63,6 +63,23 @@ public static class InstalledFonts
         return names.ToList();
     }
 
+    /// <summary>True when DirectWrite's system collection has <paramref name="family"/>, the
+    /// test the renderer uses to skip a named font that is not installed. Without DirectWrite
+    /// the name is taken as given.</summary>
+    public static bool IsInstalled(string family)
+    {
+        try
+        {
+            using var factory = DWrite.DWriteCreateFactory<IDWriteFactory2>(FactoryType.Shared);
+            using var collection = factory.GetSystemFontCollection(false);
+            return collection.FindFamilyName(family, out _);
+        }
+        catch (SharpGenException)
+        {
+            return true;
+        }
+    }
+
     /// <summary>Narrow, wide and punctuation glyphs whose advances differ in any proportional font.</summary>
     private static readonly uint[] s_probe = ['i', 'W', 'm', '.', '0', ' '];
 

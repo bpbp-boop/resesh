@@ -14,14 +14,18 @@ public sealed partial class PasteConfirmDialog : ContentDialog
     public bool IsDontAskChecked => DontAskBox.IsChecked == true;
 
     /// <param name="dontAskText">The opt-out's label, which names where to turn the
-    /// warning back on; the caller takes that from the Settings catalog.</param>
-    public PasteConfirmDialog(string title, string message, string preview, string dontAskText)
+    /// warning back on; the caller takes that from the Settings catalog. Null hides the
+    /// opt-out, for a confirmation that setting does not control.</param>
+    public PasteConfirmDialog(string title, string message, string preview, string? dontAskText)
     {
         Message = message;
         Preview = preview;
         InitializeComponent();
         Title = title;
-        DontAskBox.Content = dontAskText;
+        if (dontAskText is null)
+            DontAskBox.Visibility = Microsoft.UI.Xaml.Visibility.Collapsed;
+        else
+            DontAskBox.Content = dontAskText;
     }
 
     /// <summary>Shows the dialog; true when the user chose Paste.</summary>

@@ -18,8 +18,14 @@ public sealed class HighlightRuleItem(HighlightRule rule, string packTag, Action
 
     public HighlightRule Rule { get; } = rule;
     public string Name => Rule.Name;
-    public string PackTag { get; } = packTag;
-    public Brush SwatchBrush { get; } = new SolidColorBrush(HighlightRulesEditor.TryParseColor(rule.Color) ?? Colors.White);
+
+    public Brush SwatchBrush { get; } = new SolidColorBrush(HighlightRulesEditor.TryParseRuleColor(rule.Color) ?? Colors.Transparent);
+
+    /// <summary>The terminal skips a rule whose colour it cannot read, so the list says so
+    /// (with an empty swatch) rather than showing a colour that is never painted.</summary>
+    public string PackTag { get; } = HighlightRulesEditor.TryParseRuleColor(rule.Color) is null
+        ? (packTag.Length == 0 ? "" : packTag + " · ") + "invalid color, not applied"
+        : packTag;
     public Windows.UI.Text.FontWeight NameWeight => Rule.Bold ? FontWeights.SemiBold : FontWeights.Normal;
     public string EnabledAutomationId => $"SettingsHighlightRuleEnabled_{Rule.Id}";
 
@@ -95,15 +101,15 @@ public sealed partial class HighlightRulesEditor : UserControl
     {
         CombinedPreview.Inlines.Clear();
         var sample = ListSampleBox.Text;
-        var rules = _draft.AllRules.Where(r => r.Enabled).ToList();
+        // As the terminal does, a rule whose colour it cannot read paints nothing.
+        var rules = _draft.AllRules.Where(r => r.Enabled && TryParseRuleColor(r.Color) is not null).ToList();
         var winner = new int[sample.Length];
         Array.Fill(winner, -1);
         for (var r = 0; r < rules.Count; r++)
         {
             try
             {
-                var options = rules[r].MatchCase ? RegexOptions.None : RegexOptions.IgnoreCase;
-                var regex = new Regex(rules[r].Pattern, options, TimeSpan.FromMilliseconds(200));
+                var regex = new Regex(rules[r].Pattern, PreviewOptions(rules[r].MatchCase), TimeSpan.FromMilliseconds(200));
                 foreach (Match m in regex.Matches(sample))
                     for (var c = m.Index; c < m.Index + m.Length; c++)
                         winner[c] = r;
@@ -123,7 +129,7 @@ public sealed partial class HighlightRulesEditor : UserControl
             if (winner[start] >= 0)
             {
                 var rule = rules[winner[start]];
-                run.Foreground = new SolidColorBrush(TryParseColor(rule.Color) ?? Colors.White);
+                run.Foreground = new SolidColorBrush(TryParseRuleColor(rule.Color)!.Value);
                 if (rule.Bold)
                     run.FontWeight = FontWeights.Bold;
                 if (rule.Underline)
@@ -191,8 +197,7 @@ public sealed partial class HighlightRulesEditor : UserControl
 
         try
         {
-            var options = MatchCaseSwitch.IsOn ? RegexOptions.None : RegexOptions.IgnoreCase;
-            var regex = new Regex(pattern, options, TimeSpan.FromMilliseconds(200));
+            var regex = new Regex(pattern, PreviewOptions(MatchCaseSwitch.IsOn), TimeSpan.FromMilliseconds(200));
             var index = 0;
             var matched = 0;
             foreach (Match m in regex.Matches(sample))
@@ -335,14 +340,19 @@ public sealed partial class HighlightRulesEditor : UserControl
         RaiseChanged();
     }
 
-    internal static Windows.UI.Color? TryParseColor(string text)
-    {
-        if (!Regex.IsMatch(text, "^#[0-9a-fA-F]{6}$"))
-            return null;
-        return Windows.UI.Color.FromArgb(
-            255,
-            Convert.ToByte(text.Substring(1, 2), 16),
-            Convert.ToByte(text.Substring(3, 2), 16),
-            Convert.ToByte(text.Substring(5, 2), 16));
-    }
+    /// <summary>The options the terminal's highlighter compiles with (culture-invariant
+    /// case folding), so the preview matches what the terminal will paint.</summary>
+    private static RegexOptions PreviewOptions(bool matchCase) =>
+        RegexOptions.CultureInvariant | (matchCase ? RegexOptions.None : RegexOptions.IgnoreCase);
+
+    /// <summary>A typed colour, accepted exactly when the terminal accepts it.</summary>
+    internal static Windows.UI.Color? TryParseColor(string text) =>
+        Resesh.Terminal.HexColor.Parse(text) is { } rgb ? ToColor(rgb) : null;
+
+    /// <summary>A stored rule's colour as the terminal reads it: none means the default.</summary>
+    internal static Windows.UI.Color? TryParseRuleColor(string? text) =>
+        Resesh.Terminal.HexColor.ParseHighlight(text) is { } rgb ? ToColor(rgb) : null;
+
+    private static Windows.UI.Color ToColor(uint rgb) =>
+        Windows.UI.Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 }

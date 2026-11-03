@@ -26,6 +26,8 @@
   <ItemGroup>
     <!-- The terminal library's copy of the settings defaults, compared with Core's own. -->
     <Compile Include="..\..\src\Terminal\Native\TerminalDefaults.cs" Link="Linked\TerminalDefaults.cs" />
+    <!-- Payloads both OSC 3008 parsers must read alike; Terminal.Tests compiles it too. -->
+    <Compile Include="..\Shared\Osc3008Vectors.cs" Link="Shared\Osc3008Vectors.cs" />
   </ItemGroup>
 
   <ItemGroup>

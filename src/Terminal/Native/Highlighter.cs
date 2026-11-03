@@ -58,7 +58,7 @@ internal sealed class Highlighter
         var rules = new List<Rule>();
         foreach (var item in payload ?? [])
         {
-            if (item is null || string.IsNullOrEmpty(item.Pattern) || ParseColor(item.Color ?? "#ffffff") is not { } color)
+            if (item is null || string.IsNullOrEmpty(item.Pattern) || HexColor.ParseHighlight(item.Color) is not { } color)
                 continue;
             if (Compile(item.Pattern, item.MatchCase) is not { } regex)
                 continue;
@@ -113,11 +113,6 @@ internal sealed class Highlighter
             return null;
         }
     }
-
-    internal static uint? ParseColor(string color) =>
-        color.Length == 7 && color[0] == '#' && uint.TryParse(color.AsSpan(1), System.Globalization.NumberStyles.HexNumber, null, out var rgb)
-            ? rgb
-            : null;
 
     /// <summary>Text of a row with a column map: every UTF-16 code unit knows the cells it
     /// covers, so wide characters and grapheme clusters map to their full cells. Trailing

@@ -210,10 +210,10 @@ public sealed partial class SettingsPage
         var copy = new Button { Content = "Copy public key", IsEnabled = key.PublicKey is { Length: > 0 } };
         copy.Click += (_, _) =>
         {
-            var package = new DataPackage();
-            package.SetText(key.PublicKey);
-            Clipboard.SetContent(package);
-            ShowIdentityStatus(InfoBarSeverity.Success, $"The public key of {key.Name} was copied.");
+            if (key.PublicKey is { Length: > 0 } publicKey && Resesh.Terminal.TextClipboard.TryCopy(publicKey))
+                ShowIdentityStatus(InfoBarSeverity.Success, $"The public key of {key.Name} was copied.");
+            else
+                ShowIdentityStatus(InfoBarSeverity.Error, "The clipboard is busy in another program. Try copying again.");
         };
         var more = new DropDownButton { Content = "More" };
         var menu = new MenuFlyout();

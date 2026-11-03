@@ -69,4 +69,26 @@ public sealed class Osc3008ContextTests
             new string('a', Osc3008ContextParser.MaxPayloadLength);
         Assert.False(Osc3008ContextParser.TryParse(payload, out _));
     }
+
+    /// <summary>The same payloads the terminal's command tracker is checked against.</summary>
+    [Theory]
+    [MemberData(nameof(Resesh.Tests.Shared.Osc3008Vectors.All), MemberType = typeof(Resesh.Tests.Shared.Osc3008Vectors))]
+    public void Parser_reads_the_shared_vectors_as_the_terminal_does(
+        string payload, bool accepted, string? action, string? id, string? type, string? exit, int? status)
+    {
+        Assert.Equal(accepted, Osc3008ContextParser.TryParse(payload, out var context));
+        if (!accepted)
+            return;
+        Assert.Equal(action == "start" ? Osc3008ContextAction.Start : Osc3008ContextAction.End, context!.Action);
+        Assert.Equal(id, context.Id);
+        Assert.Equal(type, context.Type);
+        Assert.Equal(exit, context.Exit);
+        Assert.Equal(status, context.Status);
+    }
+
+    [Theory]
+    [InlineData("start=id;cwd=/srv/\u009b31m")]
+    [InlineData("start=id;hostname=vm\u0085")]
+    public void Parser_rejects_c1_controls(string payload) =>
+        Assert.False(Osc3008ContextParser.TryParse(payload, out _));
 }

@@ -36,9 +36,7 @@ public sealed partial class AgentAdaptersView : UserControl
     {
         if (sender is not Button { Tag: AgentAdapterItem adapter } button)
             return;
-        var package = new DataPackage();
-        package.SetText(adapter.Text);
-        Clipboard.SetContent(package);
-        button.Content = "Copied";
+        if (Resesh.Terminal.TextClipboard.TryCopy(adapter.Text))
+            button.Content = "Copied";
     }
 }

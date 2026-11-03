@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Resesh.Terminal.Native;
@@ -405,9 +406,13 @@ internal sealed class CommandTracker
 
     internal readonly record struct Osc3008(string Action, string Id, string? Type, string? Exit, int? Status);
 
+    /// <summary>Reads the fields the tracker uses, accepting exactly what Core's
+    /// Osc3008ContextParser accepts (this library cannot reference Core; a shared test vector
+    /// keeps them agreeing): type only on start, exit and status only on end, and no C0,
+    /// DEL or C1 control anywhere.</summary>
     internal static Osc3008? ParseOsc3008(string data)
     {
-        if (string.IsNullOrEmpty(data) || data.Length > 4096 || data.Any(c => c < 32 || c == 127))
+        if (string.IsNullOrEmpty(data) || data.Length > 4096 || data.Any(char.IsControl))
             return null;
         var fields = data.Split(';');
         var first = Regex.Match(fields[0], "^(start|end)=(.*)$", RegexOptions.CultureInvariant | RegexOptions.Singleline);
@@ -433,6 +438,7 @@ internal sealed class CommandTracker
         }
         if (id.Length is 0 or > 64)
             return null;
+        var start = first.Groups[1].Value == "start";
         string? type = null, exit = null;
         int? status = null;
         foreach (var field in fields.Skip(1))
@@ -442,12 +448,12 @@ internal sealed class CommandTracker
                 continue;
             var key = field[..separator];
             var value = field[(separator + 1)..];
-            if (key == "type" && Osc3008TypeRe.IsMatch(value))
+            if (start && key == "type" && Osc3008TypeRe.IsMatch(value))
                 type = value;
-            else if (key == "exit" && value is "success" or "failure" or "crash" or "interrupt")
+            else if (!start && key == "exit" && value is "success" or "failure" or "crash" or "interrupt")
                 exit = value;
-            else if (key == "status" && value.Length is > 0 and <= 20 && value.All(char.IsAsciiDigit)
-                && int.TryParse(value, out var s) && s <= 255)
+            else if (!start && key == "status" && value.Length > 0 && value.All(char.IsAsciiDigit)
+                && int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var s) && s <= 255)
                 status = s;
         }
         return new Osc3008(first.Groups[1].Value, id.ToString(), type, exit, status);

@@ -55,17 +55,29 @@ public sealed class PastePlanTests
         var lines = new List<int>();
         var chunks = PastePlan.Chunks("one\ntwo\nthree", 1, 0);
 
-        await PastePlan.SendAsync(chunks, bytes => written.Add(Encoding.UTF8.GetString(bytes)), new SyncProgress(lines.Add));
+        await PastePlan.SendAsync(chunks, chunk => written.Add(Encoding.UTF8.GetString(chunk.Bytes)), new SyncProgress(lines.Add));
 
         Assert.Equal(["one\r", "two\r", "three"], written);
         Assert.Equal([1, 2], lines);
     }
 
     [Fact]
+    public async Task SendAsync_HandsOverWhichChunksPressEnter()
+    {
+        // The app tells the terminal about each Enter so a command pasted slowly into a shell
+        // without integration is still detected, as a typed Enter would be.
+        var enters = new List<bool>();
+
+        await PastePlan.SendAsync(PastePlan.Chunks("ls\npwd", 0, 1), chunk => enters.Add(chunk.EndsLine));
+
+        Assert.Equal([false, false, true, false, false, false], enters);
+    }
+
+    [Fact]
     public async Task SendAsync_StopsWhenCancelled()
     {
         using var cancel = new CancellationTokenSource();
-        var written = new List<byte[]>();
+        var written = new List<PasteChunk>();
         var chunks = PastePlan.Chunks("one\ntwo\nthree\n", 10_000, 0);
 
         var send = PastePlan.SendAsync(chunks, written.Add, cancellationToken: cancel.Token);

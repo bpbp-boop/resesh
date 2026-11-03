@@ -2158,3 +2158,42 @@ the attached connect chose (`AttachedPersistence`) rather than re-reading `Sessi
   `SshJumpChain` now watches its links (`ErrorOccurred` plus a 5-second `IsConnected` poll, as
   `SshTerminalSession` does for its own client) and raises `Lost`. Telnet tabs end on it, and
   SSH sessions through a jump close on it too.
+
+## 2026-11-03 - Input, text and colour rules shared between the app and the terminal
+
+- **History insert is a paste for review.** `TerminalTabView.InsertText` goes through the
+  safe-paste path. Without bracketed paste a line break presses Enter, so a multi-line insert
+  always asks first, even with "Confirm multi-line paste" off: insert promises not to run
+  anything, and that setting's opt-out would not silence it, so the dialog hides it. A
+  trailing line break is dropped. Slow-paste sessions pace it like any paste.
+- **Paced paste tells the tracker about Enter.** Chunks still go out raw through `SendInput`
+  (2026-10-30); `SendInput(bytes, pressesEnter: true)` for each chunk that ends a line runs
+  the same `NotifyEnter` a typed Enter and an unbracketed `PasteText` run, once per line.
+- **Clipboard copies** all go through `Resesh.Terminal.TextClipboard.TryCopy`: catches every
+  failure (CLIPBRD_E_CANT_OPEN when another program holds the clipboard) and flushes, so the
+  copy outlives resesh. It lives in the Terminal project because the app references it.
+- **Labels from the wire.** `AgentText.Sanitize` keeps valid surrogate pairs (emoji) and drops
+  lone surrogates, C0/C1 controls, format characters (bidi overrides) and private use in every
+  plane; a zero width joiner between two characters is kept so emoji sequences survive. OSC
+  0/2 titles go through it in `TabViewModel.ApplyTerminalTitle`.
+- **OSC 3008** parsers in Core and the terminal refuse C1 as well as C0 and DEL, and read the
+  same fields: `type` only on `start`, `exit`/`status` only on `end`, status any digit string
+  up to 255. The terminal cannot reference Core, so `tests/Shared/Osc3008Vectors.cs` is
+  compiled into both test projects and checked against each parser.
+- **`#rrggbb` colours** are read only by `Resesh.Terminal.HexColor` (highlighter, session
+  colour tags, rule editor): '#' and six ASCII hex digits, nothing else. A rule with no colour
+  paints the default white; a rule with an unreadable colour is skipped by the terminal, and
+  the editor now agrees instead of showing white: an empty swatch, "invalid color, not
+  applied", and left out of the combined preview. Skipping, not defaulting, because the
+  stored value is wrong and painting a colour nobody chose would hide that; editing the
+  rule shows the value and Save asks for #RRGGBB. Editor previews compile with the
+  highlighter's `RegexOptions.CultureInvariant`.
+- **Primary font.** `TerminalDefaults.FamilyNames` is the renderer's reading of a font list
+  (no blanks, repeats or generic `monospace`), and the renderer's fallback chain starts with
+  the default list. `TerminalDefaults.PrimaryFamily(list, isInstalled)` gives the commands
+  panel and ruler card the family the renderer draws: the first installed named family, else
+  the first installed default. `FontFamilies.Primary` (the settings page) never treats
+  `monospace` as the font; it does not check installation, because the picker shows what
+  the user chose.
+- **Text on a colour** (High Contrast highlight text, the welcome page) is black or white by
+  the higher WCAG contrast ratio (`ColorContrast`), not gamma-encoded Rec.709 against 128.
