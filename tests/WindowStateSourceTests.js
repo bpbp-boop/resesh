@@ -94,3 +94,8 @@ test("the pinned sessions list follows Home's pinned tabs, including when a wind
   assert.match(windowCode, /nameof\(TabViewModel\.IsPinned\)\)\s*App\.QueuePinnedSessionsSave\(\);/);
   assert.match(member(windowCode, "public void RestorePinnedSessions"), /PinnedSessions\.ToRestore\(ids, App\.Workspaces\.Workspaces\)/);
 });
+
+test("the jump list follows identity changes, whose usernames its descriptions show", () => {
+  const handler = app.match(/Identities\.Changed \+= \(\) => RunOnUiThread\(\(\) =>\s*\{[\s\S]*?\}\);/)?.[0] ?? "";
+  assert.match(handler, /RefreshJumpList\(\);/);
+});

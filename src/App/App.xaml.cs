@@ -256,11 +256,13 @@ public partial class App : Application
             SessionsChanged?.Invoke();
             RefreshJumpList(); // sessions were renamed, added or deleted
         });
-        // An identity's username shows in tab endpoints without any session changing.
+        // An identity's username shows in tab endpoints and jump list descriptions without
+        // any session changing.
         Identities.Changed += () => RunOnUiThread(() =>
         {
             foreach (var tab in AllTabs)
                 tab.NotifyLoginChanged();
+            RefreshJumpList();
         });
         var window = CreateWindowCore();
         if (Settings.Current.ReopenLastLayoutAtStartup)
