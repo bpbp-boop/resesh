@@ -25,7 +25,6 @@ public sealed partial class TabGroupView
 {
     private static readonly TimeSpan TabMoveDuration = TimeSpan.FromMilliseconds(200);
     private static readonly TimeSpan TabFadeInDuration = TimeSpan.FromMilliseconds(150);
-    private static readonly Windows.UI.ViewManagement.UISettings MotionSettings = new();
 
     private readonly Dictionary<TabViewModel, (double Left, double Width)> _motionOrigins = [];
     private readonly Dictionary<UIElement, TabSlide> _tabSlides = [];
@@ -44,7 +43,7 @@ public sealed partial class TabGroupView
     // A translation offset that decays to zero over TabMoveDuration, or a held one.
     private readonly record struct TabSlide(float From, long Start, bool Moving);
 
-    private static bool MotionEnabled => MotionSettings.AnimationsEnabled;
+    private static bool MotionEnabled => AppMotion.Enabled;
 
     private void DisableTabContainerTransitions()
     {

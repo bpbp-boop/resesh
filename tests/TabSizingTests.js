@@ -63,7 +63,7 @@ test("tab changes slide every tab from where it was drawn once layout settles", 
   // New tabs fade in alongside the slide rather than after it.
   assert.match(motion, /SetTranslation\(container, 0\);\s*FadeInTab\(container\);/);
   // The system "Animation effects" setting turns all of it off.
-  assert.match(motion, /MotionSettings\.AnimationsEnabled/);
+  assert.match(motion, /MotionEnabled => AppMotion\.Enabled/);
 });
 
 test("the divider gap and the active tab move together", () => {
