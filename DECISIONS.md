@@ -2090,3 +2090,31 @@ could disagree. The rules that replaced them:
   workflow or WiX (ghostty cache keys, the signed vs unsigned MSI steps, the app user model
   id, project URLs) are guarded by `tests/BuildMetadataTests.js` rather than restructured,
   because the signing steps can't be verified off CI.
+
+## 2026-11-03 - One parser each for host:port, remote folders and key paths
+
+Parsing and formatting that had been copied and had drifted now has one home each:
+
+- **Host and port.** `HostPort` reads text as OpenSSH does: a colon is a port separator only
+  when it is the text's single colon, so a bare IPv6 literal ("::1", "2001:db8::22") is a
+  host with no port, and a port on IPv6 needs brackets ("[::1]:2222"). Hosts are stored
+  **without** brackets (quick connect, PuTTY import and the session editor strip them);
+  known_hosts and `SessionEndpoint` add them back before a port. User text ends at the
+  **last** '@' everywhere, so "john@corp@host" logs in as "john@corp".
+- **Remote working directories.** Every report of the remote shell's folder (OSC 7, OSC
+  3008, the /proc probe, shell integration, tmux, the session agent) goes through
+  `RemotePath.FromUntrusted`: absolute, no `char.IsControl` character (C1 included, since
+  U+009B is CSI to a terminal), normalised. tmux lines are trimmed only of their line
+  ending, as folder names can end in a space.
+- **Lexical "..".** `RemotePath.Normalize` collapses "." and ".." without asking the server,
+  as `cd -L` does: "/a/link/.." is "/a" even when "link" is a symlink elsewhere. That is
+  what the user typed or the shell reported, and it keeps the path box and Up in step; a
+  physical resolution would cost a round trip per navigation. Relative path-box text
+  resolves from the folder shown; "~user" is refused because only the server knows it.
+- **File names typed in the file pane.** Local names follow `WindowsDownloadPath`'s rule
+  (no trailing dot or space, no device names), remote names refuse "." and "..".
+- **Key file paths.** `KeyFilePath.Normalize` (quotes, environment variables, "~", relative
+  to the user's home rather than the process's current directory) is shared by imports,
+  `SshKeyStore` and the import identity planner, so one file is one key however it is
+  written.
+- **Import duplicates** match on kind as well as name, host and port.
