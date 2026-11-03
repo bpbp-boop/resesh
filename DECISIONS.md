@@ -2159,3 +2159,24 @@ exported and restoring it deleted them. Custom icons are written through `Atomic
 `SshKeyStore` raises `Changed` after a save succeeds, like the identity and session stores, and
 Settings' identities section listens, so keys added in one window, migrated at startup or merged
 by an import show in every open Settings page.
+
+## 2026-11-03 - SFTP transfers never leave a partial file
+
+Downloads open the local file with `FileMode.CreateNew`: the pane picks a free name when it
+plans the transfer, and something created there in the meantime is no longer overwritten (the
+next free "name (2).ext" is used and returned). Because the file is always one the download
+created, any failure deletes it, not just a cancel; a network error used to leave a truncated
+file that looked complete.
+
+An upload over an existing regular file goes to a hidden `.name.resesh-xxxxxxxx.part` beside it,
+takes the old file's permission bits, and is renamed over it only when complete, so a dropped
+connection leaves the old file intact instead of truncated. SSH.NET's `RenameFile(..., isPosix:
+true)` sends `posix-rename@openssh.com` (atomic replace; OpenSSH, including Windows OpenSSH,
+offers it) and throws `NotSupportedException` when the server lacks it; then the old file is
+deleted and plain SFTP rename (which refuses to replace) moves the upload in, and if that last
+step fails the upload is kept under its temporary name and the error says where. Symlinks (a
+rename would replace the link instead of writing through it) and folders that refuse new files
+are still overwritten in place. Ownership is not carried over by the rename; that needs root,
+which an SFTP user rarely is. Checked against a user-mode Windows OpenSSH sshd: new upload,
+overwrite, cancelled overwrite (old file intact, no `.part` left), download name clash and
+cancelled download.

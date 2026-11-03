@@ -12,7 +12,9 @@ namespace Resesh.Core.Sftp;
 /// next to the terminal's SshClient, built from the same credentials and host-key trust.
 /// All methods are blocking (run them on a background thread) and must not be called
 /// concurrently: the pane serializes operations. Transfers report progress in bytes of the
-/// current file and honor cancellation, deleting the partial target on cancel.
+/// current file and honor cancellation. A failed or cancelled transfer leaves no partial file:
+/// downloads always go to a new local file, and an upload over an existing remote file is
+/// written beside it and renamed over it only once complete.
 /// </summary>
 public sealed class SftpSession : IDisposable
 {
@@ -162,36 +164,180 @@ public sealed class SftpSession : IDisposable
         }
     }
 
-    public void Download(string remotePath, string localPath, Action<long>? progress, CancellationToken token)
+    /// <summary>
+    /// Downloads to <paramref name="localPath"/>, or, when something has appeared there since
+    /// the name was chosen, to the next free "name (2).ext". Returns the path written. The file
+    /// is always one this call created, so a failure or cancel deletes it rather than leaving a
+    /// truncated download that looks complete.
+    /// </summary>
+    public string Download(string remotePath, string localPath, Action<long>? progress, CancellationToken token)
     {
         var client = Require();
+        using var remote = client.OpenRead(remotePath);
+        var (local, path) = CreateNewLocalFile(localPath);
         try
         {
-            using var remote = client.OpenRead(remotePath);
-            using var local = File.Create(localPath);
-            CopyWithProgress(remote, local, progress, token);
+            using (local)
+                CopyWithProgress(remote, local, progress, token);
+            return path;
         }
-        catch (OperationCanceledException)
+        catch
         {
-            TryDeleteLocal(localPath);
+            TryDeleteLocal(path);
             throw;
         }
     }
 
+    /// <summary>Creates the file without ever opening an existing one (CreateNew), picking the
+    /// next free name when the planned one was taken in the meantime.</summary>
+    private static (FileStream Stream, string Path) CreateNewLocalFile(string path)
+    {
+        var directory = Path.GetDirectoryName(path)!;
+        var candidate = path;
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return (new FileStream(candidate, FileMode.CreateNew, FileAccess.Write, FileShare.None), candidate);
+            }
+            catch (IOException) when (attempt < 100 && (File.Exists(candidate) || Directory.Exists(candidate)))
+            {
+                candidate = Path.Combine(directory, RemotePath.UniqueName(Path.GetFileName(path),
+                    name => File.Exists(Path.Combine(directory, name)) || Directory.Exists(Path.Combine(directory, name))));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Uploads <paramref name="localPath"/> to <paramref name="remotePath"/>. A new file is
+    /// written in place and deleted if the upload fails. An existing regular file (which the
+    /// user agreed to overwrite) is not truncated first: the upload goes to a temporary file
+    /// beside it, takes its permissions, and is renamed over it once complete, so a dropped
+    /// connection leaves the old file intact. Where that cannot work (a symlink, which a
+    /// rename would replace rather than write through, or a folder that refuses new files)
+    /// the file is overwritten in place, as SFTP clients usually do.
+    /// </summary>
     public void Upload(string localPath, string remotePath, Action<long>? progress, CancellationToken token)
     {
         var client = Require();
+        using var local = File.OpenRead(localPath);
+        var existing = TryGetFile(client, remotePath);
+        if (existing is { IsRegularFile: true, IsSymbolicLink: false }
+            && TryOpenTemporary(client, remotePath) is var (temporary, remote))
+        {
+            try
+            {
+                using (remote)
+                    CopyWithProgress(local, remote, progress, token);
+                token.ThrowIfCancellationRequested();
+                TryCopyPermissions(client, existing, temporary);
+            }
+            catch
+            {
+                TryDeleteRemote(client, temporary);
+                throw;
+            }
+            ReplaceRemote(client, temporary, remotePath);
+            return;
+        }
+
+        var created = existing is null;
         try
         {
-            using var local = File.OpenRead(localPath);
-            using var remote = client.Open(remotePath, FileMode.Create, FileAccess.Write);
-            CopyWithProgress(local, remote, progress, token);
+            using var target = client.Open(remotePath, FileMode.Create, FileAccess.Write);
+            CopyWithProgress(local, target, progress, token);
         }
-        catch (OperationCanceledException)
+        catch (Exception e) when (created || e is OperationCanceledException)
         {
-            try { client.DeleteFile(remotePath); } catch (Exception e) when (e is SshException or IOException) { }
+            // Only a file this upload created (or a cancelled one, as before) is removed;
+            // an existing file overwritten in place stays as far as it got.
+            TryDeleteRemote(client, remotePath);
             throw;
         }
+    }
+
+    private static ISftpFile? TryGetFile(SftpClient client, string path)
+    {
+        try
+        {
+            return client.Get(path);
+        }
+        catch (SftpPathNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>A new hidden file in the target's folder, so the final rename stays on one
+    /// file system; null when the folder does not allow it.</summary>
+    private static (string Path, SftpFileStream Stream)? TryOpenTemporary(SftpClient client, string remotePath)
+    {
+        var temporary = RemotePath.Join(RemotePath.Parent(remotePath),
+            $".{RemotePath.FileName(remotePath)}.resesh-{Guid.NewGuid().ToString("N")[..8]}.part");
+        try
+        {
+            return (temporary, client.Open(temporary, FileMode.CreateNew, FileAccess.Write));
+        }
+        catch (SftpPermissionDeniedException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Moves the finished upload over the target: one atomic posix-rename where the
+    /// server offers it (OpenSSH does), else delete then rename, since plain SFTP rename
+    /// refuses to replace a file. Either way the upload is complete before the old file goes.</summary>
+    private static void ReplaceRemote(SftpClient client, string temporary, string remotePath)
+    {
+        try
+        {
+            client.RenameFile(temporary, remotePath, isPosix: true);
+            return;
+        }
+        catch (NotSupportedException)
+        {
+        }
+        catch
+        {
+            TryDeleteRemote(client, temporary);
+            throw;
+        }
+        try
+        {
+            client.DeleteFile(remotePath);
+        }
+        catch
+        {
+            TryDeleteRemote(client, temporary);
+            throw;
+        }
+        try
+        {
+            client.RenameFile(temporary, remotePath);
+        }
+        catch (Exception e) when (e is SshException or IOException)
+        {
+            // The old file is gone; the finished upload is the only copy, so it stays.
+            throw new IOException(
+                $"{RemotePath.FileName(remotePath)} was uploaded but could not be renamed into place. It was kept as {temporary}.", e);
+        }
+    }
+
+    private static void TryCopyPermissions(SftpClient client, ISftpFile original, string path)
+    {
+        try
+        {
+            client.ChangePermissions(path, ToEntry("/", original).Mode);
+        }
+        catch (Exception e) when (e is SshException or IOException)
+        {
+            // The upload still replaces the file; it just keeps the server's default mode.
+        }
+    }
+
+    private static void TryDeleteRemote(SftpClient client, string path)
+    {
+        try { client.DeleteFile(path); } catch (Exception e) when (e is SshException or IOException) { }
     }
 
     public void Rename(string oldPath, string newPath) => Require().RenameFile(oldPath, newPath);
