@@ -26,14 +26,21 @@ public static class PastePlan
     public static bool NeedsConfirmation(string text, bool bracketedPaste) =>
         !bracketedPaste && LineBreaks(text) > 0;
 
-    /// <summary>The first lines, for the confirmation, with a count of the rest.</summary>
-    public static string Preview(string text, int maxLines = 6, int maxWidth = 100)
+    /// <summary>The first and last lines, for the confirmation, with a count of those between.
+    /// The end is shown because that is where a <c>commit</c>, <c>push</c> or <c>rm</c> tends
+    /// to sit. A gap of one line is shown rather than counted.</summary>
+    public static string Preview(string text, int headLines = 6, int tailLines = 4, int maxWidth = 200)
     {
-        var lines = Normalize(text).TrimEnd('\n').Split('\n');
-        var shown = lines.Take(maxLines)
-            .Select(line => line.Length > maxWidth ? line[..maxWidth] + "…" : line);
-        var preview = string.Join('\n', shown);
-        return lines.Length > maxLines ? $"{preview}\n… and {lines.Length - maxLines} more" : preview;
+        var lines = Normalize(text).TrimEnd('\n').Split('\n')
+            .Select(line => line.Length > maxWidth ? line[..maxWidth] + "…" : line)
+            .ToArray();
+        var hidden = lines.Length - headLines - tailLines;
+        if (hidden <= 1)
+            return string.Join('\n', lines);
+        var head = string.Join('\n', lines.Take(headLines));
+        var tail = string.Join('\n', lines.TakeLast(tailLines));
+        var gap = $"… {hidden} more lines …";
+        return tailLines > 0 ? $"{head}\n{gap}\n{tail}" : $"{head}\n{gap}";
     }
 
     /// <summary>True when either delay is set, so the paste is sent by <see cref="Chunks"/>

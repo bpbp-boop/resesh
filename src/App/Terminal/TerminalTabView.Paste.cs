@@ -138,17 +138,16 @@ public sealed partial class TerminalTabView
     private async Task<bool> ConfirmPasteAsync(string text)
     {
         var lines = PastePlan.LineBreaks(text);
-        var dialog = new ConfirmDialog(
+        var dialog = new PasteConfirmDialog(
             lines == 1 ? "Paste and run 1 line?" : $"Paste and run {lines} lines?",
             $"Each line runs on {Session.Name} as soon as it arrives.",
-            "Paste")
+            PastePlan.Preview(text),
+            $"Don't ask again (turn it back on in {SettingsCatalog.PathTo(GlobalSettingsTarget.ConfirmMultilinePaste)})")
         {
             XamlRoot = XamlRoot,
-            Note = PastePlan.Preview(text),
-            OptionText = $"Don't ask again (turn it back on in {SettingsCatalog.PathTo(GlobalSettingsTarget.ConfirmMultilinePaste)})",
         };
         var confirmed = await dialog.ConfirmAsync();
-        if (confirmed && dialog.IsOptionChecked)
+        if (confirmed && dialog.IsDontAskChecked)
             App.SaveSetting(s => s with { ConfirmMultilinePaste = false }, nameof(SettingsViewModel.ConfirmMultilinePaste));
         return confirmed;
     }
