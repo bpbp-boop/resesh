@@ -68,8 +68,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             try
             {
-                if (App.Workspaces.RemoveSessions(ids))
-                    App.RefreshWorkspaceMenus();
+                App.Workspaces.RemoveSessions(ids); // menus follow the store
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -85,7 +84,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     public MainWindow()
     {
-        ViewModel = new MainViewModel(App.Store, App.Credentials, _viewModelEnvironment, this);
+        ViewModel = new MainViewModel(App.Store, App.Credentials, _viewModelEnvironment, this, App.Identities);
         _groupLayout = new SplitLayout<TabGroupViewModel>(ViewModel.Groups[0]);
         InitializeComponent();
         // TreeViewItem consumes Enter before the TreeView's normal KeyDown event. Listen to
@@ -130,16 +129,25 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         };
         ScheduleExpansionSync();
         SyncEmptyState();
-        ApplySettingsToApp();
+        ApplySettings(SettingsEffects.All);
         RegisterAccelerators();
         InitializeSessionsRail();
         InitializeWorkspaceRail();
         RefreshWorkspaceMenu();
+        // App-wide data: whoever writes it, every window follows the store that holds it.
+        App.Settings.Changed += Settings_Changed;
+        App.Highlights.Changed += Highlights_Changed;
+        App.Workspaces.Changed += Workspaces_Changed;
+        Interop.SignInLaunch.Changed += SignInLaunch_Changed;
         _uiSettings.ColorValuesChanged += SystemColorsChanged;
         AppWindow.Closing += AppWindow_Closing;
         Closed += (_, _) =>
         {
             _windowClosed = true;
+            App.Settings.Changed -= Settings_Changed;
+            App.Highlights.Changed -= Highlights_Changed;
+            App.Workspaces.Changed -= Workspaces_Changed;
+            Interop.SignInLaunch.Changed -= SignInLaunch_Changed;
             _uiSettings.ColorValuesChanged -= SystemColorsChanged;
             Resesh.Core.Backend.CleanupActions.Run(App.ReportRecoverableError,
                 SaveTreePaneWidth,
@@ -179,21 +187,20 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private void RestoreWindowPlacement()
     {
-        if (App.Settings.Current.WindowPlacement is not { Width: >= 320, Height: >= 240 } placement)
+        var placement = App.Settings.Current.WindowPlacement;
+        if (WindowLayout.Requested(placement) is not { } requested)
             return;
 
-        var requested = new RectInt32(placement.X, placement.Y, placement.Width, placement.Height);
-        var workArea = DisplayArea.GetFromRect(requested, DisplayAreaFallback.Nearest).WorkArea;
-        var width = Math.Min(requested.Width, workArea.Width);
-        var height = Math.Min(requested.Height, workArea.Height);
-        var x = Math.Clamp(requested.X, workArea.X, workArea.X + workArea.Width - width);
-        var y = Math.Clamp(requested.Y, workArea.Y, workArea.Y + workArea.Height - height);
-        _normalWindowBounds = new RectInt32(x, y, width, height);
+        var workArea = DisplayArea.GetFromRect(Rect(requested), DisplayAreaFallback.Nearest).WorkArea;
+        var bounds = WindowLayout.FitInto(requested, new PixelRect(workArea.X, workArea.Y, workArea.Width, workArea.Height));
+        _normalWindowBounds = Rect(bounds);
         AppWindow.MoveAndResize(_normalWindowBounds.Value);
 
-        if (placement.IsMaximized && AppWindow.Presenter is OverlappedPresenter presenter)
+        if (placement!.IsMaximized && AppWindow.Presenter is OverlappedPresenter presenter)
             presenter.Maximize();
     }
+
+    private static RectInt32 Rect(PixelRect rect) => new(rect.X, rect.Y, rect.Width, rect.Height);
 
     private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
     {
@@ -209,13 +216,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         var maximized = AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Maximized };
         var bounds = _normalWindowBounds
             ?? new RectInt32(AppWindow.Position.X, AppWindow.Position.Y, AppWindow.Size.Width, AppWindow.Size.Height);
-        if (bounds.Width < 320 || bounds.Height < 240)
-            return;
-
-        App.SaveSettings(App.Settings.Current with
-        {
-            WindowPlacement = new WindowPlacement(bounds.X, bounds.Y, bounds.Width, bounds.Height, maximized),
-        });
+        if (WindowLayout.ToSave(new PixelRect(bounds.X, bounds.Y, bounds.Width, bounds.Height), maximized) is { } placement)
+            App.SaveSettings(App.Settings.Current with { WindowPlacement = placement });
     }
 
     private TabGroupView AttachGroupView(TabGroupViewModel group)
@@ -770,12 +772,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     // Keeps the compact title bar and a usable tab area (rail + minimum tree + tabs).
     private const double MinimumWindowWidth = 740;
     private const double MinimumWindowHeight = 480;
-    private const double MinimumTabAreaWidth = 320;
-
-    // With the Automatic layout, the sessions pane floats over the tabs below this window width.
-    // It docks again only above the wider bound, so resizing near the edge doesn't flicker.
-    private const double PaneOverlayBelowWidth = 1000;
-    private const double PaneDockAboveWidth = 1060;
 
     private bool _quickConnectExpanded;
     private bool _paneOverlay;
@@ -824,13 +820,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         if (Root.XamlRoot is not { } root)
             return;
-        var width = root.Size.Width;
-        var overlay = SessionsPaneLayouts.Normalize(App.Settings.Current.SessionsPaneLayout) switch
-        {
-            SessionsPaneLayouts.Float => true,
-            SessionsPaneLayouts.Dock => false,
-            _ => _paneOverlay ? width < PaneDockAboveWidth : width < PaneOverlayBelowWidth,
-        };
+        var overlay = WindowLayout.Floats(App.Settings.Current.SessionsPaneLayout, root.Size.Width, _paneOverlay);
         if (overlay == _paneOverlay)
         {
             if (_paneOverlay && _overlayPaneShown)
@@ -847,11 +837,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     }
 
     /// <summary>The saved width, capped so the floating pane leaves the tabs in view.</summary>
-    private double OverlayPaneWidth()
-    {
-        var available = (Root.XamlRoot?.Size.Width ?? 1000) - MainArea.ColumnDefinitions[0].ActualWidth - 96;
-        return Math.Max(200, Math.Min(Math.Min(_sessionsPaneWidth, 360), available));
-    }
+    private double OverlayPaneWidth() => WindowLayout.FloatingWidth(
+        _sessionsPaneWidth, Root.XamlRoot?.Size.Width ?? 1000, MainArea.ColumnDefinitions[0].ActualWidth);
 
     private void PaneDismissLayer_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
@@ -950,12 +937,11 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         if (Root.XamlRoot is not { } root)
             return;
         var fixedColumns = MainArea.ColumnDefinitions[0].ActualWidth + TreeSplitterColumn.ActualWidth;
-        TreeColumn.MaxWidth = Math.Max(180, root.Size.Width - fixedColumns - MinimumTabAreaWidth);
+        TreeColumn.MaxWidth = WindowLayout.DockedMaxWidth(root.Size.Width, fixedColumns);
     }
 
     /// <summary>The tree's current width, unless the window is narrowing it below the saved width.</summary>
-    private bool TreeWidthIsUserChosen =>
-        TreeColumn.ActualWidth >= 180 && TreeColumn.ActualWidth < TreeColumn.MaxWidth - 0.5;
+    private bool TreeWidthIsUserChosen => WindowLayout.IsChosenWidth(TreeColumn.ActualWidth, TreeColumn.MaxWidth);
 
     /// <summary>Caption buttons live outside XAML theming; keep them in sync with the app theme.</summary>
     private void ApplyTitleBarButtonColors(string theme)
@@ -1150,7 +1136,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         HistoryOverlay.CloseRequested += () => CloseHistory(restoreFocus: true);
         HistoryOverlay.CanInsert = () =>
-            ViewModel.ActiveTab is { View: TerminalTabView, State: TabConnectionState.Connected, IsLocked: false };
+            ViewModel.ActiveTab is { View: TerminalTabView, AcceptsCommands: true };
         HistoryOverlay.InsertCommand = async entry =>
         {
             if (ViewModel.ActiveTab?.View is not TerminalTabView view || !await view.InsertTextAsync(entry.Command))
@@ -1170,7 +1156,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             if (!App.SaveSettings(App.Settings.Current with { KeepCommandHistory = true }))
                 return;
-            App.ApplySettingsToAllWindows();
             HistoryOverlay.SetHistoryEnabled(true);
         };
     }
@@ -1309,7 +1294,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             LaunchAtSignIn = Interop.SignInLaunch.IsEnabled,
             SetLaunchAtSignIn = enabled => Interop.SignInLaunch.TrySet(enabled, Environment.ProcessPath!),
         });
-        settings.SettingChanged += property => App.ApplySettingChange(property, source: settings);
         var page = new SettingsPage(settings);
         page.ConnectRequested += session => App.WindowFor(tab)?.ConnectSession(session);
         // Settings can be dragged to another window, so its sessions go through the window hosting it now.
@@ -1324,53 +1308,71 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     }
 
     /// <summary>Re-reads this window's Settings pages, and Welcome, which shows some of the same
-    /// settings, after another window or command changed settings.</summary>
-    private void RefreshSettingsPage(SettingsViewModel? source)
+    /// settings. A page that is saving skips its own announcement (SettingsViewModel.Refresh).</summary>
+    private void RefreshSettingsPages()
     {
         // Dragging Settings between windows can leave two Settings tabs in one window.
         foreach (var tab in ViewModel.AllTabs)
         {
-            if (tab.View is SettingsPage page && !ReferenceEquals(page.ViewModel, source))
+            if (tab.View is SettingsPage page)
                 page.ViewModel.Refresh();
             else if (tab.View is OnboardingView welcome)
                 welcome.Refresh(App.Settings.Current);
         }
     }
 
-    /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
-    internal void ApplySettingsToApp()
+    /// <summary>Runs a store follower once the write that raised it has finished. Stores
+    /// announce from inside the writer's call, on its thread; a menu rebuilt there could
+    /// land halfway through a workspace switch or a close, so followers wait their turn.</summary>
+    private void AfterWrite(Action follow) => DispatcherQueue.TryEnqueue(() =>
     {
-        ApplySettingsToApp(App.Settings.Current);
-        if (_sessionsPaneOpen && _selectedRailTab == "recordings")
-            _ = ViewModel.RefreshRecordingsAsync();
-        RefreshSettingsPage(source: null);
+        if (!_windowClosed)
+            follow();
+    });
+
+    private void Settings_Changed(AppSettings before, AppSettings after) =>
+        AfterWrite(() => ApplySettings(SettingsEffects.Between(before, after)));
+
+    private void Highlights_Changed() => AfterWrite(RefreshHighlights);
+
+    private bool _workspaceMenuQueued;
+
+    private void Workspaces_Changed()
+    {
+        // A backup restore or a close can write several times in a row; rebuild once.
+        if (_workspaceMenuQueued)
+            return;
+        _workspaceMenuQueued = true;
+        AfterWrite(() =>
+        {
+            _workspaceMenuQueued = false;
+            RefreshWorkspaceMenu();
+            App.RefreshWindowTitles(); // a title names the shown workspace
+        });
     }
 
-    /// <summary>Applies one saved setting to this window after Settings, in any window, changed it.
-    /// <paramref name="source"/> is the Settings page that made the change; it is already current.</summary>
-    internal void ApplySettingChange(string property, SettingsViewModel? source)
+    // Not a saved setting, but shown on every Settings page.
+    private void SignInLaunch_Changed() => AfterWrite(RefreshSettingsPages);
+
+    /// <summary>Applies the saved settings to what <paramref name="effect"/> names; see
+    /// <see cref="SettingsEffects"/> for which settings change what.</summary>
+    private void ApplySettings(SettingsEffect effect)
     {
-        RefreshSettingsPage(source);
         var settings = App.Settings.Current;
-        switch (property)
-        {
-            case nameof(SettingsViewModel.Theme):
-                ApplyThemeToApp(settings.Theme);
-                break;
-            case nameof(SettingsViewModel.ShowStatusBar):
-                ApplyStatusBarVisibility(settings.ShowStatusBar);
-                break;
-            case nameof(SettingsViewModel.SessionsPaneLayout):
-                UpdatePaneMode();
-                break;
-            case nameof(SettingsViewModel.RecordingDirectory):
-                if (_sessionsPaneOpen && _selectedRailTab == "recordings")
-                    _ = ViewModel.RefreshRecordingsAsync();
-                break;
-            default:
-                ApplyTerminalSettings(settings);
-                break;
-        }
+        if (effect.HasFlag(SettingsEffect.Theme))
+            ApplyThemeToApp(settings.Theme);
+        if (effect.HasFlag(SettingsEffect.StatusBar))
+            ApplyStatusBarVisibility(settings.ShowStatusBar);
+        if (effect.HasFlag(SettingsEffect.PaneLayout))
+            UpdatePaneMode();
+        if (effect.HasFlag(SettingsEffect.Terminals))
+            ApplyTerminalSettings(settings);
+        if (effect.HasFlag(SettingsEffect.Recordings) && _sessionsPaneOpen && _selectedRailTab == "recordings")
+            _ = ViewModel.RefreshRecordingsAsync();
+        if (effect.HasFlag(SettingsEffect.RecentSessions))
+            ViewModel.RefreshRecentSessions();
+        if (effect.HasFlag(SettingsEffect.SettingsPages))
+            RefreshSettingsPages();
     }
 
     /// <summary>Terminals re-read the saved highlighting rules.</summary>
@@ -1388,18 +1390,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         StatusBarMenuItem.IsChecked = visible;
     }
 
-    private void SetStatusBarVisible(bool visible)
-    {
-        App.SaveSetting(s => s with { ShowStatusBar = visible }, nameof(SettingsViewModel.ShowStatusBar));
-    }
-
-    private void ApplySettingsToApp(AppSettings settings)
-    {
-        ApplyThemeToApp(settings.Theme);
-        ApplyStatusBarVisibility(settings.ShowStatusBar);
-        UpdatePaneMode();
-        ApplyTerminalSettings(settings);
-    }
+    private void SetStatusBarVisible(bool visible) =>
+        App.SaveSettings(App.Settings.Current with { ShowStatusBar = visible });
 
     private void ApplyTerminalSettings(AppSettings settings)
     {

@@ -33,11 +33,14 @@ public sealed class TabThemeTests
         tab.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
 
         tab.Session = tab.Session with { Overrides = new TerminalOverrides { Theme = "crimson" } };
+        Assert.Contains(nameof(TabViewModel.ColorTag), changed);
         Assert.Contains(nameof(TabViewModel.TabTheme), changed);
         Assert.Equal("crimson", tab.TabTheme);
 
         changed.Clear();
         tab.ApplyAppTheme("light");
+        Assert.Contains(nameof(TabViewModel.AppTheme), changed);
+        Assert.Equal("light", tab.AppTheme);
         Assert.Contains(nameof(TabViewModel.TabTheme), changed);
         Assert.Equal("crimson", tab.TabTheme);
 

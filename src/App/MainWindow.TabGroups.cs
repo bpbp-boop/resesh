@@ -106,7 +106,6 @@ public sealed partial class MainWindow
         var view = new OnboardingView(
             App.Settings.Current,
             App.PreviewThemeInAllWindows,
-            () => App.RefreshSessionsInAllWindows(),
             Core.Local.LocalShellDiscovery.DefaultProfile(
                 App.Store, App.Settings.Current.DefaultLocalProfileId, App.AvailableLocalShells)?.Name);
         view.FinishRequested += () => Host().FinishOnboarding(tab, view);
@@ -125,7 +124,6 @@ public sealed partial class MainWindow
         if (!App.SaveSettings(view.Complete()))
             return;
         view.MarkCompleted();
-        App.ApplySettingsToAllWindows();
         CloseTabCore(tab);
     }
 
@@ -153,8 +151,6 @@ public sealed partial class MainWindow
             {
                 App.ReportRecoverableError(exception);
             }
-            App.RefreshRecentSessionsInAllWindows();
-            App.RefreshJumpList();
         }
         return tab;
     }
@@ -1019,8 +1015,7 @@ public sealed partial class MainWindow
 
     public void ReconnectTab(TabViewModel tab)
     {
-        if (tab.View is TerminalTabView view
-            && tab.State is TabConnectionState.Disconnected or TabConnectionState.Exited)
+        if (tab.View is TerminalTabView view && tab.IsStopped)
             _ = view.ConnectAsync(isReconnect: true);
     }
 
@@ -1034,8 +1029,7 @@ public sealed partial class MainWindow
 
     public async Task ManageTunnelsAsync(TabViewModel tab)
     {
-        if (tab is not { IsLocked: false, State: TabConnectionState.Connected, View: TerminalTabView view }
-            || !tab.Capabilities.Tunnels)
+        if (tab is not { AcceptsCommands: true, View: TerminalTabView view } || !tab.Capabilities.Tunnels)
             return;
         await TunnelsDialog.ManageAsync(Root.XamlRoot, view, tab.Session.Name,
             () => App.Store.Find(tab.Session.Id),
@@ -1049,13 +1043,11 @@ public sealed partial class MainWindow
             });
     }
 
-    private static bool CanManageRemoteSessions(TabViewModel? tab) =>
-        tab is { IsLocked: false, IsPlayback: false, IsAppPage: false, View: TerminalTabView }
-        && tab.HasRemoteSessions && tab.State != TabConnectionState.Connecting;
-
     public async Task ManageRemoteSessionsAsync(TabViewModel tab)
     {
-        if (!CanManageRemoteSessions(tab) || tab.View is not TerminalTabView view || _managingRemoteSessions)
+        // The command's own rule: the palette, menus and this guard cannot drift apart.
+        if (!ViewModel.ManageRemoteSessionsCommand.CanExecute(tab) || tab.View is not TerminalTabView view
+            || _managingRemoteSessions)
             return;
         int? slot;
         _managingRemoteSessions = true;
@@ -1107,8 +1099,7 @@ public sealed partial class MainWindow
             owner.FocusGroup(group);
             owner.FocusTabContent(existing);
             owner.BringToFront();
-            if (!existing.IsLocked && existing.View is TerminalTabView existingView
-                && existing.State is TabConnectionState.Disconnected or TabConnectionState.Exited)
+            if (existing is { IsLocked: false, IsStopped: true, View: TerminalTabView existingView })
                 await existingView.ResumeRemoteSessionAsync(selectedSlot);
         }
         else

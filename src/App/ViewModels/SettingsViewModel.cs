@@ -50,11 +50,27 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     private AppSettings Current => _environment.Current();
 
-    /// <summary>Re-reads everything, after settings changed elsewhere.</summary>
+    private AppSettings? _ownSave;
+
+    /// <summary>Re-reads everything, after settings changed elsewhere. Settings this page saved
+    /// itself are not "elsewhere": every window re-reads its pages when the store announces a
+    /// save, and the control that made it already shows the value (see <see cref="Save{T}"/>
+    /// for why echoing it back is harmful; a text box would also lose its caret).</summary>
     public void Refresh()
     {
+        if (_ownSave is not null && ReferenceEquals(Current, _ownSave))
+            return;
         RefreshHistoryUsage();
         OnPropertyChanged(string.Empty);
+    }
+
+    /// <summary>Saves through the environment, remembering the result as this page's own.</summary>
+    private bool SaveSettings(AppSettings updated)
+    {
+        if (!_environment.Save(updated))
+            return false;
+        _ownSave = updated;
+        return true;
     }
 
     /// <summary>Saves a value a control sent. The control already shows it, so the page is
@@ -66,7 +82,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         var current = Current;
         var updated = change(current);
-        if (updated != current && _environment.Save(updated))
+        if (updated != current && SaveSettings(updated))
             SettingChanged?.Invoke(property);
         if (!EqualityComparer<T>.Default.Equals(stored(), sent))
             OnPropertyChanged(property);
@@ -117,7 +133,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         var current = Current;
         if (current.FontFamily != FontFamilies.Default
-            && _environment.Save(current with { FontFamily = FontFamilies.Default }))
+            && SaveSettings(current with { FontFamily = FontFamilies.Default }))
             SettingChanged?.Invoke(nameof(TerminalFont));
         OnPropertyChanged(nameof(TerminalFont));
         OnPropertyChanged(nameof(FallbackFonts));

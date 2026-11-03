@@ -82,16 +82,13 @@ public sealed partial class MainViewModel
 
     private bool HasTerminal(TabViewModel tab) => _services?.HasTerminal(tab) == true;
 
-    private static bool IsStopped(TabViewModel tab) =>
-        tab.State is TabConnectionState.Disconnected or TabConnectionState.Exited;
-
     // ---- Tab ----
 
     [RelayCommand(CanExecute = nameof(CanReconnect))]
     private void Reconnect(TabViewModel? tab) => Services.ReconnectTab(Target(tab)!);
 
     private bool CanReconnect(TabViewModel? tab) =>
-        Target(tab) is { } target && IsStopped(target) && HasTerminal(target);
+        Target(tab) is { IsStopped: true } target && HasTerminal(target);
 
     [RelayCommand(CanExecute = nameof(CanDisconnect))]
     private void Disconnect(TabViewModel? tab) => Services.DisconnectTab(Target(tab)!);
@@ -103,7 +100,7 @@ public sealed partial class MainViewModel
     private void SendBreak(TabViewModel? tab) => Services.SendBreak(Target(tab)!);
 
     private bool CanSendBreak(TabViewModel? tab) =>
-        Target(tab) is { State: TabConnectionState.Connected, IsLocked: false } target
+        Target(tab) is { AcceptsCommands: true } target
         && target.Capabilities.SendBreak && HasTerminal(target);
 
     [RelayCommand(CanExecute = nameof(CanManageRemoteSessions),
@@ -116,7 +113,7 @@ public sealed partial class MainViewModel
 
     /// <summary>Tunnels ride a live SSH connection, so there is nothing to manage without one.</summary>
     private bool CanManageTunnels(TabViewModel? tab) =>
-        Target(tab) is { IsLocked: false, State: TabConnectionState.Connected } target
+        Target(tab) is { AcceptsCommands: true } target
         && ShowsManageTunnels(target) && HasTerminal(target);
 
     private bool CanManageRemoteSessions(TabViewModel? tab) =>

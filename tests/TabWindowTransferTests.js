@@ -98,5 +98,5 @@ test("a tab drag is one session that ends when its source leaves the tree", () =
   // Held widths and pending slides are released when the strip leaves the screen.
   const release = tabMotion.match(/private void ReleaseTabStripHolds\(\)[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
   assert.match(release, /CancelTabMotion\(\);/);
-  assert.match(release, /_tabWidthHoldPending = false;/);
+  assert.match(release, /_tabWidthHold\.Release\(\)/);
 });

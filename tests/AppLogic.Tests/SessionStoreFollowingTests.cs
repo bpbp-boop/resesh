@@ -24,7 +24,7 @@ public sealed class SessionStoreFollowingTests : IDisposable
 
     public void Dispose() => Directory.Delete(_directory, true);
 
-    private MainViewModel Window() => new(_store, new Credentials(), new ViewModelEnvironment
+    private MainViewModel Window(IdentityStore? identities = null) => new(_store, new Credentials(), new ViewModelEnvironment
     {
         CurrentTheme = () => "dark",
         ResolveTheme = theme => theme,
@@ -35,7 +35,10 @@ public sealed class SessionStoreFollowingTests : IDisposable
         RecentSessionIds = () => _recentIds,
         SaveRecentSessionIds = ids => _recentIds = ids,
         SessionsDeleted = _deleted.AddRange,
-    }, _services);
+        LoginUsername = session => _loginOverride ?? session.Username,
+    }, _services, identities);
+
+    private string? _loginOverride;
 
     private static Session Ssh(string name, string folder = "") =>
         new() { Name = name, Host = name + ".example", Username = "admin", FolderPath = folder };
@@ -331,5 +334,29 @@ public sealed class SessionStoreFollowingTests : IDisposable
         public string? Read(Guid sessionId) => null;
         public void Write(Guid sessionId, string secret) { }
         public void Delete(Guid sessionId) { }
+    }
+
+    [Fact]
+    public void IdentityChangeRefreshesEveryWindowsTabsThoughNoSessionChanged()
+    {
+        var identities = new IdentityStore(Path.Combine(_directory, "identities.json"));
+        identities.Load();
+        var session = Ssh("web");
+        _store.Add(session);
+        var first = Window(identities);
+        var second = Window(identities);
+        var firstTab = first.Connect(_store.Find(session.Id)!);
+        var secondTab = second.Connect(_store.Find(session.Id)!);
+
+        _loginOverride = "deploy"; // as an identity's new username would resolve
+        identities.Add(new Identity { Name = "deploy", Username = "deploy" });
+
+        Assert.Contains("deploy@", firstTab.Endpoint);
+        Assert.Contains("deploy@", secondTab.Endpoint);
+
+        second.Dispose();
+        _loginOverride = "ops";
+        identities.Add(new Identity { Name = "ops", Username = "ops" });
+        Assert.Contains("ops@", firstTab.Endpoint);
     }
 }

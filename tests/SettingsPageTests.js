@@ -38,7 +38,11 @@ test("changes apply as they are made, with no Save or Cancel", () => {
   assert.doesNotMatch(page, /PrimaryButtonText|"Save"|"Cancel"/);
   assert.match(settings, /_environment\.Save\(updated\)/);
   assert.match(settings, /SettingChanged\?\.Invoke\(property\)/);
-  assert.match(windowCode, /settings\.SettingChanged \+= property => App\.ApplySettingChange\(property, source: settings\)/);
+  // Every window follows the store, so a change saved by any page reaches them all. What a
+  // change redoes is SettingsEffects' (tested in AppLogic.Tests); the page skips its own echo.
+  assert.match(windowCode, /App\.Settings\.Changed \+= Settings_Changed;/);
+  assert.match(windowCode, /ApplySettings\(SettingsEffects\.Between\(before, after\)\)/);
+  assert.match(settings, /ReferenceEquals\(Current, _ownSave\)/);
 });
 
 test("the page follows the live application palette", () => {
@@ -114,7 +118,8 @@ test("inline Settings editors expose stable automation IDs", () => {
 
 test("highlighting rules commit after each change and reach every window", () => {
   assert.match(pageCode, /new HighlightRulesEditor\(_highlightDraft\)[\s\S]*?highlightEditor\.Changed \+= CommitHighlights/);
-  assert.match(pageCode, /App\.Highlights\.CommitDraft\(_highlightDraft\)[\s\S]*?App\.RefreshHighlightsInAllWindows\(\)/);
+  assert.match(pageCode, /App\.Highlights\.CommitDraft\(_highlightDraft\)/);
+  assert.match(windowCode, /App\.Highlights\.Changed \+= Highlights_Changed;/);
   assert.match(highlightPanel, /class HighlightRulesEditor/);
   assert.match(highlightPanel, /Add custom rule/);
   assert.match(highlightPanel, /RefreshCombinedPreview/);

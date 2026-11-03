@@ -197,12 +197,14 @@ test("global and per-session theme pickers use the shared catalog", () => {
 
 test("global theme selection applies immediately in every window", () => {
   assert.match(settingsPage, /SelectedItem="\{x:Bind ViewModel\.Theme, Mode=TwoWay\}"/);
-  assert.match(appCode, /internal static void ApplySettingChange[\s\S]*?foreach \(var window in app\._windows\.ToList\(\)\)[\s\S]*?window\.ApplySettingChange\(property, source\)/);
+  // Each window follows the settings store itself, whichever window saved the theme.
+  assert.match(mainWindow, /App\.Settings\.Changed \+= Settings_Changed;/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)/);
 });
 
 test("live theme changes avoid terminal layout and highlight work", () => {
-  assert.match(mainWindow, /case nameof\(SettingsViewModel\.Theme\):\s*ApplyThemeToApp\(settings\.Theme\);\s*break;/);
+  // A theme change is SettingsEffect.Theme alone (SettingsEffectsTests), which only recolors.
+  assert.match(mainWindow, /if \(effect\.HasFlag\(SettingsEffect\.Theme\)\)\s*ApplyThemeToApp\(settings\.Theme\);/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)[\s\S]*?view\.ApplyTheme\(theme\)/);
 
   const applyTheme = terminalTab.match(/public void ApplyTheme\(string theme\)\s*\{[\s\S]*?\n    \}/)?.[0];
@@ -285,7 +287,8 @@ test("the tab-row divider spans both sides without crossing the active tab", () 
   assert.match(terminalThemes, /\["solarized-light"\] = New\(\s*0xFDF6E3,/);
   assert.match(terminalThemes, /\["phthalo-green"\] = New\(\s*0x123524,/);
   assert.match(tabGroupXaml, /x:Name="LeftTabStripDivider"[\s\S]*?x:Name="RightTabStripDivider"/);
-  assert.match(tabGroup, /Tabs\.ContainerFromItem\(Tabs\.SelectedItem\)[\s\S]*?LeftTabStripDivider\.Width = activeLeft;[\s\S]*?RightTabStripDivider\.Width = stripWidth - activeRight;/);
+  // Where the gap falls is TabStripSizing.DividerWidths, tested in TabStripSizingTests.cs.
+  assert.match(tabGroup, /Tabs\.ContainerFromItem\(Tabs\.SelectedItem\)[\s\S]*?TabStripSizing\.DividerWidths\(/);
 });
 
 // The ruler's edge used to be drawn in the selection colour, which is also the focused

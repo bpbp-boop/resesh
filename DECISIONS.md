@@ -2339,3 +2339,31 @@ rename or the delete (a sticky folder such as `/tmp`, where only a file's owner 
 the temporary file is removed and the upload overwrites in place. SFTP v3 does not report a
 link count, so a hard-linked file the login owns still loses its other names; that is the
 same as `scp`'s and most editors' save-by-rename and is accepted.
+
+## 2026-11-03 - Windows follow the stores; writers don't fan out
+
+Settings, highlight rules and workspaces had no change event, so `App` kept one
+`*InAllWindows` method per kind of data and every writer had to call the right ones. New
+writers (a backup restore, Welcome, a paste prompt, another window's Settings) kept missing
+one. Restoring a backup never refreshed highlight rules, for example. Every store now raises
+`Changed` after a write lands, and the readers subscribe: each `MainWindow` follows settings,
+highlights and workspaces, `MainViewModel` follows sessions and identities, and `App` follows
+only what is app-wide (the jump list, history pruning). A writer just saves.
+
+- **What a settings change redoes** is `SettingsEffects.Between(before, after)`, one row per
+  `AppSettings` property. `SettingsEffectsTests` fails when a property has no row, so a new
+  setting has to say what it changes.
+- **Windows apply a change on the next dispatcher tick** (`MainWindow.AfterWrite`), not inside
+  the writer's call: stores announce from inside a write, and a workspace menu rebuilt there
+  could land in the middle of a workspace switch or a window close.
+- **A Settings page ignores its own save** by identity (`SettingsViewModel._ownSave`): every
+  window refreshes its pages on a settings change, but echoing a value back into the control
+  that sent it can loop a ComboBox and moves a text box's caret.
+- **Workspace writes** that only move the last layout or edit an existing draft stay quiet;
+  they happen on every layout change. `WorkspaceCoordinator`'s callback now runs only when a
+  write fails, to undo an optimistic drag or rename.
+
+Tab state follows the same rule: `TabViewModel` owns what describes a connection. Leaving the
+connected state clears `ConnectionSummary` and `ConnectionDetails` (no transport clears them
+by hand). `IsStopped` and `AcceptsCommands` are the only definitions of "ended" and
+"connected and unlocked" that menus, commands and the terminal view read.

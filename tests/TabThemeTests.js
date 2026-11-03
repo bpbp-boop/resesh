@@ -16,9 +16,6 @@ const xaml = fs.readFileSync(
 const visualPalette = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "ThemeVisualPalette.cs"),
   "utf8");
-const themeChrome = fs.readFileSync(
-  path.join(__dirname, "..", "src", "App", "ThemeChrome.cs"),
-  "utf8");
 const appXaml = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "App.xaml"),
   "utf8");
@@ -39,12 +36,8 @@ test("a session theme override recolors its tab", () => {
   const tabVisuals = presentation.match(/public static Windows\.UI\.Color TabHeaderBackgroundColor[\s\S]*?public static Windows\.UI\.Color TabHeaderForegroundColor/)?.[0] ?? "";
   assert.doesNotMatch(tabVisuals, /WithOverrides|Session\.Overrides/);
   assert.match(tabVisuals, /ThemeVisualPalette\.For\(appTheme\)/);
-  // The view model picks the theme; the header binds every color to that one choice.
-  assert.match(viewModel, /public string TabTheme =>\s*_environment\.ResolveTheme\(_session\.Overrides\.EffectiveTheme\(_appTheme\)\);/);
+  // The view model picks the theme (TabThemeTests.cs); the header binds every color to it.
   assert.doesNotMatch(xaml, /PresentationValues\.(?:TabHeader\w+|FocusedTab\w+)\(AppTheme/);
-  // Saving the session or changing the app theme both repaint the header.
-  assert.match(viewModel, /OnPropertyChanged\(nameof\(ColorTag\)\);\s*OnPropertyChanged\(nameof\(TabTheme\)\)/);
-  assert.match(viewModel, /OnPropertyChanged\(nameof\(AppTheme\)\);\s*OnPropertyChanged\(nameof\(TabTheme\)\)/);
 });
 
 test("a selected tab in an unfocused split keeps the active surface and gains an underline", () => {
@@ -62,19 +55,6 @@ test("a focused selected tab border follows its session color", () => {
   assert.match(xaml, /FocusedAccentVisibility\(IsActive, IsGroupFocused\)[\s\S]*?FocusedTabBorderColor\(TabTheme, ColorTag\)/);
 });
 
-test("an empty tab group does not draw a tab-strip divider", () => {
-  const emptySelection = fs.readFileSync(
-    path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"),
-    "utf8").match(/if \(Tabs\.SelectedItem is null\)[\s\S]*?return;/)?.[0] ?? "";
-  assert.match(emptySelection, /LeftTabStripDivider\.Width = 0/);
-  assert.match(emptySelection, /RightTabStripDivider\.Width = 0/);
-});
-
-test("vaporwave emphasizes focus while default themes keep a one-pixel accent", () => {
-  assert.match(themeChrome, /\["vaporwave"\][\s\S]*?AccentBarThickness = 3/);
-  assert.match(themeChrome, /public double AccentBarThickness \{ get; init; \} = 1;/);
-});
-
 test("inactive tabs in an unfocused split use a dimmer foreground", () => {
   const foreground = presentation.match(/TabHeaderForegroundColor[\s\S]*?TabHeaderFontWeight/)?.[0] ?? "";
   assert.match(foreground, /\? isGroupFocused/);
@@ -82,18 +62,6 @@ test("inactive tabs in an unfocused split use a dimmer foreground", () => {
 });
 
 test("saved and previewed theme changes refresh every open tab palette", () => {
-  assert.match(viewModel, /public void ApplyAppTheme\(string theme\)[\s\S]*?_appTheme = theme;[\s\S]*?OnPropertyChanged\(nameof\(AppTheme\)\)/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)[\s\S]*?foreach \(var tab in ViewModel\.AllTabs\)[\s\S]*?tab\.ApplyAppTheme\(theme\)/);
   assert.match(xaml, /TabHeaderBorderColor\(TabTheme\), Mode=OneWay/);
-});
-
-test("persistent tabs prefer a newer detected command over a delayed tmux title", () => {
-  const subtitle = viewModel.match(
-    /public string Subtitle[\s\S]*?private string FallbackSubtitle/)?.[0] ?? "";
-  assert.ok(
-    subtitle.indexOf("Session.Persistent && RunningCommand") < subtitle.indexOf("TerminalTitle is not"),
-    "the detected command must win before the stale tmux title is considered");
-  assert.match(
-    viewModel,
-    /AgentDetection\.IsShellTitle\(TerminalTitle\)[\s\S]*?RunningCommand = null/);
 });

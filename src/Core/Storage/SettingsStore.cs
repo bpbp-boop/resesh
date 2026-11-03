@@ -189,6 +189,11 @@ public sealed class SettingsStore
 
     public AppSettings Current { get; private set; } = new();
 
+    /// <summary>Raised after a save changes the settings, with the settings before and after
+    /// it, on the saver's thread and outside the store's lock. Whoever shows a setting
+    /// follows this, so no writer has to know who reads what it wrote.</summary>
+    public event Action<AppSettings, AppSettings>? Changed;
+
     public SettingsStore(string path)
     {
         _file = new StoreFile(path, "Settings");
@@ -223,11 +228,24 @@ public sealed class SettingsStore
     /// A failed write leaves the current settings and backup recovery state unchanged.</summary>
     public void Save(AppSettings settings)
     {
+        AppSettings previous;
         lock (_gate)
-        {
-            _file.Write(JsonSerializer.Serialize(settings, JsonOptions.Info<AppSettings>()));
-            Current = settings;
-        }
+            previous = SaveLocked(settings);
+        Announce(previous, settings);
+    }
+
+    private AppSettings SaveLocked(AppSettings settings)
+    {
+        var previous = Current;
+        _file.Write(JsonSerializer.Serialize(settings, JsonOptions.Info<AppSettings>()));
+        Current = settings;
+        return previous;
+    }
+
+    private void Announce(AppSettings previous, AppSettings current)
+    {
+        if (previous != current)
+            Changed?.Invoke(previous, current);
     }
 
     private static AppSettings? Read(string path)
@@ -261,6 +279,7 @@ public sealed class SettingsStore
         if (sessionId == Guid.Empty)
             return;
 
+        AppSettings previous, updated;
         lock (_gate)
         {
             var recent = new List<Guid>(Math.Min(maximumCount, Current.RecentSessionIds.Count + 1))
@@ -274,7 +293,9 @@ public sealed class SettingsStore
                 if (recent.Count == maximumCount)
                     break;
             }
-            Save(Current with { RecentSessionIds = recent });
+            updated = Current with { RecentSessionIds = recent };
+            previous = SaveLocked(updated);
         }
+        Announce(previous, updated);
     }
 }

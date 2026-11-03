@@ -57,9 +57,6 @@ public interface ITabGroupHost
 
 public sealed partial class TabGroupView : UserControl
 {
-    private const double MinimumTabWidth = 100;
-    private const double ExpandedTabActionsFallbackWidth = 224;
-
     // The drag itself is a TabDragSession (TabGroupView.Drag.cs); these are this strip's previews.
     private readonly Image _tabDragPreview = new() { IsHitTestVisible = false, Visibility = Visibility.Collapsed };
     // Inactive headers paint no background of their own, so the dragged header's image
@@ -101,7 +98,7 @@ public sealed partial class TabGroupView : UserControl
     private bool _showsFocusEdge;
     private TabViewModel? _filePaneButtonTab;
     private Terminal.TerminalTabView? _filePaneButtonView;
-    private double _expandedTabActionsWidth = ExpandedTabActionsFallbackWidth;
+    private double _expandedTabActionsWidth = TabStripSizing.ExpandedTabActionsFallbackWidth;
     private bool _terminalVisibilityDeferred;
 
     public TabGroupViewModel Group { get; }
@@ -133,15 +130,11 @@ public sealed partial class TabGroupView : UserControl
         {
             // The full refresh briefly lays tabs out at content width, so skip it when the
             // remaining tabs already have their maximum width and nothing needs to grow.
-            if (e.CollectionChange != Windows.Foundation.Collections.CollectionChange.ItemRemoved
-                || !HasShrunkTabs())
+            // Like a browser, a close under the pointer keeps the current widths (WinUI
+            // holds them too); the tabs grow once the pointer leaves the strip.
+            if (e.CollectionChange != Windows.Foundation.Collections.CollectionChange.ItemRemoved)
                 return;
-            // Like a browser, a close under the pointer keeps the current widths so the
-            // next tab's close button lands where the pointer already is. WinUI holds
-            // them too; the tabs grow once the pointer leaves the strip.
-            if (_pointerInTabStrip && e.Index < Group.Tabs.Count)
-                _tabWidthHoldPending = true;
-            else
+            if (_tabWidthHold.TabRemoved(HasShrunkTabs(), (int)e.Index, Group.Tabs.Count) == TabWidthAction.RefreshFull)
                 QueueFullTabWidthRefresh();
         };
         Tabs.SizeChanged += (_, _) =>
@@ -559,13 +552,8 @@ public sealed partial class TabGroupView : UserControl
         });
     }
 
-    private bool HasShrunkTabs()
-    {
-        var maxWidth = (double)Resources["TabViewItemMaxWidth"];
-        return Group.Tabs.Any(tab =>
-            Tabs.ContainerFromItem(tab) is FrameworkElement { ActualWidth: > 0 } container
-            && container.ActualWidth < maxWidth - 0.5);
-    }
+    private bool HasShrunkTabs() => TabStripSizing.HasShrunkTabs(
+        Group.Tabs.Select(tab => Tabs.ContainerFromItem(tab) is FrameworkElement container ? container.ActualWidth : 0));
 
     private void QueueFullTabWidthRefresh()
     {
@@ -616,42 +604,20 @@ public sealed partial class TabGroupView : UserControl
     {
         if (TabMotionOwnsDivider())
             return;
-        var stripWidth = TabStripHost.ActualWidth;
-        if (Tabs.SelectedItem is null)
-        {
-            LeftTabStripDivider.Width = 0;
-            RightTabStripDivider.Width = 0;
-            return;
-        }
-
+        var hasSelection = Tabs.SelectedItem is not null;
         // During dragging, the preview headers move independently of their native slots.
-        // Close the active-tab gap until the headers return to their final positions.
-        if (_tabDragPreview.Visibility == Visibility.Visible)
-        {
-            LeftTabStripDivider.Width = stripWidth;
-            RightTabStripDivider.Width = 0;
-            return;
-        }
-
-        if (Tabs.ContainerFromItem(Tabs.SelectedItem) is FrameworkElement activeTab &&
-            activeTab.ActualWidth > 0)
-        {
-            var origin = activeTab
-                .TransformToVisual(TabStripHost)
-                .TransformPoint(new Windows.Foundation.Point(0, 0));
-            var activeLeft = Math.Clamp(origin.X, 0, stripWidth);
-            var activeRight = Math.Clamp(origin.X + activeTab.ActualWidth, 0, stripWidth);
-            LeftTabStripDivider.Width = activeLeft;
-            RightTabStripDivider.Width = stripWidth - activeRight;
-            return;
-        }
-
+        var dragging = _tabDragPreview.Visibility == Visibility.Visible;
         // A newly opened and selected tab can precede realization of its container.
-        // Hide the divider until layout provides exact bounds rather than briefly
-        // drawing it beneath the new active tab.
-        LeftTabStripDivider.Width = 0;
-        RightTabStripDivider.Width = 0;
-        QueueTabDividerRefreshAfterLayout();
+        (double Left, double Width)? active = hasSelection && !dragging
+            && Tabs.ContainerFromItem(Tabs.SelectedItem) is FrameworkElement { ActualWidth: > 0 } activeTab
+            ? (activeTab.TransformToVisual(TabStripHost).TransformPoint(new Windows.Foundation.Point(0, 0)).X,
+                activeTab.ActualWidth)
+            : null;
+        var widths = TabStripSizing.DividerWidths(TabStripHost.ActualWidth, hasSelection, dragging, active);
+        LeftTabStripDivider.Width = widths.Left;
+        RightTabStripDivider.Width = widths.Right;
+        if (widths.RetryAfterLayout)
+            QueueTabDividerRefreshAfterLayout();
     }
 
     private static FrameworkElement? FindDescendant(DependencyObject root, string name)
@@ -775,7 +741,7 @@ public sealed partial class TabGroupView : UserControl
         ToolTipService.SetToolTip(ZoomButton, AppShortcuts.ToolTip(zoomLabel, ShortcutIds.ZoomTab));
         AutomationProperties.SetName(ZoomButton, zoomLabel);
         ZoomOverflowItem.Text = zoomLabel;
-        TabStripActions.Opacity = Group.SelectedTab?.IsGroupFocused == false ? 0.55 : 1.0;
+        TabStripActions.Opacity = TabStripActionState.Opacity(Group.SelectedTab?.IsGroupFocused);
         UpdateTabActionLayout();
 
         var tab = Group.SelectedTab;
@@ -787,8 +753,7 @@ public sealed partial class TabGroupView : UserControl
         FilePaneToggle.IsEnabled = tab?.Capabilities.FilePane == true
             && !tab.IsLocked
             && tab.View is Terminal.TerminalTabView;
-        CurrentFolderOverflowItem.IsEnabled = tab?.Capabilities.FilePane == true &&
-            tab.State == TabConnectionState.Connected && !tab.IsLocked;
+        CurrentFolderOverflowItem.IsEnabled = TabStripActionState.CurrentFolderEnabled(tab);
         var explorerAvailable = tab?.View is Terminal.TerminalTabView { HasFileExplorer: true };
         OpenInExplorerOverflowItem.Visibility = explorerAvailable ? Visibility.Visible : Visibility.Collapsed;
         OpenInExplorerOverflowItem.IsEnabled = CurrentFolderOverflowItem.IsEnabled;
@@ -809,31 +774,30 @@ public sealed partial class TabGroupView : UserControl
         RecordOverflowItem.IsChecked = recording;
         RewindOverflowItem.IsChecked = rewinding;
 
-        var label = isOpen ? "Hide File Pane" : "Show File Pane";
+        var label = TabStripActionState.FilePaneLabel(isOpen);
         ToolTipService.SetToolTip(FilePaneToggle, AppShortcuts.ToolTip(label, ShortcutIds.FilePane));
         AutomationProperties.SetName(FilePaneToggle, label);
-        var commandsLabel = commandsOpen ? "Hide commands" : "Show commands";
+        var commandsLabel = TabStripActionState.CommandsLabel(commandsOpen);
         ToolTipService.SetToolTip(ShowCommandsButton, AppShortcuts.ToolTip(commandsLabel, ShortcutIds.CommandsPanel));
         AutomationProperties.SetName(ShowCommandsButton, commandsLabel);
-        var recordingLabel = recording ? "Stop recording" : "Start recording";
+        var recordingLabel = TabStripActionState.RecordingLabel(recording);
         ToolTipService.SetToolTip(RecordButton, recordingLabel);
         AutomationProperties.SetName(RecordButton, recordingLabel);
-        ToolTipService.SetToolTip(RewindButton, rewinding ? "Return to live terminal" : "Instant rewind");
-        AutomationProperties.SetName(RewindButton, rewinding ? "Return to live terminal" : "Instant rewind");
+        var rewindLabel = TabStripActionState.RewindLabel(rewinding);
+        ToolTipService.SetToolTip(RewindButton, rewindLabel);
+        AutomationProperties.SetName(RewindButton, rewindLabel);
         FilePaneOverflowItem.Text = label;
         ShowCommandsOverflowItem.Text = commandsLabel;
         RecordOverflowItem.Text = recordingLabel;
-        RewindOverflowItem.Text = rewinding ? "Return to live terminal" : "Instant rewind";
+        RewindOverflowItem.Text = rewindLabel;
     }
 
     private void UpdateTabActionLayout()
     {
-        if (ExpandedTabActions.Visibility == Visibility.Visible && ExpandedTabActions.ActualWidth > 0)
-            _expandedTabActionsWidth = Math.Max(_expandedTabActionsWidth, ExpandedTabActions.ActualWidth + 6);
+        _expandedTabActionsWidth = TabStripSizing.ReserveActionsWidth(_expandedTabActionsWidth,
+            ExpandedTabActions.Visibility == Visibility.Visible, ExpandedTabActions.ActualWidth);
 
-        var useOverflow = TabStripHost.ActualWidth > 0
-            && Group.Tabs.Count > 0
-            && TabStripHost.ActualWidth < Group.Tabs.Count * MinimumTabWidth + _expandedTabActionsWidth;
+        var useOverflow = TabStripSizing.UseOverflow(TabStripHost.ActualWidth, Group.Tabs.Count, _expandedTabActionsWidth);
         var expandedVisibility = useOverflow ? Visibility.Collapsed : Visibility.Visible;
         if (ExpandedTabActions.Visibility == expandedVisibility)
             return;
@@ -1024,7 +988,7 @@ public sealed partial class TabGroupView : UserControl
     {
         if (e.Key == Windows.System.VirtualKey.Enter
             && Group.SelectedTab is { } tab
-            && IsStopped(tab)
+            && tab.IsStopped
             && !IsButtonSource(e.OriginalSource))
         {
             _host.ReconnectTab(tab);
@@ -1116,7 +1080,7 @@ public sealed partial class TabGroupView : UserControl
         _close.KeyboardAcceleratorTextOverride = AppShortcuts.Label(ShortcutIds.CloseTab);
         _closeDisconnected = Item("Close Disconnected Tabs", tab =>
             _ = _host.RequestCloseManyAsync(
-                Group.Tabs.Where(IsStopped).ToList(),
+                Group.Tabs.Where(tab => tab.IsStopped).ToList(),
                 "disconnected tab(s) in this group"));
         _closeOthers = Item("Close Other Tabs", tab =>
             _ = _host.RequestCloseManyAsync(Group.Tabs.Where(t => t != tab).ToList(), "other tab(s)"));
@@ -1176,9 +1140,6 @@ public sealed partial class TabGroupView : UserControl
         return menu;
     }
 
-    private static bool IsStopped(TabViewModel tab) =>
-        tab.State is TabConnectionState.Disconnected or TabConnectionState.Exited;
-
     private static Visibility VisibleIf(bool visible) => visible ? Visibility.Visible : Visibility.Collapsed;
 
     private void ConfigureMenuFor(TabViewModel tab)
@@ -1199,7 +1160,7 @@ public sealed partial class TabGroupView : UserControl
         _manageRemote.Visibility = VisibleIf(MainViewModel.ShowsManageRemoteSessions(tab));
         _tunnels.Visibility = VisibleIf(MainViewModel.ShowsManageTunnels(tab));
         // Bulk closes skip pinned tabs, so they're only offered when an unpinned tab qualifies.
-        _closeDisconnected.IsEnabled = Group.Tabs.Any(t => IsStopped(t) && !t.IsPinned);
+        _closeDisconnected.IsEnabled = Group.Tabs.Any(t => t.IsStopped && !t.IsPinned);
         _closeOthers.IsEnabled = Group.Tabs.Any(t => t != tab && !t.IsPinned);
         _closeRight.IsEnabled = Group.Tabs.Skip(Group.Tabs.IndexOf(tab) + 1).Any(t => !t.IsPinned);
         _pin.Text = tab.IsPinned ? "Unpin Tab" : "Pin Tab";
@@ -1210,7 +1171,7 @@ public sealed partial class TabGroupView : UserControl
         _filePane.Text = tab.View is Terminal.TerminalTabView { IsFilePaneOpen: true } ? "Hide File Pane" : "Show File Pane";
         var filePaneCwd = caps.FilePane;
         _filePaneCwd.Visibility = filePaneCwd ? Visibility.Visible : Visibility.Collapsed;
-        _filePaneCwd.IsEnabled = filePaneCwd && !tab.IsLocked && tab.State == TabConnectionState.Connected;
+        _filePaneCwd.IsEnabled = TabStripActionState.CurrentFolderEnabled(tab);
         _workingFolder.Visibility = caps.LocalWorkingFolder && !tab.IsPlayback
             ? Visibility.Visible
             : Visibility.Collapsed;

@@ -36,8 +36,7 @@ public sealed partial class TabGroupView
     private bool _motionSuppressed;
     private TabViewModel? _dividerSlideTab;
     private int _dividerSlideVersion;
-    private bool _pointerInTabStrip;
-    private bool _tabWidthHoldPending;
+    private readonly TabWidthHold _tabWidthHold = new();
     private FrameworkElement? _tabContainerGrid;
 
     // A translation offset that decays to zero over TabMoveDuration, or a held one.
@@ -180,18 +179,18 @@ public sealed partial class TabGroupView
         {
             if (Tabs.ContainerFromItem(tab) is not FrameworkElement { ActualWidth: > 0 } container)
                 continue;
-            if (_motionOrigins.TryGetValue(tab, out var origin))
+            var step = TabStripMotion.Plan(_motionOrigins.TryGetValue(tab, out var origin)
+                ? origin.Left - LayoutLeft(container)
+                : null);
+            if (step.Kind == TabMotionKind.Slide)
             {
-                var offset = (float)(origin.Left - LayoutLeft(container));
-                if (Math.Abs(offset) >= 0.5f)
-                    SlideElement(container, offset);
-                else
-                    SetTranslation(container, 0);
+                SlideElement(container, step.Offset);
             }
             else
             {
                 SetTranslation(container, 0);
-                FadeInTab(container);
+                if (step.Kind == TabMotionKind.FadeIn)
+                    FadeInTab(container);
             }
         }
         SlideDividerWithActiveTab();
@@ -258,13 +257,8 @@ public sealed partial class TabGroupView
             return slide.From;
         var progress = Stopwatch.GetElapsedTime(slide.Start) / TabMoveDuration;
         if (progress >= 1)
-        {
             _tabSlides.Remove(element);
-            return 0;
-        }
-        // Matches the power-3 ease-out used by SlideElement.
-        var remaining = 1 - progress;
-        return (float)(slide.From * remaining * remaining * remaining);
+        return TabStripMotion.EasedOffset(slide.From, progress);
     }
 
     private void SetTranslation(UIElement element, float offset)
@@ -323,15 +317,8 @@ public sealed partial class TabGroupView
             UpdateTabStripDivider();
             return;
         }
-        var span = (Left: origin.Left, Right: origin.Left + origin.Width);
-
-        var stripWidth = TabStripHost.ActualWidth;
-        var left = LayoutLeft(container);
-        var toLeft = Math.Clamp(left, 0, stripWidth);
-        var toRight = stripWidth - Math.Clamp(left + container.ActualWidth, 0, stripWidth);
-        var fromLeft = Math.Clamp(span.Left, 0, stripWidth);
-        var fromRight = stripWidth - Math.Clamp(span.Right, 0, stripWidth);
-        if (Math.Abs(fromLeft - toLeft) < 0.5 && Math.Abs(fromRight - toRight) < 0.5)
+        var slide = TabStripSizing.DividerSlide(TabStripHost.ActualWidth, origin, LayoutLeft(container), container.ActualWidth);
+        if (!slide.Moves)
         {
             UpdateTabStripDivider();
             return;
@@ -342,8 +329,8 @@ public sealed partial class TabGroupView
         var version = ++_dividerSlideVersion;
         var compositor = ElementCompositionPreview.GetElementVisual(LeftTabStripDivider).Compositor;
         var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
-        ScaleDivider(LeftTabStripDivider, fromLeft, toLeft, anchorRight: false);
-        ScaleDivider(RightTabStripDivider, fromRight, toRight, anchorRight: true);
+        ScaleDivider(LeftTabStripDivider, slide.FromLeft, slide.ToLeft, anchorRight: false);
+        ScaleDivider(RightTabStripDivider, slide.FromRight, slide.ToRight, anchorRight: true);
         batch.End();
         batch.Completed += (_, _) => DispatcherQueue.TryEnqueue(() =>
         {
@@ -356,15 +343,15 @@ public sealed partial class TabGroupView
 
     private void ScaleDivider(Rectangle segment, double from, double to, bool anchorRight)
     {
-        var width = Math.Max(from, to);
-        segment.Width = width;
-        if (width <= 0)
+        var span = TabStripSizing.DividerScale(from, to);
+        segment.Width = span.Width;
+        if (span.Width <= 0)
             return;
         var visual = ElementCompositionPreview.GetElementVisual(segment);
-        visual.CenterPoint = new Vector3(anchorRight ? (float)width : 0, 0, 0);
+        visual.CenterPoint = new Vector3(anchorRight ? (float)span.Width : 0, 0, 0);
         var scale = visual.Compositor.CreateVector3KeyFrameAnimation();
-        scale.InsertKeyFrame(0f, new Vector3((float)(from / width), 1, 1));
-        scale.InsertKeyFrame(1f, new Vector3((float)(to / width), 1, 1), EaseOut(visual.Compositor));
+        scale.InsertKeyFrame(0f, new Vector3((float)span.From, 1, 1));
+        scale.InsertKeyFrame(1f, new Vector3((float)span.To, 1, 1), EaseOut(visual.Compositor));
         scale.Duration = TabMoveDuration;
         visual.StartAnimation("Scale", scale);
     }
@@ -386,15 +373,11 @@ public sealed partial class TabGroupView
     /// <summary>True while tab motion owns the divider; UpdateTabStripDivider leaves it alone.</summary>
     private bool TabMotionOwnsDivider()
     {
-        // Holding the old gap until the tabs start moving avoids it jumping ahead of them.
-        if (_motionPending)
-            return true;
-        if (_dividerSlideTab is null)
-            return false;
-        if (ReferenceEquals(Group.SelectedTab, _dividerSlideTab) && _tabDragPreview.Visibility != Visibility.Visible)
-            return true;
-        CancelDividerSlide();
-        return false;
+        var owner = TabStripMotion.DividerOwner(_motionPending, _dividerSlideTab is not null,
+            ReferenceEquals(Group.SelectedTab, _dividerSlideTab), _tabDragPreview.Visibility == Visibility.Visible);
+        if (owner == TabDividerOwner.CancelSlide)
+            CancelDividerSlide();
+        return owner == TabDividerOwner.Motion;
     }
 
     // ---- drag previews ----
@@ -432,22 +415,17 @@ public sealed partial class TabGroupView
     private void ReleaseTabStripHolds()
     {
         CancelTabMotion();
-        _pointerInTabStrip = false;
-        if (!_tabWidthHoldPending)
-            return;
-        _tabWidthHoldPending = false;
-        QueueFullTabWidthRefresh();
+        if (_tabWidthHold.Release() == TabWidthAction.RefreshFull)
+            QueueFullTabWidthRefresh();
     }
 
     private void TabContainerGrid_PointerEntered(object sender, PointerRoutedEventArgs e) =>
-        _pointerInTabStrip = true;
+        _tabWidthHold.PointerEntered();
 
     private void TabContainerGrid_PointerExited(object sender, PointerRoutedEventArgs e)
     {
-        _pointerInTabStrip = false;
-        if (!_tabWidthHoldPending)
+        if (_tabWidthHold.PointerExited() != TabWidthAction.CaptureAndRefreshFull)
             return;
-        _tabWidthHoldPending = false;
         CaptureTabMotion();
         QueueFullTabWidthRefresh();
     }

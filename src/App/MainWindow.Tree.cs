@@ -159,7 +159,7 @@ public sealed partial class MainWindow
 
     private void SaveTreePaneWidth()
     {
-        if (!_sessionsPaneOpen || TreeColumn.ActualWidth < 180)
+        if (!_sessionsPaneOpen || TreeColumn.ActualWidth < WindowLayout.MinimumPaneWidth)
             return;
         _sessionsPaneWidth = TreeColumn.ActualWidth;
         App.SaveSettings(App.Settings.Current with { TreePaneWidth = _sessionsPaneWidth });

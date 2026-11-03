@@ -244,14 +244,23 @@ public sealed partial class TabViewModel : ObservableObject
     /// <summary>The connection is up or the local process is running. Clears the exit code.
     /// <paramref name="connectedAs"/> is the session as the connection reached it (the tab's
     /// session when null); <paramref name="remoteSessionSlot"/> the persistent shell it
-    /// attached to, if any. Both are dropped when the tab leaves the connected state.</summary>
-    public bool MarkConnected(Session? connectedAs = null, int? remoteSessionSlot = null)
+    /// attached to, if any; <paramref name="summary"/> the status bar's description of it.
+    /// All three are dropped when the tab leaves the connected state.</summary>
+    public bool MarkConnected(Session? connectedAs = null, int? remoteSessionSlot = null, string summary = "")
     {
         if (IsInert)
             return false;
         Enter(TabConnectionState.Connected, null, connectedAs ?? _session, remoteSessionSlot);
+        ConnectionSummary = summary;
         return true;
     }
+
+    /// <summary>The connection ended or never came up: Enter reconnects or restarts it.</summary>
+    public bool IsStopped => _state is TabConnectionState.Disconnected or TabConnectionState.Exited;
+
+    /// <summary>Connected and unlocked: something may act on the live connection (send a
+    /// break, open its folder, manage its tunnels, insert a command).</summary>
+    public bool AcceptsCommands => _state == TabConnectionState.Connected && !IsLocked;
 
     /// <summary>The connection ended or failed, or a local launch failed (red).</summary>
     public bool MarkDisconnected() => TryEnter(TabConnectionState.Disconnected, null);
@@ -322,6 +331,10 @@ public sealed partial class TabViewModel : ObservableObject
                 _staleProgramTitle = null;
                 PromptContext = null;
                 ReportedWorkingDirectory = null;
+                // What a connection negotiated describes only that connection. Every way out
+                // of the connected state clears it here, so no transport has to remember to.
+                ConnectionSummary = "";
+                ConnectionDetails = "";
             }
         }
         if (exitChanged)

@@ -532,4 +532,25 @@ public sealed class HighlightsStoreTests : IDisposable
     {
         Assert.Empty(MatchesOf(ruleId, input));
     }
+
+    [Fact]
+    public void Changed_IsRaisedByLiveWritesAndCommitsButNeverByADraft()
+    {
+        var store = NewStore();
+        var raised = 0;
+        store.Changed += () => raised++;
+
+        store.SetEnabled("number", true);
+        Assert.Equal(1, raised);
+
+        var draft = store.CreateDraft();
+        var draftRaised = 0;
+        draft.Changed += () => draftRaised++;
+        draft.SetEnabled("state-negative", false);
+        Assert.Equal(0, draftRaised);
+        Assert.Equal(1, raised);
+
+        store.CommitDraft(draft);
+        Assert.Equal(2, raised);
+    }
 }

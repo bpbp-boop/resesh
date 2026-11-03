@@ -18,7 +18,7 @@ test("Enter on a selected stopped tab uses the normal reconnect action", () => {
 
   assert.match(handler, /VirtualKey\.Enter/);
   assert.match(handler, /Group\.SelectedTab is \{ \} tab/);
-  assert.match(handler, /IsStopped\(tab\)/);
+  assert.match(handler, /tab\.IsStopped/);
   assert.match(handler, /!IsButtonSource\(e\.OriginalSource\)/);
   assert.match(handler, /_host\.ReconnectTab\(tab\)/);
   assert.match(handler, /e\.Handled = true/);

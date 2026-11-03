@@ -30,6 +30,14 @@ public sealed class ThemeTableTests
     }
 
     [Fact]
+    public void VaporwaveEmphasizesFocusWhileDefaultThemesKeepAOnePixelAccent()
+    {
+        Assert.Equal(3, ThemeChromes.Find("vaporwave").AccentBarThickness);
+        Assert.Equal(1, ThemeChromes.Find(ThemeIds.Dark).AccentBarThickness);
+        Assert.Equal(1, ThemeChromes.Find(ThemeIds.Light).AccentBarThickness);
+    }
+
+    [Fact]
     public void SystemHasNoColorsOfItsOwn()
     {
         // It is resolved to light or dark before anything is drawn.
