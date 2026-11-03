@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Resesh.Core.Models;
 using Resesh.Core.Storage;
 
 namespace Resesh.Core.Ssh;
@@ -18,6 +19,8 @@ public sealed record KnownHostEntry(string KeyType, string Sha256, string? Publi
     /// <summary>OpenSSH uses the blob's key type, not the negotiated signature algorithm.</summary>
     public string ToKnownHostsLine(string host, int port)
     {
+        // Older sessions may hold an IPv6 host in brackets; OpenSSH wants them only around host:port.
+        host = HostPort.Unbracket(host);
         if (string.IsNullOrEmpty(PublicKeyBase64))
             throw new IOException("No public host key is stored. Connect the terminal first, then open Explorer again.");
         if (string.IsNullOrWhiteSpace(host) || host.Any(c => char.IsWhiteSpace(c) || c is ',' or '*' or '?' or '!' or '|'))
@@ -277,5 +280,6 @@ public sealed class KnownHostsStore
         }
     }
 
-    private static string Key(string host, int port) => $"{host}:{port}";
+    /// <summary>One key per server: "[::1]" saved by older quick connects is the same host as "::1".</summary>
+    private static string Key(string host, int port) => $"{HostPort.Unbracket(host)}:{port}";
 }

@@ -68,6 +68,23 @@ public sealed class KnownHostsStoreTests : IDisposable
     }
 
     [Fact]
+    public void BracketedIpv6Host_IsTheSameServerAsTheBareAddress()
+    {
+        var store = NewStore();
+        store.Accept("[::1]", 2222, "ssh-ed25519", "abc");
+
+        Assert.Equal(HostKeyVerdict.Match, store.Check("::1", 2222, "ssh-ed25519", "abc"));
+    }
+
+    [Fact]
+    public void KnownHostsLine_DoesNotDoubleBracketAnIpv6Host()
+    {
+        var blob = HostKey("ssh-ed25519");
+        var entry = new KnownHostEntry("ssh-ed25519", Fingerprint(blob), Convert.ToBase64String(blob));
+        Assert.StartsWith("[::1]:2222 ", entry.ToKnownHostsLine("[::1]", 2222));
+    }
+
+    [Fact]
     public void Check_UnknownHost_ReturnsUnknown()
     {
         Assert.Equal(HostKeyVerdict.Unknown, NewStore().Check("host", 22, "ssh-ed25519", "abc"));
