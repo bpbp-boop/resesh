@@ -27,6 +27,20 @@ public sealed class JumpListPlanTests
     }
 
     [Fact]
+    public void Descriptions_use_the_resolved_login_and_show_ports_as_tabs_do()
+    {
+        var viaIdentity = new Session { Name = "app", Host = "::1", Port = 2222, IdentityId = Guid.NewGuid() };
+        var console = new Session { Name = "", Kind = SessionKind.Telnet, Host = "ts1", Port = 2003 };
+        var lookup = new[] { viaIdentity, console }.ToDictionary(s => s.Id);
+
+        var plan = JumpListPlan.For([], [viaIdentity.Id, console.Id], lookup.GetValueOrDefault,
+            session => session.IdentityId is null ? session.Username : "svc");
+
+        Assert.Equal("svc@[::1]:2222", plan.Recent[0].Description);
+        Assert.Equal(("telnet ts1:2003", "telnet ts1:2003"), (plan.Recent[1].Title, plan.Recent[1].Description));
+    }
+
+    [Fact]
     public void Pinned_sessions_are_not_repeated_under_recent_and_deleted_ones_drop_out()
     {
         var plan = JumpListPlan.For([Db.Id, Guid.NewGuid()], [Db.Id, Web.Id, Guid.NewGuid()], Find);

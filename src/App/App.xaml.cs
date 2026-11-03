@@ -564,7 +564,8 @@ public partial class App : Application
         var settings = Settings.Current;
         // Recent here lists what the Recent pane lists: saved sessions that are visible.
         var plan = JumpListPlan.For(settings.PinnedSessionIds, settings.RecentSessionIds,
-                id => Store.Find(id) is { } session && IsSessionVisible(session) ? session : null)
+                id => Store.Find(id) is { } session && IsSessionVisible(session) ? session : null,
+                LoginUsername)
             .Without(_removedJumpListItems);
         if (plan.SameAs(_jumpList))
             return;
