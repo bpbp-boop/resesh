@@ -162,11 +162,6 @@ public sealed partial class MainWindow
             if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(view) is Panel parent)
                 parent.Children.Remove(view);
             view.IsParked = true;
-            foreach (var tab in group.Tabs)
-            {
-                tab.IsInBackgroundWorkspace = true;
-                tab.IsGroupFocused = false;
-            }
         }
         ViewModel.Groups.Clear();
         foreach (var group in parked.Groups)
@@ -183,8 +178,6 @@ public sealed partial class MainWindow
             ViewModel.BackgroundGroups.Remove(group);
             ViewModel.Groups.Add(group);
             _groupViews[group].IsParked = false;
-            foreach (var tab in group.Tabs)
-                tab.IsInBackgroundWorkspace = false;
         }
         _groupLayout = parked.Layout;
         var focused = ViewModel.Groups.Contains(parked.FocusedGroup) ? parked.FocusedGroup : ViewModel.Groups[0];

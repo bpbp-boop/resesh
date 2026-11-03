@@ -258,9 +258,9 @@ type is turned off, the connection says so instead of reporting a changed host k
 Secrets are **never** written to the normal JSON store. They are excluded from backups by
 default. When included, the complete backup is encrypted with its passphrase.
 
-Session files with duplicate session IDs or invalid local directory or argument values
-use the same backup recovery as other unreadable session files. The invalid file is kept
-aside, and the app shows a recovery warning.
+Session files with invalid local directory or argument values use the same backup recovery
+as other unreadable session files. The invalid file is kept aside, and the app shows a
+recovery warning. A file with two sessions sharing one ID still loads; the first is kept.
 
 ## Project layout
 

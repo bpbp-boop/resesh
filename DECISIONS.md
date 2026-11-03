@@ -2387,12 +2387,15 @@ Session records remain settable for generated JSON metadata. The session store t
 copies records, nested records, lists and dictionaries on reads and writes. Callers must
 save edited copies; they cannot change stored state through a returned reference. Compare
 session values with `SessionMerge.SameValue` where unchanged snapshots must be detected,
-because record equality compares list references. Load and save validation reject duplicate
-session IDs and invalid nested local values before accepting the data.
+because record equality compares list references. Validation rejects invalid nested local
+values before accepting the data. A save refuses duplicate session IDs, but a load keeps the
+first session of each ID and drops the rest: older builds could write duplicates, and the
+.bak holds the same ones, so refusing them would leave those users with no sessions.
 
 Split nodes cannot be shared between branches or layouts. Public constructors check
 ownership before changing parent links; only the layout's split operation can reparent an
-owned node. Child and size lists are exposed through read-only wrappers.
+owned node. Child and size lists are exposed through read-only wrappers, made once per list
+rather than on every read, since every layout walk reads them.
 
 A local shell stays suspended until its process job is created, configured for
 kill-on-close and assigned successfully. A failure stops and cleans up the suspended shell

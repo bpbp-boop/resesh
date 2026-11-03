@@ -13,6 +13,14 @@ public sealed partial class MainViewModel
 
     internal void UnobserveTab(TabViewModel tab) => tab.PropertyChanged -= Tab_PropertyChanged;
 
+    /// <summary>Only the focused group's selection is the active tab; the others change
+    /// nothing the status bar or tab commands show.</summary>
+    internal void OnGroupSelectionChanged(TabGroupViewModel group)
+    {
+        if (ReferenceEquals(group, _focusedGroup))
+            NotifyActiveTabChanged();
+    }
+
     private sealed partial class GroupCollection(MainViewModel window, bool background) : ObservableCollection<TabGroupViewModel>
     {
         protected override void InsertItem(int index, TabGroupViewModel item)
@@ -50,9 +58,14 @@ public sealed partial class MainViewModel
             if (!background && (window._focusedGroup is null || !Contains(window._focusedGroup)))
             {
                 window._focusedGroup = this.FirstOrDefault();
-                window.OnPropertyChanged(nameof(FocusedGroup));
-                window.SyncGroupFocus();
-                window.NotifyActiveTabChanged();
+                // Empty only while a workspace switch swaps the shown groups. FocusedGroup
+                // throws then, so notify when the next group arrives instead.
+                if (window._focusedGroup is not null)
+                {
+                    window.OnPropertyChanged(nameof(FocusedGroup));
+                    window.SyncGroupFocus();
+                    window.NotifyActiveTabChanged();
+                }
             }
             base.OnCollectionChanged(e);
         }

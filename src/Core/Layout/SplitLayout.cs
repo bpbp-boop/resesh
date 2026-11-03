@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+
 namespace Resesh.Core.Layout;
 
 public enum SplitDirection
@@ -35,7 +37,9 @@ public sealed class SplitLayoutLeaf<T>(T value) : SplitLayoutNode<T> where T : n
 public sealed class SplitLayoutBranch<T> : SplitLayoutNode<T> where T : notnull
 {
     private readonly List<SplitLayoutNode<T>> _children;
+    private readonly ReadOnlyCollection<SplitLayoutNode<T>> _childrenView;
     private List<double> _sizes = [];
+    private ReadOnlyCollection<double> _sizesView = ReadOnlyCollection<double>.Empty;
 
     public SplitLayoutBranch(
         SplitOrientation orientation,
@@ -50,6 +54,7 @@ public sealed class SplitLayoutBranch<T> : SplitLayoutNode<T> where T : notnull
     {
         Orientation = orientation;
         _children = [.. children];
+        _childrenView = _children.AsReadOnly();
         if (!Enum.IsDefined(orientation) || _children.Count < 2
             || _children.Any(child => child is null)
             || _children.Distinct(ReferenceEqualityComparer.Instance).Count() != _children.Count)
@@ -62,14 +67,14 @@ public sealed class SplitLayoutBranch<T> : SplitLayoutNode<T> where T : notnull
     }
 
     public SplitOrientation Orientation { get; }
-    public IReadOnlyList<SplitLayoutNode<T>> Children => _children.AsReadOnly();
+    public IReadOnlyList<SplitLayoutNode<T>> Children => _childrenView;
     internal List<SplitLayoutNode<T>> MutableChildren => _children;
     public override IEnumerable<T> Values => _children.SelectMany(child => child.Values);
 
     /// <summary>Each child's share of the branch as a relative weight, or empty while they
     /// share it equally. This is the only record of a resized pane: the layout keeps it in
     /// step as panes are split and closed, so a split nobody touched keeps its sizes.</summary>
-    public IReadOnlyList<double> Sizes => _sizes.AsReadOnly();
+    public IReadOnlyList<double> Sizes => _sizesView;
 
     /// <summary>Sets each child's weight. Anything but one positive, finite weight per child
     /// means equal shares.</summary>
@@ -79,6 +84,7 @@ public sealed class SplitLayoutBranch<T> : SplitLayoutNode<T> where T : notnull
         _sizes = list.Count == _children.Count && list.All(size => double.IsFinite(size) && size > 0)
             ? list
             : [];
+        _sizesView = _sizes.AsReadOnly();
     }
 
     /// <summary>The weights with an equal share filled in for each child while there are none.</summary>

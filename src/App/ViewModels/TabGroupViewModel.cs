@@ -26,10 +26,15 @@ public sealed partial class TabGroupViewModel : ObservableObject
         _background = background;
         foreach (var tab in Tabs)
         {
-            tab.IsInBackgroundWorkspace = background;
             if (window is null)
+            {
+                // A group moving between a window's shown and parked workspaces passes through
+                // here; keep the flag until it lands so its tabs never seem to come on screen.
                 tab.IsGroupFocused = false;
-            window?.ObserveTab(tab);
+                continue;
+            }
+            tab.IsInBackgroundWorkspace = background;
+            window.ObserveTab(tab);
         }
     }
 
@@ -47,7 +52,7 @@ public sealed partial class TabGroupViewModel : ObservableObject
                     previous.IsActive = false;
                 if (value is not null)
                     value.IsActive = true;
-                Window?.NotifyActiveTabChanged();
+                Window?.OnGroupSelectionChanged(this);
             }
         }
     }

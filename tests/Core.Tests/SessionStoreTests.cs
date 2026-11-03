@@ -108,18 +108,15 @@ public sealed class SessionStoreTests : IDisposable
     }
 
     [Fact]
-    public void DuplicateIdsInJsonFallBackToBackup()
+    public void DuplicateIdsInJsonKeepTheFirstSession()
     {
-        var good = NewSession();
-        var store = NewStore();
-        store.Add(good);
-        File.Copy(StorePath, StorePath + ".bak");
+        var id = Guid.NewGuid();
         File.WriteAllText(StorePath, $$"""
-            {"sessions":[{"id":"{{good.Id}}","name":"one"},{"id":"{{good.Id}}","name":"two"}]}
+            {"sessions":[{"id":"{{id}}","name":"one"},{"id":"{{id}}","name":"two"}]}
             """);
-        var recovered = NewStore();
-        Assert.Equal("web-01", Assert.Single(recovered.Sessions).Name);
-        Assert.Equal(StoreLoadState.RecoveredFromBackup, recovered.LoadState);
+        var store = NewStore();
+        Assert.Equal("one", Assert.Single(store.Sessions).Name);
+        Assert.NotEqual(StoreLoadState.RecoveredFromBackup, store.LoadState);
     }
 
     [Fact]

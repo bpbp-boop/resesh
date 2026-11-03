@@ -92,7 +92,9 @@ public sealed class SessionStore
             {
                 var data = _file.Load(Read) ?? new StoreData();
                 LoadWarning = _file.Warning;
-                _sessions = data.Sessions ?? [];
+                // Older builds could save two sessions with one ID. Keep the first, the one
+                // Find returned, rather than refusing a file those builds read.
+                _sessions = (data.Sessions ?? []).DistinctBy(session => session.Id).ToList();
                 _folders = data.Folders ?? [];
                 _localFolders = data.LocalFolders ?? [];
                 _folderSettings = (data.FolderSettings ?? [])
@@ -561,6 +563,9 @@ public sealed class SessionStore
         localFolders ??= _localFolders;
         folderSettings ??= _folderSettings;
         Validate(sessions, folders, localFolders, folderSettings);
+        var ids = new HashSet<Guid>();
+        if (sessions.Any(session => !ids.Add(session.Id)))
+            throw new InvalidDataException("The sessions data contains duplicate session IDs.");
         sessions = sessions.Select(SessionSnapshot.Copy).ToList();
         folderSettings = folderSettings.Select(setting => setting with { }).ToList();
         var data = new StoreData
@@ -605,12 +610,6 @@ public sealed class SessionStore
             || folderSettings?.Any(setting => setting is null || setting.Path is null) == true)
         {
             throw new InvalidDataException("The sessions data contains an invalid session, folder or folder setting.");
-        }
-        if (sessions is not null)
-        {
-            var ids = new HashSet<Guid>();
-            if (sessions.Any(session => !ids.Add(session!.Id)))
-                throw new InvalidDataException("The sessions data contains duplicate session IDs.");
         }
     }
 

@@ -192,6 +192,22 @@ public class SplitLayoutTests
         Assert.Empty(columns.Sizes);
     }
 
+    [Fact]
+    public void ReadingChildrenAndSizesReusesOneViewUntilTheSizesChange()
+    {
+        var layout = new SplitLayout<string>("a");
+        layout.Split("a", "b", SplitDirection.Right);
+        var columns = Assert.IsType<SplitLayoutBranch<string>>(layout.Root);
+        columns.SetSizes([1, 2]);
+        var sizes = columns.Sizes;
+
+        Assert.Same(columns.Children, columns.Children);
+        Assert.Same(sizes, columns.Sizes);
+        columns.SetSizes([2, 1]);
+        Assert.Equal([2.0, 1.0], columns.Sizes);
+        Assert.Equal([1.0, 2.0], sizes);
+    }
+
     [Theory]
     [InlineData(1, 50, SplitDirection.Left)]
     [InlineData(99, 50, SplitDirection.Right)]

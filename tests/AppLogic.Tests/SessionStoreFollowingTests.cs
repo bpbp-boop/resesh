@@ -244,6 +244,37 @@ public sealed class SessionStoreFollowingTests : IDisposable
         Assert.StartsWith("1 sessions", window.StatusText);
     }
 
+    [Fact]
+    public void StatusTextCountsASessionAddedByAnotherWriter()
+    {
+        _store.Add(Ssh("web"));
+        var window = Window();
+        string? status = null;
+        window.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MainViewModel.StatusText)) status = window.StatusText; };
+
+        _store.Add(Ssh("db"));
+
+        Assert.Equal(2, window.TotalSessionCount);
+        Assert.StartsWith("2 sessions", status);
+    }
+
+    [Fact]
+    public void SearchingAgainLeavesUnchangedLeavesAlone()
+    {
+        var web = Ssh("web");
+        _store.Add(web);
+        var window = Window();
+        window.SearchText = "we";
+        var node = Node(window, web.Id);
+        var changes = 0;
+        node.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(TreeNodeViewModel.Name)) changes++; };
+
+        window.SearchText = "web";
+
+        Assert.Same(node, Node(window, web.Id));
+        Assert.Equal(0, changes);
+    }
+
     // ---- Filtering ----
 
     [Fact]

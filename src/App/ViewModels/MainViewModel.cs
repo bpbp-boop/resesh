@@ -110,7 +110,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// <summary>How many sessions the unfiltered tree shows. Every count the user reads (the
     /// status bar, the filter summary, the empty tree) uses this one, so hidden built-in
     /// profiles are never counted in one place and not another.</summary>
-    public int TotalSessionCount => VisibleSessions.Count();
+    /// <summary>Counted when the tree is built from the store, which every store change does.
+    /// The status bar reads it on every tab title change, and the store copies each session.</summary>
+    public int TotalSessionCount { get; private set; }
 
     public int MatchCount { get; private set; }
 
@@ -268,7 +270,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             throw new ArgumentException("The target group must belong to this window.", nameof(group));
         group.Tabs.Insert(Math.Clamp(index, 0, group.Tabs.Count), tab);
         group.SelectedTab = tab;
-        tab.IsGroupFocused = group == _focusedGroup;
         OnPropertyChanged(nameof(StatusText));
         OnPropertyChanged(nameof(Progress));
         OnActiveTabStateChanged();
@@ -576,10 +577,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 tab.NotifyLoginChanged();
             }
         }
+        RefreshTree(); // first: it recounts the sessions the status text shows
         OnPropertyChanged(nameof(ActiveSessionTheme));
         OnPropertyChanged(nameof(StatusText)); // the session count, and the login in the endpoint
         OnActiveTabStateChanged();
-        RefreshTree();
         RefreshRecentSessions();
     }
 
@@ -595,6 +596,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private void RefreshTree()
     {
         var visible = VisibleSessions.ToList();
+        TotalSessionCount = visible.Count;
         if (TreeShapeChanged(visible))
         {
             RebuildTree();
@@ -682,6 +684,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public void RebuildTree()
     {
         var allSessions = VisibleSessions.ToList();
+        TotalSessionCount = allSessions.Count;
         var query = _searchText.Trim();
         _treeSessions = allSessions.ToDictionary(session => session.Id);
         _treeSshFolders = _store.FoldersOf(SessionKind.Ssh);
@@ -745,7 +748,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 && node.IsLocalScope == session.IsLocal
                 && node.FolderPath.Equals(session.FolderPath, StringComparison.Ordinal))
             {
-                if (!ReferenceEquals(node.Session, session))
+                // The store hands out copies, so compare values, not references.
+                if (node.Session is not { } shown || !SessionMerge.SameValue(shown, session))
                     node.UpdateSession(session);
                 node.HighlightQuery = highlight;
             }

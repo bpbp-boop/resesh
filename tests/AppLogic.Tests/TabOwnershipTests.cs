@@ -271,6 +271,56 @@ public sealed class TabOwnershipTests : IDisposable
         Assert.Same(other, window.FocusedGroup);
     }
 
+    [Fact]
+    public void ParkingAWorkspaceNeverShowsItsTabsOrNotifiesAMissingFocus()
+    {
+        var window = Window();
+        var group = window.FocusedGroup;
+        var tab = window.Connect(new Session());
+        var background = new List<bool>();
+        tab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TabViewModel.IsInBackgroundWorkspace))
+                background.Add(tab.IsInBackgroundWorkspace);
+        };
+        // A binding reads the property it is told about.
+        window.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainViewModel.FocusedGroup))
+                _ = window.FocusedGroup;
+        };
+
+        window.Groups.Clear();
+        window.BackgroundGroups.Add(group);
+        // Leaving the parked list without being shown must not count as coming on screen.
+        window.BackgroundGroups.Remove(group);
+        window.BackgroundGroups.Add(group);
+        window.BackgroundGroups.Remove(group);
+        window.Groups.Add(group);
+
+        Assert.Equal([true, false], background);
+        Assert.Same(group, window.FocusedGroup);
+    }
+
+    [Fact]
+    public void OnlyTheFocusedGroupsSelectionNotifiesTheWindow()
+    {
+        var window = Window();
+        var other = new TabGroupViewModel();
+        window.Groups.Add(other);
+        var first = window.Connect(new Session(), other);
+        var second = window.Connect(new Session(), other);
+        var notifications = 0;
+        window.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MainViewModel.StatusText)) notifications++; };
+
+        other.SelectedTab = first;
+        Assert.Equal(0, notifications);
+        window.FocusedGroup = other;
+        notifications = 0;
+        other.SelectedTab = second;
+        Assert.Equal(1, notifications);
+    }
+
     private sealed class View : IDisposable
     {
         public int Disposals;
