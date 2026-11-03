@@ -192,9 +192,9 @@
                             </ComboBox>
                         </Grid>
                         <TextBlock
+                            x:Name="SerialHint"
                             Style="{ThemeResource CaptionTextBlockStyle}"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="Most console ports on network gear use 9600 8N1 with no flow control. Send Break (Ctrl+Break) interrupts a boot for password recovery. If the cable is unplugged, the tab reconnects when it comes back."
                             TextWrapping="Wrap" />
                     </StackPanel>
 

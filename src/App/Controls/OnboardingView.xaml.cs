@@ -41,6 +41,9 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         _sessionsChanged = sessionsChanged;
 
         InitializeComponent();
+        AppShortcuts.AddAccelerators(this, Resesh.Core.Input.ShortcutIds.FinishWelcome, FinishSetup_Invoked);
+        ToolTipService.SetToolTip(FinishSetupButton,
+            AppShortcuts.ToolTip("Save preferences and close Welcome", Resesh.Core.Input.ShortcutIds.FinishWelcome));
         Foreground = Brush("OnboardingPrimaryTextBrush");
         WelcomeLocalShellLabel.Text = localShellName is null ? "No local shell available" : $"Open {localShellName}";
         WelcomeLocalShellButton.IsEnabled = localShellName is not null;

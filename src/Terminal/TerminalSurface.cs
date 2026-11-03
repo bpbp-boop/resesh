@@ -121,6 +121,13 @@ public abstract partial class TerminalSurface : Grid, IDisposable
         set => _shortcuts = value ?? [];
     }
 
+    /// <summary>A tooltip naming its shortcut, as "Close commands (Ctrl+Shift+O)"; just the text
+    /// when the table has no such shortcut.</summary>
+    internal static string WithShortcut(string text, string id) =>
+        _shortcuts.FirstOrDefault(shortcut => shortcut.Id == id) is { Label.Length: > 0 } shortcut
+            ? $"{text} ({shortcut.Label})"
+            : text;
+
     /// <summary>The shortcut a key press in a terminal matches, if any.</summary>
     internal static (TerminalShortcut Shortcut, int ChordIndex)? MatchShortcut(
         int virtualKey, bool control, bool shift, bool alt)
@@ -170,12 +177,14 @@ public sealed record TerminalKeyChord(int Key, bool Ctrl, bool Shift, bool Alt);
 
 /// <summary>A shortcut the terminal must recognize. <paramref name="Forward"/> shortcuts go to the
 /// window; the others are terminal actions the surface runs itself. <paramref name="WhenSplit"/>
-/// shortcuts only take the key while the window is split; otherwise the shell receives it.</summary>
+/// shortcuts only take the key while the window is split; otherwise the shell receives it.
+/// <paramref name="Label"/> is the chord as the app shows it, for the terminal's own tooltips.</summary>
 public sealed record TerminalShortcut(
     string Id,
     bool Forward,
     bool WhenSplit,
-    IReadOnlyList<TerminalKeyChord> Chords);
+    IReadOnlyList<TerminalKeyChord> Chords,
+    string Label = "");
 
 internal static class TerminalLinkPolicy
 {

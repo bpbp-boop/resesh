@@ -75,7 +75,7 @@ internal sealed partial class CommandsPanel : Grid
         _close.BorderThickness = new Thickness(0);
         _close.HorizontalAlignment = HorizontalAlignment.Right;
         AutomationProperties.SetName(_close, "Close commands");
-        ToolTipService.SetToolTip(_close, "Close commands (Ctrl+Shift+O)");
+        ToolTipService.SetToolTip(_close, TerminalSurface.WithShortcut("Close commands", "terminal.commandsPanel"));
         _close.Click += (_, _) => CloseRequested?.Invoke();
 
         var header = new Grid { Margin = new Thickness(10, 5, 6, 5) };

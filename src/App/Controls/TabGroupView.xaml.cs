@@ -769,7 +769,7 @@ public sealed partial class TabGroupView : UserControl
         ZoomButton.IsChecked = ZoomOverflowItem.IsChecked = zoomed;
         ZoomGlyph.Glyph = zoomed ? "\uE73F" : "\uE740";
         var zoomLabel = zoomed ? "Restore split layout" : "Zoom tab";
-        ToolTipService.SetToolTip(ZoomButton, $"{zoomLabel} ({AppShortcuts.Label(ShortcutIds.ZoomTab)})");
+        ToolTipService.SetToolTip(ZoomButton, AppShortcuts.ToolTip(zoomLabel, ShortcutIds.ZoomTab));
         AutomationProperties.SetName(ZoomButton, zoomLabel);
         ZoomOverflowItem.Text = zoomLabel;
         TabStripActions.Opacity = Group.SelectedTab?.IsGroupFocused == false ? 0.55 : 1.0;
@@ -807,10 +807,10 @@ public sealed partial class TabGroupView : UserControl
         RewindOverflowItem.IsChecked = rewinding;
 
         var label = isOpen ? "Hide File Pane" : "Show File Pane";
-        ToolTipService.SetToolTip(FilePaneToggle, $"{label} (Ctrl+Shift+E)");
+        ToolTipService.SetToolTip(FilePaneToggle, AppShortcuts.ToolTip(label, ShortcutIds.FilePane));
         AutomationProperties.SetName(FilePaneToggle, label);
         var commandsLabel = commandsOpen ? "Hide commands" : "Show commands";
-        ToolTipService.SetToolTip(ShowCommandsButton, $"{commandsLabel} (Ctrl+Shift+O)");
+        ToolTipService.SetToolTip(ShowCommandsButton, AppShortcuts.ToolTip(commandsLabel, ShortcutIds.CommandsPanel));
         AutomationProperties.SetName(ShowCommandsButton, commandsLabel);
         var recordingLabel = recording ? "Stop recording" : "Start recording";
         ToolTipService.SetToolTip(RecordButton, recordingLabel);

@@ -45,6 +45,9 @@ public sealed partial class SessionEditDialog : ContentDialog
     {
         InitializeComponent();
         DialogTheme.Apply(this);
+        SerialHint.Text = "Most console ports on network gear use 9600 8N1 with no flow control. Send Break ("
+            + $"{AppShortcuts.Label(Resesh.Core.Input.ShortcutIds.SendBreak)}) interrupts a boot for password recovery. "
+            + "If the cable is unplugged, the tab reconnects when it comes back.";
         _existing = existing;
         _keyStore = keyStore;
         TitleText.Text = existing is null ? "New session" : "Edit session";

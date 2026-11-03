@@ -38,6 +38,7 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
     {
         InitializeComponent();
         DialogTheme.Apply(this);
+        MakeDefaultBox.Content = $"Default local profile ({AppShortcuts.Label(Resesh.Core.Input.ShortcutIds.NewLocalTab)})";
         _existing = existing;
         Title = existing is null ? "New local profile" : "Edit local profile";
         ShellIntegrationSwitch.IsOn = existing is { ShellIntegration: not ShellIntegrationMode.Disabled };

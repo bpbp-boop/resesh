@@ -618,37 +618,30 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         };
     }
 
-    /// <summary>Terminal actions run in the page, as their keys do; Find keeps focus in its field.</summary>
+    /// <summary>Terminal actions run in the page, as their keys do; Find keeps focus in its field.
+    /// The table says which terminal actions the palette lists, under the titles its keys show.</summary>
     private IReadOnlyList<CommandPaletteEntry> BuildTerminalPageCommands()
     {
         if (ViewModel.ActiveTab is not { View: TerminalTabView terminal, IsLocked: false })
             return [];
 
-        var commands = new List<CommandPaletteEntry>();
-        void AddTerminal(string title, string keywords, string id, bool keepFocus = false) =>
-            commands.Add(new CommandPaletteEntry
+        return [.. KeyBindings.All
+            .Where(binding => binding.InTerminalPalette)
+            .Select(binding => new CommandPaletteEntry
             {
-                Category = "Terminal",
-                Title = title,
-                Keywords = keywords,
-                Shortcut = AppShortcuts.Label(id),
-                KeepActionFocus = keepFocus,
+                Category = KeyBindings.TerminalCategory,
+                Title = binding.Title,
+                Keywords = binding.PaletteKeywords!,
+                Shortcut = AppShortcuts.Label(binding.Id),
+                KeepActionFocus = binding.PaletteKeepsFocus,
                 ExecuteAsync = () =>
                 {
-                    if (keepFocus)
+                    if (binding.PaletteKeepsFocus)
                         terminal.FocusTerminal();
-                    terminal.InvokeTerminalShortcut(id);
+                    terminal.InvokeTerminalShortcut(binding.Id);
                     return Task.CompletedTask;
                 },
-            });
-        AddTerminal("Find", "search text scrollback", ShortcutIds.Find, keepFocus: true);
-        AddTerminal("Paste", "clipboard insert", ShortcutIds.Paste, keepFocus: true);
-        AddTerminal("Select All", "selection copy", ShortcutIds.SelectAll);
-        AddTerminal("Clear Scrollback", "history buffer reset clean", ShortcutIds.ClearScrollback);
-        AddTerminal("Zoom In", "font size bigger larger", ShortcutIds.ZoomIn);
-        AddTerminal("Zoom Out", "font size smaller", ShortcutIds.ZoomOut);
-        AddTerminal("Reset Zoom", "font size default", ShortcutIds.ZoomReset);
-        return commands;
+            })];
     }
 
     // ---- Local profiles: default launch + split-button menu ----
