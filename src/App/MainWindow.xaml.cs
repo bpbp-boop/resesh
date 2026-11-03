@@ -1151,9 +1151,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         HistoryOverlay.CloseRequested += () => CloseHistory(restoreFocus: true);
         HistoryOverlay.CanInsert = () =>
             ViewModel.ActiveTab is { View: TerminalTabView, State: TabConnectionState.Connected, IsLocked: false };
-        HistoryOverlay.InsertCommand = entry =>
+        HistoryOverlay.InsertCommand = async entry =>
         {
-            if (ViewModel.ActiveTab?.View is not TerminalTabView view || !view.InsertText(entry.Command))
+            if (ViewModel.ActiveTab?.View is not TerminalTabView view || !await view.InsertTextAsync(entry.Command))
                 return false;
             // Focus belongs to the terminal now; closing must not send it back.
             if (HistoryOverlay.IsOpen)

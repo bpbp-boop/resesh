@@ -19,34 +19,45 @@ public sealed partial class TerminalTabView
     private bool InterceptPaste(string text) => InterceptPaste(text, insert: false);
 
     /// <summary>Pastes a command the app types for the user to review (a history entry)
-    /// through the same safe-paste path as a clipboard paste. False when there is nothing
-    /// to paste.</summary>
-    private bool PasteForReview(string text)
+    /// through the same safe-paste path as a clipboard paste. Completes once the text is on
+    /// its way: false when there is nothing to paste, the user declined the confirmation, or
+    /// the connection ended while it was open.</summary>
+    private async Task<bool> PasteForReviewAsync(string text)
     {
         // A trailing line break would press Enter on the last line too.
         text = PastePlan.Normalize(text).TrimEnd('\n');
         if (text.Length == 0)
             return false;
-        if (!InterceptPaste(text, insert: true))
-            _terminal.PasteText(text);
+        if (StartSafePaste(text, insert: true) is { } paste)
+            return await paste;
+        _terminal.PasteText(text);
         return true;
     }
 
+    private bool InterceptPaste(string text, bool insert)
+    {
+        if (StartSafePaste(text, insert) is not { } paste)
+            return false;
+        _ = paste;
+        return true;
+    }
+
+    /// <summary>Starts a paste that needs asking or pacing; null when the surface can paste it
+    /// at once.</summary>
     /// <param name="insert">The text is a command inserted for review, which promises not to
     /// run it: a line break that would press Enter always asks, whatever the paste setting,
     /// and the dialog offers no opt-out because that setting would not silence it.</param>
-    private bool InterceptPaste(string text, bool insert)
+    private Task<bool>? StartSafePaste(string text, bool insert)
     {
         if (_disposed || _tab.IsLocked)
-            return false;
+            return null;
         var bracketed = _terminal.BracketedPaste;
         var confirm = (insert || App.Settings.Current.ConfirmMultilinePaste) && PastePlan.NeedsConfirmation(text, bracketed);
         // A program with bracketed paste on takes the whole paste as one piece of text.
         var paced = !bracketed && PastePlan.IsPaced(Session.PasteLineDelay, Session.PasteCharacterDelay);
         if (!confirm && !paced)
-            return false;
-        _ = PasteAsync(text, confirm, paced, insert, _connection);
-        return true;
+            return null;
+        return PasteAsync(text, confirm, paced, insert, _connection);
     }
 
     /// <summary>Stops a slow paste as soon as the tab leaves the connected state.</summary>
@@ -63,23 +74,33 @@ public sealed partial class TerminalTabView
         !_disposed && ReferenceEquals(_connection, connection) && !connection.Token.IsCancellationRequested
         && _tab.State == TabConnectionState.Connected;
 
-    private async Task PasteAsync(string text, bool confirm, bool paced, bool insert, TerminalConnectionLifetime connection)
+    /// <summary>Asks first when <paramref name="confirm"/>, then pastes or starts a slow paste.
+    /// Completes when the text is on its way (a slow paste carries on): false when the user
+    /// declined or the connection ended meanwhile.</summary>
+    private async Task<bool> PasteAsync(string text, bool confirm, bool paced, bool insert, TerminalConnectionLifetime connection)
     {
         if (confirm && !await ConfirmPasteAsync(text, insert))
         {
-            _terminal.FocusTerminal();
-            return;
+            // A declined insert goes back to the history it came from, which is still open.
+            if (!insert)
+                _terminal.FocusTerminal();
+            return false;
         }
         // The connection may have dropped or been replaced while the dialog was open.
         if (!IsLive(connection))
-            return;
+            return false;
         _terminal.FocusTerminal();
         if (!paced)
         {
             _terminal.PasteText(text);
-            return;
+            return true;
         }
+        _ = SendPacedAsync(text, connection);
+        return true;
+    }
 
+    private async Task SendPacedAsync(string text, TerminalConnectionLifetime connection)
+    {
         CancelPacedPaste();
         var cancel = CancellationTokenSource.CreateLinkedTokenSource(connection.Token);
         _pacedPaste = cancel;
@@ -164,6 +185,7 @@ public sealed partial class TerminalTabView
         var verb = insert ? "Insert" : "Paste";
         var dialog = new PasteConfirmDialog(
             lines == 1 ? $"{verb} and run 1 line?" : $"{verb} and run {lines} lines?",
+            verb,
             insert
                 ? $"The shell on {Session.Name} has no bracketed paste, so each line break presses Enter and runs that line as soon as it arrives."
                 : $"Each line runs on {Session.Name} as soon as it arrives.",
