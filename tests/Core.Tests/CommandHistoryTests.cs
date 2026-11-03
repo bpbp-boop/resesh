@@ -515,4 +515,17 @@ public sealed class CommandHistoryTests : IDisposable
 
         Assert.Equal(["end", "start"], results.Hits.Select(h => h.Entry.Command));
     }
+
+    [Fact]
+    public void TargetTreatsAnUnsetPortAsTheDefaultAndNamesSerialPorts()
+    {
+        Assert.Equal("deploy@web01", CommandHistoryEntry.TargetOf(new Session { Host = "web01", Username = "deploy", Port = 0 }));
+        Assert.Equal("web01", CommandHistoryEntry.TargetOf(new Session { Host = "web01" }));
+        Assert.Equal("COM3", CommandHistoryEntry.TargetOf(new Session
+        {
+            Kind = SessionKind.Serial,
+            Serial = new SerialTarget { PortName = "COM3" },
+        }));
+        Assert.Equal("serial", CommandHistoryEntry.TargetOf(new Session { Kind = SessionKind.Serial }));
+    }
 }

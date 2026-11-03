@@ -33,7 +33,7 @@ public static class QuickConnectTarget
             user = text[..at];
             text = text[(at + 1)..];
         }
-        if (!TrySplitPort(text, 22, out var host, out var port) || at == 0)
+        if (!TrySplitPort(text, SessionEndpoint.DefaultSshPort, out var host, out var port) || at == 0)
             return false;
 
         var username = user.Length > 0 ? user : defaultUsername;
@@ -57,7 +57,7 @@ public static class QuickConnectTarget
         switch (parts.Length)
         {
             case 1:
-                if (!TrySplitPort(parts[0], 23, out host, out port))
+                if (!TrySplitPort(parts[0], SessionEndpoint.DefaultTelnetPort, out host, out port))
                     return false;
                 break;
             case 2:
@@ -74,7 +74,7 @@ public static class QuickConnectTarget
         session = new Session
         {
             Kind = SessionKind.Telnet,
-            Name = port == 23 ? host : $"{host}:{port}",
+            Name = port == SessionEndpoint.DefaultTelnetPort ? host : $"{host}:{port}",
             Host = host,
             Port = port,
             AuthMethod = AuthMethod.None,

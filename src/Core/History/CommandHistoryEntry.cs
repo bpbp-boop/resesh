@@ -86,23 +86,16 @@ public sealed record CommandHistoryEntry
         | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
     /// <summary>How history names where a session runs: "user@host" (with a non-default
-    /// port), "host:port" for telnet, the port name for serial, or the shell executable's file name for local profiles.</summary>
+    /// port), "host:port" for telnet, the port name for serial, or the shell executable's file
+    /// name for local profiles.</summary>
     public static string TargetOf(Session session)
     {
         ArgumentNullException.ThrowIfNull(session);
-        switch (session.Kind)
+        return SessionEndpoint.Format(session, new EndpointStyle
         {
-            case SessionKind.Local:
-                var executable = session.Local?.Executable ?? "";
-                return Path.GetFileName(executable.TrimEnd('\\', '/')) is { Length: > 0 } name ? name : executable;
-            case SessionKind.Telnet:
-                return session.Port is 23 or 0 ? session.Host : $"{session.Host}:{session.Port}";
-            case SessionKind.Serial:
-                return session.Serial?.PortName ?? "serial";
-            default:
-                var host = string.IsNullOrEmpty(session.Username) ? session.Host : $"{session.Username}@{session.Host}";
-                return session.Port is 22 or 0 ? host : $"{host}:{session.Port}";
-        }
+            Username = session.Username,
+            SerialPortOnly = true,
+        });
     }
 
     /// <summary>This entry with oversized fields cut down to the stored limits.</summary>

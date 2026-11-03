@@ -57,14 +57,13 @@ public sealed partial class TreeNodeViewModel : ObservableObject
         ? "Local"
         : Session?.Name ?? Resesh.Core.Storage.FolderPaths.Name(FolderPath);
 
-    public string HostSummary => Session switch
-    {
-        null => "",
-        { IsLocal: true } => Path.GetFileNameWithoutExtension(Session.Local?.Executable ?? ""),
-        { IsSerial: true } => Session.Serial?.Describe() ?? "serial",
-        { IsTelnet: true } => Session.Port == 23 ? $"telnet {Session.Host}" : $"telnet {Session.Host}:{Session.Port}",
-        _ => Session.Port == 22 ? Session.Host : $"{Session.Host}:{Session.Port}",
-    };
+    public string HostSummary => Session is null
+        ? ""
+        : SessionEndpoint.Format(Session, new EndpointStyle
+        {
+            ShowProtocol = true,
+            LocalShell = LocalShellDisplay.FileNameWithoutExtension,
+        });
 
     public string AutomationName => IsFolder ? $"{Name}, folder" : $"{Name}, {HostSummary}";
     public string AutomationId => Session is { } session

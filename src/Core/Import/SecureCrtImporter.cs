@@ -13,7 +13,7 @@ public sealed record ImportCandidate
     public string FolderPath { get; init; } = "";
     public string RelativePath { get; init; } = "";
     public string Host { get; init; } = "";
-    public int Port { get; init; } = 22;
+    public int Port { get; init; } = SessionEndpoint.DefaultSshPort;
     public string Username { get; init; } = "";
     public string Protocol { get; init; } = "";
     public string? PrivateKeyPath { get; init; }
@@ -56,7 +56,8 @@ public sealed record ImportCandidate
     public const string SerialProtocol = "SERIAL";
 
     /// <summary>The port to assume when the source stores none.</summary>
-    public static int DefaultPort(string protocol) => protocol == TelnetProtocol ? 23 : 22;
+    public static int DefaultPort(string protocol) =>
+        SessionEndpoint.DefaultPort(protocol == TelnetProtocol ? SessionKind.Telnet : SessionKind.Ssh);
 }
 
 public sealed record ImportScanResult

@@ -60,13 +60,13 @@ public sealed partial class BackupConflictViewModel : ObservableObject
         }
     }
 
-    private static string Endpoint(Core.Models.Session session) => session.IsLocal
-        ? session.Local?.Executable ?? "local profile"
-        : session.IsTelnet
-            ? $"telnet {session.Host}:{session.Port}"
-            : session.IsSerial
-                ? $"serial {session.Serial?.Describe()}"
-                : $"{session.Username}@{session.Host}:{session.Port}";
+    private static string Endpoint(Core.Models.Session session) => Core.Models.SessionEndpoint.Format(session, new()
+    {
+        Username = session.Username,
+        ShowDefaultPort = true,
+        ShowProtocol = true,
+        LocalShell = Core.Models.LocalShellDisplay.FullPath,
+    });
 }
 
 public sealed partial class ImportBackupDialog : ContentDialog

@@ -757,13 +757,7 @@ public sealed partial class TabViewModel : ObservableObject
 
     public string Endpoint => IsAppPage
         ? ""
-        : IsLocal
-            ? Session.Local?.Executable ?? ""
-            : Session.IsTelnet
-                ? $"telnet {Session.Host}:{Session.Port}"
-                : Session.IsSerial
-                    ? $"serial {Session.Serial?.Describe()}"
-                    : $"{_environment.LoginUsername(Session)}@{Session.Host}:{Session.Port}";
+        : SessionEndpoint.Format(Session, new() { Username = _environment.LoginUsername(Session), ShowDefaultPort = true, ShowProtocol = true, LocalShell = LocalShellDisplay.FullPath });
 
     public string StateText => Page switch
     {

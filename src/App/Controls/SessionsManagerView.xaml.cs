@@ -28,11 +28,8 @@ public sealed class SessionRow
         Folder = session.IsLocal
             ? FolderPaths.Combine("Local", session.FolderPath)
             : session.FolderPath.Length == 0 ? "—" : session.FolderPath;
-        Host = session.IsLocal
-            ? Path.GetFileName(session.Local?.Executable ?? "")
-            : session.IsSerial
-                ? session.Serial?.Describe() ?? ""
-            : session.Port == (session.IsTelnet ? 23 : 22) ? session.Host : $"{session.Host}:{session.Port}";
+        // The Type column names the protocol, so the host needs no prefix.
+        Host = SessionEndpoint.Format(session);
         Login = login switch
         {
             null => "",
