@@ -181,3 +181,13 @@ test("each change rebases onto the live settings", () => {
 test("the tab strip's adapter snippets entry opens Settings on the Agents section", () => {
   assert.match(windowCode, /ShowAgentAdaptersAsync\(\) => ShowSettingsAsync\(GlobalSettingsTarget\.Agents\)/);
 });
+
+test("the SSH algorithm picker follows settings changed in another window", () => {
+  // The picker is built in code, not bound: it must re-read on the view model's notifications
+  // (Refresh raises them with an empty name) and save only the kinds it changed.
+  const build = pageCode.match(/private SshAlgorithmPicker BuildSshAlgorithms\(\)[\s\S]*?\n    }/)?.[0] ?? "";
+  assert.match(build, /ViewModel\.PropertyChanged \+=/);
+  assert.match(build, /string\.IsNullOrEmpty\(e\.PropertyName\) \|\| e\.PropertyName == nameof\(SettingsViewModel\.SshAlgorithms\)/);
+  assert.match(build, /ViewModel\.ChangeSshAlgorithms\(shown, picker\.Value\)/);
+  assert.doesNotMatch(build, /ViewModel\.SshAlgorithms = /);
+});

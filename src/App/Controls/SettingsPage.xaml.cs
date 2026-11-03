@@ -98,15 +98,27 @@ public sealed partial class SettingsPage : UserControl
     };
 
     /// <summary>Saves each change that leaves every kind with something on; until then the
-    /// picker shows what is wrong and the saved setting stays as it was.</summary>
+    /// picker shows what is wrong and the saved setting stays as it was. The picker is not a
+    /// binding, so it follows the view model's change notifications itself: Settings in
+    /// another window can change the setting, and a save here writes only the kinds changed
+    /// here, so it never puts back what that window turned off.</summary>
     private SshAlgorithmPicker BuildSshAlgorithms()
     {
-        var picker = new SshAlgorithmPicker(followsApp: false) { Value = ViewModel.SshAlgorithms };
+        var shown = ViewModel.SshAlgorithms;
+        var picker = new SshAlgorithmPicker(followsApp: false) { Value = shown };
         picker.SetAppDefaults(null);
         picker.Changed += () =>
         {
             if (picker.Error is null)
-                ViewModel.SshAlgorithms = picker.Value;
+            {
+                ViewModel.ChangeSshAlgorithms(shown, picker.Value);
+                shown = ViewModel.SshAlgorithms;
+            }
+        };
+        ViewModel.PropertyChanged += (_, e) =>
+        {
+            if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName == nameof(SettingsViewModel.SshAlgorithms))
+                picker.Value = shown = ViewModel.SshAlgorithms;
         };
         return picker;
     }
