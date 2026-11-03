@@ -17,7 +17,11 @@ public interface ITabGroupHost
 
     /// <summary>The window is minimized or hidden, so nothing in it is on screen.</summary>
     bool IsWindowHidden { get; }
+    /// <summary>The user or the app chose this pane.</summary>
     void FocusGroup(TabGroupViewModel group);
+
+    /// <summary>The pane's tab strip changed its selection.</summary>
+    void FocusGroupForSelection(TabGroupViewModel group);
     Task RequestCloseTabAsync(TabViewModel tab);
     Task RequestCloseManyAsync(IReadOnlyList<TabViewModel> tabs, string description);
     void SplitRight(TabViewModel tab);
@@ -897,7 +901,9 @@ public sealed partial class TabGroupView : UserControl
     {
         MainWindow.Trace($"Tabs_SelectionChanged: control={((e.AddedItems.Count > 0 ? e.AddedItems[0] : null) as TabViewModel)?.Header ?? "(none)"} vm={Group.SelectedTab?.Header ?? "(null)"}");
         SyncTerminalVisibility();
-        _host.FocusGroup(Group);
+        // A parked pane's tabs close or change in the background; that never brings it forward.
+        if (!_isParked)
+            _host.FocusGroupForSelection(Group);
         _host.ViewModel.NotifyActiveTabChanged();
         FocusTerminal(Group.SelectedTab);
         QueueTabDividerRefresh();
@@ -927,12 +933,18 @@ public sealed partial class TabGroupView : UserControl
         }
     }
 
+    /// <summary>Gives the tab's terminal keyboard focus once queued work settles, if this pane
+    /// is shown and focused then. Several panes can change selection in one layout change;
+    /// only the one the window ends up focusing takes the keyboard.</summary>
     private void FocusTerminal(TabViewModel? tab)
     {
-        if (_isParked)
+        if (_isParked || tab?.View is not Terminal.TerminalTabView view)
             return;
-        if (tab?.View is Terminal.TerminalTabView view)
-            DispatcherQueue.TryEnqueue(view.FocusTerminal);
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_isParked && ReferenceEquals(_host.ViewModel.FocusedGroup, Group))
+                view.FocusTerminal();
+        });
     }
 
     // ---- the single confirmed-close pathway (X button converges here too) ----

@@ -37,5 +37,6 @@
     <Compile Include="../../src/App/ViewModels/ViewModelEnvironment.cs" Link="ViewModels/ViewModelEnvironment.cs" />
     <Compile Include="../../src/App/ViewModels/WorkspaceRailItemViewModel.cs" Link="ViewModels/WorkspaceRailItemViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/WorkspaceParking.cs" Link="ViewModels/WorkspaceParking.cs" />
+    <Compile Include="../../src/App/ViewModels/PinnedSessions.cs" Link="ViewModels/PinnedSessions.cs" />
   </ItemGroup>
 </Project>

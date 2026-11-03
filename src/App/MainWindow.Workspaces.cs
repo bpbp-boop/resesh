@@ -16,26 +16,28 @@ namespace Resesh.App;
 
 public sealed partial class MainWindow
 {
-    private WorkspaceCoordinator WorkspaceOperations => new(App.Workspaces, CaptureWorkspaceLayout,
+    private WorkspaceCoordinator WorkspaceOperations => new(App.Workspaces, LiveWorkspaceLayoutOrNull,
         App.RefreshWorkspaceMenus, (title, message) =>
             App.ReportRecoverableError(new IOException($"{title}: {message}")));
 
-    private WorkspaceLayout CaptureWorkspaceLayout()
-    {
-        if (_zoom is { } zoom)
-            return CaptureZoomedWorkspaceLayout(zoom);
+    /// <summary>The shown workspace's layout as a save would see it; zoomed, the split the
+    /// zoom will return to.</summary>
+    private WorkspaceLayout CaptureWorkspaceLayout() =>
+        _zoom is { } zoom ? CaptureZoomedWorkspaceLayout(zoom) : CaptureSplitLayout(_groupLayout);
 
-        var groups = _groupLayout.Values.ToList();
-        var groupIndices = groups
+    /// <summary>A split's groups and arrangement as a workspace keeps them. Pane sizes come
+    /// from the split itself, which every resize writes to, so a shown split and a parked
+    /// one are captured alike.</summary>
+    private static WorkspaceLayout CaptureSplitLayout(SplitLayout<TabGroupViewModel> layout)
+    {
+        var groups = layout.Values;
+        var indices = groups
             .Select((group, index) => (group, index))
             .ToDictionary(item => item.group, item => item.index);
         return new WorkspaceLayout
         {
             Groups = groups.Select(group => CaptureWorkspaceGroup(group.Tabs, group.SelectedTab)).ToList(),
-            Layout = CaptureWorkspaceLayoutNode(
-                _groupLayout.Root,
-                groupIndices,
-                GroupArea.Children.FirstOrDefault() as FrameworkElement),
+            Layout = CaptureLayoutNode(layout.Root, indices),
         };
     }
 
@@ -66,58 +68,26 @@ public sealed partial class MainWindow
         };
     }
 
-    private WorkspaceLayoutNode CaptureWorkspaceLayoutNode(
+    private static WorkspaceLayoutNode CaptureLayoutNode(
         SplitLayoutNode<TabGroupViewModel> node,
-        IReadOnlyDictionary<TabGroupViewModel, int> groupIndices,
-        FrameworkElement? element) =>
+        IReadOnlyDictionary<TabGroupViewModel, int> groupIndices) =>
         node switch
         {
             SplitLayoutLeaf<TabGroupViewModel> leaf => new WorkspaceLayoutNode
             {
                 GroupIndex = groupIndices[leaf.Value],
             },
-            SplitLayoutBranch<TabGroupViewModel> branch => CaptureWorkspaceLayoutBranch(
-                branch, groupIndices, element),
+            SplitLayoutBranch<TabGroupViewModel> branch => new WorkspaceLayoutNode
+            {
+                Orientation = branch.Orientation,
+                Sizes = branch.Sizes.ToList(),
+                Children = branch.Children.Select(child => CaptureLayoutNode(child, groupIndices)).ToList(),
+            },
             _ => throw new InvalidOperationException("Unknown split layout node."),
         };
 
-    private WorkspaceLayoutNode CaptureWorkspaceLayoutBranch(
-        SplitLayoutBranch<TabGroupViewModel> branch,
-        IReadOnlyDictionary<TabGroupViewModel, int> groupIndices,
-        FrameworkElement? element)
-    {
-        var grid = element as Grid;
-        var isColumns = branch.Orientation == SplitOrientation.Columns;
-        IReadOnlyList<double> sizes = grid is null
-            ? []
-            : branch.Children.Select((_, index) => isColumns
-                ? grid.ColumnDefinitions[index * 2].ActualWidth
-                : grid.RowDefinitions[index * 2].ActualHeight).ToList();
-        if (sizes.Count != branch.Children.Count || sizes.Any(size => !double.IsFinite(size) || size <= 0))
-            sizes = [];
-
-        return new WorkspaceLayoutNode
-        {
-            Orientation = branch.Orientation,
-            Sizes = sizes,
-            Children = branch.Children
-                .Select((child, index) => CaptureWorkspaceLayoutNode(
-                    child,
-                    groupIndices,
-                    grid is null ? null : (FrameworkElement)grid.Children[index * 3]))
-                .ToList(),
-        };
-    }
-
     internal void RefreshWorkspaceMenu()
     {
-        Workspaces.Clear();
-        foreach (var workspace in App.Workspaces.Workspaces)
-            Workspaces.Add(WorkspaceItemViewModel.FromWorkspace(workspace));
-        NoWorkspacesState.Visibility = Workspaces.Count == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
         var menuItems = new List<MenuFlyoutItemBase>
         {
             new MenuFlyoutItem { Text = "Save current layout as workspace…", Command = ViewModel.SaveWorkspaceAsCommand },
@@ -145,20 +115,22 @@ public sealed partial class MainWindow
                     {
                         Item("Show", ViewModel.OpenWorkspaceCommand),
                         Item("Open in new window", ViewModel.OpenWorkspaceInNewWindowCommand),
-                        Item("Add to current layout", ViewModel.OpenWorkspaceAdditivelyCommand),
-                        new MenuFlyoutSeparator(),
-                        Item("Update from current layout…", ViewModel.UpdateWorkspaceCommand),
-                        Item("Icon…", ViewModel.CustomizeWorkspaceCommand),
-                        Item("Rename…", ViewModel.RenameWorkspaceCommand),
-                        Item("Delete…", ViewModel.DeleteWorkspaceCommand),
                     },
                 };
+                if (CanAddWorkspaceToLayout(workspace.Id))
+                    submenu.Items.Add(Item("Add to current layout", ViewModel.OpenWorkspaceAdditivelyCommand));
                 if (IsWorkspaceOpen(workspace.Id))
                 {
-                    submenu.Items.Insert(3, Item("Close", ViewModel.CloseWorkspaceCommand));
-                    foreach (var entry in SaveWorkspaceMenuItems(workspace).Reverse())
-                        submenu.Items.Insert(3, entry);
+                    foreach (var entry in SaveWorkspaceMenuItems(workspace))
+                        submenu.Items.Add(entry);
+                    submenu.Items.Add(Item("Close", ViewModel.CloseWorkspaceCommand));
                 }
+                submenu.Items.Add(new MenuFlyoutSeparator());
+                if (CanUpdateWorkspace(workspace.Id))
+                    submenu.Items.Add(Item("Update from current layout…", ViewModel.UpdateWorkspaceCommand));
+                submenu.Items.Add(Item("Icon…", ViewModel.CustomizeWorkspaceCommand));
+                submenu.Items.Add(Item("Rename…", ViewModel.RenameWorkspaceCommand));
+                submenu.Items.Add(Item("Delete…", ViewModel.DeleteWorkspaceCommand));
                 menuItems.Add(submenu);
             }
         }
@@ -179,6 +151,29 @@ public sealed partial class MainWindow
     {
         WorkspaceOperations.Reorder(Workspaces.Select(item => item.Workspace.Id).ToList());
     }
+
+    /// <summary>Offers a row's menu items by the same rules as the title-bar menu and the rail,
+    /// decided as the menu opens, since what the window holds changes while it is closed.</summary>
+    private void WorkspaceRowMenu_Opening(object? sender, object e)
+    {
+        if (sender is not MenuFlyout menu)
+            return;
+        foreach (var entry in menu.Items.OfType<MenuFlyoutItem>())
+        {
+            if (entry is not { CommandParameter: WorkspaceItemViewModel item, Tag: string action })
+                continue;
+            entry.Visibility = action switch
+            {
+                "additive" => PresentationValues.Visible(CanAddWorkspaceToLayout(item.Id)),
+                "update" => PresentationValues.Visible(CanUpdateWorkspace(item.Id)),
+                _ => Visibility.Visible,
+            };
+        }
+    }
+
+    /// <summary>Whether "Update from current layout…" is offered: only for a workspace this
+    /// window holds (see <see cref="WorkspaceParking.CanUpdateFromLiveLayout"/>).</summary>
+    private bool CanUpdateWorkspace(Guid id) => WorkspaceParking.CanUpdateFromLiveLayout(IsWorkspaceOpen(id));
 
     /// <summary>Runs a workspace row's menu command. The row template cannot bind to the
     /// window's view model, so each item names its command in Tag.</summary>
@@ -213,7 +208,7 @@ public sealed partial class MainWindow
         if (_shownWorkspace == HomeWorkspace)
             _ = AdoptShownTabsAsWorkspace(name);
         else
-            WorkspaceOperations.SaveAs(name);
+            WorkspaceOperations.Create(name, LiveWorkspaceLayout(_shownWorkspace));
     }
 
     private async Task RenameWorkspaceAsync(Workspace workspace)
@@ -225,12 +220,17 @@ public sealed partial class MainWindow
         WorkspaceOperations.Rename(workspace.Id, name);
     }
 
+    /// <summary>Saves the workspace's own live layout, which needs it open in this window.
+    /// What it captures is decided after the confirmation, from the workspace by id, so a
+    /// switch while the dialog is open can't save another workspace's tabs into it.</summary>
     private async Task UpdateWorkspaceAsync(Workspace workspace)
     {
-        if (!await ConfirmAsync(
-            "Update Workspace?",
-            $"Replace the saved layout in \"{workspace.Name}\" with the current tab groups?",
-            "Update"))
+        if (!CanUpdateWorkspace(workspace.Id)
+            || !await ConfirmAsync(
+                "Update Workspace?",
+                $"Replace the saved layout in \"{workspace.Name}\" with its current tabs and panes?",
+                "Update")
+            || !CanUpdateWorkspace(workspace.Id))
         {
             return;
         }
@@ -263,6 +263,9 @@ public sealed partial class MainWindow
             ShowWorkspace(workspace.Id);
             return Task.CompletedTask;
         }
+        // Menus only offer it when allowed; the window may have opened the workspace since.
+        if (!CanAddWorkspaceToLayout(workspace.Id))
+            return Task.CompletedTask;
 
         ApplyWorkspaceLayout(new WorkspaceLayout
         {
@@ -361,7 +364,7 @@ public sealed partial class MainWindow
                     && candidates.Count > 0)
                 {
                     tab = candidates.Dequeue();
-                    PlaceWorkspaceTab(tab, targetGroup, placed.Count);
+                    PlaceTab(tab, targetGroup, placed.Count);
                 }
                 else
                 {
@@ -396,7 +399,7 @@ public sealed partial class MainWindow
         if (!additive)
         {
             foreach (var tab in originalTabs.Where(tab => !usedTabs.Contains(tab)))
-                RemoveWorkspaceTab(tab);
+                RemoveTabCore(tab, dispose: true, collapseEmptyPane: false);
             foreach (var group in originalGroups.Where(group => !targetGroups.Contains(group)))
                 RemoveWorkspaceGroup(group);
         }
@@ -435,12 +438,9 @@ public sealed partial class MainWindow
             RebuildWorkspaceSplitLayout(targetGroups, savedLayout);
         }
 
-        SyncGroupOrder();
-        ViewModel.OnGroupsChanged();
-        RebuildGroupLayout();
-        FocusGroup(targetGroups.FirstOrDefault(group => group.Tabs.Count > 0) ?? targetGroups[0]);
-        ViewModel.SyncGroupFocus();
-        App.SavePinnedSessions();
+        // Typing goes to the pane that is focused, not the last one whose tab was selected.
+        var focused = targetGroups.FirstOrDefault(group => group.Tabs.Count > 0) ?? targetGroups[0];
+        FinishLayoutChange(focused, focused.SelectedTab);
 
         if (missing.Count > 0)
         {
@@ -474,51 +474,20 @@ public sealed partial class MainWindow
         IReadOnlyList<TabGroupViewModel> groups,
         WorkspaceLayoutNode layout)
     {
-        _savedPaneSizes.Clear();
         _groupLayout = new SplitLayout<TabGroupViewModel>(
             BuildWorkspaceSplitNode(layout, groups));
     }
 
-    private SplitLayoutNode<TabGroupViewModel> BuildWorkspaceSplitNode(
+    private static SplitLayoutNode<TabGroupViewModel> BuildWorkspaceSplitNode(
         WorkspaceLayoutNode node,
-        IReadOnlyList<TabGroupViewModel> groups)
-    {
-        if (node.Orientation is not { } orientation)
-            return new SplitLayoutLeaf<TabGroupViewModel>(groups[node.GroupIndex]);
+        IReadOnlyList<TabGroupViewModel> groups) =>
+        node.Orientation is not { } orientation
+            ? new SplitLayoutLeaf<TabGroupViewModel>(groups[node.GroupIndex])
+            : new SplitLayoutBranch<TabGroupViewModel>(
+                orientation,
+                node.Children.Select(child => BuildWorkspaceSplitNode(child, groups)),
+                node.Sizes);
 
-        var branch = new SplitLayoutBranch<TabGroupViewModel>(
-            orientation,
-            node.Children.Select(child => BuildWorkspaceSplitNode(child, groups)));
-        if (node.Sizes.Count == node.Children.Count)
-            _savedPaneSizes[branch] = node.Sizes.ToList();
-        return branch;
-    }
-
-
-    private void PlaceWorkspaceTab(TabViewModel tab, TabGroupViewModel target, int index)
-    {
-        var source = ViewModel.GroupOf(tab);
-        source.Tabs.Remove(tab);
-        if (source.SelectedTab == tab)
-            source.SelectedTab = source.Tabs.LastOrDefault();
-        target.Tabs.Insert(Math.Clamp(index, 0, target.Tabs.Count), tab);
-
-        if (source != target && tab.View is UIElement view)
-        {
-            _groupViews[source].RemoveTerminal(view);
-            _groupViews[target].AddTerminal(view);
-        }
-    }
-
-    private void RemoveWorkspaceTab(TabViewModel tab)
-    {
-        var group = ViewModel.GroupOf(tab);
-        if (tab.View is OnboardingView onboarding)
-            onboarding.CancelPreview();
-        if (tab.View is UIElement view)
-            _groupViews[group].RemoveTerminal(view);
-        ViewModel.CloseTab(tab);
-    }
 
     private void RemoveWorkspaceGroup(TabGroupViewModel group)
     {

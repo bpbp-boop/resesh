@@ -913,16 +913,16 @@
                         <DataTemplate x:DataType="vm:WorkspaceItemViewModel">
                             <Grid ColumnDefinitions="20,*,Auto" ColumnSpacing="8" Padding="4,5">
                                 <controls:WorkspaceLayoutIcon
-                                    Layout="{x:Bind Layout, Mode=OneTime}"
+                                    Layout="{x:Bind Layout, Mode=OneWay}"
                                     Stroke="{StaticResource SessionTreeForegroundBrush}"
                                     VerticalAlignment="Center" />
                                 <StackPanel Grid.Column="1">
                                     <TextBlock
-                                        Text="{x:Bind Name, Mode=OneTime}"
+                                        Text="{x:Bind Name, Mode=OneWay}"
                                         TextTrimming="CharacterEllipsis"
                                         Foreground="{StaticResource SessionTreeForegroundBrush}" />
                                     <TextBlock
-                                        Text="{x:Bind LayoutSummary, Mode=OneTime}"
+                                        Text="{x:Bind LayoutSummary, Mode=OneWay}"
                                         FontSize="11"
                                         Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
                                 </StackPanel>
@@ -937,7 +937,7 @@
                                     AutomationProperties.Name="Workspace actions">
                                     <FontIcon Glyph="&#xE712;" FontSize="13" />
                                     <Button.Flyout>
-                                        <MenuFlyout>
+                                        <MenuFlyout Opening="WorkspaceRowMenu_Opening">
                                             <MenuFlyoutItem
                                                 Text="Show"
                                                 Tag="open"

@@ -153,7 +153,7 @@ public sealed class WorkspaceAppearanceTests : IDisposable
         };
         var lab = store.SaveAs("Lab", layout);
         var notices = new List<string>();
-        var coordinator = new WorkspaceCoordinator(store, () => layout, () => { }, (title, _) => notices.Add(title));
+        var coordinator = new WorkspaceCoordinator(store, _ => layout, () => { }, (title, _) => notices.Add(title));
 
         Assert.False(coordinator.Save(lab.Id, new WorkspaceLayout { Groups = [new WorkspaceGroup()] }));
         Assert.False(coordinator.Save(Guid.NewGuid(), layout));

@@ -64,7 +64,6 @@ public sealed partial class MainWindow
             // instead of switching back to the workspace it was opened in.
             if (followShownWorkspace && ViewModel.IsBackgroundGroup(existingGroup))
             {
-                existing.IsInBackgroundWorkspace = false;
                 MoveTabBetweenGroups(existing, ViewModel.FocusedGroup, ViewModel.FocusedGroup.Tabs.Count);
                 return existing;
             }
@@ -265,16 +264,64 @@ public sealed partial class MainWindow
 
     // ---- ITabGroupHost ----
 
+    /// <summary>Counts explicit focus choices (<see cref="FocusGroup"/>), so a queued re-assert
+    /// of one can tell whether a later choice has replaced it.</summary>
+    private int _focusIntent;
+
+    /// <summary>Focuses a pane because the user or the app chose it. Revealing a tab in a
+    /// background workspace (a notification, an app page that is already open there) brings
+    /// its workspace back first. A pane that is neither shown nor parked here (closed, or in
+    /// a workspace being discarded) is ignored, so the focused pane is always a shown one.</summary>
+    /// <remarks>Panes laid out by the same change select their tabs as they load, and a
+    /// selection focuses its pane (<see cref="FocusGroupForSelection"/>). The choice is
+    /// re-asserted once they settle, unless another explicit choice came after it.</remarks>
     public void FocusGroup(TabGroupViewModel group)
     {
-        // Revealing a tab in a background workspace (a notification, an app page that is
-        // already open there) brings its workspace back first.
-        if (ViewModel.IsBackgroundGroup(group) && ParkedWorkspaceOf(group) is { } workspace)
+        if (ViewModel.IsBackgroundGroup(group))
+        {
+            if (ParkedWorkspaceOf(group) is not { } workspace)
+                return;
             ShowWorkspace(workspace, focusTerminal: false);
+        }
+        if (!ViewModel.Groups.Contains(group))
+            return;
+        SetFocusedGroup(group);
+        var intent = ++_focusIntent;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (intent != _focusIntent || ReferenceEquals(ViewModel.FocusedGroup, group)
+                || !ViewModel.Groups.Contains(group))
+                return;
+            SetFocusedGroup(group);
+            ViewModel.SyncGroupFocus();
+            if (group.SelectedTab is { } selected)
+                FocusTabContent(selected);
+        });
+    }
+
+    /// <summary>A pane's tab strip changed its selection, which focuses a shown pane as a
+    /// click on it would. It is not a choice <see cref="FocusGroup"/> re-asserts, and a pane
+    /// that is not shown never takes focus this way.</summary>
+    public void FocusGroupForSelection(TabGroupViewModel group)
+    {
+        if (ViewModel.Groups.Contains(group))
+            SetFocusedGroup(group);
+    }
+
+    private void SetFocusedGroup(TabGroupViewModel group)
+    {
         ViewModel.FocusedGroup = group;
         ViewModel.NotifyActiveTabChanged();
         UpdateRulerPresentations();
+        AssertFocusShown();
     }
+
+    /// <summary>Checks in debug builds that the focused pane is one the window shows.</summary>
+    [System.Diagnostics.Conditional("DEBUG")]
+    private void AssertFocusShown() =>
+        System.Diagnostics.Debug.Assert(
+            ViewModel.Groups.Contains(ViewModel.FocusedGroup),
+            "The focused pane is not shown.");
 
     private void UpdateRulerPresentations()
     {
@@ -497,22 +544,29 @@ public sealed partial class MainWindow
 
     /// <summary>Closes the tab now. Does nothing for a tab the window no longer holds (closed
     /// already, or moved to another window), so a late caller can't throw midway.</summary>
-    private void CloseTabCore(TabViewModel tab)
+    private void CloseTabCore(TabViewModel tab) => RemoveTabCore(tab, dispose: true);
+
+    /// <summary>THE way a tab leaves this window: closed, with its view disposed, or handed to
+    /// another window with its session still running. Its pane picks a neighbour and settles
+    /// before any terminal changes visibility, and a pane left empty collapses unless the
+    /// caller is about to rebuild or drop the panes itself.</summary>
+    private void RemoveTabCore(TabViewModel tab, bool dispose, bool collapseEmptyPane = true)
     {
         if (ViewModel.TryGroupOf(tab) is not { } group || !_groupViews.TryGetValue(group, out var groupView))
         {
-            Trace($"CloseTabCore: '{tab.Header}' is no longer in this window; nothing to close");
+            Trace($"RemoveTabCore: '{tab.Header}' is no longer in this window; nothing to remove");
             return;
         }
-        Trace($"CloseTabCore: closing '{tab.Header}' selected={ReferenceEquals(group.SelectedTab, tab)}");
-        if (tab.View is OnboardingView onboarding)
+        Trace($"RemoveTabCore: removing '{tab.Header}' dispose={dispose} selected={ReferenceEquals(group.SelectedTab, tab)}");
+        if (dispose && tab.View is OnboardingView onboarding)
             onboarding.CancelPreview();
         groupView.CloseTerminal(
             tab.View as UIElement,
             () => ViewModel.DetachTab(tab),
-            () => (tab.View as IDisposable)?.Dispose());
-        Trace($"CloseTabCore: done; selected now '{group.SelectedTab?.Header ?? "(null)"}'");
-        CollapseGroupIfEmpty(group);
+            dispose ? () => (tab.View as IDisposable)?.Dispose() : () => { });
+        Trace($"RemoveTabCore: done; selected now '{group.SelectedTab?.Header ?? "(null)"}'");
+        if (collapseEmptyPane)
+            CollapseGroupIfEmpty(group);
     }
 
     public void SplitRight(TabViewModel tab)
@@ -572,17 +626,7 @@ public sealed partial class MainWindow
         if (source == targetGroup)
             return;
 
-        source.RemoveTab(tab);
-
-        targetGroup.Tabs.Insert(Math.Clamp(targetIndex, 0, targetGroup.Tabs.Count), tab);
-        targetGroup.SelectedTab = tab;
-
-        if (tab.View is UIElement view)
-        {
-            _groupViews[source].RemoveTerminal(view);
-            _groupViews[targetGroup].AddTerminal(view);
-        }
-
+        PlaceTab(tab, targetGroup, targetIndex, select: true);
         FocusGroup(targetGroup);
         // The setter no-ops when targetGroup was already focused; the moved tab still
         // needs its group-focus flag refreshed.
@@ -611,13 +655,36 @@ public sealed partial class MainWindow
         ViewModel.SyncGroupFocus();
     }
 
-    public void DetachTabForTransfer(TabViewModel tab)
+    public void DetachTabForTransfer(TabViewModel tab) => RemoveTabCore(tab, dispose: false);
+
+    /// <summary>THE way a tab moves to a place in a pane of this window, its own or another,
+    /// with its view. The pane it leaves picks a neighbour (<see cref="TabGroupViewModel.RemoveTab"/>);
+    /// focus, and collapsing a pane left empty, are the caller's, as is the target's selection
+    /// unless <paramref name="select"/> asks for the moved tab.</summary>
+    private void PlaceTab(TabViewModel tab, TabGroupViewModel target, int index, bool select = false)
     {
-        var sourceGroup = ViewModel.GroupOf(tab);
+        var source = ViewModel.GroupOf(tab);
+        if (ReferenceEquals(source, target))
+        {
+            var current = target.Tabs.IndexOf(tab);
+            var destination = Math.Clamp(index, 0, target.Tabs.Count - 1);
+            if (current != destination)
+                target.Tabs.Move(current, destination);
+            if (select)
+                target.SelectedTab = tab;
+            return;
+        }
+
+        source.RemoveTab(tab);
+        target.Tabs.Insert(Math.Clamp(index, 0, target.Tabs.Count), tab);
+        if (select)
+            target.SelectedTab = tab;
+        tab.IsInBackgroundWorkspace = ViewModel.IsBackgroundGroup(target);
         if (tab.View is UIElement view)
-            _groupViews[sourceGroup].RemoveTerminal(view);
-        ViewModel.DetachTab(tab);
-        CollapseGroupIfEmpty(sourceGroup);
+        {
+            _groupViews[source].RemoveTerminal(view);
+            _groupViews[target].AddTerminal(view);
+        }
     }
 
     private void CollapseGroupIfEmpty(TabGroupViewModel group)
@@ -695,9 +762,8 @@ public sealed partial class MainWindow
         var branch = (SplitLayoutBranch<TabGroupViewModel>)node;
         var grid = new Grid();
         var isColumns = branch.Orientation == SplitOrientation.Columns;
-        // Saved sizes become star weights, so panes keep their shares as the window resizes.
-        var hasSavedSizes = _savedPaneSizes.TryGetValue(branch, out var savedSizes)
-            && savedSizes.Count == branch.Children.Count;
+        // The branch's sizes become star weights, so panes keep their shares as the window resizes.
+        var sizes = branch.Sizes.Count == branch.Children.Count ? branch.Sizes : null;
 
         for (var index = 0; index < branch.Children.Count; index++)
         {
@@ -705,12 +771,12 @@ public sealed partial class MainWindow
             if (isColumns)
                 grid.ColumnDefinitions.Add(new ColumnDefinition
                 {
-                    Width = new GridLength(hasSavedSizes ? savedSizes![index] : 1, GridUnitType.Star),
+                    Width = new GridLength(sizes?[index] ?? 1, GridUnitType.Star),
                 });
             else
                 grid.RowDefinitions.Add(new RowDefinition
                 {
-                    Height = new GridLength(hasSavedSizes ? savedSizes![index] : 1, GridUnitType.Star),
+                    Height = new GridLength(sizes?[index] ?? 1, GridUnitType.Star),
                 });
 
             var child = BuildGroupLayoutElement(branch.Children[index]);
@@ -752,6 +818,9 @@ public sealed partial class MainWindow
                 Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
             };
             SplitterHitArea.Apply(splitter, isColumns);
+            // A resize, by drag or by arrow key, is written back to the branch at once.
+            splitter.ManipulationCompleted += (_, _) => RecordPaneSizes(grid, branch);
+            splitter.AddHandler(UIElement.KeyUpEvent, new Microsoft.UI.Xaml.Input.KeyEventHandler((_, _) => RecordPaneSizes(grid, branch)), true);
             // Keep the wider hit target above the terminal content while its one-pixel
             // grid track lets both tab groups meet the visible divider.
             Canvas.SetZIndex(splitter, 1);
@@ -772,6 +841,24 @@ public sealed partial class MainWindow
         }
 
         return grid;
+    }
+
+    /// <summary>Writes a split's sizes back to its branch after a gutter resized its grid.
+    /// The grid only shows the branch's sizes, so from here on the branch is what a rebuild,
+    /// a zoom, parking and saving read: none of them look at the grids.</summary>
+    private static void RecordPaneSizes(Grid grid, SplitLayoutBranch<TabGroupViewModel> branch)
+    {
+        var isColumns = branch.Orientation == SplitOrientation.Columns;
+        var tracks = isColumns ? grid.ColumnDefinitions.Count : grid.RowDefinitions.Count;
+        // A grid left behind by a rebuild no longer describes its branch.
+        if (!grid.IsLoaded || tracks != branch.Children.Count * 2 - 1)
+            return;
+        grid.UpdateLayout();
+        var sizes = branch.Children.Select((_, index) => isColumns
+            ? grid.ColumnDefinitions[index * 2].ActualWidth
+            : grid.RowDefinitions[index * 2].ActualHeight).ToList();
+        if (sizes.All(size => double.IsFinite(size) && size > 0))
+            branch.SetSizes(sizes);
     }
 
     private IReadOnlyList<CommandPaletteEntry> BuildOpenTabCommands()
@@ -825,7 +912,6 @@ public sealed partial class MainWindow
                 group.Tabs.Move(index, target);
             group.SelectedTab = selected; // the move must not steal selection
         }
-        App.SavePinnedSessions();
     }
 
 
@@ -836,7 +922,7 @@ public sealed partial class MainWindow
         if (ids.Count == 0)
             return;
         var restored = new List<Guid>();
-        foreach (var id in ids)
+        foreach (var id in PinnedSessions.ToRestore(ids, App.Workspaces.Workspaces))
         {
             if (App.Store.Find(id) is { } session)
             {
@@ -844,8 +930,8 @@ public sealed partial class MainWindow
                 restored.Add(id);
             }
         }
-        // Sessions deleted since the last run drop out of the pinned list.
-        if (restored.Count != ids.Count)
+        // Sessions deleted since the last run, or pinned by a workspace, drop out of the list.
+        if (!restored.SequenceEqual(ids))
             App.SaveSettings(App.Settings.Current with { PinnedSessionIds = restored });
     }
 
@@ -1042,6 +1128,7 @@ public sealed partial class MainWindow
             var group = owner.ViewModel.GroupOf(existing);
             group.SelectedTab = existing;
             owner.FocusGroup(group);
+            owner.FocusTabContent(existing);
             owner.BringToFront();
             if (!existing.IsLocked && existing.View is TerminalTabView existingView
                 && existing.State is TabConnectionState.Disconnected or TabConnectionState.Exited)

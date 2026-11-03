@@ -73,6 +73,98 @@ public class SplitLayoutTests
         Assert.False(layout.Remove("missing"));
     }
 
+    [Fact]
+    public void SplittingAPaneDownKeepsTheResizedColumns()
+    {
+        var layout = new SplitLayout<string>("left");
+        layout.Split("left", "right", SplitDirection.Right);
+        var columns = Assert.IsType<SplitLayoutBranch<string>>(layout.Root);
+        columns.SetSizes([300, 700]);
+
+        layout.Split("right", "below", SplitDirection.Down);
+
+        Assert.Same(columns, layout.Root);
+        Assert.Equal([300.0, 700.0], columns.Sizes);
+        var rows = Assert.IsType<SplitLayoutBranch<string>>(columns.Children[1]);
+        Assert.Empty(rows.Sizes);
+    }
+
+    [Fact]
+    public void SplittingIntoAResizedBranchSharesItEqually()
+    {
+        var layout = new SplitLayout<string>("a");
+        layout.Split("a", "b", SplitDirection.Right);
+        var columns = Assert.IsType<SplitLayoutBranch<string>>(layout.Root);
+        columns.SetSizes([300, 700]);
+
+        layout.Split("b", "c", SplitDirection.Right);
+
+        Assert.Empty(columns.Sizes);
+    }
+
+    [Fact]
+    public void ClosingAPaneKeepsTheOthersInProportion()
+    {
+        var layout = new SplitLayout<string>("a");
+        layout.Split("a", "b", SplitDirection.Right);
+        layout.Split("b", "c", SplitDirection.Right);
+        var columns = Assert.IsType<SplitLayoutBranch<string>>(layout.Root);
+        columns.SetSizes([200, 300, 500]);
+
+        layout.Remove("b");
+
+        Assert.Equal([200.0, 500.0], columns.Sizes);
+    }
+
+    [Fact]
+    public void ClosingTheLastPaneOfANestedSplitLeavesTheOuterSizes()
+    {
+        var layout = new SplitLayout<string>("left");
+        layout.Split("left", "right", SplitDirection.Right);
+        layout.Split("right", "below", SplitDirection.Down);
+        var columns = Assert.IsType<SplitLayoutBranch<string>>(layout.Root);
+        columns.SetSizes([300, 700]);
+
+        layout.Remove("below");
+
+        Assert.Equal([300.0, 700.0], columns.Sizes);
+        Assert.Equal(["left", "right"], layout.Values);
+    }
+
+    [Fact]
+    public void ABranchFlattenedIntoItsParentKeepsWhereItsPanesWere()
+    {
+        var layout = new SplitLayout<string>("x");
+        layout.Split("x", "a", SplitDirection.Right);
+        layout.Split("a", "c", SplitDirection.Down);
+        layout.Split("a", "b", SplitDirection.Right);
+        var outer = Assert.IsType<SplitLayoutBranch<string>>(layout.Root);
+        outer.SetSizes([400, 600]);
+        var rows = Assert.IsType<SplitLayoutBranch<string>>(outer.Children[1]);
+        var inner = Assert.IsType<SplitLayoutBranch<string>>(rows.Children[0]);
+        inner.SetSizes([1, 2]);
+
+        layout.Remove("c");
+
+        Assert.Equal(["x", "a", "b"], layout.Values);
+        Assert.Equal([400.0, 200.0, 400.0], outer.Sizes);
+    }
+
+    [Fact]
+    public void SizesThatDoNotFitTheChildrenMeanEqualShares()
+    {
+        var layout = new SplitLayout<string>("a");
+        layout.Split("a", "b", SplitDirection.Right);
+        var columns = Assert.IsType<SplitLayoutBranch<string>>(layout.Root);
+
+        columns.SetSizes([1, 2, 3]);
+        Assert.Empty(columns.Sizes);
+        columns.SetSizes([1, 0]);
+        Assert.Empty(columns.Sizes);
+        columns.SetSizes([1, double.NaN]);
+        Assert.Empty(columns.Sizes);
+    }
+
     [Theory]
     [InlineData(1, 50, SplitDirection.Left)]
     [InlineData(99, 50, SplitDirection.Right)]

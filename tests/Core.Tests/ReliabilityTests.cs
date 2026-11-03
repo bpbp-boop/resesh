@@ -219,12 +219,15 @@ public sealed class ReliabilityTests : IDisposable
         var layout = UnequalLayout();
         var notices = new List<string>();
         var refreshes = 0;
-        var coordinator = new WorkspaceCoordinator(store, () => layout, () => refreshes++, (title, _) => notices.Add(title));
-        Assert.True(coordinator.SaveAs("work"));
+        var coordinator = new WorkspaceCoordinator(store, _ => layout, () => refreshes++, (title, _) => notices.Add(title));
+        Assert.NotNull(coordinator.Create("work", layout));
         var workspace = Assert.Single(store.Workspaces);
         using (var locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
-            layout = new WorkspaceLayout();
+            layout = new WorkspaceLayout
+            {
+                Groups = [new WorkspaceGroup { Tabs = [new WorkspaceTabReference { SessionId = Guid.NewGuid() }] }],
+            };
             Assert.False(coordinator.Update(workspace.Id));
         }
         Assert.Equal(2, refreshes);

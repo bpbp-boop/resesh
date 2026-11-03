@@ -84,10 +84,15 @@ test("bulk close can end persistent sessions and keeps tabs whose session surviv
 });
 
 test("closing a tab hands off to its successor before removing the closing view", () => {
+  // Closing is one path: every close, a workspace replacing or discarding its tabs, and a
+  // tab handed to another window (which keeps its view) go through RemoveTabCore.
+  assert.match(source, /private void CloseTabCore\(TabViewModel tab\) => RemoveTabCore\(tab, dispose: true\);/);
+  assert.match(source, /public void DetachTabForTransfer\(TabViewModel tab\) => RemoveTabCore\(tab, dispose: false\);/);
+  assert.doesNotMatch(source, /ViewModel\.CloseTab\(/);
   const closeCore = source.match(
-    /private void CloseTabCore[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+    /private void RemoveTabCore[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
   assert.match(closeCore,
-    /groupView\.CloseTerminal\(\s*tab\.View as UIElement,\s*\(\) => ViewModel\.DetachTab\(tab\),\s*\(\) => \(tab\.View as IDisposable\)\?\.Dispose\(\)\);/);
+    /groupView\.CloseTerminal\(\s*tab\.View as UIElement,\s*\(\) => ViewModel\.DetachTab\(tab\),\s*dispose \? \(\) => \(tab\.View as IDisposable\)\?\.Dispose\(\) : \(\) => \{ \}\);/);
   assert.doesNotMatch(closeCore, /RemoveTerminal|ViewModel\.CloseTab/);
   // A late close of a tab that already left the window does nothing rather than throw.
   assert.match(closeCore, /ViewModel\.TryGroupOf\(tab\) is not \{ \} group[\s\S]*?return;/);

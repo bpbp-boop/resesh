@@ -297,15 +297,35 @@ public partial class App : Application
     internal static IEnumerable<ViewModels.TabViewModel> AllTabs =>
         Current is App app ? app._windows.SelectMany(window => window.ViewModel.AllTabs) : [];
 
+    private bool _pinnedSessionsSaveQueued;
+
+    /// <summary>Brings the pinned sessions reopened at launch in line with Home's pinned tabs in
+    /// every window, once the change in progress settles. Windows queue it whenever a tab is
+    /// pinned, unpinned, opened, closed or moved, or a window closes, so the saved list never
+    /// waits for the next pin toggle to catch up.</summary>
+    internal static void QueuePinnedSessionsSave()
+    {
+        if (Current is not App { _pinnedSessionsSaveQueued: false, _dispatcherQueue: { } queue } app)
+            return;
+        app._pinnedSessionsSaveQueued = true;
+        queue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            app._pinnedSessionsSaveQueued = false;
+            SavePinnedSessions();
+        });
+    }
+
+    /// <summary>Saves the pinned sessions now. A window calls it as it closes, before its tabs
+    /// go, so a change still queued is not lost when it is the last window.</summary>
     internal static void SavePinnedSessions()
     {
-        if (Current is not App app)
+        if (Current is not App app
+            || ViewModels.PinnedSessions.ToSave(
+                Settings.Current.PinnedSessionIds,
+                app._windows.SelectMany(window => window.HomeTabs),
+                app._windows.Count) is not { } ids)
             return;
-        SaveSettings(Settings.Current with
-        {
-            PinnedSessionIds = app._windows.SelectMany(window => window.ViewModel.AllTabs)
-                .Where(tab => tab.IsPinned).Select(tab => tab.Session.Id).Distinct().ToList(),
-        });
+        SaveSettings(Settings.Current with { PinnedSessionIds = ids });
         RefreshJumpList();
     }
 
@@ -429,6 +449,7 @@ public partial class App : Application
         window.Closed += (_, _) =>
         {
             _windows.Remove(window);
+            QueuePinnedSessionsSave(); // its pinned tabs no longer reopen, unless it was the last
             RefreshWindowTitles();
             RefreshWorkspaceRails(); // its workspaces are no longer open elsewhere
         };

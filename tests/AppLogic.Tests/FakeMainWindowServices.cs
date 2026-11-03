@@ -88,6 +88,9 @@ internal sealed class FakeMainWindowServices : IMainWindowServices
     public Task CloseWorkspaceAsync(Workspace workspace) => RecordAsync($"CloseWorkspace {workspace.Name}");
     public HashSet<Guid> OpenWorkspaces { get; } = [];
     public bool IsWorkspaceOpen(Guid workspaceId) => OpenWorkspaces.Contains(workspaceId);
+    public HashSet<Guid> WorkspacesOpenElsewhere { get; } = [];
+    public bool CanAddWorkspaceToLayout(Guid workspaceId) =>
+        WorkspaceParking.CanAddToShownLayout(IsWorkspaceOpen(workspaceId), WorkspacesOpenElsewhere.Contains(workspaceId));
     public Guid? ShownWorkspaceId { get; set; }
     public void ShowHomeWorkspace() => Record("ShowHomeWorkspace");
 
