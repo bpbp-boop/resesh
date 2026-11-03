@@ -200,5 +200,69 @@ public sealed class ImportIdentityPlannerTests : IDisposable
         Assert.Equal((SessionLogin.Own, "local"), (own.Login, own.Username));
     }
 
+    [Fact]
+    public void Commit_IdentityDeletedSinceThePlan_IsCreatedAgain()
+    {
+        var store = new SessionStore(Path.Combine(_dir.FullName, "sessions.json"));
+        store.Load();
+        var identities = new IdentityStore(Path.Combine(_dir.FullName, "identities.json"));
+        identities.Load();
+        var existing = identities.Add(new Identity { Name = "netops", Username = "netops" });
+        var candidates = new[] { Ssh("a", "DC", "netops"), Ssh("b", "DC", "netops") };
+        var plan = ImportIdentityPlanner.Plan(candidates, identities.Identities, store.FolderIdentity, _ => null);
+        Assert.Equal(existing.Id, Assert.Single(plan.Suggestions).Existing?.Id);
+        // Deleted while the review was open.
+        identities.Remove(existing.Id);
+
+        SecureCrtImporter.Commit(store, candidates, plan: plan, identities: identities);
+
+        var recreated = Assert.Single(identities.Identities);
+        Assert.NotEqual(existing.Id, recreated.Id);
+        Assert.Equal("netops", recreated.Username);
+        var resolver = new LoginResolver(store, identities);
+        Assert.All(store.Sessions, session => Assert.Equal(recreated.Id, resolver.Resolve(session).Identity?.Id));
+    }
+
+    [Fact]
+    public void Commit_FailedSessionWrite_RemovesTheIdentitiesAndKeysItMade()
+    {
+        var sessionsPath = Path.Combine(_dir.FullName, "sessions.json");
+        var seeded = new SessionStore(sessionsPath);
+        seeded.Load();
+        seeded.Add(new Session { Name = "existing", Host = "existing.example" });
+        var store = new SessionStore(sessionsPath);
+        using (new FileStream(sessionsPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            store.Load();
+        var identities = new IdentityStore(Path.Combine(_dir.FullName, "identities.json"));
+        identities.Load();
+        var keys = new SshKeyStore(Path.Combine(_dir.FullName, "ssh-keys.json"));
+        keys.Load();
+        var keyPath = Path.Combine(_dir.FullName, "id");
+        var candidates = new[]
+        {
+            Ssh("a", "Cloud", "ubuntu", keyPath), Ssh("b", "Cloud", "ubuntu", keyPath),
+            Ssh("c", "Lab", "root", Path.Combine(_dir.FullName, "own-key")),
+        };
+        var plan = ImportIdentityPlanner.Plan(candidates, identities.Identities, store.FolderIdentity, _ => null);
+
+        Assert.ThrowsAny<IOException>(() => SecureCrtImporter.Commit(store, candidates, keys, plan, identities));
+
+        Assert.Empty(identities.Identities);
+        Assert.Empty(keys.Keys);
+        Assert.Empty(store.Sessions);
+    }
+
+    [Fact]
+    public void Commit_SameSessionTwiceInOneImport_AddsItOnce()
+    {
+        var store = new SessionStore(Path.Combine(_dir.FullName, "sessions.json"));
+        store.Load();
+
+        var result = SecureCrtImporter.Commit(store, [Ssh("a", "DC", "netops"), Ssh("a", "Other", "netops")]);
+
+        Assert.Equal((1, 1), result);
+        Assert.Single(store.Sessions);
+    }
+
     public void Dispose() => _dir.Delete(recursive: true);
 }
