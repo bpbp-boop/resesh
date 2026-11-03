@@ -127,11 +127,10 @@ internal sealed record ThemeVisualPalette(
         return fallback;
     }
 
-    private static Windows.UI.Color Contrast(Windows.UI.Color color)
-    {
-        var luminance = (0.2126 * color.R) + (0.7152 * color.G) + (0.0722 * color.B);
-        return luminance >= 128 ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White;
-    }
+    /// <summary>Black or white, whichever has the higher WCAG contrast ratio on
+    /// <paramref name="color"/>, as the welcome page picks its text.</summary>
+    private static Windows.UI.Color Contrast(Windows.UI.Color color) =>
+        ColorContrast.PrefersBlackText((uint)(color.R << 16 | color.G << 8 | color.B)) ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White;
 
     private static Windows.UI.Color Blend(uint first, uint second) => Windows.UI.Color.FromArgb(
         255,

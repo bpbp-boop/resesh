@@ -437,22 +437,8 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         (byte)Math.Round(first.G + ((second.G - first.G) * amount)),
         (byte)Math.Round(first.B + ((second.B - first.B) * amount)));
 
-    private static double ContrastRatio(Color first, Color second)
-    {
-        var firstLuminance = RelativeLuminance(first);
-        var secondLuminance = RelativeLuminance(second);
-        return (Math.Max(firstLuminance, secondLuminance) + 0.05)
-            / (Math.Min(firstLuminance, secondLuminance) + 0.05);
-    }
-
-    private static double RelativeLuminance(Color color) =>
-        (0.2126 * Linear(color.R)) + (0.7152 * Linear(color.G)) + (0.0722 * Linear(color.B));
-
-    private static double Linear(byte channel)
-    {
-        var value = channel / 255.0;
-        return value <= 0.04045 ? value / 12.92 : Math.Pow((value + 0.055) / 1.055, 2.4);
-    }
+    private static double ContrastRatio(Color first, Color second) =>
+        ColorContrast.Ratio((uint)(first.R << 16 | first.G << 8 | first.B), (uint)(second.R << 16 | second.G << 8 | second.B));
 
     private void FinishSetup_Click(object sender, RoutedEventArgs e) => FinishRequested?.Invoke();
 

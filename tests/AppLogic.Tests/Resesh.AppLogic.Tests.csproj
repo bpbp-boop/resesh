@@ -23,6 +23,7 @@
     <Compile Include="../../src/App/Terminal/LatestWinsRunner.cs" Link="Terminal/LatestWinsRunner.cs" />
     <!-- Theme tables are plain data: check them against the catalog without WinUI. -->
     <Compile Include="../../src/App/ThemeChrome.cs" Link="ThemeChrome.cs" />
+    <Compile Include="../../src/App/ColorContrast.cs" Link="ColorContrast.cs" />
     <Compile Include="../../src/Terminal/Native/TerminalThemes.cs" Link="Terminal/TerminalThemes.cs" />
     <Compile Include="../../src/App/ViewModels/MainViewModel.cs" Link="ViewModels/MainViewModel.cs" />
     <Compile Include="../../src/App/ViewModels/MainViewModel.Closing.cs" Link="ViewModels/MainViewModel.Closing.cs" />
