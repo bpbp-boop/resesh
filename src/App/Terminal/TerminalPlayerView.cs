@@ -283,10 +283,7 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
         }
         else
         {
-            var elapsed = TimeSpan.FromSeconds(Math.Max(0, time));
-            _time.Text = elapsed.TotalHours >= 1
-                ? elapsed.ToString(@"hh\:mm\:ss\.fff")
-                : elapsed.ToString(@"mm\:ss\.fff");
+            _time.Text = Resesh.Core.History.ElapsedText.Clock(TimeSpan.FromSeconds(Math.Max(0, time)));
         }
     }
 

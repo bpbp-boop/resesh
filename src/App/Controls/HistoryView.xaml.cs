@@ -499,13 +499,7 @@ public sealed partial class HistoryView : UserControl
         return date.ToString(format, CultureInfo.CurrentCulture);
     }
 
-    internal static string FormatDuration(TimeSpan duration) => duration.TotalSeconds switch
-    {
-        < 1 => $"{duration.TotalMilliseconds:0} ms",
-        < 60 => $"{duration.TotalSeconds:0.#} s",
-        < 3600 => $"{(int)duration.TotalMinutes} min {duration.Seconds} s",
-        _ => $"{(int)duration.TotalHours} h {duration.Minutes} min",
-    };
+    internal static string FormatDuration(TimeSpan duration) => ElapsedText.Short(duration);
 
     // ---- selection and detail ----
 
