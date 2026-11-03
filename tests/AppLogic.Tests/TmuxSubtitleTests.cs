@@ -148,6 +148,20 @@ public sealed class TmuxSubtitleTests
     }
 
     [Fact]
+    public void DetectedCommandBeatsADelayedTmuxTitleUntilAShellTitleEndsIt()
+    {
+        var tab = Tab();
+        tab.ApplyTerminalTitle("✳ Fix login bug");
+        tab.ApplyRunningCommand("htop"); // Enter-gated discovery, not an exact start
+        tab.ApplyTerminalTitle("⠂ Fix login bug"); // tmux's late poll of the old title
+        Assert.Equal("htop", tab.Subtitle);
+        tab.ApplyTerminalTitle("python3");
+        Assert.Equal("htop", tab.Subtitle);
+        tab.ApplyTerminalTitle("bash");
+        Assert.Null(tab.RunningCommand);
+    }
+
+    [Fact]
     public void PlainSshTitleDropsAgentSpinner()
     {
         var tab = Tab(persistent: false);

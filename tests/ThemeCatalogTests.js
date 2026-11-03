@@ -287,7 +287,8 @@ test("the tab-row divider spans both sides without crossing the active tab", () 
   assert.match(terminalThemes, /\["solarized-light"\] = New\(\s*0xFDF6E3,/);
   assert.match(terminalThemes, /\["phthalo-green"\] = New\(\s*0x123524,/);
   assert.match(tabGroupXaml, /x:Name="LeftTabStripDivider"[\s\S]*?x:Name="RightTabStripDivider"/);
-  assert.match(tabGroup, /Tabs\.ContainerFromItem\(Tabs\.SelectedItem\)[\s\S]*?LeftTabStripDivider\.Width = activeLeft;[\s\S]*?RightTabStripDivider\.Width = stripWidth - activeRight;/);
+  // Where the gap falls is TabStripSizing.DividerWidths, tested in TabStripSizingTests.cs.
+  assert.match(tabGroup, /Tabs\.ContainerFromItem\(Tabs\.SelectedItem\)[\s\S]*?TabStripSizing\.DividerWidths\(/);
 });
 
 // The ruler's edge used to be drawn in the selection colour, which is also the focused

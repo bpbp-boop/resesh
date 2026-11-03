@@ -21,6 +21,7 @@
     <Compile Include="../../src/App/Interop/LaunchRequest.cs" Link="Interop/LaunchRequest.cs" />
     <Compile Include="../../src/App/Interop/JumpListPlan.cs" Link="Interop/JumpListPlan.cs" />
     <Compile Include="../../src/App/Controls/TabDragLayout.cs" Link="Controls/TabDragLayout.cs" />
+    <Compile Include="../../src/App/Controls/TabStripSizing.cs" Link="Controls/TabStripSizing.cs" />
     <Compile Include="../../src/App/Terminal/LatestWinsRunner.cs" Link="Terminal/LatestWinsRunner.cs" />
     <!-- Theme tables are plain data: check them against the catalog without WinUI. -->
     <Compile Include="../../src/App/ThemeChrome.cs" Link="ThemeChrome.cs" />

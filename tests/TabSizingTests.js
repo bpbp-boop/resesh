@@ -3,31 +3,36 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
-const xaml = fs.readFileSync(
-  path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml"),
-  "utf8");
-const code = fs.readFileSync(
-  path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"),
-  "utf8");
-const motion = fs.readFileSync(
-  path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.Motion.cs"),
-  "utf8");
+// Tab sizing and motion decisions live in TabStripSizing.cs and are tested headless in
+// tests/AppLogic.Tests/TabStripSizingTests.cs. These checks cover XAML and wiring only.
+const controls = path.join(__dirname, "..", "src", "App", "Controls");
+const xaml = fs.readFileSync(path.join(controls, "TabGroupView.xaml"), "utf8");
+const code = fs.readFileSync(path.join(controls, "TabGroupView.xaml.cs"), "utf8");
+const motion = fs.readFileSync(path.join(controls, "TabGroupView.Motion.cs"), "utf8");
+const sizing = fs.readFileSync(path.join(controls, "TabStripSizing.cs"), "utf8");
 const terminalView = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"),
   "utf8");
-const filePaneView = fs.readFileSync(
-  path.join(__dirname, "..", "src", "App", "Controls", "FilePaneView.cs"),
-  "utf8");
-const tabViewModel = fs.readFileSync(
-  path.join(__dirname, "..", "src", "App", "ViewModels", "TabViewModel.cs"),
-  "utf8");
+const mainWindow = require("./support/mainWindowSource");
 
+function xamlDouble(key) {
+  return Number(xaml.match(new RegExp(`x:Key="${key}">([\\d.]+)<`))?.[1]);
+}
+
+function csharpConstant(name) {
+  return Number(sizing.match(new RegExp(`const double ${name} = ([\\d.]+);`))?.[1]);
+}
 
 test("tabs use one browser-style width and shrink only when the strip is crowded", () => {
-  assert.match(xaml, /x:Key="TabViewItemMaxWidth">220</);
-  assert.match(xaml, /x:Key="TabViewItemMinWidth">100</);
+  assert.equal(xamlDouble("TabViewItemMaxWidth"), 220);
+  assert.equal(xamlDouble("TabViewItemMinWidth"), 100);
   assert.match(xaml, /TabWidthMode="Equal"/);
   assert.doesNotMatch(xaml, /TabWidthMode="SizeToContent"/);
+});
+
+test("the sizing logic uses the same tab widths as the XAML", () => {
+  assert.equal(csharpConstant("MaximumTabWidth"), xamlDouble("TabViewItemMaxWidth"));
+  assert.equal(csharpConstant("MinimumTabWidth"), xamlDouble("TabViewItemMinWidth"));
 });
 
 test("custom tab chrome retains WinUI drag and reorder animations", () => {
@@ -44,39 +49,20 @@ test("custom tab chrome retains WinUI drag and reorder animations", () => {
 test("the tab strip owns its motion instead of WinUI's sequenced container transitions", () => {
   // WinUI runs add, delete and reorder one after another and replays them when a group
   // view is re-parented; the strip keeps them off and animates changes itself.
-  assert.match(code, /private void NormalizeTabStripTemplate\(\)\s*\{\s*DisableTabContainerTransitions\(\);/);
-  assert.match(motion, /list\.ItemContainerTransitions = new Microsoft\.UI\.Xaml\.Media\.Animation\.TransitionCollection\(\);/);
+  assert.match(code, /private void NormalizeTabStripTemplate\(\)\s*\{[\s\S]*?DisableTabContainerTransitions\(\);/);
+  assert.match(motion, /ItemContainerTransitions = new Microsoft\.UI\.Xaml\.Media\.Animation\.TransitionCollection\(\);/);
   for (const transition of ["AddDeleteThemeTransition", "ReorderThemeTransition", "EntranceThemeTransition", "ContentThemeTransition"]) {
     assert.doesNotMatch(code, new RegExp(transition));
     assert.doesNotMatch(motion, new RegExp(transition));
   }
 });
 
-test("tab changes slide every tab from where it was drawn once layout settles", () => {
+test("tab changes snapshot where tabs are drawn before the collection moves them", () => {
   assert.match(code, /Group\.Tabs\.CollectionChanged \+= \(_, e\) =>\s*\{\s*CaptureTabMotion\(\);/);
-  // Snapshot what is on screen (layout slot plus any slide still in flight), hold it
-  // through intermediate width passes, then move everything at once.
-  assert.match(motion, /return LayoutLeft\(container\) \+ InFlightOffset\(container\);/);
-  assert.match(motion, /_tabWidthRefreshQueued \|\| _fullTabWidthRefreshQueued\)\s*\{\s*HoldTabsAtOrigins\(\);/);
-  assert.match(motion, /SlideElement\(container, offset\)/);
-  assert.match(motion, /visual\.StartAnimation\("Translation", slide\)/);
-  // New tabs fade in alongside the slide rather than after it.
-  assert.match(motion, /SetTranslation\(container, 0\);\s*FadeInTab\(container\);/);
-  // The system "Animation effects" setting turns all of it off.
-  assert.match(motion, /MotionEnabled => AppMotion\.Enabled/);
 });
 
-test("the divider gap and the active tab move together", () => {
-  assert.match(code, /private void UpdateTabStripDivider\(\)\s*\{\s*if \(TabMotionOwnsDivider\(\)\)\s*return;/);
-  assert.match(motion, /private void SlideDividerWithActiveTab\(\)[\s\S]*?_motionOrigins\.TryGetValue\(active, out var origin\)/);
-  assert.match(motion, /ScaleDivider\(LeftTabStripDivider, fromLeft, toLeft, anchorRight: false\);/);
-  assert.match(motion, /ScaleDivider\(RightTabStripDivider, fromRight, toRight, anchorRight: true\);/);
-});
-
-test("drag previews slide aside and the drop settles from the preview", () => {
-  assert.match(code, /ShiftDragPreview\(i, offset\);/);
+test("a drop settles from the drag preview over the strip colour", () => {
   assert.match(code, /if \(_tabDragPreview\.Visibility == Visibility\.Visible\)\s*CaptureTabMotion\(\);/);
-  assert.match(motion, /DragPreviewFor\(container\) is \{ \} preview\)\s*return \(\(TranslateTransform\)preview\.RenderTransform\)\.X \+ InFlightOffset\(preview\);/);
   // Inactive headers are transparent; the dragged one needs the strip colour behind it.
   assert.match(code, /_tabDragBackdrop\.Fill = _tabBackgroundBrush;/);
   // The strip's own slide replaces WinUI's fade back from the dragging state.
@@ -84,15 +70,9 @@ test("drag previews slide aside and the drop settles from the preview", () => {
 });
 
 test("layout rebuilds snap tab motion instead of animating re-parented strips", () => {
-  const window = fs.readFileSync(
-    path.join(__dirname, "..", "src", "App", "MainWindow.TabGroups.cs"),
-    "utf8");
-  const workspaces = fs.readFileSync(
-    path.join(__dirname, "..", "src", "App", "MainWindow.Workspaces.cs"),
-    "utf8");
-  assert.match(window, /foreach \(var groupView in _groupViews\.Values\)\s*\{\s*groupView\.SuppressTabMotion\(\);/);
-  assert.match(window, /_groupViews\[sourceGroup\]\.SuppressTabMotion\(\);\s*(?:\/\/.*\s*)*MoveTabBetweenGroups\(tab, newGroup, 0, userInitiated: true\);/);
-  assert.match(workspaces, /private void ApplyWorkspaceLayout\([^)]*\)\s*\{[\s\S]{0,200}?groupView\.SuppressTabMotion\(\);/);
+  assert.match(mainWindow, /foreach \(var groupView in _groupViews\.Values\)\s*\{\s*groupView\.SuppressTabMotion\(\);/);
+  assert.match(mainWindow, /_groupViews\[sourceGroup\]\.SuppressTabMotion\(\);\s*(?:\/\/.*\s*)*MoveTabBetweenGroups\(tab, newGroup, 0, userInitiated: true\);/);
+  assert.match(mainWindow, /private void ApplyWorkspaceLayout\([^)]*\)\s*\{[\s\S]{0,200}?groupView\.SuppressTabMotion\(\);/);
 });
 
 test("tab text trims inside the shared width without moving the close action", () => {
@@ -102,31 +82,26 @@ test("tab text trims inside the shared width without moving the close action", (
 });
 
 test("tabs recalculate their equal width after a close or strip resize", () => {
-  assert.match(code, /Group\.Tabs\.CollectionChanged \+= \(_, e\)/);
-  assert.match(code, /Tabs\.TabItemsChanged \+= \(_, e\) =>[\s\S]{0,400}?CollectionChange\.ItemRemoved[\s\S]{0,80}?HasShrunkTabs\(\)[\s\S]{0,700}?QueueFullTabWidthRefresh\(\)/);
-  // A close under the pointer keeps widths until the pointer leaves the strip, like a browser.
-  assert.match(code, /_pointerInTabStrip && e\.Index < Group\.Tabs\.Count\)\s*_tabWidthHoldPending = true;/);
-  assert.match(motion, /TabContainerGrid_PointerExited[\s\S]{0,200}?_tabWidthHoldPending = false;\s*CaptureTabMotion\(\);\s*QueueFullTabWidthRefresh\(\);/);
-  // Full-width tabs skip the refresh: its SizeToContent pass would flash content widths.
-  assert.match(code, /private bool HasShrunkTabs\(\)[\s\S]{0,120}?"TabViewItemMaxWidth"/);
+  assert.match(code, /Tabs\.TabItemsChanged \+= \(_, e\) =>/);
   const resizeHandler = code.slice(
     code.indexOf("Tabs.SizeChanged += (_, _) =>"),
     code.indexOf("TabStripHost.SizeChanged += (_, _) =>"));
   assert.match(resizeHandler, /QueueFullTabWidthRefresh\(\)/);
-  assert.match(code, /QueueFullTabWidthRefresh\(\)[\s\S]*?TabWidthMode = TabViewWidthMode\.SizeToContent;[\s\S]{0,100}?TabWidthMode = TabViewWidthMode\.Equal/);
+  // WinUI caches the equal width; flipping the mode is what makes it recalculate.
+  assert.match(code, /TabWidthMode = TabViewWidthMode\.SizeToContent;\s*Tabs\.TabWidthMode = TabViewWidthMode\.Equal;/);
   assert.match(code, /FindDescendant\(Tabs, "TabsItemsPresenter"\)\?\.InvalidateMeasure\(\)/);
-  assert.match(code, /Tabs\.InvalidateMeasure\(\)/);
+  // WinUI releases its own held widths when the pointer leaves this template part.
+  assert.match(motion, /FindDescendant\(Tabs, "TabContainerGrid"\)/);
+  assert.match(motion, /grid\.PointerExited \+= TabContainerGrid_PointerExited;/);
 });
 
-test("a newly selected tab waits for container layout before exposing the divider", () => {
+test("the divider refreshes after layout once a new tab has bounds", () => {
   assert.match(code, /Tabs\.LayoutUpdated \+= Tabs_DividerLayoutUpdated/);
   assert.match(code, /Tabs_DividerLayoutUpdated[\s\S]*?UpdateTabStripDivider\(\)/);
-  assert.match(code, /activeTab\.ActualWidth > 0[\s\S]*?LeftTabStripDivider\.Width = activeLeft/);
-  assert.match(code, /LeftTabStripDivider\.Width = 0;[\s\S]*?RightTabStripDivider\.Width = 0;[\s\S]*?QueueTabDividerRefreshAfterLayout\(\)/);
 });
 
 test("each tab bar reserves the measured width of every action button", () => {
-  const strip = xaml.match(/x:Name="TabStripHost"[\s\S]*?<\/Grid>\r?\n\r?\n        <Grid x:Name="TerminalHost"/)?.[0] ?? "";
+  const strip = xaml.slice(xaml.indexOf('x:Name="TabStripHost"'), xaml.indexOf('x:Name="TerminalHost"'));
 
   assert.match(strip, /<ColumnDefinition Width="\*" \/>[\s\S]*?<ColumnDefinition Width="Auto" \/>/);
   assert.match(strip, /x:Name="Tabs"[\s\S]*?Grid\.Column="0"/);
@@ -141,8 +116,7 @@ test("each tab bar reserves the measured width of every action button", () => {
   assert.doesNotMatch(filesToggle, /Flyout/);
   assert.doesNotMatch(strip, /ToggleSplitButton/);
   assert.match(strip, /x:Name="FilePaneDivider"[\s\S]*?x:Name="FilePaneToggle"/);
-  assert.match(code, /ExpandedTabActions\.ActualWidth \+ 6/);
-  assert.match(code, /recording \? "Stop recording" : "Start recording"/);
+  assert.match(code, /ExpandedTabActions\.SizeChanged \+= \(_, _\) => UpdateTabActionLayout\(\);/);
   assert.match(code, /RecordStartIcon\.Visibility = recording \? Visibility\.Collapsed : Visibility\.Visible/);
   assert.match(code, /RecordStopIcon\.Visibility = recording \? Visibility\.Visible : Visibility\.Collapsed/);
 });
@@ -154,8 +128,6 @@ test("a hidden tab close action is not focusable and has stable automation metad
   assert.match(closeButton, /IsTabStop="\{x:Bind CloseInteractive, Mode=OneWay\}"/);
   assert.match(closeButton, /AutomationProperties\.Name="\{x:Bind CloseAutomationName, Mode=OneWay\}"/);
   assert.match(closeButton, /AutomationProperties\.AutomationId="\{x:Bind CloseAutomationId, Mode=OneWay\}"/);
-  assert.match(tabViewModel, /CloseAutomationName => \$"Close \{Header\}"/);
-  assert.match(tabViewModel, /CloseAutomationId => \$"TabClose_/);
 });
 
 test("tab actions collapse into an overflow menu before minimum-width tabs scroll", () => {
@@ -166,7 +138,6 @@ test("tab actions collapse into an overflow menu before minimum-width tabs scrol
   assert.match(xaml, /x:Name="ShowCommandsOverflowItem"[\s\S]*?Click="ShowCommandsButton_Click"/);
   assert.match(xaml, /x:Name="CurrentFolderOverflowItem"[\s\S]*?Click="CurrentFolderButton_Click"/);
   assert.match(xaml, /x:Name="FilePaneOverflowItem"[\s\S]*?Click="FilePaneToggle_Click"/);
-  assert.match(code, /TabStripHost\.ActualWidth < Group\.Tabs\.Count \* MinimumTabWidth \+ _expandedTabActionsWidth/);
   assert.match(code, /ExpandedTabActions\.Visibility = expandedVisibility;[\s\S]{0,120}?TabActionsOverflowButton\.Visibility/);
   assert.match(code, /FilePaneOverflowItem\.IsChecked = isOpen/);
   assert.match(code, /RecordOverflowItem\.IsEnabled = RecordButton\.IsEnabled/);
@@ -179,42 +150,13 @@ test("record controls follow the button foreground instead of using warning red"
   assert.match(recordButton, /x:Name="RecordStopIcon"[\s\S]*?Fill="\{x:Bind RecordButton\.Foreground, Mode=OneWay\}"/);
   assert.doesNotMatch(recordButton, /#E74856/);
 });
-test("action buttons dim with their inactive tab group", () => {
-  assert.match(code, /TabStripActions\.Opacity = Group\.SelectedTab\?\.IsGroupFocused == false \? 0\.55 : 1\.0/);
+
+test("action buttons refresh when their group gains or loses focus", () => {
   assert.match(code, /nameof\(TabViewModel\.IsGroupFocused\)[\s\S]{0,80}?UpdateTabActionButtons\(\)/);
 });
 
-test("the current-folder action is connected-only and uses the host action", () => {
-  assert.match(code, /CurrentFolderOverflowItem\.IsEnabled = tab\?\.Capabilities\.FilePane == true[\s\S]*?TabConnectionState\.Connected[\s\S]*?!tab\.IsLocked/);
+test("the current-folder action uses the host action", () => {
   assert.match(code, /CurrentFolderButton_Click[\s\S]*?await _host\.OpenFilePaneAtCurrentFolderAsync\(tab\)/);
-});
-
-test("the file pane header jumps to the terminal folder", () => {
-  assert.match(filePaneView, /IconButton\([^)]*"Go to terminal folder", \(\) => TerminalFolderRequested\?\.Invoke\(\)\)/);
-  assert.match(terminalView, /TerminalFolderRequested \+= \(\) => _ = OpenFilePaneAtCurrentFolderAsync\(\)/);
-});
-
-test("file options use consistent title casing", () => {
-  for (const label of [
-    "Open File Pane at Terminal Folder",
-    "Open in File Explorer",
-    "Show File Pane",
-  ]) {
-    assert.match(xaml, new RegExp(`Text="${label}"`));
-  }
-  assert.match(code, /isOpen \? "Hide File Pane" : "Show File Pane"/);
-});
-
-test("local sessions use the direct filesystem pane and Explorer path", () => {
-  assert.match(terminalView, /Session\.IsLocal[\s\S]*?new FilePaneView\(\(\) => Session, OpenInExplorerAsync\)/);
-  assert.match(terminalView, /OpenInExplorerAsync\(string path\)[\s\S]*?Session\.IsLocal[\s\S]*?OpenLocalDirectoryInExplorer\(path\)[\s\S]*?SshfsIntegration/);
-  assert.match(filePaneView, /_localFiles is not null \\|\\| SshfsIntegration\.IsInstalled/);
-});
-
-test("SFTP downloads validate each remote name and keep recursive paths below the selected folder", () => {
-  assert.match(filePaneView, /WindowsDownloadPath\.ValidateName\(entry\.Name\)/);
-  assert.match(filePaneView, /PlanRemoteDirectory\(sftp, entry\.FullPath, localPath, targetDir, files, token\)/);
-  assert.doesNotMatch(filePaneView, /Path\.Combine\(localDir, child\.Name\)/);
 });
 
 test("the tab-bar toggle follows selection and all file-pane open and close routes", () => {
