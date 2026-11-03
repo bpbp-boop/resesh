@@ -24,6 +24,9 @@ public sealed class SshJumpChain : IDisposable
     private int _disposed;
     private int _lost;
     private Timer? _watchdog;
+    private readonly Lock _lostGate = new();
+    private Action<string>? _lostHandlers;
+    private string? _lostReason;
 
     private SshJumpChain()
     {
@@ -36,17 +39,51 @@ public sealed class SshJumpChain : IDisposable
     /// dies without closing (SSH.NET does not always notice either, so the links are also
     /// polled), and TCP keepalive on that socket only ever reaches this machine. Never raised
     /// after <see cref="Dispose"/>.
+    /// A jump can drop while <see cref="Open"/> is still returning, before the connection
+    /// that runs through the chain subscribes, so a handler added after the loss is called at
+    /// once, on the adding thread, with the same reason.
     /// </summary>
-    public event Action<string>? Lost;
+    public event Action<string>? Lost
+    {
+        add
+        {
+            if (value is null)
+                return;
+            string? reason;
+            lock (_lostGate)
+            {
+                reason = _lostReason;
+                if (reason is null)
+                {
+                    _lostHandlers += value;
+                    return;
+                }
+            }
+            if (Volatile.Read(ref _disposed) == 0)
+                value(reason);
+        }
+        remove
+        {
+            lock (_lostGate)
+                _lostHandlers -= value;
+        }
+    }
 
     private void RaiseLost(Session jump, Exception? failure)
     {
         if (Volatile.Read(ref _disposed) != 0 || Interlocked.Exchange(ref _lost, 1) != 0)
             return;
         Interlocked.Exchange(ref _watchdog, null)?.Dispose();
-        Lost?.Invoke(failure is null
+        var reason = failure is null
             ? $"The connection to the jump host {jump.Name} was lost."
-            : $"The connection to the jump host {jump.Name} was lost: {failure.Message}");
+            : $"The connection to the jump host {jump.Name} was lost: {failure.Message}";
+        Action<string>? handlers;
+        lock (_lostGate)
+        {
+            _lostReason = reason;
+            handlers = _lostHandlers;
+        }
+        handlers?.Invoke(reason);
     }
 
     /// <summary>Starts watching every link once the chain is complete.</summary>
