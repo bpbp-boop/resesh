@@ -1332,8 +1332,7 @@ public sealed partial class TabGroupView : UserControl
     private async Task RenameTabAsync(TabViewModel tab)
     {
         var title = await Dialogs.TextPromptDialog.PromptAsync(XamlRoot, "Rename Tab", "Tab title", tab.Header, "Rename");
-        if (!string.IsNullOrWhiteSpace(title))
-            tab.TitleOverride = title.Trim();
+        MainViewModel.RenameTab(tab, title);
     }
 
     // ---- drag between groups ----

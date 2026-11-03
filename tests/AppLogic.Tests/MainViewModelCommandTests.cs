@@ -665,6 +665,23 @@ public sealed class MainViewModelCommandTests : IDisposable
     }
 
     [Fact]
+    public void RenamingATabToItsShownHeaderKeepsFollowingTheSession()
+    {
+        var window = Window();
+        var session = Ssh("router");
+        _store.Add(session);
+        var tab = Open(window, session, TabConnectionState.Connected);
+
+        MainViewModel.RenameTab(tab, " router ");
+        MainViewModel.RenameTab(tab, "   ");
+        MainViewModel.RenameTab(tab, null);
+
+        Assert.Null(tab.TitleOverride);
+        MainViewModel.RenameTab(tab, "  core  ");
+        Assert.Equal("core", tab.TitleOverride);
+    }
+
+    [Fact]
     public async Task RenameFolderTrimsAndRefusesSeparators()
     {
         _store.CreateFolder("Sites/North");

@@ -293,6 +293,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Applies a Rename prompt's answer, trimmed. The prompt starts from the shown
+    /// header, so accepting it unchanged (or empty, or cancelled) changes nothing: setting the
+    /// override then would freeze a header that otherwise follows the session's name.</summary>
+    public static void RenameTab(TabViewModel tab, string? title)
+    {
+        title = title?.Trim();
+        if (string.IsNullOrEmpty(title) || title == tab.Header)
+            return;
+        tab.TitleOverride = title;
+    }
+
     /// <summary>Removes and disposes the tab. Collapsing empty groups is the window's job.</summary>
     public void CloseTab(TabViewModel tab)
     {
