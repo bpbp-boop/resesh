@@ -58,11 +58,14 @@ internal sealed record JumpListPlan(IReadOnlyList<JumpListItem> Pinned, IReadOnl
 
     /// <summary>Where the session connects, as its tab shows it: the login it will use (an
     /// identity's or a folder's, not only its own) and any non-default port. The protocol
-    /// is named, since a jump list item has no other cue that a target is telnet.</summary>
+    /// is named, since a jump list item has no other cue that a target is telnet. A host
+    /// session with no host yet reads as its name, not a bare "user@".</summary>
     private static string Description(Session session, Func<Session, string> login)
     {
         if (session.IsLocal)
             return "Local terminal";
+        if (session.Kind is SessionKind.Ssh or SessionKind.Telnet && string.IsNullOrWhiteSpace(session.Host))
+            return session.Name;
         var endpoint = SessionEndpoint.Format(session, new()
         {
             Username = session.Kind == SessionKind.Ssh ? login(session) : null,

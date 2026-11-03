@@ -41,6 +41,15 @@ public sealed class JumpListPlanTests
     }
 
     [Fact]
+    public void A_session_with_no_host_is_described_by_its_name()
+    {
+        var unfinished = new Session { Name = "new box", Host = "", Username = "deploy" };
+        var plan = JumpListPlan.For([], [unfinished.Id], id => id == unfinished.Id ? unfinished : null, session => session.Username);
+
+        Assert.Equal(("new box", "new box"), (plan.Recent[0].Title, plan.Recent[0].Description));
+    }
+
+    [Fact]
     public void Pinned_sessions_are_not_repeated_under_recent_and_deleted_ones_drop_out()
     {
         var plan = JumpListPlan.For([Db.Id, Guid.NewGuid()], [Db.Id, Web.Id, Guid.NewGuid()], Find);
