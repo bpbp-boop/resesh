@@ -14,7 +14,11 @@ public sealed class BulkSessionTests : IDisposable
     private readonly SessionStore _store;
     private int _changes;
 
-    public BulkSessionTests() => _store = new SessionStore(Path.Combine(_directory, "sessions.json"));
+    public BulkSessionTests()
+    {
+        _store = new SessionStore(Path.Combine(_directory, "sessions.json"));
+        _store.Changed += () => _changes++;
+    }
 
     public void Dispose() => Directory.Delete(_directory, true);
 
@@ -26,7 +30,6 @@ public sealed class BulkSessionTests : IDisposable
         IsSessionVisible = _ => true,
         ApplySessionSettings = _ => { },
         ReportError = error => throw error,
-        SessionsChanged = _ => _changes++,
     });
 
     private static Session Ssh(string name) => new() { Name = name, Host = name + ".example", Username = "admin" };

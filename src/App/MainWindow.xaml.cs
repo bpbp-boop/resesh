@@ -52,7 +52,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         CurrentTheme = () => App.Settings.Current.Theme,
         ResolveTheme = App.ResolveTheme,
         ShowAgentIcons = () => App.Settings.Current.ShowAgentIcons,
-        IsSessionVisible = session => !session.IsLocal || !session.BuiltIn || App.AvailableLocalShells.Contains(session.Id),
+        IsSessionVisible = App.IsSessionVisible,
         LoginUsername = App.LoginUsername,
         ApplySessionSettings = tab =>
         {
@@ -63,7 +63,19 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             }
         },
         ReportError = App.ReportRecoverableError,
-        SessionsChanged = App.RefreshSessionsInAllWindows,
+        RunOnUiThread = App.RunOnUiThread,
+        SessionsDeleted = ids =>
+        {
+            try
+            {
+                if (App.Workspaces.RemoveSessions(ids))
+                    App.RefreshWorkspaceMenus();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                App.ReportRecoverableError(exception);
+            }
+        },
         RecentSessionIds = () => App.Settings.Current.RecentSessionIds,
         SaveRecentSessionIds = ids => App.SaveSettings(App.Settings.Current with { RecentSessionIds = ids }),
         RecordingDirectory = () => App.Settings.Current.RecordingDirectory,
@@ -104,8 +116,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             ViewModel.PruneTreeSelection();
             ScheduleExpansionSync();
             SyncEmptyState();
-            ViewModel.RefreshRecentSessions();
-            App.RefreshJumpList(); // sessions were renamed, added or deleted
         };
         ViewModel.PropertyChanged += (_, e) =>
         {
@@ -138,7 +148,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             Resesh.Core.Backend.CleanupActions.Run(App.ReportRecoverableError,
                 SaveTreePaneWidth,
                 SaveWorkspacesOnClose,
-                ViewModel.CloseAllTabs);
+                ViewModel.CloseAllTabs,
+                ViewModel.Dispose);
         };
     }
 
@@ -670,6 +681,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         string defaultFolder,
         SessionSettingsTarget initialTarget = SessionSettingsTarget.General)
     {
+        // Callers pass the copy they show (a tree node, a table row); edit the saved record.
+        existing = existing is null ? null : App.Store.Find(existing.Id) ?? existing;
         var isCurrentDefault = existing is not null && App.Settings.Current.DefaultLocalProfileId == existing.Id;
         var dialog = new LocalProfileEditDialog(
             ViewModel.LocalFolderPathsForPicker, existing, defaultFolder, isCurrentDefault, initialTarget)
@@ -1438,7 +1451,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private void SyncEmptyState()
     {
-        EmptyState.Visibility = App.Store.Sessions.Count == 0 && !ViewModel.IsFiltering
+        EmptyState.Visibility = ViewModel.TotalSessionCount == 0 && !ViewModel.IsFiltering
             ? Visibility.Visible : Visibility.Collapsed;
         NoFilterMatchesState.Visibility = ViewModel.IsFiltering && ViewModel.MatchCount == 0
             ? Visibility.Visible : Visibility.Collapsed;
@@ -1475,6 +1488,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     private async Task OpenSessionEditorAsync(Session? existing, string defaultFolder,
         SessionKind newKind = SessionKind.Ssh)
     {
+        // Callers pass the copy they show (a tree node, a table row); edit the saved record.
+        existing = existing is null ? null : App.Store.Find(existing.Id) ?? existing;
         var dialog = new SessionEditDialog(ViewModel.FolderPathsForPicker, existing, defaultFolder, App.SshKeys,
             newKind: newKind)
         {

@@ -58,6 +58,11 @@ public partial class App : Application
     /// launch by discovery). Built-ins outside this set are hidden, not deleted.</summary>
     public static IReadOnlySet<Guid> AvailableLocalShells { get; private set; } = new HashSet<Guid>();
 
+    /// <summary>Whether a saved session is shown anywhere (tree, search, Recent, the jump
+    /// list): everything except built-in local profiles whose shell is not installed.</summary>
+    public static bool IsSessionVisible(Session session) =>
+        !session.IsLocal || !session.BuiltIn || AvailableLocalShells.Contains(session.Id);
+
     /// <summary>Resolves the System choice to the Windows color mode used right now.</summary>
     public static string ResolveTheme(string? theme)
     {
@@ -188,6 +193,7 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+        _uiQueue = _dispatcherQueue;
         CommandCompletionNotifications.SetDispatcher(_dispatcherQueue);
 
         _storesLoad!.GetAwaiter().GetResult();
@@ -226,6 +232,12 @@ public partial class App : Application
 #endif
         Resesh.Terminal.TerminalSurface.Shortcuts = AppShortcuts.ForTerminals();
         PruneCommandHistory();
+        // Windows follow the store themselves; views outside them and the jump list follow here.
+        Store.Changed += () => RunOnUiThread(() =>
+        {
+            SessionsChanged?.Invoke();
+            RefreshJumpList(); // sessions were renamed, added or deleted
+        });
         var window = CreateWindowCore();
         if (Settings.Current.ReopenLastLayoutAtStartup)
             window.RestoreLastLayout();
@@ -309,17 +321,42 @@ public partial class App : Application
         RefreshJumpList();
     }
 
-    internal static void RefreshSessionsInAllWindows(ViewModels.MainViewModel? source = null)
+    /// <summary>Re-reads sessions everywhere after a change the session store does not see,
+    /// such as identities an import added. Saved session changes need no call: every window
+    /// follows <see cref="SessionStore.Changed"/>.</summary>
+    internal static void RefreshSessionsInAllWindows()
     {
         if (Current is not App app)
             return;
         foreach (var window in app._windows.ToList())
-            window.ViewModel.RefreshSessions(rebuildTree: !ReferenceEquals(window.ViewModel, source));
+            window.ViewModel.RefreshSessions();
         SessionsChanged?.Invoke();
     }
 
-    /// <summary>Raised after saved sessions or folders change, for views outside the tree.</summary>
+    /// <summary>Raised on the UI thread after saved sessions, folders or folder identities
+    /// change, for views outside the tree.</summary>
     internal static event Action? SessionsChanged;
+
+    /// <summary>Runs an action on the UI thread: at once when already on it, else queued.</summary>
+    internal static void RunOnUiThread(Action action)
+    {
+        if (_uiQueue is { HasThreadAccess: false } queue)
+            queue.TryEnqueue(() => action());
+        else
+            action();
+    }
+
+    private static DispatcherQueue? _uiQueue;
+
+    /// <summary>Every window's Recent pane re-reads the saved list (one window opening a
+    /// session changes it for all).</summary>
+    internal static void RefreshRecentSessionsInAllWindows()
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.ViewModel.RefreshRecentSessions();
+    }
 
     internal static void RefreshWindowTitles()
     {
@@ -481,7 +518,9 @@ public partial class App : Application
     {
         _jumpListQueued = false;
         var settings = Settings.Current;
-        var plan = JumpListPlan.For(settings.PinnedSessionIds, settings.RecentSessionIds, Store.Find)
+        // Recent here lists what the Recent pane lists: saved sessions that are visible.
+        var plan = JumpListPlan.For(settings.PinnedSessionIds, settings.RecentSessionIds,
+                id => Store.Find(id) is { } session && IsSessionVisible(session) ? session : null)
             .Without(_removedJumpListItems);
         if (plan.SameAs(_jumpList))
             return;
@@ -498,8 +537,7 @@ public partial class App : Application
         if (recent.Count != settings.RecentSessionIds.Count
             && SaveSettings(Settings.Current with { RecentSessionIds = recent }))
         {
-            foreach (var window in _windows.ToList())
-                window.ViewModel.RefreshRecentSessions();
+            RefreshRecentSessionsInAllWindows();
         }
         // The committed list already left them out; the next change rebuilds it from Recent.
         _jumpList = null;

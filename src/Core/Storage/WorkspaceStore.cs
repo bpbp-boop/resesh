@@ -128,12 +128,15 @@ public sealed class WorkspaceStore
     private bool HasChangesLocked(Guid id, WorkspaceLayout live)
     {
         var index = _workspaces.FindIndex(workspace => workspace.Id == id);
-        if (index < 0)
-            return false;
+        return index >= 0 && Differs(_workspaces[index], live);
+    }
+
+    private static bool Differs(Workspace workspace, WorkspaceLayout live)
+    {
         var normalized = NormalizeLayout(live);
         if (normalized.Groups.All(group => group.Tabs.Count == 0))
             return false;
-        var saved = NormalizeLayout(new WorkspaceLayout { Groups = _workspaces[index].Groups, Layout = _workspaces[index].Layout });
+        var saved = NormalizeLayout(new WorkspaceLayout { Groups = workspace.Groups, Layout = workspace.Layout });
         return !SameArrangement(saved, normalized);
     }
 
@@ -295,6 +298,47 @@ public sealed class WorkspaceStore
                 LabelIcon = labelIcon,
             };
             Commit(updated);
+        }
+    }
+
+    /// <summary>
+    /// Forgets deleted sessions: their tabs leave every saved workspace, unsaved draft and the
+    /// last layout, in one write, as a backup import drops sessions it did not bring. Panes
+    /// stay where they were, matching a window that still shows the workspace, and a draft
+    /// left the same as its saved layout is dropped. Returns whether anything changed.
+    /// </summary>
+    public bool RemoveSessions(IEnumerable<Guid> sessionIds)
+    {
+        lock (_gate)
+        {
+            var removed = sessionIds.ToHashSet();
+            var referenced = _workspaces.SelectMany(workspace => workspace.Groups)
+                .Concat(_lastLayout?.Groups ?? [])
+                .Concat(_drafts.Values.SelectMany(draft => draft.Groups))
+                .SelectMany(group => group.Tabs)
+                .Select(tab => tab.SessionId)
+                .ToHashSet();
+            if (!referenced.Overlaps(removed))
+                return false;
+
+            referenced.ExceptWith(removed);
+            var pruned = RemapReferences(
+                new WorkspaceStoreData
+                {
+                    Workspaces = _workspaces,
+                    LastLayout = _lastLayout,
+                    LastActiveWorkspaceId = _lastActiveWorkspaceId,
+                    Drafts = _drafts.Select(draft => new WorkspaceDraft { WorkspaceId = draft.Key, Layout = draft.Value }).ToList(),
+                },
+                new Dictionary<Guid, Guid>(),
+                referenced);
+            var workspaces = pruned.Workspaces!;
+            var drafts = (pruned.Drafts ?? [])
+                .Where(draft => workspaces.FirstOrDefault(workspace => workspace.Id == draft.WorkspaceId) is { } saved
+                    && Differs(saved, draft.Layout))
+                .ToDictionary(draft => draft.WorkspaceId, draft => draft.Layout);
+            Commit(workspaces, pruned.LastLayout, _lastActiveWorkspaceId, drafts);
+            return true;
         }
     }
 

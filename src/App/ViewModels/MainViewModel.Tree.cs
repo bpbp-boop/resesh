@@ -86,23 +86,23 @@ public sealed partial class MainViewModel
     [RelayCommand(CanExecute = nameof(CanOpenSelection))]
     private void OpenSelection(IReadOnlyList<TreeNodeViewModel>? nodes)
     {
-        foreach (var session in SessionsOf(SelectionOrCurrent(nodes)).ToList())
+        foreach (var session in SessionsToOpen(nodes))
             Services.ConnectSession(session);
     }
 
     [RelayCommand(CanExecute = nameof(CanOpenSelection))]
     private void OpenSelectionInNewWindow(IReadOnlyList<TreeNodeViewModel>? nodes) =>
-        Services.ConnectInNewWindow(SessionsOf(SelectionOrCurrent(nodes)).ToList());
+        Services.ConnectInNewWindow(SessionsToOpen(nodes));
 
     /// <summary>Opens each session in a new pane of its own.</summary>
     [RelayCommand(CanExecute = nameof(CanOpenSelection))]
     private void OpenSelectionInNewSplits(IReadOnlyList<TreeNodeViewModel>? nodes) =>
-        Services.ConnectInNewSplits(SessionsOf(SelectionOrCurrent(nodes)).ToList());
+        Services.ConnectInNewSplits(SessionsToOpen(nodes));
 
     /// <summary>Opens the sessions together, as the tabs of one new pane.</summary>
     [RelayCommand(CanExecute = nameof(CanOpenSelection))]
     private void OpenSelectionInOneNewSplit(IReadOnlyList<TreeNodeViewModel>? nodes) =>
-        Services.ConnectInNewSplit(SessionsOf(SelectionOrCurrent(nodes)).ToList());
+        Services.ConnectInNewSplit(SessionsToOpen(nodes));
 
     /// <summary>Deals the sessions across the panes already open, one each in pane order,
     /// starting over at the first pane when there are more sessions than panes.</summary>
@@ -110,13 +110,18 @@ public sealed partial class MainViewModel
     private void OpenSelectionInExistingSplits(IReadOnlyList<TreeNodeViewModel>? nodes)
     {
         var groups = Groups.ToList();
-        var sessions = SessionsOf(SelectionOrCurrent(nodes)).ToList();
+        var sessions = SessionsToOpen(nodes);
         for (var index = 0; index < sessions.Count; index++)
             Services.ConnectSession(sessions[index], groups[index % groups.Count]);
     }
 
     private bool CanOpenSelection(IReadOnlyList<TreeNodeViewModel>? nodes) =>
         SessionsOf(SelectionOrCurrent(nodes)).Any();
+
+    /// <summary>The saved records of the selection's sessions: nodes hold copies, and a copy
+    /// must never be what connects.</summary>
+    private List<Session> SessionsToOpen(IReadOnlyList<TreeNodeViewModel>? nodes) =>
+        SessionsOf(SelectionOrCurrent(nodes)).Select(session => CurrentSession(session.Id)).OfType<Session>().ToList();
 
     private bool CanOpenSelectionInExistingSplits(IReadOnlyList<TreeNodeViewModel>? nodes) =>
         IsSplit && CanOpenSelection(nodes);
@@ -127,8 +132,13 @@ public sealed partial class MainViewModel
     private Task EditSelectionAsync(IReadOnlyList<TreeNodeViewModel>? nodes) =>
         SelectionOrCurrent(nodes) switch
         {
-            [{ Session: { IsLocal: true } profile }] => Services.EditLocalProfileAsync(profile, profile.FolderPath),
-            [{ Session: { } session }] => Services.EditSessionAsync(session, session.FolderPath),
+            // The editor starts from the saved record, not the node's copy of it.
+            [{ Session: { } node }] => CurrentSession(node.Id) switch
+            {
+                { IsLocal: true } profile => Services.EditLocalProfileAsync(profile, profile.FolderPath),
+                { } session => Services.EditSessionAsync(session, session.FolderPath),
+                null => Task.CompletedTask,
+            },
             [{ IsFolder: true, IsLocalRoot: false } folder] => RenameFolderAsync(folder),
             _ => Task.CompletedTask,
         };
@@ -234,7 +244,14 @@ public sealed partial class MainViewModel
         items = items.Where(n => !n.IsLocalRoot).ToList();
         var folders = items.Where(n => n.IsFolder).ToList();
         var sessions = items.Where(n => !n.IsFolder).ToList();
-        var affected = SessionsOf(items).Count();
+        // Counted from the store with the deletes' own rules: a folder takes every session
+        // under it, including ones a filter hides from the tree.
+        var affected = folders
+            .SelectMany(folder => _store.SessionsInFolder(folder.FolderPath, KindOf(folder)))
+            .Concat(sessions.Select(node => _store.Find(node.Session!.Id)).OfType<Session>())
+            .Select(session => session.Id)
+            .Distinct()
+            .Count();
 
         var parts = new List<string>();
         if (folders.Count > 0)

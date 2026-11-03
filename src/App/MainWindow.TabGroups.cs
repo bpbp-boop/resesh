@@ -141,6 +141,7 @@ public sealed partial class MainWindow
         int? resumeTmuxSlot = null,
         TabViewModel? insertAfter = null)
     {
+        session = App.Store.Find(session.Id) ?? session; // callers may hold an older copy
         var tab = ViewModel.Connect(session, group, insertAfter);
         var view = new TerminalTabView(
             tab, App.Credentials, App.KnownHosts, App.SshKeys, resumeTmuxSlot);
@@ -155,7 +156,7 @@ public sealed partial class MainWindow
             {
                 App.ReportRecoverableError(exception);
             }
-            ViewModel.RefreshRecentSessions();
+            App.RefreshRecentSessionsInAllWindows();
             App.RefreshJumpList();
         }
         return tab;
@@ -185,9 +186,9 @@ public sealed partial class MainWindow
         };
         view.LoginChanged += (session, password) =>
         {
-            if (App.WindowFor(tab) is { } owner && App.Store.Find(session.Id) is not null)
+            if (App.WindowFor(tab) is { } owner)
             {
-                try { owner.ViewModel.UpdateSession(session, password); }
+                try { owner.ViewModel.UpdateLogin(session, password); }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
                     App.ReportRecoverableError(exception);
