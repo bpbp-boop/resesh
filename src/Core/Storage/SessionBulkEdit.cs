@@ -37,8 +37,8 @@ public sealed record SessionBulkEdit
     public bool SetTheme { get; init; }
     public string? Theme { get; init; }
 
-    /// <summary>SSH sessions only. Never turned on for a session that uses PowerShell
-    /// shell integration, which cannot run inside tmux.</summary>
+    /// <summary>SSH sessions only. Never turned on for a session that
+    /// <see cref="SessionRules.CanBePersistent"/> refuses; see <see cref="PersistentSkipped"/>.</summary>
     public bool? Persistent { get; init; }
 
     /// <summary>What keeps a persistent shell alive: the Resesh agent (true) or tmux
@@ -80,11 +80,8 @@ public sealed record SessionBulkEdit
             var overrides = (session.Overrides ?? new TerminalOverrides()) with { Theme = Theme };
             edited = edited with { Overrides = overrides.IsEmpty ? null : overrides };
         }
-        if (Persistent is { } persistent && session.Kind == SessionKind.Ssh
-            && !(persistent && session.ShellIntegration == ShellIntegrationMode.PowerShell))
-        {
+        if (Persistent is { } persistent && session.Kind == SessionKind.Ssh && !SkipsPersistent(session))
             edited = edited with { Persistent = persistent };
-        }
         if (session.Kind == SessionKind.Ssh)
             edited = edited with { SessionAgent = (SessionAgent ?? edited.SessionAgent) && edited.Persistent };
         return edited == session ? session : edited;
@@ -96,6 +93,15 @@ public sealed record SessionBulkEdit
             .Where(pair => !ReferenceEquals(pair.Before, pair.After))
             .Select(pair => pair.After)
             .ToList();
+
+    /// <summary>The sessions this edit asks to make persistent but leaves as they are, under
+    /// <see cref="SessionRules.CanBePersistent"/>, so the editor can say so.</summary>
+    public IReadOnlyList<Session> PersistentSkipped(IEnumerable<Session> sessions) =>
+        sessions.Where(session => session.Kind == SessionKind.Ssh && !session.Persistent && SkipsPersistent(session))
+            .ToList();
+
+    private bool SkipsPersistent(Session session) =>
+        Persistent == true && !SessionRules.CanBePersistent(session.ShellIntegration);
 }
 
 /// <summary>Copies saved sessions under new ids and names that are free in their folder.</summary>

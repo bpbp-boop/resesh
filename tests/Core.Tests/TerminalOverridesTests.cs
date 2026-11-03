@@ -51,4 +51,13 @@ public sealed class TerminalOverridesTests
         var effective = Defaults.WithOverrides(new TerminalOverrides { MouseCapture = MouseCaptureModes.Always });
         Assert.Equal(MouseCaptureModes.Always, effective.MouseCapture);
     }
+
+    [Fact]
+    public void WithOverrides_KeepsOverriddenSizesInTheirRanges()
+    {
+        var effective = Defaults.WithOverrides(new TerminalOverrides { FontSize = 0, Scrollback = int.MaxValue });
+
+        Assert.Equal(SettingRanges.FontSize.Minimum, effective.FontSize);
+        Assert.Equal(SettingRanges.Scrollback.Maximum, effective.Scrollback);
+    }
 }

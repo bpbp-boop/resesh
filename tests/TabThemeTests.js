@@ -34,7 +34,7 @@ test("a session theme override recolors its tab", () => {
   assert.doesNotMatch(tabVisuals, /WithOverrides|Session\.Overrides/);
   assert.match(tabVisuals, /ThemeVisualPalette\.For\(appTheme\)/);
   // The view model picks the theme; the header binds every color to that one choice.
-  assert.match(viewModel, /public string TabTheme =>\s*_session\.Overrides\?\.Theme is \{ \} theme \? _environment\.ResolveTheme\(theme\) : _appTheme;/);
+  assert.match(viewModel, /public string TabTheme =>\s*_environment\.ResolveTheme\(_session\.Overrides\.EffectiveTheme\(_appTheme\)\);/);
   assert.doesNotMatch(xaml, /PresentationValues\.(?:TabHeader\w+|FocusedTab\w+)\(AppTheme/);
   // Saving the session or changing the app theme both repaint the header.
   assert.match(viewModel, /OnPropertyChanged\(nameof\(ColorTag\)\);\s*OnPropertyChanged\(nameof\(TabTheme\)\)/);

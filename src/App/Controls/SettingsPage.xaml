@@ -132,8 +132,6 @@
                         <NumberBox
                             x:Name="FontSizeBox"
                             MinWidth="160"
-                            Minimum="8"
-                            Maximum="32"
                             SpinButtonPlacementMode="Compact"
                             Value="{x:Bind ViewModel.FontSize, Mode=TwoWay}"
                             AutomationProperties.Name="Font size"
@@ -145,8 +143,6 @@
                         <NumberBox
                             x:Name="ScrollbackBox"
                             MinWidth="160"
-                            Minimum="1000"
-                            Maximum="100000"
                             SmallChange="1000"
                             SpinButtonPlacementMode="Compact"
                             Value="{x:Bind ViewModel.Scrollback, Mode=TwoWay}"
@@ -346,8 +342,6 @@
                         <NumberBox
                             x:Name="HistoryDaysBox"
                             MinWidth="160"
-                            Minimum="1"
-                            Maximum="3650"
                             SpinButtonPlacementMode="Compact"
                             Value="{x:Bind ViewModel.CommandHistoryDays, Mode=TwoWay}"
                             AutomationProperties.Name="Keep history for (days)"

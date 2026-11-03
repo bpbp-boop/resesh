@@ -45,16 +45,8 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
         FolderBox.ItemsSource = localFolderPaths.ToList();
         FolderBox.Text = FolderPaths.Normalize(existing?.FolderPath ?? defaultFolder);
 
-        foreach (var (name, _) in SessionEditDialog.ColorChoices)
-            ColorBox.Items.Add(name);
-        ColorBox.SelectedIndex = Math.Max(0, Array.FindIndex(SessionEditDialog.ColorChoices, c => c.Hex == existing?.ColorTag));
-
+        AppearanceForm.Load(existing);
         PopulateIconPicker(existing?.Icon);
-
-        OverrideThemeBox.ItemsSource = new[] { new ThemeChoice("", "Use app setting") }.Concat(ThemeCatalog.All).ToList();
-        OverrideThemeBox.SelectedIndex = 0;
-        OverrideMouseBox.ItemsSource = MouseCaptureChoice.OverrideNames();
-        OverrideMouseBox.SelectedIndex = MouseCaptureChoice.OverrideIndex(existing?.Overrides?.MouseCapture);
 
         MakeDefaultBox.IsChecked = isCurrentDefault;
         MakeDefaultBox.IsEnabled = !isCurrentDefault; // unset by picking another default, not here
@@ -71,28 +63,6 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
                 ? ""
                 : string.Join(Environment.NewLine, target.Environment.Select(kv => $"{kv.Key}={kv.Value}"));
             NotesBox.Text = existing.Notes;
-            if (existing.Overrides is { } overrides)
-            {
-                OverrideThemeBox.SelectedItem = ThemeCatalog.All.FirstOrDefault(theme => theme.Id == overrides.Theme)
-                    ?? OverrideThemeBox.Items[0];
-                OverrideFontFamilyBox.FamilyName = overrides.FontFamily ?? "";
-                if (overrides.FontSize is { } fontSize)
-                    OverrideFontSizeBox.Value = fontSize;
-                if (overrides.Scrollback is { } scrollback)
-                    OverrideScrollbackBox.Value = scrollback;
-                OverrideRecordingBox.SelectedIndex = overrides.AlwaysRecord switch
-                {
-                    true => 1,
-                    false => 2,
-                    null => 0,
-                };
-                OverrideHistoryBox.SelectedIndex = overrides.KeepCommandHistory switch
-                {
-                    true => 1,
-                    false => 2,
-                    null => 0,
-                };
-            }
         }
 
         NameBox.TextChanged += (_, _) => ClearFieldError(NameBox, NameError);
@@ -105,17 +75,7 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
         Opened += (_, _) => DispatcherQueue.TryEnqueue(() => InitialFocus(initialTarget)?.Focus(FocusState.Programmatic));
     }
 
-    private Control? InitialFocus(SessionSettingsTarget target) => target switch
-    {
-        SessionSettingsTarget.Theme => OverrideThemeBox,
-        SessionSettingsTarget.FontFamily => OverrideFontFamilyBox.FocusTarget,
-        SessionSettingsTarget.FontSize => OverrideFontSizeBox,
-        SessionSettingsTarget.Scrollback => OverrideScrollbackBox,
-        SessionSettingsTarget.MouseCapture => OverrideMouseBox,
-        SessionSettingsTarget.AlwaysRecord => OverrideRecordingBox,
-        SessionSettingsTarget.CommandHistory => OverrideHistoryBox,
-        _ => NameBox,
-    };
+    private Control? InitialFocus(SessionSettingsTarget target) => AppearanceForm.FocusTarget(target) ?? NameBox;
 
     private void SectionBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
@@ -203,37 +163,16 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
             return;
         }
 
-        var overrides = new TerminalOverrides
+        // Edits the saved profile rather than building a new one, so whatever this dialog
+        // doesn't show (paste delays, terminal type, anything a later version adds) survives.
+        var basis = _existing ?? new Session { Id = Guid.NewGuid() };
+        Result = AppearanceForm.ApplyTo(basis with
         {
-            Theme = (OverrideThemeBox.SelectedItem as ThemeChoice)?.Id is { Length: > 0 } theme ? theme : null,
-            FontFamily = string.IsNullOrWhiteSpace(OverrideFontFamilyBox.FamilyName) ? null : OverrideFontFamilyBox.FamilyName.Trim(),
-            FontSize = double.IsNaN(OverrideFontSizeBox.Value) ? null : (int)OverrideFontSizeBox.Value,
-            Scrollback = double.IsNaN(OverrideScrollbackBox.Value) ? null : (int)OverrideScrollbackBox.Value,
-            MouseCapture = MouseCaptureChoice.OverrideAt(OverrideMouseBox.SelectedIndex),
-            AlwaysRecord = OverrideRecordingBox.SelectedIndex switch
-            {
-                1 => true,
-                2 => false,
-                _ => null,
-            },
-            KeepCommandHistory = OverrideHistoryBox.SelectedIndex switch
-            {
-                1 => true,
-                2 => false,
-                _ => null,
-            },
-            EnabledRules = _existing?.Overrides?.EnabledRules,
-            DisabledRules = _existing?.Overrides?.DisabledRules,
-        };
-        Result = new Session
-        {
-            Id = _existing?.Id ?? Guid.NewGuid(),
             Kind = SessionKind.Local,
             ShellIntegration = ShellIntegrationSwitch.IsOn ? ShellIntegrationMode.Automatic : ShellIntegrationMode.Disabled,
-            BuiltIn = _existing?.BuiltIn ?? false,
             Name = NameBox.Text.Trim(),
             FolderPath = FolderPaths.Normalize(FolderBox.Text),
-            Local = new LocalTarget
+            Local = (basis.Local ?? new LocalTarget()) with
             {
                 Executable = ExecutableBox.Text.Trim(),
                 Arguments = ArgumentsBox.Text
@@ -242,11 +181,8 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
                 StartingDirectory = StartDirBox.Text.Trim(),
                 Environment = environment.Count > 0 ? environment : null,
             },
-            ColorTag = SessionEditDialog.ColorChoices[Math.Max(0, ColorBox.SelectedIndex)].Hex,
             Icon = SelectedIcon,
-            Agent = _existing?.Agent,
             Notes = NotesBox.Text,
-            Overrides = overrides.IsEmpty ? null : overrides,
-        };
+        });
     }
 }

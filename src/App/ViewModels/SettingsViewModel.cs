@@ -76,6 +76,8 @@ public sealed partial class SettingsViewModel : ObservableObject
     private static int? Whole(double value, int minimum, int maximum) =>
         double.IsNaN(value) ? null : Math.Clamp((int)value, minimum, maximum);
 
+    private static int? Whole(double value, IntRange range) => Whole(value, range.Minimum, range.Maximum);
+
     private static string? NonBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     // ---- General ----
@@ -124,13 +126,13 @@ public sealed partial class SettingsViewModel : ObservableObject
     public double FontSize
     {
         get => Current.FontSize;
-        set => Save(value, s => s with { FontSize = Whole(value, 8, 32) ?? s.FontSize }, () => FontSize);
+        set => Save(value, s => s with { FontSize = Whole(value, SettingRanges.FontSize) ?? s.FontSize }, () => FontSize);
     }
 
     public double Scrollback
     {
         get => Current.Scrollback;
-        set => Save(value, s => s with { Scrollback = Whole(value, 1000, 100000) ?? s.Scrollback }, () => Scrollback);
+        set => Save(value, s => s with { Scrollback = Whole(value, SettingRanges.Scrollback) ?? s.Scrollback }, () => Scrollback);
     }
 
     public bool CopyOnSelect
@@ -248,7 +250,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     public double CommandHistoryDays
     {
         get => Current.CommandHistoryDays;
-        set => Save(value, s => s with { CommandHistoryDays = Whole(value, 1, 3650) ?? s.CommandHistoryDays }, () => CommandHistoryDays);
+        set => Save(value, s => s with { CommandHistoryDays = Whole(value, SettingRanges.CommandHistoryDays) ?? s.CommandHistoryDays }, () => CommandHistoryDays);
     }
 
     public string RecordingDirectory

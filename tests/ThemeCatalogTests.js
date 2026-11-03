@@ -189,8 +189,10 @@ test("the status bar takes a themed chrome surface, not a translucent Fluent lay
 test("global and per-session theme pickers use the shared catalog", () => {
   assert.match(settingsViewModel, /List<ThemeChoice> Themes \{ get; \} = \[\.\. ThemeCatalog\.All\]/);
   assert.match(settingsPage, /ItemsSource="\{x:Bind ViewModel\.Themes\}"/);
-  assert.match(sessionDialog, /Concat\(ThemeCatalog\.All\)/);
-  assert.match(localDialog, /Concat\(ThemeCatalog\.All\)/);
+  // Both session editors show the one shared Appearance form.
+  assert.match(fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "SessionAppearanceForm.xaml.cs"), "utf8"), /Concat\(ThemeCatalog\.All\)/);
+  assert.match(sessionEditXaml, /<controls:SessionAppearanceForm x:Name="AppearanceForm"/);
+  assert.match(localDialogXaml, /<controls:SessionAppearanceForm x:Name="AppearanceForm"/);
 });
 
 test("global theme selection applies immediately in every window", () => {

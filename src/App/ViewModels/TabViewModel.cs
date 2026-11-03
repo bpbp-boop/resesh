@@ -527,7 +527,7 @@ public sealed partial class TabViewModel : ObservableObject
     /// <summary>The theme this tab's header draws with: the session's theme override when it
     /// has one, otherwise the app's.</summary>
     public string TabTheme =>
-        _session.Overrides?.Theme is { } theme ? _environment.ResolveTheme(theme) : _appTheme;
+        _environment.ResolveTheme(_session.Overrides.EffectiveTheme(_appTheme));
 
     /// <summary>e.g. "aes256-gcm@openssh.com • SHA256:…" once connected.</summary>
     public string ConnectionSummary

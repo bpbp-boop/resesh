@@ -262,7 +262,7 @@ public partial class App : Application
     /// pruned even while it is turned off, so the retention promise still holds.</summary>
     internal static void PruneCommandHistory()
     {
-        var days = Math.Clamp(Settings.Current.CommandHistoryDays, 1, 3650);
+        var days = SettingRanges.CommandHistoryDays.Clamp(Settings.Current.CommandHistoryDays);
         _ = Task.Run(() =>
         {
             try { History.Prune(days); }

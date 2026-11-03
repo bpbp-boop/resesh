@@ -25,6 +25,9 @@ public sealed partial class SettingsPage : UserControl
     {
         ViewModel = viewModel;
         InitializeComponent();
+        NumberBoxRanges.Limit(FontSizeBox, SettingRanges.FontSize);
+        NumberBoxRanges.Limit(ScrollbackBox, SettingRanges.Scrollback);
+        NumberBoxRanges.Limit(HistoryDaysBox, SettingRanges.CommandHistoryDays);
         HistoryDescription.Text =
             "Save each finished command with its output, folder, and result on this computer, and search it with "
             + $"{AppShortcuts.Label(ShortcutIds.CommandHistory)}. Output can include secrets that a server prints. "

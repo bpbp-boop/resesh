@@ -670,6 +670,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         string defaultFolder,
         SessionSettingsTarget initialTarget = SessionSettingsTarget.General)
     {
+        existing = Saved(existing);
         var isCurrentDefault = existing is not null && App.Settings.Current.DefaultLocalProfileId == existing.Id;
         var dialog = new LocalProfileEditDialog(
             ViewModel.LocalFolderPathsForPicker, existing, defaultFolder, isCurrentDefault, initialTarget)
@@ -682,8 +683,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
         if (existing is null)
             ViewModel.AddSession(result, null);
+        else if (RebaseOnSaved(existing, result) is { } merged)
+            ViewModel.UpdateSession(merged, null);
         else
-            ViewModel.UpdateSession(result, null);
+            return;
         if (dialog.MakeDefault && App.Settings.Current.DefaultLocalProfileId != result.Id)
             App.SaveSettings(App.Settings.Current with { DefaultLocalProfileId = result.Id });
     }
@@ -1474,10 +1477,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     // ---- Dialog helpers ----
 
     private async Task OpenSessionEditorAsync(Session? existing, string defaultFolder,
-        SessionKind newKind = SessionKind.Ssh)
+        SessionKind newKind = SessionKind.Ssh, string? notice = null,
+        SessionSettingsTarget initialTarget = SessionSettingsTarget.General)
     {
+        existing = Saved(existing);
         var dialog = new SessionEditDialog(ViewModel.FolderPathsForPicker, existing, defaultFolder, App.SshKeys,
-            newKind: newKind)
+            notice, initialTarget, newKind)
         {
             XamlRoot = Root.XamlRoot,
         };
@@ -1487,9 +1492,26 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
         if (existing is null)
             ViewModel.AddSession(result, dialog.Password);
+        else if (RebaseOnSaved(existing, result) is { } merged)
+            ViewModel.UpdateSession(result = merged, dialog.Password);
         else
-            ViewModel.UpdateSession(result, dialog.Password);
-        dialog.SaveProxyPassword();
+            return;
+        dialog.SaveProxyPassword(result);
+    }
+
+    /// <summary>The session as saved now: a tree node, list row or tab can hold an older copy.</summary>
+    private static Session? Saved(Session? session) =>
+        session is not null && App.Store.Find(session.Id) is { } saved ? saved : session;
+
+    /// <summary>An editor's changes applied to the session as saved now, so what changed while
+    /// it was open (a folder moved in another window, an icon suggested on connect) is kept.
+    /// Null, after a notice, when the session was deleted meanwhile: saving would bring it back.</summary>
+    private Session? RebaseOnSaved(Session original, Session edited)
+    {
+        if (App.Store.Find(original.Id) is { } latest)
+            return SessionMerge.Rebase(original, edited, latest);
+        ShowOperationNotice("Changes not saved", $"\"{original.Name}\" was deleted while it was being edited.");
+        return null;
     }
 
     private Task<string?> PromptAsync(string title, string placeholder, string initial) =>

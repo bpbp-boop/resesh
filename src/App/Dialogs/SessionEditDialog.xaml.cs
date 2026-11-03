@@ -28,17 +28,6 @@ public sealed partial class SessionEditDialog : ContentDialog
         public string Label { get; init; } = "";
     }
 
-    internal static readonly (string Name, string? Hex)[] ColorChoices =
-    [
-        ("None", null),
-        ("Red", "#E74856"),
-        ("Orange", "#FF8C00"),
-        ("Yellow", "#FFB900"),
-        ("Green", "#10893E"),
-        ("Blue", "#0078D7"),
-        ("Purple", "#886CE4"),
-    ];
-
     private readonly Session? _existing;
     private readonly Controls.SshAlgorithmPicker _algorithms = new(followsApp: true);
     private readonly SshKeyStore _keyStore;
@@ -56,10 +45,6 @@ public sealed partial class SessionEditDialog : ContentDialog
     {
         InitializeComponent();
         DialogTheme.Apply(this);
-        OverrideThemeBox.ItemsSource = new[] { new ThemeChoice("", "Use app setting") }
-            .Concat(ThemeCatalog.All).ToList();
-        OverrideMouseBox.ItemsSource = MouseCaptureChoice.OverrideNames();
-        OverrideMouseBox.SelectedIndex = MouseCaptureChoice.OverrideIndex(existing?.Overrides?.MouseCapture);
         _existing = existing;
         _keyStore = keyStore;
         TitleText.Text = existing is null ? "New session" : "Edit session";
@@ -78,9 +63,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         FolderBox.ItemsSource = folderPaths.ToList();
         FolderBox.Text = FolderPaths.Normalize(existing?.FolderPath ?? defaultFolder);
 
-        foreach (var (name, _) in ColorChoices)
-            ColorBox.Items.Add(name);
-        ColorBox.SelectedIndex = Math.Max(0, Array.FindIndex(ColorChoices, c => c.Hex == existing?.ColorTag));
+        AppearanceForm.Load(existing);
 
         PopulateIconPicker(existing?.Icon);
         PopulateKeyChoices(existing?.PrivateKeyId);
@@ -136,29 +119,6 @@ public sealed partial class SessionEditDialog : ContentDialog
             NotesBox.Text = existing.Notes;
             PasteLineDelayBox.Value = existing.PasteLineDelay;
             PasteCharacterDelayBox.Value = existing.PasteCharacterDelay;
-
-            if (existing.Overrides is { } overrides)
-            {
-                OverrideThemeBox.SelectedItem = ThemeCatalog.All.FirstOrDefault(theme => theme.Id == overrides.Theme)
-                    ?? OverrideThemeBox.Items[0];
-                OverrideFontFamilyBox.FamilyName = overrides.FontFamily ?? "";
-                if (overrides.FontSize is { } fontSize)
-                    OverrideFontSizeBox.Value = fontSize;
-                if (overrides.Scrollback is { } scrollback)
-                    OverrideScrollbackBox.Value = scrollback;
-                OverrideRecordingBox.SelectedIndex = overrides.AlwaysRecord switch
-                {
-                    true => 1,
-                    false => 2,
-                    null => 0,
-                };
-                OverrideHistoryBox.SelectedIndex = overrides.KeepCommandHistory switch
-                {
-                    true => 1,
-                    false => 2,
-                    null => 0,
-                };
-            }
         }
 
         UpdateLoginFields();
@@ -281,17 +241,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         UpdateAuthFieldVisibility();
     }
 
-    private Control? InitialFocus(SessionSettingsTarget target) => target switch
-    {
-        SessionSettingsTarget.Theme => OverrideThemeBox,
-        SessionSettingsTarget.FontFamily => OverrideFontFamilyBox.FocusTarget,
-        SessionSettingsTarget.FontSize => OverrideFontSizeBox,
-        SessionSettingsTarget.Scrollback => OverrideScrollbackBox,
-        SessionSettingsTarget.MouseCapture => OverrideMouseBox,
-        SessionSettingsTarget.AlwaysRecord => OverrideRecordingBox,
-        SessionSettingsTarget.CommandHistory => OverrideHistoryBox,
-        _ => NameBox,
-    };
+    private Control? InitialFocus(SessionSettingsTarget target) => AppearanceForm.FocusTarget(target) ?? NameBox;
 
     private void PopulateKeyChoices(Guid? selectedId)
     {
@@ -450,12 +400,10 @@ public sealed partial class SessionEditDialog : ContentDialog
             }));
     }
 
-    /// <summary>Stores or clears the proxy password for the saved session. Called by the
-    /// owner after it saves <see cref="Result"/>.</summary>
-    internal void SaveProxyPassword()
+    /// <summary>Stores or clears the proxy password for <paramref name="saved"/>. Called by the
+    /// owner after it saves <see cref="Result"/>, merged with the session as saved.</summary>
+    internal void SaveProxyPassword(Session saved)
     {
-        if (Result is not { } saved)
-            return;
         if (saved.Proxy is not { Username.Length: > 0 })
             App.Credentials.DeleteProxy(saved.Id);
         else if (ProxyPassword is not null)
@@ -690,43 +638,28 @@ public sealed partial class SessionEditDialog : ContentDialog
             args.Cancel = true;
             return;
         }
-        if (ssh && PersistentToggle.IsOn && ShellIntegrationBox.SelectedIndex == 4)
+        var shellIntegration = !ssh ? ShellIntegrationMode.Disabled : ShellIntegrationBox.SelectedIndex switch
         {
-            SetFieldError(PersistentToggle, PersistentError,
-                "Turn off Persistent session to use PowerShell shell integration.");
+            1 => ShellIntegrationMode.Bash,
+            2 => ShellIntegrationMode.Zsh,
+            3 => ShellIntegrationMode.Fish,
+            4 => ShellIntegrationMode.PowerShell,
+            _ => ShellIntegrationMode.Disabled,
+        };
+        if (ssh && PersistentToggle.IsOn && !SessionRules.CanBePersistent(shellIntegration))
+        {
+            SetFieldError(PersistentToggle, PersistentError, SessionRules.PersistentPowerShellConflict);
             SectionBar.SelectedItem = TerminalSection;
             PersistentToggle.Focus(FocusState.Programmatic);
             PersistentToggle.StartBringIntoView();
             args.Cancel = true;
             return;
         }
-        // An all-null overrides object is stored as null so sessions.json stays clean.
-        var overrides = new TerminalOverrides
+        // Edits the saved session rather than building a new one, so whatever this dialog
+        // doesn't show (and anything a later version adds) survives the save.
+        var basis = _existing ?? new Session { Id = Guid.NewGuid() };
+        Result = AppearanceForm.ApplyTo(basis with
         {
-            Theme = (OverrideThemeBox.SelectedItem as ThemeChoice)?.Id is { Length: > 0 } theme ? theme : null,
-            FontFamily = string.IsNullOrWhiteSpace(OverrideFontFamilyBox.FamilyName) ? null : OverrideFontFamilyBox.FamilyName.Trim(),
-            FontSize = double.IsNaN(OverrideFontSizeBox.Value) ? null : (int)OverrideFontSizeBox.Value,
-            Scrollback = double.IsNaN(OverrideScrollbackBox.Value) ? null : (int)OverrideScrollbackBox.Value,
-            MouseCapture = MouseCaptureChoice.OverrideAt(OverrideMouseBox.SelectedIndex),
-            AlwaysRecord = OverrideRecordingBox.SelectedIndex switch
-            {
-                1 => true,
-                2 => false,
-                _ => null,
-            },
-            KeepCommandHistory = OverrideHistoryBox.SelectedIndex switch
-            {
-                1 => true,
-                2 => false,
-                _ => null,
-            },
-            // Highlight deltas are edited from the tab's Highlighting menu, not here — carry them through.
-            EnabledRules = _existing?.Overrides?.EnabledRules,
-            DisabledRules = _existing?.Overrides?.DisabledRules,
-        };
-        Result = new Session
-        {
-            Id = _existing?.Id ?? Guid.NewGuid(),
             Kind = telnet ? SessionKind.Telnet : serial ? SessionKind.Serial : SessionKind.Ssh,
             Name = NameBox.Text.Trim(),
             FolderPath = FolderPaths.Normalize(FolderBox.Text),
@@ -770,24 +703,13 @@ public sealed partial class SessionEditDialog : ContentDialog
                 2 => DetachedSessionAction.EndDetachedAndStartNew,
                 _ => DetachedSessionAction.Ask,
             },
-            ShellIntegration = !ssh ? ShellIntegrationMode.Disabled : ShellIntegrationBox.SelectedIndex switch
-            {
-                1 => ShellIntegrationMode.Bash,
-                2 => ShellIntegrationMode.Zsh,
-                3 => ShellIntegrationMode.Fish,
-                4 => ShellIntegrationMode.PowerShell,
-                _ => ShellIntegrationMode.Disabled,
-            },
+            ShellIntegration = shellIntegration,
             Notes = NotesBox.Text,
-            ColorTag = ColorChoices[Math.Max(0, ColorBox.SelectedIndex)].Hex,
             Icon = SelectedIcon,
-            Agent = _existing?.Agent,
-            CredentialNeeded = _existing?.CredentialNeeded ?? false,
             JumpHostId = via == 1 ? (JumpBox.SelectedItem as JumpChoice)?.Id : null,
             Proxy = proxy,
             Tunnels = !ssh || _tunnels.Count == 0 ? null : _tunnels.ToList(),
-            Overrides = overrides.IsEmpty ? null : overrides,
-        };
+        });
         ProxyPassword = proxy is not null && ProxyPasswordBox.Password.Length > 0 ? ProxyPasswordBox.Password : null;
         Password = ownLogin && auth == AuthMethod.Password && PasswordBox.Password.Length > 0
             ? PasswordBox.Password

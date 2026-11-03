@@ -100,17 +100,19 @@ public sealed record AppSettings
     /// <summary>Also play the system notification sound for those alerts.</summary>
     public bool AgentAlertSound { get; init; }
 
-    /// <summary>These settings with a session's overrides layered on top (null members inherit).</summary>
+    /// <summary>These settings with a session's overrides layered on top (null members inherit).
+    /// Overridden sizes are kept to <see cref="SettingRanges"/>: sessions.json can come from a
+    /// backup or a hand edit, and the terminal must not be asked for a 0-point font.</summary>
     public AppSettings WithOverrides(TerminalOverrides? overrides) =>
         overrides is null
             ? this
             : this with
             {
-                Theme = overrides.Theme ?? Theme,
+                Theme = overrides.EffectiveTheme(Theme),
                 // A session's font goes in front of the app's fallbacks rather than replacing them.
                 FontFamily = FontFamilies.Layer(overrides.FontFamily, FontFamily),
-                FontSize = overrides.FontSize ?? FontSize,
-                Scrollback = overrides.Scrollback ?? Scrollback,
+                FontSize = overrides.FontSize is { } fontSize ? SettingRanges.FontSize.Clamp(fontSize) : FontSize,
+                Scrollback = overrides.Scrollback is { } scrollback ? SettingRanges.Scrollback.Clamp(scrollback) : Scrollback,
                 MouseCapture = overrides.MouseCapture ?? MouseCapture,
                 AlwaysRecord = overrides.AlwaysRecord ?? AlwaysRecord,
                 KeepCommandHistory = overrides.KeepCommandHistory ?? KeepCommandHistory,

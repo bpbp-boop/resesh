@@ -1757,7 +1757,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         theme = App.ResolveTheme(theme);
         _chromePalette = ThemeVisualPalette.For(theme);
         ApplyPaneSplitterTheme();
-        _terminal.ApplyOptions(theme: App.ResolveTheme(Session.Overrides?.Theme ?? theme));
+        _terminal.ApplyOptions(theme: App.ResolveTheme(Session.Overrides.EffectiveTheme(theme)));
     }
 
     /// <summary>Pushes layout and interaction settings into the terminal, with this

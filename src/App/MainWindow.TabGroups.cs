@@ -865,17 +865,7 @@ public sealed partial class MainWindow
         var notice = tab.State == TabConnectionState.Connected
             ? "This tab is connected — changes to host, port, authentication, or network apply on the next connect."
             : null;
-        var dialog = new SessionEditDialog(
-            ViewModel.FolderPathsForPicker, current, current.FolderPath, App.SshKeys, notice, initialTarget)
-        {
-            XamlRoot = Root.XamlRoot,
-        };
-        await dialog.ShowModalAsync();
-        if (dialog.Result is { } result)
-        {
-            ViewModel.UpdateSession(result, dialog.Password);
-            dialog.SaveProxyPassword();
-        }
+        await OpenSessionEditorAsync(current, current.FolderPath, notice: notice, initialTarget: initialTarget);
     }
 
     /// <remarks>Callers fire and forget. One lock or unlock prompt per tab at a time; the tab
