@@ -304,13 +304,6 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         tab.TitleOverride = title;
     }
 
-    /// <summary>Removes and disposes the tab. Collapsing empty groups is the window's job.</summary>
-    public void CloseTab(TabViewModel tab)
-    {
-        DetachTab(tab);
-        (tab.View as IDisposable)?.Dispose();
-    }
-
     public void CloseAllTabs()
     {
         foreach (var group in Groups.Concat(BackgroundGroups))

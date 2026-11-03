@@ -664,6 +664,58 @@ public sealed class MainViewModelCommandTests : IDisposable
         Assert.DoesNotContain("Sites/North", _store.Folders);
     }
 
+    // ---- Closing ----
+
+    [Fact]
+    public void ClosePlanFollowsTheSettingAndThePin()
+    {
+        var window = Window();
+        var tab = Open(window, Ssh("router"), TabConnectionState.Connected);
+
+        Assert.Equal(TabCloseKind.Now, window.PlanClose(tab, confirmActiveSessions: false).Kind);
+        Assert.Equal(
+            new TabClosePlan(TabCloseKind.Confirm, "Close Tab", "Close \"router\"? The session is still connected.", "Close"),
+            window.PlanClose(tab, confirmActiveSessions: true));
+
+        tab.IsPinned = true;
+        Assert.Equal(
+            new TabClosePlan(TabCloseKind.ConfirmPinned, "Tab Is Pinned", "\"router\" is pinned. The session is still connected.", "Unpin and Close"),
+            window.PlanClose(tab, confirmActiveSessions: false));
+
+        tab.MarkDisconnected();
+        Assert.Equal("\"router\" is pinned.", window.PlanClose(tab, confirmActiveSessions: true).Message);
+    }
+
+    [Fact]
+    public void ClosePlanOffersToEndAnAttachedPersistentShell()
+    {
+        var window = Window();
+        var tab = Open(window, Ssh("router") with { Persistent = true }, TabConnectionState.Connecting);
+        tab.MarkConnected(remoteSessionSlot: 1);
+
+        Assert.Equal(
+            new TabClosePlan(TabCloseKind.ConfirmPersistent, "Close Tab", "Close \"router\"?", "Close Tab"),
+            window.PlanClose(tab, confirmActiveSessions: true));
+
+        // Without a terminal there is no shell to end; the plain question explains why it stays.
+        _window.Terminals.Remove(tab);
+        Assert.Equal(
+            "Close \"router\"? The remote session keeps running (persistent) — connecting again resumes it.",
+            window.PlanClose(tab, confirmActiveSessions: true).Message);
+    }
+
+    [Fact]
+    public void AppPagesCloseWithoutAsking()
+    {
+        var window = Window();
+        var tab = Open(window, Ssh("router"), TabConnectionState.Connected);
+        tab.IsPinned = true;
+        var welcome = TabViewModel.CreateAppPage(AppPage.Welcome, Environment());
+
+        Assert.Equal(TabCloseKind.Now, window.PlanClose(welcome, confirmActiveSessions: true).Kind);
+        Assert.Equal("Close 2 tab(s)? 1 of them is still connected.", MainViewModel.CloseManyMessage([tab, welcome], "tab(s)"));
+    }
+
     [Fact]
     public void RenamingATabToItsShownHeaderKeepsFollowingTheSession()
     {
