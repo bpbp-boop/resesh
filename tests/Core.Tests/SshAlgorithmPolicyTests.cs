@@ -189,4 +189,96 @@ public sealed class SshAlgorithmPolicyTests
     [InlineData("curve25519-sha256", false)]
     public void Legacy_MarksOldAlgorithms(string name, bool legacy) =>
         Assert.Equal(legacy, SshAlgorithmPolicy.IsLegacy(name));
+    // ---- OpenSSH options (SSHFS) ----
+
+    private static IReadOnlyList<string> OpenSshOptions(
+        Session session, string? trusted, Func<SshAlgorithmKind, IReadOnlyCollection<string>?> known)
+    {
+        var previous = SshAlgorithmPolicy.AppDefaultsSource;
+        try
+        {
+            SshAlgorithmPolicy.AppDefaultsSource = null;
+            return SshAlgorithmPolicy.OpenSshOptions(session, trusted, known);
+        }
+        finally
+        {
+            SshAlgorithmPolicy.AppDefaultsSource = previous;
+        }
+    }
+
+    private static IReadOnlyCollection<string> Everything(SshAlgorithmKind kind) => SshAlgorithmPolicy.Supported(kind);
+
+    private static string Option(IReadOnlyList<string> options, string name) =>
+        Assert.Single(options, option => option.StartsWith(name + "=", StringComparison.Ordinal))[(name.Length + 1)..];
+
+    [Fact]
+    public void OpenSshOptions_OfferWhatOurConnectionsOffer_InSshNetOrder()
+    {
+        var session = new Session { Name = "router", Host = "router", Algorithms = new SshAlgorithms { DisabledCiphers = ["aes128-ctr"] } };
+
+        var options = OpenSshOptions(session, null, Everything);
+
+        Assert.Equal(string.Join(',', SshAlgorithmPolicy.Offered(SshAlgorithmKind.Cipher, session.Algorithms, null)), Option(options, "Ciphers"));
+        Assert.DoesNotContain("aes128-ctr", Option(options, "Ciphers").Split(','));
+        // Legacy algorithms stay on by default, as for the terminal.
+        Assert.Contains("ssh-rsa", Option(options, "HostKeyAlgorithms").Split(','));
+        Assert.Equal(string.Join(',', SshAlgorithmPolicy.Supported(SshAlgorithmKind.KeyExchange)), Option(options, "KexAlgorithms"));
+        Assert.Equal(string.Join(',', SshAlgorithmPolicy.Supported(SshAlgorithmKind.Mac)), Option(options, "MACs"));
+    }
+
+    [Fact]
+    public void OpenSshOptions_DropNamesTheClientDoesNotKnow()
+    {
+        var session = new Session { Name = "web", Host = "web" };
+        IReadOnlyCollection<string>? Known(SshAlgorithmKind kind) => kind == SshAlgorithmKind.KeyExchange
+            ? ["curve25519-sha256", "diffie-hellman-group14-sha256", "not-in-ssh-net"]
+            : Everything(kind);
+
+        var kex = Option(OpenSshOptions(session, null, Known), "KexAlgorithms").Split(',');
+
+        Assert.Equal(["curve25519-sha256", "diffie-hellman-group14-sha256"],
+            SshAlgorithmPolicy.Supported(SshAlgorithmKind.KeyExchange).Intersect(kex));
+        Assert.Equal(2, kex.Length);
+    }
+
+    [Fact]
+    public void OpenSshOptions_WithoutTheClientsList_OnlyRemoveWhatIsOff()
+    {
+        var session = new Session { Name = "web", Host = "web", Algorithms = new SshAlgorithms { DisabledMacs = ["hmac-sha1"] } };
+
+        var options = OpenSshOptions(session, null, _ => null);
+
+        Assert.Equal(["MACs=-hmac-sha1"], options);
+    }
+
+    [Fact]
+    public void OpenSshOptions_OfferOnlyTheTrustedHostKeyType()
+    {
+        var session = new Session { Name = "web", Host = "web" };
+
+        var hostKeys = Option(OpenSshOptions(session, "ssh-rsa", Everything), "HostKeyAlgorithms").Split(',');
+
+        Assert.NotEmpty(hostKeys);
+        Assert.All(hostKeys, name => Assert.True(SshHostKeyTypes.SameKey(name, "ssh-rsa"), name));
+        Assert.Contains("rsa-sha2-512", hostKeys);
+    }
+
+    [Fact]
+    public void OpenSshOptions_RefuseWhenTheTrustedTypeIsTurnedOff()
+    {
+        var off = SshAlgorithmPolicy.Supported(SshAlgorithmKind.HostKey).Where(name => SshHostKeyTypes.SameKey(name, "ssh-ed25519")).ToList();
+        var session = new Session { Name = "web", Host = "web", Algorithms = new SshAlgorithms { DisabledHostKeys = off } };
+
+        var failure = Assert.Throws<SshSessionException>(() => OpenSshOptions(session, "ssh-ed25519", Everything));
+        Assert.Equal(SshFailureKind.HostKeyRejected, failure.Kind);
+    }
+
+    [Fact]
+    public void OpenSshOptions_RefuseWhenTheClientKnowsNoneLeftOn()
+    {
+        var session = new Session { Name = "web", Host = "web" };
+
+        Assert.Throws<SshSessionException>(() => OpenSshOptions(
+            session, null, kind => kind == SshAlgorithmKind.Cipher ? ["arcfour"] : Everything(kind)));
+    }
 }

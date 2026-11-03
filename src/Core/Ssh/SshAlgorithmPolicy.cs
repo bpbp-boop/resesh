@@ -140,6 +140,62 @@ public static class SshAlgorithmPolicy
                 dictionary.Remove(name);
     }
 
+    // ---- OpenSSH options (SSHFS) ----
+
+    /// <summary>The OpenSSH option each kind is set with.</summary>
+    public static string OpenSshOption(SshAlgorithmKind kind) => kind switch
+    {
+        SshAlgorithmKind.KeyExchange => "KexAlgorithms",
+        SshAlgorithmKind.Cipher => "Ciphers",
+        SshAlgorithmKind.Mac => "MACs",
+        _ => "HostKeyAlgorithms",
+    };
+
+    /// <summary>
+    /// <c>-o</c> options that make an OpenSSH client (SSHFS-Win's) offer what a connection of
+    /// ours offers for <paramref name="session"/>: the same algorithms, less any that client
+    /// does not know (<paramref name="known"/> answers from its <c>ssh -Q</c>; an unknown name
+    /// in a list makes OpenSSH refuse to start). SSH.NET's names are OpenSSH's. When the
+    /// client's list is unavailable (null) only what is turned off is removed, with
+    /// OpenSSH's <c>-list</c>, which ignores names it does not know.
+    /// Host keys are limited to the trusted key's type: OpenSSH stops preferring the type it
+    /// has a key for once <c>HostKeyAlgorithms</c> is set, and the mount trusts only that key.
+    /// </summary>
+    /// <exception cref="SshSessionException">A kind has nothing left to offer.</exception>
+    public static IReadOnlyList<string> OpenSshOptions(
+        Session session, string? trustedKeyType, Func<SshAlgorithmKind, IReadOnlyCollection<string>?> known)
+    {
+        var app = AppDefaults;
+        var options = new List<string>();
+        foreach (var kind in Kinds)
+        {
+            var offered = Checked(kind, session, app);
+            if (kind == SshAlgorithmKind.HostKey && trustedKeyType is not null)
+            {
+                offered = offered.Where(name => SshHostKeyTypes.SameKey(name, trustedKeyType)).ToList();
+                if (offered.Count == 0)
+                    throw new SshSessionException(SshFailureKind.HostKeyRejected,
+                        $"{session.Host} is trusted by its {SshHostKeyTypes.Describe(trustedKeyType)} host key, but that "
+                        + "type is turned off for this session. Turn it back on in the session's Advanced settings or in "
+                        + "Settings › Identities & Keys › SSH algorithms.");
+            }
+            var names = known(kind);
+            if (names is null)
+            {
+                var off = Supported(kind).Except(offered, StringComparer.Ordinal).ToList();
+                if (off.Count > 0)
+                    options.Add($"{OpenSshOption(kind)}=-{string.Join(',', off)}");
+                continue;
+            }
+            var usable = offered.Where(name => names.Contains(name)).ToList();
+            if (usable.Count == 0)
+                throw new SshSessionException(SshFailureKind.Other,
+                    $"SSHFS-Win's ssh supports none of the {Title(kind).ToLowerInvariant()} algorithms turned on for {session.Name}.");
+            options.Add($"{OpenSshOption(kind)}={string.Join(',', usable)}");
+        }
+        return options;
+    }
+
     // ---- OpenSSH lists (import) ----
 
     /// <summary>The on/off choices an OpenSSH config's algorithm options amount to; null when
