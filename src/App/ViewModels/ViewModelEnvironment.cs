@@ -11,7 +11,13 @@ public sealed class ViewModelEnvironment
     public required Func<Session, bool> IsSessionVisible { get; init; }
     public required Action<TabViewModel> ApplySessionSettings { get; init; }
     public required Action<Exception> ReportError { get; init; }
-    public Action<MainViewModel> SessionsChanged { get; init; } = _ => { };
+
+    /// <summary>Runs an action on the window's UI thread: at once when already on it.
+    /// Session store changes can be saved from any thread.</summary>
+    public Action<Action> RunOnUiThread { get; init; } = action => action();
+
+    /// <summary>Saved sessions were deleted; references kept elsewhere (saved workspaces) drop them.</summary>
+    public Action<IReadOnlyCollection<Guid>> SessionsDeleted { get; init; } = _ => { };
 
     public Func<IReadOnlyList<Guid>> RecentSessionIds { get; init; } = () => [];
     public Action<IReadOnlyList<Guid>> SaveRecentSessionIds { get; init; } = _ => { };

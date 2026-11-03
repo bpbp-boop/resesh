@@ -34,7 +34,6 @@ public sealed class ImportedSshKeyTests
                 Assert.Equal(AuthMethod.PrivateKey, session.AuthMethod);
                 Assert.Equal(key.Id, session.PrivateKeyId);
                 Assert.Null(session.PrivateKeyPath);
-                Assert.False(session.CredentialNeeded);
             });
             Assert.Equal((0, 2), SecureCrtImporter.Commit(store, candidates, keys));
             Assert.Single(keys.Keys);

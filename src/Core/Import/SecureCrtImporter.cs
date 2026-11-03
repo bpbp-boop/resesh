@@ -13,7 +13,7 @@ public sealed record ImportCandidate
     public string FolderPath { get; init; } = "";
     public string RelativePath { get; init; } = "";
     public string Host { get; init; } = "";
-    public int Port { get; init; } = 22;
+    public int Port { get; init; } = SessionEndpoint.DefaultSshPort;
     public string Username { get; init; } = "";
     public string Protocol { get; init; } = "";
     public string? PrivateKeyPath { get; init; }
@@ -56,7 +56,8 @@ public sealed record ImportCandidate
     public const string SerialProtocol = "SERIAL";
 
     /// <summary>The port to assume when the source stores none.</summary>
-    public static int DefaultPort(string protocol) => protocol == TelnetProtocol ? 23 : 22;
+    public static int DefaultPort(string protocol) =>
+        SessionEndpoint.DefaultPort(protocol == TelnetProtocol ? SessionKind.Telnet : SessionKind.Ssh);
 }
 
 public sealed record ImportScanResult
@@ -377,28 +378,37 @@ public static class SecureCrtImporter
         return true;
     }
 
-    /// <summary>
-    /// Adds the selected candidates (SSH or telnet, from any importer) to the store. A
-    /// candidate whose name+host+port already
-    /// exists is skipped. Returns (imported, duplicatesSkipped).
-    /// </summary>
     /// <summary>True when a session with the candidate's name, host, and port already exists.</summary>
     public static bool IsDuplicate(SessionStore store, ImportCandidate candidate) =>
-        store.Sessions.Any(s =>
+        IsDuplicate(store.Sessions, candidate);
+
+    private static bool IsDuplicate(IEnumerable<Session> sessions, ImportCandidate candidate) =>
+        sessions.Any(s =>
             s.Name.Equals(candidate.Name, StringComparison.OrdinalIgnoreCase)
             && (candidate.IsSerial
                 ? s.IsSerial && string.Equals(s.Serial?.PortName, candidate.Serial!.PortName, StringComparison.OrdinalIgnoreCase)
                 : s.Host.Equals(candidate.Host, StringComparison.OrdinalIgnoreCase) && s.Port == candidate.Port));
 
-    /// <summary>Adds the selected candidates, skipping duplicates. With an identity plan,
-    /// sessions sharing a login use one identity (created or reused) instead of their own.</summary>
+    /// <summary>
+    /// Adds the selected candidates (SSH, telnet or serial, from any importer), skipping any
+    /// whose name and endpoint already exist. With an identity plan, sessions sharing a login
+    /// use one identity (created or reused) instead of their own. Key files are registered and
+    /// new identities saved first, then every session, jump link and folder identity in one
+    /// write; if that fails, the keys and identities made for it are removed again, so a
+    /// failed import leaves neither sessions pointing at nothing nor identities nobody uses.
+    /// The plan is rechecked here: an identity it reuses that has since been deleted is
+    /// created again rather than referenced. Returns (imported, duplicatesSkipped).
+    /// </summary>
     public static (int Imported, int Duplicates) Commit(SessionStore store, IEnumerable<ImportCandidate> selected,
         SshKeyStore? keys = null, Identities.ImportIdentityPlan? plan = null, IdentityStore? identities = null)
     {
         var imported = 0;
         var duplicates = 0;
         var identityIds = new Dictionary<string, Guid>();
+        var newIdentities = new List<Identity>();
+        var newKeyIds = new List<Guid>();
         var added = new List<(Session Session, string? JumpHostName)>();
+        var existing = store.Sessions;
 
         void Add(ImportCandidate candidate, Session session)
         {
@@ -407,8 +417,17 @@ public static class SecureCrtImporter
                 Proxy = session.Kind == SessionKind.Ssh ? candidate.Proxy : null,
                 Algorithms = session.Kind == SessionKind.Ssh && candidate.Algorithms is { IsEmpty: false } ? candidate.Algorithms : null,
             };
-            store.Add(session);
             added.Add((session, candidate.JumpHostName));
+        }
+
+        Guid RegisterKey(string path)
+        {
+            var knownKeys = (keys ?? throw new InvalidOperationException("An SSH key store is required to import keys."))
+                .Keys.Select(key => key.Id).ToHashSet();
+            var key = keys.RegisterExternal(path, allowMissing: true);
+            if (!knownKeys.Contains(key.Id))
+                newKeyIds.Add(key.Id);
+            return key.Id;
         }
 
         Guid IdentityFor(Identities.ImportLogin login)
@@ -417,133 +436,157 @@ public static class SecureCrtImporter
                 return known;
             var suggestion = plan!.Suggestions.First(s => s.Login.Key == login.Key);
             Guid id;
-            if (suggestion.Existing is { } existing)
-                id = existing.Id;
+            if (suggestion.Existing is { } reused && identities!.Find(reused.Id) is not null)
+                id = reused.Id;
             else
             {
-                var key = login.UsesKey
-                    ? (keys ?? throw new InvalidOperationException("An SSH key store is required to import keys."))
-                        .RegisterExternal(login.KeyPath, allowMissing: true)
-                    : null;
-                id = identities!.Add(new Identity
+                var keyId = login.UsesKey ? RegisterKey(login.KeyPath) : (Guid?)null;
+                var identity = new Identity
                 {
                     Name = suggestion.Name,
                     Username = login.Username,
-                    Proof = key is null ? IdentityProof.Password : IdentityProof.Key,
-                    KeyId = key?.Id,
-                }).Id;
+                    Proof = keyId is null ? IdentityProof.Password : IdentityProof.Key,
+                    KeyId = keyId,
+                };
+                newIdentities.Add(identity);
+                id = identity.Id;
             }
             identityIds[login.Key] = id;
             return id;
         }
 
-        foreach (var candidate in selected)
+        try
         {
-            if (IsDuplicate(store, candidate))
+            foreach (var candidate in selected)
             {
-                duplicates++;
-                continue;
-            }
+                if (IsDuplicate(existing.Concat(added.Select(entry => entry.Session)), candidate))
+                {
+                    duplicates++;
+                    continue;
+                }
 
-            if (candidate.IsTelnet)
-            {
-                // Telnet carries no credentials: the server prompts in the terminal.
+                if (candidate.IsTelnet)
+                {
+                    // Telnet carries no credentials: the server prompts in the terminal.
+                    Add(candidate, new Session
+                    {
+                        Kind = SessionKind.Telnet,
+                        Name = candidate.Name,
+                        FolderPath = candidate.FolderPath,
+                        Host = candidate.Host,
+                        Port = candidate.Port,
+                        AuthMethod = AuthMethod.None,
+                    });
+                    imported++;
+                    continue;
+                }
+
+                if (candidate.IsSerial)
+                {
+                    Add(candidate, new Session
+                    {
+                        Kind = SessionKind.Serial,
+                        Name = candidate.Name,
+                        FolderPath = candidate.FolderPath,
+                        Serial = candidate.Serial,
+                        Port = 0,
+                        AuthMethod = AuthMethod.None,
+                    });
+                    imported++;
+                    continue;
+                }
+
+                if (identities is not null && plan?.Choices.GetValueOrDefault(candidate) is
+                    { Kind: not Identities.ImportLoginKind.Own } choice)
+                {
+                    Add(candidate, new Session
+                    {
+                        Name = candidate.Name,
+                        FolderPath = candidate.FolderPath,
+                        Host = candidate.Host,
+                        Port = candidate.Port,
+                        InheritLogin = choice.Kind == Identities.ImportLoginKind.Inherit,
+                        IdentityId = choice.Kind == Identities.ImportLoginKind.Identity ? IdentityFor(choice.Login!) : null,
+                    });
+                    if (choice.Kind == Identities.ImportLoginKind.Inherit && choice.Login is { } inherited
+                        && plan.Suggestions.Any(s => s.Login.Key == inherited.Key))
+                        IdentityFor(inherited);
+                    imported++;
+                    continue;
+                }
+
+                var keyId = !string.IsNullOrWhiteSpace(candidate.PrivateKeyPath)
+                    ? RegisterKey(candidate.PrivateKeyPath)
+                    : (Guid?)null;
+
                 Add(candidate, new Session
                 {
-                    Kind = SessionKind.Telnet,
                     Name = candidate.Name,
                     FolderPath = candidate.FolderPath,
                     Host = candidate.Host,
                     Port = candidate.Port,
-                    AuthMethod = AuthMethod.None,
+                    Username = candidate.Username,
+                    AuthMethod = keyId is null ? AuthMethod.Password : AuthMethod.PrivateKey,
+                    PrivateKeyId = keyId,
                 });
                 imported++;
-                continue;
             }
 
-            if (candidate.IsSerial)
-            {
-                Add(candidate, new Session
-                {
-                    Kind = SessionKind.Serial,
-                    Name = candidate.Name,
-                    FolderPath = candidate.FolderPath,
-                    Serial = candidate.Serial,
-                    Port = 0,
-                    AuthMethod = AuthMethod.None,
-                });
-                imported++;
-                continue;
-            }
-
-            if (identities is not null && plan?.Choices.GetValueOrDefault(candidate) is
-                { Kind: not Identities.ImportLoginKind.Own } choice)
-            {
-                Add(candidate, new Session
-                {
-                    Name = candidate.Name,
-                    FolderPath = candidate.FolderPath,
-                    Host = candidate.Host,
-                    Port = candidate.Port,
-                    InheritLogin = choice.Kind == Identities.ImportLoginKind.Inherit,
-                    IdentityId = choice.Kind == Identities.ImportLoginKind.Identity ? IdentityFor(choice.Login!) : null,
-                });
-                if (choice.Kind == Identities.ImportLoginKind.Inherit && choice.Login is { } inherited
-                    && plan.Suggestions.Any(s => s.Login.Key == inherited.Key))
-                    IdentityFor(inherited);
-                imported++;
-                continue;
-            }
-
-            var key = !string.IsNullOrWhiteSpace(candidate.PrivateKeyPath)
-                ? (keys ?? throw new InvalidOperationException("An SSH key store is required to import keys."))
-                    .RegisterExternal(candidate.PrivateKeyPath, allowMissing: true)
-                : null;
-
-            Add(candidate, new Session
-            {
-                Name = candidate.Name,
-                FolderPath = candidate.FolderPath,
-                Host = candidate.Host,
-                Port = candidate.Port,
-                Username = candidate.Username,
-                AuthMethod = key is null ? AuthMethod.Password : AuthMethod.PrivateKey,
-                PrivateKeyId = key?.Id,
-                CredentialNeeded = key is null,
-            });
-            imported++;
-        }
-
-        // A jump host is named by the source, so it can only be linked once every session
-        // exists: one imported just now, or one saved earlier under that name.
-        var linked = new List<Session>();
-        foreach (var (session, jumpName) in added)
-        {
-            if (jumpName is null || session.Kind == SessionKind.Local)
-                continue;
-            var jump = added.Select(entry => entry.Session).Concat(store.Sessions).FirstOrDefault(other =>
-                other.Kind == SessionKind.Ssh && other.Id != session.Id
-                && (other.Name.Equals(jumpName, StringComparison.OrdinalIgnoreCase)
-                    || other.Host.Equals(jumpName, StringComparison.OrdinalIgnoreCase)));
-            if (jump is not null)
-                linked.Add(session with { JumpHostId = jump.Id });
-        }
-        // Checked against each other as well: a source can name two hosts as each other's jump.
-        var byId = store.Sessions.ToDictionary(session => session.Id);
-        foreach (var session in linked)
-        {
-            if (!Ssh.JumpRoute.WouldLoop(session.Id, session.JumpHostId!.Value, byId.GetValueOrDefault))
+            // A jump host is named by the source, so it can only be linked once every session
+            // is known: one imported just now, or one saved earlier under that name.
+            var byId = existing.ToDictionary(session => session.Id);
+            foreach (var (session, _) in added)
                 byId[session.Id] = session;
-        }
-        store.UpdateMany(linked.Where(session => byId[session.Id].JumpHostId is not null));
+            foreach (var (session, jumpName) in added)
+            {
+                if (jumpName is null || session.Kind == SessionKind.Local)
+                    continue;
+                var jump = added.Select(entry => entry.Session).Concat(existing).FirstOrDefault(other =>
+                    other.Kind == SessionKind.Ssh && other.Id != session.Id
+                    && (other.Name.Equals(jumpName, StringComparison.OrdinalIgnoreCase)
+                        || other.Host.Equals(jumpName, StringComparison.OrdinalIgnoreCase)));
+                // Checked against each other as well: a source can name two hosts as each other's jump.
+                if (jump is not null && !Ssh.JumpRoute.WouldLoop(session.Id, jump.Id, byId.GetValueOrDefault))
+                    byId[session.Id] = session with { JumpHostId = jump.Id };
+            }
 
-        // Attach only identities some imported session uses, and never over a folder's own.
-        foreach (var (folder, login) in plan?.Attachments ?? [])
+            // Attach only identities some imported session uses, and never over a folder's own
+            // (the store keeps a folder's own setting when it merges these).
+            var folderSettings = (plan?.Attachments ?? [])
+                .Where(attachment => identityIds.ContainsKey(attachment.Login.Key))
+                .Select(attachment => new FolderSettings
+                {
+                    Path = attachment.FolderPath,
+                    IdentityId = identityIds[attachment.Login.Key],
+                })
+                .ToList();
+
+            if (newIdentities.Count > 0)
+                identities!.MergeImport(newIdentities);
+            store.ApplyImport(added.Select(entry => byId[entry.Session.Id]), [], [], folderSettings);
+        }
+        catch
         {
-            if (identityIds.TryGetValue(login.Key, out var id) && store.FolderIdentity(folder) is null)
-                store.SetFolderIdentity(folder, id);
+            RemoveCreated(identities, newIdentities, keys, newKeyIds);
+            throw;
         }
 
         return (imported, duplicates);
+    }
+
+    /// <summary>Best effort: what a failed import made for its sessions goes again. A removal
+    /// that fails too leaves an unused identity or key, which the user can delete.</summary>
+    private static void RemoveCreated(IdentityStore? identities, List<Identity> newIdentities, SshKeyStore? keys, List<Guid> newKeyIds)
+    {
+        foreach (var identity in newIdentities)
+        {
+            try { identities?.Remove(identity.Id); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
+        foreach (var keyId in newKeyIds)
+        {
+            try { keys?.Remove(keyId); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
     }
 }

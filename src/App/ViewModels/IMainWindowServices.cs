@@ -93,6 +93,10 @@ public interface IMainWindowServices
     /// <summary>True when this window holds the workspace's tabs, shown or in the background.</summary>
     bool IsWorkspaceOpen(Guid workspaceId);
 
+    /// <summary>True when the workspace's tabs can be added to the shown layout: no window,
+    /// this one included, has it open, so adding opens no connection twice.</summary>
+    bool CanAddWorkspaceToLayout(Guid workspaceId);
+
     /// <summary>The workspace this window shows, or null for Home.</summary>
     Guid? ShownWorkspaceId { get; }
 

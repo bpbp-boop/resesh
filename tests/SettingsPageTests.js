@@ -181,3 +181,78 @@ test("each change rebases onto the live settings", () => {
 test("the tab strip's adapter snippets entry opens Settings on the Agents section", () => {
   assert.match(windowCode, /ShowAgentAdaptersAsync\(\) => ShowSettingsAsync\(GlobalSettingsTarget\.Agents\)/);
 });
+
+test("the SSH algorithm picker follows settings changed in another window", () => {
+  // The picker is built in code, not bound: it must re-read on the view model's notifications
+  // (Refresh raises them with an empty name) and save only the kinds it changed.
+  const build = pageCode.match(/private SshAlgorithmPicker BuildSshAlgorithms\(\)[\s\S]*?\n    }/)?.[0] ?? "";
+  assert.match(build, /ViewModel\.PropertyChanged \+=/);
+  assert.match(build, /string\.IsNullOrEmpty\(e\.PropertyName\) \|\| e\.PropertyName == nameof\(SettingsViewModel\.SshAlgorithms\)/);
+  assert.match(build, /ViewModel\.ChangeSshAlgorithms\(shown, picker\.Value\)/);
+  assert.doesNotMatch(build, /ViewModel\.SshAlgorithms = /);
+});
+
+const targets = read("src", "App", "ViewModels", "SettingsTargets.cs");
+const enumMembers = (name) =>
+  (targets.match(new RegExp(String.raw`public enum ${name}\s*\{([\s\S]*?)\}`))?.[1] ?? "")
+    .split(",").map(member => member.trim()).filter(Boolean);
+const sectionTitles = Object.fromEntries(
+  [...targets.matchAll(/SettingsSection\.(\w+) => "([^"]+)"/g)].map(match => [match[1], match[2]])
+    .concat([["General", targets.match(/_ => "([^"]+)",\s*\};/)?.[1]]]));
+
+test("every Settings target that is not a section has a field to focus", () => {
+  const sections = enumMembers("SettingsSection");
+  const fields = pageCode.match(/FieldOf\(GlobalSettingsTarget target\) => target switch[\s\S]*?\n    };/)?.[0] ?? "";
+  for (const target of enumMembers("GlobalSettingsTarget").filter(member => !sections.includes(member)))
+    assert.match(fields, new RegExp(String.raw`GlobalSettingsTarget\.${target} =>`), target);
+});
+
+test("the Settings page shows the catalog's section titles", () => {
+  assert.equal(Object.keys(sectionTitles).length, enumMembers("SettingsSection").length);
+  for (const [section, title] of Object.entries(sectionTitles)) {
+    const xamlTitle = title.replace(/&/g, "&amp;");
+    assert.match(page, new RegExp(`Content="${xamlTitle}" Tag="${section}"`), section);
+  }
+  // Sections with a heading (Sessions is a full-height table without one) repeat the title.
+  const headings = [...page.matchAll(/<TextBlock Text="([^"]+)" Style="\{StaticResource SectionTitle\}"/g)]
+    .map(match => match[1].replace(/&amp;/g, "&"));
+  assert.ok(headings.length >= 7);
+  for (const heading of headings)
+    assert.ok(Object.values(sectionTitles).includes(heading), heading);
+});
+
+test("text that sends people to Settings names a real section, one way", () => {
+  const sourceFiles = [];
+  const walk = (directory) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      if (entry.isDirectory() && !["bin", "obj"].includes(entry.name))
+        walk(full);
+      else if (/\.(cs|xaml)$/.test(entry.name))
+        sourceFiles.push(full);
+    }
+  };
+  walk(path.join(__dirname, "..", "src"));
+  const titles = Object.values(sectionTitles);
+  const groups = [...page.matchAll(/<TextBlock (?:x:Name="\w+" )?Text="([^"]+)" Style="\{StaticResource GroupHeader\}"/g)]
+    .map(match => match[1].replace(/&amp;/g, "&"));
+  const sessionSections = [...read("src", "App", "Dialogs", "SessionEditDialog.xaml").matchAll(/<SelectorBarItem [^>]*Text="([^"]+)"/g)]
+    .map(match => match[1]);
+  for (const file of sourceFiles) {
+    const text = fs.readFileSync(file, "utf8").replace(/&amp;/g, "&").replace(/&gt;/g, ">");
+    const name = path.relative(path.join(__dirname, ".."), file);
+    // In text, not code comments: "Settings > Sessions" in a doc comment names nothing.
+    for (const line of text.split("\n").filter(line => !/^\s*\/\//.test(line)))
+      assert.doesNotMatch(line, /Settings >/, `${name}: use " › " between Settings sections`);
+    for (const match of text.matchAll(/(Session )?Settings › ([^."{}()]+?)(?: › ([^."{}()]+?))?(?=[."{}()]|\s*$|\s+unless|\s+and)/gm)) {
+      const [, session, section, group] = match;
+      if (session) {
+        assert.ok(sessionSections.includes(section.trim()), `${name}: "${match[0]}" names no session editor section`);
+        continue;
+      }
+      assert.ok(titles.includes(section.trim()), `${name}: "${match[0]}" names no Settings section`);
+      if (group)
+        assert.ok(groups.includes(group.trim()), `${name}: "${match[0]}" names no group in that section`);
+    }
+  }
+});

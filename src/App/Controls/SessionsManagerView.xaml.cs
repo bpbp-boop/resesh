@@ -4,10 +4,10 @@ using Microsoft.UI.Xaml.Input;
 using Resesh.App.Dialogs;
 using Resesh.App.ViewModels;
 using Resesh.Core.Identities;
+using Resesh.Core.Input;
 using Resesh.Core.Models;
 using Resesh.Core.Search;
 using Resesh.Core.Storage;
-using Windows.System;
 
 namespace Resesh.App.Controls;
 
@@ -28,11 +28,8 @@ public sealed class SessionRow
         Folder = session.IsLocal
             ? FolderPaths.Combine("Local", session.FolderPath)
             : session.FolderPath.Length == 0 ? "—" : session.FolderPath;
-        Host = session.IsLocal
-            ? Path.GetFileName(session.Local?.Executable ?? "")
-            : session.IsSerial
-                ? session.Serial?.Describe() ?? ""
-            : session.Port == (session.IsTelnet ? 23 : 22) ? session.Host : $"{session.Host}:{session.Port}";
+        // The Type column names the protocol, so the host needs no prefix.
+        Host = SessionEndpoint.Format(session);
         Login = login switch
         {
             null => "",
@@ -291,20 +288,37 @@ public sealed partial class SessionsManagerView : UserControl
             await EditOneAsync(row.Session);
     }
 
+    /// <summary>The session tree's keys, read from the same table entries, so a key means one
+    /// thing in every list of sessions: Enter connects, F2 edits, Delete deletes.</summary>
     private async void SessionList_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (SessionList.SelectedItems.Count == 0)
+        if (SessionList.SelectedItems.Count == 0
+            || KeyBindings.Find((int)e.Key, AppShortcuts.CurrentModifiers(), ShortcutScope.SessionTree)
+                is not var (binding, _))
+        {
             return;
-        if (e.Key == VirtualKey.Delete)
-        {
-            e.Handled = true;
-            await DeleteSelectedAsync();
         }
-        else if (e.Key is VirtualKey.Enter or VirtualKey.F2)
+        switch (binding.Id)
         {
-            e.Handled = true;
-            await EditSelectedAsync();
+            case ShortcutIds.OpenSelection:
+                e.Handled = true;
+                ConnectSelected();
+                break;
+            case ShortcutIds.EditSelection:
+                e.Handled = true;
+                await EditSelectedAsync();
+                break;
+            case ShortcutIds.DeleteSelection:
+                e.Handled = true;
+                await DeleteSelectedAsync();
+                break;
         }
+    }
+
+    private void ConnectSelected()
+    {
+        foreach (var session in SelectedSessions())
+            ConnectRequested?.Invoke(session);
     }
 
     private void SessionList_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
@@ -318,9 +332,11 @@ public sealed partial class SessionsManagerView : UserControl
 
         var selected = SelectedSessions();
         var menu = new MenuFlyout();
-        void Add(string text, Action action)
+        void Add(string text, Action action, string? shortcutId = null)
         {
             var item = new MenuFlyoutItem { Text = text };
+            if (shortcutId is not null)
+                item.KeyboardAcceleratorTextOverride = AppShortcuts.Label(shortcutId);
             item.Click += (_, _) => action();
             menu.Items.Add(item);
         }
@@ -328,9 +344,9 @@ public sealed partial class SessionsManagerView : UserControl
         {
             foreach (var session in selected)
                 ConnectRequested?.Invoke(session);
-        });
+        }, ShortcutIds.OpenSelection);
         menu.Items.Add(new MenuFlyoutSeparator());
-        Add("Edit…", () => _ = EditSelectedAsync());
+        Add("Edit…", () => _ = EditSelectedAsync(), ShortcutIds.EditSelection);
         var move = new MenuFlyoutSubItem { Text = "Move to" };
         FillMoveItems(move.Items);
         menu.Items.Add(move);
@@ -338,7 +354,7 @@ public sealed partial class SessionsManagerView : UserControl
         FillIdentityItems(identity.Items);
         menu.Items.Add(identity);
         Add("Duplicate", DuplicateSelected);
-        Add("Delete", () => _ = DeleteSelectedAsync());
+        Add("Delete", () => _ = DeleteSelectedAsync(), ShortcutIds.DeleteSelection);
 
         if (args.TryGetPosition(SessionList, out var point))
             menu.ShowAt(SessionList, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Position = point });
@@ -432,8 +448,9 @@ public sealed partial class SessionsManagerView : UserControl
         }
         if (await BulkEditSessionsDialog.EditAsync(XamlRoot, selected) is not { } edit)
             return;
-        var changed = edit.ApplyTo(selected);
-        if (Save(owner => owner.UpdateSessions(changed)))
+        // The rows are copies from when the table was filled; the edit applies to the saved records.
+        IReadOnlyList<Session> changed = [];
+        if (Save(owner => changed = owner.EditSessions(selected.Select(session => session.Id), edit)))
         {
             ShowStatus(InfoBarSeverity.Success, changed.Count == 0
                 ? "The selected sessions already had those settings."
@@ -599,7 +616,8 @@ public sealed partial class SessionsManagerView : UserControl
             if (!await confirm.ConfirmAsync())
                 return;
         }
-        if (Save(owner => owner.UpdateSessions(changed)))
+        // Decided on the rows shown; saved onto the records as they are now.
+        if (Save(owner => changed = owner.EditSessions(selected.Select(session => session.Id), edit)))
             ShowStatus(InfoBarSeverity.Success, $"{Count(changed.Count, "session")} set to {outcome}.{skippedNote}");
     }
 }

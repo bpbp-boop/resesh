@@ -63,6 +63,16 @@ public abstract partial class TerminalSurface : Grid, IDisposable
     public abstract int Columns { get; protected set; }
     public abstract int Rows { get; protected set; }
 
+    /// <summary>The font size drawn now: the configured size plus the user's zoom.</summary>
+    public abstract int ZoomedFontSize { get; }
+
+    /// <summary>One cell's size in device pixels; (0, 0) before the font is measured.</summary>
+    public abstract (int Width, int Height) CellPixelSize { get; }
+
+    /// <summary>Holds the grid at 80 columns whatever the width (a telnet session that asks
+    /// for it), or lets it follow the width again.</summary>
+    public abstract void SetFixed80Columns(bool fixed80Columns);
+
     public abstract Task InitializeAsync();
     public abstract void WriteOutput(ReadOnlySpan<byte> data);
     public abstract void NotifyConnected();
@@ -121,6 +131,13 @@ public abstract partial class TerminalSurface : Grid, IDisposable
         set => _shortcuts = value ?? [];
     }
 
+    /// <summary>A tooltip naming its shortcut, as "Close commands (Ctrl+Shift+O)"; just the text
+    /// when the table has no such shortcut.</summary>
+    internal static string WithShortcut(string text, string id) =>
+        _shortcuts.FirstOrDefault(shortcut => shortcut.Id == id) is { Label.Length: > 0 } shortcut
+            ? $"{text} ({shortcut.Label})"
+            : text;
+
     /// <summary>The shortcut a key press in a terminal matches, if any.</summary>
     internal static (TerminalShortcut Shortcut, int ChordIndex)? MatchShortcut(
         int virtualKey, bool control, bool shift, bool alt)
@@ -170,12 +187,14 @@ public sealed record TerminalKeyChord(int Key, bool Ctrl, bool Shift, bool Alt);
 
 /// <summary>A shortcut the terminal must recognize. <paramref name="Forward"/> shortcuts go to the
 /// window; the others are terminal actions the surface runs itself. <paramref name="WhenSplit"/>
-/// shortcuts only take the key while the window is split; otherwise the shell receives it.</summary>
+/// shortcuts only take the key while the window is split; otherwise the shell receives it.
+/// <paramref name="Label"/> is the chord as the app shows it, for the terminal's own tooltips.</summary>
 public sealed record TerminalShortcut(
     string Id,
     bool Forward,
     bool WhenSplit,
-    IReadOnlyList<TerminalKeyChord> Chords);
+    IReadOnlyList<TerminalKeyChord> Chords,
+    string Label = "");
 
 internal static class TerminalLinkPolicy
 {

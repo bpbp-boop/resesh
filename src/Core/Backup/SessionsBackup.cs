@@ -82,6 +82,10 @@ public sealed record BackupPackage
     /// <summary>Saved identity passwords; only in encrypted backups that include secrets.</summary>
     public IReadOnlyDictionary<Guid, string> IdentitySecrets { get; init; } = new Dictionary<Guid, string>();
 
+    /// <summary>Saved proxy passwords by session id; only in encrypted backups that include
+    /// secrets, and absent from backups made before they were carried.</summary>
+    public IReadOnlyDictionary<Guid, string> ProxySecrets { get; init; } = new Dictionary<Guid, string>();
+
     /// <summary>Remote-tree folder settings (folder identities).</summary>
     public IReadOnlyList<FolderSettings> FolderSettings { get; init; } = [];
 }
@@ -156,8 +160,9 @@ public static class SessionsBackup
         var sessionData = new BackupSessionData
         {
             Sessions = selected,
-            Folders = SelectFolders(sessions.Folders, options.Scope, SessionKind.Ssh),
-            LocalFolders = SelectFolders(sessions.FoldersOf(SessionKind.Local), options.Scope, SessionKind.Local),
+            // Only folders that exist on their own: one implied by its sessions comes back with them.
+            Folders = SelectFolders(sessions.ExplicitFoldersOf(SessionKind.Ssh), options.Scope, SessionKind.Ssh),
+            LocalFolders = SelectFolders(sessions.ExplicitFoldersOf(SessionKind.Local), options.Scope, SessionKind.Local),
             FolderSettings = selectedFolderSettings,
         };
         var manifest = new BackupManifest
@@ -221,6 +226,13 @@ public static class SessionsBackup
                     .ToDictionary(item => item.Id, item => item.Secret!);
                 if (identitySecretData.Count > 0)
                     WriteJson(zip, "identity-secrets.json", identitySecretData);
+                var proxySecretData = selected
+                    .Where(session => session.Proxy is not null)
+                    .Select(session => (session.Id, Secret: credentials.ReadProxy(session.Id)))
+                    .Where(item => item.Secret is not null)
+                    .ToDictionary(item => item.Id, item => item.Secret!);
+                if (proxySecretData.Count > 0)
+                    WriteJson(zip, "proxy-secrets.json", proxySecretData);
             }
         }
 
@@ -321,6 +333,13 @@ public static class SessionsBackup
             var identityIds = identities.Select(identity => identity.Id).ToHashSet();
             if (identitySecrets.Keys.Any(id => !identityIds.Contains(id)))
                 throw new InvalidDataException("The backup contains a password for an unknown identity.");
+            // Absent from backups made before proxy passwords were carried.
+            var proxySecrets = ReadOptional<Dictionary<Guid, string>>(zip, "proxy-secrets.json") ?? [];
+            if (!manifest.IncludesSecrets && proxySecrets.Count > 0)
+                throw new InvalidDataException("The backup proxy secret metadata is inconsistent.");
+            var sessionIds = sessionData.Sessions.Select(session => session.Id).ToHashSet();
+            if (proxySecrets.Keys.Any(id => !sessionIds.Contains(id)))
+                throw new InvalidDataException("The backup contains a proxy password for an unknown session.");
 
             var icons = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in zip.Entries.Where(e => e.FullName.StartsWith("icons/", StringComparison.Ordinal)))
@@ -351,6 +370,7 @@ public static class SessionsBackup
                 Workspaces = ReadOptionalBytes(zip, "workspaces.json"),
                 Identities = identities,
                 IdentitySecrets = identitySecrets,
+                ProxySecrets = proxySecrets,
                 FolderSettings = sessionData.FolderSettings ?? [],
             };
         }
@@ -423,13 +443,25 @@ public static class SessionsBackup
         SshKeyStore sshKeyStore,
         ICredentialService credentials,
         IReadOnlyDictionary<Guid, BackupConflictResolution> resolutions,
-        IdentityStore? identityStore = null)
+        IdentityStore? identityStore = null,
+        WorkspaceStore? workspaceStore = null)
     {
         // Validate opaque archive content before any import-side mutation. Presence means
         // replacement; absence intentionally leaves the target workspace file untouched.
         var importedWorkspaceData = package.Workspaces is null
             ? null
             : WorkspaceStore.ParsePayload(package.Workspaces);
+        if (importedWorkspaceData is not null)
+        {
+            // Workspaces are replaced through their store, so an unreadable file is refused
+            // like any other save: here, before the sessions change, rather than after.
+            if (workspaceStore is null)
+            {
+                workspaceStore = new WorkspaceStore(Path.Combine(dataDirectory, "workspaces.json"));
+                workspaceStore.Load();
+            }
+            workspaceStore.EnsureWritable();
+        }
         var existingKeyIds = sshKeyStore.Keys.Select(key => key.Id).ToHashSet();
         var keyIdMap = sshKeyStore.MergeImport(package.SshKeys);
         // Identities that already exist keep their local definition and password; new ones
@@ -456,6 +488,10 @@ public static class SessionsBackup
         var duplicated = 0;
         var kept = 0;
         var secretsImported = 0;
+        // Written once the sessions are saved, so a failed save leaves every password as it was.
+        var passwords = new Dictionary<Guid, string>();
+        var proxyPasswords = new Dictionary<Guid, string>();
+        var droppedPasswords = new List<Guid>();
 
         foreach (var imported in mappedPackage.Sessions)
         {
@@ -478,6 +514,11 @@ public static class SessionsBackup
                 {
                     target = imported with { Id = conflict.Existing.Id };
                     replaced++;
+                    // As when a session is edited: one that stops using its own password
+                    // loses the stored copy instead of keeping it, unused, under its id.
+                    if (conflict.Existing.UsesOwnPassword && !target.UsesOwnPassword
+                        && !package.Secrets.ContainsKey(imported.Id))
+                        droppedPasswords.Add(target.Id);
                 }
                 else
                 {
@@ -489,10 +530,9 @@ public static class SessionsBackup
             sessions.Add(target);
             idMap[imported.Id] = target.Id;
             if (package.Secrets.TryGetValue(imported.Id, out var secret))
-            {
-                credentials.Write(target.Id, secret);
-                secretsImported++;
-            }
+                passwords[target.Id] = secret;
+            if (package.ProxySecrets.TryGetValue(imported.Id, out var proxySecret))
+                proxyPasswords[target.Id] = proxySecret;
         }
 
         // Jump hosts are references between sessions, so they follow whatever id each
@@ -503,12 +543,28 @@ public static class SessionsBackup
                 sessions[index] = sessions[index] with { JumpHostId = mappedJump };
         }
 
-        sessionStore.ApplyImport(sessions, package.Folders, package.LocalFolders);
+        // Folder logins arrive in the same write as the sessions that inherit them.
+        var folderSettings = identityStore is null
+            ? []
+            : package.FolderSettings
+                .Select(setting => setting with { IdentityId = MapIdentity(setting.IdentityId) })
+                .Where(setting => setting.IdentityId is { } id && identityStore.Find(id) is not null)
+                .ToList();
+        sessionStore.ApplyImport(sessions, package.Folders, package.LocalFolders, folderSettings);
+        foreach (var (sessionId, secret) in passwords)
+        {
+            credentials.Write(sessionId, secret);
+            secretsImported++;
+        }
+        foreach (var (sessionId, secret) in proxyPasswords)
+        {
+            credentials.WriteProxy(sessionId, secret);
+            secretsImported++;
+        }
+        foreach (var sessionId in droppedPasswords)
+            credentials.Delete(sessionId);
         if (identityStore is not null)
         {
-            sessionStore.MergeFolderSettings(package.FolderSettings
-                .Select(setting => setting with { IdentityId = MapIdentity(setting.IdentityId) })
-                .Where(setting => setting.IdentityId is { } id && identityStore.Find(id) is not null));
             foreach (var (sourceId, secret) in package.IdentitySecrets)
             {
                 if (!identityIdMap.TryGetValue(sourceId, out var targetId) || existingIdentityIds.Contains(targetId))
@@ -529,33 +585,22 @@ public static class SessionsBackup
             secretsImported++;
         }
 
+        // Backups made before the key registry name key files on the session. Register them
+        // now, as startup does, so the sessions connect (and edit) without a restart; this
+        // runs after the passwords above, since an old session kept its key passphrase there.
+        sshKeyStore.MigrateLegacySessions(sessionStore, credentials);
+
         var validSessionIds = sessionStore.Sessions.Select(s => s.Id).ToHashSet();
         var remappedWorkspaceData = importedWorkspaceData is null
             ? null
             : WorkspaceStore.RemapReferences(importedWorkspaceData, idMap, validSessionIds);
-        var importedSettings = package.Settings with
-        {
-            PinnedSessionIds = package.Settings.PinnedSessionIds
-                .Select(id => idMap.GetValueOrDefault(id, id))
-                .Where(validSessionIds.Contains)
-                .Distinct()
-                .ToList(),
-            DefaultLocalProfileId = package.Settings.DefaultLocalProfileId is { } defaultId
-                && idMap.GetValueOrDefault(defaultId, defaultId) is var mappedDefault
-                && validSessionIds.Contains(mappedDefault)
-                    ? mappedDefault
-                    : null,
-        };
-        settingsStore.Save(importedSettings);
+        settingsStore.Save(package.Settings.WithSessionIds(id =>
+            idMap.GetValueOrDefault(id, id) is var mapped && validSessionIds.Contains(mapped) ? mapped : null));
         var knownHostsAdded = knownHostsStore.Merge(package.KnownHosts);
         highlightsStore.MergeBackup(package.Highlights);
         ImportFiles(dataDirectory, package);
         if (remappedWorkspaceData is not null)
-        {
-            WorkspaceStore.WriteImported(
-                Path.Combine(dataDirectory, "workspaces.json"),
-                remappedWorkspaceData);
-        }
+            workspaceStore!.ReplaceWithImport(remappedWorkspaceData);
 
         return new BackupImportResult
         {

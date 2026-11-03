@@ -16,6 +16,12 @@ const xaml = fs.readFileSync(
 const visualPalette = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "ThemeVisualPalette.cs"),
   "utf8");
+const themeChrome = fs.readFileSync(
+  path.join(__dirname, "..", "src", "App", "ThemeChrome.cs"),
+  "utf8");
+const appXaml = fs.readFileSync(
+  path.join(__dirname, "..", "src", "App", "App.xaml"),
+  "utf8");
 const terminalSurface = fs.readFileSync(
   path.join(__dirname, "..", "src", "Terminal", "TerminalSurface.cs"),
   "utf8");
@@ -34,7 +40,7 @@ test("a session theme override recolors its tab", () => {
   assert.doesNotMatch(tabVisuals, /WithOverrides|Session\.Overrides/);
   assert.match(tabVisuals, /ThemeVisualPalette\.For\(appTheme\)/);
   // The view model picks the theme; the header binds every color to that one choice.
-  assert.match(viewModel, /public string TabTheme =>\s*_session\.Overrides\?\.Theme is \{ \} theme \? _environment\.ResolveTheme\(theme\) : _appTheme;/);
+  assert.match(viewModel, /public string TabTheme =>\s*_environment\.ResolveTheme\(_session\.Overrides\.EffectiveTheme\(_appTheme\)\);/);
   assert.doesNotMatch(xaml, /PresentationValues\.(?:TabHeader\w+|FocusedTab\w+)\(AppTheme/);
   // Saving the session or changing the app theme both repaint the header.
   assert.match(viewModel, /OnPropertyChanged\(nameof\(ColorTag\)\);\s*OnPropertyChanged\(nameof\(TabTheme\)\)/);
@@ -50,7 +56,9 @@ test("a selected tab in an unfocused split keeps the active surface and gains an
 test("a focused selected tab border follows its session color", () => {
   // Session color wins; otherwise the theme's accent, which defaults to the stock blue.
   assert.match(presentation, /FocusedTabBorderColor\(string appTheme, string\? colorTag\)[\s\S]*?parsed\.A > 0 \? parsed : palette\.Accent/);
-  assert.match(visualPalette, /Hex\(0x0078D4\), 1, Hex\(divider\), Hex\(selection\), false\)/);
+  assert.match(visualPalette, /Accent: chrome\.Accent is \{ \} accent \? Hex\(accent\) : DefaultAccent/);
+  assert.match(visualPalette, /Resources\["SessionDefaultAccentColor"\]/);
+  assert.match(appXaml, /<Color x:Key="SessionDefaultAccentColor">#0078D4<\/Color>/);
   assert.match(xaml, /FocusedAccentVisibility\(IsActive, IsGroupFocused\)[\s\S]*?FocusedTabBorderColor\(TabTheme, ColorTag\)/);
 });
 
@@ -63,8 +71,8 @@ test("an empty tab group does not draw a tab-strip divider", () => {
 });
 
 test("vaporwave emphasizes focus while default themes keep a one-pixel accent", () => {
-  assert.match(visualPalette, /"vaporwave"[\s\S]*?AccentBarThickness = 3/);
-  assert.match(visualPalette, /Hex\(0x0078D4\), 1, Hex\(divider\)/);
+  assert.match(themeChrome, /\["vaporwave"\][\s\S]*?AccentBarThickness = 3/);
+  assert.match(themeChrome, /public double AccentBarThickness \{ get; init; \} = 1;/);
 });
 
 test("inactive tabs in an unfocused split use a dimmer foreground", () => {

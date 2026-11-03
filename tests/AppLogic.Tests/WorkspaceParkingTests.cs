@@ -50,4 +50,19 @@ public sealed class WorkspaceParkingTests
             [TabViewModel.CreateAppPage(AppPage.Settings, Environment)]));
         Assert.False(WorkspaceParking.TakesShownTabs(Saved, Parked(home), [Session()]));
     }
+
+    [Fact]
+    public void AWorkspaceIsAddedToTheLayoutOnlyWhileNoWindowHoldsIt()
+    {
+        Assert.True(WorkspaceParking.CanAddToShownLayout(openHere: false, openElsewhere: false));
+        Assert.False(WorkspaceParking.CanAddToShownLayout(openHere: true, openElsewhere: false));
+        Assert.False(WorkspaceParking.CanAddToShownLayout(openHere: false, openElsewhere: true));
+    }
+
+    [Fact]
+    public void AWorkspaceIsUpdatedFromItsLiveLayoutOnlyWhileThisWindowHoldsIt()
+    {
+        Assert.True(WorkspaceParking.CanUpdateFromLiveLayout(openHere: true));
+        Assert.False(WorkspaceParking.CanUpdateFromLiveLayout(openHere: false));
+    }
 }

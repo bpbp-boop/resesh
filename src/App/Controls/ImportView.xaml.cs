@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Resesh.Core.Identities;
 using Resesh.Core.Import;
+using Resesh.Core.Models;
 using Resesh.Core.Storage;
 
 namespace Resesh.App.Controls;
@@ -59,14 +60,15 @@ public sealed partial class ImportCandidateVm : ImportRow
     {
         get
         {
-            if (Candidate.IsTelnet)
-                return $"telnet {Candidate.Host}" + (Candidate.Port == 23 ? "" : $":{Candidate.Port}");
-            if (Candidate.Serial is { } serial)
-                return $"serial {serial.Describe()}";
-            var target = Candidate.Port == 22 ? Candidate.Host : $"{Candidate.Host}:{Candidate.Port}";
-            var user = Candidate.Username.Length > 0 ? $"{Candidate.Username}@" : "";
-            var key = Candidate.PrivateKeyPath is { Length: > 0 } path ? $" · key {Path.GetFileName(path)}" : "";
-            return $"{user}{target}{key}";
+            var kind = Candidate.IsTelnet ? SessionKind.Telnet
+                : Candidate.Serial is not null ? SessionKind.Serial
+                : SessionKind.Ssh;
+            var target = SessionEndpoint.Format(kind, Candidate.Host, Candidate.Port, Candidate.Serial, null,
+                new() { Username = Candidate.Username, ShowProtocol = true });
+            var key = kind == SessionKind.Ssh && Candidate.PrivateKeyPath is { Length: > 0 } path
+                ? $" · key {Path.GetFileName(path)}"
+                : "";
+            return target + key;
         }
     }
 
@@ -435,6 +437,12 @@ public sealed partial class ImportView : UserControl, IDisposable
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             FooterText.Text = $"Import failed: {exception.Message}";
+        }
+        finally
+        {
+            // Whatever happened, the trees show what the store now holds: a failed import
+            // stays open to retry and never completes, so nothing else would refresh them.
+            App.RefreshSessionsInAllWindows();
         }
     }
 

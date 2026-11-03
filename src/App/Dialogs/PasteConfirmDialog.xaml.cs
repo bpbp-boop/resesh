@@ -13,12 +13,15 @@ public sealed partial class PasteConfirmDialog : ContentDialog
     /// <summary>The "don't ask again" answer, read after the dialog closes.</summary>
     public bool IsDontAskChecked => DontAskBox.IsChecked == true;
 
-    public PasteConfirmDialog(string title, string message, string preview)
+    /// <param name="dontAskText">The opt-out's label, which names where to turn the
+    /// warning back on; the caller takes that from the Settings catalog.</param>
+    public PasteConfirmDialog(string title, string message, string preview, string dontAskText)
     {
         Message = message;
         Preview = preview;
         InitializeComponent();
         Title = title;
+        DontAskBox.Content = dontAskText;
     }
 
     /// <summary>Shows the dialog; true when the user chose Paste.</summary>

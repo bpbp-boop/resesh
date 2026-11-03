@@ -246,7 +246,7 @@ public sealed class SecureCrtImporterTests
     }
 
     [Fact]
-    public void Commit_MarksCredentialNeededAndSkipsDuplicatesOnReimport()
+    public void Commit_SkipsDuplicatesOnReimport()
     {
         var dir = Directory.CreateTempSubdirectory("import-commit-test");
         try
@@ -258,14 +258,12 @@ public sealed class SecureCrtImporterTests
             var (imported, duplicates) = SecureCrtImporter.Commit(store, scan.Importable);
             Assert.Equal(5, imported);
             Assert.Equal(0, duplicates);
-            Assert.All(store.Sessions.Where(s => !s.IsTelnet), s => Assert.True(s.CredentialNeeded));
 
             // Telnet has no credential to capture: the server prompts in the terminal.
             var telnet = store.Sessions.Single(s => s.IsTelnet);
             Assert.Equal(SessionKind.Telnet, telnet.Kind);
             Assert.Equal(("172.16.0.20", 23, "Legacy"), (telnet.Host, telnet.Port, telnet.FolderPath));
             Assert.Equal(AuthMethod.None, telnet.AuthMethod);
-            Assert.False(telnet.CredentialNeeded);
             Assert.Equal("", telnet.Username);
 
             var (reimported, reDuplicates) = SecureCrtImporter.Commit(store, scan.Importable);

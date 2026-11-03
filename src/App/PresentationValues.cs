@@ -150,16 +150,16 @@ public static class PresentationValues
         hasUnseenOutput ? FontWeights.SemiBold : FontWeights.Normal;
 
     public static Windows.UI.Color StateColor(TabConnectionState state, bool hasUnseenOutput) =>
-        state == TabConnectionState.Connected && hasUnseenOutput
-            ? Rgb(0x0078D4)
+        StatusColor(state == TabConnectionState.Connected && hasUnseenOutput
+            ? Status.Info
             : state switch
             {
-                TabConnectionState.Connected => Rgb(0x16C60C),
-                TabConnectionState.Connecting => Rgb(0xFFB900),
-                TabConnectionState.Exited => Rgb(0x8A8A8A),
-                TabConnectionState.Playback or TabConnectionState.Page => Rgb(0x0078D4),
-                _ => Rgb(0xE74856),
-            };
+                TabConnectionState.Connected => Status.Success,
+                TabConnectionState.Connecting => Status.Caution,
+                TabConnectionState.Exited => Status.Neutral,
+                TabConnectionState.Playback or TabConnectionState.Page => Status.Info,
+                _ => Status.Critical,
+            });
 
     /// <summary>The badge's symbol on a 10x10 grid: an exclamation mark, a question mark,
     /// a tick or a cross. Null for the states that show a plain dot. A new geometry each
@@ -179,14 +179,14 @@ public static class PresentationValues
             : (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), path);
     }
 
-    public static Windows.UI.Color AgentBadgeColor(AgentAttention attention) => attention switch
+    public static Windows.UI.Color AgentBadgeColor(AgentAttention attention) => StatusColor(attention switch
     {
-        AgentAttention.Working => Rgb(0x0078D4),
-        AgentAttention.NeedsApproval or AgentAttention.NeedsAnswer => Rgb(0xFFB900),
-        AgentAttention.Complete => Rgb(0x16C60C),
-        AgentAttention.Failed => Rgb(0xE74856),
-        _ => Rgb(0x9E9E9E),
-    };
+        AgentAttention.Working => Status.Info,
+        AgentAttention.NeedsApproval or AgentAttention.NeedsAnswer => Status.Caution,
+        AgentAttention.Complete => Status.Success,
+        AgentAttention.Failed => Status.Critical,
+        _ => Status.Neutral,
+    });
 
     public static Windows.UI.Color FocusedTabBorderColor(string appTheme, string? colorTag)
     {
@@ -234,8 +234,8 @@ public static class PresentationValues
     public static Windows.UI.Color WorkspaceAlertColor(WorkspaceAlert alert) => alert switch
     {
         WorkspaceAlert.Attention => AgentBadgeColor(AgentAttention.NeedsApproval),
-        WorkspaceAlert.Disconnected => Rgb(0xE74856),
-        _ => Rgb(0x0078D4),
+        WorkspaceAlert.Disconnected => StatusColor(Status.Critical),
+        _ => StatusColor(Status.Info),
     };
 
     public static double WorkspaceAlertSize(WorkspaceAlert alert) => alert == WorkspaceAlert.Activity ? 8 : 12;
@@ -250,6 +250,21 @@ public static class PresentationValues
 
     private static Brush ResourceBrush(string key) =>
         (Brush)Application.Current.Resources[key];
+
+    /// <summary>The meanings a status mark can have. Each is one brush in App.xaml's theme
+    /// dictionaries, with a High Contrast variant in system colors.</summary>
+    private enum Status { Info, Success, Caution, Critical, Neutral }
+
+    // Read on each call rather than cached: the app-level lookup follows High Contrast.
+    private static Windows.UI.Color StatusColor(Status status) =>
+        ((SolidColorBrush)ResourceBrush(status switch
+        {
+            Status.Info => "SessionStatusInfoBrush",
+            Status.Success => "SessionStatusSuccessBrush",
+            Status.Caution => "SessionStatusCautionBrush",
+            Status.Critical => "SessionStatusCriticalBrush",
+            _ => "SessionStatusNeutralBrush",
+        })).Color;
 
     private static Windows.UI.Color ParseColor(string? value)
     {

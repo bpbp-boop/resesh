@@ -197,7 +197,6 @@
                         Background="Transparent"
                         BorderThickness="0"
                         Click="CloseButton_Click"
-                        ToolTipService.ToolTip="Close (Esc)"
                         AutomationProperties.Name="Close command history">
                         <FontIcon Glyph="&#xE711;" FontSize="12" />
                     </Button>
@@ -485,7 +484,6 @@
                                     Height="28"
                                     Padding="0"
                                     Click="PreviousMatch_Click"
-                                    ToolTipService.ToolTip="Previous match (Shift+F3)"
                                     AutomationProperties.Name="Previous match">
                                     <FontIcon Glyph="&#xE70E;" FontSize="11" />
                                 </Button>
@@ -496,7 +494,6 @@
                                     Height="28"
                                     Padding="0"
                                     Click="NextMatch_Click"
-                                    ToolTipService.ToolTip="Next match (F3)"
                                     AutomationProperties.Name="Next match">
                                     <FontIcon Glyph="&#xE70D;" FontSize="11" />
                                 </Button>
@@ -614,7 +611,6 @@
                             <Button
                                 x:Name="CompareBackButton"
                                 Click="CompareBack_Click"
-                                ToolTipService.ToolTip="Back to results (Esc)"
                                 AutomationProperties.AutomationId="HistoryCompareBack">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <FontIcon Glyph="&#xE72B;" FontSize="12" />
@@ -678,7 +674,6 @@
                                     Height="28"
                                     Padding="0"
                                     Click="PreviousChange_Click"
-                                    ToolTipService.ToolTip="Previous change (Shift+F7)"
                                     AutomationProperties.Name="Previous change">
                                     <FontIcon Glyph="&#xE70E;" FontSize="11" />
                                 </Button>
@@ -688,7 +683,6 @@
                                     Height="28"
                                     Padding="0"
                                     Click="NextChange_Click"
-                                    ToolTipService.ToolTip="Next change (F7)"
                                     AutomationProperties.Name="Next change">
                                     <FontIcon Glyph="&#xE70D;" FontSize="11" />
                                 </Button>

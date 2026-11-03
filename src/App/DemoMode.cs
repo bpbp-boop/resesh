@@ -40,6 +40,8 @@ internal static class DemoMode
         .Skip(1)
         .Any(arg => arg.Equals("--demo", StringComparison.OrdinalIgnoreCase));
 
+    public static string DataFolder => DataDirectory.Value;
+
     public static string StorePath(string fileName) => Path.Combine(DataDirectory.Value, fileName);
 
     public static ICredentialService CreateCredentialService() =>
@@ -89,7 +91,7 @@ internal static class DemoMode
             var dc = city;
             for (var node = 1; node <= 2; node++)
             {
-                Add(site, "p", node, $"{dc}/Network/Core", "cisco", $"{city} MPLS core router; diverse national backbone paths", color: "#0078D4");
+                Add(site, "p", node, $"{dc}/Network/Core", "cisco", $"{city} MPLS core router; diverse national backbone paths", color: "#0078D7");
                 Add(site, "pe", node, $"{dc}/Network/Provider edge", "juniper", $"{city} enterprise L3VPN and EVPN provider edge");
                 Add(site, "ix", node, $"{dc}/Edge & Security/Peering", "juniper", $"{city} public IX and private peering edge; IPv4 and IPv6");
                 Add(site, "transit", node, $"{dc}/Edge & Security/Transit", "cisco", $"{city} upstream transit edge; independent upstream paths");

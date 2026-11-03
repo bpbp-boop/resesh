@@ -97,33 +97,13 @@ public sealed class AppCommandCatalog
                 vm.OpenWelcomeCommand, KeepActionFocus: true),
         };
 
-        void Setting(string title, string keywords, GlobalSettingsTarget target, string? shortcut = null) =>
-            commands.Add(new("Global Settings", Fixed(title), keywords, vm.OpenSettingsCommand, shortcut,
-                Parameter: () => target));
-        Setting("Open Settings", "preferences options", GlobalSettingsTarget.General, ShortcutIds.Settings);
-        Setting("Manage Sessions", "bulk edit move duplicate delete identity sort filter", GlobalSettingsTarget.Sessions);
-        Setting("Theme", "appearance color scheme", GlobalSettingsTarget.Theme);
-        Setting("Terminal Font Family", "appearance typeface", GlobalSettingsTarget.FontFamily);
-        Setting("Status Bar", "appearance interface bottom chrome", GlobalSettingsTarget.ShowStatusBar);
-        Setting("Sessions Pane Layout", "sidebar float overlay flyout dock narrow window", GlobalSettingsTarget.SessionsPaneLayout);
-        Setting("Font Size", "appearance terminal text", GlobalSettingsTarget.FontSize);
-        Setting("Scrollback Lines", "terminal history buffer", GlobalSettingsTarget.Scrollback);
-        Setting("Copy Selected Text", "clipboard copy on select", GlobalSettingsTarget.CopyOnSelect);
-        Setting("Paste With Right-Click", "clipboard mouse", GlobalSettingsTarget.RightClickPaste);
-        Setting("Mouse in Programs", "mouse tracking reporting capture select copy shift claude codex tui vim", GlobalSettingsTarget.MouseCapture);
-        Setting("SSH Algorithms", "kex key exchange cipher mac host key legacy security harden", GlobalSettingsTarget.SshAlgorithms);
-        Setting("Confirm Multi-Line Pastes", "clipboard paste warning safe lines enter", GlobalSettingsTarget.ConfirmMultilinePaste);
-        Setting("Reopen Last Layout at Startup", "workspace launch restore groups", GlobalSettingsTarget.ReopenLastLayout);
-        Setting("Command History", "keep save commands output search retention", GlobalSettingsTarget.CommandHistory);
-        Setting("Automatic Recording", "record sessions disk", GlobalSettingsTarget.AlwaysRecord);
-        Setting("Recording Directory", "record sessions path folder", GlobalSettingsTarget.RecordingDirectory);
-        Setting("Rewind History", "minutes terminal capture", GlobalSettingsTarget.RewindMinutes);
-        Setting("Rewind Memory Limit", "megabytes terminal capture", GlobalSettingsTarget.RewindMegabytes);
-        Setting("Highlighting", "rules regex colors", GlobalSettingsTarget.Highlighting);
-        Setting("Agent Display", "icons tab coding agents", GlobalSettingsTarget.ShowAgentIcons);
-        Setting("Agent Taskbar Alerts", "flash notification", GlobalSettingsTarget.AgentAlertFlash);
-        Setting("Agent Notification Sound", "alert audio", GlobalSettingsTarget.AgentAlertSound);
-        Setting("About resesh", "version build license credits help report bug", GlobalSettingsTarget.About);
+        // Settings entries come from the catalog the Settings page navigates by.
+        foreach (var entry in SettingsCatalog.Targets)
+        {
+            var target = entry.Target;
+            commands.Add(new("Global Settings", Fixed(entry.PaletteTitle), entry.Keywords, vm.OpenSettingsCommand,
+                entry.ShortcutId, Parameter: () => target));
+        }
 
         commands.Add(new("Workspaces", Fixed("Save Current Layout as Workspace"), "tabs groups layout save as",
             vm.SaveWorkspaceAsCommand));
@@ -143,8 +123,9 @@ public sealed class AppCommandCatalog
                     _vm.OpenWorkspaceCommand, Parameter: () => workspace);
             yield return new("Workspaces", Fixed($"Open {workspace.Name} in New Window"), "tabs groups layout separate",
                 _vm.OpenWorkspaceInNewWindowCommand, Parameter: () => workspace);
-            yield return new("Workspaces", Fixed($"Open {workspace.Name} Additively"), "tabs groups layout add",
-                _vm.OpenWorkspaceAdditivelyCommand, Parameter: () => workspace);
+            if (services.CanAddWorkspaceToLayout(workspace.Id))
+                yield return new("Workspaces", Fixed($"Open {workspace.Name} Additively"), "tabs groups layout add",
+                    _vm.OpenWorkspaceAdditivelyCommand, Parameter: () => workspace);
             if (services.IsWorkspaceOpen(workspace.Id))
                 yield return new("Workspaces", Fixed($"Close {workspace.Name}"), "workspace disconnect tabs",
                     _vm.CloseWorkspaceCommand, Parameter: () => workspace);

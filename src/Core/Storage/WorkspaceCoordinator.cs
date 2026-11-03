@@ -1,13 +1,15 @@
 namespace Resesh.Core.Storage;
 
 /// <summary>Coordinates workspace writes and reports recoverable failures to its caller.</summary>
+/// <param name="liveLayout">A workspace's own layout as it stands where it is open, or null
+/// when no window has it open. Keyed by id, so an update can only ever capture the workspace
+/// it updates, never whichever one happens to be shown.</param>
 public sealed class WorkspaceCoordinator(
     WorkspaceStore store,
-    Func<WorkspaceLayout> capture,
+    Func<Guid, WorkspaceLayout?> liveLayout,
     Action changed,
     Action<string, string> report)
 {
-    public bool SaveAs(string name) => Create(name, capture()) is not null;
 
     /// <summary>Saves a new workspace with the layout given, or reports why it could not.</summary>
     public Workspace? Create(string name, WorkspaceLayout layout)
@@ -17,7 +19,11 @@ public sealed class WorkspaceCoordinator(
         return created;
     }
     public bool Rename(Guid id, string name) => Execute("Workspace was not renamed", () => store.Rename(id, name));
-    public bool Update(Guid id) => Execute("Workspace was not updated", () => store.Update(id, capture()));
+
+    /// <summary>Saves a workspace's live layout as what it opens to. A workspace that is not
+    /// open has no live layout, so nothing changes.</summary>
+    public bool Update(Guid id) => liveLayout(id) is { } layout && Save(id, layout);
+
     public bool Delete(Guid id) => Execute("Workspace was not deleted", () => store.Delete(id));
     public bool Reorder(IReadOnlyList<Guid> ids) => Execute("Workspace order was not saved", () => store.Reorder(ids));
     public bool SetAppearance(Guid id, string? icon, string? initials, bool labelIcon) =>

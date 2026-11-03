@@ -141,13 +141,14 @@ public sealed partial class TerminalTabView
         var dialog = new PasteConfirmDialog(
             lines == 1 ? "Paste and run 1 line?" : $"Paste and run {lines} lines?",
             $"Each line runs on {Session.Name} as soon as it arrives.",
-            PastePlan.Preview(text))
+            PastePlan.Preview(text),
+            $"Don't ask again (turn it back on in {SettingsCatalog.PathTo(GlobalSettingsTarget.ConfirmMultilinePaste)})")
         {
             XamlRoot = XamlRoot,
         };
         var confirmed = await dialog.ConfirmAsync();
         if (confirmed && dialog.IsDontAskChecked)
-            App.SaveSettings(App.Settings.Current with { ConfirmMultilinePaste = false });
+            App.SaveSetting(s => s with { ConfirmMultilinePaste = false }, nameof(SettingsViewModel.ConfirmMultilinePaste));
         return confirmed;
     }
 }

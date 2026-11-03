@@ -44,8 +44,8 @@ public sealed class TerminalCapture : IDisposable
     private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
     private readonly LinkedList<TerminalRecordingEvent> _events = [];
     private readonly List<TerminalKeyframe> _keyframes = [];
-    private readonly TimeSpan _maximumAge;
-    private readonly long _maximumBytes;
+    private TimeSpan _maximumAge;
+    private long _maximumBytes;
     private readonly bool _retainForRewind;
     private long _eventBytes;
     private long _keyframeBytes;
@@ -66,7 +66,7 @@ public sealed class TerminalCapture : IDisposable
         int initialRows,
         DateTimeOffset? startedAt = null,
         TimeSpan? maximumAge = null,
-        long maximumBytes = 32L * 1024 * 1024,
+        long maximumBytes = RewindLimits.DefaultMegabytes * RewindLimits.BytesPerMegabyte,
         bool retainForRewind = true)
     {
         if (initialColumns <= 0)
@@ -81,9 +81,43 @@ public sealed class TerminalCapture : IDisposable
         _currentColumns = initialColumns;
         _currentRows = initialRows;
         StartedAt = startedAt ?? DateTimeOffset.UtcNow;
-        _maximumAge = maximumAge ?? TimeSpan.FromMinutes(30);
+        _maximumAge = maximumAge ?? TimeSpan.FromMinutes(RewindLimits.DefaultMinutes);
         _maximumBytes = maximumBytes;
         _retainForRewind = retainForRewind;
+    }
+
+    /// <summary>Changes the rewind caps of a live capture, as the settings change. Lower caps
+    /// drop the oldest rewind data at once; higher ones keep what is already retained and
+    /// let it grow.</summary>
+    public void SetLimits(TimeSpan maximumAge, long maximumBytes)
+    {
+        if (maximumAge <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(maximumAge));
+        if (maximumBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+        bool changed;
+        lock (_gate)
+        {
+            if (_disposed || (_maximumAge == maximumAge && _maximumBytes == maximumBytes))
+                return;
+            var wasAvailable = HasRewindDataLocked;
+            _maximumAge = maximumAge;
+            _maximumBytes = maximumBytes;
+            TrimLocked();
+            changed = wasAvailable != HasRewindDataLocked;
+        }
+        if (changed)
+            Changed?.Invoke();
+    }
+
+    /// <summary>The caps in effect: (age, bytes).</summary>
+    public (TimeSpan MaximumAge, long MaximumBytes) Limits
+    {
+        get
+        {
+            lock (_gate)
+                return (_maximumAge, _maximumBytes);
+        }
     }
 
     public DateTimeOffset StartedAt { get; }
@@ -133,9 +167,11 @@ public sealed class TerminalCapture : IDisposable
         get
         {
             lock (_gate)
-                return _anchor is not null || _keyframes.Count > 0 || _events.Count > 0;
+                return HasRewindDataLocked;
         }
     }
+
+    private bool HasRewindDataLocked => _anchor is not null || _keyframes.Count > 0 || _events.Count > 0;
 
     public void CaptureOutput(ReadOnlySpan<byte> data, long unixTimeMilliseconds)
     {
@@ -465,16 +501,49 @@ public sealed class TerminalCapture : IDisposable
 
 public sealed record TerminalRecordingPaths(string CastPath, string LogPath);
 
+/// <summary>
+/// The rewind caps' defaults and ranges. Settings defaults, the Settings page's ranges and
+/// the capture all read them from here.
+/// </summary>
+public static class RewindLimits
+{
+    public const int DefaultMinutes = 30;
+    public const int MinimumMinutes = 1;
+    public const int MaximumMinutes = 24 * 60;
+    public const int DefaultMegabytes = 32;
+    public const int MinimumMegabytes = 1;
+    public const int MaximumMegabytes = 1024;
+    public const long BytesPerMegabyte = 1024L * 1024;
+
+    /// <summary>The age cap for a setting, clamped to the range.</summary>
+    public static TimeSpan Age(int minutes) =>
+        TimeSpan.FromMinutes(Math.Clamp(minutes, MinimumMinutes, MaximumMinutes));
+
+    /// <summary>The memory cap for a setting, clamped to the range.</summary>
+    public static long Bytes(int megabytes) =>
+        Math.Clamp(megabytes, MinimumMegabytes, MaximumMegabytes) * BytesPerMegabyte;
+}
+
 public static class TerminalRecordingFiles
 {
+    /// <summary>
+    /// The folder a recording-directory setting names: environment variables expanded
+    /// ("%USERPROFILE%\casts") and made absolute. The recorder writes there and the
+    /// Recordings list and "Open Recordings Location" read there, so both see one folder.
+    /// </summary>
+    public static string ResolveDirectory(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+            throw new ArgumentException("A recording directory is required.", nameof(directory));
+        return Path.GetFullPath(Environment.ExpandEnvironmentVariables(directory.Trim()));
+    }
+
     public static TerminalRecordingPaths CreatePaths(
         string directory,
         string sessionName,
         DateTimeOffset timestamp)
     {
-        if (string.IsNullOrWhiteSpace(directory))
-            throw new ArgumentException("A recording directory is required.", nameof(directory));
-
+        directory = ResolveDirectory(directory);
         Directory.CreateDirectory(directory);
         var invalid = Path.GetInvalidFileNameChars();
         var safeName = new string(sessionName.Trim().Select(character => invalid.Contains(character) ? '_' : character).ToArray());

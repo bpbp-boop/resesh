@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Resesh.Core.History;
+using Resesh.Core.Input;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 using DispatcherQueuePriority = Microsoft.UI.Dispatching.DispatcherQueuePriority;
@@ -121,7 +122,7 @@ public sealed partial class HistoryView : UserControl
     private int _loadVersion;
     private bool _suppressFilterEvents;
     private Guid? _pendingSessionFilter;
-    private FontFamily _monoFont = new("Cascadia Mono, Consolas");
+    private FontFamily _monoFont = new(Resesh.Core.Storage.FontFamilies.Default);
 
     public event Action? CloseRequested;
 
@@ -132,8 +133,11 @@ public sealed partial class HistoryView : UserControl
     /// <summary>Whether a connected terminal tab is active right now.</summary>
     public Func<bool>? CanInsert { get; set; }
 
-    /// <summary>The saved session an entry came from, if it still exists.</summary>
-    public Func<CommandHistoryEntry, string?>? SessionNameFor { get; set; }
+    /// <summary>Current names of saved sessions, by id. Entries show and are found under
+    /// their session's current name; a deleted session keeps the name its commands recorded.</summary>
+    public Func<IReadOnlyDictionary<Guid, string>>? SessionNames { get; set; }
+
+    private IReadOnlyDictionary<Guid, string> _sessionNames = new Dictionary<Guid, string>();
 
     public Action<CommandHistoryEntry>? OpenSession { get; set; }
 
@@ -146,6 +150,12 @@ public sealed partial class HistoryView : UserControl
     {
         InitializeComponent();
         AddHandler(KeyDownEvent, new KeyEventHandler(View_KeyDown), handledEventsToo: true);
+        ToolTipService.SetToolTip(CloseButton, AppShortcuts.ToolTip("Close", ShortcutIds.HistoryClose));
+        ToolTipService.SetToolTip(PreviousMatchButton, AppShortcuts.ToolTip("Previous match", ShortcutIds.HistoryPreviousMatch));
+        ToolTipService.SetToolTip(NextMatchButton, AppShortcuts.ToolTip("Next match", ShortcutIds.HistoryNextMatch));
+        ToolTipService.SetToolTip(CompareBackButton, AppShortcuts.ToolTip("Back to results", ShortcutIds.HistoryBackToResults));
+        ToolTipService.SetToolTip(PreviousChangeButton, AppShortcuts.ToolTip("Previous change", ShortcutIds.HistoryPreviousChange));
+        ToolTipService.SetToolTip(NextChangeButton, AppShortcuts.ToolTip("Next change", ShortcutIds.HistoryNextChange));
         BuildKeyHints();
         Unloaded += (_, _) => Close();
     }
@@ -161,6 +171,7 @@ public sealed partial class HistoryView : UserControl
         OffNotice.IsOpen = false;
         Visibility = Visibility.Visible;
         App.History.Changed += History_Changed;
+        App.SessionsChanged += Sessions_Changed;
         _ = LoadAsync(keepSelection: false);
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -182,6 +193,7 @@ public sealed partial class HistoryView : UserControl
         if (!IsOpen)
             return;
         App.History.Changed -= History_Changed;
+        App.SessionsChanged -= Sessions_Changed;
         _loadVersion++;
         _searchCancellation?.Cancel();
         _searchDebounce?.Stop();
@@ -202,12 +214,20 @@ public sealed partial class HistoryView : UserControl
                 _ = LoadAsync(keepSelection: true);
         });
 
+    // A session renamed or deleted while the view is open changes its labels.
+    private void Sessions_Changed()
+    {
+        if (IsOpen)
+            _ = LoadAsync(keepSelection: true);
+    }
+
     /// <summary>Reads the history summary, then searches. Only the newest load applies its
     /// result: closing the view or starting another load (reopening, a history change)
     /// supersedes one still reading.</summary>
     private async Task LoadAsync(bool keepSelection)
     {
         var version = ++_loadVersion;
+        _sessionNames = SessionNames?.Invoke() ?? new Dictionary<Guid, string>();
         CommandHistorySummary summary;
         try
         {
@@ -236,7 +256,8 @@ public sealed partial class HistoryView : UserControl
         var choices = new List<HistorySessionChoice> { new(null, "All sessions") };
         choices.AddRange(summary.Sessions
             .Select(session => new HistorySessionChoice(session.Id,
-                string.IsNullOrWhiteSpace(session.Name) ? session.Target : session.Name))
+                _sessionNames.GetValueOrDefault(session.Id)
+                    ?? (string.IsNullOrWhiteSpace(session.Name) ? session.Target : session.Name)))
             .OrderBy(choice => choice.Label, StringComparer.CurrentCultureIgnoreCase));
         _suppressFilterEvents = true;
         SessionFilter.ItemsSource = choices;
@@ -244,8 +265,12 @@ public sealed partial class HistoryView : UserControl
         _suppressFilterEvents = false;
     }
 
-    private static string SessionLabel(CommandHistoryEntry entry) =>
-        string.IsNullOrWhiteSpace(entry.SessionName) ? entry.Target : entry.SessionName;
+    private string SessionLabel(CommandHistoryEntry entry) =>
+        entry.DisplaySessionName(_sessionNames) is { } name && !string.IsNullOrWhiteSpace(name) ? name : entry.Target;
+
+    /// <summary>The current name of the entry's session, or null when it is not saved (any more).</summary>
+    private string? CurrentSessionName(CommandHistoryEntry entry) =>
+        entry.SessionId is { } id ? _sessionNames.GetValueOrDefault(id) : null;
 
     private CommandHistoryQuery BuildQuery()
     {
@@ -274,6 +299,7 @@ public sealed partial class HistoryView : UserControl
                 _ => null,
             },
             SearchOutput = SearchOutputBox.IsChecked == true,
+            SessionNames = _sessionNames,
         };
     }
 
@@ -563,7 +589,8 @@ public sealed partial class HistoryView : UserControl
 
         FactsGrid.Children.Clear();
         FactsGrid.RowDefinitions.Clear();
-        AddFact("Session", string.IsNullOrWhiteSpace(entry.SessionName) ? "(unsaved connection)" : entry.SessionName);
+        var displayName = entry.DisplaySessionName(_sessionNames);
+        AddFact("Session", string.IsNullOrWhiteSpace(displayName) ? "(unsaved connection)" : displayName);
         AddFact("Target", entry.Target);
         if (!string.IsNullOrEmpty(entry.WorkingDirectory))
             AddFact("Folder", entry.WorkingDirectory);
@@ -571,12 +598,12 @@ public sealed partial class HistoryView : UserControl
         var canInsert = CanInsert?.Invoke() == true;
         InsertButton.IsEnabled = canInsert;
         ToolTipService.SetToolTip(InsertButton, canInsert
-            ? "Type this command at the active tab's prompt without running it (Enter)"
+            ? AppShortcuts.ToolTip("Type this command at the active tab's prompt without running it", ShortcutIds.HistoryInsert)
             : "Open a connected terminal tab to insert this command");
-        var sessionName = SessionNameFor?.Invoke(entry);
+        var sessionName = CurrentSessionName(entry);
         OpenSessionButton.Visibility = sessionName is null ? Visibility.Collapsed : Visibility.Visible;
         OpenSessionText.Text = sessionName is null ? "Open Session" : $"Open {sessionName}";
-        ToolTipService.SetToolTip(OpenSessionButton, "Connect in a new tab (Ctrl+Enter)");
+        ToolTipService.SetToolTip(OpenSessionButton, AppShortcuts.ToolTip("Connect in a new tab", ShortcutIds.HistoryOpenSession));
 
         SetOutput(entry);
         _ = LoadRunsAsync(entry);
@@ -731,7 +758,7 @@ public sealed partial class HistoryView : UserControl
 
     private void OpenSelectedSession()
     {
-        if (_selected is not { } entry || OpenSession is null || SessionNameFor?.Invoke(entry) is null)
+        if (_selected is not { } entry || OpenSession is null || CurrentSessionName(entry) is null)
             return;
         CloseRequested?.Invoke();
         OpenSession(entry);
@@ -886,67 +913,58 @@ public sealed partial class HistoryView : UserControl
 
     // ---- keyboard ----
 
+    /// <summary>Keys come from the shared table: its Command History scopes, one while browsing
+    /// results and one while comparing runs, so the hints and the Keyboard Shortcuts screen
+    /// name the same keys this handles.</summary>
     private void View_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        var ctrl = AppShortcuts.CurrentModifiers().HasFlag(Resesh.Core.Input.KeyModifiers.Ctrl);
-        var shift = AppShortcuts.CurrentModifiers().HasFlag(Resesh.Core.Input.KeyModifiers.Shift);
+        var scope = _compareMode ? ShortcutScope.HistoryCompare : ShortcutScope.CommandHistory;
+        if (KeyBindings.Find((int)e.Key, AppShortcuts.CurrentModifiers(), scope) is not var (binding, chord))
+            return;
         var focus = FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
         var inNavigator = ReferenceEquals(focus, SearchBox) || IsWithin(focus, ResultList);
-        if (_compareMode)
+        switch (binding.Id)
         {
-            switch (e.Key)
-            {
-                case VirtualKey.Escape when !e.Handled:
-                    e.Handled = true;
-                    ExitCompare();
-                    break;
-                case VirtualKey.F7:
-                    e.Handled = true;
-                    GoToChange(shift ? _changeCursor - 1 : _changeCursor + 1);
-                    break;
-            }
-            return;
-        }
-        switch (e.Key)
-        {
-            case VirtualKey.Escape:
-                if (e.Handled)
-                    return; // a ComboBox or flyout closed itself
-                e.Handled = true;
+            case ShortcutIds.HistoryClose or ShortcutIds.HistoryBackToResults when e.Handled:
+                return; // a ComboBox or flyout closed itself
+            case ShortcutIds.HistoryClose:
                 CloseRequested?.Invoke();
                 break;
-            case VirtualKey.Down when inNavigator:
-                e.Handled = true;
-                MoveSelection(1);
+            case ShortcutIds.HistoryBackToResults:
+                ExitCompare();
                 break;
-            case VirtualKey.Up when inNavigator:
-                e.Handled = true;
-                MoveSelection(-1);
+            case ShortcutIds.HistoryNextChange:
+                GoToChange(_changeCursor + 1);
                 break;
-            case VirtualKey.PageDown when inNavigator:
-                e.Handled = true;
-                MoveSelection(10);
+            case ShortcutIds.HistoryPreviousChange:
+                GoToChange(_changeCursor - 1);
                 break;
-            case VirtualKey.PageUp when inNavigator:
-                e.Handled = true;
-                MoveSelection(-10);
+            case ShortcutIds.HistoryNextMatch:
+                GoToMatch(_activeMatch + 1);
                 break;
-            case VirtualKey.Enter when inNavigator:
-                e.Handled = true;
-                if (ctrl)
-                    OpenSelectedSession();
-                else
-                    InsertSelected();
+            case ShortcutIds.HistoryPreviousMatch:
+                GoToMatch(_activeMatch - 1);
                 break;
-            case VirtualKey.F3:
-                e.Handled = true;
-                GoToMatch(shift ? _activeMatch - 1 : _activeMatch + 1);
+            // The table lists the backward chord (↑, PgUp) first.
+            case ShortcutIds.HistorySelect when inNavigator:
+                MoveSelection(chord == 0 ? -1 : 1);
                 break;
-            case VirtualKey.Delete when IsWithin(focus, ResultList) && _selected is not null:
-                e.Handled = true;
+            case ShortcutIds.HistorySelectPage when inNavigator:
+                MoveSelection(chord == 0 ? -10 : 10);
+                break;
+            case ShortcutIds.HistoryInsert when inNavigator:
+                InsertSelected();
+                break;
+            case ShortcutIds.HistoryOpenSession when inNavigator:
+                OpenSelectedSession();
+                break;
+            case ShortcutIds.HistoryDelete when IsWithin(focus, ResultList) && _selected is not null:
                 DeleteFlyout.ShowAt(DeleteButton);
                 break;
+            default:
+                return;
         }
+        e.Handled = true;
     }
 
     private static bool IsWithin(DependencyObject? element, DependencyObject ancestor)
@@ -981,10 +999,10 @@ public sealed partial class HistoryView : UserControl
     private void BuildKeyHints()
     {
         KeyHints.Children.Clear();
-        void Hint(string keys, string action)
+        void Hint(string shortcutId, string action)
         {
             var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-            foreach (var key in keys.Split(' '))
+            foreach (var key in AppShortcuts.Label(shortcutId).Split(' '))
             {
                 panel.Children.Add(new Border
                 {
@@ -1008,16 +1026,16 @@ public sealed partial class HistoryView : UserControl
 
         if (_compareMode)
         {
-            Hint("F7", "Next change");
-            Hint("Shift+F7", "Previous change");
-            Hint("Esc", "Back to results");
+            Hint(ShortcutIds.HistoryNextChange, "Next change");
+            Hint(ShortcutIds.HistoryPreviousChange, "Previous change");
+            Hint(ShortcutIds.HistoryBackToResults, "Back to results");
             return;
         }
-        Hint("↑ ↓", "Select");
-        Hint("Enter", "Insert in terminal");
-        Hint("Ctrl+Enter", "Open session");
-        Hint("F3", "Next match");
-        Hint("Esc", "Close");
+        Hint(ShortcutIds.HistorySelect, "Select");
+        Hint(ShortcutIds.HistoryInsert, "Insert in terminal");
+        Hint(ShortcutIds.HistoryOpenSession, "Open session");
+        Hint(ShortcutIds.HistoryNextMatch, "Next match");
+        Hint(ShortcutIds.HistoryClose, "Close");
         KeyHints.Children.Add(new TextBlock
         {
             Text = "Filters: host:name  in:folder  exit:fail  \"exact phrase\"",

@@ -172,7 +172,7 @@ public sealed record Session
 
     public string Host { get; set; } = "";
 
-    public int Port { get; set; } = 22;
+    public int Port { get; set; } = SessionEndpoint.DefaultSshPort;
 
     /// <summary>The login name. With <see cref="Login"/> Own it is this session's username;
     /// otherwise a non-empty value overrides the identity's username and keeps its proof.</summary>
@@ -195,6 +195,12 @@ public sealed record Session
         IdentityId is not null ? SessionLogin.Identity
         : InheritLogin ? SessionLogin.Inherit
         : SessionLogin.Own;
+
+    /// <summary>True when the session keeps its own password under its id. Identity logins
+    /// keep theirs under the identity and keys keep a passphrase with the key, so a session
+    /// that stops using its own password should drop the stored copy.</summary>
+    [JsonIgnore]
+    public bool UsesOwnPassword => Login == SessionLogin.Own && AuthMethod == AuthMethod.Password;
 
     /// <summary>Username, auth method and key below; meaningful when <see cref="Login"/> is Own.</summary>
     public AuthMethod AuthMethod { get; set; } = AuthMethod.Password;
@@ -292,9 +298,6 @@ public sealed record Session
     /// icon says where the tab runs, the agent icon says what is running in it.
     /// </summary>
     public string? Agent { get; init; }
-
-    /// <summary>Set for imported sessions whose credential has not been captured yet.</summary>
-    public bool CredentialNeeded { get; init; }
 
     /// <summary>Terminal appearance overrides for this session; null = use app settings.</summary>
     public TerminalOverrides? Overrides { get; init; }

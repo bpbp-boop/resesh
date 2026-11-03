@@ -161,7 +161,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
     }
 
     /// <summary>A serial line has no window size.</summary>
-    public void Resize(int columns, int rows) { }
+    public bool Resize(int columns, int rows, int pixelWidth = 0, int pixelHeight = 0) => true;
 
     /// <summary>Holds the line in the break state for <see cref="BreakDuration"/>, after
     /// whatever was typed before it has been sent.</summary>

@@ -25,7 +25,6 @@ public sealed partial class MainWindow
     private readonly HashSet<Border> _paneGutters = [];
     private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _paneFocusBrush = new(Microsoft.UI.Colors.Transparent);
     private readonly HashSet<CommunityToolkit.WinUI.Controls.GridSplitter> _activeSplitters = [];
-    private readonly Dictionary<SplitLayoutBranch<TabGroupViewModel>, IReadOnlyList<double>> _savedPaneSizes = [];
 
     private void ConfigureSplitter(CommunityToolkit.WinUI.Controls.GridSplitter splitter, Border line)
     {
@@ -640,32 +639,33 @@ public sealed partial class MainWindow
             draggedSessions,
             targetFolder,
             targetKind);
-        if (!plan.Accepted)
-            return;
 
         // WinUI has updated its transient hierarchy when it raises this event, but the
         // underlying drag operation is still unwinding. Replacing RootNodes synchronously
         // here lets that remaining work mutate the replacement tree. Persist after the event
-        // returns, then rebuild once from the store so the visual and saved trees agree.
+        // returns, then rebuild from the store so the visual and saved trees agree: WinUI
+        // has moved the nodes itself, whether the drop was refused, saved or failed to save.
         DispatcherQueue.TryEnqueue(
             Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
             () =>
             {
-                if (plan.SessionIds.Count > 0)
+                try
                 {
-                    try
+                    if (plan.Accepted && plan.SessionIds.Count > 0)
                     {
                         var before = LoginIdentities(plan.SessionIds);
                         ViewModel.MoveSessionsToFolder(plan.SessionIds, targetFolder);
                         NoteLoginChanges(before, LoginIdentities(plan.SessionIds));
                     }
-                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-                    {
-                        App.ReportRecoverableError(exception);
-                    }
                 }
-                else
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    App.ReportRecoverableError(exception);
+                }
+                finally
+                {
                     ViewModel.RebuildTree();
+                }
             });
     }
 }

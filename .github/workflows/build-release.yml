@@ -51,7 +51,8 @@ jobs:
         run: dotnet test tests/AppLogic.Tests/Resesh.AppLogic.Tests.csproj --configuration Release
 
       # The native frame tests drive the real libghostty-vt and reseshvt shim. Same cache
-      # as the x64 build job below.
+      # as the x64 build job below. Both keys hash the GhosttyVtInput files listed in
+      # src/Terminal/Resesh.Terminal.csproj; tests/BuildMetadataTests.js checks they match.
       - name: Cache libghostty-vt
         id: ghostty-cache
         uses: actions/cache@v5
@@ -106,22 +107,13 @@ jobs:
       - name: Set build version
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_TYPE -eq "tag") {
-            $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          }
-          else {
-            $version = "0.0.$env:GITHUB_RUN_NUMBER"
-          }
-
-          if ($version -notmatch '^\d+\.\d+\.\d+$') {
-            throw "Release tags must use the form v1.2.3. MSI versions must be numeric."
-          }
-
+          $version = ./eng/build-version.ps1
           "VERSION=$version" >> $env:GITHUB_ENV
 
       # The terminal's native libraries (libghostty-vt and our reseshvt shim). The installer
       # refuses to build without them. Zig and the Ghostty commit are pinned in
-      # eng/ghostty-vt.json; a cold build takes a few minutes, so the output is cached.
+      # eng/ghostty-vt.json; a cold build takes a few minutes, so the output is cached, keyed
+      # on the same files as the test job's cache.
       - name: Cache libghostty-vt
         id: ghostty-cache
         uses: actions/cache@v5
@@ -312,17 +304,7 @@ jobs:
       - name: Set build version
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_TYPE -eq "tag") {
-            $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          }
-          else {
-            $version = "0.0.$env:GITHUB_RUN_NUMBER"
-          }
-
-          if ($version -notmatch '^\d+\.\d+\.\d+$') {
-            throw "Release tags must use the form v1.2.3. MSI versions must be numeric."
-          }
-
+          $version = ./eng/build-version.ps1
           "VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Download application output

@@ -69,18 +69,31 @@ internal static class Program
         finally { CommandCompletionNotifications.Unregister(); }
     }
 
-    internal static string StorePath(string fileName, string defaultPath)
-    {
-        if (DemoMode.IsEnabled)
-            return DemoMode.StorePath(fileName);
+    /// <summary>The folder this run keeps its data in: the demo scratch folder, the
+    /// --data-dir folder, or %APPDATA%\Resesh. The stores, custom icons, backups and the
+    /// single-instance key all derive from this one answer, so they cannot disagree.</summary>
+    internal static string DataDirectory => DataDirectoryOverride ?? AppDataPaths.Roaming();
 
-        var args = Environment.GetCommandLineArgs();
-        for (var i = 1; i < args.Length - 1; i++)
+    /// <summary>A file in the data folder, or <paramref name="defaultPath"/> (which may live
+    /// elsewhere, like command history in local app data) when no folder was chosen.</summary>
+    internal static string StorePath(string fileName, string defaultPath) =>
+        DataDirectoryOverride is { } directory ? Path.Combine(directory, fileName) : defaultPath;
+
+    private static string? DataDirectoryOverride
+    {
+        get
         {
-            if (args[i] == "--data-dir")
-                return Path.Combine(Path.GetFullPath(args[i + 1]), fileName);
+            if (DemoMode.IsEnabled)
+                return DemoMode.DataFolder;
+
+            var args = Environment.GetCommandLineArgs();
+            for (var i = 1; i < args.Length - 1; i++)
+            {
+                if (args[i] == "--data-dir")
+                    return Path.GetFullPath(args[i + 1]);
+            }
+            return null;
         }
-        return defaultPath;
     }
 
     /// <summary>False in demo mode or with --data-dir: a jump list item or a sign-in launch
@@ -132,8 +145,7 @@ internal static class Program
         if (DemoMode.IsEnabled)
             return null;
 
-        var dataDirectory = Path.GetDirectoryName(StorePath("sessions.json", SessionStore.DefaultPath))!;
-        var normalized = Path.GetFullPath(dataDirectory)
+        var normalized = Path.GetFullPath(DataDirectory)
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             .ToUpperInvariant();
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));

@@ -16,15 +16,35 @@ public sealed partial class MainViewModel
 
     public string ActiveStopVerb => ActiveTab?.Capabilities.StopVerb ?? "Disconnect";
 
-    public bool ShowSendBreak => ActiveTab is { IsPlayback: false } tab && tab.Capabilities.SendBreak;
+    public bool ShowSendBreak => ShowsSendBreak(ActiveTab);
 
-    public bool ShowManageRemoteSessions => ActiveTab is { IsPlayback: false, IsAppPage: false } tab
-        && tab.Capabilities.RemoteSession && tab.Session.Persistent;
+    public bool ShowManageRemoteSessions => ShowsManageRemoteSessions(ActiveTab);
 
-    public bool ShowManageTunnels => ActiveTab is { IsPlayback: false, IsAppPage: false } tab
-        && tab.Session.Kind == SessionKind.Ssh;
+    public bool ShowManageTunnels => ShowsManageTunnels(ActiveTab);
 
-    public bool ShowEndRemoteSession => ActiveTab is not { } tab || tab.Capabilities.RemoteSession;
+    /// <summary>Kept in the Session menu with no tab open, where it is simply disabled.</summary>
+    public bool ShowEndRemoteSession => ActiveTab is null || ShowsEndRemoteSession(ActiveTab);
+
+    // Per-tab visibility rules: the Session menu applies them to the active tab, the tab's
+    // right-click menu to the tab it was opened on. Whether the command can run now is its
+    // CanExecute, for both.
+
+    public static bool ShowsSendBreak(TabViewModel? tab) =>
+        tab is { IsPlayback: false } && tab.Capabilities.SendBreak;
+
+    public static bool ShowsManageRemoteSessions(TabViewModel? tab) =>
+        tab is { IsPlayback: false, IsAppPage: false } && tab.HasRemoteSessions;
+
+    public static bool ShowsManageTunnels(TabViewModel? tab) =>
+        tab is { IsPlayback: false, IsAppPage: false } && tab.Capabilities.Tunnels;
+
+    /// <summary>Only a session that keeps persistent shells has one to end; closing or
+    /// disconnecting any other tab already ends its shell.</summary>
+    public static bool ShowsEndRemoteSession(TabViewModel? tab) =>
+        tab is { IsPlayback: false, IsAppPage: false } && tab.HasRemoteSessions;
+
+    public static bool ShowsFilePane(TabViewModel? tab) =>
+        tab is { IsPlayback: false, IsAppPage: false } && tab.Capabilities.FilePane;
 
     public string PinTabTitle => ActiveTab?.IsPinned == true ? "Unpin Tab" : "Pin Tab";
 
@@ -96,21 +116,21 @@ public sealed partial class MainViewModel
 
     /// <summary>Tunnels ride a live SSH connection, so there is nothing to manage without one.</summary>
     private bool CanManageTunnels(TabViewModel? tab) =>
-        Target(tab) is { IsLocked: false, IsPlayback: false, IsAppPage: false, State: TabConnectionState.Connected } target
-        && target.Session.Kind == SessionKind.Ssh && HasTerminal(target);
+        Target(tab) is { IsLocked: false, State: TabConnectionState.Connected } target
+        && ShowsManageTunnels(target) && HasTerminal(target);
 
     private bool CanManageRemoteSessions(TabViewModel? tab) =>
-        Target(tab) is { IsLocked: false, IsPlayback: false, IsAppPage: false } target
-        && target.Capabilities.RemoteSession && target.Session.Persistent
+        Target(tab) is { IsLocked: false } target && ShowsManageRemoteSessions(target)
         && target.State != TabConnectionState.Connecting && HasTerminal(target);
 
     [RelayCommand(CanExecute = nameof(CanEndRemoteSession),
         AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
     private Task EndRemoteSessionAsync(TabViewModel? tab) => Services.EndRemoteSessionAsync(Target(tab)!);
 
+    /// <summary>Only while the live connection is attached to a persistent shell: the
+    /// session's Persistent setting may have changed since it connected either way.</summary>
     private bool CanEndRemoteSession(TabViewModel? tab) =>
-        Target(tab) is { State: TabConnectionState.Connected } target
-        && target.Capabilities.RemoteSession && HasTerminal(target);
+        Target(tab) is { IsAttachedToRemoteSession: true } target && HasTerminal(target);
 
     [RelayCommand(CanExecute = nameof(IsSessionTab))]
     private void CloneTab(TabViewModel? tab) => Services.CloneSession(Target(tab)!);
@@ -127,8 +147,12 @@ public sealed partial class MainViewModel
     private Task EditSessionSettingsAsync(SessionSettingsTarget? target) =>
         Services.EditSessionSettingsAsync(ActiveTab!, target ?? SessionSettingsTarget.General);
 
-    private bool CanEditSessionSettings(SessionSettingsTarget? target) =>
-        IsSessionTab(ActiveTab) && _store.Find(ActiveTab!.Session.Id) is not null;
+    private bool CanEditSessionSettings(SessionSettingsTarget? target) => CanEditSessionOf(ActiveTab);
+
+    /// <summary>The tab's session is saved, so its options (and highlight or agent defaults)
+    /// can be edited; false once it was deleted while the tab stayed open.</summary>
+    public bool CanEditSessionOf(TabViewModel? tab) =>
+        IsSessionTab(tab) && _store.Find(tab!.Session.Id) is not null;
 
     [RelayCommand(CanExecute = nameof(HasTab),
         AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
@@ -162,7 +186,7 @@ public sealed partial class MainViewModel
     private void ToggleFilePane(TabViewModel? tab) => Services.ToggleFilePane(Target(tab)!);
 
     private bool CanToggleFilePane(TabViewModel? tab) =>
-        IsUnlockedTerminal(tab) && Target(tab)!.Capabilities.FilePane;
+        IsUnlockedTerminal(tab) && ShowsFilePane(Target(tab));
 
     [RelayCommand(CanExecute = nameof(IsUnlockedTerminal))]
     private void ToggleCommandsPanel(TabViewModel? tab) => Services.ToggleCommandsPanel(Target(tab)!);

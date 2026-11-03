@@ -15,9 +15,9 @@ public partial class App : Application
     private MainWindow? _lastActiveWindow;
     private DispatcherQueue? _dispatcherQueue;
 
-    public static SessionStore Store { get; } = new(StorePath("sessions.json", SessionStore.DefaultPath));
-    public static SshKeyStore SshKeys { get; } = new(StorePath("ssh-keys.json", SshKeyStore.DefaultPath));
-    public static IdentityStore Identities { get; } = new(StorePath("identities.json", IdentityStore.DefaultPath));
+    public static SessionStore Store { get; } = new(DataFile("sessions.json"));
+    public static SshKeyStore SshKeys { get; } = new(DataFile("ssh-keys.json"));
+    public static IdentityStore Identities { get; } = new(DataFile("identities.json"));
 
     /// <summary>Resolves session logins against the live session and identity stores.</summary>
     public static Resesh.Core.Identities.LoginResolver Logins { get; } = new(Store, Identities);
@@ -38,19 +38,18 @@ public partial class App : Application
     public static string LoginUsername(Session session) =>
         session.Kind == SessionKind.Ssh ? Logins.Resolve(session).Username : session.Username;
     public static ICredentialService Credentials { get; } = DemoMode.CreateCredentialService();
-    public static KnownHostsStore KnownHosts { get; } = new(StorePath("known_hosts.json", KnownHostsStore.DefaultPath));
-    public static SettingsStore Settings { get; } = new(StorePath("settings.json", SettingsStore.DefaultPath));
-    public static HighlightsStore Highlights { get; } = new(StorePath("highlights.json", HighlightsStore.DefaultPath));
-    public static WorkspaceStore Workspaces { get; } = new(StorePath("workspaces.json", WorkspaceStore.DefaultPath));
+    public static KnownHostsStore KnownHosts { get; } = new(DataFile("known_hosts.json"));
+    public static SettingsStore Settings { get; } = new(DataFile("settings.json"));
+    public static HighlightsStore Highlights { get; } = new(DataFile("highlights.json"));
+    public static WorkspaceStore Workspaces { get; } = new(DataFile("workspaces.json"));
     public static Resesh.Core.History.CommandHistoryStore History { get; } =
-        new(StorePath("history", Resesh.Core.History.CommandHistoryStore.DefaultDirectory));
+        new(Program.StorePath("history", Resesh.Core.History.CommandHistoryStore.DefaultDirectory));
     private static AccessibilitySettings Accessibility { get; } = new();
     public static bool IsHighContrast => Accessibility.HighContrast;
 
 
-    /// <summary>Resolves the shared data location used for stores and app instancing.</summary>
-    private static string StorePath(string fileName, string defaultPath) =>
-        Program.StorePath(fileName, defaultPath);
+    /// <summary>A file in the data folder every store, backup and the single-instance key share.</summary>
+    private static string DataFile(string fileName) => Path.Combine(Program.DataDirectory, fileName);
     public static Resesh.App.Icons.SessionIconCatalog Icons { get; } = new();
     public static Resesh.App.Icons.BrandIconImages Brands { get; } = new();
 
@@ -58,15 +57,20 @@ public partial class App : Application
     /// launch by discovery). Built-ins outside this set are hidden, not deleted.</summary>
     public static IReadOnlySet<Guid> AvailableLocalShells { get; private set; } = new HashSet<Guid>();
 
+    /// <summary>Whether a saved session is shown anywhere (tree, search, Recent, the jump
+    /// list): everything except built-in local profiles whose shell is not installed.</summary>
+    public static bool IsSessionVisible(Session session) =>
+        !session.IsLocal || !session.BuiltIn || AvailableLocalShells.Contains(session.Id);
+
     /// <summary>Resolves the System choice to the Windows color mode used right now.</summary>
     public static string ResolveTheme(string? theme)
     {
-        if (!string.Equals(theme, "system", StringComparison.OrdinalIgnoreCase))
+        if (!ThemeCatalog.IsSystem(theme))
             return ThemeCatalog.Find(theme).Id;
 
         var background = new UISettings().GetColorValue(UIColorType.Background);
         var luminance = (0.2126 * background.R) + (0.7152 * background.G) + (0.0722 * background.B);
-        return luminance >= 128 ? "light" : "dark";
+        return luminance >= 128 ? ThemeIds.Light : ThemeIds.Dark;
     }
 
     public App()
@@ -103,11 +107,9 @@ public partial class App : Application
             return;
         if (!DemoMode.IsEnabled)
             MigrateLegacyDataDir();
-        _settingsLoad = Task.Run(() =>
-        {
-            Settings.Load();
-            Resesh.Core.Ssh.SshAlgorithmPolicy.AppDefaults = Settings.Current.SshAlgorithms;
-        });
+        // Connections read the algorithm defaults from whatever settings are saved when they start.
+        Resesh.Core.Ssh.SshAlgorithmPolicy.AppDefaultsSource = () => Settings.Current.SshAlgorithms;
+        _settingsLoad = Task.Run(Settings.Load);
         _storesLoad = Task.Run(() =>
         {
             Store.Load();
@@ -150,11 +152,6 @@ public partial class App : Application
             ReportRecoverableError(exception);
             return false;
         }
-        finally
-        {
-            // Connections read the defaults from Core; keep them to what is actually saved.
-            Resesh.Core.Ssh.SshAlgorithmPolicy.AppDefaults = Settings.Current.SshAlgorithms;
-        }
     }
 
     internal static void ReportRecoverableError(Exception exception)
@@ -188,7 +185,12 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         _dispatcherQueue = DispatcherQueue.GetForCurrentThread();
+        _uiQueue = _dispatcherQueue;
         CommandCompletionNotifications.SetDispatcher(_dispatcherQueue);
+        // The app-wide chrome brushes are declared without colors; give them the saved
+        // theme's before any window draws with them. Not in the constructor: code can't
+        // read Application resources until it has returned.
+        ThemeVisualPalette.For(ResolveTheme(Settings.Current.Theme)).ApplyToAppResources();
 
         _storesLoad!.GetAwaiter().GetResult();
         if (DemoMode.IsEnabled)
@@ -226,6 +228,18 @@ public partial class App : Application
 #endif
         Resesh.Terminal.TerminalSurface.Shortcuts = AppShortcuts.ForTerminals();
         PruneCommandHistory();
+        // Windows follow the store themselves; views outside them and the jump list follow here.
+        Store.Changed += () => RunOnUiThread(() =>
+        {
+            SessionsChanged?.Invoke();
+            RefreshJumpList(); // sessions were renamed, added or deleted
+        });
+        // An identity's username shows in tab endpoints without any session changing.
+        Identities.Changed += () => RunOnUiThread(() =>
+        {
+            foreach (var tab in AllTabs)
+                tab.NotifyLoginChanged();
+        });
         var window = CreateWindowCore();
         if (Settings.Current.ReopenLastLayoutAtStartup)
             window.RestoreLastLayout();
@@ -262,7 +276,7 @@ public partial class App : Application
     /// pruned even while it is turned off, so the retention promise still holds.</summary>
     internal static void PruneCommandHistory()
     {
-        var days = Math.Clamp(Settings.Current.CommandHistoryDays, 1, 3650);
+        var days = SettingRanges.CommandHistoryDays.Clamp(Settings.Current.CommandHistoryDays);
         _ = Task.Run(() =>
         {
             try { History.Prune(days); }
@@ -297,29 +311,84 @@ public partial class App : Application
     internal static IEnumerable<ViewModels.TabViewModel> AllTabs =>
         Current is App app ? app._windows.SelectMany(window => window.ViewModel.AllTabs) : [];
 
+    private bool _pinnedSessionsSaveQueued;
+
+    /// <summary>Brings the pinned sessions reopened at launch in line with Home's pinned tabs in
+    /// every window, once the change in progress settles. Windows queue it whenever a tab is
+    /// pinned, unpinned, opened, closed or moved, or a window closes, so the saved list never
+    /// waits for the next pin toggle to catch up.</summary>
+    internal static void QueuePinnedSessionsSave()
+    {
+        if (Current is not App { _pinnedSessionsSaveQueued: false, _dispatcherQueue: { } queue } app)
+            return;
+        app._pinnedSessionsSaveQueued = true;
+        queue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            app._pinnedSessionsSaveQueued = false;
+            SavePinnedSessions();
+        });
+    }
+
+    /// <summary>Saves the pinned sessions now. A window calls it as it closes, before its tabs
+    /// go, so a change still queued is not lost when it is the last window.</summary>
     internal static void SavePinnedSessions()
     {
-        if (Current is not App app)
+        if (Current is not App app
+            || ViewModels.PinnedSessions.ToSave(
+                Settings.Current.PinnedSessionIds,
+                app._windows.SelectMany(window => window.HomeTabs),
+                app._windows.Count) is not { } ids)
             return;
-        SaveSettings(Settings.Current with
-        {
-            PinnedSessionIds = app._windows.SelectMany(window => window.ViewModel.AllTabs)
-                .Where(tab => tab.IsPinned).Select(tab => tab.Session.Id).Distinct().ToList(),
-        });
+        SaveSettings(Settings.Current with { PinnedSessionIds = ids });
         RefreshJumpList();
     }
 
-    internal static void RefreshSessionsInAllWindows(ViewModels.MainViewModel? source = null)
+    /// <summary>Re-reads sessions everywhere after a change the session store does not see,
+    /// such as identities an import added. Saved session changes need no call: every window
+    /// follows <see cref="SessionStore.Changed"/>.</summary>
+    internal static void RefreshSessionsInAllWindows()
     {
         if (Current is not App app)
             return;
         foreach (var window in app._windows.ToList())
-            window.ViewModel.RefreshSessions(rebuildTree: !ReferenceEquals(window.ViewModel, source));
+            window.ViewModel.RefreshSessions();
         SessionsChanged?.Invoke();
     }
 
-    /// <summary>Raised after saved sessions or folders change, for views outside the tree.</summary>
+    /// <summary>A recording started or stopped in some tab: every window showing the
+    /// Recordings list reads the folder again.</summary>
+    internal static void RefreshRecordingsInAllWindows()
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.RefreshRecordingsIfShown();
+    }
+
+    /// <summary>Raised on the UI thread after saved sessions, folders or folder identities
+    /// change, for views outside the tree.</summary>
     internal static event Action? SessionsChanged;
+
+    /// <summary>Runs an action on the UI thread: at once when already on it, else queued.</summary>
+    internal static void RunOnUiThread(Action action)
+    {
+        if (_uiQueue is { HasThreadAccess: false } queue)
+            queue.TryEnqueue(() => action());
+        else
+            action();
+    }
+
+    private static DispatcherQueue? _uiQueue;
+
+    /// <summary>Every window's Recent pane re-reads the saved list (one window opening a
+    /// session changes it for all).</summary>
+    internal static void RefreshRecentSessionsInAllWindows()
+    {
+        if (Current is not App app)
+            return;
+        foreach (var window in app._windows.ToList())
+            window.ViewModel.RefreshRecentSessions();
+    }
 
     internal static void RefreshWindowTitles()
     {
@@ -360,6 +429,17 @@ public partial class App : Application
         if (property is nameof(ViewModels.SettingsViewModel.KeepCommandHistory)
             or nameof(ViewModels.SettingsViewModel.CommandHistoryDays))
             PruneCommandHistory();
+    }
+
+    /// <summary>Saves one setting changed outside the Settings page (a paste prompt, a menu) and
+    /// applies it the way the page does, so every window and every open Settings page shows it.
+    /// <paramref name="property"/> is the <see cref="ViewModels.SettingsViewModel"/> property.</summary>
+    internal static bool SaveSetting(Func<AppSettings, AppSettings> change, string property)
+    {
+        if (!SaveSettings(change(Settings.Current)))
+            return false;
+        ApplySettingChange(property);
+        return true;
     }
 
     /// <summary>Open terminals in every window re-read the saved highlighting rules.</summary>
@@ -429,6 +509,7 @@ public partial class App : Application
         window.Closed += (_, _) =>
         {
             _windows.Remove(window);
+            QueuePinnedSessionsSave(); // its pinned tabs no longer reopen, unless it was the last
             RefreshWindowTitles();
             RefreshWorkspaceRails(); // its workspaces are no longer open elsewhere
         };
@@ -481,7 +562,9 @@ public partial class App : Application
     {
         _jumpListQueued = false;
         var settings = Settings.Current;
-        var plan = JumpListPlan.For(settings.PinnedSessionIds, settings.RecentSessionIds, Store.Find)
+        // Recent here lists what the Recent pane lists: saved sessions that are visible.
+        var plan = JumpListPlan.For(settings.PinnedSessionIds, settings.RecentSessionIds,
+                id => Store.Find(id) is { } session && IsSessionVisible(session) ? session : null)
             .Without(_removedJumpListItems);
         if (plan.SameAs(_jumpList))
             return;
@@ -498,8 +581,7 @@ public partial class App : Application
         if (recent.Count != settings.RecentSessionIds.Count
             && SaveSettings(Settings.Current with { RecentSessionIds = recent }))
         {
-            foreach (var window in _windows.ToList())
-                window.ViewModel.RefreshRecentSessions();
+            RefreshRecentSessionsInAllWindows();
         }
         // The committed list already left them out; the next change rebuilds it from Recent.
         _jumpList = null;

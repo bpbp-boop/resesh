@@ -112,6 +112,18 @@ public sealed class SessionBulkEditTests
     }
 
     [Fact]
+    public void PersistentSkipped_NamesTheSessionsTheRuleKeepsAsTheyAre()
+    {
+        var powerShell = Ssh("ps") with { ShellIntegration = ShellIntegrationMode.PowerShell };
+        var bash = Ssh("bash") with { ShellIntegration = ShellIntegrationMode.Bash };
+        Session[] sessions = [powerShell, bash, Local()];
+
+        Assert.Equal([powerShell], new SessionBulkEdit { Persistent = true }.PersistentSkipped(sessions));
+        Assert.Empty(new SessionBulkEdit { Persistent = false }.PersistentSkipped(sessions));
+        Assert.False(SessionRules.CanBePersistent(ShellIntegrationMode.PowerShell));
+    }
+
+    [Fact]
     public void Theme_KeepsOtherOverridesAndClearsBackToTheAppSetting()
     {
         var session = Ssh() with { Overrides = new TerminalOverrides { FontSize = 18 } };

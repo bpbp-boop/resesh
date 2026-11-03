@@ -57,6 +57,9 @@ internal sealed class CommandTracker
     internal static readonly Regex CmdSplitRe = new("^(" + CmdPromptBody + @")\s?(.*)$", RegexOptions.CultureInvariant | RegexOptions.Singleline);
     private static readonly Regex HistoryCompactPromptRe = new(@"^[^@\s:]{1,100}@[^\s:]{1,100}:([^\s$#%>]{1,512})[$#%]$", RegexOptions.CultureInvariant);
     internal static readonly Regex WindowsIdlePromptRe = new(@"^(?:PS )?((?:[A-Za-z]:[\\/]|\\\\)[^\r\n>]*)>\s*$", RegexOptions.CultureInvariant);
+    // PowerShell's default prompt in a provider other than the file system ("PS HKLM:\>"):
+    // a location but not a folder, reported so an older folder report is not taken for it.
+    private static readonly Regex PowerShellProviderPromptRe = new(@"^PS ([A-Za-z][A-Za-z0-9_.-]+:[\\/]?[^\r\n>]*)>\s*$", RegexOptions.CultureInvariant);
     private static readonly Regex UnixSpacedIdlePromptRe = new(@"^[^@\s$#%>]{1,100}@[^\s$#%>]{1,100}\s+([^\r\n$#%>]{1,160}?)\s*[$#%>]\s*$", RegexOptions.CultureInvariant);
     private static readonly Regex UnixBracketedIdlePromptRe = new(@"^\[[^@\]\s]{1,100}@[^\]\s]{1,100}\s+([^\]\r\n]{1,160}?)\]\s*[$#%>]\s*$", RegexOptions.CultureInvariant);
     private static readonly Regex NokiaMdCliPromptRe = new(@"^[A-Z]:[^@\s]+@[^\s#]+#\s*$", RegexOptions.CultureInvariant);
@@ -150,7 +153,11 @@ internal sealed class CommandTracker
     private int _historyIdleGeneration;
     private long _lastOutputMs;
 
+    // What the screen proved (a banner, a mode prompt) and what the host suggested (the
+    // session's icon, the SSH banner). Kept apart so the hint can change or be withdrawn
+    // without erasing evidence.
     private string? _promptPlatform;
+    private string? _promptHint;
     private string? _lastPromptSignature;
     private int _titlesSeen;
 
@@ -979,15 +986,17 @@ internal sealed class CommandTracker
     // ---- prompt context -------------------------------------------------------------------
 
     /// <summary>Native hint from a saved icon or SSH banner; it only permits prompt
-    /// interpretation, screen evidence still owns the displayed context.</summary>
+    /// interpretation, screen evidence still owns the displayed context. A null or
+    /// non-network platform withdraws an earlier hint (the session's icon changed).</summary>
     public void SetPromptPlatform(string? platform)
     {
-        if (platform is "cisco" or "juniper" or "nokia")
-        {
-            _promptPlatform = platform;
-            ReportPromptContext(force: false);
-        }
+        var hint = platform is "cisco" or "juniper" or "nokia" ? platform : null;
+        if (hint == _promptHint)
+            return;
+        _promptHint = hint;
+        ReportPromptContext(force: false);
     }
+
 
     /// <summary>Reports the current location label from a completed known prompt. The cursor
     /// line is part of the signature, so returning to the same context after a command still
@@ -1013,6 +1022,10 @@ internal sealed class CommandTracker
         string? label = null, platform = null;
         Match match;
         if ((match = WindowsIdlePromptRe.Match(promptText)).Success)
+        {
+            label = match.Groups[1].Value;
+        }
+        else if ((match = PowerShellProviderPromptRe.Match(promptText)).Success)
         {
             label = match.Groups[1].Value;
         }
@@ -1059,12 +1072,13 @@ internal sealed class CommandTracker
                 else if (junos.Groups[1].Value == ">")
                 {
                     var role = JunosRoleRe.Match(previousText);
-                    var known = _promptPlatform == "juniper" || role.Success || RecentLineMatches(start, JunosBannerRe, 40);
-                    if (known)
+                    var seen = _promptPlatform == "juniper" || role.Success || RecentLineMatches(start, JunosBannerRe, 40);
+                    if (seen || _promptHint == "juniper")
                     {
                         label = (role.Success ? role.Groups[1].Value + " · " : "") + "operational";
                         platform = "juniper";
-                        _promptPlatform = platform;
+                        if (seen)
+                            _promptPlatform = platform; // only screen evidence outlives the hint
                     }
                 }
             }
@@ -1078,7 +1092,8 @@ internal sealed class CommandTracker
                     var location = isXr ? xr.Groups[1].Value : "";
                     var mode = isXr ? xr.Groups[3].Value : ios.Groups[2].Value;
                     var terminator = isXr ? xr.Groups[4].Value : ios.Groups[3].Value;
-                    var known = isXr || _promptPlatform == "cisco" || RecentLineMatches(start, CiscoBannerRe, 60);
+                    var seen = isXr || _promptPlatform == "cisco" || RecentLineMatches(start, CiscoBannerRe, 60);
+                    var known = seen || _promptHint == "cisco";
                     // A mode suffix is safe network-CLI context; a bare EXEC prompt needs Cisco
                     // evidence so "server#" stays an ordinary Unix root prompt.
                     if (mode.Length > 0 || known)
@@ -1088,10 +1103,9 @@ internal sealed class CommandTracker
                             parts.Insert(0, location);
                         label = string.Join(" · ", parts);
                         if (known)
-                        {
                             platform = "cisco";
-                            _promptPlatform = platform;
-                        }
+                        if (seen)
+                            _promptPlatform = platform; // only screen evidence outlives the hint
                     }
                 }
             }

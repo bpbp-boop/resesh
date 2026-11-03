@@ -10,6 +10,7 @@ const presentation = read("src", "App", "PresentationValues.cs");
 const tabXaml = read("src", "App", "Controls", "TabGroupView.xaml");
 const mainXaml = read("src", "App", "MainWindow.xaml");
 const mainCode = require("./support/mainWindowSource");
+const visualPalette = read("src", "App", "ThemeVisualPalette.cs");
 
 test("tab and tree view models expose data instead of WinUI presentation objects", () => {
   for (const [name, source] of [["tab", tabViewModel], ["tree", treeViewModel]]) {
@@ -67,7 +68,7 @@ test("tree selection brushes live at app scope and update with the theme palette
   const appXaml = read("src", "App", "App.xaml");
   assert.match(appXaml, /x:Key="SessionTreeSelectionBrush"/);
   assert.match(appXaml, /x:Key="SessionTreeSelectionForegroundBrush"/);
-  assert.match(mainCode, /SessionTreeSelectionBrush"\]\)\.Color = palette\.TreeSelection/);
-  assert.match(mainCode, /SessionTreeSelectionForegroundBrush"\]\)\.Color = palette\.TreeSelectionForeground/);
+  assert.match(visualPalette, /Set\("SessionTreeSelectionBrush", TreeSelection\)/);
+  assert.match(visualPalette, /Set\("SessionTreeSelectionForegroundBrush", TreeSelectionForeground\)/);
   assert.doesNotMatch(mainCode, /TreeNodeViewModel\.ApplySelectionTheme/);
 });

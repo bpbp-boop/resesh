@@ -15,14 +15,12 @@ namespace Resesh.App;
 public sealed partial class MainWindow
 {
     /// <summary>A workspace the window holds but does not show: its groups in layout order,
-    /// the split that arranges them, the pane sizes it had, and the pane that had focus.</summary>
+    /// the split that arranges and sizes them, and the pane that had focus.</summary>
     private sealed class ParkedWorkspace(
         SplitLayout<TabGroupViewModel> layout,
-        Dictionary<SplitLayoutBranch<TabGroupViewModel>, IReadOnlyList<double>> paneSizes,
         TabGroupViewModel focusedGroup)
     {
         public SplitLayout<TabGroupViewModel> Layout { get; } = layout;
-        public Dictionary<SplitLayoutBranch<TabGroupViewModel>, IReadOnlyList<double>> PaneSizes { get; } = paneSizes;
         public TabGroupViewModel FocusedGroup { get; set; } = focusedGroup;
         public IReadOnlyList<TabGroupViewModel> Groups => Layout.Values;
         public IEnumerable<TabViewModel> Tabs => Groups.SelectMany(group => group.Tabs);
@@ -47,8 +45,20 @@ public sealed partial class MainWindow
     /// <summary>The saved workspace this window shows, or null while it shows Home.</summary>
     internal Guid? ShownWorkspaceId => _shownWorkspace == HomeWorkspace ? null : _shownWorkspace;
 
+    /// <summary>The tabs that belong to no saved workspace: Home's, shown or parked. Only
+    /// these tabs' pins reopen at launch (see <see cref="PinnedSessions"/>).</summary>
+    internal IEnumerable<TabViewModel> HomeTabs =>
+        _shownWorkspace == HomeWorkspace ? ViewModel.ShownTabs
+        : _parkedWorkspaces.TryGetValue(HomeWorkspace, out var home) ? home.Tabs
+        : [];
+
     internal bool IsWorkspaceOpen(Guid id) =>
         id != HomeWorkspace && (_shownWorkspace == id || _parkedWorkspaces.ContainsKey(id));
+
+    /// <summary>Whether "Add to current layout" is offered for a workspace, in every menu and
+    /// the palette alike (see <see cref="WorkspaceParking.CanAddToShownLayout"/>).</summary>
+    internal bool CanAddWorkspaceToLayout(Guid id) =>
+        WorkspaceParking.CanAddToShownLayout(IsWorkspaceOpen(id), App.WindowWithWorkspace(id, except: this) is not null);
 
     private void InitializeWorkspaceRail()
     {
@@ -62,6 +72,8 @@ public sealed partial class MainWindow
             if (property is nameof(TabViewModel.HasUnseenOutput) or nameof(TabViewModel.Agent)
                 or nameof(TabViewModel.State) or nameof(TabViewModel.IsPinned))
                 QueueWorkspaceRailRefresh();
+            if (property is nameof(TabViewModel.IsPinned))
+                App.QueuePinnedSessionsSave();
         };
         // Tabs opening and closing in Home change what the + button would do.
         ViewModel.PropertyChanged += (_, e) =>
@@ -143,8 +155,7 @@ public sealed partial class MainWindow
 
     private void ParkShownWorkspace()
     {
-        CaptureLivePaneSizes();
-        var parked = new ParkedWorkspace(_groupLayout, new(_savedPaneSizes), ViewModel.FocusedGroup);
+        var parked = new ParkedWorkspace(_groupLayout, ViewModel.FocusedGroup);
         foreach (var group in parked.Groups)
         {
             var view = _groupViews[group];
@@ -175,9 +186,6 @@ public sealed partial class MainWindow
                 tab.IsInBackgroundWorkspace = false;
         }
         _groupLayout = parked.Layout;
-        _savedPaneSizes.Clear();
-        foreach (var (branch, sizes) in parked.PaneSizes)
-            _savedPaneSizes[branch] = sizes;
         var focused = ViewModel.Groups.Contains(parked.FocusedGroup) ? parked.FocusedGroup : ViewModel.Groups[0];
         FinishLayoutChange(focused, focused.SelectedTab);
     }
@@ -189,7 +197,6 @@ public sealed partial class MainWindow
         ViewModel.Groups.Add(group);
         AttachGroupView(group);
         _groupLayout = new SplitLayout<TabGroupViewModel>(group);
-        _savedPaneSizes.Clear();
         ViewModel.FocusedGroup = group;
         return group;
     }
@@ -200,60 +207,8 @@ public sealed partial class MainWindow
         var group = new TabGroupViewModel();
         AttachGroupView(group).IsParked = true;
         ViewModel.BackgroundGroups.Add(group);
-        return new ParkedWorkspace(new SplitLayout<TabGroupViewModel>(group), [], group);
+        return new ParkedWorkspace(new SplitLayout<TabGroupViewModel>(group), group);
     }
-
-    /// <summary>Records each split's live pane sizes, which the grids hold until a rebuild.</summary>
-    private void CaptureLivePaneSizes() =>
-        CapturePaneSizes(_groupLayout.Root, GroupArea.Children.FirstOrDefault() as FrameworkElement);
-
-    private void CapturePaneSizes(SplitLayoutNode<TabGroupViewModel> node, FrameworkElement? element)
-    {
-        if (node is not SplitLayoutBranch<TabGroupViewModel> branch || element is not Grid grid)
-            return;
-        var isColumns = branch.Orientation == SplitOrientation.Columns;
-        var tracks = isColumns ? grid.ColumnDefinitions.Count : grid.RowDefinitions.Count;
-        if (tracks != branch.Children.Count * 2 - 1 || grid.Children.Count < branch.Children.Count * 3 - 2)
-            return;
-        var sizes = branch.Children.Select((_, index) => isColumns
-            ? grid.ColumnDefinitions[index * 2].ActualWidth
-            : grid.RowDefinitions[index * 2].ActualHeight).ToList();
-        if (sizes.All(size => double.IsFinite(size) && size > 0))
-            _savedPaneSizes[branch] = sizes;
-        for (var index = 0; index < branch.Children.Count; index++)
-            CapturePaneSizes(branch.Children[index], grid.Children[index * 3] as FrameworkElement);
-    }
-
-    /// <summary>A parked workspace's layout as a save would see it. It has no grids, so pane
-    /// sizes come from what it recorded when it was parked.</summary>
-    private static WorkspaceLayout CaptureParkedLayout(ParkedWorkspace parked)
-    {
-        var groups = parked.Groups.ToList();
-        var indices = groups.Select((group, index) => (group, index)).ToDictionary(item => item.group, item => item.index);
-        return new WorkspaceLayout
-        {
-            Groups = groups.Select(group => CaptureWorkspaceGroup(group.Tabs, group.SelectedTab)).ToList(),
-            Layout = CaptureParkedNode(parked.Layout.Root, indices, parked.PaneSizes),
-        };
-    }
-
-    private static WorkspaceLayoutNode CaptureParkedNode(
-        SplitLayoutNode<TabGroupViewModel> node,
-        IReadOnlyDictionary<TabGroupViewModel, int> indices,
-        IReadOnlyDictionary<SplitLayoutBranch<TabGroupViewModel>, IReadOnlyList<double>> sizes) =>
-        node switch
-        {
-            SplitLayoutLeaf<TabGroupViewModel> leaf => new WorkspaceLayoutNode { GroupIndex = indices[leaf.Value] },
-            SplitLayoutBranch<TabGroupViewModel> branch => new WorkspaceLayoutNode
-            {
-                Orientation = branch.Orientation,
-                Sizes = sizes.TryGetValue(branch, out var branchSizes) && branchSizes.Count == branch.Children.Count
-                    ? branchSizes.ToList()
-                    : [],
-                Children = branch.Children.Select(child => CaptureParkedNode(child, indices, sizes)).ToList(),
-            },
-            _ => throw new InvalidOperationException("Unknown split layout node."),
-        };
 
     /// <summary>The workspace a background group belongs to.</summary>
     private Guid? ParkedWorkspaceOf(TabGroupViewModel group) =>
@@ -313,6 +268,7 @@ public sealed partial class MainWindow
         _parkedWorkspaces[HomeWorkspace] = CreateEmptyParkedWorkspace();
         _shownWorkspace = created.Id;
         AssertWorkspacesConsistent();
+        App.QueuePinnedSessionsSave(); // its pinned tabs are the workspace's now, not Home's
         App.RefreshWorkspaceRails();
         App.RefreshWindowTitles();
         return true;
@@ -401,20 +357,23 @@ public sealed partial class MainWindow
 
     /// <summary>An open workspace's layout as it stands, shown or parked.</summary>
     private WorkspaceLayout LiveWorkspaceLayout(Guid id) =>
-        _shownWorkspace == id ? CaptureWorkspaceLayout() : CaptureParkedLayout(_parkedWorkspaces[id]);
+        _shownWorkspace == id ? CaptureWorkspaceLayout() : CaptureSplitLayout(_parkedWorkspaces[id].Layout);
 
-    /// <summary>Whether a workspace differs from what it was saved as: live here, live in the
-    /// window that holds it, or through the draft it will open from.</summary>
-    internal bool HasUnsavedWorkspaceChanges(Guid id)
-    {
-        if (id == HomeWorkspace)
-            return false;
-        if (IsWorkspaceOpen(id))
-            return App.Workspaces.HasChanges(id, LiveWorkspaceLayout(id));
-        if (App.WindowWithWorkspace(id, except: this) is { } other)
-            return other.HasUnsavedWorkspaceChanges(id);
-        return App.Workspaces.HasDraft(id);
-    }
+    /// <summary>A workspace's own layout as it stands in the window that has it open, this
+    /// one or another, or null when no window has it open. Every save, update and summary of
+    /// a workspace's live state reads this, so none can capture a different workspace.</summary>
+    internal WorkspaceLayout? LiveWorkspaceLayoutOrNull(Guid id) =>
+        id == HomeWorkspace ? null
+        : IsWorkspaceOpen(id) ? LiveWorkspaceLayout(id)
+        : App.WindowWithWorkspace(id, except: this)?.LiveWorkspaceLayout(id);
+
+    /// <summary>Whether a workspace differs from what it was saved as: live in the window that
+    /// holds it, or through the draft it will open from.</summary>
+    internal bool HasUnsavedWorkspaceChanges(Guid id) =>
+        HasUnsavedWorkspaceChanges(id, LiveWorkspaceLayoutOrNull(id));
+
+    private static bool HasUnsavedWorkspaceChanges(Guid id, WorkspaceLayout? live) =>
+        id != HomeWorkspace && (live is null ? App.Workspaces.HasDraft(id) : App.Workspaces.HasChanges(id, live));
 
     /// <summary>Closes every tab of a workspace in this window without saving anything. A
     /// shown workspace hands the window back to Home before it goes.</summary>
@@ -429,19 +388,12 @@ public sealed partial class MainWindow
             return;
         foreach (var group in parked.Groups.ToList())
         {
-            var view = _groupViews[group];
+            // The panes go with the workspace, so none collapses as it empties.
             foreach (var tab in group.Tabs.ToList())
-            {
-                if (tab.View is OnboardingView onboarding)
-                    onboarding.CancelPreview();
-                if (tab.View is UIElement content)
-                    view.RemoveTerminal(content);
-                ViewModel.CloseTab(tab);
-            }
+                RemoveTabCore(tab, dispose: true, collapseEmptyPane: false);
             _groupViews.Remove(group);
             ViewModel.BackgroundGroups.Remove(group);
         }
-        App.SavePinnedSessions();
         App.RefreshWorkspaceRails();
     }
 
@@ -453,13 +405,13 @@ public sealed partial class MainWindow
         foreach (var (id, parked) in _parkedWorkspaces)
         {
             if (id != HomeWorkspace)
-                WorkspaceOperations.KeepDraft(id, CaptureParkedLayout(parked));
+                WorkspaceOperations.KeepDraft(id, CaptureSplitLayout(parked.Layout));
         }
         KeepShownWorkspaceDraft();
         var home = _shownWorkspace == HomeWorkspace
             ? CaptureWorkspaceLayout()
             : _parkedWorkspaces.TryGetValue(HomeWorkspace, out var parkedHome)
-                ? CaptureParkedLayout(parkedHome)
+                ? CaptureSplitLayout(parkedHome.Layout)
                 : new WorkspaceLayout();
         WorkspaceOperations.SaveLastLayout(home, ShownWorkspaceId);
     }
@@ -511,14 +463,23 @@ public sealed partial class MainWindow
         for (var index = 0; index < RailWorkspaces.Count; index++)
         {
             var item = RailWorkspaces[index];
+            var workspace = saved[index];
+            var live = LiveWorkspaceLayoutOrNull(item.Id);
             item.SetState(
                 IsWorkspaceOpen(item.Id),
                 _shownWorkspace == item.Id,
                 App.WindowWithWorkspace(item.Id, except: this) is not null,
                 AlertFor(item.Id),
                 index + 2,
-                HasUnsavedWorkspaceChanges(item.Id));
+                HasUnsavedWorkspaceChanges(item.Id, live));
+            // The Workspaces pane describes each workspace from the same state as its button.
+            var current = live ?? App.Workspaces.DraftOf(item.Id)
+                ?? new WorkspaceLayout { Groups = workspace.Groups, Layout = workspace.Layout };
+            SyncWorkspaceRow(index, workspace, current, item);
         }
+        while (Workspaces.Count > saved.Count)
+            Workspaces.RemoveAt(Workspaces.Count - 1);
+        NoWorkspacesState.Visibility = PresentationValues.Visible(Workspaces.Count == 0);
 
         // The shown workspace is the selection of whichever list holds it, so ListView draws its
         // own accent pill; the other list selects nothing.
@@ -533,6 +494,32 @@ public sealed partial class MainWindow
             : "New workspace";
         ToolTipService.SetToolTip(NewWorkspaceRailButton, newTip);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(NewWorkspaceRailButton, newTip);
+    }
+
+    /// <summary>Puts the Workspaces pane's row for a workspace at its place and brings it up
+    /// to date. Rows are reused by id, as the rail's buttons are, so an open row menu or a
+    /// drag keeps its item.</summary>
+    private void SyncWorkspaceRow(int index, Workspace workspace, WorkspaceLayout current, WorkspaceRailItemViewModel state)
+    {
+        var existing = -1;
+        for (var probe = 0; probe < Workspaces.Count; probe++)
+        {
+            if (Workspaces[probe].Id == workspace.Id)
+            {
+                existing = probe;
+                break;
+            }
+        }
+        if (existing < 0)
+        {
+            var row = new WorkspaceItemViewModel();
+            row.Update(workspace, current, state);
+            Workspaces.Insert(index, row);
+            return;
+        }
+        if (existing != index)
+            Workspaces.Move(existing, index);
+        Workspaces[index].Update(workspace, current, state);
     }
 
     private WorkspaceAlert AlertFor(Guid id) =>
@@ -621,7 +608,7 @@ public sealed partial class MainWindow
             menu.Items.Add(Item(item.IsOpenElsewhere ? "Go to window" : "Show", ViewModel.OpenWorkspaceCommand, workspace));
         if (!item.IsOpen && !item.IsOpenElsewhere)
             menu.Items.Add(Item("Open in new window", ViewModel.OpenWorkspaceInNewWindowCommand, workspace));
-        if (!item.IsActive && !item.IsOpen && !item.IsOpenElsewhere)
+        if (CanAddWorkspaceToLayout(workspace.Id))
             menu.Items.Add(Item("Add to current layout", ViewModel.OpenWorkspaceAdditivelyCommand, workspace));
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(Item("Icon…", ViewModel.CustomizeWorkspaceCommand, workspace));
@@ -652,14 +639,11 @@ public sealed partial class MainWindow
         return [save, revert];
     }
 
-    /// <summary>Makes a workspace's current layout what it opens to: live if it is open here,
-    /// otherwise the draft it was left with. Nothing else saves a workspace's layout.</summary>
+    /// <summary>Makes a workspace's current layout what it opens to: live if a window has it
+    /// open, otherwise the draft it was left with.</summary>
     private void SaveWorkspaceNow(Workspace workspace)
     {
-        var layout = IsWorkspaceOpen(workspace.Id)
-            ? LiveWorkspaceLayout(workspace.Id)
-            : App.Workspaces.DraftOf(workspace.Id);
-        if (layout is not null)
+        if ((LiveWorkspaceLayoutOrNull(workspace.Id) ?? App.Workspaces.DraftOf(workspace.Id)) is { } layout)
             WorkspaceOperations.Save(workspace.Id, layout);
     }
 

@@ -24,21 +24,10 @@ const commandPalette = fs.readFileSync(path.join(__dirname, "..", "src", "App", 
 const presentation = fs.readFileSync(path.join(__dirname, "..", "src", "App", "PresentationValues.cs"), "utf8");
 const visualPalette = fs.readFileSync(path.join(__dirname, "..", "src", "App", "ThemeVisualPalette.cs"), "utf8");
 
-const ids = [...catalog.matchAll(/new\("([a-z-]+)",/g)].map(match => match[1]);
-function terminalPalette(id) {
-  // Catalog ids are [a-z-] only, so they need no regex escaping.
-  const body = terminalThemes.match(new RegExp(`\\["${id}"\\] = New\\(([^)]*)\\)`))?.[1];
-  assert.ok(body, `terminal palette ${id}`);
-  return body.match(/0x[0-9A-F]{6}\b/g) ?? [];
-}
+const themeChrome = fs.readFileSync(path.join(__dirname, "..", "src", "App", "ThemeChrome.cs"), "utf8");
 
-test("every terminal palette defines all twenty colors", () => {
-  for (const id of ids) assert.equal(terminalPalette(id).length, 20, id);
-});
-
-test("each catalog theme has a terminal palette", () => {
-  for (const id of ids) assert.ok(terminalThemes.includes(`["${id}"] = New(`), id);
-});
+// Which themes exist, and that every table covers each of them, is checked headless by
+// AppLogic.Tests/ThemeTableTests; these pin a few deliberate choices.
 
 test("Phthalo Green uses its green shell and terminal palette", () => {
   assert.match(catalog, /new\("phthalo-green", "Phthalo Green"\)/);
@@ -46,16 +35,27 @@ test("Phthalo Green uses its green shell and terminal palette", () => {
     terminalThemes,
     /\["phthalo-green"\] = New\(\s*0x123524, 0xD7EEE5, 0x72E0AD, 0x245A46,/,
   );
-  assert.match(visualPalette, /"phthalo-green" => New\(0x123524, 0x0B2118, 0x2D5A48, 0xD7EEE5, 0x245A46\)/);
+  assert.match(themeChrome, /\["phthalo-green"\] = new\(0x0B2118, 0x2D5A48\)/);
 });
 
 test("Crimson pairs a wine-red terminal with a matching tab and a bold red accent", () => {
   assert.match(catalog, /new\("crimson", "Crimson"\)/);
   assert.match(terminalThemes, /\["crimson"\] = New\(\s*0x330B12, 0xF4E4E6,/);
   // The active tab is the terminal background, so tab and terminal read as one surface.
-  assert.match(visualPalette, /"crimson" => New\(0x330B12, [\s\S]*?Accent = Hex\(0xFF4D5E\),\s*AccentBarThickness = 3/);
+  const crimson = themeChrome.match(/\["crimson"\][\s\S]*?\},/)?.[0] ?? "";
+  assert.doesNotMatch(crimson, /ActiveTab/);
+  assert.match(crimson, /Accent = 0xFF4D5E,\s*AccentBarThickness = 3/);
   // Unselected crimson tabs stay visibly red instead of fading into the tab strip.
-  assert.match(visualPalette, /"crimson"[\s\S]*?InactiveTab = Hex\(0x4A101A\),\s*HoverTab = Hex\(0x5C1622\)/);
+  assert.match(crimson, /InactiveTab = 0x4A101A,\s*HoverTab = 0x5C1622/);
+});
+
+test("the app chrome takes background, text and selection from the terminal palette", () => {
+  // One copy of each theme's defining colors: the chrome table adds only the strip and divider.
+  assert.match(visualPalette, /var terminal = Resesh\.Terminal\.Native\.TerminalThemes\.Find\(id\);/);
+  assert.match(visualPalette, /var active = chrome\.ActiveTab \?\? terminal\.Background;/);
+  assert.match(visualPalette, /TreeForeground: Hex\(terminal\.Foreground\)/);
+  assert.match(visualPalette, /TreeSelection: Hex\(terminal\.Selection\)/);
+  assert.doesNotMatch(themeChrome, /\bForeground = |Selection = /);
 });
 
 test("the active tab and the focused pane are a full step, not a nudge", () => {
@@ -111,7 +111,7 @@ test("the command palette is built from theme surfaces, not Fluent defaults", ()
   assert.match(commandPalette, /x:Key="ListViewItemBackgroundSelected" ResourceKey="SessionTreeSelectionBrush"/);
   assert.match(commandPalette, /x:Key="ListViewItemForegroundSelected" ResourceKey="SessionTreeSelectionForegroundBrush"/);
   assert.match(appXaml, /x:Key="SessionAccentBrush"/);
-  assert.match(mainWindow, /SessionAccentBrush"\]\)\.Color = palette\.Accent/);
+  assert.match(visualPalette, /Set\("SessionAccentBrush", Accent\)/);
 });
 
 test("the command palette composes above terminal surfaces without visibility workarounds", () => {
@@ -183,14 +183,16 @@ test("the session options form has room for its columns and scrolls every sectio
 test("the status bar takes a themed chrome surface, not a translucent Fluent layer", () => {
   assert.match(appXaml, /x:Key="SessionChromeBrush"/);
   assert.match(mainWindowXaml, /x:Name="StatusBar"[\s\S]*?Background="\{StaticResource SessionChromeBrush\}"/);
-  assert.match(mainWindow, /SessionChromeBrush"\]\)\.Color = palette\.Chrome/);
+  assert.match(visualPalette, /Set\("SessionChromeBrush", Chrome\)/);
 });
 
 test("global and per-session theme pickers use the shared catalog", () => {
   assert.match(settingsViewModel, /List<ThemeChoice> Themes \{ get; \} = \[\.\. ThemeCatalog\.All\]/);
   assert.match(settingsPage, /ItemsSource="\{x:Bind ViewModel\.Themes\}"/);
-  assert.match(sessionDialog, /Concat\(ThemeCatalog\.All\)/);
-  assert.match(localDialog, /Concat\(ThemeCatalog\.All\)/);
+  // Both session editors show the one shared Appearance form.
+  assert.match(fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "SessionAppearanceForm.xaml.cs"), "utf8"), /Concat\(ThemeCatalog\.All\)/);
+  assert.match(sessionEditXaml, /<controls:SessionAppearanceForm x:Name="AppearanceForm"/);
+  assert.match(localDialogXaml, /<controls:SessionAppearanceForm x:Name="AppearanceForm"/);
 });
 
 test("global theme selection applies immediately in every window", () => {
@@ -230,13 +232,14 @@ test("light-dark changes commit custom colors in the framework composition frame
 });
 
 test("unknown saved theme identifiers fall back safely", () => {
-  assert.match(catalog, /\?\? All\[0\]/);
-  assert.match(terminalThemes, /Themes\.TryGetValue\(id, out var theme\) \? theme : Themes\["dark"\]/);
+  assert.match(catalog, /\?\? DefaultChoice;/);
+  assert.match(terminalThemes, /Themes\.TryGetValue\(id, out var theme\) \? theme : Themes\[DefaultId\]/);
+  assert.match(themeChrome, /ById\.TryGetValue\(id, out var chrome\) \? chrome : ById\[ThemeIds\.Default\]/);
 });
 
 test("custom themes recolor the app shell and tab strip", () => {
-  assert.match(mainWindow, /SessionShellBrush"\]\)\.Color = palette\.Shell/);
-  assert.match(mainWindow, /SessionInputBrush"\]\)\.Color = palette\.Input/);
+  assert.match(visualPalette, /Set\("SessionShellBrush", Shell\)/);
+  assert.match(visualPalette, /Set\("SessionInputBrush", Input\)/);
   assert.doesNotMatch(mainWindowXaml, /x:Name="(?:Expand|Collapse)AllButton"[^>]*?Background=/);
   assert.match(appXaml, /x:Key="SessionShellBrush"/);
   assert.match(appXaml, /x:Key="SessionInputBrush"/);
@@ -247,41 +250,16 @@ test("custom themes recolor the app shell and tab strip", () => {
   assert.match(tabGroup, /Resources\["TabViewBorderBrush"\] = divider/);
 });
 
-test("each theme gives the session tree its terminal foreground and selection colors", () => {
-  const expected = {
-    light: ["383A42", "BFCEFF"],
-    "solarized-dark": ["839496", "274852"],
-    "solarized-light": ["657B83", "EEE8D5"],
-    dracula: ["F8F8F2", "44475A"],
-    "one-dark": ["ABB2BF", "3E4451"],
-    nord: ["D8DEE9", "434C5E"],
-    "gruvbox-dark": ["EBDBB2", "504945"],
-    monokai: ["F8F8F2", "49483E"],
-    "tokyo-night": ["C0CAF5", "33467C"],
-    "catppuccin-mocha": ["CDD6F4", "45475A"],
-    "phthalo-green": ["D7EEE5", "245A46"],
-  };
-
-  for (const [id, [foreground, selection]] of Object.entries(expected)) {
-    assert.match(
-      visualPalette,
-      new RegExp(`"${id}"\\s*=>\\s*New\\([^\\n]*0x${foreground},\\s*0x${selection}\\)`),
-      id,
-    );
-  }
-  assert.match(visualPalette, /_ => New\([^\n]*0xCCCCCC, 0x264F78\)/);
-});
-
 test("live theme changes recolor session-tree labels, details, icons, and selection", () => {
   // App scope, so the Welcome tab shares the same mutable brush instances.
   assert.match(appXaml, /x:Key="SessionTreeForegroundBrush"/);
   assert.match(appXaml, /x:Key="SessionTreeMutedForegroundBrush"/);
   assert.match(mainWindowXaml, /x:Name="SessionTree"[\s\S]*?Foreground="\{StaticResource SessionTreeForegroundBrush\}"/);
   assert.match(mainWindowXaml, /Text="\{x:Bind HostSummary, Mode=OneWay\}"[\s\S]*?PresentationValues\.TreeMutedForeground\(IsSelected\)/);
-  assert.match(mainWindow, /SessionTreeForegroundBrush"\]\)\.Color = palette\.TreeForeground/);
-  assert.match(mainWindow, /SessionTreeMutedForegroundBrush"\]\)\.Color = palette\.TreeMutedForeground/);
-  assert.match(mainWindow, /SessionTreeSelectionBrush"\]\)\.Color = palette\.TreeSelection/);
-  assert.match(mainWindow, /SessionTreeSelectionForegroundBrush"\]\)\.Color = palette\.TreeSelectionForeground/);
+  assert.match(visualPalette, /Set\("SessionTreeForegroundBrush", TreeForeground\)/);
+  assert.match(visualPalette, /Set\("SessionTreeMutedForegroundBrush", TreeMutedForeground\)/);
+  assert.match(visualPalette, /Set\("SessionTreeSelectionBrush", TreeSelection\)/);
+  assert.match(visualPalette, /Set\("SessionTreeSelectionForegroundBrush", TreeSelectionForeground\)/);
 });
 
 test("High Contrast uses Windows system colors across custom chrome", () => {
@@ -294,7 +272,7 @@ test("High Contrast uses Windows system colors across custom chrome", () => {
   assert.match(visualPalette, /SystemColorHighlightTextColor/);
   assert.doesNotMatch(mainWindow, /HighContrastChanged \+=/);
   assert.match(mainWindow, /var highContrastChanged = isHighContrast != _isHighContrast/);
-  assert.match(mainWindow, /highContrastChanged \|\| string\.Equals\(theme, "system"/);
+  assert.match(mainWindow, /highContrastChanged \|\| ThemeCatalog\.IsSystem\(theme\)/);
   assert.match(mainWindow, /ButtonHoverForegroundColor = palette\.TreeSelectionForeground/);
 });
 
@@ -328,7 +306,7 @@ test("the terminal ruler is a faintly tinted lane, not a bordered one", () => {
 test("live theme changes repaint existing shell and pane dividers", () => {
   assert.match(mainWindowXaml, /x:Name="TitleBarDivider"/);
   assert.match(mainWindowXaml, /x:Name="StatusBar"/);
-  assert.match(mainWindow, /SessionChromeFrameBrush"\]\)\.Color = palette\.Frame/);
+  assert.match(visualPalette, /Set\("SessionChromeFrameBrush", Frame\)/);
   assert.match(mainWindowXaml, /x:Name="TitleBarDivider"[\s\S]*?Background="\{StaticResource SessionChromeFrameBrush\}"/);
   assert.match(mainWindowXaml, /x:Name="StatusBar"[\s\S]*?BorderBrush="\{StaticResource SessionChromeFrameBrush\}"/);
   assert.match(mainWindow, /foreach \(var \(splitter, line\) in _splitterLines\)[\s\S]*?line\.Background = SplitterBrush/);
@@ -353,7 +331,8 @@ test("live theme changes recolor both retained tab-row divider brushes", () => {
 });
 
 test("resesh Dark keeps its original divider and bypasses stale Fluent strokes", () => {
-  assert.match(visualPalette, /_ => New\(0x0C0C0C, 0x181818, 0x2B2B2B,/);
+  assert.match(themeChrome, /\[ThemeIds\.Dark\] = new\(0x181818, 0x2B2B2B\)/);
+  assert.match(terminalThemes, /\["dark"\] = New\(\s*0x0C0C0C,/);
   assert.match(tabGroup, /Resources\["TabViewBorderBrush"\] = divider/);
   assert.match(tabGroup, /ActualThemeChanged \+= \(_, _\) => QueueTabTemplateRefresh\(\)/);
 });
@@ -375,7 +354,7 @@ test("XAML dialogs opt in to the Fluent ContentDialog style", () => {
 test("placeholder text is a step dimmer than captions, app-wide and in dialogs", () => {
   // Fluent's secondary text color sits too close to typed text to read as a hint.
   assert.match(visualPalette, /Placeholder => IsHighContrast\s*\? TreeForeground\s*: Mix\(TreeForeground, Input, 0\.45\)/);
-  assert.match(mainWindow, /SessionPlaceholderForegroundBrush"\]\)\.Color = palette\.Placeholder/);
+  assert.match(visualPalette, /Set\("SessionPlaceholderForegroundBrush", Placeholder\)/);
   for (const key of ["TextControlPlaceholderForeground", "TextControlPlaceholderForegroundFocused", "ComboBoxPlaceHolderForeground"]) {
     assert.match(appXaml, new RegExp(`x:Key="${key}" ResourceKey="SessionPlaceholderForegroundBrush"`), key);
   }

@@ -35,13 +35,85 @@ public sealed class SessionStoreTests : IDisposable
             PassphraseRequired = true,
             Notes = "core switch",
             ColorTag = "#FF8800",
-            CredentialNeeded = true,
             Overrides = new TerminalOverrides { Theme = "light", FontSize = 18 },
         };
         NewStore().Add(session);
 
         var reloaded = NewStore().Find(session.Id);
         Assert.Equal(session, reloaded);
+    }
+
+    [Fact]
+    public void Load_IgnoresFieldsNoLongerKept()
+    {
+        // credentialNeeded was saved by imports until it was dropped as never read.
+        var id = Guid.NewGuid();
+        File.WriteAllText(StorePath, $$"""
+            {"sessions":[{"id":"{{id}}","name":"core-sw-3","host":"192.168.1.3","username":"netops","folderPath":"","credentialNeeded":true}]}
+            """);
+
+        var store = NewStore();
+
+        Assert.Null(store.LoadWarning);
+        Assert.Equal("core-sw-3", store.Find(id)?.Name);
+    }
+
+    [Fact]
+    public void SetFolderIdentity_KeepsTheFolderAfterItsSessionsMoveOut()
+    {
+        var store = NewStore();
+        var session = NewSession(folder: "Prod");
+        store.Add(session);
+        var identityId = Guid.NewGuid();
+
+        store.SetFolderIdentity("Prod", identityId);
+        store.MoveToFolder(session.Id, "");
+
+        // The folder stays, showing the identity it holds, rather than vanishing while the
+        // identity waits to log in whatever is made at "Prod" next.
+        Assert.Equal(["Prod"], store.Folders);
+        Assert.Equal(["Prod"], NewStore().Folders);
+        Assert.Equal(identityId, store.FolderIdentity("Prod"));
+        store.DeleteFolder("Prod");
+        Assert.Empty(store.Folders);
+        Assert.Null(store.FolderIdentity("Prod"));
+    }
+
+    [Fact]
+    public void SetFolderIdentity_OnTheRootAddsNoFolder()
+    {
+        var store = NewStore();
+
+        store.SetFolderIdentity("", Guid.NewGuid());
+
+        Assert.Empty(store.Folders);
+        Assert.Empty(store.ExplicitFoldersOf(SessionKind.Ssh));
+    }
+
+    [Fact]
+    public void Load_FolderSettingWithNoFolder_BringsTheFolderBack()
+    {
+        // Written by builds that let a folder identity outlive its implicit folder.
+        var identityId = Guid.NewGuid();
+        File.WriteAllText(StorePath, $$"""
+            {"sessions":[],"folders":[],"folderSettings":[{"path":"Prod/Web","identityId":"{{identityId}}"},{"path":"","identityId":"{{identityId}}"}]}
+            """);
+
+        var store = NewStore();
+
+        Assert.Equal(["Prod", "Prod/Web"], store.Folders);
+        Assert.Equal(["Prod/Web"], store.ExplicitFoldersOf(SessionKind.Ssh));
+        Assert.Equal(identityId, store.FolderIdentity("Prod/Web"));
+    }
+
+    [Fact]
+    public void MergeFolderSettings_MakesTheirFoldersExplicit()
+    {
+        var store = NewStore();
+
+        store.MergeFolderSettings([new FolderSettings { Path = "Branch", IdentityId = Guid.NewGuid() }]);
+
+        Assert.Equal(["Branch"], store.ExplicitFoldersOf(SessionKind.Ssh));
     }
 
     [Fact]
@@ -430,5 +502,50 @@ public sealed class SessionStoreTests : IDisposable
         Assert.Equal("B", FolderPaths.Combine("", "B"));
         Assert.Equal("A", FolderPaths.Parent("A/B"));
         Assert.Equal("", FolderPaths.Parent("A"));
+    }
+
+    [Fact]
+    public void Changed_IsRaisedAfterEverySavedChangeOnly()
+    {
+        var store = NewStore();
+        var session = NewSession();
+        var changes = 0;
+        store.Changed += () =>
+        {
+            changes++;
+            Assert.NotNull(store.Find(session.Id)); // handlers see the saved state
+        };
+
+        store.Add(session);
+        store.SetFolderIdentity("", Guid.NewGuid());
+        store.DetachIdentity(store.FolderIdentity("")!.Value);
+        store.MoveToFolder(session.Id, ""); // already there: nothing to save
+        Assert.Equal(3, changes);
+
+        using (new FileStream(StorePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            Assert.ThrowsAny<IOException>(() => store.Update(session with { Name = "renamed" }));
+        Assert.Equal(3, changes);
+        Assert.Equal("web-01", store.Find(session.Id)!.Name);
+    }
+
+    [Fact]
+    public void SessionsInFolder_IsWhatDeleteFolderRemoves()
+    {
+        var store = NewStore();
+        store.AddMany(
+        [
+            NewSession("ssh", "Lab"),
+            NewSession("telnet", "Lab/Consoles") with { Kind = SessionKind.Telnet },
+            NewSession("serial", "Lab") with { Kind = SessionKind.Serial, Serial = new SerialTarget { PortName = "COM3" } },
+            NewSession("elsewhere", "Prod"),
+            new Session { Name = "pwsh", Kind = SessionKind.Local, FolderPath = "Lab", Local = new LocalTarget { Executable = "pwsh.exe" } },
+        ]);
+
+        var counted = store.SessionsInFolder("Lab").Select(s => s.Name).Order().ToList();
+        var deleted = store.DeleteFolder("Lab").Select(s => s.Name).Order().ToList();
+
+        Assert.Equal(["serial", "ssh", "telnet"], counted);
+        Assert.Equal(counted, deleted);
+        Assert.Equal(["elsewhere", "pwsh"], store.Sessions.Select(s => s.Name).Order());
     }
 }

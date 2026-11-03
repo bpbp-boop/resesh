@@ -65,6 +65,23 @@ public sealed class SettingsViewModelTests
     }
 
     [Fact]
+    public void SshAlgorithmChangesKeepKindsChangedInAnotherWindow()
+    {
+        var settings = Settings();
+        var mac = Resesh.Core.Ssh.SshAlgorithmPolicy.Supported(Resesh.Core.Ssh.SshAlgorithmKind.Mac)[0];
+        var cipher = Resesh.Core.Ssh.SshAlgorithmPolicy.Supported(Resesh.Core.Ssh.SshAlgorithmKind.Cipher)[0];
+        var shown = settings.SshAlgorithms;
+        // Settings in another window turns a MAC off after this page last showed the setting.
+        _settings = _settings with { SshAlgorithms = new Resesh.Core.Models.SshAlgorithms { DisabledMacs = [mac] } };
+
+        settings.ChangeSshAlgorithms(shown, new Resesh.Core.Models.SshAlgorithms { DisabledCiphers = [cipher] });
+
+        Assert.Equal([cipher], _settings.SshAlgorithms!.DisabledCiphers!);
+        Assert.Equal([mac], _settings.SshAlgorithms.DisabledMacs!);
+        Assert.Equal([nameof(SettingsViewModel.SshAlgorithms)], _changes);
+    }
+
+    [Fact]
     public void SessionsPaneLayoutSavesTheChosenLayout()
     {
         var settings = Settings();

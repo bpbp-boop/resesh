@@ -35,15 +35,18 @@ test("a strip drop transfers the tab from its source window", () => {
 test("cross-window transfer preserves the live tab and reparents its terminal view", () => {
   const transfer = windowCode.match(
     /public void TransferTabToGroup\([\s\S]*?\n    }\r?\n\r?\n    public void DetachTabForTransfer/)?.[0] ?? "";
-  const detach = windowCode.match(
-    /public void DetachTabForTransfer\([\s\S]*?\n    }\r?\n\r?\n    private void CollapseGroupIfEmpty/)?.[0] ?? "";
+  const remove = windowCode.match(
+    /private void RemoveTabCore\([\s\S]*?\n    }\r?\n/)?.[0] ?? "";
 
   assert.match(transfer, /sourceHost\.DetachTabForTransfer\(tab\)/);
   assert.match(transfer, /ViewModel\.AttachTab\(tab, targetGroup, targetIndex\)/);
   assert.match(transfer, /_groupViews\[targetGroup\]\.AddTerminal\(view\)/);
-  assert.match(detach, /_groupViews\[sourceGroup\]\.RemoveTerminal\(view\)/);
-  assert.match(detach, /ViewModel\.DetachTab\(tab\)/);
-  assert.doesNotMatch(detach, /CloseTab|Dispose/);
+  // The source window removes the tab the way it closes one, but keeps its view alive.
+  assert.match(windowCode, /public void DetachTabForTransfer\(TabViewModel tab\) => RemoveTabCore\(tab, dispose: false\);/);
+  assert.match(remove, /ViewModel\.DetachTab\(tab\)/);
+  assert.match(remove, /dispose \? \(\) => \(tab\.View as IDisposable\)\?\.Dispose\(\) : \(\) => \{ \}/);
+  assert.match(remove, /if \(dispose && tab\.View is OnboardingView onboarding\)/);
+  assert.doesNotMatch(remove, /ViewModel\.CloseTab/);
 });
 
 test("view-model ownership subscriptions move with a transferred tab", () => {

@@ -128,7 +128,9 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         IReadOnlyList<SshHop>? jumps = null,
         IReadOnlyList<Tunnel>? tunnels = null,
         string? proxyPassword = null,
-        Func<SshHop, SshHop?>? resolveLogin = null)
+        Func<SshHop, SshHop?>? resolveLogin = null,
+        int pixelWidth = 0,
+        int pixelHeight = 0)
     {
         if (bootstrapCommand is not null && bootstrapCommandFactory is not null)
             throw new ArgumentException("Specify either a bootstrap command or a bootstrap factory, not both.");
@@ -219,7 +221,7 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             {
                 try
                 {
-                    integrated = IntegratedShellStream.Create(client, terminalType, columns, rows, initialCommand, cancellationToken);
+                    integrated = IntegratedShellStream.Create(client, terminalType, columns, rows, initialCommand, cancellationToken, pixelWidth, pixelHeight);
                     bootstrapCommand = null; // no setup is typed into this terminal
                 }
                 catch (Exception ex) when (ex is SshException or IOException or NotSupportedException or InvalidOperationException)
@@ -235,8 +237,9 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
             // The same channel setup as integration, minus exec, so a plain shell also gets
             // the COLORTERM environment request. The public API is the fallback.
             shell = integrated ?? (IntegratedShellStream.IsShellSupported
-                ? IntegratedShellStream.Create(client, terminalType, columns, rows, null, cancellationToken)
-                : client.CreateShellStream(terminalType, (uint)columns, (uint)rows, 0, 0, 64 * 1024));
+                ? IntegratedShellStream.Create(client, terminalType, columns, rows, null, cancellationToken, pixelWidth, pixelHeight)
+                : client.CreateShellStream(terminalType, (uint)columns, (uint)rows,
+                    (uint)Math.Max(0, pixelWidth), (uint)Math.Max(0, pixelHeight), 64 * 1024));
             Interlocked.Exchange(ref _shell, shell);
             ThrowIfAbandoned(cancellationToken);
             if (bootstrapCommand is not null)
@@ -475,8 +478,8 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         catch (SshException) { } // remote already gone ("Client not connected."); reader loop reports it
     }
 
-    public void Resize(int columns, int rows) =>
-        ShellStreamResizer.TryResize(_shell, columns, rows);
+    public bool Resize(int columns, int rows, int pixelWidth = 0, int pixelHeight = 0) =>
+        ShellStreamResizer.TryResize(_shell, columns, rows, pixelWidth, pixelHeight);
 
     /// <summary>Runs a one-off command on its own channel (e.g. tmux kill-session). Blocking.</summary>
     public bool TryRunCommand(string command)

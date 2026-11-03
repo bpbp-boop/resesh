@@ -1,11 +1,17 @@
 namespace Resesh.Terminal.Native;
 
 /// <summary>A terminal theme as 0xRRGGBB values: defaults plus the 16 ANSI colors.</summary>
-internal sealed record TerminalTheme(uint Background, uint Foreground, uint Cursor, uint Selection, uint[] Ansi);
+public sealed record TerminalTheme(uint Background, uint Foreground, uint Cursor, uint Selection, uint[] Ansi);
 
-/// <summary>The same palettes terminal.html uses, keyed by theme id.</summary>
-internal static class TerminalThemes
+/// <summary>The terminal palettes, keyed by theme id: one entry per fixed theme in Core's
+/// ThemeCatalog. "system" has none; the app resolves it to light or dark first. The app's
+/// chrome (ThemeVisualPalette) takes its background, text and selection colors from here.</summary>
+public static class TerminalThemes
 {
+    /// <summary>The theme for an unknown id. Core's ThemeIds.Default, which this project can't
+    /// reference; ThemeTableTests checks the two agree.</summary>
+    public const string DefaultId = "dark";
+
     private static readonly Dictionary<string, TerminalTheme> Themes =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -21,12 +27,6 @@ internal static class TerminalThemes
                 0x0184BC, 0xA626A4, 0x0997B3, 0xFAFAFA,
                 0x4F525E, 0xE06C75, 0x98C379, 0xE5C07B,
                 0x61AFEF, 0xC678DD, 0x56B6C2, 0xFFFFFF),
-            ["system"] = New(
-                0x0C0C0C, 0xCCCCCC, 0xFFFFFF, 0x264F78,
-                0x0C0C0C, 0xC50F1F, 0x13A10E, 0xC19C00,
-                0x0037DA, 0x881798, 0x3A96DD, 0xCCCCCC,
-                0x767676, 0xE74856, 0x16C60C, 0xF9F1A5,
-                0x3B78FF, 0xB4009E, 0x61D6D6, 0xF2F2F2),
             ["solarized-dark"] = New(
                 0x002B36, 0x839496, 0x93A1A1, 0x274852,
                 0x073642, 0xDC322F, 0x859900, 0xB58900,
@@ -103,8 +103,14 @@ internal static class TerminalThemes
                 0xA2C1FF, 0xF2A9E8, 0x95E6E3, 0xFFF5F6),
         };
 
-    internal static TerminalTheme Find(string? id) =>
-        id is not null && Themes.TryGetValue(id, out var theme) ? theme : Themes["dark"];
+    /// <summary>Every theme id with a palette.</summary>
+    public static IEnumerable<string> Ids => Themes.Keys;
+
+    public static bool Contains(string? id) => id is not null && Themes.ContainsKey(id);
+
+    /// <summary>The palette for <paramref name="id"/>, or the default theme's.</summary>
+    public static TerminalTheme Find(string? id) =>
+        id is not null && Themes.TryGetValue(id, out var theme) ? theme : Themes[DefaultId];
 
     private static TerminalTheme New(uint background, uint foreground, uint cursor, uint selection, params uint[] ansi)
     {

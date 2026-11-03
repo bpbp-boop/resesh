@@ -1,0 +1,9 @@
+<Project>
+  <!-- Windows App SDK package versions, shared by the app and the terminal library. Both must
+       restore the same WinUI, or the app links two copies of its projections. -->
+  <PropertyGroup>
+    <WindowsAppSdkRuntimeVersion>2.4.0</WindowsAppSdkRuntimeVersion>
+    <WindowsAppSdkWinUIVersion>2.3.6</WindowsAppSdkWinUIVersion>
+    <WindowsAppSdkInteractiveExperiencesVersion>2.1.6</WindowsAppSdkInteractiveExperiencesVersion>
+  </PropertyGroup>
+</Project>

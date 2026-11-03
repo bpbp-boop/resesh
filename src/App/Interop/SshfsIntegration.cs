@@ -202,11 +202,18 @@ internal static class SshfsIntegration
         var line = entry.ToKnownHostsLine(session.Host, session.Port);
         var exe = FindSshfsExe()
             ?? throw new IOException("sshfs.exe was not found in the SSHFS-Win install.");
+        string? keyPath = null;
         if (session.AuthMethod == AuthMethod.PrivateKey)
         {
-            if (string.IsNullOrEmpty(session.PrivateKeyPath) || !File.Exists(session.PrivateKeyPath))
-                throw new IOException($"the session's key file was not found: {session.PrivateKeyPath}");
-            if (session.PassphraseRequired)
+            // The key registry is the one record of a key's file and whether it is encrypted;
+            // a session (resolved login or not) only names the key.
+            var key = session.PrivateKeyId is { } keyId ? App.SshKeys.Find(keyId) : null;
+            if (key is null)
+                throw new IOException("the session does not have a registered SSH key.");
+            keyPath = key.Path;
+            if (string.IsNullOrEmpty(keyPath) || !File.Exists(keyPath))
+                throw new IOException($"the session's key file was not found: {keyPath}");
+            if (key.IsEncrypted == true)
                 throw new IOException("the key is passphrase-protected — sshfs cannot prompt for it. "
                     + "Use a passphrase-free key for the Explorer mount.");
         }
@@ -259,7 +266,7 @@ internal static class SshfsIntegration
             };
             if (session.AuthMethod == AuthMethod.PrivateKey)
             {
-                options.Add(PathOption("IdentityFile", session.PrivateKeyPath!));
+                options.Add(PathOption("IdentityFile", keyPath!));
                 options.Add("PreferredAuthentications=publickey");
                 options.Add("BatchMode=yes");
             }

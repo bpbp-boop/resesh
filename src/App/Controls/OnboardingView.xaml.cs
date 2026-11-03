@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Resesh.App.Dialogs;
+using Resesh.App.ViewModels;
 using Resesh.Core.Import;
 using Resesh.Core.Storage;
 using Windows.UI;
@@ -11,13 +12,12 @@ namespace Resesh.App.Controls;
 
 public sealed partial class OnboardingView : UserControl, IDisposable
 {
-    private readonly AppSettings _savedSettings;
+    private readonly WelcomeChoices _choices;
     private readonly Action<string> _previewTheme;
     private readonly Action _sessionsChanged;
     private ImportScanResult? _puttyScan;
     private ImportScanResult? _openSshScan;
     private ImportScanResult? _secureCrtScan;
-    private string _selectedTheme;
     private bool _scanStarted;
     private bool _completed;
     private bool _updatingThemeUi;
@@ -36,32 +36,70 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         Action sessionsChanged,
         string? localShellName)
     {
-        _savedSettings = settings;
+        _choices = new WelcomeChoices(settings);
         _previewTheme = previewTheme;
         _sessionsChanged = sessionsChanged;
-        _selectedTheme = settings.Theme;
 
         InitializeComponent();
+        AppShortcuts.AddAccelerators(this, Resesh.Core.Input.ShortcutIds.FinishWelcome, FinishSetup_Invoked);
+        ToolTipService.SetToolTip(FinishSetupButton,
+            AppShortcuts.ToolTip("Save preferences and close Welcome", Resesh.Core.Input.ShortcutIds.FinishWelcome));
         Foreground = Brush("OnboardingPrimaryTextBrush");
         WelcomeLocalShellLabel.Text = localShellName is null ? "No local shell available" : $"Open {localShellName}";
         WelcomeLocalShellButton.IsEnabled = localShellName is not null;
 
-        _updatingThemeUi = true;
-        ConfirmCloseToggle.IsOn = settings.ConfirmCloseActiveSessions;
-        CopyOnSelectToggle.IsOn = settings.CopyOnSelect;
-        RightClickPasteToggle.IsOn = settings.RightClickPaste;
-        CrashReportsToggle.IsOn = settings.WriteCrashReports;
-        CommandHistoryToggle.IsOn = settings.KeepCommandHistory;
-        CommandHistoryNote.Text =
-            $"Search it with {AppShortcuts.Label(Resesh.Core.Input.ShortcutIds.CommandHistory)}. History stays on this computer " +
-            $"and is deleted after {settings.CommandHistoryDays} days. Output can include secrets a server prints, " +
-            "so history is off until you turn it on. Change it later in Settings > Recording.";
-        UpdateThemeSelection();
-        _updatingThemeUi = false;
-        UpdateSaveButtonState();
+        ShowSettings(settings);
         RefreshLogins();
         Loaded += OnLoaded;
+        Loaded += (_, _) => HookStoreChanges(true);
+        Unloaded += (_, _) => HookStoreChanges(false);
     }
+
+    private string SelectedTheme => _choices.Shown.Theme;
+
+    /// <summary>Re-reads the saved settings after Settings, in any window, changed them. A
+    /// setting changed there replaces what was picked here; the other picks stay.</summary>
+    public void Refresh(AppSettings saved)
+    {
+        if (_completed)
+            return;
+        _choices.Refresh(saved);
+        ShowSettings(saved);
+    }
+
+    private void ShowSettings(AppSettings saved)
+    {
+        var shown = _choices.Shown;
+        var wasUpdating = _updatingThemeUi;
+        _updatingThemeUi = true;
+        ConfirmCloseToggle.IsOn = shown.ConfirmCloseActiveSessions;
+        CopyOnSelectToggle.IsOn = shown.CopyOnSelect;
+        RightClickPasteToggle.IsOn = shown.RightClickPaste;
+        CrashReportsToggle.IsOn = shown.WriteCrashReports;
+        CommandHistoryToggle.IsOn = shown.KeepCommandHistory;
+        CommandHistoryNote.Text =
+            $"Search it with {AppShortcuts.Label(Resesh.Core.Input.ShortcutIds.CommandHistory)}. History stays on this computer " +
+            $"and is deleted after {saved.CommandHistoryDays} days. Output can include secrets a server prints, " +
+            $"so history is off until you turn it on. Change it later in {SettingsCatalog.PathTo(GlobalSettingsTarget.CommandHistory)}.";
+        UpdateThemeSelection();
+        _updatingThemeUi = wasUpdating;
+        UpdateSaveButtonState();
+    }
+
+    /// <summary>The identities summary follows identities and folder logins changed elsewhere.
+    /// Hooked while loaded: Welcome can be dragged to another window, which unloads it.</summary>
+    private void HookStoreChanges(bool attach)
+    {
+        App.Identities.Changed -= OnStoreChanged;
+        App.SessionsChanged -= OnStoreChanged;
+        if (!attach)
+            return;
+        App.Identities.Changed += OnStoreChanged;
+        App.SessionsChanged += OnStoreChanged;
+    }
+
+    // Identity changes can be raised off the UI thread.
+    private void OnStoreChanged() => DispatcherQueue.TryEnqueue(RefreshLogins);
 
     /// <summary>Summarizes the identities in use, so the section reads as state, not only as advice.</summary>
     private void RefreshLogins()
@@ -92,29 +130,24 @@ public sealed partial class OnboardingView : UserControl, IDisposable
 
     private void ManageIdentities_Click(object sender, RoutedEventArgs e) => ManageIdentitiesRequested?.Invoke();
 
-    public AppSettings Complete()
-    {
-        return App.Settings.Current with
-        {
-            Theme = _selectedTheme,
-            ConfirmCloseActiveSessions = ConfirmCloseToggle.IsOn,
-            CopyOnSelect = CopyOnSelectToggle.IsOn,
-            RightClickPaste = RightClickPasteToggle.IsOn,
-            WriteCrashReports = CrashReportsToggle.IsOn,
-            KeepCommandHistory = CommandHistoryToggle.IsOn,
-            OnboardingCompleted = true,
-        };
-    }
+    /// <summary>The settings saved now with what was picked here, and Welcome done.</summary>
+    public AppSettings Complete() => _choices.Complete(App.Settings.Current);
 
     public void MarkCompleted() => _completed = true;
 
+    /// <summary>Closing without finishing puts back the theme saved now, which Settings may
+    /// have changed since Welcome opened.</summary>
     public void CancelPreview()
     {
-        if (!_completed)
-            _previewTheme(_savedSettings.Theme);
+        if (!_completed && _choices.PreviewsTheme)
+            _previewTheme(App.Settings.Current.Theme);
     }
 
-    public void Dispose() => Loaded -= OnLoaded;
+    public void Dispose()
+    {
+        Loaded -= OnLoaded;
+        HookStoreChanges(false);
+    }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -269,15 +302,15 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         }
     }
 
-    private void LightTheme_Click(object sender, RoutedEventArgs e) => SelectTheme("light");
+    private void LightTheme_Click(object sender, RoutedEventArgs e) => SelectTheme(ThemeIds.Light);
 
-    private void DarkTheme_Click(object sender, RoutedEventArgs e) => SelectTheme("dark");
+    private void DarkTheme_Click(object sender, RoutedEventArgs e) => SelectTheme(ThemeIds.Dark);
 
-    private void SystemTheme_Click(object sender, RoutedEventArgs e) => SelectTheme("system");
+    private void SystemTheme_Click(object sender, RoutedEventArgs e) => SelectTheme(ThemeIds.System);
 
     private void SelectTheme(string theme)
     {
-        _selectedTheme = theme;
+        _choices.Choose(_choices.Shown with { Theme = theme });
         _previewTheme(theme);
         UpdateThemeSelection();
         UpdateSaveButtonState();
@@ -287,8 +320,8 @@ public sealed partial class OnboardingView : UserControl, IDisposable
     {
         var wasUpdating = _updatingThemeUi;
         _updatingThemeUi = true;
-        var isSystem = _selectedTheme == "system";
-        var isLight = !isSystem && ThemeCatalog.IsLight(_selectedTheme);
+        var isSystem = ThemeCatalog.IsSystem(SelectedTheme);
+        var isLight = !isSystem && ThemeCatalog.IsLight(SelectedTheme);
         LightThemeToggle.IsChecked = isLight;
         DarkThemeToggle.IsChecked = !isSystem && !isLight;
         SystemThemeToggle.IsChecked = isSystem;
@@ -298,27 +331,27 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         // the palette and disables the fixed-theme picker while it follows Windows.
         if (isSystem)
         {
-            ThemePicker.ItemsSource = new[] { ThemeCatalog.Find("system") };
+            ThemePicker.ItemsSource = new[] { ThemeCatalog.Find(ThemeIds.System) };
             ThemePicker.SelectedIndex = 0;
             ThemePicker.IsEnabled = false;
         }
         else
         {
             var choices = ThemeCatalog.All
-                .Where(theme => theme.Id != "system" && theme.IsLight == isLight)
+                .Where(theme => theme.Id != ThemeIds.System && theme.IsLight == isLight)
                 .ToList();
             ThemePicker.ItemsSource = choices;
             ThemePicker.SelectedItem = choices.FirstOrDefault(theme =>
-                string.Equals(theme.Id, _selectedTheme, StringComparison.OrdinalIgnoreCase));
+                string.Equals(theme.Id, SelectedTheme, StringComparison.OrdinalIgnoreCase));
             ThemePicker.IsEnabled = true;
         }
 
-        var resolved = App.ResolveTheme(_selectedTheme);
+        var resolved = App.ResolveTheme(SelectedTheme);
         var palette = ThemeVisualPalette.For(resolved);
         ApplyPagePalette(palette);
         if (isSystem)
         {
-            var currentMode = resolved == "light" ? "Light" : "Dark";
+            var currentMode = resolved == ThemeIds.Light ? "Light" : "Dark";
             SystemThemeHint.Text = $"System follows your Windows color mode (currently {currentMode}). Choose Light or Dark to select a fixed color theme.";
             SystemThemeHint.Visibility = Visibility.Visible;
         }
@@ -337,8 +370,17 @@ public sealed partial class OnboardingView : UserControl, IDisposable
 
     private void PreferenceToggle_Toggled(object sender, RoutedEventArgs e)
     {
-        if (!_updatingThemeUi)
-            UpdateSaveButtonState();
+        if (_updatingThemeUi)
+            return;
+        _choices.Choose(_choices.Shown with
+        {
+            ConfirmCloseActiveSessions = ConfirmCloseToggle.IsOn,
+            CopyOnSelect = CopyOnSelectToggle.IsOn,
+            RightClickPaste = RightClickPasteToggle.IsOn,
+            WriteCrashReports = CrashReportsToggle.IsOn,
+            KeepCommandHistory = CommandHistoryToggle.IsOn,
+        });
+        UpdateSaveButtonState();
     }
 
     private void UpdateSaveButtonState()
@@ -346,13 +388,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         if (FinishSetupButton is null)
             return;
 
-        FinishSetupButton.IsEnabled = _savedSettings.OnboardingCompleted != true
-            || !string.Equals(_selectedTheme, _savedSettings.Theme, StringComparison.OrdinalIgnoreCase)
-            || ConfirmCloseToggle.IsOn != _savedSettings.ConfirmCloseActiveSessions
-            || CopyOnSelectToggle.IsOn != _savedSettings.CopyOnSelect
-            || RightClickPasteToggle.IsOn != _savedSettings.RightClickPaste
-            || CrashReportsToggle.IsOn != _savedSettings.WriteCrashReports
-            || CommandHistoryToggle.IsOn != _savedSettings.KeepCommandHistory;
+        FinishSetupButton.IsEnabled = _choices.HasChanges(App.Settings.Current);
     }
 
     private void ApplyPagePalette(ThemeVisualPalette palette)

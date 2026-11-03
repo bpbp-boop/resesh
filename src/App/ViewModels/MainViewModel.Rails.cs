@@ -48,7 +48,8 @@ public sealed partial class MainViewModel
     }
 
     /// <summary>Rebuilds the Recent pane from the persisted list, dropping sessions that
-    /// were deleted and hiding ones that are not visible right now.</summary>
+    /// were deleted and hiding ones that are not visible right now. Runs on every session
+    /// store change, so its entries show the sessions as saved.</summary>
     public void RefreshRecentSessions()
     {
         var saved = _environment.RecentSessionIds();
@@ -71,10 +72,12 @@ public sealed partial class MainViewModel
             _environment.SaveRecentSessionIds(persisted);
     }
 
+    /// <summary>Connects the saved record of a Recent entry: the entry holds a copy, which
+    /// may predate an edit made since the pane was filled.</summary>
     [RelayCommand]
     private void ConnectRecent(TreeNodeViewModel? node)
     {
-        if (node?.Session is { } session)
+        if (node?.Session is { } entry && CurrentSession(entry.Id) is { } session)
             Services.ConnectSession(session);
     }
 
@@ -89,7 +92,7 @@ public sealed partial class MainViewModel
 
         try
         {
-            var directory = Path.GetFullPath(Environment.ExpandEnvironmentVariables(_environment.RecordingDirectory()));
+            var directory = Core.Recording.TerminalRecordingFiles.ResolveDirectory(_environment.RecordingDirectory());
             var loader = RecordingLoader;
             var items = await Task.Run(() => loader(directory));
             if (loadVersion != _recordingsLoadVersion)

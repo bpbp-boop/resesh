@@ -35,10 +35,10 @@ public sealed partial class MainWindow
             items.Add(new QuickConnectSuggestion
             {
                 Display = adhoc.IsSerial
-                    ? $"Open {adhoc.Serial?.Describe()}"
+                    ? $"Open {SessionEndpoint.Format(adhoc)}"
                     : adhoc.IsTelnet
-                    ? $"Connect to {adhoc.Host}:{adhoc.Port} over telnet"
-                    : $"Connect to {adhoc.Username}@{adhoc.Host}" + (adhoc.Port != 22 ? $":{adhoc.Port}" : ""),
+                    ? $"Connect to {SessionEndpoint.Format(adhoc, new() { ShowDefaultPort = true })} over telnet"
+                    : $"Connect to {SessionEndpoint.Format(adhoc, new() { Username = adhoc.Username })}",
                 Detail = adhoc.IsSerial ? "serial port" : adhoc.IsTelnet ? "new connection · unencrypted" : "new connection",
                 Glyph = "\uE768",
                 Session = adhoc,
@@ -49,14 +49,12 @@ public sealed partial class MainWindow
             items.AddRange(ViewModel.RankedMatches(text).Select(s => new QuickConnectSuggestion
             {
                 Display = s.Name,
-                Detail = s.IsLocal
-                    ? s.Local?.Executable ?? "local shell"
-                    : s.IsSerial
-                        ? $"serial {s.Serial?.Describe()}"
-                    : s.IsTelnet
-                        ? $"telnet {s.Host}" + (s.Port != 23 ? $":{s.Port}" : "")
-                        : (App.LoginUsername(s) is { Length: > 0 } user ? $"{user}@{s.Host}" : s.Host)
-                            + (s.Port != 22 ? $":{s.Port}" : ""),
+                Detail = SessionEndpoint.Format(s, new()
+                {
+                    Username = App.LoginUsername(s),
+                    ShowProtocol = true,
+                    LocalShell = LocalShellDisplay.FullPath,
+                }),
                 Glyph = s.IsLocal ? "\uE7F8" : "\uEDA2",
                 Session = s,
             }));

@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:Resesh.App.Controls"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
+    xmlns:recording="using:Resesh.Core.Recording"
     Background="{StaticResource SessionShellBrush}"
     Foreground="{StaticResource SessionTreeForegroundBrush}">
 
@@ -111,9 +112,11 @@
                             AutomationProperties.AutomationId="SettingsFontFamily" />
                     </toolkit:SettingsCard>
                     <toolkit:SettingsCard
+                        x:Name="FallbackFontsCard"
                         Header="Fallback fonts"
                         Description="Tried in order for characters the terminal font doesn't have, such as icons from a Nerd Font. Separate with commas.">
                         <TextBox
+                            x:Name="FallbackFontsBox"
                             MinWidth="280"
                             Text="{x:Bind ViewModel.FallbackFonts, Mode=TwoWay}"
                             PlaceholderText="Built-in fallbacks only"
@@ -132,8 +135,6 @@
                         <NumberBox
                             x:Name="FontSizeBox"
                             MinWidth="160"
-                            Minimum="8"
-                            Maximum="32"
                             SpinButtonPlacementMode="Compact"
                             Value="{x:Bind ViewModel.FontSize, Mode=TwoWay}"
                             AutomationProperties.Name="Font size"
@@ -145,8 +146,6 @@
                         <NumberBox
                             x:Name="ScrollbackBox"
                             MinWidth="160"
-                            Minimum="1000"
-                            Maximum="100000"
                             SmallChange="1000"
                             SpinButtonPlacementMode="Compact"
                             Value="{x:Bind ViewModel.Scrollback, Mode=TwoWay}"
@@ -346,8 +345,6 @@
                         <NumberBox
                             x:Name="HistoryDaysBox"
                             MinWidth="160"
-                            Minimum="1"
-                            Maximum="3650"
                             SpinButtonPlacementMode="Compact"
                             Value="{x:Bind ViewModel.CommandHistoryDays, Mode=TwoWay}"
                             AutomationProperties.Name="Keep history for (days)"
@@ -398,8 +395,8 @@
                         <NumberBox
                             x:Name="RewindMinutesBox"
                             MinWidth="160"
-                            Minimum="1"
-                            Maximum="1440"
+                            Minimum="{x:Bind recording:RewindLimits.MinimumMinutes}"
+                            Maximum="{x:Bind recording:RewindLimits.MaximumMinutes}"
                             SpinButtonPlacementMode="Compact"
                             Value="{x:Bind ViewModel.RewindMinutes, Mode=TwoWay}"
                             AutomationProperties.Name="Rewind history (minutes)"
@@ -409,8 +406,8 @@
                         <NumberBox
                             x:Name="RewindMegabytesBox"
                             MinWidth="160"
-                            Minimum="1"
-                            Maximum="1024"
+                            Minimum="{x:Bind recording:RewindLimits.MinimumMegabytes}"
+                            Maximum="{x:Bind recording:RewindLimits.MaximumMegabytes}"
                             SpinButtonPlacementMode="Compact"
                             Value="{x:Bind ViewModel.RewindMegabytes, Mode=TwoWay}"
                             AutomationProperties.Name="Memory limit per tab (MiB)"

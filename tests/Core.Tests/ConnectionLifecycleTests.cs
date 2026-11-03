@@ -146,6 +146,18 @@ public sealed class ConnectionLifecycleTests : IDisposable
     }
 
     [Fact]
+    public void ResizeWithNoShellReportsItWasNotApplied()
+    {
+        // The tab records a size as sent only when it was, so the next resize tries again.
+        using var telnet = new TelnetTerminalSession();
+        using var ssh = new SshTerminalSession(_knownHosts);
+        using var local = new LocalTerminalSession();
+        Assert.False(telnet.Resize(100, 30));
+        Assert.False(ssh.Resize(100, 30, 800, 600));
+        Assert.False(local.Resize(100, 30));
+    }
+
+    [Fact]
     public void Telnet_DisposeBeforeConnect_ReleasesTheRoute()
     {
         var telnet = new TelnetTerminalSession();

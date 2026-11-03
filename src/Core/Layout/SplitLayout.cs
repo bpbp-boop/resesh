@@ -34,22 +34,46 @@ public sealed class SplitLayoutLeaf<T>(T value) : SplitLayoutNode<T> where T : n
 public sealed class SplitLayoutBranch<T> : SplitLayoutNode<T> where T : notnull
 {
     private readonly List<SplitLayoutNode<T>> _children;
+    private List<double> _sizes = [];
 
-    public SplitLayoutBranch(SplitOrientation orientation, IEnumerable<SplitLayoutNode<T>> children)
+    public SplitLayoutBranch(
+        SplitOrientation orientation,
+        IEnumerable<SplitLayoutNode<T>> children,
+        IEnumerable<double>? sizes = null)
     {
         Orientation = orientation;
         _children = [.. children];
         foreach (var child in _children)
             child.Parent = this;
+        SetSizes(sizes);
     }
 
     public SplitOrientation Orientation { get; }
     public IReadOnlyList<SplitLayoutNode<T>> Children => _children;
     internal List<SplitLayoutNode<T>> MutableChildren => _children;
     public override IEnumerable<T> Values => _children.SelectMany(child => child.Values);
+
+    /// <summary>Each child's share of the branch as a relative weight, or empty while they
+    /// share it equally. This is the only record of a resized pane: the layout keeps it in
+    /// step as panes are split and closed, so a split nobody touched keeps its sizes.</summary>
+    public IReadOnlyList<double> Sizes => _sizes;
+
+    /// <summary>Sets each child's weight. Anything but one positive, finite weight per child
+    /// means equal shares.</summary>
+    public void SetSizes(IEnumerable<double>? sizes)
+    {
+        var list = sizes?.ToList() ?? [];
+        _sizes = list.Count == _children.Count && list.All(size => double.IsFinite(size) && size > 0)
+            ? list
+            : [];
+    }
+
+    /// <summary>The weights with an equal share filled in for each child while there are none.</summary>
+    internal List<double> ExplicitSizes() =>
+        _sizes.Count == _children.Count ? [.. _sizes] : [.. Enumerable.Repeat(1.0, _children.Count)];
 }
 
-/// <summary>A recursive layout of equal-size column and row siblings.</summary>
+/// <summary>A recursive layout of column and row siblings, equal-size unless resized.</summary>
 public sealed class SplitLayout<T> where T : notnull
 {
     private readonly Dictionary<T, SplitLayoutLeaf<T>> _leaves = [];
@@ -108,6 +132,9 @@ public sealed class SplitLayout<T> where T : notnull
             var targetIndex = parent.MutableChildren.IndexOf(targetLeaf);
             parent.MutableChildren.Insert(targetIndex + (insertBefore ? 0 : 1), addedLeaf);
             addedLeaf.Parent = parent;
+            // The branch that gained a pane goes back to equal shares, as a new one starts;
+            // halving the target instead would shrink each pane of a run of splits.
+            parent.SetSizes(null);
             return;
         }
 
@@ -123,8 +150,14 @@ public sealed class SplitLayout<T> where T : notnull
         if (!_leaves.TryGetValue(value, out var leaf) || leaf.Parent is not { } parent)
             return false; // The root is the one group that must remain.
 
-        parent.MutableChildren.Remove(leaf);
+        var index = parent.MutableChildren.IndexOf(leaf);
+        var sizes = parent.Sizes.Count > 0 ? parent.ExplicitSizes() : null;
+        parent.MutableChildren.RemoveAt(index);
         _leaves.Remove(value);
+        // The panes left keep their shares of the branch and split the closed one's
+        // between them in proportion.
+        sizes?.RemoveAt(index);
+        parent.SetSizes(sizes);
 
         if (parent.MutableChildren.Count == 1)
         {
@@ -165,10 +198,19 @@ public sealed class SplitLayout<T> where T : notnull
         }
 
         var index = parent.MutableChildren.IndexOf(branch);
+        // The branch's children take its share of the parent between them as they had it,
+        // so no pane moves when the branch dissolves into its parent.
+        var sizes = parent.ExplicitSizes();
+        var share = sizes[index];
+        var inner = branch.ExplicitSizes();
+        var total = inner.Sum();
+        sizes.RemoveAt(index);
+        sizes.InsertRange(index, inner.Select(size => share * size / total));
         parent.MutableChildren.RemoveAt(index);
         parent.MutableChildren.InsertRange(index, branch.MutableChildren);
         foreach (var child in branch.MutableChildren)
             child.Parent = parent;
+        parent.SetSizes(sizes);
     }
 }
 

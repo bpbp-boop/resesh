@@ -38,6 +38,6 @@
                     AutomationProperties.Name="Paste preview" />
             </ScrollViewer>
         </Border>
-        <CheckBox x:Name="DontAskBox" Content="Don't ask again (turn it back on in Settings › Terminal)" />
+        <CheckBox x:Name="DontAskBox" />
     </StackPanel>
 </ContentDialog>

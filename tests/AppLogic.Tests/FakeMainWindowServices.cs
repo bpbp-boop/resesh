@@ -30,7 +30,12 @@ internal sealed class FakeMainWindowServices : IMainWindowServices
         return Task.CompletedTask;
     }
 
-    public void ConnectSession(Session session) => Record($"Connect {session.Name}");
+    public List<Session> ConnectedSessions { get; } = [];
+    public void ConnectSession(Session session)
+    {
+        ConnectedSessions.Add(session);
+        Record($"Connect {session.Name}");
+    }
     public List<(Session Session, TabGroupViewModel Group)> PaneConnections { get; } = [];
     public void ConnectSession(Session session, TabGroupViewModel group) => PaneConnections.Add((session, group));
     public void ConnectInNewWindow(IReadOnlyList<Session> sessions) =>
@@ -88,6 +93,9 @@ internal sealed class FakeMainWindowServices : IMainWindowServices
     public Task CloseWorkspaceAsync(Workspace workspace) => RecordAsync($"CloseWorkspace {workspace.Name}");
     public HashSet<Guid> OpenWorkspaces { get; } = [];
     public bool IsWorkspaceOpen(Guid workspaceId) => OpenWorkspaces.Contains(workspaceId);
+    public HashSet<Guid> WorkspacesOpenElsewhere { get; } = [];
+    public bool CanAddWorkspaceToLayout(Guid workspaceId) =>
+        WorkspaceParking.CanAddToShownLayout(IsWorkspaceOpen(workspaceId), WorkspacesOpenElsewhere.Contains(workspaceId));
     public Guid? ShownWorkspaceId { get; set; }
     public void ShowHomeWorkspace() => Record("ShowHomeWorkspace");
 

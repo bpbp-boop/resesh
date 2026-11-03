@@ -7,7 +7,7 @@ using Resesh.Core.Storage;
 
 namespace Resesh.App.ViewModels;
 
-public sealed partial class MainViewModel : ObservableObject
+public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly ViewModelEnvironment _environment;
     private readonly SessionStore _store;
@@ -55,7 +55,15 @@ public sealed partial class MainViewModel : ObservableObject
         _focusedGroup = initial;
         RebuildTree();
         Commands = new AppCommandCatalog(this);
+        _store.Changed += Store_Changed;
     }
+
+    /// <summary>Stops following the session store. The window calls this when it closes.</summary>
+    public void Dispose() => _store.Changed -= Store_Changed;
+
+    // Every saved change reaches every window, whoever made it: a dialog, another window,
+    // a connect prompt or an import. The tree, tabs and Recent re-read the store here.
+    private void Store_Changed() => _environment.RunOnUiThread(RefreshSessions);
 
     /// <summary>The window that carries out commands. Only commands need it.</summary>
     private IMainWindowServices Services =>
@@ -86,6 +94,9 @@ public sealed partial class MainViewModel : ObservableObject
 
     public bool IsFiltering => IsSearching;
 
+    /// <summary>How many sessions the unfiltered tree shows. Every count the user reads (the
+    /// status bar, the filter summary, the empty tree) uses this one, so hidden built-in
+    /// profiles are never counted in one place and not another.</summary>
     public int TotalSessionCount => VisibleSessions.Count();
 
     public int MatchCount { get; private set; }
@@ -161,7 +172,7 @@ public sealed partial class MainViewModel : ObservableObject
     {
         get
         {
-            var baseText = $"{_store.Sessions.Count} sessions";
+            var baseText = $"{TotalSessionCount} sessions";
             var tab = ActiveTab;
             if (tab is null)
                 return baseText;
@@ -308,14 +319,14 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     // ---- Session CRUD ----
+    // Each change is one store write. The tree, tabs and Recent of every window follow it
+    // through the store's Changed event (RefreshSessions), not through these methods.
 
     public void AddSession(Session session, string? password)
     {
         _store.Add(session);
         if (!string.IsNullOrEmpty(password))
             _credentials.Write(session.Id, password);
-        RebuildTree();
-        _environment.SessionsChanged(this);
     }
 
     public void UpdateSession(Session session, string? password)
@@ -326,57 +337,55 @@ public sealed partial class MainViewModel : ObservableObject
             _credentials.Write(session.Id, password);
         else if (UsesOwnPassword(previous) && !UsesOwnPassword(session))
             _credentials.Delete(session.Id);
-        foreach (var tab in AllTabs.Where(t => t.Session.Id == session.Id))
-        {
-            tab.Session = session;
-            // Appearance overrides take effect immediately; connection fields apply on next connect.
-            _environment.ApplySessionSettings(tab);
-        }
-        OnPropertyChanged(nameof(ActiveSessionTheme));
-        // Preserve realized containers for presentation-only edits (icon, color, endpoint,
-        // terminal settings, etc.). Rebuild only when membership, hierarchy, ordering, or
-        // the active filter projection may have changed.
-        var needsRebuild = previous is null
-            || previous.Kind != session.Kind
-            || !previous.FolderPath.Equals(session.FolderPath, StringComparison.OrdinalIgnoreCase)
-            || !previous.Name.Equals(session.Name, StringComparison.OrdinalIgnoreCase)
-            || IsVisible(previous) != IsVisible(session)
-            || (IsSearching && SearchableFieldsChanged(previous, session));
-
-        if (needsRebuild || !_sessionNodes.TryGetValue(session.Id, out var node))
-            RebuildTree();
-        else
-            node.UpdateSession(session);
-        _environment.SessionsChanged(this);
     }
 
-    /// <summary>True when the session keeps its own password under its id. Identity logins
-    /// keep theirs under the identity, so moving to one drops the session's copy.</summary>
-    private static bool UsesOwnPassword(Session? session) =>
-        session is { Login: SessionLogin.Own, AuthMethod: AuthMethod.Password };
+    /// <summary>Saves a login chosen at a connect prompt. Only the login fields come from
+    /// <paramref name="login"/>, which is the tab's copy of the session; everything else is
+    /// the saved record, so a copy taken before other edits cannot write them back.</summary>
+    public void UpdateLogin(Session login, string? password)
+    {
+        if (_store.Find(login.Id) is not { } current)
+            return;
+        UpdateSession(current with
+        {
+            Username = login.Username,
+            AuthMethod = login.AuthMethod,
+            PrivateKeyId = login.PrivateKeyId,
+            PrivateKeyPath = login.PrivateKeyPath,
+            IdentityId = login.IdentityId,
+            InheritLogin = login.InheritLogin,
+        }, password);
+    }
 
-    private static bool SearchableFieldsChanged(Session before, Session after) =>
-        before.Name != after.Name
-        || before.Host != after.Host
-        || before.Username != after.Username
-        || before.FolderPath != after.FolderPath
-        || before.Notes != after.Notes;
+    private static bool UsesOwnPassword(Session? session) => session?.UsesOwnPassword == true;
 
     public void DeleteSession(Session session)
     {
         _store.Remove(session.Id);
-        _credentials.Delete(session.Id);
-        _credentials.DeleteProxy(session.Id);
-        RebuildTree();
-        _environment.SessionsChanged(this);
+        ForgetDeleted([session.Id]);
     }
 
-    public void MoveSessionsToFolder(IEnumerable<Guid> sessionIds, string folderPath)
-    {
+    public void MoveSessionsToFolder(IEnumerable<Guid> sessionIds, string folderPath) =>
         _store.MoveToFolder(sessionIds, folderPath);
-        RebuildTree();
-        _environment.SessionsChanged(this);
+
+    /// <summary>Cleans up after deleted sessions: their saved passwords, and their tabs in
+    /// saved workspaces. Every delete path ends here.</summary>
+    private void ForgetDeleted(IReadOnlyCollection<Guid> sessionIds)
+    {
+        foreach (var id in sessionIds)
+        {
+            _credentials.Delete(id);
+            _credentials.DeleteProxy(id);
+        }
+        if (sessionIds.Count > 0)
+            _environment.SessionsDeleted(sessionIds);
     }
+
+    /// <summary>The saved record of a session shown somewhere as a copy (a tree node, a
+    /// Recent entry), or null once it is deleted or hidden. Actions read this at the moment
+    /// they run, so they never act on details that changed since the copy was taken.</summary>
+    public Session? CurrentSession(Guid id) =>
+        _store.Find(id) is { } session && IsVisible(session) ? session : null;
 
     // ---- Bulk session changes (Settings > Sessions): one store write per action ----
 
@@ -392,25 +401,27 @@ public sealed partial class MainViewModel : ObservableObject
         _store.UpdateMany(sessions);
         foreach (var session in dropsPassword)
             _credentials.Delete(session.Id);
-        RefreshSessions();
-        _environment.SessionsChanged(this);
     }
 
-    public void DeleteSessions(IEnumerable<Session> sessions)
+    /// <summary>Applies a bulk edit to the saved records of these sessions, not to copies a
+    /// table showed earlier, so a change made meanwhile (in another window, say) is kept.
+    /// Returns the sessions the edit changed.</summary>
+    public IReadOnlyList<Session> EditSessions(IEnumerable<Guid> sessionIds, SessionBulkEdit edit)
     {
-        foreach (var removed in _store.RemoveMany(sessions.Select(session => session.Id)))
-            {
-                _credentials.Delete(removed.Id);
-                _credentials.DeleteProxy(removed.Id);
-            }
-        RebuildTree();
-        _environment.SessionsChanged(this);
+        var changed = edit.ApplyTo(sessionIds.Distinct().Select(_store.Find).OfType<Session>().ToList());
+        UpdateSessions(changed);
+        return changed;
     }
 
-    /// <summary>Copies the sessions beside the originals, saved passwords included.</summary>
+    public void DeleteSessions(IEnumerable<Session> sessions) =>
+        ForgetDeleted(_store.RemoveMany(sessions.Select(session => session.Id)).Select(removed => removed.Id).ToList());
+
+    /// <summary>Copies the sessions beside the originals, saved passwords included. Copies
+    /// are made from the saved records, not from the copies passed in.</summary>
     public IReadOnlyList<Session> DuplicateSessions(IEnumerable<Session> sessions)
     {
-        var copies = SessionDuplicator.Duplicate(sessions, _store.Sessions);
+        var sources = sessions.Select(session => _store.Find(session.Id)).OfType<Session>().ToList();
+        var copies = SessionDuplicator.Duplicate(sources, _store.Sessions);
         _store.AddMany(copies.Select(pair => pair.Copy));
         foreach (var (source, copy) in copies)
         {
@@ -419,8 +430,6 @@ public sealed partial class MainViewModel : ObservableObject
             if (UsesOwnPassword(source) && _credentials.Read(source.Id) is { Length: > 0 } password)
                 _credentials.Write(copy.Id, password);
         }
-        RebuildTree();
-        _environment.SessionsChanged(this);
         return copies.Select(pair => pair.Copy).ToList();
     }
 
@@ -433,50 +442,173 @@ public sealed partial class MainViewModel : ObservableObject
             return;
 
         _store.CreateFolder(path, kind);
-        RebuildTree();
-        _environment.SessionsChanged(this);
     }
 
     public void RenameFolder(string oldPath, string newPath, SessionKind kind = SessionKind.Ssh)
     {
-        if (_expansion.Remove(ExpansionKeyFor(oldPath, kind), out var wasExpanded))
-            _expansion[ExpansionKeyFor(FolderPaths.Normalize(newPath), kind)] = wasExpanded;
-        _store.RenameFolder(oldPath, newPath, kind);
-        RebuildTree();
-        _environment.SessionsChanged(this);
+        // The save rebuilds the tree, so the expansion of the folder and the folders beneath
+        // it moves first, and moves back if the save fails.
+        var expansion = new Dictionary<string, bool>(_expansion, _expansion.Comparer);
+        var filterExpansion = new Dictionary<string, bool>(_filterExpansion, _filterExpansion.Comparer);
+        MoveExpansion(_expansion, oldPath, newPath, kind);
+        MoveExpansion(_filterExpansion, oldPath, newPath, kind);
+        try
+        {
+            _store.RenameFolder(oldPath, newPath, kind);
+        }
+        catch
+        {
+            Restore(_expansion, expansion);
+            Restore(_filterExpansion, filterExpansion);
+            throw;
+        }
+
+        static void Restore(Dictionary<string, bool> target, Dictionary<string, bool> saved)
+        {
+            target.Clear();
+            foreach (var (key, value) in saved)
+                target[key] = value;
+        }
     }
 
-    /// <summary>Number of same-kind sessions that would be removed by deleting this folder.</summary>
+    /// <summary>The number of sessions deleting this folder removes: the store's own answer,
+    /// so telnet and serial sessions in the folder are counted too.</summary>
     public int CountSessionsUnder(string folderPath, SessionKind kind = SessionKind.Ssh) =>
-        _store.Sessions.Count(s => s.Kind == kind && FolderPaths.IsSelfOrDescendant(s.FolderPath, folderPath));
+        _store.SessionsInFolder(folderPath, kind).Count;
 
     public void DeleteFolder(string path, SessionKind kind = SessionKind.Ssh)
     {
-        foreach (var removed in _store.DeleteFolder(path, kind))
-            {
-                _credentials.Delete(removed.Id);
-                _credentials.DeleteProxy(removed.Id);
-            }
-        RebuildTree();
-        _environment.SessionsChanged(this);
+        var removed = _store.DeleteFolder(path, kind);
+        ForgetExpansion(_expansion, path, kind);
+        ForgetExpansion(_filterExpansion, path, kind);
+        ForgetDeleted(removed.Select(session => session.Id).ToList());
     }
 
-    public void RefreshSessions(bool rebuildTree = true)
+    /// <summary>Moves the expansion state of a folder and every folder beneath it to their new paths.</summary>
+    private static void MoveExpansion(Dictionary<string, bool> expansion, string oldPath, string newPath, SessionKind kind)
+    {
+        oldPath = FolderPaths.Normalize(oldPath);
+        newPath = FolderPaths.Normalize(newPath);
+        if (oldPath.Length == 0 || newPath.Length == 0)
+            return;
+        var moved = FolderKeys(expansion, kind)
+            .Select(item => (item.Key, Path: FolderPaths.Reparent(item.Path, oldPath, newPath)))
+            .Where(item => item.Path is not null)
+            .Select(item => (item.Key, NewKey: ExpansionKeyFor(item.Path!, kind), Expanded: expansion[item.Key]))
+            .ToList();
+        foreach (var (key, _, _) in moved)
+            expansion.Remove(key);
+        foreach (var (_, newKey, expanded) in moved)
+            expansion[newKey] = expanded;
+    }
+
+    private static void ForgetExpansion(Dictionary<string, bool> expansion, string folderPath, SessionKind kind)
+    {
+        folderPath = FolderPaths.Normalize(folderPath);
+        if (folderPath.Length == 0)
+            return;
+        foreach (var (key, path) in FolderKeys(expansion, kind))
+        {
+            if (FolderPaths.IsSelfOrDescendant(path, folderPath))
+                expansion.Remove(key);
+        }
+    }
+
+    /// <summary>The expansion keys of one folder namespace with their paths, as a snapshot
+    /// the caller may change the map under.</summary>
+    private static List<(string Key, string Path)> FolderKeys(Dictionary<string, bool> expansion, SessionKind kind)
+    {
+        var localPrefix = ExpansionKeyFor("", SessionKind.Local);
+        var local = kind == SessionKind.Local;
+        return expansion.Keys
+            .Where(key => key.StartsWith(localPrefix, StringComparison.Ordinal) == local)
+            .Select(key => (key, local ? key[localPrefix.Length..] : key))
+            .ToList();
+    }
+
+    /// <summary>Brings the window up to date with the store: tabs take their session's
+    /// saved record, the tree is patched in place or rebuilt (see <see cref="TreeShapeChanged"/>),
+    /// and Recent is re-read.</summary>
+    public void RefreshSessions()
     {
         foreach (var tab in AllTabs)
         {
             if (_store.Find(tab.Session.Id) is { } session && session != tab.Session)
             {
                 tab.Session = session;
+                // Appearance overrides take effect immediately; connection fields apply on next connect.
                 _environment.ApplySessionSettings(tab);
             }
+            else
+            {
+                // A folder identity can change the login without changing the session record.
+                tab.NotifyLoginChanged();
+            }
         }
+        OnPropertyChanged(nameof(ActiveSessionTheme));
+        OnPropertyChanged(nameof(StatusText)); // the session count, and the login in the endpoint
         OnActiveTabStateChanged();
-        if (rebuildTree)
-            RebuildTree();
+        RefreshTree();
+        RefreshRecentSessions();
     }
 
     // ---- Tree ----
+
+    // What the displayed tree was built from, so a store change can tell an edit that only
+    // changes how a leaf looks (patched in place, keeping realized containers) from one
+    // that adds, removes, moves, reorders or re-filters nodes (rebuilt).
+    private Dictionary<Guid, Session> _treeSessions = [];
+    private IReadOnlyList<string> _treeSshFolders = [];
+    private IReadOnlyList<string> _treeLocalFolders = [];
+
+    private void RefreshTree()
+    {
+        var visible = VisibleSessions.ToList();
+        if (TreeShapeChanged(visible))
+        {
+            RebuildTree();
+            return;
+        }
+        foreach (var session in visible)
+        {
+            if (_treeSessions[session.Id] == session)
+                continue;
+            _treeSessions[session.Id] = session;
+            // A session the filter hides has no node, and the edit did not make it match.
+            if (_sessionNodes.TryGetValue(session.Id, out var node))
+                node.UpdateSession(session);
+        }
+    }
+
+    /// <summary>Whether the tree must be rebuilt rather than patched: sessions or folders
+    /// came or went, a session moved, changed kind or was renamed (ordering), or an edit
+    /// changed whether it matches the filter. The filter question goes to
+    /// <see cref="SessionSearch"/> itself, so it covers every field the search reads.</summary>
+    private bool TreeShapeChanged(IReadOnlyList<Session> visible)
+    {
+        if (visible.Count != _treeSessions.Count
+            || !_store.FoldersOf(SessionKind.Ssh).SequenceEqual(_treeSshFolders, StringComparer.Ordinal)
+            || !_store.FoldersOf(SessionKind.Local).SequenceEqual(_treeLocalFolders, StringComparer.Ordinal))
+        {
+            return true;
+        }
+        var query = _searchText.Trim();
+        foreach (var session in visible)
+        {
+            if (!_treeSessions.TryGetValue(session.Id, out var previous))
+                return true;
+            if (previous == session)
+                continue;
+            if (previous.Kind != session.Kind
+                || !previous.FolderPath.Equals(session.FolderPath, StringComparison.Ordinal)
+                || !previous.Name.Equals(session.Name, StringComparison.OrdinalIgnoreCase)
+                || (IsSearching && SessionSearch.Matches(previous, query) != SessionSearch.Matches(session, query)))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     // Nodes belonging to the tree currently displayed. The TreeView raises Collapsed
     // for nodes being removed during a rebuild — sometimes after the rebuild returns —
@@ -520,14 +652,17 @@ public sealed partial class MainViewModel : ObservableObject
     {
         var allSessions = VisibleSessions.ToList();
         var query = _searchText.Trim();
+        _treeSessions = allSessions.ToDictionary(session => session.Id);
+        _treeSshFolders = _store.FoldersOf(SessionKind.Ssh);
+        _treeLocalFolders = _store.FoldersOf(SessionKind.Local);
 
         // A matching folder reveals its complete subtree. Otherwise only matching leaves
         // and their ancestors are projected into the filtered view.
         var matchingSshFolders = IsSearching
-            ? MatchingFolders(_store.FoldersOf(SessionKind.Ssh), query)
+            ? MatchingFolders(_treeSshFolders, query)
             : [];
         var matchingLocalFolders = IsSearching
-            ? MatchingFolders(_store.FoldersOf(SessionKind.Local), query)
+            ? MatchingFolders(_treeLocalFolders, query)
             : [];
         var localRootMatches = IsSearching && "Local".Contains(query, StringComparison.OrdinalIgnoreCase);
         var sessions = !IsSearching
@@ -545,7 +680,7 @@ public sealed partial class MainViewModel : ObservableObject
                 .Concat((kind == SessionKind.Local ? matchingLocalFolders : matchingSshFolders)
                     .SelectMany(FolderPaths.SelfAndAncestors))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-            : _store.FoldersOf(kind);
+            : kind == SessionKind.Local ? _treeLocalFolders : _treeSshFolders;
 
         // Reuse the previous generation's nodes wherever they still describe the same
         // folder or session, then patch the bound collections in place. Clearing and

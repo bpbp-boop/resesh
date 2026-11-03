@@ -515,4 +515,69 @@ public sealed class CommandHistoryTests : IDisposable
 
         Assert.Equal(["end", "start"], results.Hits.Select(h => h.Entry.Command));
     }
+
+    [Theory]
+    [InlineData("api-gateway")]  // the full-text index
+    [InlineData("ap")]           // a scanned short term
+    [InlineData("host:gateway")]
+    public void RenamedSessionIsFoundUnderItsCurrentName(string text)
+    {
+        var store = NewStore();
+        var renamed = Guid.NewGuid();
+        store.Append(Entry("uptime", _now, session: "web01", sessionId: renamed));
+        store.Append(Entry("uptime", _now.AddMinutes(1), session: "db-02", target: "postgres@db-02.lan", sessionId: Guid.NewGuid()));
+        var query = new CommandHistoryQuery
+        {
+            Text = text,
+            SessionNames = new Dictionary<Guid, string> { [renamed] = "api-gateway" },
+        };
+
+        var expected = CommandHistorySearch.Search(store.Snapshot(), query);
+        var actual = store.Search(query);
+
+        Assert.Equal(renamed, Assert.Single(actual.Hits).Entry.SessionId);
+        Assert.Equal(expected.Hits.Select(h => h.Entry.Id), actual.Hits.Select(h => h.Entry.Id));
+        // Without current names only the recorded one matches.
+        Assert.Empty(store.Search(query with { SessionNames = null }).Hits);
+    }
+
+    [Fact]
+    public void RecordedSessionNameStillMatchesAfterARename()
+    {
+        var store = NewStore();
+        var id = Guid.NewGuid();
+        store.Append(Entry("uptime", _now, session: "web01", sessionId: id));
+
+        var hits = store.Search(new CommandHistoryQuery
+        {
+            Text = "web01",
+            SessionNames = new Dictionary<Guid, string> { [id] = "api-gateway" },
+        }).Hits;
+
+        Assert.Single(hits);
+    }
+
+    [Fact]
+    public void EntriesShowTheirSessionsCurrentNameUntilItIsDeleted()
+    {
+        var id = Guid.NewGuid();
+        var entry = Entry("uptime", _now, session: "web01", sessionId: id);
+
+        Assert.Equal("api-gateway", entry.DisplaySessionName(new Dictionary<Guid, string> { [id] = "api-gateway" }));
+        Assert.Equal("web01", entry.DisplaySessionName(new Dictionary<Guid, string>()));
+        Assert.Equal("web01", (entry with { SessionId = null }).DisplaySessionName(new Dictionary<Guid, string> { [id] = "x" }));
+    }
+
+    [Fact]
+    public void TargetTreatsAnUnsetPortAsTheDefaultAndNamesSerialPorts()
+    {
+        Assert.Equal("deploy@web01", CommandHistoryEntry.TargetOf(new Session { Host = "web01", Username = "deploy", Port = 0 }));
+        Assert.Equal("web01", CommandHistoryEntry.TargetOf(new Session { Host = "web01" }));
+        Assert.Equal("COM3", CommandHistoryEntry.TargetOf(new Session
+        {
+            Kind = SessionKind.Serial,
+            Serial = new SerialTarget { PortName = "COM3" },
+        }));
+        Assert.Equal("serial", CommandHistoryEntry.TargetOf(new Session { Kind = SessionKind.Serial }));
+    }
 }
