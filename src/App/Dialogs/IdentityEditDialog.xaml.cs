@@ -65,6 +65,10 @@ public sealed partial class IdentityEditDialog : ContentDialog
     /// the stored password; leaving ask-once forgets the remembered one.</summary>
     internal static Identity Save(Identity? existing, Identity identity, string? password)
     {
+        // Refuse a password Credential Manager would reject before the identity is saved,
+        // so a failure leaves nothing half-changed.
+        if (identity.Proof == IdentityProof.Password && password is not null)
+            Resesh.Core.Credentials.CredentialStoreException.ThrowIfTooLong(password);
         var saved = existing is null ? App.Identities.Add(identity) : App.Identities.Update(identity);
         if (saved.Proof == IdentityProof.Password && password is not null)
             App.Credentials.WriteIdentity(saved.Id, password);

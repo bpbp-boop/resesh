@@ -2090,3 +2090,36 @@ could disagree. The rules that replaced them:
   workflow or WiX (ghostty cache keys, the signed vs unsigned MSI steps, the app user model
   id, project URLs) are guarded by `tests/BuildMetadataTests.js` rather than restructured,
   because the signing steps can't be verified off CI.
+
+## 2026-11-03 - Scratch profiles keep their own passwords and logs
+
+`--data-dir` runs used the real Windows Credential Manager, so deleting a session in a scratch
+copy (or the startup key migration, which moves session passphrases onto keys and deletes the
+session copies) deleted the user's real passwords. Only the default profile uses Credential
+Manager now. `--demo` keeps secrets in memory, as before. A `--data-dir` profile keeps them in
+`credentials.json` in its folder, each secret encrypted with DPAPI for the current Windows user
+(`ProtectedFileCredentialService`, P/Invoke to `CryptProtectData`, so AOT-safe and no extra
+package), and saved like every store: atomically, never over a file it could not read. File
+rather than memory so a test profile keeps its passwords across restarts. Existing scratch
+profiles ask for their passwords once. An entry DPAPI cannot decrypt (the folder came from
+another user) reads as no saved password.
+
+The same run also wrote crash.log and trace.log to the real `%LOCALAPPDATA%\Resesh`. Logs go
+to the data folder for demo and `--data-dir` runs (`Program.LogDirectory`), and About's logs
+folder points there. `ShellIntegrationScripts.Materialize` still writes to
+`%LOCALAPPDATA%\Resesh\shell-integration\<version>`: the scripts are fixed per app version,
+hold no user data, and every profile can share them. The one-time `%APPDATA%\Sessions` rename
+migration runs only for the default profile.
+
+The command line is parsed once into `DataProfile` (options match case-insensitively, the
+first `--data-dir` wins and is made absolute, `--demo` wins over `--data-dir`), and the data
+folder, relaunch command, jump list, sign-in and credential choice all read it. Before, the
+relaunch command passed a relative `--data-dir` through unchanged (a taskbar relaunch opened
+another folder), `--DEMO` turned demo mode on but was dropped from the relaunch command, and a
+trailing `--data-dir` with no folder opened the real data while turning the jump list off. A
+`--data-dir` without a usable folder now stops with a message instead of opening real data.
+
+Credential Manager failures were raw `Win32Exception`s that the Settings and identity handlers
+(which catch `IOException`) let through. They are `CredentialStoreException : IOException` now,
+and every backend refuses a secret over Credential Manager's 2560-byte blob limit (1280
+characters) before anything is saved, with a message that says so.

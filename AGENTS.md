@@ -40,8 +40,9 @@ node --test tests/*.js
 Run the tests that cover what you changed before calling work done; CI (`.github/workflows/
 build-release.yml`) runs all four suites on every push and pull request.
 
-To launch the app for manual checks without touching the user's real sessions, settings or
-credentials, use `.\demo.ps1` or pass `--data-dir <scratch folder>` to the built exe.
+To launch the app for manual checks without touching the user's real sessions, settings,
+credentials or logs, use `.\demo.ps1` or pass `--data-dir <scratch folder>` to the built exe
+(its passwords are kept DPAPI-encrypted in that folder, not in Credential Manager).
 
 ## Conventions
 

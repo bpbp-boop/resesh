@@ -1465,7 +1465,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         try
         {
-            var dir = AppDataPaths.Local();
+            var dir = Program.LogDirectory;
             Directory.CreateDirectory(dir);
             // TraceHook producers (SSH/ConPTY read loops) call this off the UI thread, and a
             // second app instance or a log tail may hold the file — so serialize in-process,
