@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Resesh.App.ViewModels;
 using Resesh.Core.Models;
 using Resesh.Core.Storage;
 
@@ -85,7 +86,7 @@ public sealed partial class LoginDialog : ContentDialog
         {
             LoginRemember.Folder when save =>
                 "Creates an identity for this folder. Sessions added here later use it too, and one "
-                + "password change updates all of them. Manage it in Settings > Identities & Keys.",
+                + $"password change updates all of them. Manage it in {SettingsCatalog.PathTo(SettingsSection.Identities)}.",
             LoginRemember.Folder =>
                 "Creates an identity for this folder that remembers the username. The password is "
                 + "asked once and kept in memory until resesh closes.",

@@ -1361,8 +1361,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private void SetStatusBarVisible(bool visible)
     {
-        if (App.SaveSettings(App.Settings.Current with { ShowStatusBar = visible }))
-            App.ApplySettingChange(nameof(SettingsViewModel.ShowStatusBar));
+        App.SaveSetting(s => s with { ShowStatusBar = visible }, nameof(SettingsViewModel.ShowStatusBar));
     }
 
     private void ApplySettingsToApp(AppSettings settings)

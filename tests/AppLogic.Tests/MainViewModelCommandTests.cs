@@ -304,6 +304,15 @@ public sealed class MainViewModelCommandTests : IDisposable
     }
 
     [Fact]
+    public void PaletteListsEverySettingsTarget()
+    {
+        var settings = Window().Commands.PaletteCommands().Where(d => d.Category == "Global Settings").ToList();
+
+        Assert.Equal(SettingsCatalog.Targets.Select(entry => entry.PaletteTitle), settings.Select(d => d.Title()));
+        Assert.Equal(SettingsCatalog.Targets.Select(entry => (object)entry.Target), settings.Select(d => d.CurrentParameter));
+    }
+
+    [Fact]
     public void PaletteListsEachWorkspaceThreeWays()
     {
         var window = Window();

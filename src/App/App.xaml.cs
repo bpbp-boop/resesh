@@ -362,6 +362,17 @@ public partial class App : Application
             PruneCommandHistory();
     }
 
+    /// <summary>Saves one setting changed outside the Settings page (a paste prompt, a menu) and
+    /// applies it the way the page does, so every window and every open Settings page shows it.
+    /// <paramref name="property"/> is the <see cref="ViewModels.SettingsViewModel"/> property.</summary>
+    internal static bool SaveSetting(Func<AppSettings, AppSettings> change, string property)
+    {
+        if (!SaveSettings(change(Settings.Current)))
+            return false;
+        ApplySettingChange(property);
+        return true;
+    }
+
     /// <summary>Open terminals in every window re-read the saved highlighting rules.</summary>
     internal static void RefreshHighlightsInAllWindows()
     {

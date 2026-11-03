@@ -77,7 +77,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         CommandHistoryNote.Text =
             $"Search it with {AppShortcuts.Label(Resesh.Core.Input.ShortcutIds.CommandHistory)}. History stays on this computer " +
             $"and is deleted after {saved.CommandHistoryDays} days. Output can include secrets a server prints, " +
-            "so history is off until you turn it on. Change it later in Settings > Recording.";
+            $"so history is off until you turn it on. Change it later in {SettingsCatalog.PathTo(GlobalSettingsTarget.CommandHistory)}.";
         UpdateThemeSelection();
         _updatingThemeUi = wasUpdating;
         UpdateSaveButtonState();
