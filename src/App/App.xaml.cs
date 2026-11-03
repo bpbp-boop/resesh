@@ -103,11 +103,9 @@ public partial class App : Application
             return;
         if (!DemoMode.IsEnabled)
             MigrateLegacyDataDir();
-        _settingsLoad = Task.Run(() =>
-        {
-            Settings.Load();
-            Resesh.Core.Ssh.SshAlgorithmPolicy.AppDefaults = Settings.Current.SshAlgorithms;
-        });
+        // Connections read the algorithm defaults from whatever settings are saved when they start.
+        Resesh.Core.Ssh.SshAlgorithmPolicy.AppDefaultsSource = () => Settings.Current.SshAlgorithms;
+        _settingsLoad = Task.Run(Settings.Load);
         _storesLoad = Task.Run(() =>
         {
             Store.Load();
@@ -149,11 +147,6 @@ public partial class App : Application
         {
             ReportRecoverableError(exception);
             return false;
-        }
-        finally
-        {
-            // Connections read the defaults from Core; keep them to what is actually saved.
-            Resesh.Core.Ssh.SshAlgorithmPolicy.AppDefaults = Settings.Current.SshAlgorithms;
         }
     }
 

@@ -35,15 +35,20 @@ public static class SshAlgorithmPolicy
     private static readonly Lazy<ConnectionInfo> Defaults = new(() =>
         new ConnectionInfo("localhost", "user", new NoneAuthenticationMethod("user")));
 
-    private static volatile SshAlgorithms? _appDefaults;
+    private static volatile Func<SshAlgorithms?>? _appDefaultsSource;
 
-    /// <summary>The app settings' choices, which sessions follow for each kind they leave
-    /// unset. The app sets this at startup and whenever settings are saved.</summary>
-    public static SshAlgorithms? AppDefaults
+    /// <summary>Reads the app settings' choices, which sessions follow for each kind they
+    /// leave unset. The app points this at its settings store once at startup, so every
+    /// connection reads what is saved at that moment however the settings changed (the
+    /// settings page, a backup import), rather than a copy that each writer must refresh.</summary>
+    public static Func<SshAlgorithms?>? AppDefaultsSource
     {
-        get => _appDefaults;
-        set => _appDefaults = value;
+        get => _appDefaultsSource;
+        set => _appDefaultsSource = value;
     }
+
+    /// <summary>The app settings' choices right now; null when nothing is turned off.</summary>
+    public static SshAlgorithms? AppDefaults => _appDefaultsSource?.Invoke();
 
     /// <summary>What SSH.NET offers by default, in its order of preference. SSH.NET
     /// implements nothing beyond these, so this is every algorithm that can be turned on.</summary>
