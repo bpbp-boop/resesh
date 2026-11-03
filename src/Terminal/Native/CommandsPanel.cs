@@ -130,7 +130,7 @@ internal sealed partial class CommandsPanel : Grid
         _count.Foreground = _mutedBrush;
         _close.Foreground = _mutedBrush;
         _list.Foreground = _foregroundBrush;
-        _list.FontFamily = new FontFamily(TerminalDefaults.PrimaryFamily(fontFamily));
+        _list.FontFamily = new FontFamily(TerminalDefaults.PrimaryFamily(fontFamily, InstalledFonts.IsInstalled));
     }
 
     /// <summary>Rebinds the list when the marks changed; keeps scroll position otherwise.</summary>

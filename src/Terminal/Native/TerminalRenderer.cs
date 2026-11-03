@@ -44,9 +44,11 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private static readonly string SymbolsFontPath =
         Path.Combine(AppContext.BaseDirectory, "Fonts", "SymbolsNerdFontMono-Regular.ttf");
 
+    // Starts with the default list's fonts, so the XAML text TerminalDefaults.PrimaryFamily
+    // picks for a list is the font drawn here.
     private static readonly string[] FallbackFamilies =
     [
-        "Cascadia Mono", "Consolas", SymbolsFamily, "Segoe UI Symbol", "Segoe UI Emoji", "Yu Gothic", "Microsoft YaHei",
+        .. TerminalDefaults.FamilyNames(TerminalDefaults.FontFamily), SymbolsFamily, "Segoe UI Symbol", "Segoe UI Emoji", "Yu Gothic", "Microsoft YaHei",
         "Malgun Gothic", "Nirmala UI", "Ebrima", "Segoe UI Historic", "Cambria Math", "Segoe UI",
     ];
 
@@ -298,10 +300,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         _emSize = emPixels;
         _glyphs.Clear();
         using var collection = s_dwrite!.GetSystemFontCollection(false);
-        var requested = fontFamilyList.Split(',')
-            .Select(f => f.Trim().Trim('"', '\''))
-            .Where(f => f.Length > 0 && !f.Equals("monospace", StringComparison.OrdinalIgnoreCase));
-        var families = requested.Concat(FallbackFamilies)
+        var families = TerminalDefaults.FamilyNames(fontFamilyList).Concat(FallbackFamilies)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Where(f => collection.FindFamilyName(f, out _) || (f == SymbolsFamily && File.Exists(SymbolsFontPath)))
             .ToArray();

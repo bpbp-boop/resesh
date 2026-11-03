@@ -121,7 +121,7 @@ internal sealed partial class TerminalRuler : Grid
 
     /// <summary>The hover card shows a command in the terminal's own font.</summary>
     internal void SetFontFamily(string fontFamily) =>
-        _cardCommand.FontFamily = new FontFamily(TerminalDefaults.PrimaryFamily(fontFamily));
+        _cardCommand.FontFamily = new FontFamily(TerminalDefaults.PrimaryFamily(fontFamily, InstalledFonts.IsInstalled));
 
     /// <summary>Repaints the lane over a different background: a full-screen app's own color
     /// while the terminal extends it into the margin, the theme's otherwise.</summary>
@@ -362,7 +362,7 @@ internal sealed partial class TerminalRuler : Grid
         _card.PointerEntered += (_, _) => _hideTimer.Stop();
         _card.PointerExited += (_, _) => _hideTimer.Start();
 
-        _cardCommand.FontFamily = new FontFamily(TerminalDefaults.PrimaryFamily(null));
+        _cardCommand.FontFamily = new FontFamily(TerminalDefaults.PrimaryFamily(null, InstalledFonts.IsInstalled));
         _cardCommand.FontSize = 12;
         _cardCommand.TextTrimming = TextTrimming.CharacterEllipsis;
         _cardMeta.FontSize = 11;
