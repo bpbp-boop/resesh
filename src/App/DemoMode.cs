@@ -40,6 +40,8 @@ internal static class DemoMode
         .Skip(1)
         .Any(arg => arg.Equals("--demo", StringComparison.OrdinalIgnoreCase));
 
+    public static string DataFolder => DataDirectory.Value;
+
     public static string StorePath(string fileName) => Path.Combine(DataDirectory.Value, fileName);
 
     public static ICredentialService CreateCredentialService() =>

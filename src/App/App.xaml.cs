@@ -15,9 +15,9 @@ public partial class App : Application
     private MainWindow? _lastActiveWindow;
     private DispatcherQueue? _dispatcherQueue;
 
-    public static SessionStore Store { get; } = new(StorePath("sessions.json", SessionStore.DefaultPath));
-    public static SshKeyStore SshKeys { get; } = new(StorePath("ssh-keys.json", SshKeyStore.DefaultPath));
-    public static IdentityStore Identities { get; } = new(StorePath("identities.json", IdentityStore.DefaultPath));
+    public static SessionStore Store { get; } = new(DataFile("sessions.json"));
+    public static SshKeyStore SshKeys { get; } = new(DataFile("ssh-keys.json"));
+    public static IdentityStore Identities { get; } = new(DataFile("identities.json"));
 
     /// <summary>Resolves session logins against the live session and identity stores.</summary>
     public static Resesh.Core.Identities.LoginResolver Logins { get; } = new(Store, Identities);
@@ -38,19 +38,18 @@ public partial class App : Application
     public static string LoginUsername(Session session) =>
         session.Kind == SessionKind.Ssh ? Logins.Resolve(session).Username : session.Username;
     public static ICredentialService Credentials { get; } = DemoMode.CreateCredentialService();
-    public static KnownHostsStore KnownHosts { get; } = new(StorePath("known_hosts.json", KnownHostsStore.DefaultPath));
-    public static SettingsStore Settings { get; } = new(StorePath("settings.json", SettingsStore.DefaultPath));
-    public static HighlightsStore Highlights { get; } = new(StorePath("highlights.json", HighlightsStore.DefaultPath));
-    public static WorkspaceStore Workspaces { get; } = new(StorePath("workspaces.json", WorkspaceStore.DefaultPath));
+    public static KnownHostsStore KnownHosts { get; } = new(DataFile("known_hosts.json"));
+    public static SettingsStore Settings { get; } = new(DataFile("settings.json"));
+    public static HighlightsStore Highlights { get; } = new(DataFile("highlights.json"));
+    public static WorkspaceStore Workspaces { get; } = new(DataFile("workspaces.json"));
     public static Resesh.Core.History.CommandHistoryStore History { get; } =
-        new(StorePath("history", Resesh.Core.History.CommandHistoryStore.DefaultDirectory));
+        new(Program.StorePath("history", Resesh.Core.History.CommandHistoryStore.DefaultDirectory));
     private static AccessibilitySettings Accessibility { get; } = new();
     public static bool IsHighContrast => Accessibility.HighContrast;
 
 
-    /// <summary>Resolves the shared data location used for stores and app instancing.</summary>
-    private static string StorePath(string fileName, string defaultPath) =>
-        Program.StorePath(fileName, defaultPath);
+    /// <summary>A file in the data folder every store, backup and the single-instance key share.</summary>
+    private static string DataFile(string fileName) => Path.Combine(Program.DataDirectory, fileName);
     public static Resesh.App.Icons.SessionIconCatalog Icons { get; } = new();
     public static Resesh.App.Icons.BrandIconImages Brands { get; } = new();
 

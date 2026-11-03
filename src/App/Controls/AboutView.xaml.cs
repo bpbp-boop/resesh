@@ -29,8 +29,7 @@ public sealed partial class AboutView : UserControl
         new("Simple Icons", "Brand icons", "CC0", "https://simpleicons.org/"),
     ];
 
-    private readonly string _dataFolder = Path.GetDirectoryName(
-        Program.StorePath("sessions.json", SessionStore.DefaultPath))!;
+    private readonly string _dataFolder = Program.DataDirectory;
     private readonly string _logsFolder = AppDataPaths.Local();
     private int _copyFeedbackVersion;
 
