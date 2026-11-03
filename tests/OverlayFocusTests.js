@@ -40,3 +40,25 @@ test("a palette command keeps its own focus session and never clears a reopened 
   assert.match(run, /var outer = _invocationFocus;[\s\S]*?finally\s*\{\s*_invocationFocus = outer;/);
   assert.doesNotMatch(source, /_invokedFromTerminal/);
 });
+
+// Typing in the palette or session filter holds focus there: a tab opening, closing or being
+// selected in the background must not pull it into a terminal. User clicks and keys still do.
+test("background refocus respects a focus held by search", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const groupView = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"), "utf8");
+  const focusTerminal = groupView.match(/private void FocusTerminal\(TabViewModel\? tab, bool userInitiated = false\)[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
+  assert.match(focusTerminal, /userInitiated \|\| view\.IsFocusHeldElsewhere\?\.Invoke\(\) != true/);
+  // Selection changes are not user-initiated here; pointer presses on a tab are.
+  assert.match(groupView, /NotifyActiveTabChanged\(\);\s*FocusTerminal\(Group\.SelectedTab\);\s*QueueTabDividerRefresh\(\);/);
+  assert.match(groupView, /FocusTerminal\(tab, userInitiated: true\);\s*await PrepareTabDragPreviewAsync/);
+
+  const focusContent = method(/private void FocusTabContent\(TabViewModel tab, bool userInitiated = false\)[\s\S]*?\n    }\r?\n/);
+  assert.match(focusContent, /userInitiated \|\| !IsTypingInSearch/);
+});
+
+test("the shortcuts dialog queues behind an open dialog instead of being dropped", () => {
+  const show = method(/private async Task ShowThenRefocusAsync[\s\S]*?\n    }\r?\n/);
+  assert.ok(show);
+  assert.doesNotMatch(show, /GetOpenPopupsForXamlRoot/);
+});

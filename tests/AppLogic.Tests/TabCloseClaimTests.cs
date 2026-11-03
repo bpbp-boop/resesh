@@ -47,7 +47,7 @@ public sealed class TabCloseClaimTests : IDisposable
         var tab = window.Connect(new Session { Id = Guid.NewGuid() });
         Assert.True(window.TryBeginClose(tab));
 
-        window.CloseTab(tab);
+        window.DetachTab(tab);
 
         Assert.False(window.Owns(tab));
         Assert.Null(window.TryGroupOf(tab));

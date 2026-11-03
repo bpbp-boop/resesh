@@ -50,8 +50,10 @@ public partial class App : Application
 
     /// <summary>A file in the data folder every store, backup and the single-instance key share.</summary>
     private static string DataFile(string fileName) => Path.Combine(Program.DataDirectory, fileName);
-    public static Resesh.App.Icons.SessionIconCatalog Icons { get; } = new();
-    public static Resesh.App.Icons.BrandIconImages Brands { get; } = new();
+    // One catalog for every window, so the scale an icon is drawn at comes from the window
+    // in use, not from whichever window set it last (and not 1 once that window closed).
+    public static Resesh.App.Icons.SessionIconCatalog Icons { get; } = new() { ScaleProvider = RasterizationScale };
+    public static Resesh.App.Icons.BrandIconImages Brands { get; } = new() { ScaleProvider = RasterizationScale };
 
     /// <summary>Built-in local profiles whose shell is installed right now (set once at
     /// launch by discovery). Built-ins outside this set are hidden, not deleted.</summary>
@@ -513,6 +515,18 @@ public partial class App : Application
             return;
         foreach (var window in app._windows.ToList())
             window.SetTabContentDropTargetsVisibleCore(visible);
+    }
+
+    /// <summary>The rasterization scale of the most recently active open window, else of any
+    /// open window, else 1. XamlRoot is null until a window's content loads.</summary>
+    private static double RasterizationScale()
+    {
+        if (Current is not App app)
+            return 1.0;
+        var window = app._lastActiveWindow is { } last && app._windows.Contains(last)
+            ? last
+            : app._windows.FirstOrDefault(open => open.RasterizationScale is not null);
+        return window?.RasterizationScale ?? 1.0;
     }
 
     private MainWindow CreateWindowCore()

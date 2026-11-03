@@ -2287,3 +2287,38 @@ are still overwritten in place. Ownership is not carried over by the rename; tha
 which an SFTP user rarely is. Checked against a user-mode Windows OpenSSH sshd: new upload,
 overwrite, cancelled overwrite (old file intact, no `.part` left), download name clash and
 cancelled download.
+
+## 2026-11-03 - One rule each for UI behaviour that had drifted
+
+A second audit found UI logic repeated in several places that no longer agreed. Each now has
+one home:
+
+- **Failed session-tree saves** (sessions.json locked or read-only) are caught by the tree
+  commands themselves and shown as the operation notice, as a failed drag-move already was,
+  however the command ran: tree key, context menu, forwarded shortcut or palette. A
+  multi-selection delete is one store write (`SessionStore.DeleteMany`), so a failure deletes
+  nothing rather than the items before it.
+- **Folder rename** trims the name and refuses `/` and `\`, asking again: `FolderPaths.Combine`
+  would nest the folder instead of renaming it. Moving a folder is not a rename.
+- **Theme brushes in code** come from `ThemeResources`, never `Application.Current.Resources`
+  for a themed key. The app's RequestedTheme is fixed at startup, so the app lookup answers
+  for the startup theme; `ThemeResources` resolves against the element's ActualTheme (High
+  Contrast's dictionary when it is on) and re-applies on ActualThemeChanged. Brushes App.xaml
+  declares outside its theme dictionaries and `ThemeVisualPalette` recolours in place (the
+  `Session*` palette) are one shared instance and may still be read through the app.
+- **Motion** asks `AppMotion.Enabled`, the only reader of Windows' animation setting; the
+  sessions pane slide now honours it too.
+- **Icon raster scale** for a lookup that names none is the most recently active open
+  window's, set once by the app; a window no longer overwrites it for all the others.
+  Lookups take an explicit scale where the caller knows its XamlRoot.
+- **Focus held by search**: a background change (a tab opening, closing or being selected
+  by the app) never moves focus out of the palette or session filter. Focus requests the
+  user made (clicking a tab, tab-switching keys, Escape, an overlay closing) pass
+  `userInitiated` and still focus the terminal. The shortcuts dialog queues behind an open
+  dialog like every other instead of being dropped.
+- **Tab close decisions** (`MainViewModel.PlanClose`) live in the view model, where tests
+  run them; the window shows the planned dialog and removes the tab with `DetachTab`. The
+  test-only `CloseTab` is gone.
+- **Filters** match terms through `SessionSearch`: every term must match some field, and a
+  term may match what the item sits in (its folder, the Local root, the row's login), so
+  "local pwsh" and "prod web" both work in the tree, the import list and the sessions table.

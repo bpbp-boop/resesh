@@ -55,7 +55,7 @@ test("Y confirms session-close dialogs without becoming a global destructive sho
 
   const singleClose = source.match(
     /public async Task RequestCloseTabAsync[\s\S]*?\n    }\r?\n\r?\n    private async Task RequestCloseTmuxTabAsync/)?.[0] ?? "";
-  assert.equal(singleClose.match(/acceptY: true/g)?.length, 2);
+  assert.equal(singleClose.match(/acceptY: true/g)?.length, 1);
 
   const tmuxClose = source.match(
     /private async Task RequestCloseTmuxTabAsync[\s\S]*?\n    }\r?\n\r?\n(?:    \/\/\/.*\r?\n)*    public async Task RequestCloseManyAsync/)?.[0] ?? "";
@@ -151,8 +151,8 @@ test("a confirmed single-tab close follows the tab to the window that holds it n
   // After the first await, only the current owner closes or unpins the tab.
   const afterFirstAwait = single.slice(single.indexOf("await "));
   assert.doesNotMatch(afterFirstAwait, /(?<![.\w])(?:CloseTabCore|TogglePin)\(tab\)/);
-  assert.match(single, /pinnedOwner\.TogglePin\(tab\);\s*pinnedOwner\.CloseTabCore\(tab\);/);
-  assert.match(single, /CloseOwnerOf\(tab\) is \{ \} owner\)\s*owner\.CloseTabCore\(tab\);/);
+  assert.match(single, /CloseOwnerOf\(tab\) is not \{ \} owner\)\s*return;/);
+  assert.match(single, /TabCloseKind\.ConfirmPinned && tab\.IsPinned\)\s*owner\.TogglePin\(tab\);\s*owner\.CloseTabCore\(tab\);/);
   assert.match(single, /owner\.TogglePin\(tab\);\s*owner\.CloseTabCore\(tab\);/);
 
   const bulk = source.match(

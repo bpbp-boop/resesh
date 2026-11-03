@@ -195,6 +195,13 @@ public sealed partial class MainWindow
         bool animateChrome = true)
     {
         CancelSessionsPaneAnimation();
+        if (!AppMotion.Enabled)
+        {
+            // No slide: land where the animation's completion would.
+            if (!opening && !SessionsPaneShown)
+                ApplySessionsRailLayout();
+            return;
+        }
         var animationVersion = ++_sessionsPaneAnimationVersion;
 
         var pane = SelectedSessionsPane();

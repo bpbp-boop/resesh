@@ -218,7 +218,6 @@ public static class PresentationValues
 
     // NavigationViewSelectionIndicatorHeight: the marker is the native selection pill's shape.
     private const double RailMarkerFullHeight = 16;
-    private static readonly Windows.UI.ViewManagement.UISettings MotionSettings = new();
 
     /// <summary>The workspace marker is drawn at full height and scaled, so a change of state
     /// animates through its ScaleTransition instead of snapping.</summary>
@@ -227,7 +226,7 @@ public static class PresentationValues
 
     /// <summary>Matches the workspace slide; zero when Windows animation effects are off.</summary>
     public static TimeSpan RailMarkerDuration =>
-        MotionSettings.AnimationsEnabled ? TimeSpan.FromMilliseconds(170) : TimeSpan.Zero;
+        AppMotion.Enabled ? TimeSpan.FromMilliseconds(170) : TimeSpan.Zero;
 
     /// <summary>The alert dot's colour: amber when an agent waits, red for a dropped
     /// session, the accent for unseen output — the tab strip's own meanings.</summary>

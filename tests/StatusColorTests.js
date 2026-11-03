@@ -58,3 +58,22 @@ test("the app's palette brushes take their colors from the one palette in code",
   assert.match(appCode, /void OnLaunched\([\s\S]*?ThemeVisualPalette\.For\(ResolveTheme\(Settings\.Current\.Theme\)\)\.ApplyToAppResources\(\);[\s\S]*?CreateWindowCore\(/);
   assert.match(mainWindow, /private void ApplyThemePalette\(string theme\)[\s\S]*?palette\.ApplyToAppResources\(\);/);
 });
+
+test("code-built UI resolves Fluent theme brushes against its own theme", () => {
+  // The app's RequestedTheme is the startup theme; a lookup through Application.Current
+  // finds that theme's brush after the user switches. ThemeResources resolves against the
+  // element's ActualTheme and follows its changes.
+  const fluentLookup = /Application\.Current\.Resources\s*(?:\[|\.TryGetValue\()[^\]]*?"(?:TextFillColor|SystemFillColor|DividerStrokeColor|LayerFillColor)\w*Brush"/;
+  for (const parts of [
+    ["Controls", "FilePaneView.cs"],
+    ["Controls", "SshAlgorithmPicker.cs"],
+    ["Controls", "HighlightRulesEditor.xaml.cs"],
+    ["Dialogs", "TmuxSessionRowView.xaml.cs"],
+  ]) {
+    const source = read("src", "App", ...parts);
+    assert.doesNotMatch(source, fluentLookup, parts.join("/"));
+  }
+  assert.match(read("src", "App", "Controls", "FilePaneView.cs"), /ThemeResources\.SetBrush\(_statusText,/);
+  assert.match(read("src", "App", "Dialogs", "TmuxSessionRowView.xaml"),
+    /BorderBrush="\{ThemeResource SystemFillColorCautionBrush\}"/);
+});

@@ -26,8 +26,6 @@ public sealed partial class MainWindow
     private static readonly TimeSpan PaneMoveDuration = TimeSpan.FromMilliseconds(170);
     private const int PaneSettleLimit = 6;
 
-    private static readonly Windows.UI.ViewManagement.UISettings PaneMotionSettings = new();
-
     private readonly Dictionary<TabGroupView, Rect> _paneOrigins = [];
     // Panes whose visuals motion has touched. Others are left alone: enabling Translation or
     // writing to a pane's visual makes its terminal's swap chain show blank until it next
@@ -42,7 +40,7 @@ public sealed partial class MainWindow
     private bool _paneMotionWaiting;
     private int _paneSettlePasses;
 
-    private static bool PaneMotionEnabled => PaneMotionSettings.AnimationsEnabled;
+    private static bool PaneMotionEnabled => AppMotion.Enabled;
 
     /// <summary>Records where every pane is drawn. Call before anything moves panes; the
     /// first capture in a dispatcher turn wins, so nested changes keep the on-screen state.</summary>

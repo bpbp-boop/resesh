@@ -19,17 +19,18 @@ public sealed class BrandIconImages
     private readonly Dictionary<(string Key, int Pixels, Color Color), ImageSource> _cache = [];
     private readonly Dictionary<string, string?> _svgText = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Supplies the window's rasterization scale; until then images draw at scale 1.</summary>
+    /// <summary>The rasterization scale for a lookup that names none: the app's, from its most
+    /// recently active window; until one is known, images draw at scale 1.</summary>
     public Func<double>? ScaleProvider { get; set; }
 
     /// <summary>The brand mark for a key at a logical size in a colour, or null for a key that
-    /// is not a brand or whose file is missing.</summary>
-    public ImageSource? Get(string key, double logicalSize, Color color)
+    /// is not a brand or whose file is missing. Pass the showing element's
+    /// XamlRoot.RasterizationScale where it is known.</summary>
+    public ImageSource? Get(string key, double logicalSize, Color color, double? scale = null)
     {
         if (key.Length == 0)
             return null;
-        var scale = ScaleProvider?.Invoke() ?? 1.0;
-        var pixels = (int)Math.Ceiling(logicalSize * (double.IsNaN(scale) || scale <= 0 ? 1.0 : scale));
+        var pixels = SessionIconCatalog.PhysicalPixels(logicalSize, scale, ScaleProvider);
         var cacheKey = (key.ToLowerInvariant(), pixels, color);
         if (_cache.TryGetValue(cacheKey, out var cached))
             return cached;

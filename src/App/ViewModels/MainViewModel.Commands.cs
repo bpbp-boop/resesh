@@ -230,12 +230,12 @@ public sealed partial class MainViewModel
     private void OpenDefaultLocalProfile() => Services.OpenDefaultLocalProfile();
 
     [RelayCommand(AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
-    private async Task NewFolderAsync()
+    private Task NewFolderAsync() => ReportingStoreFailures(async () =>
     {
         var name = await Services.PromptAsync("New Folder", "Folder name", "");
         if (!string.IsNullOrWhiteSpace(name))
             CreateFolder(name);
-    }
+    });
 
     /// <summary>Plays a recording from the rail, or asks for one when none is given.</summary>
     [RelayCommand(AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]

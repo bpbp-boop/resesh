@@ -31,17 +31,19 @@ public sealed class SessionIconCatalog
     // is what caused visible aliasing when one 72 px raster served every surface).
     private readonly Dictionary<(string Key, int Pixels), ImageSource> _cache = [];
 
-    /// <summary>Supplies the window's XamlRoot.RasterizationScale (e.g. 1.5 at 150% DPI);
-    /// set by the main window. Until it's available, images render at scale 1 and are
-    /// re-rasterized crisply on the next fetch once the real scale is known.</summary>
+    /// <summary>The rasterization scale (e.g. 1.5 at 150% DPI) for a lookup that names none:
+    /// the app's, from its most recently active window. Until one is known, images render at
+    /// scale 1 and are re-rasterized crisply on the next fetch once the real scale is.</summary>
     public Func<double>? ScaleProvider { get; set; }
 
-    private int PhysicalPixels(double logicalSize)
+    /// <summary>Physical pixels for a logical size at the given scale (the showing element's
+    /// XamlRoot.RasterizationScale), else at <see cref="ScaleProvider"/>'s.</summary>
+    internal static int PhysicalPixels(double logicalSize, double? scale, Func<double>? fallback)
     {
-        var scale = ScaleProvider?.Invoke() ?? 1.0;
-        if (double.IsNaN(scale) || scale <= 0)
-            scale = 1.0;
-        return (int)Math.Ceiling(logicalSize * scale);
+        var value = scale ?? fallback?.Invoke() ?? 1.0;
+        if (double.IsNaN(value) || value <= 0)
+            value = 1.0;
+        return (int)Math.Ceiling(logicalSize * value);
     }
 
     public static string CustomIconsDirectory { get; } =
@@ -51,12 +53,13 @@ public sealed class SessionIconCatalog
 
     /// <summary>A custom icon's image rendered for a display size in logical pixels, or null
     /// for a built-in key (drawn one-colour by <see cref="BrandIconImages"/>), no icon, or a
-    /// missing file.</summary>
-    public ImageSource? GetImage(string? key, double logicalSize)
+    /// missing file. Pass the showing element's XamlRoot.RasterizationScale where it is known:
+    /// windows on monitors of different DPI each get their own raster.</summary>
+    public ImageSource? GetImage(string? key, double logicalSize, double? scale = null)
     {
         if (string.IsNullOrEmpty(key) || key == SessionIcons.None)
             return null;
-        var cacheKey = (key.ToLowerInvariant(), PhysicalPixels(logicalSize));
+        var cacheKey = (key.ToLowerInvariant(), PhysicalPixels(logicalSize, scale, ScaleProvider));
         if (_cache.TryGetValue(cacheKey, out var cached))
             return cached;
         var source = Load(key, cacheKey.Item2);
@@ -94,11 +97,11 @@ public sealed class SessionIconCatalog
     /// answer "what is running here", never "what is this host", so the two sets must not
     /// be able to resolve each other's keys.
     /// </summary>
-    public ImageSource? GetAgentImage(string? key, double logicalSize)
+    public ImageSource? GetAgentImage(string? key, double logicalSize, double? scale = null)
     {
         if (!Resesh.Core.Agents.AgentIdentities.IsAgentKey(key))
             return null;
-        var cacheKey = ("agent:" + key!.ToLowerInvariant(), PhysicalPixels(logicalSize));
+        var cacheKey = ("agent:" + key!.ToLowerInvariant(), PhysicalPixels(logicalSize, scale, ScaleProvider));
         if (_cache.TryGetValue(cacheKey, out var cached))
             return cached;
         try

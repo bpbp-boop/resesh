@@ -377,51 +377,29 @@ public sealed partial class MainWindow
 
     private async Task RequestCloseClaimedTabAsync(TabViewModel tab)
     {
-        if (tab.IsAppPage
-            || (!tab.IsPinned && !App.Settings.Current.ConfirmCloseActiveSessions))
+        var plan = ViewModel.PlanClose(tab, App.Settings.Current.ConfirmCloseActiveSessions);
+        switch (plan.Kind)
         {
-            CloseTabCore(tab);
-            return;
-        }
-
-        if (tab.IsAttachedToRemoteSession
-            && tab.View is TerminalTabView tmuxView)
-        {
-            await RequestCloseTmuxTabAsync(tab, tmuxView);
-            return;
-        }
-
-        var detail = tab.State != TabConnectionState.Connected
-            ? ""
-            : tab.IsLocal
-                ? " The process is still running — closing stops it and everything it started."
-                : tab.IsAttachedToRemoteSession
-                    ? " The remote session keeps running (persistent) — connecting again resumes it."
-                    : " The session is still connected.";
-        if (tab.IsPinned)
-        {
-            // Pinned tabs need the extra deliberate step; one dialog covers both.
-            if (!await ConfirmAsync("Tab Is Pinned", $"\"{tab.Header}\" is pinned.{detail}", "Unpin and Close", acceptY: true)
-                || CloseOwnerOf(tab) is not { } pinnedOwner)
+            case TabCloseKind.Now:
+                CloseTabCore(tab);
                 return;
-            if (tab.IsPinned)
-                pinnedOwner.TogglePin(tab);
-            pinnedOwner.CloseTabCore(tab);
-            return;
+            case TabCloseKind.ConfirmPersistent when tab.View is TerminalTabView tmuxView:
+                await RequestCloseTmuxTabAsync(tab, tmuxView, plan);
+                return;
         }
-        if (await ConfirmAsync("Close Tab", $"Close \"{tab.Header}\"?{detail}", "Close", acceptY: true)
-            && CloseOwnerOf(tab) is { } owner)
-            owner.CloseTabCore(tab);
+
+        // A pinned tab needs the extra deliberate step; one dialog covers both.
+        if (!await ConfirmAsync(plan.Title, plan.Message, plan.PrimaryText, acceptY: true)
+            || CloseOwnerOf(tab) is not { } owner)
+            return;
+        if (plan.Kind == TabCloseKind.ConfirmPinned && tab.IsPinned)
+            owner.TogglePin(tab);
+        owner.CloseTabCore(tab);
     }
 
-    private async Task RequestCloseTmuxTabAsync(TabViewModel tab, TerminalTabView view)
+    private async Task RequestCloseTmuxTabAsync(TabViewModel tab, TerminalTabView view, TabClosePlan plan)
     {
-        var dialog = new ConfirmDialog(
-            tab.IsPinned ? "Tab Is Pinned" : "Close Tab",
-            tab.IsPinned
-                ? $"\"{tab.Header}\" is pinned. Closing the tab also unpins it."
-                : $"Close \"{tab.Header}\"?",
-            tab.IsPinned ? "Unpin and Close" : "Close Tab")
+        var dialog = new ConfirmDialog(plan.Title, plan.Message, plan.PrimaryText)
         {
             XamlRoot = Root.XamlRoot,
             AcceptsY = true,
@@ -478,10 +456,7 @@ public sealed partial class MainWindow
             return;
         }
 
-        var connected = tabs.Count(t => t.State == TabConnectionState.Connected);
-        var message = connected > 0
-            ? $"Close {tabs.Count} {description}? {connected} of them {(connected == 1 ? "is" : "are")} still connected."
-            : $"Close {tabs.Count} {description}?";
+        var message = MainViewModel.CloseManyMessage(tabs, description);
         var persistent = tabs.Where(t => t.IsAttachedToRemoteSession && t.View is TerminalTabView).ToList();
         if (persistent.Count > 0)
         {
