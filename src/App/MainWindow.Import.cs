@@ -178,12 +178,9 @@ public sealed partial class MainWindow
         }
         finally
         {
-            // A failed import may have saved some stores before the one that failed; every
-            // window shows what is saved either way.
+            // A failed import may have saved some stores before the one that failed. Every
+            // window follows each store it saved; icon files are read fresh only on request.
             App.Icons.InvalidateCustomIcons();
-            App.RefreshWorkspaceMenus();
-            App.RefreshSessionsInAllWindows();
-            App.ApplySettingsToAllWindows();
         }
 
         // The import has happened even if this window closed meanwhile; only the summary goes.

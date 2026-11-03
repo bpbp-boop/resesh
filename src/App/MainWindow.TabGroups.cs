@@ -106,7 +106,6 @@ public sealed partial class MainWindow
         var view = new OnboardingView(
             App.Settings.Current,
             App.PreviewThemeInAllWindows,
-            () => App.RefreshSessionsInAllWindows(),
             Core.Local.LocalShellDiscovery.DefaultProfile(
                 App.Store, App.Settings.Current.DefaultLocalProfileId, App.AvailableLocalShells)?.Name);
         view.FinishRequested += () => Host().FinishOnboarding(tab, view);
@@ -125,7 +124,6 @@ public sealed partial class MainWindow
         if (!App.SaveSettings(view.Complete()))
             return;
         view.MarkCompleted();
-        App.ApplySettingsToAllWindows();
         CloseTabCore(tab);
     }
 
@@ -153,8 +151,6 @@ public sealed partial class MainWindow
             {
                 App.ReportRecoverableError(exception);
             }
-            App.RefreshRecentSessionsInAllWindows();
-            App.RefreshJumpList();
         }
         return tab;
     }

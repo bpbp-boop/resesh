@@ -436,12 +436,6 @@ public sealed partial class ImportView : UserControl, IDisposable
         {
             FooterText.Text = $"Import failed: {exception.Message}";
         }
-        finally
-        {
-            // Whatever happened, the trees show what the store now holds: a failed import
-            // stays open to retry and never completes, so nothing else would refresh them.
-            App.RefreshSessionsInAllWindows();
-        }
     }
 
     private void ShowResult(int imported, int duplicates, IReadOnlyList<Resesh.Core.Models.Identity> created)

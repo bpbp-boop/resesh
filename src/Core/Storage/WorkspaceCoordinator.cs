@@ -1,13 +1,16 @@
 namespace Resesh.Core.Storage;
 
-/// <summary>Coordinates workspace writes and reports recoverable failures to its caller.</summary>
+/// <summary>Coordinates workspace writes and reports recoverable failures to its caller.
+/// A write that succeeds is announced by <see cref="WorkspaceStore.Changed"/>.</summary>
 /// <param name="liveLayout">A workspace's own layout as it stands where it is open, or null
 /// when no window has it open. Keyed by id, so an update can only ever capture the workspace
 /// it updates, never whichever one happens to be shown.</param>
+/// <param name="restore">Called when a write fails, to put back menus a drag or an edit
+/// changed before the write was tried.</param>
 public sealed class WorkspaceCoordinator(
     WorkspaceStore store,
     Func<Guid, WorkspaceLayout?> liveLayout,
-    Action changed,
+    Action restore,
     Action<string, string> report)
 {
 
@@ -57,11 +60,10 @@ public sealed class WorkspaceCoordinator(
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
             or ArgumentException or InvalidOperationException)
         {
-            if (refresh) changed(); // Restore menus after an optimistic drag or edit.
+            if (refresh) restore();
             report(failure, exception.Message);
             return false;
         }
-        if (refresh) changed();
         return true;
     }
 }

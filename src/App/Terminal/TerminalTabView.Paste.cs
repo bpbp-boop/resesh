@@ -196,7 +196,7 @@ public sealed partial class TerminalTabView
         };
         var confirmed = await dialog.ConfirmAsync();
         if (confirmed && dialog.IsDontAskChecked)
-            App.SaveSetting(s => s with { ConfirmMultilinePaste = false }, nameof(SettingsViewModel.ConfirmMultilinePaste));
+            App.SaveSettings(App.Settings.Current with { ConfirmMultilinePaste = false });
         return confirmed;
     }
 }

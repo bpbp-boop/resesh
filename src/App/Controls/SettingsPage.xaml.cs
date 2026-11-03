@@ -167,8 +167,7 @@ public sealed partial class SettingsPage : UserControl
         try
         {
             App.Highlights.CommitDraft(_highlightDraft);
-            HighlightSaveError.IsOpen = false;
-            App.RefreshHighlightsInAllWindows();
+            HighlightSaveError.IsOpen = false; // every window's terminals follow the store
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

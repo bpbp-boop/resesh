@@ -249,4 +249,57 @@ public sealed class SettingsStoreTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Changed_ReportsBeforeAndAfterOnlyOnceASaveHasLanded()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"sessions-settings-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new SettingsStore(path);
+            var changes = new List<(AppSettings Before, AppSettings After)>();
+            store.Changed += (before, after) =>
+            {
+                // A follower reads the store, so it must already hold the new settings.
+                Assert.Same(after, store.Current);
+                changes.Add((before, after));
+            };
+            var original = store.Current;
+
+            store.Save(original with { ShowStatusBar = false });
+            store.Save(store.Current); // nothing differs: nobody is told
+            store.RecordRecentSession(Guid.NewGuid());
+
+            Assert.Equal(2, changes.Count);
+            Assert.Same(original, changes[0].Before);
+            Assert.False(changes[0].After.ShowStatusBar);
+            Assert.Single(changes[1].After.RecentSessionIds);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Changed_StaysQuietWhenTheSaveFails()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"sessions-settings-{Guid.NewGuid():N}.json");
+        try
+        {
+            var store = new SettingsStore(path);
+            store.Save(store.Current);
+            var raised = false;
+            store.Changed += (_, _) => raised = true;
+            using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                Assert.ThrowsAny<IOException>(() => store.Save(store.Current with { FontSize = 20 }));
+
+            Assert.False(raised);
+            Assert.Equal(14, store.Current.FontSize);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

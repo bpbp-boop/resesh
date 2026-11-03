@@ -438,4 +438,32 @@ public sealed class WorkspaceStoreTests : IDisposable
         Assert.False(loaded.RemoveSessions([Guid.NewGuid()]));
         Assert.Equal(written, File.GetLastWriteTimeUtc(path));
     }
+
+    [Fact]
+    public void Changed_FollowsWhatMenusShowButNotTheLastLayout()
+    {
+        var store = new WorkspaceStore(Path.Combine(_dir.FullName, "workspaces.json"));
+        store.Load();
+        var raised = 0;
+        store.Changed += () => raised++;
+        var one = new WorkspaceLayout
+        {
+            Groups = [new WorkspaceGroup { Tabs = [new WorkspaceTabReference { SessionId = Guid.NewGuid() }] }],
+        };
+        var two = new WorkspaceLayout
+        {
+            Groups = [new WorkspaceGroup { Tabs = [.. one.Groups[0].Tabs, new WorkspaceTabReference { SessionId = Guid.NewGuid() }] }],
+        };
+
+        var saved = store.SaveAs("Morning", one);
+        Assert.Equal(1, raised);
+        store.SaveLastLayout(two); // written on every layout change; menus do not show it
+        Assert.Equal(1, raised);
+        store.SetDraft(saved.Id, two); // the workspace now has unsaved changes
+        Assert.Equal(2, raised);
+        store.SetDraft(saved.Id, new WorkspaceLayout { Groups = [.. two.Groups, new WorkspaceGroup()] });
+        Assert.Equal(2, raised); // still has unsaved changes: nothing a menu shows moved
+        store.Rename(saved.Id, "Evening");
+        Assert.Equal(3, raised);
+    }
 }

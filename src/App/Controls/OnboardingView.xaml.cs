@@ -14,7 +14,6 @@ public sealed partial class OnboardingView : UserControl, IDisposable
 {
     private readonly WelcomeChoices _choices;
     private readonly Action<string> _previewTheme;
-    private readonly Action _sessionsChanged;
     private ImportScanResult? _puttyScan;
     private ImportScanResult? _openSshScan;
     private ImportScanResult? _secureCrtScan;
@@ -33,12 +32,10 @@ public sealed partial class OnboardingView : UserControl, IDisposable
     public OnboardingView(
         AppSettings settings,
         Action<string> previewTheme,
-        Action sessionsChanged,
         string? localShellName)
     {
         _choices = new WelcomeChoices(settings);
         _previewTheme = previewTheme;
-        _sessionsChanged = sessionsChanged;
 
         InitializeComponent();
         AppShortcuts.AddAccelerators(this, Resesh.Core.Input.ShortcutIds.FinishWelcome, FinishSetup_Invoked);
@@ -274,7 +271,6 @@ public sealed partial class OnboardingView : UserControl, IDisposable
                 1 => $"Created the identity {identities[0]}.",
                 _ => $"Created {identities.Count} identities: {string.Join(", ", identities)}.",
             };
-            _sessionsChanged();
             label.Text = $"{imported} imported";
             label.Foreground = Brush("OnboardingAccentTextBrush");
             ImportStatus.Severity = InfoBarSeverity.Success;

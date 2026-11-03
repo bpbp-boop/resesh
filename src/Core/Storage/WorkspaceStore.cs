@@ -75,6 +75,12 @@ public sealed class WorkspaceStore
     private Dictionary<Guid, WorkspaceLayout> _drafts = [];
     public string? LoadWarning { get; private set; }
 
+    /// <summary>Raised after a write changes the saved workspaces or which of them have
+    /// unsaved changes: what menus and rails show. Writes that only move the last layout or
+    /// edit an existing draft stay quiet; they happen on every layout change. Raised on the
+    /// writer's thread.</summary>
+    public event Action? Changed;
+
     /// <summary>Whether saves are allowed; see <see cref="StoreLoadState"/>.</summary>
     public StoreLoadState LoadState
     {
@@ -395,10 +401,14 @@ public sealed class WorkspaceStore
             .Where(draft => workspaces.Any(workspace => workspace.Id == draft.Key))
             .ToDictionary(draft => draft.Key, draft => draft.Value);
         _file.Write(Serialize(workspaces, lastLayout, lastActiveWorkspaceId, drafts));
+        var shownChanged = !ReferenceEquals(workspaces, _workspaces)
+            || !drafts.Keys.ToHashSet().SetEquals(_drafts.Keys);
         _workspaces = workspaces;
         _lastLayout = lastLayout;
         _lastActiveWorkspaceId = lastActiveWorkspaceId;
         _drafts = drafts;
+        if (shownChanged)
+            Changed?.Invoke();
     }
 
     private static string Serialize(

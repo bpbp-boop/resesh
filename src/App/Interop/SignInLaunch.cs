@@ -23,6 +23,9 @@ internal static class SignInLaunch
         return approved?.GetValue(ValueName) is not byte[] { Length: > 0 } state || state[0] % 2 == 0;
     }
 
+    /// <summary>Raised after <see cref="TrySet"/> changes the entry, for every Settings page showing it.</summary>
+    public static event Action? Changed;
+
     /// <summary>Adds or removes the entry; false when the registry refused the change.</summary>
     public static bool TrySet(bool enabled, string executablePath)
     {
@@ -35,6 +38,7 @@ internal static class SignInLaunch
                 run.SetValue(ValueName, $"\"{executablePath}\"", RegistryValueKind.String);
             else
                 run.DeleteValue(ValueName, throwOnMissingValue: false);
+            Changed?.Invoke();
             return true;
         }
         catch (Exception exception) when (exception is UnauthorizedAccessException or System.Security.SecurityException or IOException)

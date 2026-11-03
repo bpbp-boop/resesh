@@ -230,7 +230,7 @@ public sealed class ReliabilityTests : IDisposable
             };
             Assert.False(coordinator.Update(workspace.Id));
         }
-        Assert.Equal(2, refreshes);
+        Assert.Equal(1, refreshes); // only the failure restores; the store announces successes
         Assert.Single(notices);
         store.Load();
         var restored = Assert.Single(store.Workspaces).Layout!;

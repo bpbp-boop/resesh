@@ -68,8 +68,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             try
             {
-                if (App.Workspaces.RemoveSessions(ids))
-                    App.RefreshWorkspaceMenus();
+                App.Workspaces.RemoveSessions(ids); // menus follow the store
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -85,7 +84,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     public MainWindow()
     {
-        ViewModel = new MainViewModel(App.Store, App.Credentials, _viewModelEnvironment, this);
+        ViewModel = new MainViewModel(App.Store, App.Credentials, _viewModelEnvironment, this, App.Identities);
         _groupLayout = new SplitLayout<TabGroupViewModel>(ViewModel.Groups[0]);
         InitializeComponent();
         // TreeViewItem consumes Enter before the TreeView's normal KeyDown event. Listen to
@@ -130,16 +129,25 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         };
         ScheduleExpansionSync();
         SyncEmptyState();
-        ApplySettingsToApp();
+        ApplySettings(SettingsEffects.All);
         RegisterAccelerators();
         InitializeSessionsRail();
         InitializeWorkspaceRail();
         RefreshWorkspaceMenu();
+        // App-wide data: whoever writes it, every window follows the store that holds it.
+        App.Settings.Changed += Settings_Changed;
+        App.Highlights.Changed += Highlights_Changed;
+        App.Workspaces.Changed += Workspaces_Changed;
+        Interop.SignInLaunch.Changed += SignInLaunch_Changed;
         _uiSettings.ColorValuesChanged += SystemColorsChanged;
         AppWindow.Closing += AppWindow_Closing;
         Closed += (_, _) =>
         {
             _windowClosed = true;
+            App.Settings.Changed -= Settings_Changed;
+            App.Highlights.Changed -= Highlights_Changed;
+            App.Workspaces.Changed -= Workspaces_Changed;
+            Interop.SignInLaunch.Changed -= SignInLaunch_Changed;
             _uiSettings.ColorValuesChanged -= SystemColorsChanged;
             Resesh.Core.Backend.CleanupActions.Run(App.ReportRecoverableError,
                 SaveTreePaneWidth,
@@ -1170,7 +1178,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             if (!App.SaveSettings(App.Settings.Current with { KeepCommandHistory = true }))
                 return;
-            App.ApplySettingsToAllWindows();
             HistoryOverlay.SetHistoryEnabled(true);
         };
     }
@@ -1309,7 +1316,6 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             LaunchAtSignIn = Interop.SignInLaunch.IsEnabled,
             SetLaunchAtSignIn = enabled => Interop.SignInLaunch.TrySet(enabled, Environment.ProcessPath!),
         });
-        settings.SettingChanged += property => App.ApplySettingChange(property, source: settings);
         var page = new SettingsPage(settings);
         page.ConnectRequested += session => App.WindowFor(tab)?.ConnectSession(session);
         // Settings can be dragged to another window, so its sessions go through the window hosting it now.
@@ -1324,53 +1330,71 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     }
 
     /// <summary>Re-reads this window's Settings pages, and Welcome, which shows some of the same
-    /// settings, after another window or command changed settings.</summary>
-    private void RefreshSettingsPage(SettingsViewModel? source)
+    /// settings. A page that is saving skips its own announcement (SettingsViewModel.Refresh).</summary>
+    private void RefreshSettingsPages()
     {
         // Dragging Settings between windows can leave two Settings tabs in one window.
         foreach (var tab in ViewModel.AllTabs)
         {
-            if (tab.View is SettingsPage page && !ReferenceEquals(page.ViewModel, source))
+            if (tab.View is SettingsPage page)
                 page.ViewModel.Refresh();
             else if (tab.View is OnboardingView welcome)
                 welcome.Refresh(App.Settings.Current);
         }
     }
 
-    /// <summary>Applies the persisted settings to the shell and every open terminal.</summary>
-    internal void ApplySettingsToApp()
+    /// <summary>Runs a store follower once the write that raised it has finished. Stores
+    /// announce from inside the writer's call, on its thread; a menu rebuilt there could
+    /// land halfway through a workspace switch or a close, so followers wait their turn.</summary>
+    private void AfterWrite(Action follow) => DispatcherQueue.TryEnqueue(() =>
     {
-        ApplySettingsToApp(App.Settings.Current);
-        if (_sessionsPaneOpen && _selectedRailTab == "recordings")
-            _ = ViewModel.RefreshRecordingsAsync();
-        RefreshSettingsPage(source: null);
+        if (!_windowClosed)
+            follow();
+    });
+
+    private void Settings_Changed(AppSettings before, AppSettings after) =>
+        AfterWrite(() => ApplySettings(SettingsEffects.Between(before, after)));
+
+    private void Highlights_Changed() => AfterWrite(RefreshHighlights);
+
+    private bool _workspaceMenuQueued;
+
+    private void Workspaces_Changed()
+    {
+        // A backup restore or a close can write several times in a row; rebuild once.
+        if (_workspaceMenuQueued)
+            return;
+        _workspaceMenuQueued = true;
+        AfterWrite(() =>
+        {
+            _workspaceMenuQueued = false;
+            RefreshWorkspaceMenu();
+            App.RefreshWindowTitles(); // a title names the shown workspace
+        });
     }
 
-    /// <summary>Applies one saved setting to this window after Settings, in any window, changed it.
-    /// <paramref name="source"/> is the Settings page that made the change; it is already current.</summary>
-    internal void ApplySettingChange(string property, SettingsViewModel? source)
+    // Not a saved setting, but shown on every Settings page.
+    private void SignInLaunch_Changed() => AfterWrite(RefreshSettingsPages);
+
+    /// <summary>Applies the saved settings to what <paramref name="effect"/> names; see
+    /// <see cref="SettingsEffects"/> for which settings change what.</summary>
+    private void ApplySettings(SettingsEffect effect)
     {
-        RefreshSettingsPage(source);
         var settings = App.Settings.Current;
-        switch (property)
-        {
-            case nameof(SettingsViewModel.Theme):
-                ApplyThemeToApp(settings.Theme);
-                break;
-            case nameof(SettingsViewModel.ShowStatusBar):
-                ApplyStatusBarVisibility(settings.ShowStatusBar);
-                break;
-            case nameof(SettingsViewModel.SessionsPaneLayout):
-                UpdatePaneMode();
-                break;
-            case nameof(SettingsViewModel.RecordingDirectory):
-                if (_sessionsPaneOpen && _selectedRailTab == "recordings")
-                    _ = ViewModel.RefreshRecordingsAsync();
-                break;
-            default:
-                ApplyTerminalSettings(settings);
-                break;
-        }
+        if (effect.HasFlag(SettingsEffect.Theme))
+            ApplyThemeToApp(settings.Theme);
+        if (effect.HasFlag(SettingsEffect.StatusBar))
+            ApplyStatusBarVisibility(settings.ShowStatusBar);
+        if (effect.HasFlag(SettingsEffect.PaneLayout))
+            UpdatePaneMode();
+        if (effect.HasFlag(SettingsEffect.Terminals))
+            ApplyTerminalSettings(settings);
+        if (effect.HasFlag(SettingsEffect.Recordings) && _sessionsPaneOpen && _selectedRailTab == "recordings")
+            _ = ViewModel.RefreshRecordingsAsync();
+        if (effect.HasFlag(SettingsEffect.RecentSessions))
+            ViewModel.RefreshRecentSessions();
+        if (effect.HasFlag(SettingsEffect.SettingsPages))
+            RefreshSettingsPages();
     }
 
     /// <summary>Terminals re-read the saved highlighting rules.</summary>
@@ -1388,18 +1412,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         StatusBarMenuItem.IsChecked = visible;
     }
 
-    private void SetStatusBarVisible(bool visible)
-    {
-        App.SaveSetting(s => s with { ShowStatusBar = visible }, nameof(SettingsViewModel.ShowStatusBar));
-    }
-
-    private void ApplySettingsToApp(AppSettings settings)
-    {
-        ApplyThemeToApp(settings.Theme);
-        ApplyStatusBarVisibility(settings.ShowStatusBar);
-        UpdatePaneMode();
-        ApplyTerminalSettings(settings);
-    }
+    private void SetStatusBarVisible(bool visible) =>
+        App.SaveSettings(App.Settings.Current with { ShowStatusBar = visible });
 
     private void ApplyTerminalSettings(AppSettings settings)
     {

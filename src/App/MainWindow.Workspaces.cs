@@ -17,7 +17,7 @@ namespace Resesh.App;
 public sealed partial class MainWindow
 {
     private WorkspaceCoordinator WorkspaceOperations => new(App.Workspaces, LiveWorkspaceLayoutOrNull,
-        App.RefreshWorkspaceMenus, (title, message) =>
+        App.RefreshWorkspaceRails, (title, message) =>
             App.ReportRecoverableError(new IOException($"{title}: {message}")));
 
     /// <summary>The shown workspace's layout as a save would see it; zoomed, the split the

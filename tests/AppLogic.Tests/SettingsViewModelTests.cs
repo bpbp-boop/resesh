@@ -361,4 +361,30 @@ public sealed class SettingsViewModelTests
         Assert.False(settings.LaunchAtSignIn);
         Assert.Equal(0, calls);
     }
+
+    [Fact]
+    public void ThePageSavingIgnoresTheStoresAnnouncementOfItsOwnSave()
+    {
+        var settings = Settings();
+        var other = Settings();
+        var echoed = new List<string?>();
+        var otherRefreshed = new List<string?>();
+        settings.PropertyChanged += (_, e) => echoed.Add(e.PropertyName);
+        other.PropertyChanged += (_, e) => otherRefreshed.Add(e.PropertyName);
+
+        settings.CopyOnSelect = false;
+        // The store announces the save, during it or a moment later, and every window
+        // refreshes its pages.
+        settings.Refresh();
+        other.Refresh();
+
+        // The control already shows the value; re-raising it can loop or move a caret.
+        Assert.Empty(echoed);
+        Assert.Contains(string.Empty, otherRefreshed);
+
+        // A later change made elsewhere does reach the page.
+        _settings = _settings with { FontSize = 20 };
+        settings.Refresh();
+        Assert.Contains(string.Empty, echoed);
+    }
 }

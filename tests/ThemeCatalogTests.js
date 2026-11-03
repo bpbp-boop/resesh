@@ -197,12 +197,14 @@ test("global and per-session theme pickers use the shared catalog", () => {
 
 test("global theme selection applies immediately in every window", () => {
   assert.match(settingsPage, /SelectedItem="\{x:Bind ViewModel\.Theme, Mode=TwoWay\}"/);
-  assert.match(appCode, /internal static void ApplySettingChange[\s\S]*?foreach \(var window in app\._windows\.ToList\(\)\)[\s\S]*?window\.ApplySettingChange\(property, source\)/);
+  // Each window follows the settings store itself, whichever window saved the theme.
+  assert.match(mainWindow, /App\.Settings\.Changed \+= Settings_Changed;/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)/);
 });
 
 test("live theme changes avoid terminal layout and highlight work", () => {
-  assert.match(mainWindow, /case nameof\(SettingsViewModel\.Theme\):\s*ApplyThemeToApp\(settings\.Theme\);\s*break;/);
+  // A theme change is SettingsEffect.Theme alone (SettingsEffectsTests), which only recolors.
+  assert.match(mainWindow, /if \(effect\.HasFlag\(SettingsEffect\.Theme\)\)\s*ApplyThemeToApp\(settings\.Theme\);/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)[\s\S]*?view\.ApplyTheme\(theme\)/);
 
   const applyTheme = terminalTab.match(/public void ApplyTheme\(string theme\)\s*\{[\s\S]*?\n    \}/)?.[0];

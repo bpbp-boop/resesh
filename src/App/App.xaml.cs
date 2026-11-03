@@ -251,19 +251,26 @@ public partial class App : Application
 #endif
         Resesh.Terminal.TerminalSurface.Shortcuts = AppShortcuts.ForTerminals();
         PruneCommandHistory();
-        // Windows follow the store themselves; views outside them and the jump list follow here.
+        // Windows follow the stores themselves; views outside them, the jump list and history
+        // retention follow here. No writer has to know who reads what it wrote.
         Store.Changed += () => RunOnUiThread(() =>
         {
             SessionsChanged?.Invoke();
             RefreshJumpList(); // sessions were renamed, added or deleted
         });
-        // An identity's username shows in tab endpoints and jump list descriptions without
-        // any session changing.
+        // An identity's username shows in trees, tab endpoints and jump list descriptions
+        // without any session changing.
         Identities.Changed += () => RunOnUiThread(() =>
         {
-            foreach (var tab in AllTabs)
-                tab.NotifyLoginChanged();
+            SessionsChanged?.Invoke();
             RefreshJumpList();
+        });
+        Settings.Changed += (before, after) => RunOnUiThread(() =>
+        {
+            RefreshJumpList(); // pinned and recent sessions
+            if (before.KeepCommandHistory != after.KeepCommandHistory
+                || before.CommandHistoryDays != after.CommandHistoryDays)
+                PruneCommandHistory();
         });
         var window = CreateWindowCore();
         if (Settings.Current.ReopenLastLayoutAtStartup)
@@ -367,19 +374,6 @@ public partial class App : Application
                 app._windows.Count) is not { } ids)
             return;
         SaveSettings(Settings.Current with { PinnedSessionIds = ids });
-        RefreshJumpList();
-    }
-
-    /// <summary>Re-reads sessions everywhere after a change the session store does not see,
-    /// such as identities an import added. Saved session changes need no call: every window
-    /// follows <see cref="SessionStore.Changed"/>.</summary>
-    internal static void RefreshSessionsInAllWindows()
-    {
-        if (Current is not App app)
-            return;
-        foreach (var window in app._windows.ToList())
-            window.ViewModel.RefreshSessions();
-        SessionsChanged?.Invoke();
     }
 
     /// <summary>A recording started or stopped in some tab: every window showing the
@@ -392,8 +386,8 @@ public partial class App : Application
             window.RefreshRecordingsIfShown();
     }
 
-    /// <summary>Raised on the UI thread after saved sessions, folders or folder identities
-    /// change, for views outside the tree.</summary>
+    /// <summary>Raised on the UI thread after saved sessions, folders or identities change,
+    /// for views outside the windows' trees.</summary>
     internal static event Action? SessionsChanged;
 
     /// <summary>Runs an action on the UI thread: at once when already on it, else queued.</summary>
@@ -407,16 +401,6 @@ public partial class App : Application
 
     private static DispatcherQueue? _uiQueue;
 
-    /// <summary>Every window's Recent pane re-reads the saved list (one window opening a
-    /// session changes it for all).</summary>
-    internal static void RefreshRecentSessionsInAllWindows()
-    {
-        if (Current is not App app)
-            return;
-        foreach (var window in app._windows.ToList())
-            window.ViewModel.RefreshRecentSessions();
-    }
-
     internal static void RefreshWindowTitles()
     {
         if (Current is not App app)
@@ -424,15 +408,6 @@ public partial class App : Application
         var showContext = app._windows.Count > 1;
         foreach (var window in app._windows.ToList())
             window.RefreshWindowTitle(showContext);
-    }
-
-    /// <summary>Settings are app-wide: every window applies them, not only the one that saved.</summary>
-    internal static void ApplySettingsToAllWindows()
-    {
-        if (Current is not App app)
-            return;
-        foreach (var window in app._windows.ToList())
-            window.ApplySettingsToApp();
     }
 
     /// <summary>Previews an unsaved theme in every window. Welcome previews themes and can be
@@ -443,48 +418,6 @@ public partial class App : Application
             return;
         foreach (var window in app._windows.ToList())
             window.PreviewTheme(theme);
-    }
-
-    /// <summary>Applies one saved setting in every window. <paramref name="source"/> is the
-    /// Settings page that changed it, if any; other windows' Settings pages re-read.</summary>
-    internal static void ApplySettingChange(string property, ViewModels.SettingsViewModel? source = null)
-    {
-        if (Current is not App app)
-            return;
-        foreach (var window in app._windows.ToList())
-            window.ApplySettingChange(property, source);
-        if (property is nameof(ViewModels.SettingsViewModel.KeepCommandHistory)
-            or nameof(ViewModels.SettingsViewModel.CommandHistoryDays))
-            PruneCommandHistory();
-    }
-
-    /// <summary>Saves one setting changed outside the Settings page (a paste prompt, a menu) and
-    /// applies it the way the page does, so every window and every open Settings page shows it.
-    /// <paramref name="property"/> is the <see cref="ViewModels.SettingsViewModel"/> property.</summary>
-    internal static bool SaveSetting(Func<AppSettings, AppSettings> change, string property)
-    {
-        if (!SaveSettings(change(Settings.Current)))
-            return false;
-        ApplySettingChange(property);
-        return true;
-    }
-
-    /// <summary>Open terminals in every window re-read the saved highlighting rules.</summary>
-    internal static void RefreshHighlightsInAllWindows()
-    {
-        if (Current is not App app)
-            return;
-        foreach (var window in app._windows.ToList())
-            window.RefreshHighlights();
-    }
-
-    internal static void RefreshWorkspaceMenus()
-    {
-        if (Current is not App app)
-            return;
-        foreach (var window in app._windows.ToList())
-            window.RefreshWorkspaceMenu();
-        RefreshWindowTitles();
     }
 
     /// <summary>Every window's rail shows which workspaces the others hold, so a workspace
@@ -618,11 +551,8 @@ public partial class App : Application
         _removedJumpListItems.UnionWith(removed);
         var removedIds = LaunchRequest.Parse(removed.SelectMany(SplitArguments).ToList()).SessionIds.ToHashSet();
         var recent = settings.RecentSessionIds.Where(id => !removedIds.Contains(id)).ToList();
-        if (recent.Count != settings.RecentSessionIds.Count
-            && SaveSettings(Settings.Current with { RecentSessionIds = recent }))
-        {
-            RefreshRecentSessionsInAllWindows();
-        }
+        if (recent.Count != settings.RecentSessionIds.Count)
+            SaveSettings(Settings.Current with { RecentSessionIds = recent }); // Recent panes follow
         // The committed list already left them out; the next change rebuilds it from Recent.
         _jumpList = null;
     }

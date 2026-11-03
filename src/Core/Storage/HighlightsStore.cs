@@ -35,6 +35,10 @@ public sealed class HighlightsStore
 
     private HighlightsStore() { }
 
+    /// <summary>Raised after a write to the live store changes the rules, on the writer's
+    /// thread. A draft never raises it: its edits reach terminals only as a preview.</summary>
+    public event Action? Changed;
+
     /// <summary>Set by <see cref="Load"/> when the file was recovered or unreadable.</summary>
     public string? LoadWarning { get; private set; }
 
@@ -380,6 +384,8 @@ public sealed class HighlightsStore
         _disabled = candidate.Disabled;
         _custom = candidate.Custom;
         _overrides = candidate.Overrides;
+        if (_file is not null)
+            Changed?.Invoke();
     }
 
     private static StoreData? Read(string path)

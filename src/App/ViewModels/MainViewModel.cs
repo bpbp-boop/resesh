@@ -11,6 +11,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
     private readonly ViewModelEnvironment _environment;
     private readonly SessionStore _store;
+    private readonly IdentityStore? _identities;
     private readonly ICredentialService _credentials;
     private readonly IMainWindowServices? _services;
 
@@ -43,10 +44,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         SessionStore store,
         ICredentialService credentials,
         ViewModelEnvironment environment,
-        IMainWindowServices? services = null)
+        IMainWindowServices? services = null,
+        IdentityStore? identities = null)
     {
         _environment = environment;
         _store = store;
+        _identities = identities;
         _credentials = credentials;
         _services = services;
         TreeSelection = new((node, selected) => node.IsSelected = selected);
@@ -56,13 +59,21 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         RebuildTree();
         Commands = new AppCommandCatalog(this);
         _store.Changed += Store_Changed;
+        if (_identities is not null)
+            _identities.Changed += Store_Changed;
     }
 
-    /// <summary>Stops following the session store. The window calls this when it closes.</summary>
-    public void Dispose() => _store.Changed -= Store_Changed;
+    /// <summary>Stops following the stores. The window calls this when it closes.</summary>
+    public void Dispose()
+    {
+        _store.Changed -= Store_Changed;
+        if (_identities is not null)
+            _identities.Changed -= Store_Changed;
+    }
 
     // Every saved change reaches every window, whoever made it: a dialog, another window,
-    // a connect prompt or an import. The tree, tabs and Recent re-read the store here.
+    // a connect prompt or an import. The tree, tabs and Recent re-read the store here. An
+    // identity's username shows in tabs and the tree without any session changing.
     private void Store_Changed() => _environment.RunOnUiThread(RefreshSessions);
 
     /// <summary>The window that carries out commands. Only commands need it.</summary>
