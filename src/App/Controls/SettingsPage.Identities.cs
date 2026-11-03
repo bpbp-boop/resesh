@@ -267,8 +267,8 @@ public sealed partial class SettingsPage
 
     private async Task RenameKeyAsync(SshKeyReference key)
     {
-        var name = await TextPromptDialog.PromptAsync(XamlRoot, "Rename SSH key", "Name", key.Name, "Rename");
-        if (string.IsNullOrWhiteSpace(name) || name == key.Name)
+        var name = (await TextPromptDialog.PromptAsync(XamlRoot, "Rename SSH key", "Name", key.Name, "Rename"))?.Trim();
+        if (string.IsNullOrEmpty(name) || name == key.Name)
             return;
         try
         {
