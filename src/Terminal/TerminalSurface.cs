@@ -104,8 +104,9 @@ public abstract partial class TerminalSurface : Grid, IDisposable
     public abstract bool BracketedPaste { get; }
 
     /// <summary>Sends bytes as if typed, scrolling to the bottom as typing does. Used to send
-    /// a paste a piece at a time.</summary>
-    public abstract void SendInput(byte[] data);
+    /// a paste a piece at a time. <paramref name="pressesEnter"/> marks a piece that ends a
+    /// pasted line, so the command it runs is detected as a typed Enter's would be.</summary>
+    public abstract void SendInput(byte[] data, bool pressesEnter = false);
 
     /// <summary>Turns command-history capture on or off for this live terminal.</summary>
     public abstract void SetHistoryCapture(bool enabled);

@@ -731,12 +731,15 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     }
 
     /// <summary>Types text at the prompt as a paste, without pressing Enter, so the user
-    /// reviews a command from history before it runs.</summary>
+    /// reviews a command from history before it runs. It goes through safe paste, so a
+    /// multi-line command that would run line by line (no bracketed paste) always asks
+    /// first, and a slow-paste session gets it slowly.</summary>
     public bool InsertText(string text)
     {
         if (_disposed || _tab.IsLocked || _tab.State != TabConnectionState.Connected)
             return false;
-        _terminal.PasteText(text);
+        if (!PasteForReview(text))
+            return false;
         _terminal.FocusTerminal();
         return true;
     }
