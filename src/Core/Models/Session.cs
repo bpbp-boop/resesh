@@ -196,6 +196,12 @@ public sealed record Session
         : InheritLogin ? SessionLogin.Inherit
         : SessionLogin.Own;
 
+    /// <summary>True when the session keeps its own password under its id. Identity logins
+    /// keep theirs under the identity and keys keep a passphrase with the key, so a session
+    /// that stops using its own password should drop the stored copy.</summary>
+    [JsonIgnore]
+    public bool UsesOwnPassword => Login == SessionLogin.Own && AuthMethod == AuthMethod.Password;
+
     /// <summary>Username, auth method and key below; meaningful when <see cref="Login"/> is Own.</summary>
     public AuthMethod AuthMethod { get; set; } = AuthMethod.Password;
 

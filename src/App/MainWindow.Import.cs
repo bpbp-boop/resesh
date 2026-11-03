@@ -22,7 +22,9 @@ public sealed partial class MainWindow
 {
     // ---- Backup export / import ----
 
-    private static string BackupDataDirectory => Path.GetDirectoryName(SessionStore.DefaultPath)!;
+    /// <summary>Where backups read and write the files no store owns (icons, workspaces):
+    /// the folder the stores use, so --data-dir and demo mode back up their own data.</summary>
+    private static string BackupDataDirectory => Program.DataDirectory;
 
     /// <summary>The window running a backup or import wizard, if any. One runs at a time
     /// across the app: they write the same stores, and each is a chain of dialogs and pickers
@@ -157,23 +159,31 @@ public sealed partial class MainWindow
         if (preview.Resolutions is not { } resolutions)
             return;
 
-        var result = await Task.Run(() => SessionsBackup.Import(
-            package,
-            BackupDataDirectory,
-            App.Store,
-            App.Settings,
-            App.KnownHosts,
-            App.Highlights,
-            App.SshKeys,
-            App.Credentials,
-            resolutions,
-            App.Identities));
-
-        App.Icons.InvalidateCustomIcons();
-        App.Workspaces.Load();
-        App.RefreshWorkspaceMenus();
-        App.RefreshSessionsInAllWindows();
-        App.ApplySettingsToAllWindows();
+        BackupImportResult result;
+        try
+        {
+            result = await Task.Run(() => SessionsBackup.Import(
+                package,
+                BackupDataDirectory,
+                App.Store,
+                App.Settings,
+                App.KnownHosts,
+                App.Highlights,
+                App.SshKeys,
+                App.Credentials,
+                resolutions,
+                App.Identities,
+                App.Workspaces));
+        }
+        finally
+        {
+            // A failed import may have saved some stores before the one that failed; every
+            // window shows what is saved either way.
+            App.Icons.InvalidateCustomIcons();
+            App.RefreshWorkspaceMenus();
+            App.RefreshSessionsInAllWindows();
+            App.ApplySettingsToAllWindows();
+        }
 
         // The import has happened even if this window closed meanwhile; only the summary goes.
         if (_windowClosed)

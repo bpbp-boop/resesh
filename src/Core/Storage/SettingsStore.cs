@@ -115,6 +115,23 @@ public sealed record AppSettings
                 AlwaysRecord = overrides.AlwaysRecord ?? AlwaysRecord,
                 KeepCommandHistory = overrides.KeepCommandHistory ?? KeepCommandHistory,
             };
+
+    /// <summary>These settings with every saved-session reference passed through
+    /// <paramref name="map"/>, which gives the id the session has here, or null when it has
+    /// none (the reference is then dropped). Every setting that names a session is mapped
+    /// here and only here, so restoring a backup cannot miss one.</summary>
+    public AppSettings WithSessionIds(Func<Guid, Guid?> map)
+    {
+        List<Guid> MapList(IEnumerable<Guid> ids) =>
+            ids.Select(map).OfType<Guid>().Distinct().ToList();
+
+        return this with
+        {
+            PinnedSessionIds = MapList(PinnedSessionIds),
+            RecentSessionIds = MapList(RecentSessionIds),
+            DefaultLocalProfileId = DefaultLocalProfileId is { } id ? map(id) : null,
+        };
+    }
 }
 
 public sealed record WindowPlacement(int X, int Y, int Width, int Height, bool IsMaximized = false);

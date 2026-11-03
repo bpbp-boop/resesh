@@ -44,7 +44,8 @@ public sealed class SessionsBackupTests : IDisposable
         var package = SessionsBackup.Read(path);
         Assert.Equal(SessionsBackup.CurrentSchemaVersion, package.Manifest.SchemaVersion);
         Assert.Equal(selected.Id, Assert.Single(package.Sessions).Id);
-        Assert.Equal(["Ops", "Ops/Empty", "Ops/Prod"], package.Folders.OrderBy(f => f));
+        // Ops and Ops/Prod exist through the selected session, which brings them back on import.
+        Assert.Equal(["Ops/Empty"], package.Folders);
         Assert.Empty(package.LocalFolders);
         Assert.Equal("light", package.Settings.Theme);
         Assert.Single(package.KnownHosts);
@@ -514,6 +515,261 @@ public sealed class SessionsBackupTests : IDisposable
         Assert.Equal("Ops/Prod", Assert.Single(package.FolderSettings).Path);
         Assert.Empty(package.IdentitySecrets);
     }
+
+    [Fact]
+    public void ExportImport_FoldersImpliedBySessionsStayImplied()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "implied-source"));
+        var session = Ssh("web", "web.example", "Prod/Web");
+        source.Sessions.Add(session);
+        source.Sessions.CreateFolder("Staging");
+        var path = Path.Combine(_dir.FullName, "implied.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials, new BackupExportOptions());
+
+        var target = CreateStores(Path.Combine(_dir.FullName, "implied-target"));
+        SessionsBackup.Import(SessionsBackup.Read(path), target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>());
+
+        Assert.Equal(["Prod", "Prod/Web", "Staging"], target.Sessions.Folders);
+        // Moving the session away empties Prod, which goes as it would have before the backup.
+        target.Sessions.MoveToFolder(session.Id, "");
+        Assert.Equal(["Staging"], target.Sessions.Folders);
+    }
+
+    [Fact]
+    public void ExportImport_ProxyPasswordsFollowTheSessionTheyBelongTo()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "proxy-source"));
+        var proxy = new ProxySettings { Host = "proxy.example", Port = 1080, Username = "bob" };
+        var behind = Ssh("Behind proxy", "inner.example", "") with { Proxy = proxy };
+        var fresh = Ssh("Fresh", "fresh.example", "") with { Proxy = proxy };
+        source.Sessions.Add(behind);
+        source.Sessions.Add(fresh);
+        ICredentialService sourceCredentials = source.Credentials;
+        sourceCredentials.WriteProxy(behind.Id, "proxy secret");
+        sourceCredentials.WriteProxy(fresh.Id, "fresh proxy secret");
+        var path = Path.Combine(_dir.FullName, "proxy.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
+            new BackupExportOptions { IncludeSecrets = true, Passphrase = "proxy passphrase" });
+        var package = SessionsBackup.Read(path, "proxy passphrase");
+        Assert.Equal("proxy secret", package.ProxySecrets[behind.Id]);
+
+        var target = CreateStores(Path.Combine(_dir.FullName, "proxy-target"));
+        target.Sessions.Add(Ssh("Mine", behind.Host, ""));
+        var result = SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution> { [behind.Id] = BackupConflictResolution.Duplicate });
+
+        ICredentialService targetCredentials = target.Credentials;
+        var copy = Assert.Single(target.Sessions.Sessions, s => s.Name == "Behind proxy");
+        Assert.NotEqual(behind.Id, copy.Id);
+        Assert.Equal("proxy secret", targetCredentials.ReadProxy(copy.Id));
+        Assert.Equal("fresh proxy secret", targetCredentials.ReadProxy(fresh.Id));
+        Assert.Null(targetCredentials.ReadProxy(behind.Id));
+        Assert.Equal(2, result.SecretsImported);
+    }
+
+    [Fact]
+    public void Read_BackupWithoutProxyPasswords_ImportsWithNone()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "no-proxy-source"));
+        var session = Ssh("Plain", "plain.example", "");
+        source.Sessions.Add(session);
+        source.Credentials.Write(session.Id, "password");
+        var path = Path.Combine(_dir.FullName, "no-proxy.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
+            new BackupExportOptions { IncludeSecrets = true, Passphrase = "plain passphrase" });
+
+        var package = SessionsBackup.Read(path, "plain passphrase");
+
+        Assert.Empty(package.ProxySecrets);
+        Assert.Equal("password", package.Secrets[session.Id]);
+    }
+
+    [Fact]
+    public void Import_RecentSessionsAreRemappedLikePinnedOnes()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "recent-source"));
+        var duplicated = Ssh("Edge", "edge.example", "");
+        var fresh = Ssh("Fresh", "fresh.example", "");
+        source.Sessions.Add(duplicated);
+        source.Sessions.Add(fresh);
+        var gone = Guid.NewGuid();
+        source.Settings.Save(new AppSettings { RecentSessionIds = [duplicated.Id, gone, fresh.Id] });
+        var path = Path.Combine(_dir.FullName, "recent.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials, new BackupExportOptions());
+
+        var target = CreateStores(Path.Combine(_dir.FullName, "recent-target"));
+        target.Sessions.Add(Ssh("Mine", duplicated.Host, ""));
+        SessionsBackup.Import(SessionsBackup.Read(path), target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution> { [duplicated.Id] = BackupConflictResolution.Duplicate });
+
+        var copy = Assert.Single(target.Sessions.Sessions, s => s.Name == "Edge");
+        Assert.Equal([copy.Id, fresh.Id], target.Settings.Current.RecentSessionIds);
+    }
+
+    /// <summary>Fails when a setting that holds session ids is added without being mapped in
+    /// <see cref="AppSettings.WithSessionIds"/>, which a backup restore relies on.</summary>
+    [Fact]
+    public void WithSessionIds_MapsEverySettingThatHoldsAnId()
+    {
+        var before = Guid.NewGuid();
+        var after = Guid.NewGuid();
+        var settings = new AppSettings();
+        var idProperties = typeof(AppSettings).GetProperties()
+            .Where(property => property.PropertyType == typeof(Guid) || property.PropertyType == typeof(Guid?)
+                || typeof(IEnumerable<Guid>).IsAssignableFrom(property.PropertyType))
+            .ToList();
+        Assert.NotEmpty(idProperties);
+        foreach (var property in idProperties)
+        {
+            var value = typeof(IEnumerable<Guid>).IsAssignableFrom(property.PropertyType) ? (object)new List<Guid> { before } : before;
+            property.SetValue(settings, value);
+        }
+
+        var mapped = settings.WithSessionIds(id => id == before ? after : null);
+
+        foreach (var property in idProperties)
+        {
+            var value = property.GetValue(mapped);
+            var ids = value as IEnumerable<Guid> ?? new[] { (Guid)value! };
+            Assert.True(ids.SequenceEqual([after]), $"{property.Name} is not mapped by WithSessionIds.");
+        }
+        Assert.Null(settings.WithSessionIds(_ => null).DefaultLocalProfileId);
+        Assert.Empty(settings.WithSessionIds(_ => null).RecentSessionIds);
+    }
+
+    [Fact]
+    public void Import_ReplaceThatStopsUsingItsOwnPassword_DropsTheOldOne()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "drop-source"));
+        var identityLogin = Ssh("Now an identity", "identity.example", "") with { IdentityId = Guid.NewGuid() };
+        var stillPassword = Ssh("Still a password", "password.example", "");
+        source.Sessions.Add(identityLogin);
+        source.Sessions.Add(stillPassword);
+        var path = Path.Combine(_dir.FullName, "drop.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials, new BackupExportOptions());
+
+        var target = CreateStores(Path.Combine(_dir.FullName, "drop-target"));
+        target.Sessions.Add(identityLogin with { IdentityId = null });
+        target.Sessions.Add(stillPassword);
+        target.Credentials.Write(identityLogin.Id, "old password");
+        target.Credentials.Write(stillPassword.Id, "kept password");
+
+        SessionsBackup.Import(SessionsBackup.Read(path), target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>
+            {
+                [identityLogin.Id] = BackupConflictResolution.Replace,
+                [stillPassword.Id] = BackupConflictResolution.Replace,
+            });
+
+        Assert.Equal(SessionLogin.Identity, target.Sessions.Find(identityLogin.Id)!.Login);
+        Assert.Null(target.Credentials.Read(identityLogin.Id));
+        Assert.Equal("kept password", target.Credentials.Read(stillPassword.Id));
+    }
+
+    [Fact]
+    public void Import_LegacyKeySessionsAreMigratedAndConnectWithoutARestart()
+    {
+        var keyPath = Path.Combine(_dir.FullName, "legacy-key");
+        var legacy = Ssh("Legacy key", "legacy.example", "") with
+        {
+            AuthMethod = AuthMethod.PrivateKey,
+            PrivateKeyPath = keyPath,
+            PassphraseRequired = true,
+        };
+        var package = EmptyPackage(schemaVersion: 1) with
+        {
+            Manifest = new BackupManifest { SchemaVersion = 1, IncludesSecrets = true },
+            Sessions = [legacy],
+            Secrets = new Dictionary<Guid, string> { [legacy.Id] = "key passphrase" },
+        };
+        var target = CreateStores(Path.Combine(_dir.FullName, "legacy-target"));
+
+        SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>());
+
+        var imported = target.Sessions.Find(legacy.Id)!;
+        var key = Assert.Single(target.SshKeys.Keys);
+        Assert.Equal(key.Id, imported.PrivateKeyId);
+        Assert.Null(imported.PrivateKeyPath);
+        Assert.Equal(Path.GetFullPath(keyPath), key.Path);
+        Assert.Equal("key passphrase", target.Credentials.ReadKey(key.Id));
+        Assert.Null(target.Credentials.Read(legacy.Id));
+    }
+
+    [Fact]
+    public void Import_WorkspacesGoThroughTheLiveStore()
+    {
+        var workspace = new Workspace { Id = Guid.NewGuid(), Name = "Imported", Groups = [new WorkspaceGroup()] };
+        var package = EmptyPackage() with
+        {
+            Workspaces = Encoding.UTF8.GetBytes(
+                $"{{\"workspaces\":[{{\"id\":\"{workspace.Id}\",\"name\":\"Imported\",\"groups\":[{{\"tabs\":[],\"activeTabIndex\":0}}]}}]}}"),
+        };
+        var target = CreateStores(Path.Combine(_dir.FullName, "live-workspace-target"));
+        var live = new WorkspaceStore(Path.Combine(target.Directory, "workspaces.json"));
+        live.Load();
+        live.SaveAs("Existing", new WorkspaceLayout { Groups = [new WorkspaceGroup()] });
+
+        SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>(), workspaceStore: live);
+
+        Assert.Equal(workspace.Id, Assert.Single(live.Workspaces).Id);
+    }
+
+    [Fact]
+    public void Import_UnreadableWorkspacesAreRefusedBeforeAnythingChanges()
+    {
+        var imported = Ssh("Would import", "would-import.example", "");
+        var package = EmptyPackage() with
+        {
+            Sessions = [imported],
+            Workspaces = Encoding.UTF8.GetBytes("{\"workspaces\":[]}"),
+        };
+        var target = CreateStores(Path.Combine(_dir.FullName, "unreadable-workspace-target"));
+        var workspacePath = Path.Combine(target.Directory, "workspaces.json");
+        var seeded = new WorkspaceStore(workspacePath);
+        seeded.Load();
+        seeded.SaveAs("Existing", new WorkspaceLayout { Groups = [new WorkspaceGroup()] });
+        var before = File.ReadAllBytes(workspacePath);
+        var live = new WorkspaceStore(workspacePath);
+        using (new FileStream(workspacePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            live.Load();
+        Assert.Equal(StoreLoadState.Unreadable, live.LoadState);
+
+        Assert.Throws<StoreReadOnlyException>(() => SessionsBackup.Import(package, target.Directory,
+            target.Sessions, target.Settings, target.KnownHosts, target.Highlights, target.SshKeys,
+            target.Credentials, new Dictionary<Guid, BackupConflictResolution>(), workspaceStore: live));
+
+        Assert.Empty(target.Sessions.Sessions);
+        Assert.Equal(before, File.ReadAllBytes(workspacePath));
+    }
+
+    private static BackupPackage EmptyPackage(int schemaVersion = SessionsBackup.CurrentSchemaVersion) => new()
+    {
+        Manifest = new BackupManifest { SchemaVersion = schemaVersion },
+        Sessions = [],
+        Folders = [],
+        LocalFolders = [],
+        Settings = new AppSettings(),
+        KnownHosts = new Dictionary<string, KnownHostEntry>(),
+        Highlights = new HighlightBackupData(),
+        Icons = new Dictionary<string, byte[]>(),
+        Secrets = new Dictionary<Guid, string>(),
+        SshKeys = [],
+        KeySecrets = new Dictionary<Guid, string>(),
+    };
 
     public void Dispose() => _dir.Delete(recursive: true);
 
