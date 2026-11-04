@@ -9,6 +9,23 @@ namespace Resesh.Core.Models;
 /// </summary>
 public static class SessionMerge
 {
+    /// <summary>Compares saved values across store snapshots; record equality alone compares
+    /// list references and would reapply unchanged terminal settings after every save.</summary>
+    public static bool SameValue(Session first, Session second) =>
+        ReferenceEquals(first, second)
+        || first with { Local = second.Local, Tunnels = second.Tunnels, Algorithms = second.Algorithms, Overrides = second.Overrides } == second
+            && SameLocal(first.Local, second.Local)
+            && SameList(first.Tunnels, second.Tunnels)
+            && SameAlgorithms(first.Algorithms, second.Algorithms)
+            && SameOverrides(first.Overrides, second.Overrides);
+
+    private static bool SameOverrides(TerminalOverrides? first, TerminalOverrides? second) =>
+        first is null || second is null
+            ? first is null && second is null
+            : first with { EnabledRules = second.EnabledRules, DisabledRules = second.DisabledRules } == second
+                && SameList(first.EnabledRules, second.EnabledRules)
+                && SameList(first.DisabledRules, second.DisabledRules);
+
     /// <summary>The latest saved session with the changes from <paramref name="original"/> to
     /// <paramref name="edited"/> applied. Fields that only make sense together (the login, the
     /// route, persistence) move as one, so a merge never pairs halves of two different logins.</summary>

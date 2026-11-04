@@ -22,6 +22,13 @@ public sealed class LocalSessionException(string message, Exception? inner = nul
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class LocalTerminalSession : ITerminalBackend
 {
+    private readonly Func<IntPtr, SafeProcessHandle, bool> _assignProcessToJob;
+
+    public LocalTerminalSession() : this(AssignProcessToJobObject) { }
+
+    internal LocalTerminalSession(Func<IntPtr, SafeProcessHandle, bool> assignProcessToJob) =>
+        _assignProcessToJob = assignProcessToJob;
+
     private SafeFileHandle? _inputWrite;   // us -> shell
     private SafeFileHandle? _outputRead;   // shell -> us
     private FileStream? _inputStream;
@@ -74,6 +81,9 @@ public sealed class LocalTerminalSession : ITerminalBackend
             ?? throw new ArgumentException("Session has no local target.", nameof(session));
         if (string.IsNullOrWhiteSpace(target.Executable))
             throw new LocalSessionException("No executable is set for this profile.");
+        if (target.StartingDirectory is null || target.Arguments is null
+            || target.Arguments.Any(argument => argument is null))
+            throw new LocalSessionException("The local profile contains an invalid directory or argument list.");
 
         var executable = Environment.ExpandEnvironmentVariables(target.Executable.Trim());
         var directory = Environment.ExpandEnvironmentVariables(target.StartingDirectory.Trim());
@@ -153,17 +163,18 @@ public sealed class LocalTerminalSession : ITerminalBackend
             _processId = process.dwProcessId;
 
             _job = CreateJobObjectW(IntPtr.Zero, null);
-            if (_job != IntPtr.Zero)
+            if (_job == IntPtr.Zero)
+                throw new LocalSessionException("Could not create the process job.", new Win32Exception());
+            var limits = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION
             {
-                var limits = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-                {
-                    BasicLimitInformation = { LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE },
-                };
-                SetInformationJobObject(_job, JobObjectExtendedLimitInformation,
-                    ref limits, Marshal.SizeOf<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>());
-                AssignProcessToJobObject(_job, _process);
-            }
-            ResumeThread(processThread);
+                BasicLimitInformation = { LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE },
+            };
+            if (!SetInformationJobObject(_job, JobObjectExtendedLimitInformation,
+                    ref limits, Marshal.SizeOf<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>())
+                || !_assignProcessToJob(_job, _process))
+                throw new LocalSessionException("Could not secure the process tree.", new Win32Exception());
+            if (ResumeThread(processThread) == uint.MaxValue)
+                throw new LocalSessionException("Could not start the shell thread.", new Win32Exception());
             CloseHandle(processThread);
             processThread = IntPtr.Zero;
 

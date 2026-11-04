@@ -914,7 +914,7 @@
       <div class="card">
         <span class="card__tag">storage</span>
         <span class="card__name">atomic json, secrets elsewhere</span>
-        <span class="card__note">sessions, identities and workspaces are written atomically with a backup copy, and an unreadable file is kept aside instead of replaced. passwords and passphrases live in windows credential manager and are never written to disk by resesh.</span>
+        <span class="card__note">sessions, identities and workspaces are written atomically with a backup copy, and an unreadable file is kept aside instead of replaced. session files with duplicate ids or invalid local directory or argument values also use backup recovery. passwords and passphrases live in windows credential manager and are never written to disk by resesh.</span>
       </div>
     </div>
   </div>

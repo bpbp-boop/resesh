@@ -10,9 +10,6 @@ const windowCode = require("./support/mainWindowSource");
 const tabGroup = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.xaml.cs"),
   "utf8");
-const mainViewModel = fs.readFileSync(
-  path.join(__dirname, "..", "src", "App", "ViewModels", "MainViewModel.cs"),
-  "utf8");
 
 test("a tab drag exposes drop targets in every app window", () => {
   assert.match(
@@ -49,16 +46,8 @@ test("cross-window transfer preserves the live tab and reparents its terminal vi
   assert.doesNotMatch(remove, /ViewModel\.CloseTab/);
 });
 
-test("view-model ownership subscriptions move with a transferred tab", () => {
-  const attach = mainViewModel.match(
-    /public void AttachTab\([\s\S]*?\n    }\r?\n\r?\n    \/\/\/ <summary>Detaches/)?.[0] ?? "";
-  const detach = mainViewModel.match(
-    /public TabGroupViewModel DetachTab\([\s\S]*?\n    }\r?\n\r?\n    private void Tab_PropertyChanged/)?.[0] ?? "";
-
-  assert.match(attach, /tab\.PropertyChanged \+= Tab_PropertyChanged/);
-  assert.match(detach, /tab\.PropertyChanged -= Tab_PropertyChanged/);
-  assert.doesNotMatch(detach, /Dispose/);
-});
+// Subscription ownership is exercised by TabOwnershipTests, including rejected
+// attachments, direct collection changes and repeated transfers between windows.
 
 const tabDrag = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "Controls", "TabGroupView.Drag.cs"),

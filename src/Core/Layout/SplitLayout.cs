@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+
 namespace Resesh.Core.Layout;
 
 public enum SplitDirection
@@ -17,13 +19,14 @@ public enum SplitOrientation
 public abstract class SplitLayoutNode<T> where T : notnull
 {
     internal SplitLayoutBranch<T>? Parent { get; set; }
+    internal object? Owner { get; set; }
 
     public abstract IEnumerable<T> Values { get; }
 }
 
 public sealed class SplitLayoutLeaf<T>(T value) : SplitLayoutNode<T> where T : notnull
 {
-    public T Value { get; } = value;
+    public T Value { get; } = value is null ? throw new ArgumentNullException(nameof(value)) : value;
 
     public override IEnumerable<T> Values
     {
@@ -34,29 +37,44 @@ public sealed class SplitLayoutLeaf<T>(T value) : SplitLayoutNode<T> where T : n
 public sealed class SplitLayoutBranch<T> : SplitLayoutNode<T> where T : notnull
 {
     private readonly List<SplitLayoutNode<T>> _children;
+    private readonly ReadOnlyCollection<SplitLayoutNode<T>> _childrenView;
     private List<double> _sizes = [];
+    private ReadOnlyCollection<double> _sizesView = ReadOnlyCollection<double>.Empty;
 
     public SplitLayoutBranch(
         SplitOrientation orientation,
         IEnumerable<SplitLayoutNode<T>> children,
         IEnumerable<double>? sizes = null)
+        : this(orientation, children, sizes, reparent: false)
+    {
+    }
+
+    internal SplitLayoutBranch(SplitOrientation orientation, IEnumerable<SplitLayoutNode<T>> children,
+        IEnumerable<double>? sizes, bool reparent)
     {
         Orientation = orientation;
         _children = [.. children];
+        _childrenView = _children.AsReadOnly();
+        if (!Enum.IsDefined(orientation) || _children.Count < 2
+            || _children.Any(child => child is null)
+            || _children.Distinct(ReferenceEqualityComparer.Instance).Count() != _children.Count)
+            throw new ArgumentException("The branch requires distinct children and a valid orientation.", nameof(children));
+        if (!reparent && _children.Any(child => child.Parent is not null || child.Owner is not null))
+            throw new ArgumentException("A child already belongs to a branch or layout.", nameof(children));
+        SetSizes(sizes);
         foreach (var child in _children)
             child.Parent = this;
-        SetSizes(sizes);
     }
 
     public SplitOrientation Orientation { get; }
-    public IReadOnlyList<SplitLayoutNode<T>> Children => _children;
+    public IReadOnlyList<SplitLayoutNode<T>> Children => _childrenView;
     internal List<SplitLayoutNode<T>> MutableChildren => _children;
     public override IEnumerable<T> Values => _children.SelectMany(child => child.Values);
 
     /// <summary>Each child's share of the branch as a relative weight, or empty while they
     /// share it equally. This is the only record of a resized pane: the layout keeps it in
     /// step as panes are split and closed, so a split nobody touched keeps its sizes.</summary>
-    public IReadOnlyList<double> Sizes => _sizes;
+    public IReadOnlyList<double> Sizes => _sizesView;
 
     /// <summary>Sets each child's weight. Anything but one positive, finite weight per child
     /// means equal shares.</summary>
@@ -66,6 +84,7 @@ public sealed class SplitLayoutBranch<T> : SplitLayoutNode<T> where T : notnull
         _sizes = list.Count == _children.Count && list.All(size => double.IsFinite(size) && size > 0)
             ? list
             : [];
+        _sizesView = _sizes.AsReadOnly();
     }
 
     /// <summary>The weights with an equal share filled in for each child while there are none.</summary>
@@ -86,12 +105,16 @@ public sealed class SplitLayout<T> where T : notnull
     public SplitLayout(SplitLayoutNode<T> root)
     {
         Root = root ?? throw new ArgumentNullException(nameof(root));
-        Root.Parent = null;
+        if (root.Parent is not null || root.Owner is not null)
+            throw new ArgumentException("The root already belongs to a branch or layout.", nameof(root));
         IndexNode(Root);
+        ClaimNode(Root);
     }
 
     private void IndexNode(SplitLayoutNode<T> node)
     {
+        if (node.Owner is not null)
+            throw new ArgumentException("A node already belongs to a layout.", nameof(node));
         if (node is SplitLayoutLeaf<T> leaf)
         {
             if (!_leaves.TryAdd(leaf.Value, leaf))
@@ -107,7 +130,19 @@ public sealed class SplitLayout<T> where T : notnull
         }
 
         foreach (var child in branch.Children)
+        {
+            if (!ReferenceEquals(child.Parent, branch))
+                throw new ArgumentException("A node has an invalid parent.", nameof(node));
             IndexNode(child);
+        }
+    }
+
+    private void ClaimNode(SplitLayoutNode<T> node)
+    {
+        node.Owner = this;
+        if (node is SplitLayoutBranch<T> branch)
+            foreach (var child in branch.Children)
+                ClaimNode(child);
     }
 
     public SplitLayoutNode<T> Root { get; private set; }
@@ -115,6 +150,8 @@ public sealed class SplitLayout<T> where T : notnull
 
     public void Split(T target, T added, SplitDirection direction)
     {
+        if (!Enum.IsDefined(direction))
+            throw new ArgumentOutOfRangeException(nameof(direction));
         if (_leaves.ContainsKey(added))
             throw new ArgumentException("The added value is already in the layout.", nameof(added));
         if (!_leaves.TryGetValue(target, out var targetLeaf))
@@ -124,7 +161,7 @@ public sealed class SplitLayout<T> where T : notnull
             ? SplitOrientation.Columns
             : SplitOrientation.Rows;
         var insertBefore = direction is SplitDirection.Left or SplitDirection.Up;
-        var addedLeaf = new SplitLayoutLeaf<T>(added);
+        var addedLeaf = new SplitLayoutLeaf<T>(added) { Owner = this };
         _leaves.Add(added, addedLeaf);
 
         if (targetLeaf.Parent is { Orientation: var parentOrientation } parent && parentOrientation == orientation)
@@ -140,7 +177,7 @@ public sealed class SplitLayout<T> where T : notnull
 
         var originalParent = targetLeaf.Parent;
         SplitLayoutNode<T>[] children = insertBefore ? [addedLeaf, targetLeaf] : [targetLeaf, addedLeaf];
-        var branch = new SplitLayoutBranch<T>(orientation, children);
+        var branch = new SplitLayoutBranch<T>(orientation, children, null, reparent: true) { Owner = this };
         ReplaceNode(targetLeaf, branch, originalParent);
     }
 
@@ -154,6 +191,8 @@ public sealed class SplitLayout<T> where T : notnull
         var sizes = parent.Sizes.Count > 0 ? parent.ExplicitSizes() : null;
         parent.MutableChildren.RemoveAt(index);
         _leaves.Remove(value);
+        leaf.Parent = null;
+        leaf.Owner = null;
         // The panes left keep their shares of the branch and split the closed one's
         // between them in proportion.
         sizes?.RemoveAt(index);

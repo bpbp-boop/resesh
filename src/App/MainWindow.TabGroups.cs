@@ -661,7 +661,6 @@ public sealed partial class MainWindow
         target.Tabs.Insert(Math.Clamp(index, 0, target.Tabs.Count), tab);
         if (select)
             target.SelectedTab = tab;
-        tab.IsInBackgroundWorkspace = ViewModel.IsBackgroundGroup(target);
         if (tab.View is UIElement view)
         {
             _groupViews[source].RemoveTerminal(view);
@@ -681,6 +680,8 @@ public sealed partial class MainWindow
             return;
 
         CapturePaneMotion();
+        // Removing the group moves the view model's focus on its own, so ask first.
+        var wasFocused = ReferenceEquals(ViewModel.FocusedGroup, group);
         if (!_groupLayout.Remove(group))
             return;
         if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(_groupViews[group]) is Panel parent)
@@ -689,7 +690,7 @@ public sealed partial class MainWindow
         ViewModel.Groups.Remove(group);
         SyncGroupOrder();
 
-        if (ReferenceEquals(ViewModel.FocusedGroup, group))
+        if (wasFocused)
             FocusGroup(_groupLayout.Values[0]);
         ViewModel.OnGroupsChanged();
         RebuildGroupLayout();
@@ -883,17 +884,6 @@ public sealed partial class MainWindow
     public void TogglePin(TabViewModel tab)
     {
         tab.IsPinned = !tab.IsPinned;
-        if (tab.IsPinned)
-        {
-            // Pinned tabs live at the front of their group, after any already-pinned tabs.
-            var group = ViewModel.GroupOf(tab);
-            var selected = group.SelectedTab;
-            var index = group.Tabs.IndexOf(tab);
-            var target = group.Tabs.Count(t => t.IsPinned) - 1;
-            if (index != target)
-                group.Tabs.Move(index, target);
-            group.SelectedTab = selected; // the move must not steal selection
-        }
     }
 
 

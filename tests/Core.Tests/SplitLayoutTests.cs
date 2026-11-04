@@ -5,6 +5,33 @@ namespace Resesh.Core.Tests;
 public class SplitLayoutTests
 {
     [Fact]
+    public void ReusingAnOwnedRootOrChildIsRejectedWithoutChangingTheFirstLayout()
+    {
+        var layout = new SplitLayout<string>("a");
+        layout.Split("a", "b", SplitDirection.Right);
+        var root = Assert.IsType<SplitLayoutBranch<string>>(layout.Root);
+        Assert.Throws<ArgumentException>(() => new SplitLayout<string>(root));
+        Assert.Throws<ArgumentException>(() => new SplitLayout<string>(root.Children[0]));
+        Assert.Throws<ArgumentException>(() => new SplitLayoutBranch<string>(
+            SplitOrientation.Rows, [root.Children[0], new SplitLayoutLeaf<string>("c")]));
+        Assert.Throws<ArgumentException>(() => new SplitLayoutBranch<string>(
+            SplitOrientation.Rows, [new SplitLayoutLeaf<string>("c"), root]));
+
+        layout.Split("a", "below", SplitDirection.Down);
+        Assert.True(layout.Remove("below"));
+        Assert.True(layout.Remove("b"));
+        Assert.Equal(["a"], layout.Values);
+    }
+
+    [Fact]
+    public void FailedBranchConstructionDoesNotClaimAnyChildren()
+    {
+        var leaf = new SplitLayoutLeaf<string>("a");
+        Assert.Throws<ArgumentException>(() => new SplitLayoutBranch<string>(SplitOrientation.Rows, [leaf, leaf]));
+        Assert.Equal(["a"], new SplitLayout<string>(leaf).Values);
+    }
+
+    [Fact]
     public void RepeatedColumnSplitsShareOneOrderedBranch()
     {
         var layout = new SplitLayout<string>("a");
@@ -163,6 +190,22 @@ public class SplitLayoutTests
         Assert.Empty(columns.Sizes);
         columns.SetSizes([1, double.NaN]);
         Assert.Empty(columns.Sizes);
+    }
+
+    [Fact]
+    public void ReadingChildrenAndSizesReusesOneViewUntilTheSizesChange()
+    {
+        var layout = new SplitLayout<string>("a");
+        layout.Split("a", "b", SplitDirection.Right);
+        var columns = Assert.IsType<SplitLayoutBranch<string>>(layout.Root);
+        columns.SetSizes([1, 2]);
+        var sizes = columns.Sizes;
+
+        Assert.Same(columns.Children, columns.Children);
+        Assert.Same(sizes, columns.Sizes);
+        columns.SetSizes([2, 1]);
+        Assert.Equal([2.0, 1.0], columns.Sizes);
+        Assert.Equal([1.0, 2.0], sizes);
     }
 
     [Theory]

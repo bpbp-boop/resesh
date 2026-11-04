@@ -57,7 +57,7 @@ public sealed class SessionStore
 
     public IReadOnlyList<Session> Sessions
     {
-        get { lock (_gate) return _sessions.ToList(); }
+        get { lock (_gate) return _sessions.Select(SessionSnapshot.Copy).ToList(); }
     }
 
     /// <summary>SSH folder paths (explicit plus mentioned by a session); see <see cref="FoldersOf"/>.</summary>
@@ -92,7 +92,9 @@ public sealed class SessionStore
             {
                 var data = _file.Load(Read) ?? new StoreData();
                 LoadWarning = _file.Warning;
-                _sessions = data.Sessions ?? [];
+                // Older builds could save two sessions with one ID. Keep the first, the one
+                // Find returned, rather than refusing a file those builds read.
+                _sessions = (data.Sessions ?? []).DistinctBy(session => session.Id).ToList();
                 _folders = data.Folders ?? [];
                 _localFolders = data.LocalFolders ?? [];
                 _folderSettings = (data.FolderSettings ?? [])
@@ -135,7 +137,7 @@ public sealed class SessionStore
     /// <summary>Settings saved on remote-tree folders. The empty path is the tree root.</summary>
     public IReadOnlyList<FolderSettings> FolderSettings
     {
-        get { lock (_gate) return _folderSettings.ToList(); }
+        get { lock (_gate) return _folderSettings.Select(setting => setting with { }).ToList(); }
     }
 
     /// <summary>The identity attached directly to this folder (not inherited), or null.</summary>
@@ -223,7 +225,8 @@ public sealed class SessionStore
 
     public Session? Find(Guid id)
     {
-        lock (_gate) return _sessions.FirstOrDefault(s => s.Id == id);
+        lock (_gate)
+            return _sessions.FirstOrDefault(s => s.Id == id) is { } session ? SessionSnapshot.Copy(session) : null;
     }
 
     public void Add(Session session)
@@ -480,7 +483,7 @@ public sealed class SessionStore
         if (folderPath.Length == 0)
             return [];
         lock (_gate)
-            return _sessions.Where(s => IsInFolder(s, folderPath, kind)).ToList();
+            return _sessions.Where(s => IsInFolder(s, folderPath, kind)).Select(SessionSnapshot.Copy).ToList();
     }
 
     private static bool IsInFolder(Session session, string folderPath, SessionKind kind) =>
@@ -559,6 +562,12 @@ public sealed class SessionStore
         folders ??= _folders;
         localFolders ??= _localFolders;
         folderSettings ??= _folderSettings;
+        Validate(sessions, folders, localFolders, folderSettings);
+        var ids = new HashSet<Guid>();
+        if (sessions.Any(session => !ids.Add(session.Id)))
+            throw new InvalidDataException("The sessions data contains duplicate session IDs.");
+        sessions = sessions.Select(SessionSnapshot.Copy).ToList();
+        folderSettings = folderSettings.Select(setting => setting with { }).ToList();
         var data = new StoreData
         {
             Sessions = sessions,
@@ -589,7 +598,13 @@ public sealed class SessionStore
         IEnumerable<string?>? localFolders, IEnumerable<FolderSettings?>? folderSettings)
     {
         if (sessions?.Any(session => session is null || session.Name is null
-                || session.Host is null || session.Username is null || session.FolderPath is null) == true
+                || session.Host is null || session.Username is null || session.FolderPath is null
+                || session.Notes is null || session.TerminalType is null
+                || session.Local is { } local && (local.Executable is null || local.StartingDirectory is null
+                    || local.Arguments is null || local.Arguments.Any(argument => argument is null)
+                    || local.Environment?.Any(pair => pair.Value is null) == true)
+                || session.Proxy is { } proxy && (proxy.Host is null || proxy.Username is null)
+                || session.Tunnels?.Any(tunnel => tunnel is null || tunnel.BindAddress is null || tunnel.DestinationHost is null) == true) == true
             || folders?.Any(folder => folder is null) == true
             || localFolders?.Any(folder => folder is null) == true
             || folderSettings?.Any(setting => setting is null || setting.Path is null) == true)

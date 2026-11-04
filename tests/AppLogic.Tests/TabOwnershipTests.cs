@@ -14,7 +14,9 @@ public sealed class TabOwnershipTests : IDisposable
 
     private MainViewModel Window() => new(
         new SessionStore(Path.Combine(_directory, Guid.NewGuid() + ".json")), new Credentials(),
-        new ViewModelEnvironment
+        Environment());
+
+    private ViewModelEnvironment Environment() => new()
         {
             CurrentTheme = () => "dark",
             ResolveTheme = theme => theme,
@@ -22,7 +24,7 @@ public sealed class TabOwnershipTests : IDisposable
             IsSessionVisible = _ => true,
             ApplySessionSettings = _ => { },
             ReportError = _errors.Add,
-        });
+        };
 
     [Theory]
     [InlineData(0, 0, 1)]
@@ -67,7 +69,10 @@ public sealed class TabOwnershipTests : IDisposable
         var group = window.FocusedGroup;
         var tabs = Enumerable.Range(0, 4).Select(_ => window.Connect(new Session { Id = Guid.NewGuid(), Persistent = true })).ToArray();
         if (pinFirstTwo)
-            tabs[0].IsPinned = tabs[1].IsPinned = true;
+        {
+            tabs[0].IsPinned = true;
+            tabs[1].IsPinned = true;
+        }
         var otherGroup = new TabGroupViewModel();
         window.Groups.Add(otherGroup);
         window.FocusedGroup = otherGroup;
@@ -159,6 +164,160 @@ public sealed class TabOwnershipTests : IDisposable
         var notifications = 0;
         first.PropertyChanged += (_, e) => { if (e.PropertyName == "StatusText") notifications++; };
         tab.ConnectionSummary = "new";
+        Assert.Equal(1, notifications);
+    }
+
+    [Fact]
+    public void UnpinningTheFirstTabKeepsPinsTogetherAndPreservesSelection()
+    {
+        var window = Window();
+        var a = window.Connect(new Session());
+        var b = window.Connect(new Session());
+        var c = window.Connect(new Session());
+        a.IsPinned = true;
+        b.IsPinned = true;
+        var group = window.FocusedGroup;
+        group.SelectedTab = a;
+
+        a.IsPinned = false;
+
+        Assert.Equal([b, a, c], group.Tabs);
+        Assert.Same(a, group.SelectedTab);
+        Assert.True(a.IsActive);
+        // Drag and direct insert cannot cross the pin boundary either.
+        group.Tabs.Move(2, 0);
+        Assert.Same(b, group.Tabs[0]);
+        var incoming = new TabViewModel(new Session(), Environment());
+        group.Tabs.Insert(0, incoming);
+        Assert.Same(b, group.Tabs[0]);
+        Assert.Same(incoming, group.Tabs[1]);
+    }
+
+    [Fact]
+    public void DuplicateAndForeignAttachmentsDoNotChangeOwnershipOrSubscriptions()
+    {
+        var source = Window();
+        var target = Window();
+        var tab = source.Connect(new Session());
+        var other = new TabGroupViewModel();
+        source.Groups.Add(other);
+
+        Assert.Throws<InvalidOperationException>(() => source.AttachTab(tab, other, 0));
+        Assert.Throws<InvalidOperationException>(() => target.AttachTab(tab, target.FocusedGroup, 0));
+        Assert.Throws<InvalidOperationException>(() => other.Tabs.Add(tab));
+        Assert.Throws<ArgumentException>(() => source.AttachTab(
+            new TabViewModel(new Session(), Environment()), target.FocusedGroup, 0));
+        Assert.Single(source.AllTabs);
+        Assert.Empty(target.AllTabs);
+
+        var notifications = 0;
+        source.PropertyChanged += (_, e) => { if (e.PropertyName == "StatusText") notifications++; };
+        tab.ConnectionSummary = "changed";
+        Assert.Equal(1, notifications);
+    }
+
+    [Fact]
+    public void DirectRemovalAndClearRepairSelectionAndReleaseOwnership()
+    {
+        var window = Window();
+        var a = window.Connect(new Session());
+        var b = window.Connect(new Session());
+        var group = window.FocusedGroup;
+        group.SelectedTab = a;
+        Assert.Throws<ArgumentException>(() => group.SelectedTab = new TabViewModel(new Session(), Environment()));
+
+        group.Tabs.Remove(a);
+        Assert.Same(b, window.ActiveTab);
+        Assert.False(a.IsActive);
+        group.Tabs.Clear();
+        Assert.Null(window.ActiveTab);
+        Assert.False(b.IsActive);
+        var otherWindow = Window();
+        otherWindow.AttachTab(a, otherWindow.FocusedGroup, 0);
+        Assert.Same(a, otherWindow.ActiveTab);
+    }
+
+    [Fact]
+    public void WorkspaceMovesAndGroupRemovalKeepFocusAndSubscriptionsValid()
+    {
+        var window = Window();
+        var group = window.FocusedGroup;
+        var tab = window.Connect(new Session());
+        var other = new TabGroupViewModel();
+        window.Groups.Add(other);
+        Assert.Throws<ArgumentException>(() => window.FocusedGroup = new TabGroupViewModel());
+        Assert.Throws<InvalidOperationException>(() => window.BackgroundGroups.Add(group));
+        Assert.Throws<InvalidOperationException>(() => Window().Groups.Add(group));
+
+        window.Groups.Remove(group);
+        window.BackgroundGroups.Add(group);
+        Assert.Same(other, window.FocusedGroup);
+        Assert.False(tab.IsGroupFocused);
+        Assert.True(tab.IsInBackgroundWorkspace);
+        Assert.Throws<ArgumentException>(() => window.FocusedGroup = group);
+        window.BackgroundGroups.Remove(group);
+        window.Groups.Add(group);
+        window.FocusedGroup = group;
+        Assert.True(tab.IsGroupFocused);
+        Assert.False(tab.IsInBackgroundWorkspace);
+        var notifications = 0;
+        window.PropertyChanged += (_, e) => { if (e.PropertyName == "StatusText") notifications++; };
+        tab.ConnectionSummary = "changed";
+        Assert.Equal(1, notifications);
+        window.Groups.Clear();
+        Assert.Null(window.ActiveTab);
+        Assert.Throws<InvalidOperationException>(() => window.FocusedGroup);
+        window.Groups.Add(other);
+        Assert.Same(other, window.FocusedGroup);
+    }
+
+    [Fact]
+    public void ParkingAWorkspaceNeverShowsItsTabsOrNotifiesAMissingFocus()
+    {
+        var window = Window();
+        var group = window.FocusedGroup;
+        var tab = window.Connect(new Session());
+        var background = new List<bool>();
+        tab.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TabViewModel.IsInBackgroundWorkspace))
+                background.Add(tab.IsInBackgroundWorkspace);
+        };
+        // A binding reads the property it is told about.
+        window.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(MainViewModel.FocusedGroup))
+                _ = window.FocusedGroup;
+        };
+
+        window.Groups.Clear();
+        window.BackgroundGroups.Add(group);
+        // Leaving the parked list without being shown must not count as coming on screen.
+        window.BackgroundGroups.Remove(group);
+        window.BackgroundGroups.Add(group);
+        window.BackgroundGroups.Remove(group);
+        window.Groups.Add(group);
+
+        Assert.Equal([true, false], background);
+        Assert.Same(group, window.FocusedGroup);
+    }
+
+    [Fact]
+    public void OnlyTheFocusedGroupsSelectionNotifiesTheWindow()
+    {
+        var window = Window();
+        var other = new TabGroupViewModel();
+        window.Groups.Add(other);
+        var first = window.Connect(new Session(), other);
+        var second = window.Connect(new Session(), other);
+        var notifications = 0;
+        window.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MainViewModel.StatusText)) notifications++; };
+
+        other.SelectedTab = first;
+        Assert.Equal(0, notifications);
+        window.FocusedGroup = other;
+        notifications = 0;
+        other.SelectedTab = second;
         Assert.Equal(1, notifications);
     }
 

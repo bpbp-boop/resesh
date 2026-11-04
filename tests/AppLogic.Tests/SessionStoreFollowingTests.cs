@@ -15,6 +15,7 @@ public sealed class SessionStoreFollowingTests : IDisposable
     private readonly List<Guid> _deleted = [];
     private IReadOnlyList<Guid> _recentIds = [];
     private Func<Session, bool> _isVisible = _ => true;
+    private int _appearanceApplications;
 
     public SessionStoreFollowingTests()
     {
@@ -30,7 +31,7 @@ public sealed class SessionStoreFollowingTests : IDisposable
         ResolveTheme = theme => theme,
         ShowAgentIcons = () => true,
         IsSessionVisible = session => _isVisible(session),
-        ApplySessionSettings = _ => { },
+        ApplySessionSettings = _ => _appearanceApplications++,
         ReportError = error => throw error,
         RecentSessionIds = () => _recentIds,
         SaveRecentSessionIds = ids => _recentIds = ids,
@@ -56,6 +57,27 @@ public sealed class SessionStoreFollowingTests : IDisposable
         AllNodes(window.RootNodes).Single(node => node is { IsFolder: true, IsLocalScope: false } && node.FolderPath == path);
 
     // ---- Every writer reaches every window ----
+
+    [Fact]
+    public void UnrelatedSaveDoesNotReapplyUnchangedNestedSessionSettings()
+    {
+        var profile = new Session
+        {
+            Name = "local", Kind = SessionKind.Local,
+            Local = new LocalTarget { Executable = "cmd.exe", Arguments = ["/q"] },
+            Overrides = new TerminalOverrides { EnabledRules = ["rule"] },
+            Algorithms = new SshAlgorithms { DisabledCiphers = ["cipher"] },
+        };
+        _store.Add(profile);
+        var window = Window();
+        var tab = window.Connect(_store.Find(profile.Id)!);
+        _store.Add(Ssh("other"));
+        Assert.Equal(0, _appearanceApplications);
+
+        _store.Update(_store.Find(profile.Id)! with { Overrides = new TerminalOverrides { FontSize = 20 } });
+        Assert.Equal(1, _appearanceApplications);
+        Assert.Equal(20, tab.Session.Overrides!.FontSize);
+    }
 
     [Fact]
     public void DetachingAnIdentityUpdatesTabsAndTreesOfEveryWindow()
@@ -220,6 +242,37 @@ public sealed class SessionStoreFollowingTests : IDisposable
 
         Assert.Equal(1, window.TotalSessionCount);
         Assert.StartsWith("1 sessions", window.StatusText);
+    }
+
+    [Fact]
+    public void StatusTextCountsASessionAddedByAnotherWriter()
+    {
+        _store.Add(Ssh("web"));
+        var window = Window();
+        string? status = null;
+        window.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MainViewModel.StatusText)) status = window.StatusText; };
+
+        _store.Add(Ssh("db"));
+
+        Assert.Equal(2, window.TotalSessionCount);
+        Assert.StartsWith("2 sessions", status);
+    }
+
+    [Fact]
+    public void SearchingAgainLeavesUnchangedLeavesAlone()
+    {
+        var web = Ssh("web");
+        _store.Add(web);
+        var window = Window();
+        window.SearchText = "we";
+        var node = Node(window, web.Id);
+        var changes = 0;
+        node.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(TreeNodeViewModel.Name)) changes++; };
+
+        window.SearchText = "web";
+
+        Assert.Same(node, Node(window, web.Id));
+        Assert.Equal(0, changes);
     }
 
     // ---- Filtering ----

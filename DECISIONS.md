@@ -2367,3 +2367,36 @@ Tab state follows the same rule: `TabViewModel` owns what describes a connection
 connected state clears `ConnectionSummary` and `ConnectionDetails` (no transport clears them
 by hand). `IsStopped` and `AcceptsCommands` are the only definitions of "ended" and
 "connected and unlocked" that menus, commands and the terminal view read.
+
+## 2026-11-03 - Enforce ownership at collection and storage boundaries
+
+Tab and group collections enforce single ownership, repair selection and focus after
+removal, and keep pinned tabs together at the front. Pin changes from restore and direct
+collection edits follow the same rules as menu actions. Window subscriptions follow group
+and tab membership; a transfer must remove its source before adding its target. Workspace
+switches can temporarily have no shown groups: `ActiveTab` is null then, and requesting
+`FocusedGroup` fails explicitly. Group replacement by index is refused; remove and insert
+so ownership changes have one defined path.
+
+Collection subclasses passed to WinUI must be partial so C#/WinRT generates their
+collection interfaces. Without it, these new collections built without warnings but failed
+during the first TabView layout with `E_INVALIDARG` / `E_XAMLPARSEFAILED`. The declarations
+are also needed for Native AOT; see [C#/WinRT AOT guidance](https://github.com/microsoft/CsWinRT/blob/master/docs/aot-trimming.md).
+
+Session records remain settable for generated JSON metadata. The session store therefore
+copies records, nested records, lists and dictionaries on reads and writes. Callers must
+save edited copies; they cannot change stored state through a returned reference. Compare
+session values with `SessionMerge.SameValue` where unchanged snapshots must be detected,
+because record equality compares list references. Validation rejects invalid nested local
+values before accepting the data. A save refuses duplicate session IDs, but a load keeps the
+first session of each ID and drops the rest: older builds could write duplicates, and the
+.bak holds the same ones, so refusing them would leave those users with no sessions.
+
+Split nodes cannot be shared between branches or layouts. Public constructors check
+ownership before changing parent links; only the layout's split operation can reparent an
+owned node. Child and size lists are exposed through read-only wrappers, made once per list
+rather than on every read, since every layout walk reads them.
+
+A local shell stays suspended until its process job is created, configured for
+kill-on-close and assigned successfully. A failure stops and cleans up the suspended shell
+instead of starting a process tree that the app cannot control.
