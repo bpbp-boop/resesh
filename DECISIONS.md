@@ -2400,3 +2400,64 @@ rather than on every read, since every layout walk reads them.
 A local shell stays suspended until its process job is created, configured for
 kill-on-close and assigned successfully. A failure stops and cleans up the suspended shell
 instead of starting a process tree that the app cannot control.
+
+## 2026-11-06 - Tabs tear off onto an invisible desktop drop target
+
+Dragging a tab out of every window opens it in a new one. `TabView.CanTearOutTabs` (Windows
+App SDK 1.6+) gives a window that follows the pointer, but it replaces the OLE drag that
+`TabStripDrop` and the panes' split drop targets rely on, so cross-window moves and splits
+would have to be rebuilt on its events. The tear-off rides on the same OLE drag instead.
+
+The first version acted on `TabDroppedOutside`, which WinUI raises when no target accepted
+the drop. It worked, but outside the windows the pointer showed "no drop" for the whole
+drag, which reads as "you can't do this". The pointer shape belongs to the drop target
+under it, and the source cannot override it (`IDropSource::GiveFeedback` is WinUI's). So
+for the length of a drag, `TearOffDropTarget` puts up a target of our own:
+
+- A layered, topmost, non-activating popup over the whole virtual screen at alpha 1:
+  hit-tested, so OLE finds it, but never visible. It is registered with `RegisterDragDrop`
+  and accepts `DROPEFFECT_MOVE`, so the pointer shows the move cursor and WinUI's "Move"
+  caption, and its `Drop` reports the point.
+- Its window region cuts out the on-screen part of every resesh window, walking windows top
+  to bottom so a part covered by another app stays covered, and using DWM's extended frame
+  bounds so the invisible resize borders are not cut out. The drag still reaches the
+  windows' own targets, and a drop on their chrome or the sessions pane still goes nowhere.
+  Escape gets no `Drop` at all.
+- `Drop` runs inside the system drag loop, so the tear-off is queued to the dispatcher and
+  acts on the session it was shown for even if `TabDragCompleted` ended it first. The window
+  is destroyed when the drag session ends, on every path that ends one.
+- If the drag ends without the app hearing of it, the window would sit invisibly over the
+  desktop eating clicks. While a drag runs the drag loop holds the mouse, so the window
+  hides itself on any mouse message that reaches it.
+- The grab offset is measured at `TabDragStarting`, before the strip's previews reset. The
+  window frame is measured with `ClientToScreen`, not assumed, since content extends into
+  the title bar.
+- The new window gets its bounds through the `MainWindow` constructor, so it never shows at
+  the saved placement first. It opens restored, at the source's restored size.
+- A window's only tab moves its window rather than leaving an empty one behind.
+
+Outside the windows there is still no tab image: the strips set the system drag image
+empty and draw their own previews inside windows.
+
+## 2026-11-06 - An agent's screen is not read for shell commands
+
+oh-my-pi writes OSC 133 itself, for prompt navigation in terminals that offer it: `A` before
+every user message it draws and `B C D;0` as one string after it (its `user-message.ts`),
+and it repeats them each time it redraws the message. `CommandTracker` took them for the
+shell's, so each message became a command mark, a history record and a running-command
+report, and the `A` ended the real `omp` command and retired the agent badge. Agents'
+editors and transcripts also have prompt-shaped lines ("> fix it", "$ make") that
+Enter-gated discovery read as commands in shells without integration.
+
+While evidence says an agent runs (`AgentTracker.AgentRunning`: a command, title, process or
+adapter report, not the session default or a pinned icon), the tab tells the surface, and:
+
+- Every OSC 133 `A`, `B` and `C` is ignored, and so is a `D` at the cursor position of the
+  ignored `C` before it. Any other `D` is the shell's: the agent exited, the command that ran
+  it gets its exit code, and the prompt it brings retires the agent on hosts that never
+  retitle. Ignored marks do not count as shell integration, so discovery stays on where the
+  shell has none.
+- Enter-gated discovery only accepts a user@host or PowerShell prompt, which is what shows
+  the agent has exited when nothing else says so.
+- The ruler collapses, as it does on the alternate screen. Its column keeps its width, so
+  the grid does not reflow when an agent starts or stops.

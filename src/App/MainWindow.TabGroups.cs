@@ -13,6 +13,7 @@ using Resesh.Core.Models;
 using Resesh.Core.Recording;
 using Microsoft.UI.Windowing;
 using Windows.System;
+using Windows.Graphics;
 
 namespace Resesh.App;
 
@@ -638,6 +639,39 @@ public sealed partial class MainWindow
     }
 
     public void DetachTabForTransfer(TabViewModel tab) => RemoveTabCore(tab, dispose: false);
+
+    /// <summary>A tab dropped on the desktop opens in a new window there, the size of this
+    /// window restored, with the tab under the pointer at <paramref name="drop"/> (physical
+    /// pixels). A window's only tab moves its window instead, rather than leaving an empty one
+    /// behind. <paramref name="grab"/> is where the pointer would hold the tab as the first in
+    /// this window's only pane, in DIPs from the corner of the pane area.</summary>
+    public void TearOffTab(TabViewModel tab, Windows.Foundation.Point grab, PointInt32 drop)
+    {
+        if (ViewModel.TryGroupOf(tab) is null
+            || Root.XamlRoot is not { } xamlRoot
+            || Interop.WindowFrame.ClientOrigin(WinRT.Interop.WindowNative.GetWindowHandle(this)) is not { } client)
+            return;
+
+        var scale = xamlRoot.RasterizationScale;
+        var area = GroupArea.TransformToVisual(Root).TransformPoint(default);
+        // The frame between the window's corner and its content is measured, not assumed.
+        var grabX = client.X - AppWindow.Position.X + (int)Math.Round((area.X + grab.X) * scale);
+        var grabY = client.Y - AppWindow.Position.Y + (int)Math.Round((area.Y + grab.Y) * scale);
+        var (width, height) = _normalWindowBounds is { } normal
+            ? (normal.Width, normal.Height)
+            : (AppWindow.Size.Width, AppWindow.Size.Height);
+        var workArea = DisplayArea.GetFromPoint(drop, DisplayAreaFallback.Nearest).WorkArea;
+        var bounds = WindowLayout.TornOff(drop.X, drop.Y, grabX, grabY, width, height,
+            new PixelRect(workArea.X, workArea.Y, workArea.Width, workArea.Height));
+
+        if (ViewModel.AllTabs.All(other => ReferenceEquals(other, tab)))
+        {
+            MoveWindowTo(bounds);
+            return;
+        }
+        var window = App.OpenNewWindow(bounds);
+        window.TransferTabToGroup(tab, this, window.ViewModel.FocusedGroup, 0);
+    }
 
     /// <summary>THE way a tab moves to a place in a pane of this window, its own or another,
     /// with its view. The pane it leaves picks a neighbour (<see cref="TabGroupViewModel.RemoveTab"/>);

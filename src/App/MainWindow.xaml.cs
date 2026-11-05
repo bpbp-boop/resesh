@@ -82,7 +82,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         SetDefaultLocalProfile = id => App.SaveSettings(App.Settings.Current with { DefaultLocalProfileId = id }),
     };
 
-    public MainWindow()
+    /// <param name="bounds">Where to open, in physical pixels; null restores the saved placement.</param>
+    public MainWindow(PixelRect? bounds = null)
     {
         ViewModel = new MainViewModel(App.Store, App.Credentials, _viewModelEnvironment, this, App.Identities);
         _groupLayout = new SplitLayout<TabGroupViewModel>(ViewModel.Groups[0]);
@@ -96,7 +97,10 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         CommandPalette.CloseRequested += () => CloseCommandPalette(restoreFocus: true);
         CommandPalette.CommandInvoked += command => _ = ExecuteCommandPaletteEntryAsync(command);
         InitializeHistoryOverlay();
-        RestoreWindowPlacement();
+        if (bounds is { } requested)
+            MoveWindowTo(requested);
+        else
+            RestoreWindowPlacement();
         AppWindow.Changed += AppWindow_Changed;
         SplitterHitArea.Apply(TreeSplitter, columns: true);
         ConfigureSplitter(TreeSplitter, TreeSplitterLine);
@@ -201,6 +205,16 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     }
 
     private static RectInt32 Rect(PixelRect rect) => new(rect.X, rect.Y, rect.Width, rect.Height);
+
+    /// <summary>Restores the window if maximized and moves it to <paramref name="bounds"/>,
+    /// already fitted to a display.</summary>
+    private void MoveWindowTo(PixelRect bounds)
+    {
+        if (AppWindow.Presenter is OverlappedPresenter { State: not OverlappedPresenterState.Restored } presenter)
+            presenter.Restore();
+        _normalWindowBounds = Rect(bounds);
+        AppWindow.MoveAndResize(_normalWindowBounds.Value);
+    }
 
     private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
     {
