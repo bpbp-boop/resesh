@@ -35,10 +35,10 @@ public interface ITabGroupHost
         TabGroupViewModel targetGroup,
         int targetIndex);
     void DetachTabForTransfer(TabViewModel tab);
-    /// <summary>The tab was dropped outside every tab strip and pane. <paramref name="grab"/>
-    /// is where the pointer would hold it as the first tab of the only pane, in DIPs from
-    /// the corner of the window's pane area.</summary>
-    void TearOffTab(TabViewModel tab, Windows.Foundation.Point grab);
+    /// <summary>The tab was dropped on the desktop at <paramref name="drop"/> (physical
+    /// pixels). <paramref name="grab"/> is where the pointer would hold it as the first tab
+    /// of the only pane, in DIPs from the corner of the window's pane area.</summary>
+    void TearOffTab(TabViewModel tab, Windows.Foundation.Point grab, Windows.Graphics.PointInt32 drop);
     void SetTabContentDropTargetsVisible(bool visible);
     void CloneSession(TabViewModel tab);
     void TogglePin(TabViewModel tab);
@@ -1336,6 +1336,7 @@ public sealed partial class TabGroupView : UserControl
         if (_drag is not null)
             EndTabDrag();
         _drag = new TabDragSession(tab, this) { TearOffGrab = TearOffGrab() };
+        _drag.DesktopTarget = ShowDesktopDropTarget(_drag);
         if (_tabDragPreview.Source is not null)
             ShowTabDragPreview();
         args.Data.RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
@@ -1568,16 +1569,6 @@ public sealed partial class TabGroupView : UserControl
             if (ReferenceEquals(_drag, drag))
                 EndTabDrag();
         });
-    }
-
-    /// <summary>Raised on the source with its completion when nothing accepted the drop, so no
-    /// drop is queued behind it. The window decides whether the drop was outside every window.</summary>
-    private void Tabs_TabDroppedOutside(TabView sender, TabViewTabDroppedOutsideEventArgs args)
-    {
-        if (_drag is not { } drag || drag.Source != this || !ReferenceEquals(args.Item, drag.Tab))
-            return;
-        EndTabDrag();
-        _host.TearOffTab(drag.Tab, drag.TearOffGrab);
     }
 
     /// <summary>Where the pointer would hold the dragged tab as the first, unscrolled tab of

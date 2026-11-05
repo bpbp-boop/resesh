@@ -13,6 +13,7 @@ using Resesh.Core.Models;
 using Resesh.Core.Recording;
 using Microsoft.UI.Windowing;
 using Windows.System;
+using Windows.Graphics;
 
 namespace Resesh.App;
 
@@ -639,20 +640,16 @@ public sealed partial class MainWindow
 
     public void DetachTabForTransfer(TabViewModel tab) => RemoveTabCore(tab, dispose: false);
 
-    /// <summary>A tab dropped outside every window opens in a new one there, the size of this
-    /// window restored, with the tab under the pointer. A drop on a part of a window that is
-    /// not a drop target, or a drag cancelled with Escape, leaves it where it was. A
-    /// window's only tab moves its window instead, rather than leaving an empty one behind.
-    /// <paramref name="grab"/> is where the pointer would hold the tab as the first in this
-    /// window's only pane, in DIPs from the corner of the pane area.</summary>
-    public void TearOffTab(TabViewModel tab, Windows.Foundation.Point grab)
+    /// <summary>A tab dropped on the desktop opens in a new window there, the size of this
+    /// window restored, with the tab under the pointer at <paramref name="drop"/> (physical
+    /// pixels). A window's only tab moves its window instead, rather than leaving an empty one
+    /// behind. <paramref name="grab"/> is where the pointer would hold the tab as the first in
+    /// this window's only pane, in DIPs from the corner of the pane area.</summary>
+    public void TearOffTab(TabViewModel tab, Windows.Foundation.Point grab, PointInt32 drop)
     {
         if (ViewModel.TryGroupOf(tab) is null
-            || Interop.ScreenPointer.IsDragCancelled()
-            || Interop.ScreenPointer.Position() is not { } pointer
-            || App.IsAppWindow(Interop.ScreenPointer.TopLevelWindowAt(pointer))
             || Root.XamlRoot is not { } xamlRoot
-            || Interop.ScreenPointer.ClientOrigin(WinRT.Interop.WindowNative.GetWindowHandle(this)) is not { } client)
+            || Interop.WindowFrame.ClientOrigin(WinRT.Interop.WindowNative.GetWindowHandle(this)) is not { } client)
             return;
 
         var scale = xamlRoot.RasterizationScale;
@@ -663,8 +660,8 @@ public sealed partial class MainWindow
         var (width, height) = _normalWindowBounds is { } normal
             ? (normal.Width, normal.Height)
             : (AppWindow.Size.Width, AppWindow.Size.Height);
-        var workArea = DisplayArea.GetFromPoint(pointer, DisplayAreaFallback.Nearest).WorkArea;
-        var bounds = WindowLayout.TornOff(pointer.X, pointer.Y, grabX, grabY, width, height,
+        var workArea = DisplayArea.GetFromPoint(drop, DisplayAreaFallback.Nearest).WorkArea;
+        var bounds = WindowLayout.TornOff(drop.X, drop.Y, grabX, grabY, width, height,
             new PixelRect(workArea.X, workArea.Y, workArea.Width, workArea.Height));
 
         if (ViewModel.AllTabs.All(other => ReferenceEquals(other, tab)))

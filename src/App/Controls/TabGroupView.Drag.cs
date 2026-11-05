@@ -4,7 +4,7 @@ using Resesh.App.ViewModels;
 namespace Resesh.App.Controls;
 
 // The in-process handoff for a tab dragged out of a strip, to its own strip, another
-// group's, or a pane's content in any window.
+// group's, or a pane's content in any window, or to the desktop outside them.
 public sealed partial class TabGroupView
 {
     private enum TabDragPhase
@@ -34,8 +34,11 @@ public sealed partial class TabGroupView
         public TabGroupView? ScrollTarget { get; set; }
 
         /// <summary>Where the pointer holds the tab, measured at the start: the strip's
-        /// previews are gone by the time a drop outside every window is reported.</summary>
+        /// previews are gone by the time a drop outside every window is acted on.</summary>
         public Windows.Foundation.Point TearOffGrab { get; init; }
+
+        /// <summary>Catches the tab outside every window; gone when the drag ends.</summary>
+        public Interop.TearOffDropTarget? DesktopTarget { get; set; }
 
         /// <summary>A source parked with its workspace or removed with its pane is out of
         /// the tree. Its drag can't be completed, and its tab may already be gone.</summary>
@@ -57,6 +60,7 @@ public sealed partial class TabGroupView
         HideTabStripDropIndicator();
         // Cleared before the source resets, so nothing it triggers sees a half-ended drag.
         _drag = null;
+        drag?.DesktopTarget?.Dispose();
         drag?.Source.ResetTabDragPreview();
         _host.SetTabContentDropTargetsVisible(false);
     }
@@ -91,5 +95,27 @@ public sealed partial class TabGroupView
             if (_drag?.Source != this)
                 ResetTabDragPreview();
         });
+    }
+
+    /// <summary>Covers the desktop outside every window for the drag, so the tab can be
+    /// dropped there. The drop arrives inside the system's drag loop; the tear-off waits for
+    /// it to finish, and acts even if the completion ended the session first.</summary>
+    private Interop.TearOffDropTarget? ShowDesktopDropTarget(TabDragSession drag)
+    {
+        try
+        {
+            return Interop.TearOffDropTarget.Show(App.WindowHandles, point => DispatcherQueue.TryEnqueue(() =>
+            {
+                if (ReferenceEquals(_drag, drag))
+                    EndTabDrag();
+                _host.TearOffTab(drag.Tab, drag.TearOffGrab, point);
+            }));
+        }
+        catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or System.Runtime.InteropServices.COMException)
+        {
+            // The drag still works between windows; only tearing off is lost.
+            App.ReportRecoverableError(exception);
+            return null;
+        }
     }
 }

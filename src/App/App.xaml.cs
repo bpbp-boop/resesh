@@ -340,9 +340,9 @@ public partial class App : Application
     /// because WinUI does not expose an application window collection.</summary>
     public static MainWindow OpenNewWindow(ViewModels.PixelRect? bounds = null) => ((App)Current).CreateWindowCore(bounds);
 
-    /// <summary>Whether <paramref name="hwnd"/> is one of this app's windows.</summary>
-    internal static bool IsAppWindow(IntPtr hwnd) =>
-        Current is App app && app._windows.Any(window => WinRT.Interop.WindowNative.GetWindowHandle(window) == hwnd);
+    /// <summary>The handles of this app's windows.</summary>
+    internal static IReadOnlyCollection<IntPtr> WindowHandles =>
+        Current is App app ? app._windows.Select(WinRT.Interop.WindowNative.GetWindowHandle).ToHashSet() : [];
 
     internal static MainWindow? WindowFor(Resesh.App.ViewModels.TabViewModel tab) =>
         Current is App app ? app._windows.FirstOrDefault(window => window.ViewModel.AllTabs.Contains(tab)) : null;
