@@ -8,6 +8,8 @@ and the git history.
 
 ## Shipped
 
+- **Tab tear-off** — a tab dropped outside every window opens in a new window under the
+  pointer, keeping its live connection; a window's only tab moves its window instead.
 - **Serial consoles** — `SessionKind.Serial` with a `SerialTarget` (port, speed, data bits,
   parity, stop bits, flow control), a port picker with SetupAPI device names, Send Break,
   `serial COM5 115200` quick connect, PuTTY serial import, and a tab that reconnects when an

@@ -2400,3 +2400,28 @@ rather than on every read, since every layout walk reads them.
 A local shell stays suspended until its process job is created, configured for
 kill-on-close and assigned successfully. A failure stops and cleans up the suspended shell
 instead of starting a process tree that the app cannot control.
+
+## 2026-11-06 - Tabs tear off on TabDroppedOutside, not CanTearOutTabs
+
+Dragging a tab out of every window opens it in a new one. `TabView.CanTearOutTabs` (Windows
+App SDK 1.6+) gives a window that follows the pointer, but it replaces the OLE drag that
+`TabStripDrop` and the panes' split drop targets rely on, so cross-window moves and splits
+would have to be rebuilt on its events. Instead the source `TabView` raises
+`TabDroppedOutside` (with `TabDragCompleted`) when no target accepted the drop, and the
+window decides:
+
+- WinUI reports a drag cancelled with Escape the same way. The button carrying the drag is
+  still held then, so `ScreenPointer.IsDragCancelled` checks Escape and both physical
+  buttons (`GetAsyncKeyState` reads physical buttons, and they may be swapped).
+- A drop on part of a resesh window that is not a drop target (title bar, sessions pane)
+  is also "outside"; `WindowFromPoint` on one of our windows means leave the tab alone.
+- The grab offset is measured at `TabDragStarting`: `TabDragCompleted` resets the strip's
+  previews before `TabDroppedOutside` arrives. The window frame is measured with
+  `ClientToScreen`, not assumed, since content extends into the title bar.
+- The new window gets its bounds through the `MainWindow` constructor, so it never shows at
+  the saved placement first. It opens restored, at the source's restored size.
+- A window's only tab moves its window rather than leaving an empty one behind.
+
+Outside every window the system shows its no-drop cursor and no tab image: the strips set
+the drag image empty and draw their own previews, and `TabViewTabDragStartingEventArgs`
+exposes no `DragUI` to give the system one for outside.

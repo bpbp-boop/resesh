@@ -33,6 +33,10 @@ public sealed partial class TabGroupView
         /// <summary>The group whose strip is scrolling under the pointer.</summary>
         public TabGroupView? ScrollTarget { get; set; }
 
+        /// <summary>Where the pointer holds the tab, measured at the start: the strip's
+        /// previews are gone by the time a drop outside every window is reported.</summary>
+        public Windows.Foundation.Point TearOffGrab { get; init; }
+
         /// <summary>A source parked with its workspace or removed with its pane is out of
         /// the tree. Its drag can't be completed, and its tab may already be gone.</summary>
         public bool IsSourceGone => VisualTreeHelper.GetParent(Source) is null;
