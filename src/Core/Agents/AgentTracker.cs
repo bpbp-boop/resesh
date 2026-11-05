@@ -101,6 +101,11 @@ public sealed class AgentTracker
         }
     }
 
+    /// <summary>Evidence says an agent is running now. Unlike <see cref="Current"/>, the
+    /// session's default identity and the user's pinned icon do not count: they say what to
+    /// show, not what runs, and a shell prompt under them is still a shell prompt.</summary>
+    public bool AgentRunning => AgentIdentities.IsAgentKey(_structured ?? _detected);
+
     private string? ResolveKey()
     {
         if (Suppressed)

@@ -86,6 +86,7 @@ internal sealed class CommandTracker
     };
     private static readonly Regex Osc3008TypeRe = new(@"^(service|session|shell|command|vm|container|elevate|chpriv|subcontext|remote|boot|app)$", RegexOptions.CultureInvariant);
     private static readonly Regex ControlCharsRe = new(@"[\x00-\x1f\x7f-\x9f]", RegexOptions.CultureInvariant);
+    private static readonly Regex UserHostPromptRe = new(@"^[^\s@]+@[^\s:]+(?:\s|:)", RegexOptions.CultureInvariant);
 
     private sealed class Mark
     {
@@ -162,6 +163,11 @@ internal sealed class CommandTracker
     private string? _lastPromptSignature;
     private int _titlesSeen;
 
+    // An agent owns the screen (see SetAgentRunning). _agentCommandAt is where its last
+    // ignored OSC 133 C left the cursor, so the D that closes it can be told from the shell's.
+    private bool _agentRunning;
+    private (int Line, int X)? _agentCommandAt;
+
     /// <summary>Runs an action on the UI thread after a delay.</summary>
     public required Action<TimeSpan, Action> Schedule { get; init; }
 
@@ -206,6 +212,8 @@ internal sealed class CommandTracker
         try
         {
             if (_buffer.IsAlternate)
+                return;
+            if (_agentRunning && IsAgentSemanticPrompt(kind, cursorMarker, cursorX))
                 return;
             _oscSeen = true;
             if (kind is 1 or 2)
@@ -293,6 +301,31 @@ internal sealed class CommandTracker
         _promptCol = -1;
     }
 
+    /// <summary>
+    /// The host's agent detection says an agent is running here. What it draws in the normal
+    /// screen is its transcript, not shell commands: oh-my-pi brackets every user message with
+    /// OSC 133 (A before it, B C D;0 after it) for prompt navigation, and agents' editors and
+    /// transcripts have prompt-shaped lines ("> fix it", "$ make"). Those are not marked,
+    /// reported or recorded. The shell's own D when the agent exits still ends the command
+    /// that started it, and is what retires the agent on hosts that never retitle.
+    /// </summary>
+    public void SetAgentRunning(bool running)
+    {
+        _agentRunning = running;
+        _agentCommandAt = null;
+    }
+
+    /// <summary>While an agent runs, every A, B and C is its own. A D is its own when it closes
+    /// the agent's C at the same cursor position (oh-my-pi writes B C D;0 as one string);
+    /// anything else is the shell reporting that the command running the agent finished.</summary>
+    private bool IsAgentSemanticPrompt(int kind, ICommandMarker? cursorMarker, int cursorX)
+    {
+        var at = (cursorMarker is { IsDisposed: false } marker ? marker.Line : -1, cursorX);
+        var closesAgentCommand = _agentCommandAt == at;
+        _agentCommandAt = kind == 3 ? at : null;
+        return kind != 4 || closesAgentCommand;
+    }
+
     /// <summary>Transport cancellation and playback are not shell completion evidence.</summary>
     public void SetExecutionReporting(bool enabled)
     {
@@ -330,6 +363,7 @@ internal sealed class CommandTracker
         foreach (var probe in _probes)
             probe.Osc3008Id = null;
         _lastPromptSignature = null;
+        _agentCommandAt = null;
     }
 
     internal CommandPhase Phase => _phase;
@@ -487,14 +521,17 @@ internal sealed class CommandTracker
             // tmux can pass B through before flushing its buffered prompt, leaving B at
             // column zero. Recover only strong user@host or PowerShell prompt shapes.
             var prompt = CmdSplitRe.Match(full);
-            if (prompt.Success && (Regex.IsMatch(prompt.Groups[1].Value, @"^[^\s@]+@[^\s:]+(?:\s|:)")
-                || prompt.Groups[1].Value.StartsWith("PS ", StringComparison.Ordinal)))
+            if (prompt.Success && IsShellPrompt(prompt.Groups[1].Value))
                 col = full.Length - prompt.Groups[2].Length;
         }
         if (col > full.Length)
             return "";
         return Truncate(full[col..].Trim(), maxLength);
     }
+
+    /// <summary>A prompt shape only a shell draws: user@host, or PowerShell's.</summary>
+    private static bool IsShellPrompt(string prompt) =>
+        UserHostPromptRe.IsMatch(prompt) || prompt.StartsWith("PS ", StringComparison.Ordinal);
 
     /// <summary>
     /// A persistent session is sending its screen again after a reattach. The marks in it
@@ -568,6 +605,10 @@ internal sealed class CommandTracker
             var lineText = _buffer.LineText(row) ?? "";
             var match = CmdPromptRe.IsMatch(lineText) ? CmdSplitRe.Match(lineText) : null;
             if (match is not { Success: true })
+                return null;
+            // An agent's editor line ("> fix it") is not a command line; a shell prompt
+            // under it means the agent has exited.
+            if (_agentRunning && !IsShellPrompt(match.Groups[1].Value))
                 return null;
             var col = lineText.Length - match.Groups[2].Length;
             return (row, CmdText(row, col), CmdText(row, col, HistoryMaxCommand));

@@ -121,6 +121,22 @@ public class AgentTrackerTests
     }
 
     [Fact]
+    public void AgentRunningNeedsEvidenceNotADefaultOrAPinnedIcon()
+    {
+        var tracker = new AgentTracker("claude");
+        Assert.True(tracker.Current.IsAgent);
+        Assert.False(tracker.AgentRunning);  // a shell prompt under the session's icon
+
+        tracker.SetManualOverride("codex");
+        Assert.False(tracker.AgentRunning);
+        tracker.ObserveCommand("claude");
+        Assert.True(tracker.AgentRunning);
+        tracker.ObserveCommand("");          // back at a prompt; the pinned icon stays
+        Assert.False(tracker.AgentRunning);
+        Assert.Equal("codex", tracker.Current.Key);
+    }
+
+    [Fact]
     public void NoneSuppressesEverything()
     {
         var tracker = new AgentTracker(AgentIdentities.None);
