@@ -165,6 +165,47 @@ public class CommandTrackerTests
     }
 
     [Fact]
+    public void AgentsOwnPromptMarksAreNotCommandsButTheShellsEndIs()
+    {
+        var h = new Harness();
+        h.Tracker.SetExecutionReporting(true);
+        h.Tracker.SetHistoryCapture(true);
+        h.Buffer.Add("user@host:~$ omp");
+        h.Semantic(1);
+        h.Buffer.CursorX = 13;
+        h.Semantic(2);
+        h.Semantic(3);
+        h.Tracker.SetAgentRunning(true);     // the host recognized the command
+
+        // oh-my-pi brackets each user message: A before it, B C D;0 right after it.
+        h.Buffer.CursorX = 0;
+        h.Buffer.Add(" fix the build");
+        h.Semantic(1);
+        h.Buffer.Add(" and run the tests");
+        h.Buffer.CursorX = 19;
+        h.Semantic(2);
+        h.Semantic(3);
+        h.Semantic(4, exit: 0);
+        h.Buffer.Add("$ dotnet build");
+
+        var omp = Assert.Single(h.Tracker.Commands());
+        Assert.Equal("omp", omp.Text);
+        Assert.Null(omp.Exit);
+        Assert.Equal([("omp", true)], h.Running);
+        Assert.Equal(["omp"], h.Marked);
+        Assert.Empty(h.Records);
+
+        // The agent exits and the shell reports how the command that ran it ended.
+        h.Buffer.CursorX = 0;
+        h.Buffer.Add("user@host:~$ ");
+        h.Semantic(4, exit: 3);
+        Assert.Equal(3, Assert.Single(h.Tracker.Commands()).Exit);
+        Assert.Equal(("", true), h.Running[^1]);
+        Assert.Equal(new TerminalCommandExecution(1, "omp", true, 3), h.Executions[^1]);
+        Assert.Equal("omp", Assert.Single(h.Records).CommandLine);
+    }
+
+    [Fact]
     public void EnterOnPromptShapedLineBecomesDiscoveredMark()
     {
         var h = new Harness();
@@ -244,6 +285,33 @@ public class CommandTrackerTests
         h.Tracker.OnOutputParsed();
         h.RunTimers();
         Assert.Empty(h.Tracker.Commands());
+    }
+
+    [Fact]
+    public void EnterInAnAgentIsNotACommandUntilAShellPromptIsBack()
+    {
+        var h = new Harness();
+        h.Tracker.SetAgentRunning(true);
+        h.Buffer.Add("> fix the build");     // the agent's editor
+        h.Semantic(1);                       // and its own marks around the message
+        h.Semantic(2);
+        h.Semantic(3);
+        h.Semantic(4, exit: 0);
+        h.Tracker.NotifyEnter();
+        h.RunTimers();
+        h.Buffer.Add("$ dotnet build");      // its transcript
+        h.Tracker.NotifyEnter();
+        h.RunTimers();
+        Assert.Empty(h.Tracker.Commands());
+        Assert.Empty(h.Running);
+        Assert.False(h.Tracker.ShellIntegrationSeen);
+
+        // The agent exited without the host noticing: a shell prompt shows it.
+        h.Buffer.Add("user@host:~$ ls");
+        h.Tracker.NotifyEnter();
+        h.RunTimers();
+        Assert.Equal("ls", Assert.Single(h.Tracker.Commands()).Text);
+        Assert.Equal(["ls"], h.Marked);
     }
 
     [Fact]

@@ -640,15 +640,19 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
     private void ApplyAgent(Func<AgentTracker, bool> observe)
     {
-        if (_disposed || !observe(_agent))
+        if (_disposed)
             return;
-        PushAgentState();
+        if (observe(_agent))
+            PushAgentState();
+        else
+            _terminal.SetAgentRunning(_agent.AgentRunning); // a pinned icon can hide a start or exit
     }
 
     private void PushAgentState()
     {
         var snapshot = _agent.Current;
         _tab.Agent = snapshot;
+        _terminal.SetAgentRunning(_agent.AgentRunning);
         if (snapshot.Attention.IsAlert())
             AgentAlert?.Invoke(_tab, snapshot);
     }

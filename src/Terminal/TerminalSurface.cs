@@ -157,6 +157,9 @@ public abstract partial class TerminalSurface : Grid, IDisposable
     public abstract void ScrollToCommand(long id);
     public abstract void SetRulerPresentation(bool isSplit, bool isGroupFocused);
     public abstract void SetPromptPlatform(string? platform);
+    /// <summary>An agent is running in this terminal (the tab's agent detection): its
+    /// transcript is not read for shell commands and the ruler hides until it exits.</summary>
+    public abstract void SetAgentRunning(bool running);
     public abstract void SetInitialOptions(
         int fontSize,
         string fontFamily,

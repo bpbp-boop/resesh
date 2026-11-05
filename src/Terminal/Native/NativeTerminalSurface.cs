@@ -53,6 +53,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private CommandTracker? _commands;
     private bool _historyCapture;
     private string? _promptPlatform;
+    private bool _agentRunning;
     private bool _annotationsPending;
     private bool _commandsPanelOpen;
     private readonly Border _toast = new() { Visibility = Visibility.Collapsed };
@@ -1757,6 +1758,17 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         RefreshCommands()?.SetPromptPlatform(platform);
     }
 
+    public override void SetAgentRunning(bool running)
+    {
+        if (running == _agentRunning)
+            return;
+        _agentRunning = running;
+        // Often called from inside the tracker's own events (the command that starts or ends
+        // the agent), so only the flag changes: no buffer refresh under the running handler.
+        _commands?.SetAgentRunning(running);
+        QueueAnnotations(); // the ruler hides while an agent runs
+    }
+
     public override void ApplyHighlights(IReadOnlyList<TerminalHighlight> rules)
     {
         lock (_renderGate)
@@ -1810,6 +1822,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _commands.SetHistoryCapture(_historyCapture);
         if (_promptPlatform is not null)
             _commands.SetPromptPlatform(_promptPlatform);
+        _commands.SetAgentRunning(_agentRunning);
         if (_connection.IsLive && !_readOnly)
             _commands.SetExecutionReporting(true);
     }
@@ -1896,7 +1909,9 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _annotations?.Request(!_replaying && _lastObservedMs > 0 ? _lastObservedMs : 0);
         commands.OnOutputParsed();
         var marks = commands.Commands();
-        _ruler.Visibility = _commandBuffer!.IsAlternate ? Visibility.Collapsed : Visibility.Visible;
+        // A full-screen program's screen has no scrollback to map, and an agent's transcript
+        // has no shell commands in it: its marks would only be noise beside the scroll bar.
+        _ruler.Visibility = _commandBuffer!.IsAlternate || _agentRunning ? Visibility.Collapsed : Visibility.Visible;
         _rulerMarks = marks;
         _rulerBookmarks = commands.BookmarkLines();
         UpdateRuler();
