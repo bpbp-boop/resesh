@@ -12,6 +12,8 @@ public class AgentDetectionTests
     [InlineData("· thinking", "thinking")]
     [InlineData("Claude Code", "Claude Code")]
     [InlineData("π - project", "π - project")]
+    [InlineData("π ⠏ TEAR: Tear off tabs", "TEAR: Tear off tabs")]
+    [InlineData("π ✳ ", "π ✳ ")]
     [InlineData("~/src", "~/src")]
     [InlineData("* notes", "* notes")]
     [InlineData("✳", "✳")]
