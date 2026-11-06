@@ -107,8 +107,8 @@ public sealed partial class NativeTerminalSurface
     {
         _textInput.FontFamily = new FontFamily(_fontFamily);
         _textInput.FontSize = EffectiveFontSize;
-        _textInputForeground.Color = ToColor(_theme.Foreground);
-        _textInputBackground.Color = ToColor(_theme.Background);
+        _textInputForeground.Color = RgbColor.ToColor(_theme.Foreground);
+        _textInputBackground.Color = RgbColor.ToColor(_theme.Background);
         PlaceTextInput();
     }
 

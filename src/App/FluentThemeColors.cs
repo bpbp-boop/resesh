@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Resesh.Core.Storage;
+using Resesh.Terminal;
 using Windows.UI;
 
 namespace Resesh.App;
@@ -107,8 +108,9 @@ internal static class FluentThemeColors
 
     private static RetintTarget Target(ThemeVisualPalette palette)
     {
-        var surface = Rgb(palette.Shell);
-        return new RetintTarget(surface, Readable(Rgb(palette.TreeForeground), surface), Rgb(palette.Accent));
+        var surface = RgbColor.ToRgb(palette.Shell);
+        return new RetintTarget(surface, ColorMath.Readable(RgbColor.ToRgb(palette.TreeForeground), surface, 4.5),
+            RgbColor.ToRgb(palette.Accent));
     }
 
     private static ResourceDictionary Copy(XamlControlsResources fluent)
@@ -202,23 +204,6 @@ internal static class FluentThemeColors
         Entries.Add(new Entry(Argb(dark), Argb(light), set, isText, brush, null));
         return brush;
     }
-
-    /// <summary><paramref name="color"/>, moved toward black or white (whichever the surface
-    /// contrasts with) until it stands out from <paramref name="surface"/> at 4.5:1.</summary>
-    private static uint Readable(uint color, uint surface)
-    {
-        var target = ColorContrast.PrefersBlackText(surface) ? 0x000000u : 0xFFFFFFu;
-        for (var weight = 0.0; weight < 1; weight += 0.1)
-        {
-            var candidate = ColorMath.Mix(color, target, weight);
-            double a = ColorMath.RelativeLuminance(candidate), b = ColorMath.RelativeLuminance(surface);
-            if ((Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05) >= 4.5)
-                return candidate;
-        }
-        return target;
-    }
-
-    private static uint Rgb(Color color) => (uint)(color.R << 16 | color.G << 8 | color.B);
 
     private static uint Argb(Color color) => (uint)(color.A << 24 | color.R << 16 | color.G << 8 | color.B);
 

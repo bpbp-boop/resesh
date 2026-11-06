@@ -1,5 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
+using Resesh.Core.Storage;
+using Resesh.Terminal;
 using Windows.UI.ViewManagement;
 
 namespace Resesh.App;
@@ -28,58 +30,49 @@ internal sealed record ThemeVisualPalette(
     /// nearly halfway, still about 3:1 on the input surface. High Contrast keeps the system text.</summary>
     public Windows.UI.Color Placeholder => IsHighContrast
         ? TreeForeground
-        : Mix(TreeForeground, Input, 0.45);
+        : RgbColor.ToColor(ColorMath.Mix(RgbColor.ToRgb(TreeForeground), RgbColor.ToRgb(Input), 0.45));
 
-    private static Windows.UI.Color Mix(Windows.UI.Color from, Windows.UI.Color to, double weight) =>
-        Windows.UI.Color.FromArgb(
-            255,
-            (byte)Math.Round(from.R + ((to.R - from.R) * weight)),
-            (byte)Math.Round(from.G + ((to.G - from.G) * weight)),
-            (byte)Math.Round(from.B + ((to.B - from.B) * weight)));
-
-    private static Windows.UI.Color Hex(uint rgb) => Windows.UI.Color.FromArgb(
-        255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
-
-    /// <summary>The chrome for a resolved theme id (never System). Background, text and
-    /// selection come from the theme's terminal palette; <see cref="ThemeChromes"/> adds the rest.</summary>
+    /// <summary>The chrome for a resolved theme id. Background, text and selection come from
+    /// the theme's terminal palette; <see cref="ThemeChoice.Chrome"/> adds the rest.</summary>
     public static ThemeVisualPalette For(string id)
     {
         if (App.IsHighContrast)
             return HighContrast();
 
-        var theme = Resesh.Core.Storage.ThemeCatalog.Find(id);
+        var theme = ThemeCatalog.Find(id);
         var terminal = theme.Palette;
-        var chrome = ThemeChromes.Find(id);
+        var chrome = theme.Chrome;
         // Built-ins have a hand-tuned accent or deliberately none; collection themes take one
         // from their palette unless the user turned theme colors off.
         var accent = chrome.Accent
-            ?? (!theme.IsBuiltIn && Resesh.Core.Storage.ThemeColorModes.Normalize(App.Settings.Current.ThemeColors) != Resesh.Core.Storage.ThemeColorModes.Off
-                ? Resesh.Core.Storage.ThemeAccent.Pick(terminal)
+            ?? (!theme.IsBuiltIn && ThemeColorModes.Normalize(App.Settings.Current.ThemeColors) != ThemeColorModes.Off
+                ? ThemeAccent.Pick(terminal)
                 : null);
         var active = chrome.ActiveTab ?? terminal.Background;
         var strip = chrome.Strip;
         var divider = chrome.Divider;
         // The surface ramp. Secondary chrome (the status bar) lifts just off the shell, and
         // the accent stays the stock Windows blue on a hairline bar unless the theme sets both.
+        static Windows.UI.Color Blend(uint first, uint second) => RgbColor.ToColor(ColorMath.Mix(first, second, 1 / 3.0));
         return new(
-            Shell: Hex(chrome.Shell ?? strip),
-            Chrome: chrome.Chrome is { } surface ? Hex(surface) : Blend(strip, divider),
-            Input: chrome.Input is { } input ? Hex(input) : Blend(active, strip),
-            Frame: Hex(divider),
-            Divider: Hex(divider),
-            ActiveTab: Hex(active),
-            HoverTab: chrome.HoverTab is { } hover ? Hex(hover) : Blend(active, divider),
-            InactiveTab: Hex(chrome.InactiveTab ?? strip),
-            TreeForeground: Hex(terminal.Foreground),
+            Shell: RgbColor.ToColor(chrome.Shell ?? strip),
+            Chrome: chrome.Chrome is { } surface ? RgbColor.ToColor(surface) : Blend(strip, divider),
+            Input: chrome.Input is { } input ? RgbColor.ToColor(input) : Blend(active, strip),
+            Frame: RgbColor.ToColor(divider),
+            Divider: RgbColor.ToColor(divider),
+            ActiveTab: RgbColor.ToColor(active),
+            HoverTab: chrome.HoverTab is { } hover ? RgbColor.ToColor(hover) : Blend(active, divider),
+            InactiveTab: RgbColor.ToColor(chrome.InactiveTab ?? strip),
+            TreeForeground: RgbColor.ToColor(terminal.Foreground),
             TreeMutedForeground: chrome.TreeMutedForeground is { } muted
-                ? Hex(muted)
+                ? RgbColor.ToColor(muted)
                 : Blend(terminal.Foreground, strip),
-            TreeSelection: Hex(terminal.Selection),
-            TreeSelectionForeground: Hex(terminal.SelectionForeground ?? terminal.Foreground),
-            Accent: accent is { } picked ? Hex(picked) : DefaultAccent,
+            TreeSelection: RgbColor.ToColor(terminal.Selection),
+            TreeSelectionForeground: RgbColor.ToColor(terminal.SelectionForeground ?? terminal.Foreground),
+            Accent: accent is { } picked ? RgbColor.ToColor(picked) : DefaultAccent,
             AccentBarThickness: chrome.AccentBarThickness,
-            PaneBorder: Hex(chrome.PaneBorder ?? divider),
-            PaneFocusBorder: Hex(chrome.PaneFocusBorder ?? terminal.Selection),
+            PaneBorder: RgbColor.ToColor(chrome.PaneBorder ?? divider),
+            PaneFocusBorder: RgbColor.ToColor(chrome.PaneFocusBorder ?? terminal.Selection),
             IsHighContrast: false);
     }
 
@@ -119,7 +112,8 @@ internal sealed record ThemeVisualPalette(
         var window = SystemColor("SystemColorWindowColor", ui.GetColorValue(UIColorType.Background));
         var text = SystemColor("SystemColorWindowTextColor", ui.GetColorValue(UIColorType.Foreground));
         var highlight = SystemColor("SystemColorHighlightColor", ui.GetColorValue(UIColorType.Accent));
-        var highlightText = SystemColor("SystemColorHighlightTextColor", Contrast(highlight));
+        var highlightText = SystemColor("SystemColorHighlightTextColor",
+            ColorMath.PrefersBlackText(RgbColor.ToRgb(highlight)) ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White);
         return new(window, window, window, text, text, window, highlight, window,
             text, text, highlight, highlightText, highlight, 2, text, highlight, true);
     }
@@ -135,15 +129,4 @@ internal sealed record ThemeVisualPalette(
         }
         return fallback;
     }
-
-    /// <summary>Black or white, whichever has the higher WCAG contrast ratio on
-    /// <paramref name="color"/>, as the welcome page picks its text.</summary>
-    private static Windows.UI.Color Contrast(Windows.UI.Color color) =>
-        ColorContrast.PrefersBlackText((uint)(color.R << 16 | color.G << 8 | color.B)) ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White;
-
-    private static Windows.UI.Color Blend(uint first, uint second) => Windows.UI.Color.FromArgb(
-        255,
-        (byte)((((first >> 16) & 0xff) * 2 + ((second >> 16) & 0xff)) / 3),
-        (byte)((((first >> 8) & 0xff) * 2 + ((second >> 8) & 0xff)) / 3),
-        (byte)(((first & 0xff) * 2 + (second & 0xff)) / 3));
 }

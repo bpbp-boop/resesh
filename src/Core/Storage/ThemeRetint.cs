@@ -35,17 +35,17 @@ public static class ThemeRetint
     {
         var alpha = argb & 0xFF000000;
         var rgb = argb & 0xFFFFFF;
-        var (hue, _, lightness, chroma) = Hsl(rgb);
+        var (hue, _, lightness, chroma) = ColorMath.ToHsl(rgb);
         uint mapped;
         if (chroma > MinimumChroma)
         {
             // Fluent's accent ramp is blue (#4CC2FF, #99EBFF, #0078D4, #005FB8...).
             if (hue is < 185 or > 225)
                 return argb;
-            var (accentHue, accentSaturation, _, _) = Hsl(theme.Accent);
-            mapped = FromHsl(accentHue, accentSaturation, lightness);
+            var (accentHue, accentSaturation, _, _) = ColorMath.ToHsl(theme.Accent);
+            mapped = ColorMath.FromHsl(accentHue, accentSaturation, lightness);
             if (isText)
-                mapped = Readable(mapped, theme);
+                mapped = ColorMath.Readable(mapped, theme.Background, 3, theme.Foreground);
         }
         else
         {
@@ -71,56 +71,5 @@ public static class ThemeRetint
         return alpha | mapped;
     }
 
-    /// <summary>The color pulled toward the theme's text until it stands out from the surface at 3:1.</summary>
-    private static uint Readable(uint color, RetintTarget theme)
-    {
-        for (var weight = 0.0; weight < 1; weight += 0.1)
-        {
-            var candidate = ColorMath.Mix(color, theme.Foreground, weight);
-            if (Contrast(candidate, theme.Background) >= 3)
-                return candidate;
-        }
-        return theme.Foreground;
-    }
-
-    private static double Contrast(uint first, uint second)
-    {
-        double a = ColorMath.RelativeLuminance(first), b = ColorMath.RelativeLuminance(second);
-        return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
-    }
-
     private static double Average(uint rgb) => (((rgb >> 16) & 0xFF) + ((rgb >> 8) & 0xFF) + (rgb & 0xFF)) / 3.0;
-
-    private static (double Hue, double Saturation, double Lightness, int Chroma) Hsl(uint rgb)
-    {
-        int r = (int)(rgb >> 16) & 0xFF, g = (int)(rgb >> 8) & 0xFF, b = (int)rgb & 0xFF;
-        int max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b));
-        var chroma = max - min;
-        var lightness = (max + min) / 510.0;
-        if (chroma == 0)
-            return (0, 0, lightness, 0);
-        var saturation = chroma / 255.0 / (1 - Math.Abs((2 * lightness) - 1));
-        var hue = max == r ? ((g - b) / (double)chroma % 6 + 6) % 6
-            : max == g ? ((b - r) / (double)chroma) + 2
-            : ((r - g) / (double)chroma) + 4;
-        return (hue * 60, saturation, lightness, chroma);
-    }
-
-    private static uint FromHsl(double hue, double saturation, double lightness)
-    {
-        var c = (1 - Math.Abs((2 * lightness) - 1)) * saturation;
-        var x = c * (1 - Math.Abs((hue / 60 % 2) - 1));
-        var m = lightness - (c / 2);
-        var (r, g, b) = (hue / 60) switch
-        {
-            < 1 => (c, x, 0.0),
-            < 2 => (x, c, 0.0),
-            < 3 => (0.0, c, x),
-            < 4 => (0.0, x, c),
-            < 5 => (x, 0.0, c),
-            _ => (c, 0.0, x),
-        };
-        uint Channel(double v) => (uint)Math.Clamp(Math.Round((v + m) * 255), 0, 255);
-        return (Channel(r) << 16) | (Channel(g) << 8) | Channel(b);
-    }
 }

@@ -106,16 +106,16 @@ internal sealed partial class TerminalRuler : Grid
         _laneBackground = background;
         _laneForeground = foreground;
         // terminal.html's DARK_RULER / LIGHT_RULER command and bookmark colors.
-        _ok = dark ? Rgb(0x2EA043) : Rgb(0x50A14F);
-        _fail = dark ? Rgb(0xFF5555) : Rgb(0xE45649);
-        _unknown = dark ? Rgb(0x9E9E9E) : Rgb(0x6A6A6A);
-        _bookmark = dark ? Rgb(0x61D6D6) : Rgb(0x0997B3);
-        _match = dark ? Rgb(0x7F8EA3) : Rgb(0x5A6B85);
-        _activeMatch = dark ? Rgb(0xF2CC60) : Rgb(0xC18401);
-        _card.Background = new SolidColorBrush(dark ? Rgb(0x1E1E2B) : Rgb(0xF7F7FA));
-        _card.BorderBrush = new SolidColorBrush(dark ? Rgb(0x3A3A50) : Rgb(0xC8C8D2));
-        _cardCommand.Foreground = new SolidColorBrush(dark ? Rgb(0xE6EDF3) : Rgb(0x24242B));
-        _cardMeta.Foreground = new SolidColorBrush(dark ? Rgb(0xA7A7B5) : Rgb(0x666675));
+        _ok = RgbColor.ToColor(dark ? 0x2EA043u : 0x50A14F);
+        _fail = RgbColor.ToColor(dark ? 0xFF5555u : 0xE45649);
+        _unknown = RgbColor.ToColor(dark ? 0x9E9E9Eu : 0x6A6A6A);
+        _bookmark = RgbColor.ToColor(dark ? 0x61D6D6u : 0x0997B3);
+        _match = RgbColor.ToColor(dark ? 0x7F8EA3u : 0x5A6B85);
+        _activeMatch = RgbColor.ToColor(dark ? 0xF2CC60u : 0xC18401);
+        _card.Background = new SolidColorBrush(RgbColor.ToColor(dark ? 0x1E1E2Bu : 0xF7F7FA));
+        _card.BorderBrush = new SolidColorBrush(RgbColor.ToColor(dark ? 0x3A3A50u : 0xC8C8D2));
+        _cardCommand.Foreground = new SolidColorBrush(RgbColor.ToColor(dark ? 0xE6EDF3u : 0x24242B));
+        _cardMeta.Foreground = new SolidColorBrush(RgbColor.ToColor(dark ? 0xA7A7B5u : 0x666675));
         Paint();
     }
 
@@ -227,7 +227,7 @@ internal sealed partial class TerminalRuler : Grid
         var highContrast = Accessibility.HighContrast;
         var background = highContrast
             ? 0xFF000000 | _laneBackground
-            : Over(Rgb(_laneForeground), LaneTint, _laneBackground);
+            : Over(RgbColor.ToColor(_laneForeground), LaneTint, _laneBackground);
         Array.Fill(_pixels, background);
         var edge = highContrast ? Math.Max(1, (int)Math.Round(scale)) : 0;
         for (var y = 0; y < height && edge > 0; y++)
@@ -258,7 +258,7 @@ internal sealed partial class TerminalRuler : Grid
                 _pixels.AsSpan(y * width + x0, Math.Max(0, x1 - x0)).Fill(pixel);
         }
         foreach (var (line, color) in _highlights)
-            Tick(line, Rgb(color), 1, opacity: 0.8 * ordinary); // slightly dim: find ticks stay dominant
+            Tick(line, RgbColor.ToColor(color), 1, opacity: 0.8 * ordinary); // slightly dim: find ticks stay dominant
         foreach (var line in _searchLines)
             if (line != _currentSearchLine)
                 Tick(line, _match, 2, search);
@@ -417,6 +417,4 @@ internal sealed partial class TerminalRuler : Grid
             | Mix(color.G, (background >> 8) & 0xFF, alpha) << 8
             | Mix(color.B, background & 0xFF, alpha);
     }
-
-    private static Color Rgb(uint rgb) => Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 }

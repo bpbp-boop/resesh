@@ -43,13 +43,13 @@ public sealed class SettingsStoreTests
         var path = Path.Combine(Path.GetTempPath(), $"sessions-settings-{Guid.NewGuid():N}.json");
         try
         {
-            File.WriteAllText(path, """{ "theme": "light", "fontSize": 16, "pinnedSessionIds": [], "recentSessionIds": [] }""");
+            File.WriteAllText(path, """{ "fontSize": 16, "pinnedSessionIds": [], "recentSessionIds": [] }""");
 
             var store = new SettingsStore(path);
             store.Load();
 
             // Lists compare by reference in a record; everything else must equal the defaults.
-            var expected = new AppSettings { Appearance = ThemeAppearances.Light, FontSize = 16 };
+            var expected = new AppSettings { FontSize = 16 };
             Assert.Null(store.LoadWarning);
             Assert.Empty(store.Current.PinnedSessionIds);
             Assert.Equal(expected, store.Current with
@@ -61,43 +61,6 @@ public sealed class SettingsStoreTests
         finally
         {
             File.Delete(path);
-        }
-    }
-
-    [Theory]
-    [InlineData("system", ThemeAppearances.System, ThemeIds.Light, ThemeIds.Dark)]
-    [InlineData("solarized-light", ThemeAppearances.Light, "solarized-light", ThemeIds.Dark)]
-    [InlineData("nord", ThemeAppearances.Dark, ThemeIds.Light, "nord")]
-    [InlineData("no-such-theme", ThemeAppearances.Dark, ThemeIds.Light, ThemeIds.Default)]
-    public void Load_LegacyThemeMigratesAndSavesOnlyAppearanceAndModeThemes(
-        string legacyTheme, string appearance, string lightTheme, string darkTheme)
-    {
-        var directory = Directory.CreateTempSubdirectory("resesh-legacy-theme-");
-        var path = Path.Combine(directory.FullName, "settings.json");
-        try
-        {
-            File.WriteAllText(path, $$"""{"theme":"{{legacyTheme}}"}""");
-            var store = new SettingsStore(path);
-
-            store.Load();
-
-            Assert.Null(store.LoadWarning);
-            Assert.Null(store.Current.LegacyTheme);
-            Assert.Equal(appearance, store.Current.Appearance);
-            Assert.Equal(lightTheme, store.Current.LightTheme);
-            Assert.Equal(darkTheme, store.Current.DarkTheme);
-
-            store.Save(store.Current);
-
-            using var saved = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
-            Assert.False(saved.RootElement.TryGetProperty("theme", out _));
-            Assert.Equal(appearance, saved.RootElement.GetProperty("appearance").GetString());
-            Assert.Equal(lightTheme, saved.RootElement.GetProperty("lightTheme").GetString());
-            Assert.Equal(darkTheme, saved.RootElement.GetProperty("darkTheme").GetString());
-        }
-        finally
-        {
-            directory.Delete(recursive: true);
         }
     }
 
@@ -115,7 +78,6 @@ public sealed class SettingsStoreTests
             Assert.Contains("\n  \"appearance\": \"dark\"", json);
             Assert.Contains("\n  \"lightTheme\": \"light\"", json);
             Assert.Contains("\n  \"darkTheme\": \"dark\"", json);
-            Assert.DoesNotContain("\"theme\":", json);
         }
         finally
         {
@@ -277,7 +239,7 @@ public sealed class SettingsStoreTests
         var path = Path.Combine(Path.GetTempPath(), $"resesh-legacy-settings-{Guid.NewGuid():N}.json");
         try
         {
-            File.WriteAllText(path, "{\"theme\":\"dark\"}");
+            File.WriteAllText(path, "{\"fontSize\":14}");
             var store = new SettingsStore(path);
 
             store.Load();

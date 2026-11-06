@@ -4,12 +4,12 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using Resesh.Core.Storage;
-using Windows.UI;
+using Resesh.Terminal;
 
 namespace Resesh.App.Controls;
 
 /// <summary>A compact theme choice with searchable light and dark galleries.
-/// Unknown ids, including legacy "system", display verbatim and stay unchanged until a pick.</summary>
+/// Unknown ids display verbatim and stay unchanged until a pick.</summary>
 public sealed partial class ThemePickerButton : UserControl
 {
     public static readonly DependencyProperty ThemeIdProperty = DependencyProperty.Register(
@@ -67,10 +67,10 @@ public sealed partial class ThemePickerButton : UserControl
         Preview.Visibility = theme is null ? Visibility.Collapsed : Visibility.Visible;
         if (theme is not null)
         {
-            Preview.Background = Brush(theme.Palette.Background);
-            _colors[0].Fill = Brush(theme.Palette.Foreground);
+            Preview.Background = new SolidColorBrush(RgbColor.ToColor(theme.Palette.Background));
+            _colors[0].Fill = new SolidColorBrush(RgbColor.ToColor(theme.Palette.Foreground));
             for (var i = 1; i < _colors.Length; i++)
-                _colors[i].Fill = Brush(theme.Palette.Ansi[i]);
+                _colors[i].Fill = new SolidColorBrush(RgbColor.ToColor(theme.Palette.Ansi[i]));
         }
         LightThemes.SelectedTheme = theme?.IsLight == true ? theme : null;
         DarkThemes.SelectedTheme = theme?.IsLight == false ? theme : null;
@@ -101,7 +101,4 @@ public sealed partial class ThemePickerButton : UserControl
         if (changed)
             SelectionChanged?.Invoke(this, EventArgs.Empty);
     }
-
-    private static SolidColorBrush Brush(uint rgb) => new(Color.FromArgb(255,
-        (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb));
 }

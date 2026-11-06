@@ -157,7 +157,6 @@ public static class SettingsCatalog
         [nameof(AppSettings.SessionsRailTab)] = "Window state, from the sessions rail.",
         [nameof(AppSettings.OnboardingCompleted)] = "Set by finishing Welcome.",
         [nameof(AppSettings.DefaultLocalProfileId)] = "Chosen in the local profile editor (Make default).",
-        [nameof(AppSettings.LegacyTheme)] = "Read from older settings files and moved into Appearance, LightTheme and DarkTheme.",
     };
 }
 

@@ -57,12 +57,12 @@ public static partial class ThemeCategories
 
     public static ThemeCategory Of(string name, ThemePalette palette)
     {
-        var background = Hsl(palette.Background);
-        var foreground = Hsl(palette.Foreground);
+        var background = ColorMath.ToHsl(palette.Background);
+        var foreground = ColorMath.ToHsl(palette.Foreground);
         double lightness = 0, saturation = 0;
         for (var i = 1; i <= 6; i++)
         {
-            var color = Hsl(palette.Ansi[i]);
+            var color = ColorMath.ToHsl(palette.Ansi[i]);
             lightness += color.Lightness / 6;
             saturation += color.Saturation / 6;
         }
@@ -86,7 +86,7 @@ public static partial class ThemeCategories
         if (RetroName().IsMatch(name)
             || (ColorMath.RelativeLuminance(palette.Background) < 0.2 && foreground.Chroma > 80 && saturation < 0.5))
             categories |= ThemeCategory.Retro;
-        if (Contrast(palette.Foreground, palette.Background) >= 15)
+        if (ColorMath.Contrast(palette.Foreground, palette.Background) >= 15)
             categories |= ThemeCategory.HighContrast;
         return categories;
     }
@@ -96,27 +96,4 @@ public static partial class ThemeCategories
 
     [GeneratedRegex(@"retro|vintage|\b[789]0s\b|amber|phosphor|\bcrt\b|c64|commodore|apple ?(ii|classic)|\bibm\b|\bdos\b|\bcga\b|\bega\b|\bvga\b|teletype|matrix|hacker|hax0r|borland|turbo|atari|amiga|spectrum|mainframe|vt ?\d{3}|monochrome|homebrew|green ?screen|synthwave|outrun|1984|man page|\bunix\b|irix|nextstep|\bsgi\b|\btron\b|encom|cassette|vhs|arcade|8.?bit|pixel", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex RetroName();
-
-    private static double Contrast(uint first, uint second)
-    {
-        double a = ColorMath.RelativeLuminance(first), b = ColorMath.RelativeLuminance(second);
-        return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
-    }
-
-    private readonly record struct HslColor(double Hue, double Saturation, double Lightness, int Chroma);
-
-    private static HslColor Hsl(uint rgb)
-    {
-        int r = (int)(rgb >> 16) & 0xFF, g = (int)(rgb >> 8) & 0xFF, b = (int)rgb & 0xFF;
-        int max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b));
-        var chroma = max - min;
-        var lightness = (max + min) / 510.0;
-        if (chroma == 0)
-            return new(0, 0, lightness, 0);
-        var saturation = chroma / 255.0 / (1 - Math.Abs((2 * lightness) - 1));
-        double hue = max == r ? ((g - b) / (double)chroma % 6 + 6) % 6
-            : max == g ? ((b - r) / (double)chroma) + 2
-            : ((r - g) / (double)chroma) + 4;
-        return new(hue * 60, saturation, lightness, chroma);
-    }
 }

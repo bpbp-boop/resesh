@@ -58,45 +58,6 @@ public sealed class SessionsBackupTests : IDisposable
         Assert.DoesNotContain(archive.Entries, e => e.FullName.Contains("recording", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Theory]
-    [InlineData("system", ThemeAppearances.System, ThemeIds.Light, ThemeIds.Dark)]
-    [InlineData("solarized-light", ThemeAppearances.Light, "solarized-light", ThemeIds.Dark)]
-    [InlineData("nord", ThemeAppearances.Dark, ThemeIds.Light, "nord")]
-    [InlineData("no-such-theme", ThemeAppearances.Dark, ThemeIds.Light, ThemeIds.Default)]
-    public void Import_LegacyThemeMigratesToAppearanceAndModeThemes(
-        string legacyTheme, string appearance, string lightTheme, string darkTheme)
-    {
-        var source = CreateStores(Path.Combine(_dir.FullName, "legacy-source"));
-        var path = Path.Combine(_dir.FullName, "legacy.reseshbackup");
-        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
-            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials, new BackupExportOptions());
-        using (var archive = ZipFile.Open(path, ZipArchiveMode.Update))
-        {
-            archive.GetEntry("settings.json")!.Delete();
-            using var writer = new StreamWriter(archive.CreateEntry("settings.json").Open());
-            writer.Write($$"""{"theme":"{{legacyTheme}}"}""");
-        }
-
-        var package = SessionsBackup.Read(path);
-        var target = CreateStores(Path.Combine(_dir.FullName, "legacy-target"));
-        SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
-            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
-            new Dictionary<Guid, BackupConflictResolution>());
-
-        var loaded = new SettingsStore(Path.Combine(target.Directory, "settings.json"));
-        loaded.Load();
-        Assert.Null(loaded.LoadWarning);
-        Assert.Null(loaded.Current.LegacyTheme);
-        Assert.Equal(appearance, loaded.Current.Appearance);
-        Assert.Equal(lightTheme, loaded.Current.LightTheme);
-        Assert.Equal(darkTheme, loaded.Current.DarkTheme);
-        using var saved = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(target.Directory, "settings.json")));
-        Assert.False(saved.RootElement.TryGetProperty("theme", out _));
-        Assert.Equal(appearance, saved.RootElement.GetProperty("appearance").GetString());
-        Assert.Equal(lightTheme, saved.RootElement.GetProperty("lightTheme").GetString());
-        Assert.Equal(darkTheme, saved.RootElement.GetProperty("darkTheme").GetString());
-    }
-
     [Fact]
     public void ExportRead_WithSecretsEncryptsCompleteArchiveAndRejectsWrongPassphrase()
     {
