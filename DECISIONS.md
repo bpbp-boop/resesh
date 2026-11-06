@@ -2401,6 +2401,49 @@ A local shell stays suspended until its process job is created, configured for
 kill-on-close and assigned successfully. A failure stops and cleans up the suspended shell
 instead of starting a process tree that the app cannot control.
 
+## 2026-11-06 - Agent "working" is the agent's word, and badges are drawn at size
+
+A finished agent's tab often showed the blue working dot forever. Two causes:
+
+- **Any input byte restarted it.** `ObserveUserInput` turned every badge but a blocked one
+  into `Working`, including `Idle`, which is where a finished agent goes once its tab is
+  viewed. It ran on `InputReceived`, which also carries what the terminal sends by itself:
+  the focus report a program asks for with mode 1004 (Claude Code tracks focus), mouse
+  reports, and answers to the program's queries. So selecting a finished tab sent `ESC [ I`,
+  the badge went back to working, and no hook ever ended it. The terminal now raises
+  `UserInputSent` for keys, text, pastes and app-sent input only, and input never starts
+  work: it turns a blocked badge to working (the user answered) and clears a result.
+- **Detection claimed work.** A command line, a title or a process in the job set
+  `Working`, and only the agent leaving ended it. Detection now sets identity only. The one
+  activity signal without an adapter is the braille spinner Claude Code and Codex put in
+  front of their own title: spinning means working, and the spinner stopping after it ran
+  means idle. It applies beside an adapter too, since Claude Code's Stop hook does not run
+  when the user interrupts it. A title never replaces a blocked or finished state.
+
+The working dot pulses (opacity 1 → 0.3, 1.6 s, on the compositor via `AgentPulse`), so a
+dot that stays reads differently from one that is working; with Windows animation effects off
+it stays still. A `ProgressRing` was considered and rejected as too loud at 12 px across
+several tabs.
+
+The badges were tried as native `InfoBadge`s and dropped: the InfoBadge draws its symbol by
+scaling a 20 px icon glyph down through a Viewbox, which came out jagged and faint at 14 px,
+and its presets use the `SystemFillColor*` colours instead of the app's status colours.
+`Controls/AgentBadge` keeps the InfoBadge's shape (a disc with a centred symbol) but draws
+it from two ellipses (a ring in the colour behind it, then the disc in `AgentBadgeColor`)
+and a bold `TextBlock` at its real size with tight line bounds, so DirectWrite renders the
+symbol at its final size. Symbols are ! ? ✓ ✕ in `SessionBadgeGlyphBrush`. The tabs and
+the workspace rail use the same control.
+
+## 2026-11-06 - Colour tags are a line on top of every tab
+
+The coloured bar at a tab's left edge is gone; the status dot or agent icon now sits centred
+in the tab's leading space (12 px either side). A tag shows instead as the top bar: full
+strength on the focused tab, as before, and at 60% opacity on every other tab, including the
+selected tab of an unfocused split. Tagged lines are at least 2 px, since the default 1 px
+accent bar is too thin to tell tag colours apart. High Contrast shows no tag line on
+inactive tabs, keeping to system colours. `TabViewModel.ColorTag` is "" rather than null
+for no tag: x:Bind skips function updates when a nullable string becomes null, which would
+leave a removed tag's line on screen.
 ## 2026-11-06 - Tabs tear off onto an invisible desktop drop target
 
 Dragging a tab out of every window opens it in a new one. `TabView.CanTearOutTabs` (Windows

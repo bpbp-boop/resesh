@@ -142,6 +142,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     public static string? UnavailableReason => GhosttyNative.TryLoad();
 
     public override event Action<byte[]>? InputReceived;
+    public override event Action? UserInputSent;
     public override event Action<int, int>? Resized;
     public override event TerminalOutputObservedHandler? OutputObserved;
     public override event Action<ReadOnlyMemory<byte>, int, int, long>? KeyframeCaptured;
@@ -1146,6 +1147,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         if (typed && TypedInputFilter?.Invoke(bytes) == true)
             return;
         InputReceived?.Invoke(bytes);
+        UserInputSent?.Invoke();
         if (_lastInfo.ScrollOffset + _lastInfo.ScrollLength < _lastInfo.ScrollTotal)
         {
             GhosttyNative.rvt_scroll(_term, GhosttyNative.ScrollBottom, 0);
@@ -1728,6 +1730,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         var bytes = Encoding.UTF8.GetBytes(text);
         fixed (byte* p = bytes)
             GhosttyNative.rvt_paste(_term, p, (nuint)bytes.Length);
+        UserInputSent?.Invoke();
         GhosttyNative.rvt_scroll(_term, GhosttyNative.ScrollBottom, 0);
         RequestFrame();
     }

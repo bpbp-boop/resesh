@@ -477,7 +477,6 @@ public sealed partial class TabViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(AgentIconKey));
         OnPropertyChanged(nameof(ShowsProgramStatus));
-        OnPropertyChanged(nameof(AgentBadgeGlyph));
         OnPropertyChanged(nameof(AgentBadgeSize));
         OnPropertyChanged(nameof(AgentTooltip));
         OnPropertyChanged(nameof(ShowCompletionNotificationButton));
@@ -495,22 +494,16 @@ public sealed partial class TabViewModel : ObservableObject
     /// with no agent icon under it. Only states with a symbol qualify: a bare "working" dot
     /// would be indistinguishable from the connection and unseen-output dots beside it.</summary>
     public bool ShowsProgramStatus =>
-        AgentIconsEnabled && Agent.Program is not null && AgentBadgeGlyph.Length > 0;
+        AgentIconsEnabled && Agent.Program is not null && AgentBadgeHasSymbol;
 
     /// <summary>Meaningful states get a symbol as well as a colour, so the badge remains
     /// readable for users who cannot distinguish the colours.</summary>
-    public string AgentBadgeGlyph => Agent.Attention switch
-    {
-        AgentAttention.NeedsApproval => "!",
-        AgentAttention.NeedsAnswer => "?",
-        AgentAttention.Complete => "✓",
-        AgentAttention.Failed => "×",
-        _ => "",
-    };
+    private bool AgentBadgeHasSymbol => Agent.Attention is
+        AgentAttention.NeedsApproval or AgentAttention.NeedsAnswer or AgentAttention.Complete or AgentAttention.Failed;
 
-    /// <summary>A plain dot stays small. A symbol needs room: as much as fits beside an
-    /// agent icon without hiding it, and most of the slot when the badge stands alone.</summary>
-    public double AgentBadgeSize => AgentBadgeGlyph.Length == 0 ? 7 : ShowsProgramStatus ? 15 : 12;
+    /// <summary>The badge disc's diameter: a plain dot stays small; a symbol needs room, and
+    /// hangs off the agent icon's corner or fills the slot when it stands alone.</summary>
+    public double AgentBadgeSize => AgentBadgeHasSymbol ? 14 : 6;
 
     /// <summary>Names the agent, its state, and how we know — so a guess never reads like
     /// a report. Any label came off the wire and is already sanitized and truncated.</summary>
@@ -887,7 +880,10 @@ public sealed partial class TabViewModel : ObservableObject
             => SetProperty(ref _isLocked, value);
     }
 
-    public string? ColorTag => Session.ColorTag;
+    /// <summary>The session's colour tag, "" for none. Never null: generated x:Bind code skips
+    /// function updates when a nullable string becomes null, so removing a tag would leave the
+    /// tab's tag line and accent bar in the old colour.</summary>
+    public string ColorTag => Session.ColorTag ?? "";
 
     /// <summary>Set while locked-out after repeated failed unlock attempts.</summary>
     public DateTimeOffset LockoutUntil { get; private set; } = DateTimeOffset.MinValue;

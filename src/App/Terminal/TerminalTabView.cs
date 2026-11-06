@@ -167,9 +167,10 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             // and the next prompt's report may have moved the folder by then.
             if (Array.IndexOf(data, (byte)'\r') >= 0)
                 _enterDirectory = CurrentHistoryDirectory();
-            // Answering is what unblocks a waiting agent, so input clears a sticky badge.
-            ApplyAgent(tracker => tracker.ObserveUserInput());
         };
+        // Only what the user typed or pasted: the focus report the terminal sends when the tab
+        // is selected would otherwise read as an answer and restart a finished agent's badge.
+        _terminal.UserInputSent += () => ApplyAgent(tracker => tracker.ObserveUserInput());
         _terminal.Resized += (cols, rows) =>
         {
             ResizeBackend(cols, rows);

@@ -76,9 +76,16 @@ test("layout rebuilds snap tab motion instead of animating re-parented strips", 
 });
 
 test("tab text trims inside the shared width without moving the close action", () => {
-  assert.match(xaml, /<ColumnDefinition Width="\*" \/>/);
-  assert.match(xaml, /Grid\.Column="5"[\s\S]*?TextTrimming="CharacterEllipsis"/);
-  assert.match(xaml, /Grid\.Column="6"[\s\S]*?Click="TabCloseGlyph_Click"/);
+  const header = xaml.match(/<TabViewItem\.Header>[\s\S]*?<\/TabViewItem\.Header>/)?.[0] ?? "";
+  const columns = [...(header.match(/<Grid\.ColumnDefinitions>([\s\S]*?)<\/Grid\.ColumnDefinitions>/)?.[1] ?? "")
+    .matchAll(/<ColumnDefinition Width="([^"]+)" \/>/g)].map(match => match[1]);
+  const star = columns.indexOf("*");
+  assert.ok(star >= 0, "a star column takes the remaining width");
+  const column = pattern => Number(header.match(pattern)?.[1]);
+  // The title fills the star column and trims; the close button sits in a later fixed one.
+  assert.equal(column(/Grid\.Column="(\d+)"(?:(?!Grid\.Column=)[\s\S])*?x:Name="TabTitleText"/), star);
+  assert.match(header, /x:Name="TabTitleText"[\s\S]*?TextTrimming="CharacterEllipsis"/);
+  assert.ok(column(/Grid\.Column="(\d+)"(?:(?!Grid\.Column=)[\s\S])*?Click="TabCloseGlyph_Click"/) > star);
 });
 
 test("tabs recalculate their equal width after a close or strip resize", () => {

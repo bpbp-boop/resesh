@@ -32,6 +32,11 @@ public abstract partial class TerminalSurface : Grid, IDisposable
         Native.Highlighter.Precompile(rules);
 
     public abstract event Action<byte[]>? InputReceived;
+    /// <summary>The user typed, pasted or sent text into the terminal. Raised alongside the
+    /// bytes in <see cref="InputReceived"/>, which also carries what the terminal sends by
+    /// itself (focus and mouse reports, answers to the program's queries); those are not the
+    /// user saying anything to the program.</summary>
+    public abstract event Action? UserInputSent;
     public abstract event Action<int, int>? Resized;
     public abstract event TerminalOutputObservedHandler? OutputObserved;
     /// <summary>A rewind keyframe: the screen as VT text, its size and capture time. The memory

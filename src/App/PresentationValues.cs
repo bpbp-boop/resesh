@@ -111,8 +111,14 @@ public static class PresentationValues
     public static VerticalAlignment AgentBadgeVerticalAlignment(bool programStatus) =>
         programStatus ? VerticalAlignment.Center : VerticalAlignment.Bottom;
 
-    public static Thickness AgentBadgeMargin(bool programStatus) =>
-        programStatus ? new Thickness(0) : new Thickness(0, 0, -2, -2);
+    /// <summary>How far the badge hangs past the icon's corner: a symbol badge is centred
+    /// near the corner so it hides as little of the icon as it can.</summary>
+    public static Thickness AgentBadgeMargin(bool programStatus, double size) =>
+        programStatus ? new Thickness(0) : size > 8 ? new Thickness(0, 0, -6, -6) : new Thickness(0, 0, -2, -2);
+
+    /// <summary>Only a visible working dot pulses, so a hidden one costs no frames.</summary>
+    public static bool AgentBadgePulses(string? key, AgentAttention attention) =>
+        attention == AgentAttention.Working && AgentIcon(key) is not null;
 
     public static Windows.UI.Color TabHeaderBackgroundColor(
         string appTheme,
@@ -161,24 +167,8 @@ public static class PresentationValues
                 _ => Status.Critical,
             });
 
-    /// <summary>The badge's symbol on a 10x10 grid: an exclamation mark, a question mark,
-    /// a tick or a cross. Null for the states that show a plain dot. A new geometry each
-    /// time, because one instance cannot belong to two tabs.</summary>
-    public static Geometry? AgentBadgeSymbol(AgentAttention attention)
-    {
-        var path = attention switch
-        {
-            AgentAttention.NeedsApproval => "M5,2 L5,5.6 M5,7.9 L5,8",
-            AgentAttention.NeedsAnswer => "M3.3,3.5 C3.3,1.5 6.7,1.5 6.7,3.5 C6.7,4.9 5,4.8 5,6 M5,7.9 L5,8",
-            AgentAttention.Complete => "M2.4,5.3 L4.3,7.1 L7.7,3.1",
-            AgentAttention.Failed => "M3,3 L7,7 M7,3 L3,7",
-            _ => null,
-        };
-        return path is null
-            ? null
-            : (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry), path);
-    }
-
+    /// <summary>The badge's disc, in the app's status colours: blue while working, amber
+    /// while it waits for you, green when done, red when failed, grey for a bell.</summary>
     public static Windows.UI.Color AgentBadgeColor(AgentAttention attention) => StatusColor(attention switch
     {
         AgentAttention.Working => Status.Info,
@@ -199,9 +189,20 @@ public static class PresentationValues
     }
 
     /// <summary>Height of the active tab's accent bar. Themes whose accent is the only
-    /// saturated color on screen ask for a thicker bar so it reads as a marker.</summary>
-    public static double FocusedTabAccentThickness(string appTheme) =>
-        ThemeVisualPalette.For(appTheme).AccentBarThickness;
+    /// saturated color on screen ask for a thicker bar so it reads as a marker. A colour tag
+    /// needs at least 2 px to be told apart, here and on the inactive tabs' tag line.</summary>
+    public static double FocusedTabAccentThickness(string appTheme, string? colorTag) =>
+        ParseColor(colorTag).A > 0 ? TagLineThickness(appTheme) : ThemeVisualPalette.For(appTheme).AccentBarThickness;
+
+    public static double TagLineThickness(string appTheme) =>
+        Math.Max(2, ThemeVisualPalette.For(appTheme).AccentBarThickness);
+
+    /// <summary>A tagged tab that is not the focused one shows its colour as a dimmer copy of
+    /// the top bar, so tags still read across the strip. High Contrast keeps to system
+    /// colours, so there the tag shows only on the focused tab's bar, as the selection colour.</summary>
+    public static Visibility TagLineVisibility(string appTheme, string? colorTag, bool isActive, bool isGroupFocused) =>
+        Visible(ParseColor(colorTag).A > 0 && !(isActive && isGroupFocused)
+            && !ThemeVisualPalette.For(appTheme).IsHighContrast);
 
     // ---- workspace rail buttons ----
 
@@ -228,24 +229,19 @@ public static class PresentationValues
     public static TimeSpan RailMarkerDuration =>
         AppMotion.Enabled ? TimeSpan.FromMilliseconds(170) : TimeSpan.Zero;
 
-    /// <summary>The alert dot's colour: amber when an agent waits, red for a dropped
-    /// session, the accent for unseen output — the tab strip's own meanings.</summary>
-    public static Windows.UI.Color WorkspaceAlertColor(WorkspaceAlert alert) => alert switch
+    /// <summary>The rail's alert badge speaks the tab strip's language: the blocked badge
+    /// when an agent waits, the failed one for a dropped session, the working dot's blue
+    /// for unseen output.</summary>
+    public static AgentAttention WorkspaceAlertBadge(WorkspaceAlert alert) => alert switch
     {
-        WorkspaceAlert.Attention => AgentBadgeColor(AgentAttention.NeedsApproval),
-        WorkspaceAlert.Disconnected => StatusColor(Status.Critical),
-        _ => StatusColor(Status.Info),
+        WorkspaceAlert.Attention => AgentAttention.NeedsApproval,
+        WorkspaceAlert.Disconnected => AgentAttention.Failed,
+        _ => AgentAttention.Working,
     };
 
-    public static double WorkspaceAlertSize(WorkspaceAlert alert) => alert == WorkspaceAlert.Activity ? 8 : 12;
+    public static Windows.UI.Color WorkspaceAlertColor(WorkspaceAlert alert) => AgentBadgeColor(WorkspaceAlertBadge(alert));
 
-    /// <summary>A symbol on the urgent alerts, so they read without telling the colours apart.</summary>
-    public static Geometry? WorkspaceAlertSymbol(WorkspaceAlert alert) => alert switch
-    {
-        WorkspaceAlert.Attention => AgentBadgeSymbol(AgentAttention.NeedsApproval),
-        WorkspaceAlert.Disconnected => AgentBadgeSymbol(AgentAttention.Failed),
-        _ => null,
-    };
+    public static double WorkspaceAlertSize(WorkspaceAlert alert) => alert == WorkspaceAlert.Activity ? 6 : 12;
 
     // Only for the Session* brushes ThemeVisualPalette recolours in place: one shared instance.
     private static Brush ResourceBrush(string key) =>

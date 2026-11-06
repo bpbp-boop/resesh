@@ -56,7 +56,7 @@
                     <SolidColorBrush x:Key="SessionScrimSubtleBrush" Color="#33000000" />
                     <SolidColorBrush x:Key="SessionRecordingBrush" Color="{StaticResource SessionStatusCriticalColor}" />
                     <!-- Tab state dots, agent badges and workspace alerts; PresentationValues
-                         picks one by key. The badge symbol is drawn dark on every fill. -->
+                         picks one by key. The badge symbol is dark on every fill. -->
                     <SolidColorBrush x:Key="SessionStatusInfoBrush" Color="{StaticResource SessionDefaultAccentColor}" />
                     <SolidColorBrush x:Key="SessionStatusSuccessBrush" Color="{StaticResource SessionStatusSuccessColor}" />
                     <SolidColorBrush x:Key="SessionStatusCautionBrush" Color="{StaticResource SessionStatusCautionColor}" />
@@ -73,7 +73,7 @@
                     <SolidColorBrush x:Key="SessionScrimSubtleBrush" Color="#33000000" />
                     <SolidColorBrush x:Key="SessionRecordingBrush" Color="{StaticResource SessionStatusCriticalColor}" />
                     <!-- Tab state dots, agent badges and workspace alerts; PresentationValues
-                         picks one by key. The badge symbol is drawn dark on every fill. -->
+                         picks one by key. The badge symbol is dark on every fill. -->
                     <SolidColorBrush x:Key="SessionStatusInfoBrush" Color="{StaticResource SessionDefaultAccentColor}" />
                     <SolidColorBrush x:Key="SessionStatusSuccessBrush" Color="{StaticResource SessionStatusSuccessColor}" />
                     <SolidColorBrush x:Key="SessionStatusCautionBrush" Color="{StaticResource SessionStatusCautionColor}" />

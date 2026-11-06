@@ -22,6 +22,18 @@ public class AgentDetectionTests
         Assert.Equal(expected, AgentDetection.WithoutStatusGlyph(title));
 
     [Theory]
+    [InlineData("⠐ Fix login bug", true)]
+    [InlineData("  ⠋ resesh", true)]
+    [InlineData("⠋", true)]
+    [InlineData("✳ Fix login bug", false)]
+    [InlineData("resesh", false)]
+    [InlineData("⠋resesh", false)]   // braille in a word is not a spinner frame
+    [InlineData("notes ⠋ draft", false)]
+    [InlineData("", false)]
+    public void ActivitySpinnerIsALeadingBrailleFrame(string title, bool expected) =>
+        Assert.Equal(expected, AgentDetection.HasActivitySpinner(title));
+
+    [Theory]
     [InlineData("claude", "claude")]
     [InlineData("  claude --resume  ", "claude")]
     [InlineData("/usr/local/bin/claude", "claude")]

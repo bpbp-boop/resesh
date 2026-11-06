@@ -190,6 +190,18 @@ public static class AgentDetection
         return null;
     }
 
+    /// <summary>True when the title starts with a braille spinner frame: Claude Code and
+    /// Codex animate one in front of their title while they work, and drop it (Claude shows
+    /// "✳" instead) once they stop. Like the status glyph, it must be followed by a space or
+    /// stand alone, so a title that merely contains braille is not a spinner.</summary>
+    public static bool HasActivitySpinner(string? title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return false;
+        var span = title.AsSpan().TrimStart();
+        return span[0] is >= '\u2800' and <= '\u28FF' && (span.Length == 1 || char.IsWhiteSpace(span[1]));
+    }
+
     /// <summary>True for an exact shell-process title or a stock user-host prompt title.
     /// Both are definite evidence that an agent returned control to the shell.</summary>
     public static bool IsShellTitle(string? title) =>
