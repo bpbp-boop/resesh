@@ -38,8 +38,8 @@ test("each status hue is typed once, in App.xaml", () => {
   }
 });
 
-test("tab dots, agent badges and workspace alerts look their colors up by key", () => {
-  for (const method of ["StateColor", "AgentBadgeColor", "WorkspaceAlertColor"]) {
+test("tab dots and agent badges look their colors up by key", () => {
+  for (const method of ["StateColor", "AgentBadgeColor"]) {
     const body = presentation.match(new RegExp(`public static Windows\\.UI\\.Color ${method}\\([\\s\\S]*?;\\r?\\n\\r?\\n`))?.[0] ?? "";
     assert.match(body, /StatusColor\(/, method);
     assert.doesNotMatch(body, /Rgb\(/, method);

@@ -3,6 +3,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:Resesh.App"
+    xmlns:controls="using:Resesh.App.Controls"
     xmlns:vm="using:Resesh.App.ViewModels">
 
     <UserControl.Resources>
@@ -356,36 +357,20 @@
                                             Source="{x:Bind local:PresentationValues.AgentIcon(AgentIconKey), Mode=OneWay}"
                                             Width="16"
                                             Height="16" />
-                                        <Border
-                                            Width="{x:Bind AgentBadgeSize, Mode=OneWay}"
-                                            Height="{x:Bind AgentBadgeSize, Mode=OneWay}"
-                                            Margin="{x:Bind local:PresentationValues.AgentBadgeMargin(ShowsProgramStatus), Mode=OneWay}"
+                                        <!-- The ring repeats the tab's colour to cut the badge
+                                             out of the icon; the working dot pulses. -->
+                                        <controls:AgentBadge
+                                            Attention="{x:Bind Agent.Attention, Mode=OneWay}"
+                                            Size="{x:Bind AgentBadgeSize, Mode=OneWay}"
+                                            Margin="{x:Bind local:PresentationValues.AgentBadgeMargin(ShowsProgramStatus, AgentBadgeSize), Mode=OneWay}"
                                             HorizontalAlignment="{x:Bind local:PresentationValues.AgentBadgeHorizontalAlignment(ShowsProgramStatus), Mode=OneWay}"
                                             VerticalAlignment="{x:Bind local:PresentationValues.AgentBadgeVerticalAlignment(ShowsProgramStatus), Mode=OneWay}"
-                                            CornerRadius="7"
-                                            BorderThickness="1"
+                                            local:AgentPulse.IsActive="{x:Bind local:PresentationValues.AgentBadgePulses(AgentIconKey, Agent.Attention), Mode=OneWay}"
                                             Visibility="{x:Bind local:PresentationValues.AgentBadgeVisibility(AgentIconKey, Agent.Attention, ShowsProgramStatus), Mode=OneWay}">
-                                            <Border.BorderBrush>
+                                            <controls:AgentBadge.RingBrush>
                                                 <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBackgroundColor(TabTheme, IsActive, IsPointerOver), Mode=OneWay}" />
-                                            </Border.BorderBrush>
-                                            <Border.Background>
-                                                <SolidColorBrush Color="{x:Bind local:PresentationValues.AgentBadgeColor(Agent.Attention), Mode=OneWay}" />
-                                            </Border.Background>
-                                            <!-- The symbol is drawn, not typed: a font glyph this
-                                                 small smears, and a dark stroke reads on every
-                                                 badge colour where white does not on amber. -->
-                                            <Viewbox Stretch="Uniform">
-                                                <Path
-                                                    Width="10"
-                                                    Height="10"
-                                                    Data="{x:Bind local:PresentationValues.AgentBadgeSymbol(Agent.Attention), Mode=OneWay}"
-                                                    Stroke="{ThemeResource SessionBadgeGlyphBrush}"
-                                                    StrokeThickness="1.6"
-                                                    StrokeStartLineCap="Round"
-                                                    StrokeEndLineCap="Round"
-                                                    StrokeLineJoin="Round" />
-                                            </Viewbox>
-                                        </Border>
+                                            </controls:AgentBadge.RingBrush>
+                                        </controls:AgentBadge>
                                     </Grid>
                                     <FontIcon
                                         Grid.Column="3"

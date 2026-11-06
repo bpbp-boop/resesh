@@ -23,9 +23,9 @@ public sealed record AgentSnapshot(
 /// Precedence, strongest first: the user's manual override, an adapter's structured
 /// events, live detection (local process membership, prompt commands, titles), then the
 /// session's default identity as the "before we know anything" fallback.
-///
-/// Attention never comes from detection — a heuristic may say WHICH agent is running,
-/// never that it is waiting for you.
+/// Attention never comes from guessing which agent runs — a heuristic may say WHICH agent
+/// is running, never what it is doing. The one exception is the activity spinner agents put
+/// at the front of their own title: that is the agent saying it is working.
 /// </summary>
 public sealed class AgentTracker
 {
@@ -40,6 +40,9 @@ public sealed class AgentTracker
     private AgentSource _detectedSource = AgentSource.Unknown;
     private AgentAttention _attention = AgentAttention.None;
     private string? _label;
+    // The title has shown an activity spinner since the agent was last seen to stop; only then
+    // does a title without one mean the work stopped.
+    private bool _titleSpinning;
 
     // The status of a program that is not an agent (OSC 7501). Kept apart from the agent
     // state: it claims no identity, and it shows only while no agent does.
@@ -134,6 +137,7 @@ public sealed class AgentTracker
         _detectedSource = source;
         _label = null;
         _attention = AgentAttention.None;
+        _titleSpinning = false;
     }
 
     // ---- evidence ----
@@ -159,14 +163,14 @@ public sealed class AgentTracker
         else
             ClearProgramStatus(); // an agent is starting: an old result is not its news
         // Back at a prompt: any adapter-reported agent is gone, and whatever starts now has
-        // yet to show whether it has an adapter.
+        // yet to show whether it has an adapter. A command line says which agent, not that
+        // it is working: an agent waiting at its own prompt is not.
         ForgetAgent(AgentSource.Command, key ?? AgentIdentities.Shell);
-        if (key is not null)
-            _attention = AgentAttention.Working;
     });
 
-    /// <summary>The terminal title changed. Identity only, and only when it names an agent —
-    /// a title that mentions no agent is not evidence that one exited.</summary>
+    /// <summary>The terminal title changed. Identity only when it names an agent — a title
+    /// that mentions no agent is not evidence that one exited — plus the activity spinner
+    /// an agent puts in front of its own title while it works.</summary>
     public bool ObserveTitle(string? title) => Change(() =>
     {
         if (Suppressed)
@@ -182,21 +186,52 @@ public sealed class AgentTracker
             return;
         }
 
-        if (_structured is not null)
-            return;
-        var key = AgentDetection.FromTitle(title);
-        if (key is null || key == _detected)
-            return;
-        _detected = key;
-        _detectedSource = AgentSource.Title;
-        if (_attention == AgentAttention.None)
-            _attention = AgentAttention.Working;
+        var spinning = AgentDetection.HasActivitySpinner(title);
+        // A title may name the agent, but not over one found in the tab's own processes:
+        // membership is definitive, and a spinner frame alone (Codex's evidence) would
+        // otherwise rename it on every frame, flipping the icon against the process poll.
+        var processAgent = _detectedSource == AgentSource.Process && AgentIdentities.IsAgentKey(_detected);
+        if (_structured is null && !processAgent)
+        {
+            var key = AgentDetection.FromTitle(title);
+            if (key is not null && key != _detected)
+            {
+                _detected = key;
+                _detectedSource = AgentSource.Title;
+            }
+        }
+        ObserveTitleActivity(spinning);
     });
+
+    /// <summary>
+    /// The spinner is the agent's own report, so it counts even beside an adapter: Claude
+    /// Code's Stop hook does not run when the user interrupts it, but its title stops
+    /// spinning. It only moves between working and idle; a badge that asks for the user
+    /// is never replaced by a title.
+    /// </summary>
+    private void ObserveTitleActivity(bool spinning)
+    {
+        if (!AgentIdentities.IsAgentKey(ResolveKey()))
+            return;
+        if (spinning)
+        {
+            _titleSpinning = true;
+            if (_attention is AgentAttention.None or AgentAttention.Idle)
+                _attention = AgentAttention.Working;
+        }
+        else if (_titleSpinning)
+        {
+            _titleSpinning = false;
+            if (_attention == AgentAttention.Working)
+                _attention = AgentAttention.Idle;
+        }
+    }
 
     /// <summary>
     /// The processes currently inside this tab's job object (local tabs only). Membership is
     /// definitive both ways: an agent process appearing starts the identity, and its absence
-    /// ends one — including an adapter-reported agent that died without an exit event.
+    /// ends one — including an adapter-reported agent that died without an exit event. A
+    /// running process says nothing about whether the agent is busy.
     /// </summary>
     public bool ObserveProcesses(IEnumerable<string>? processNames) => Change(() =>
     {
@@ -209,8 +244,6 @@ public sealed class AgentTracker
             {
                 _detected = key;
                 _detectedSource = AgentSource.Process;
-                if (_structured is null)
-                    _attention = AgentAttention.Working;
             }
             return;
         }
@@ -300,8 +333,11 @@ public sealed class AgentTracker
         _label = status.Label;
     });
 
-    /// <summary>The user typed into this tab. Answering is what unblocks a waiting agent,
-    /// so this is the signal that clears a sticky badge.</summary>
+    /// <summary>The user typed or pasted into this tab — not the terminal answering a query,
+    /// reporting focus or forwarding the mouse. Answering is what unblocks a waiting agent,
+    /// so a blocked badge turns to working; a result the user has now acted on clears.
+    /// Input never starts "working" by itself: a keystroke at an idle agent's prompt may be
+    /// half a line, an Esc or a slash command, and only the agent knows if work began.</summary>
     public bool ObserveUserInput() => Change(() =>
     {
         _programSinceInput = false;
@@ -310,9 +346,12 @@ public sealed class AgentTracker
         else if (_programAttention != AgentAttention.Working)
             ClearProgramStatus();
 
-        if (_attention is AgentAttention.None or AgentAttention.Working)
+        if (_attention.RequiresUser())
+            _attention = AgentAttention.Working;
+        else if (_attention.ClearsOnView())
+            _attention = AgentIdentities.IsAgentKey(ResolveKey()) ? AgentAttention.Idle : AgentAttention.None;
+        else
             return;
-        _attention = AgentIdentities.IsAgentKey(ResolveKey()) ? AgentAttention.Working : AgentAttention.None;
         _label = null;
     });
 

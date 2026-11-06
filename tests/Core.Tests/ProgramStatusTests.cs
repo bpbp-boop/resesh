@@ -194,7 +194,7 @@ public class ProgramStatusTests
         tracker.ObserveCommand("claude");
         Assert.False(tracker.ObserveProgramStatus(Report(3, kind: 1, app: "terraform")));
         Assert.Equal("claude", tracker.Current.Key);
-        Assert.Equal(AgentAttention.Working, tracker.Current.Attention);
+        Assert.Equal(AgentAttention.None, tracker.Current.Attention); // the agent's own, unchanged
         Assert.Null(tracker.Current.Program);
     }
 

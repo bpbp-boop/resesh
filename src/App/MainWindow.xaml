@@ -94,31 +94,14 @@
                             Foreground="{StaticResource SessionTreeForegroundBrush}"
                             Visibility="{x:Bind local:PresentationValues.Collapsed(HasIcon), Mode=OneWay}" />
                     </Grid>
-                    <Border
-                        Width="{x:Bind local:PresentationValues.WorkspaceAlertSize(Alert), Mode=OneWay}"
-                        Height="{x:Bind local:PresentationValues.WorkspaceAlertSize(Alert), Mode=OneWay}"
+                    <controls:AgentBadge
                         Margin="0,2,3,0"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Top"
-                        CornerRadius="7"
-                        BorderThickness="1"
-                        BorderBrush="{StaticResource SessionShellBrush}"
-                        Visibility="{x:Bind local:PresentationValues.Visible(HasAlert), Mode=OneWay}">
-                        <Border.Background>
-                            <SolidColorBrush Color="{x:Bind local:PresentationValues.WorkspaceAlertColor(Alert), Mode=OneWay}" />
-                        </Border.Background>
-                        <Viewbox Stretch="Uniform">
-                            <Path
-                                Width="10"
-                                Height="10"
-                                Data="{x:Bind local:PresentationValues.WorkspaceAlertSymbol(Alert), Mode=OneWay}"
-                                Stroke="{ThemeResource SessionBadgeGlyphBrush}"
-                                StrokeThickness="1.6"
-                                StrokeStartLineCap="Round"
-                                StrokeEndLineCap="Round"
-                                StrokeLineJoin="Round" />
-                        </Viewbox>
-                    </Border>
+                        RingBrush="{StaticResource SessionShellBrush}"
+                        Attention="{x:Bind local:PresentationValues.WorkspaceAlertBadge(Alert), Mode=OneWay}"
+                        Size="{x:Bind local:PresentationValues.WorkspaceAlertSize(Alert), Mode=OneWay}"
+                        Visibility="{x:Bind local:PresentationValues.Visible(HasAlert), Mode=OneWay}" />
                     <Border
                         Width="14"
                         Height="14"
