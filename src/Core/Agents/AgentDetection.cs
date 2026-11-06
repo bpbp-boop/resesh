@@ -135,17 +135,28 @@ public static class AgentDetection
     /// <summary>A title without the status glyph agents put in front of it: Claude Code's
     /// "✳" and braille spinner, Codex's spinner, "●" and the like. The glyph changes many
     /// times a second while an agent works, which is noise on a tab. Only a single non-ASCII
-    /// symbol followed by a space counts, so "~/src" and "π - project" are left alone.</summary>
+    /// symbol followed by a space counts, so "~/src" and "π - project" are left alone.
+    /// oh-my-pi puts its π mark in front of the spinner ("π ⠏ task"); the tab's agent icon
+    /// already says which agent it is, so the mark goes with the spinner.</summary>
     public static string WithoutStatusGlyph(string title)
     {
         var span = title.AsSpan().TrimStart();
+        if (span.Length > 2 && span[0] == PiTitleMark && char.IsWhiteSpace(span[1])
+            && TryStripGlyph(span[1..].TrimStart(), out var afterPi))
+            return afterPi.ToString();
+        return TryStripGlyph(span, out var rest) ? rest.ToString() : title;
+    }
+
+    private static bool TryStripGlyph(ReadOnlySpan<char> span, out ReadOnlySpan<char> rest)
+    {
+        rest = default;
         if (span.Length < 2 || span[0] < 0x80 || !char.IsWhiteSpace(span[1]))
-            return title;
+            return false;
         var category = char.GetUnicodeCategory(span[0]);
         if (category is not (UnicodeCategory.OtherSymbol or UnicodeCategory.OtherPunctuation))
-            return title;
-        var rest = span[1..].Trim();
-        return rest.IsEmpty ? title : rest.ToString();
+            return false;
+        rest = span[1..].Trim();
+        return !rest.IsEmpty;
     }
 
     /// <summary>The agent named by a terminal title, or null. Conservative on purpose:

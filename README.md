@@ -218,6 +218,15 @@ as at a shell prompt. Hold Shift to send a click to the program instead. To give
 clicks too (Shift then selects), or nothing at all, change **Settings › Terminal › Mouse in
 programs**, or override it for one session in its Appearance settings.
 
+## Tabs and windows
+
+Drag a tab onto another pane's tab strip to move it there, or onto a pane's terminal to
+split it toward the side you drop on; both work across windows. Drop a tab outside every
+resesh window to tear it off into a new window under the pointer, connection and all.
+Dragging a window's only tab out moves that window instead. Press Escape during the drag,
+or drop on a part of a window that isn't a tab strip or pane, to leave the tab where it
+was. Pinned tabs stay put.
+
 ## SSH algorithms
 
 **Settings › Identities & Keys › SSH algorithms** chooses which key exchange, cipher, MAC

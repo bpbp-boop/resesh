@@ -53,6 +53,13 @@ public static class WindowLayout
         return new PixelRect(x, y, width, height);
     }
 
+    /// <summary>Where a window opens for a tab dropped outside every window: placed so the
+    /// pointer holds the tab where it held it in the strip it left, (<paramref name="grabX"/>,
+    /// <paramref name="grabY"/>) from the window's corner, then kept on the work area of the
+    /// display it was dropped on.</summary>
+    public static PixelRect TornOff(int pointerX, int pointerY, int grabX, int grabY, int width, int height, PixelRect workArea) =>
+        FitInto(new PixelRect(pointerX - grabX, pointerY - grabY, width, height), workArea);
+
     /// <summary>What to save for a window last restored to <paramref name="normalBounds"/>,
     /// or null when that is too small to be worth reopening at.</summary>
     public static WindowPlacement? ToSave(PixelRect normalBounds, bool maximized) =>

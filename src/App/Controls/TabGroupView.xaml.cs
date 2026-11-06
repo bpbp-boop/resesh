@@ -35,6 +35,10 @@ public interface ITabGroupHost
         TabGroupViewModel targetGroup,
         int targetIndex);
     void DetachTabForTransfer(TabViewModel tab);
+    /// <summary>The tab was dropped on the desktop at <paramref name="drop"/> (physical
+    /// pixels). <paramref name="grab"/> is where the pointer would hold it as the first tab
+    /// of the only pane, in DIPs from the corner of the window's pane area.</summary>
+    void TearOffTab(TabViewModel tab, Windows.Foundation.Point grab, Windows.Graphics.PointInt32 drop);
     void SetTabContentDropTargetsVisible(bool visible);
     void CloneSession(TabViewModel tab);
     void TogglePin(TabViewModel tab);
@@ -1331,7 +1335,8 @@ public sealed partial class TabGroupView : UserControl
         // A drag that never ended (its completion lost) must not leak into this one.
         if (_drag is not null)
             EndTabDrag();
-        _drag = new TabDragSession(tab, this);
+        _drag = new TabDragSession(tab, this) { TearOffGrab = TearOffGrab() };
+        _drag.DesktopTarget = ShowDesktopDropTarget(_drag);
         if (_tabDragPreview.Source is not null)
             ShowTabDragPreview();
         args.Data.RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Move;
@@ -1564,5 +1569,15 @@ public sealed partial class TabGroupView : UserControl
             if (ReferenceEquals(_drag, drag))
                 EndTabDrag();
         });
+    }
+
+    /// <summary>Where the pointer would hold the dragged tab as the first, unscrolled tab of
+    /// a pane, from the pane's corner: where it lands in a window torn off for it.</summary>
+    private Windows.Foundation.Point TearOffGrab()
+    {
+        var first = (Tabs.ContainerFromIndex(0) as UIElement ?? Tabs)
+            .TransformToVisual(this).TransformPoint(default);
+        return new(first.X + (_tabScrollViewer?.HorizontalOffset ?? 0) + _tabDragPointerOffset,
+            first.Y + _tabDragPreview.Height / 2);
     }
 }
