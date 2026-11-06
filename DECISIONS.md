@@ -2586,3 +2586,20 @@ adapter report, not the session default or a pinned icon), the tab tells the sur
   layer and its border. The tab colors stay as they were, so app tabs still match terminal
   tabs in the strip. Cards and fields keep the `Input` surface for contrast within the page.
   Welcome measures its text contrast against `ActiveTab` to match.
+
+## 2026-11-06 - Theme rows pass the mouse wheel to the page
+
+- A WinUI `ScrollViewer` that can only scroll sideways turns a vertical wheel turn into a
+  sideways scroll (`ScrollViewer::OnPointerWheelChanged` asks only whether the content is
+  scrollable on either axis), so over a theme row the Settings page stopped scrolling and
+  the row slid instead. There is no property to stop this on a ListView's ScrollViewer.
+- `ThemeGallery` listens for `PointerWheelChanged` on the element just inside the ListView's
+  ScrollViewer, which sees the event first. For a plain vertical wheel it sets the row's
+  `HorizontalScrollMode` to `Disabled`, re-enabling it on the dispatcher. The row then
+  reports nothing scrollable, leaves the event unhandled, and the page's ScrollViewer scrolls
+  with the system's wheel settings and animation; a hand-rolled `ChangeView` on the page
+  would not match either. Shift, a tilt wheel, and the wheel over the row's scroll bar still
+  scroll the row.
+- WinUI has no stock "scroll buttons" for a horizontal list, so each row has plain buttons
+  at its ends that page by the swatches fully in view. They are not tab stops: arrow keys
+  already move through the list.
