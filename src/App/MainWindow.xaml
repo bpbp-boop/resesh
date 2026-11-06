@@ -490,6 +490,39 @@
                 Background="{StaticResource SessionShellBrush}"
                 BorderBrush="{StaticResource SessionChromeFrameBrush}"
                 BorderThickness="0,0,1,0">
+                <!-- The pane toggle, tool tabs and Settings take the rail's text color like the
+                     workspace icons, rather than Fluent's grey, which only follows the theme
+                     when Windows controls are themed too. -->
+                <Border.Resources>
+                    <ResourceDictionary>
+                        <ResourceDictionary.ThemeDictionaries>
+                            <ResourceDictionary x:Key="Dark">
+                                <StaticResource x:Key="ButtonForeground" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="SessionTreeMutedForegroundBrush" />
+                                <StaticResource x:Key="NavigationViewItemForeground" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="NavigationViewItemForegroundPointerOver" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="NavigationViewItemForegroundPressed" ResourceKey="SessionTreeMutedForegroundBrush" />
+                                <StaticResource x:Key="NavigationViewItemForegroundSelected" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="NavigationViewItemForegroundSelectedPointerOver" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="NavigationViewItemForegroundSelectedPressed" ResourceKey="SessionTreeMutedForegroundBrush" />
+                            </ResourceDictionary>
+                            <ResourceDictionary x:Key="Light">
+                                <StaticResource x:Key="ButtonForeground" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="SessionTreeMutedForegroundBrush" />
+                                <StaticResource x:Key="NavigationViewItemForeground" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="NavigationViewItemForegroundPointerOver" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="NavigationViewItemForegroundPressed" ResourceKey="SessionTreeMutedForegroundBrush" />
+                                <StaticResource x:Key="NavigationViewItemForegroundSelected" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="NavigationViewItemForegroundSelectedPointerOver" ResourceKey="SessionTreeForegroundBrush" />
+                                <StaticResource x:Key="NavigationViewItemForegroundSelectedPressed" ResourceKey="SessionTreeMutedForegroundBrush" />
+                            </ResourceDictionary>
+                            <!-- High Contrast keeps the native system-color states. -->
+                            <ResourceDictionary x:Key="HighContrast" />
+                        </ResourceDictionary.ThemeDictionaries>
+                    </ResourceDictionary>
+                </Border.Resources>
                 <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
                     <Button
                         x:Name="SessionsPaneToggleButton"
