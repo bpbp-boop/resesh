@@ -179,7 +179,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private void SystemColorsChanged(UISettings sender, object args)
     {
-        DispatcherQueue.TryEnqueue(() =>
+        DispatcherQueue.TryPost(() =>
         {
             var isHighContrast = App.IsHighContrast;
             var highContrastChanged = isHighContrast != _isHighContrast;
@@ -539,7 +539,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     private void FocusTabContent(TabViewModel tab, bool userInitiated = false)
     {
         if (tab.View is TerminalTabView view)
-            DispatcherQueue.TryEnqueue(() =>
+            DispatcherQueue.TryPost(() =>
             {
                 if (ReferenceEquals(ViewModel.TryGroupOf(tab), ViewModel.FocusedGroup)
                     && (userInitiated || !IsTypingInSearch))
@@ -920,7 +920,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         if (!_quickConnectExpanded)
             return;
         // Focus can pass through the suggestion list; decide once it has settled.
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             if (!_quickConnectExpanded || QuickConnectHasFocus() || QuickConnectBox.IsSuggestionListOpen)
                 return;
@@ -1338,7 +1338,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     /// <summary>Runs a store follower once the write that raised it has finished. Stores
     /// announce from inside the writer's call, on its thread; a menu rebuilt there could
     /// land halfway through a workspace switch or a close, so followers wait their turn.</summary>
-    private void AfterWrite(Action follow) => DispatcherQueue.TryEnqueue(() =>
+    private void AfterWrite(Action follow) => DispatcherQueue.TryPost(() =>
     {
         if (!_windowClosed)
             follow();

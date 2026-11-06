@@ -195,7 +195,7 @@ public sealed unsafe partial class NativeTerminalSurface
                 return;
             _effectsPosted = true;
         }
-        if (!DispatcherQueue.TryEnqueue(ApplyPendingEffects))
+        if (!DispatcherQueue.TryPost(ApplyPendingEffects))
         {
             lock (_effectsGate)
                 _effectsPosted = false;

@@ -534,7 +534,7 @@ public sealed partial class TabGroupView : UserControl
     {
         // RequestedTheme can rebuild TabView after ApplyTheme returns. Run after that
         // layout pass so WinUI's hidden header width and presenter padding stay removed.
-        DispatcherQueue.TryEnqueue(() => DispatcherQueue.TryEnqueue(() =>
+        DispatcherQueue.TryPost(() => DispatcherQueue.TryPost(() =>
         {
             NormalizeTabStripTemplate();
             QueueTabWidthRefresh();
@@ -547,7 +547,7 @@ public sealed partial class TabGroupView : UserControl
         if (_tabWidthRefreshQueued)
             return;
 
-        _tabWidthRefreshQueued = DispatcherQueue.TryEnqueue(() =>
+        _tabWidthRefreshQueued = DispatcherQueue.TryPost(() =>
         {
             _tabWidthRefreshQueued = false;
             FindDescendant(Tabs, "TabsItemsPresenter")?.InvalidateMeasure();
@@ -564,7 +564,7 @@ public sealed partial class TabGroupView : UserControl
         if (_fullTabWidthRefreshQueued)
             return;
 
-        _fullTabWidthRefreshQueued = DispatcherQueue.TryEnqueue(() =>
+        _fullTabWidthRefreshQueued = DispatcherQueue.TryPost(() =>
         {
             _fullTabWidthRefreshQueued = false;
             // WinUI otherwise defers this full-width path until a pointer event.
@@ -581,7 +581,7 @@ public sealed partial class TabGroupView : UserControl
         if (_tabDividerRefreshQueued)
             return;
 
-        _tabDividerRefreshQueued = DispatcherQueue.TryEnqueue(() =>
+        _tabDividerRefreshQueued = DispatcherQueue.TryPost(() =>
         {
             _tabDividerRefreshQueued = false;
             UpdateTabStripDivider();
@@ -910,7 +910,7 @@ public sealed partial class TabGroupView : UserControl
     {
         if (_isParked || tab?.View is not Terminal.TerminalTabView view)
             return;
-        DispatcherQueue.TryEnqueue(() =>
+        DispatcherQueue.TryPost(() =>
         {
             if (!_isParked && ReferenceEquals(_host.ViewModel.FocusedGroup, Group)
                 && (userInitiated || view.IsFocusHeldElsewhere?.Invoke() != true))
@@ -1564,7 +1564,7 @@ public sealed partial class TabGroupView : UserControl
         // ends it first, otherwise (a cancelled drag, a drop outside every target) this
         // does. See DECISIONS.md, "Tab drags are one session with a deferred end".
         drag.Phase = TabDragPhase.Completing;
-        DispatcherQueue.TryEnqueue(() =>
+        DispatcherQueue.TryPost(() =>
         {
             if (ReferenceEquals(_drag, drag))
                 EndTabDrag();

@@ -156,7 +156,7 @@ public sealed partial class ThemeGallery : UserControl
             return;
         var mode = scroller.HorizontalScrollMode;
         scroller.HorizontalScrollMode = ScrollMode.Disabled;
-        DispatcherQueue.TryEnqueue(() => scroller.HorizontalScrollMode = mode);
+        DispatcherQueue.TryPost(() => scroller.HorizontalScrollMode = mode);
     }
 
     private static bool IsInScrollBar(DependencyObject? node, ScrollViewer scroller)

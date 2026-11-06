@@ -59,7 +59,7 @@ public sealed partial class NativeTerminalSurface
             if (e.IsContentChanging && !_composing && !_flushQueued)
             {
                 _flushQueued = true;
-                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, FlushTextInput);
+                DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, FlushTextInput);
             }
         };
         box.TextCompositionStarted += (_, _) =>
@@ -74,7 +74,7 @@ public sealed partial class NativeTerminalSurface
             box.Opacity = 0;
             // The committed text lands after this event.
             _flushQueued = true;
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, FlushTextInput);
+            DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.High, FlushTextInput);
         };
         GotFocus += (_, args) =>
         {

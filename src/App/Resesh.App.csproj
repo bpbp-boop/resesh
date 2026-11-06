@@ -71,6 +71,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- TryPost and OnTick, which every DispatcherQueue callback goes through. -->
+    <Using Include="Resesh.Terminal.DispatcherQueueReporting" Static="true" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- The terminal page's JS/HTML are copied in from Resesh.Terminal; VS's fast
          up-to-date check otherwise ignores edits to them. -->
     <UpToDateCheckInput Include="..\Terminal\wwwroot\**" />

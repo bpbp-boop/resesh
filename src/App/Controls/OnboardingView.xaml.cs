@@ -94,7 +94,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
     }
 
     // Identity changes can be raised off the UI thread.
-    private void OnStoreChanged() => DispatcherQueue.TryEnqueue(RefreshLogins);
+    private void OnStoreChanged() => DispatcherQueue.TryPost(RefreshLogins);
 
     /// <summary>Summarizes the identities in use, so the section reads as state, not only as advice.</summary>
     private void RefreshLogins()

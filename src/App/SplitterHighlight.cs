@@ -41,11 +41,11 @@ internal sealed class SplitterHighlight
         _hoverTimer = splitter.DispatcherQueue.CreateTimer();
         _hoverTimer.Interval = HoverDelay;
         _hoverTimer.IsRepeating = false;
-        _hoverTimer.Tick += (_, _) =>
+        _hoverTimer.OnTick(() =>
         {
             _hoverShown = _hovered;
             Update();
-        };
+        });
 
         splitter.PointerEntered += (_, _) =>
         {

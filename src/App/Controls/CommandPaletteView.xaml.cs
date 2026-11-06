@@ -45,7 +45,7 @@ public sealed partial class CommandPaletteView : UserControl
         SearchBox.Text = "";
         RefreshResults();
         Visibility = Visibility.Visible;
-        DispatcherQueue.TryEnqueue(() =>
+        DispatcherQueue.TryPost(() =>
         {
             SearchBox.Focus(FocusState.Programmatic);
             SearchBox.SelectAll();

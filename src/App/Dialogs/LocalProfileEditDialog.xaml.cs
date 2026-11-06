@@ -73,7 +73,7 @@ public sealed partial class LocalProfileEditDialog : ContentDialog
         if (initialTarget != SessionSettingsTarget.General)
             SectionBar.SelectedItem = AppearanceSection;
         DialogSizing.FitSections(this, ProfileForm, SectionHost, preferredWidth: 600, preferredHeight: 440);
-        Opened += (_, _) => DispatcherQueue.TryEnqueue(() => InitialFocus(initialTarget)?.Focus(FocusState.Programmatic));
+        Opened += (_, _) => DispatcherQueue.TryPost(() => InitialFocus(initialTarget)?.Focus(FocusState.Programmatic));
     }
 
     private Control? InitialFocus(SessionSettingsTarget target) => AppearanceForm.FocusTarget(target) ?? NameBox;

@@ -86,13 +86,13 @@ public sealed partial class AboutView : UserControl
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromSeconds(2);
         timer.IsRepeating = false;
-        timer.Tick += (_, _) =>
+        timer.OnTick(() =>
         {
             if (version != _copyFeedbackVersion)
                 return;
             CopyDetailsIcon.Glyph = "";
             CopyDetailsText.Text = "Copy details";
-        };
+        });
         timer.Start();
     }
 

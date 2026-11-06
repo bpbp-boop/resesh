@@ -313,7 +313,7 @@ test("live theme changes remove WinUI tab insets again after template rebuild", 
   assert.match(tabGroup, /private void NormalizeTabStripTemplate\(\)/);
   assert.match(tabGroup, /ActualThemeChanged \+= \(_, _\) => QueueTabTemplateRefresh\(\)/);
   assert.match(tabGroup, /QueueTabTemplateRefresh\(\)/);
-  assert.match(tabGroup, /DispatcherQueue\.TryEnqueue\(\(\) => DispatcherQueue\.TryEnqueue/);
+  assert.match(tabGroup, /DispatcherQueue\.TryPost\(\(\) => DispatcherQueue\.TryPost/);
 });
 
 test("live theme changes recolor both retained tab-row divider brushes", () => {

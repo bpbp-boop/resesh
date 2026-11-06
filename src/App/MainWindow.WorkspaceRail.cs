@@ -417,7 +417,7 @@ public sealed partial class MainWindow
         if (_railRefreshQueued)
             return;
         _railRefreshQueued = true;
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             _railRefreshQueued = false;
             RefreshWorkspaceRail();

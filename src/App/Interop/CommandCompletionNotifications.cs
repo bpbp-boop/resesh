@@ -145,7 +145,7 @@ internal static class CommandCompletionNotifications
                     return;
                 }
             }
-            var queued = _dispatcher?.TryEnqueue(() =>
+            var queued = _dispatcher?.TryPost(() =>
             {
                 try { target.Activate(); }
                 catch (Exception error) { Trace("activate", error); }

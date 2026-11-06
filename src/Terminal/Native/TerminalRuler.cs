@@ -71,7 +71,7 @@ internal sealed partial class TerminalRuler : Grid
         _hideTimer = DispatcherQueue.CreateTimer();
         _hideTimer.Interval = TimeSpan.FromMilliseconds(250);
         _hideTimer.IsRepeating = false;
-        _hideTimer.Tick += (_, _) => _card.Visibility = Visibility.Collapsed;
+        _hideTimer.OnTick(() => _card.Visibility = Visibility.Collapsed);
         Width = LaneWidth;
         Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); // hit-testable lane
         Children.Add(_ticks);

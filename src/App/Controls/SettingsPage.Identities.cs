@@ -28,7 +28,7 @@ public sealed partial class SettingsPage
 
     private void HookIdentityChanges()
     {
-        void OnChanged() => DispatcherQueue.TryEnqueue(() =>
+        void OnChanged() => DispatcherQueue.TryPost(() =>
         {
             if (IdentitiesSection.Visibility == Visibility.Visible)
                 RefreshIdentities();

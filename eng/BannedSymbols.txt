@@ -1,0 +1,3 @@
+M:Microsoft.UI.Dispatching.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueueHandler);Use TryPost: WinUI fails fast on a throwing callback without logging it (DispatcherQueueReporting)
+M:Microsoft.UI.Dispatching.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority,Microsoft.UI.Dispatching.DispatcherQueueHandler);Use TryPost: WinUI fails fast on a throwing callback without logging it (DispatcherQueueReporting)
+E:Microsoft.UI.Dispatching.DispatcherQueueTimer.Tick;Use OnTick: WinUI fails fast on a throwing tick without logging it (DispatcherQueueReporting)

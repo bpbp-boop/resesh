@@ -53,7 +53,7 @@ internal static class ModalDialogPresenter
                 dialog.RequestedTheme = owner.ActualTheme;
             // Cancellation can come from any thread; Hide must run on the dialog's.
             var dispatcher = dialog.DispatcherQueue;
-            using var hide = cancellationToken.Register(() => dispatcher.TryEnqueue(dialog.Hide));
+            using var hide = cancellationToken.Register(() => dispatcher.TryPost(dialog.Hide));
             try
             {
                 var result = await dialog.ShowAsync();

@@ -179,7 +179,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _terminal.OutputObserved += (data, unixMs) => _capture?.CaptureOutput(data, unixMs);
         _terminal.KeyframeCaptured += (state, cols, rows, unixMs) =>
             _capture?.CaptureKeyframe(state, cols, rows, unixMs);
-        _terminal.ReconnectRequested += () => DispatcherQueue.TryEnqueue(() => _ = ConnectAsync(isReconnect: true));
+        _terminal.ReconnectRequested += () => DispatcherQueue.TryPost(() => _ = ConnectAsync(isReconnect: true));
         // The page's terminal is constructed with these (init handshake), so it opens
         // with the right theme/fonts instead of restyling just after first paint.
         var initial = App.Settings.Current.WithOverrides(Session.Overrides);
@@ -195,22 +195,22 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
         // Queued, while Resized is not: a Resized handled before this runs has already sent
         // a newer size, so use the size now rather than the one Ready was raised with.
-        _terminal.Ready += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        _terminal.Ready += (_, _) => DispatcherQueue.TryPost(() =>
         {
             if (_disposed)
                 return;
             ResizeBackend(_terminal.Columns, _terminal.Rows);
             CaptureResize(_terminal.Columns, _terminal.Rows);
         });
-        _terminal.TitleChanged += title => DispatcherQueue.TryEnqueue(() => _tab.ApplyTerminalTitle(SplitTmuxStatus(title, out _)));
-        _terminal.CommandChanged += (text, exact) => DispatcherQueue.TryEnqueue(() => _tab.ApplyRunningCommand(text, exact));
-        _terminal.CommandExecutionChanged += execution => DispatcherQueue.TryEnqueue(() =>
+        _terminal.TitleChanged += title => DispatcherQueue.TryPost(() => _tab.ApplyTerminalTitle(SplitTmuxStatus(title, out _)));
+        _terminal.CommandChanged += (text, exact) => DispatcherQueue.TryPost(() => _tab.ApplyRunningCommand(text, exact));
+        _terminal.CommandExecutionChanged += execution => DispatcherQueue.TryPost(() =>
         {
             if (!_disposed && _tab.State == TabConnectionState.Connected)
                 _tab.ObserveCommandExecution(execution.Id, execution.CommandLine, execution.Completed, execution.ExitCode);
         });
         _terminal.PromptContextChanged += (context, platform) =>
-            DispatcherQueue.TryEnqueue(() =>
+            DispatcherQueue.TryPost(() =>
             {
                 _tab.ApplyPromptContext(context, platform);
                 ObservePrompt(context, platform);
@@ -219,18 +219,18 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             });
         // Every folder report goes through the one tracker, which checks its host and ranks
         // it by recency; the tab's subtitle and every folder reader take it from there.
-        _terminal.WorkingDirectoryReported += payload => DispatcherQueue.TryEnqueue(() =>
+        _terminal.WorkingDirectoryReported += payload => DispatcherQueue.TryPost(() =>
         {
             if (Osc7WorkingDirectoryParser.TryParse(payload, out var report) && report is not null)
                 ObserveWorkingDirectory(report);
         });
-        _terminal.WindowsWorkingDirectoryReported += payload => DispatcherQueue.TryEnqueue(() =>
+        _terminal.WindowsWorkingDirectoryReported += payload => DispatcherQueue.TryPost(() =>
         {
             // OSC 9;9 names a Windows folder: only this machine's shells send it.
             if (Session.IsLocal && Osc9WorkingDirectory.TryParse(payload, out var path))
                 ObserveWorkingDirectory(new Osc7WorkingDirectory(Environment.MachineName, path));
         });
-        _terminal.ContextReported += payload => DispatcherQueue.TryEnqueue(() =>
+        _terminal.ContextReported += payload => DispatcherQueue.TryPost(() =>
         {
             if (Osc3008ContextParser.TryParse(payload, out var context) && context is
                 { Action: Osc3008ContextAction.Start, Type: "shell" or "command", WorkingDirectory: not null })
@@ -240,8 +240,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             }
         });
         _terminal.ShortcutRequested += (id, chord) =>
-            DispatcherQueue.TryEnqueue(() => ShortcutRequested?.Invoke(id, chord));
-        _terminal.CommandsPanelOpenChanged += open => DispatcherQueue.TryEnqueue(() =>
+            DispatcherQueue.TryPost(() => ShortcutRequested?.Invoke(id, chord));
+        _terminal.CommandsPanelOpenChanged += open => DispatcherQueue.TryPost(() =>
         {
             IsCommandsPanelOpen = open;
             CommandsPanelOpenChanged?.Invoke();
@@ -250,12 +250,12 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         // the time its record arrives, a cd may already have moved the shell. The page sends
         // a finished command's record before it announces the next command, so this still
         // holds the right folder.
-        _terminal.CommandObserved += _ => DispatcherQueue.TryEnqueue(() =>
+        _terminal.CommandObserved += _ => DispatcherQueue.TryPost(() =>
         {
             _historyDirectory = _enterDirectory ?? CurrentHistoryDirectory();
             _enterDirectory = null;
         });
-        _terminal.CommandRecorded += record => DispatcherQueue.TryEnqueue(() => RecordHistory(record));
+        _terminal.CommandRecorded += record => DispatcherQueue.TryPost(() => RecordHistory(record));
 
         _agent = new AgentTracker(Session.Agent);
         WireAgentSignals();
@@ -295,13 +295,13 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _captureColumns = columns;
         _captureRows = rows;
         _capture.Changed += OnCaptureChanged;
-        _capture.RecordingChanged += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        _capture.RecordingChanged += (_, _) => DispatcherQueue.TryPost(() =>
         {
             SyncCaptureState();
             App.RefreshRecordingsInAllWindows(); // a recording appeared or was finished
         });
         // A write failure (a full disk, say) stops the recording but not the terminal.
-        _capture.RecordingFailed += (_, message) => DispatcherQueue.TryEnqueue(() =>
+        _capture.RecordingFailed += (_, message) => DispatcherQueue.TryPost(() =>
         {
             if (!_disposed)
                 _terminal.WriteNotice(message);
@@ -346,7 +346,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         if (_rewindAvailable == available)
             return;
         _rewindAvailable = available;
-        DispatcherQueue.TryEnqueue(SyncCaptureState);
+        DispatcherQueue.TryPost(SyncCaptureState);
     }
 
     private void SyncCaptureState()
@@ -514,10 +514,10 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _terminal.CommandChanged += (command, _) =>
         {
             if (command.Length == 0)
-                DispatcherQueue.TryEnqueue(ClearReportedProgress);
+                DispatcherQueue.TryPost(ClearReportedProgress);
         };
         _terminal.PromptContextChanged += (_, _) =>
-            DispatcherQueue.TryEnqueue(ClearReportedProgress);
+            DispatcherQueue.TryPost(ClearReportedProgress);
         _tab.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(TabViewModel.State) && _tab.State != TabConnectionState.Connected)
@@ -678,7 +678,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromSeconds(2);
         timer.IsRepeating = true;
-        timer.Tick += (_, _) => _ = PollLocalAgentProcessesAsync();
+        timer.OnTick(() => _ = PollLocalAgentProcessesAsync());
         return timer;
     }
 
@@ -876,7 +876,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             _terminal.WriteOutput(data);
             // Benign cross-thread reads: worst case is one redundant enqueue.
             if (!_tab.IsActive && !_tab.HasUnseenOutput)
-                DispatcherQueue.TryEnqueue(() =>
+                DispatcherQueue.TryPost(() =>
                 {
                     if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
                 });
@@ -927,7 +927,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
             var local = new LocalTerminalSession();
             FollowOutput(local, connection);
-            local.Exited += code => DispatcherQueue.TryEnqueue(() =>
+            local.Exited += code => DispatcherQueue.TryPost(() =>
             {
                 if (ConnectionEnded(connection, exited: true, exitCode: code))
                     _terminal.NotifyDisconnected($"Process exited with code {code}.", action: "restart", neutral: true);
@@ -987,7 +987,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 ended = true;
                 _terminal.NotifyDisconnected(message);
             }
-            telnet.Closed += ex => DispatcherQueue.TryEnqueue(() =>
+            telnet.Closed += ex => DispatcherQueue.TryPost(() =>
                 EndTelnet(ex is null ? "Connection closed by the remote host." : $"Connection lost: {ex.Message}"));
 
             var cols = _terminal.Columns;
@@ -1010,7 +1010,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 // TCP keepalive on telnet's socket only reaches the loopback forward, so a
                 // jump that dies is watched for on the jump itself.
                 if (via is not null)
-                    via.Lost += reason => DispatcherQueue.TryEnqueue(() =>
+                    via.Lost += reason => DispatcherQueue.TryPost(() =>
                     {
                         if (connection.Token.IsCancellationRequested) return;
                         if (!ReferenceEquals(_backend, telnet))
@@ -1116,13 +1116,13 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             {
                 HostKeyDecision = info => ConfirmHostKeyBlocking(info, dialling, connection.Token),
                 Connecting = host => dialling.Host = host,
-                ShellIntegrationNotice = message => uiDispatcher.TryEnqueue(() =>
+                ShellIntegrationNotice = message => uiDispatcher.TryPost(() =>
                 {
                     if (!_disposed && !connection.Token.IsCancellationRequested)
                         _terminal.WriteNotice(message);
                 }),
             };
-            session.TunnelChanged += status => uiDispatcher.TryEnqueue(() =>
+            session.TunnelChanged += status => uiDispatcher.TryPost(() =>
             {
                 if (_disposed || connection.Token.IsCancellationRequested) return;
                 // Tunnels saved with the session start before its shell; say how each went.
@@ -1133,7 +1133,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 TunnelsChanged?.Invoke();
             });
             FollowOutput(session, connection);
-            session.Closed += ex => DispatcherQueue.TryEnqueue(() =>
+            session.Closed += ex => DispatcherQueue.TryPost(() =>
             {
                 if (ConnectionEnded(connection))
                     _terminal.NotifyDisconnected(ex is null ? "Connection closed." : $"Connection lost: {ex.Message}");
@@ -1241,7 +1241,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             _credentials.WriteIdentity(identity.Id, update.Secret);
         else
             _pendingIdentitySecret = (identity.Id, update.Secret);
-        DispatcherQueue.TryEnqueue(() => _ = ConnectAsync(isReconnect: true));
+        DispatcherQueue.TryPost(() => _ = ConnectAsync(isReconnect: true));
     }
 
     /// <summary>Runs after SSH authentication and before the interactive shell opens.</summary>
@@ -1390,7 +1390,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         PersistenceBackend Fallback(string reason)
         {
             // In the window, not the terminal: the shell start that follows wipes the screen.
-            DispatcherQueue.TryEnqueue(() =>
+            DispatcherQueue.TryPost(() =>
             {
                 if (!_disposed && !token.IsCancellationRequested)
                     App.WindowFor(_tab)?.ShowOperationNotice(
@@ -1400,7 +1400,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             return PersistenceBackend.Tmux;
         }
 
-        void Notice(string message) => DispatcherQueue.TryEnqueue(() =>
+        void Notice(string message) => DispatcherQueue.TryPost(() =>
         {
             if (!_disposed && !token.IsCancellationRequested)
                 _terminal.WriteNotice(message);
@@ -1421,7 +1421,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         var count = TmuxPersistence.ParseManagedSessions(result.Output, Session.Id).Count;
         if (count == 0)
             return;
-        DispatcherQueue.TryEnqueue(() =>
+        DispatcherQueue.TryPost(() =>
         {
             if (!_disposed && !token.IsCancellationRequested)
                 App.WindowFor(_tab)?.ShowOperationNotice(
@@ -1434,7 +1434,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     private TmuxChoice SelectTmuxSessionBlocking(TmuxConnectPlan.Choose choose, CancellationToken token)
     {
         var tcs = new TaskCompletionSource<TmuxChoice?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!DispatcherQueue.TryEnqueue(async () =>
+        if (!DispatcherQueue.TryPost(async () =>
         {
             try
             {
@@ -1861,7 +1861,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     private T RunOnUiBlocking<T>(Func<Task<T>> work, CancellationToken token)
     {
         var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!DispatcherQueue.TryEnqueue(async () =>
+        if (!DispatcherQueue.TryPost(async () =>
         {
             try
             {
@@ -1902,7 +1902,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     private bool ConfirmHostKeyBlocking(HostKeyInfo info, Dialling dialling, CancellationToken token)
     {
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!DispatcherQueue.TryEnqueue(async () =>
+        if (!DispatcherQueue.TryPost(async () =>
         {
             try
             {
@@ -1922,7 +1922,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         IReadOnlyList<KeyboardInteractivePrompt> prompts, Dialling dialling, CancellationToken token)
     {
         var tcs = new TaskCompletionSource<IReadOnlyList<string>?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!DispatcherQueue.TryEnqueue(async () =>
+        if (!DispatcherQueue.TryPost(async () =>
         {
             try
             {
@@ -2018,7 +2018,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             catch (Exception exception) when (CommandHistoryStore.IsStorageFailure(exception))
             {
                 // Report once per tab; a full disk would otherwise raise a notice per command.
-                dispatcher.TryEnqueue(() =>
+                dispatcher.TryPost(() =>
                 {
                     if (_historyWriteFailed)
                         return;

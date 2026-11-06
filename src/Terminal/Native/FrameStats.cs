@@ -86,7 +86,7 @@ internal static class FrameStats
             while (true)
             {
                 var posted = Now();
-                queue.TryEnqueue(() =>
+                queue.TryPost(() =>
                 {
                     var ran = Now();
                     var line = string.Create(CultureInfo.InvariantCulture,

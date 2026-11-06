@@ -2603,3 +2603,21 @@ adapter report, not the session default or a pinned icon), the tab tells the sur
 - WinUI has no stock "scroll buttons" for a horizontal list, so each row has plain buttons
   at its ends that page by the swatches fully in view. They are not tab stops: arrow keys
   already move through the list.
+
+## 2026-11-07 - Dispatcher callbacks report their exceptions before WinUI fails fast
+
+- An exception thrown by a `DispatcherQueue.TryEnqueue` callback or a `DispatcherQueueTimer`
+  tick never reaches `Application.UnhandledException` or `AppDomain.UnhandledException`
+  (microsoft-ui-xaml#8940, open on Windows App SDK 2.4). CsWinRT turns it into an HRESULT,
+  and CoreMessagingXP fails fast with a stowed exception (`0xc000027b`). The event log names
+  `CoreMessagingXP.dll` and combase, the WER minidump holds neither the managed heap nor the
+  stowed record, and `crash.log` stays empty. A crash on a theme change (E_ACCESSDENIED) left
+  nothing to go on, and the WER archive held ~65 earlier crashes of the same shape.
+- Every callback goes through `DispatcherQueueReporting` (in Resesh.Terminal, so both
+  projects share it): `TryPost` and `OnTick`. An exception filter hands the exception to
+  `App.LogCrash` with the throwing frames still on it and never catches, so the process
+  still fails fast as before; this only adds the report. Keeping the app alive instead
+  would leave it in whatever half-applied state the callback threw from.
+- `eng/BannedSymbols.txt` (BannedApiAnalyzers, RS0030 as an error, imported through
+  `eng/WindowsAppSdk.props`) bans the raw `TryEnqueue` overloads and `Tick`. XAML's
+  `DispatcherTimer` is not affected: its ticks reach `Application.UnhandledException`.

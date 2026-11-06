@@ -49,11 +49,11 @@ public sealed partial class SettingsPage : UserControl
     {
         Show(SettingsCatalog.Of(target).Section);
         if (target == GlobalSettingsTarget.Sessions)
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, SessionsManager.FocusFilter);
+            DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, SessionsManager.FocusFilter);
         if (FieldOf(target) is not var (card, control))
             return;
         // The section was collapsed until now; place and focus after its first layout pass.
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             card.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0.3, AnimationDesired = false });
             control.Focus(FocusState.Programmatic);
@@ -154,7 +154,7 @@ public sealed partial class SettingsPage : UserControl
         if (section == SettingsSection.Sessions)
             SessionsManager.Refresh();
         if (section == SettingsSection.Theme)
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
                 FixedGallery.ScrollToSelection();
                 LightGallery.ScrollToSelection();

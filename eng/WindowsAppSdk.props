@@ -6,4 +6,15 @@
     <WindowsAppSdkWinUIVersion>2.3.6</WindowsAppSdkWinUIVersion>
     <WindowsAppSdkInteractiveExperiencesVersion>2.1.6</WindowsAppSdkInteractiveExperiencesVersion>
   </PropertyGroup>
+
+  <!-- WinUI fails fast, with nothing in crash.log, when a DispatcherQueue callback or timer tick
+       throws. Code goes through Resesh.Terminal.DispatcherQueueReporting, which logs first;
+       eng/BannedSymbols.txt makes the raw calls a build error. -->
+  <PropertyGroup>
+    <WarningsAsErrors>$(WarningsAsErrors);RS0030</WarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="4.14.0" PrivateAssets="all" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" />
+  </ItemGroup>
 </Project>

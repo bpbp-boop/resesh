@@ -114,6 +114,8 @@ public partial class App : Application
         };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => LogCrash(e.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, e) => LogCrash(e.Exception);
+        // WinUI raises neither event above for these; it fails fast (DispatcherQueueReporting).
+        Resesh.Terminal.DispatcherQueueReporting.UnhandledException = LogCrash;
     }
 
     private static Task? _settingsLoad;
@@ -315,10 +317,10 @@ public partial class App : Application
         Program.SetActivationTarget(this);
         // Registering for notification clicks takes ~70 ms of COM work; do it once the
         // first frame is up rather than before the window can appear.
-        _dispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, CommandCompletionNotifications.Register);
+        _dispatcherQueue.TryPost(DispatcherQueuePriority.Low, CommandCompletionNotifications.Register);
         // Every terminal compiles the highlight rules (20-30 ms); do it once, in the background,
         // so opening the first tab does not wait for it.
-        _dispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        _dispatcherQueue.TryPost(DispatcherQueuePriority.Low, () =>
         {
             var rules = Terminal.TerminalTabView.HighlightPayload(Highlights, null);
             _ = Task.Run(() => Resesh.Terminal.TerminalSurface.PrecompileHighlights(rules));
@@ -345,7 +347,7 @@ public partial class App : Application
     /// names sessions or recordings (a jump list item) opens them in the window used last.</summary>
     internal void HandleRedirectedActivation(IReadOnlyList<string> commandLine)
     {
-        _dispatcherQueue?.TryEnqueue(() =>
+        _dispatcherQueue?.TryPost(() =>
         {
             var request = LaunchRequest.Parse(commandLine);
             if (!request.OpensSomething || _lastActiveWindow is not { } window || !_windows.Contains(window))
@@ -381,7 +383,7 @@ public partial class App : Application
         if (Current is not App { _pinnedSessionsSaveQueued: false, _dispatcherQueue: { } queue } app)
             return;
         app._pinnedSessionsSaveQueued = true;
-        queue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        queue.TryPost(DispatcherQueuePriority.Low, () =>
         {
             app._pinnedSessionsSaveQueued = false;
             SavePinnedSessions();
@@ -419,7 +421,7 @@ public partial class App : Application
     internal static void RunOnUiThread(Action action)
     {
         if (_uiQueue is { HasThreadAccess: false } queue)
-            queue.TryEnqueue(() => action());
+            queue.TryPost(() => action());
         else
             action();
     }
@@ -552,7 +554,7 @@ public partial class App : Application
     {
         if (Current is not App app || app._jumpListQueued || !Program.UsesDefaultDataDirectory)
             return;
-        app._jumpListQueued = app._dispatcherQueue?.TryEnqueue(DispatcherQueuePriority.Low, app.UpdateJumpList) == true;
+        app._jumpListQueued = app._dispatcherQueue?.TryPost(DispatcherQueuePriority.Low, app.UpdateJumpList) == true;
     }
 
     private void UpdateJumpList()

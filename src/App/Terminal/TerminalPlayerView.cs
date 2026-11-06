@@ -81,7 +81,7 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
             scrollback: settings.Scrollback,
             readOnly: true);
         _terminal.ShortcutRequested += (id, chord) =>
-            DispatcherQueue.TryEnqueue(() => ShortcutRequested?.Invoke(id, chord));
+            DispatcherQueue.TryPost(() => ShortcutRequested?.Invoke(id, chord));
         _terminal.Ready += (_, _) =>
         {
             if (_ready || _disposed)
@@ -161,7 +161,7 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromMilliseconds(50);
         timer.IsRepeating = true;
-        timer.Tick += (_, _) => AdvancePlayback();
+        timer.OnTick(AdvancePlayback);
         return timer;
     }
 

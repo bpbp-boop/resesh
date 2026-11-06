@@ -102,7 +102,7 @@ public sealed partial class SessionsManagerView : UserControl
     {
         InitializeComponent();
         KindBox.SelectedIndex = 0;
-        void OnChanged() => DispatcherQueue.TryEnqueue(Refresh);
+        void OnChanged() => DispatcherQueue.TryPost(Refresh);
         Loaded += (_, _) =>
         {
             App.SessionsChanged += OnChanged;
@@ -384,7 +384,7 @@ public sealed partial class SessionsManagerView : UserControl
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromSeconds(6);
         timer.IsRepeating = false;
-        timer.Tick += (_, _) => Status.IsOpen = false;
+        timer.OnTick(() => Status.IsOpen = false);
         return timer;
     }
 

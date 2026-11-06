@@ -50,6 +50,10 @@ credentials or logs, use `.\demo.ps1` or pass `--data-dir <scratch folder>` to t
   and AOT analyzer warnings rather than suppressing them without a reason in a comment.
 - **XAML bindings** use `x:Bind`, not `{Binding}`. Types shown through `DisplayMemberPath` or
   other runtime binding need `[GeneratedBindableCustomProperty]`.
+- **Dispatcher callbacks** go through `TryPost` and `OnTick` (`DispatcherQueueReporting`), not
+  `DispatcherQueue.TryEnqueue` or `DispatcherQueueTimer.Tick`, which the build bans: WinUI
+  fails fast on an exception there without raising any unhandled-exception event, so only
+  the wrapper gets it into crash.log.
 - **Persisted JSON** goes through source-generated metadata in
   `src/Core/Storage/CoreJson.cs`. Register new persisted types on `CoreJsonContext`, add new
   enums to the camel-case enum converter's list, and use settable (not init-only) properties

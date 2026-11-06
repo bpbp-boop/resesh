@@ -73,7 +73,7 @@ public sealed partial class TabGroupView
     private void TabGroupView_Unloaded(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
     {
         StopDragScroll();
-        DispatcherQueue.TryEnqueue(() =>
+        DispatcherQueue.TryPost(() =>
         {
             if (VisualTreeHelper.GetParent(this) is not null)
                 return;
@@ -90,7 +90,7 @@ public sealed partial class TabGroupView
     /// keeps the preview it uses.</summary>
     private void Tabs_PointerCaptureLost(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
-        DispatcherQueue.TryEnqueue(() =>
+        DispatcherQueue.TryPost(() =>
         {
             if (_drag?.Source != this)
                 ResetTabDragPreview();
@@ -104,7 +104,7 @@ public sealed partial class TabGroupView
     {
         try
         {
-            return Interop.TearOffDropTarget.Show(App.WindowHandles, point => DispatcherQueue.TryEnqueue(() =>
+            return Interop.TearOffDropTarget.Show(App.WindowHandles, point => DispatcherQueue.TryPost(() =>
             {
                 if (ReferenceEquals(_drag, drag))
                     EndTabDrag();

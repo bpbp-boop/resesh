@@ -215,7 +215,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _flashTimer = DispatcherQueue.CreateTimer();
         _flashTimer.Interval = TimeSpan.FromMilliseconds(700);
         _flashTimer.IsRepeating = false;
-        _flashTimer.Tick += (_, _) => _flash.Visibility = Visibility.Collapsed;
+        _flashTimer.OnTick(() => _flash.Visibility = Visibility.Collapsed);
         _flash.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x47, 0xF2, 0xCC, 0x60));
         _flash.VerticalAlignment = VerticalAlignment.Top;
         // ValueChanged, not Scroll: Scroll fires only for pointer input, while keyboard and
@@ -229,12 +229,12 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _renderer.SwapChainChanged += OnRendererSwapChainChanged;
         _blinkTimer = DispatcherQueue.CreateTimer();
         _blinkTimer.Interval = TimeSpan.FromMilliseconds(BlinkMilliseconds);
-        _blinkTimer.Tick += (_, _) =>
+        _blinkTimer.OnTick(() =>
         {
             _cursorBlinkOn = !_cursorBlinkOn;
             MarkCursorDirty();
             RequestFrame();
-        };
+        });
 
         _panel.SizeChanged += (_, _) => Relayout();
         _panel.CompositionScaleChanged += (_, _) => Relayout();
@@ -512,7 +512,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             }
             var bytes = length == 0 ? [] : new ReadOnlySpan<byte>(data, checked((int)length)).ToArray();
             // Raised on the UI thread.
-            self.DispatcherQueue.TryEnqueue(() => self.DispatchNativeEvent((GhosttyEventKind)kind, bytes));
+            self.DispatcherQueue.TryPost(() => self.DispatchNativeEvent((GhosttyEventKind)kind, bytes));
         }
         catch (Exception exception)
         {
@@ -782,7 +782,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         if (_disposed)
             return;
         ForceFull();
-        DispatcherQueue.TryEnqueue(() =>
+        DispatcherQueue.TryPost(() =>
         {
             if (_disposed)
                 return;
@@ -965,7 +965,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _focused = focused;
         // Settles first: focus moving between the surface, its text box and the find field
         // raises a lost/got pair that is not a focus change for the program.
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ReportFocus);
+        DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, ReportFocus);
         _cursorBlinkOn = true;
         if (!focused) _suppressedKey.Clear();
         MarkCursorDirty();
@@ -1589,7 +1589,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         {
             _autoscrollTimer = DispatcherQueue.CreateTimer();
             _autoscrollTimer.Interval = TimeSpan.FromMilliseconds(50);
-            _autoscrollTimer.Tick += (_, _) =>
+            _autoscrollTimer.OnTick(() =>
             {
                 if (!_selecting || _autoscroll == 0 || _term == IntPtr.Zero)
                 {
@@ -1599,7 +1599,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
                 GhosttyNative.rvt_scroll(_term, GhosttyNative.ScrollDelta, _autoscroll == 1 ? -1 : 1);
                 var edge = (CellAt(_lastPointer.X, 0).X, _autoscroll == 1 ? 0 : Rows - 1);
                 Gesture(GestureKind.AutoscrollTick, _lastPointer, edge);
-            };
+            });
         }
         if (!_autoscrollTimer.IsRunning)
             _autoscrollTimer.Start();
@@ -1800,14 +1800,14 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
                 var timer = DispatcherQueue.CreateTimer();
                 timer.Interval = delay;
                 timer.IsRepeating = false;
-                timer.Tick += (_, _) =>
+                timer.OnTick(() =>
                 {
                     timer.Stop();
                     if (_disposed || _commands is null || _commandBuffer != commandBuffer)
                         return;
                     _commandBuffer?.Refresh();
                     action();
-                };
+                });
                 timer.Start();
             },
         };
@@ -1873,7 +1873,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             {
                 _annotationTimer = DispatcherQueue.CreateTimer();
                 _annotationTimer.IsRepeating = false;
-                _annotationTimer.Tick += (_, _) => EnqueueAnnotations();
+                _annotationTimer.OnTick(EnqueueAnnotations);
             }
             _annotationTimer.Interval = TimeSpan.FromMilliseconds(wait);
             _annotationTimer.Start();
@@ -1886,7 +1886,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     /// QueueAnnotations would wait forever for a pass that never runs.</summary>
     private void EnqueueAnnotations()
     {
-        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RunAnnotations))
+        if (!DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RunAnnotations))
             _annotationsPending = false;
     }
 
@@ -1937,7 +1937,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     {
         if (_disposed || Interlocked.Exchange(ref _rulerRefreshPosted, 1) == 1)
             return;
-        if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        if (!DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
                 Volatile.Write(ref _rulerRefreshPosted, 0);
                 UpdateRuler();
@@ -2006,7 +2006,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _toastTimer = DispatcherQueue.CreateTimer();
             _toastTimer.Interval = TimeSpan.FromMilliseconds(1200);
             _toastTimer.IsRepeating = false;
-            _toastTimer.Tick += (_, _) => _toast.Visibility = Visibility.Collapsed;
+            _toastTimer.OnTick(() => _toast.Visibility = Visibility.Collapsed);
         }
         label.Text = text;
         _toast.Visibility = Visibility.Visible;
