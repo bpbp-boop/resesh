@@ -10,6 +10,10 @@ public enum GlobalSettingsTarget
 {
     General,
     Theme,
+    Appearance,
+    LightTheme,
+    DarkTheme,
+    ThemeColors,
     FontFamily,
     FallbackFonts,
     FontSize,
@@ -46,6 +50,7 @@ public enum GlobalSettingsTarget
 public enum SettingsSection
 {
     General,
+    Theme,
     Sessions,
     Identities,
     Recording,
@@ -78,6 +83,7 @@ public static class SettingsCatalog
 
     public static string SectionTitle(SettingsSection section) => section switch
     {
+        SettingsSection.Theme => "Theme",
         SettingsSection.Sessions => "Sessions",
         SettingsSection.Identities => "Identities & Keys",
         SettingsSection.Recording => "Recording",
@@ -101,7 +107,11 @@ public static class SettingsCatalog
     [
         new(GlobalSettingsTarget.General, SettingsSection.General, null, "Open Settings", "preferences options", ShortcutIds.Settings),
         new(GlobalSettingsTarget.Sessions, SettingsSection.Sessions, null, "Manage Sessions", "bulk edit move duplicate delete identity sort filter"),
-        new(GlobalSettingsTarget.Theme, SettingsSection.General, nameof(AppSettings.Theme), "Theme", "appearance color scheme"),
+        new(GlobalSettingsTarget.Theme, SettingsSection.Theme, null, "Theme Settings", "appearance color scheme palette colors"),
+        new(GlobalSettingsTarget.Appearance, SettingsSection.Theme, nameof(AppSettings.Appearance), "Appearance (Light, Dark or Windows)", "theme mode light dark system windows color"),
+        new(GlobalSettingsTarget.LightTheme, SettingsSection.Theme, nameof(AppSettings.LightTheme), "Light Theme", "color scheme palette light mode appearance"),
+        new(GlobalSettingsTarget.DarkTheme, SettingsSection.Theme, nameof(AppSettings.DarkTheme), "Dark Theme", "color scheme palette dark mode appearance"),
+        new(GlobalSettingsTarget.ThemeColors, SettingsSection.Theme, nameof(AppSettings.ThemeColors), "Color the App With the Theme", "accent color menus text controls icons windows blue everything"),
         new(GlobalSettingsTarget.FontFamily, SettingsSection.General, nameof(AppSettings.FontFamily), "Terminal Font Family", "appearance typeface"),
         new(GlobalSettingsTarget.FallbackFonts, SettingsSection.General, nameof(AppSettings.FontFamily), "Fallback Fonts", "appearance typeface nerd font icons glyphs missing characters"),
         new(GlobalSettingsTarget.ShowStatusBar, SettingsSection.General, nameof(AppSettings.ShowStatusBar), "Status Bar", "appearance interface bottom chrome"),
@@ -147,6 +157,7 @@ public static class SettingsCatalog
         [nameof(AppSettings.SessionsRailTab)] = "Window state, from the sessions rail.",
         [nameof(AppSettings.OnboardingCompleted)] = "Set by finishing Welcome.",
         [nameof(AppSettings.DefaultLocalProfileId)] = "Chosen in the local profile editor (Make default).",
+        [nameof(AppSettings.LegacyTheme)] = "Read from older settings files and moved into Appearance, LightTheme and DarkTheme.",
     };
 }
 

@@ -168,7 +168,7 @@ public abstract partial class TerminalSurface : Grid, IDisposable
     public abstract void SetInitialOptions(
         int fontSize,
         string fontFamily,
-        string theme,
+        Native.TerminalTheme theme,
         bool copyOnSelect,
         bool rightClickPaste,
         int scrollback,
@@ -178,7 +178,7 @@ public abstract partial class TerminalSurface : Grid, IDisposable
     public abstract void ApplyOptions(
         int? fontSize = null,
         string? fontFamily = null,
-        string? theme = null,
+        Native.TerminalTheme? theme = null,
         bool? copyOnSelect = null,
         bool? rightClickPaste = null,
         int? scrollback = null);

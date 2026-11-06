@@ -33,8 +33,8 @@ internal sealed record ThemeChrome(uint Strip, uint Divider)
 
 internal static class ThemeChromes
 {
-    /// <summary>One entry per fixed theme in <see cref="ThemeCatalog"/>; System resolves to
-    /// Light or Dark first.</summary>
+    /// <summary>One entry per built-in theme in <see cref="ThemeCatalog"/>, tuned by hand.
+    /// Collection themes take theirs from <see cref="Derive"/>.</summary>
     public static IReadOnlyDictionary<string, ThemeChrome> ById { get; } =
         new Dictionary<string, ThemeChrome>(StringComparer.OrdinalIgnoreCase)
         {
@@ -80,7 +80,25 @@ internal static class ThemeChromes
             },
         };
 
-    /// <summary>The chrome for <paramref name="id"/>, or the default theme's.</summary>
-    public static ThemeChrome Find(string? id) =>
-        id is not null && ById.TryGetValue(id, out var chrome) ? chrome : ById[ThemeIds.Default];
+    /// <summary>The chrome for <paramref name="id"/>, or the default theme's for an unknown id.</summary>
+    public static ThemeChrome Find(string? id)
+    {
+        var theme = ThemeCatalog.Find(id);
+        return ById.TryGetValue(theme.Id, out var chrome) ? chrome : Derive(theme.Palette);
+    }
+
+    /// <summary>Chrome from the terminal palette alone. The strip sits a step darker than the
+    /// terminal, as the built-ins' do, except on a near-black background, where it steps
+    /// toward the text instead; dividers lie a sixth of the way to the text (darker on light
+    /// themes, whose text may be colored).</summary>
+    internal static ThemeChrome Derive(ThemePalette palette)
+    {
+        var background = palette.Background;
+        if (ColorMath.RelativeLuminance(background) > 0.5)
+            return new(ColorMath.Mix(background, 0x000000, 0.05), ColorMath.Mix(background, 0x000000, 0.15));
+        var strip = ColorMath.RelativeLuminance(background) < 0.01
+            ? ColorMath.Mix(background, palette.Foreground, 0.06)
+            : ColorMath.Mix(background, 0x000000, 0.25);
+        return new(strip, ColorMath.Mix(background, palette.Foreground, 0.16));
+    }
 }

@@ -70,18 +70,18 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var appTheme = App.ResolveTheme(App.Settings.Current.Theme);
+        var appTheme = App.CurrentTheme;
         var settings = App.Settings.Current.WithOverrides(_overrides());
         _terminal.SetInitialOptions(
             fontSize ?? settings.FontSize,
             settings.FontFamily,
-            App.ResolveTheme(settings.Theme),
+            App.TerminalTheme(App.ResolveTheme(_overrides().EffectiveTheme(appTheme))),
             copyOnSelect: true,
             rightClickPaste: false,
             scrollback: settings.Scrollback,
             readOnly: true);
         _terminal.ShortcutRequested += (id, chord) =>
-            DispatcherQueue.TryEnqueue(() => ShortcutRequested?.Invoke(id, chord));
+            DispatcherQueue.TryPost(() => ShortcutRequested?.Invoke(id, chord));
         _terminal.Ready += (_, _) =>
         {
             if (_ready || _disposed)
@@ -161,7 +161,7 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromMilliseconds(50);
         timer.IsRepeating = true;
-        timer.Tick += (_, _) => AdvancePlayback();
+        timer.OnTick(AdvancePlayback);
         return timer;
     }
 
@@ -295,7 +295,7 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
             return;
         theme = App.ResolveTheme(theme);
         _controls.Background = new SolidColorBrush(ThemeVisualPalette.For(theme).InactiveTab);
-        _terminal.ApplyOptions(theme: App.ResolveTheme(_overrides()?.Theme ?? theme));
+        _terminal.ApplyOptions(theme: App.TerminalTheme(App.ResolveTheme(_overrides().EffectiveTheme(theme))));
     }
 
     /// <summary>Applies font and scrollback settings, with the session's overrides on top.</summary>

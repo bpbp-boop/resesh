@@ -186,7 +186,7 @@ public sealed partial class HistoryView
         _suppressCompareEvents = false;
         BuildKeyHints();
         _ = RefreshComparisonAsync(older, newer);
-        DispatcherQueue.TryEnqueue(() => CompareBackButton.Focus(FocusState.Programmatic));
+        DispatcherQueue.TryPost(() => CompareBackButton.Focus(FocusState.Programmatic));
     }
 
     private void ExitCompare()
@@ -199,7 +199,7 @@ public sealed partial class HistoryView
         ApplyModeVisibility();
         BuildKeyHints();
         if (IsOpen)
-            DispatcherQueue.TryEnqueue(() => SearchBox.Focus(FocusState.Programmatic));
+            DispatcherQueue.TryPost(() => SearchBox.Focus(FocusState.Programmatic));
     }
 
     private void CompareBack_Click(object sender, RoutedEventArgs e) => ExitCompare();

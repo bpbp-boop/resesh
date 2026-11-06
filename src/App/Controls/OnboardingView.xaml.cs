@@ -52,8 +52,6 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         Unloaded += (_, _) => HookStoreChanges(false);
     }
 
-    private string SelectedTheme => _choices.Shown.Theme;
-
     /// <summary>Re-reads the saved settings after Settings, in any window, changed them. A
     /// setting changed there replaces what was picked here; the other picks stay.</summary>
     public void Refresh(AppSettings saved)
@@ -96,7 +94,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
     }
 
     // Identity changes can be raised off the UI thread.
-    private void OnStoreChanged() => DispatcherQueue.TryEnqueue(RefreshLogins);
+    private void OnStoreChanged() => DispatcherQueue.TryPost(RefreshLogins);
 
     /// <summary>Summarizes the identities in use, so the section reads as state, not only as advice.</summary>
     private void RefreshLogins()
@@ -137,7 +135,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
     public void CancelPreview()
     {
         if (!_completed && _choices.PreviewsTheme)
-            _previewTheme(App.Settings.Current.Theme);
+            _previewTheme(App.CurrentTheme);
     }
 
     public void Dispose()
@@ -298,16 +296,22 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         }
     }
 
-    private void LightTheme_Click(object sender, RoutedEventArgs e) => SelectTheme(ThemeIds.Light);
+    private static readonly IReadOnlyList<ThemeChoice> LightThemes = [.. ThemeCatalog.All.Where(theme => theme.IsLight)];
+    private static readonly IReadOnlyList<ThemeChoice> DarkThemes = [.. ThemeCatalog.All.Where(theme => !theme.IsLight)];
 
-    private void DarkTheme_Click(object sender, RoutedEventArgs e) => SelectTheme(ThemeIds.Dark);
+    private void SystemTheme_Click(object sender, RoutedEventArgs e) =>
+        Choose(_choices.Shown with { Appearance = ThemeAppearances.System });
 
-    private void SystemTheme_Click(object sender, RoutedEventArgs e) => SelectTheme(ThemeIds.System);
+    /// <summary>Leaving System keeps the theme drawn now, as Settings does.</summary>
+    private void FixedTheme_Click(object sender, RoutedEventArgs e) =>
+        Choose(_choices.Shown.Appearance == ThemeAppearances.System
+            ? _choices.Shown.WithFixedTheme(_choices.Shown.ThemeFor(App.SystemIsLight()))
+            : _choices.Shown);
 
-    private void SelectTheme(string theme)
+    private void Choose(WelcomeValues shown)
     {
-        _choices.Choose(_choices.Shown with { Theme = theme });
-        _previewTheme(theme);
+        _choices.Choose(shown);
+        _previewTheme(shown.ThemeFor(App.SystemIsLight()));
         UpdateThemeSelection();
         UpdateSaveButtonState();
     }
@@ -316,39 +320,27 @@ public sealed partial class OnboardingView : UserControl, IDisposable
     {
         var wasUpdating = _updatingThemeUi;
         _updatingThemeUi = true;
-        var isSystem = ThemeCatalog.IsSystem(SelectedTheme);
-        var isLight = !isSystem && ThemeCatalog.IsLight(SelectedTheme);
-        LightThemeToggle.IsChecked = isLight;
-        DarkThemeToggle.IsChecked = !isSystem && !isLight;
+        var shown = _choices.Shown;
+        var isSystem = shown.Appearance == ThemeAppearances.System;
+        var resolved = shown.ThemeFor(App.SystemIsLight());
+        var isLight = ThemeCatalog.IsLight(resolved);
         SystemThemeToggle.IsChecked = isSystem;
+        FixedThemeToggle.IsChecked = !isSystem;
 
-        // Mode is a shortcut, not a second persisted setting. Light and Dark filter
-        // the exact palette choices. Selecting a palette owns the mode. System owns
-        // the palette and disables the fixed-theme picker while it follows Windows.
+        // Theme lists every theme (with a light/dark filter) and fixes the one picked. System
+        // lists the themes of the mode Windows is in and sets that mode's; the other mode's
+        // theme stays as it was.
+        ThemeFilter.ShowModes = !isSystem;
+        var choices = !isSystem ? ThemeCatalog.All : isLight ? LightThemes : DarkThemes;
+        if (!ReferenceEquals(ThemePicker.Themes, choices))
+            ThemePicker.Themes = choices;
+        ThemePicker.SelectedTheme = ThemeCatalog.Find(resolved);
+
+        ApplyPagePalette(ThemeVisualPalette.For(resolved));
         if (isSystem)
         {
-            ThemePicker.ItemsSource = new[] { ThemeCatalog.Find(ThemeIds.System) };
-            ThemePicker.SelectedIndex = 0;
-            ThemePicker.IsEnabled = false;
-        }
-        else
-        {
-            var choices = ThemeCatalog.All
-                .Where(theme => theme.Id != ThemeIds.System && theme.IsLight == isLight)
-                .ToList();
-            ThemePicker.ItemsSource = choices;
-            ThemePicker.SelectedItem = choices.FirstOrDefault(theme =>
-                string.Equals(theme.Id, SelectedTheme, StringComparison.OrdinalIgnoreCase));
-            ThemePicker.IsEnabled = true;
-        }
-
-        var resolved = App.ResolveTheme(SelectedTheme);
-        var palette = ThemeVisualPalette.For(resolved);
-        ApplyPagePalette(palette);
-        if (isSystem)
-        {
-            var currentMode = resolved == ThemeIds.Light ? "Light" : "Dark";
-            SystemThemeHint.Text = $"System follows your Windows color mode (currently {currentMode}). Choose Light or Dark to select a fixed color theme.";
+            SystemThemeHint.Text = $"System follows your Windows color mode (currently {(isLight ? "Light" : "Dark")}), "
+                + $"and this picks the {(isLight ? "light" : "dark")} theme. Choose both in {SettingsCatalog.PathTo(SettingsSection.Theme)}.";
             SystemThemeHint.Visibility = Visibility.Visible;
         }
         else
@@ -358,11 +350,16 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         _updatingThemeUi = wasUpdating;
     }
 
-    private void ThemePicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void ThemePicker_SelectionChanged(object? sender, ThemeChoice theme)
     {
-        if (!_updatingThemeUi && ThemePicker.SelectedItem is ThemeChoice theme)
-            SelectTheme(theme.Id);
+        if (_updatingThemeUi)
+            return;
+        Choose(_choices.Shown.Appearance == ThemeAppearances.System
+            ? _choices.Shown.WithModeTheme(theme.Id)
+            : _choices.Shown.WithFixedTheme(theme.Id));
     }
+
+    private void ThemeFilter_QueryChanged(object? sender, EventArgs e) => ThemePicker.Query = ThemeFilter.Query;
 
     private void PreferenceToggle_Toggled(object sender, RoutedEventArgs e)
     {
@@ -389,11 +386,13 @@ public sealed partial class OnboardingView : UserControl, IDisposable
 
     private void ApplyPagePalette(ThemeVisualPalette palette)
     {
-        var primary = EnsureContrast(palette.TreeForeground, palette.Shell, 4.5);
-        var secondary = EnsureContrast(palette.TreeMutedForeground, palette.Shell, 4.5);
-        var accentText = EnsureContrast(palette.Accent, palette.Shell, 4.5);
+        // The page sits on the selected tab's color (SessionPageBrush), so contrast is measured there.
+        var page = palette.ActiveTab;
+        var primary = EnsureContrast(palette.TreeForeground, page, 4.5);
+        var secondary = EnsureContrast(palette.TreeMutedForeground, page, 4.5);
+        var accentText = EnsureContrast(palette.Accent, page, 4.5);
         var accentForeground = BetterContrast(Microsoft.UI.Colors.Black, Microsoft.UI.Colors.White, palette.Accent);
-        var previewBorder = EnsureContrast(palette.Frame, palette.Shell, 3.0);
+        var previewBorder = EnsureContrast(palette.Frame, page, 3.0);
 
         SetBrush("OnboardingPrimaryTextBrush", primary);
         SetBrush("OnboardingSecondaryTextBrush", secondary);

@@ -351,6 +351,7 @@ public static class SessionsBackup
 
             var settings = ReadOptional<AppSettings>(zip, "settings.json") ?? new AppSettings();
             SettingsStore.Validate(settings);
+            settings = settings.WithLegacyTheme();
             var knownHosts = KnownHostsStore.Validate(
                 ReadOptional<Dictionary<string, KnownHostEntry>>(zip, "known_hosts.json") ?? []);
             var highlights = ReadOptional<HighlightBackupData>(zip, "highlights.json") ?? new HighlightBackupData();

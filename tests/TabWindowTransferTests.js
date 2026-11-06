@@ -71,7 +71,7 @@ test("a tab drag is one session that ends when its source leaves the tree", () =
 
   // A source unloaded (and still out of the tree a turn later) or parked ends its drag.
   const unloaded = tabDrag.match(/private void TabGroupView_Unloaded[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
-  assert.match(unloaded, /DispatcherQueue\.TryEnqueue[\s\S]*?VisualTreeHelper\.GetParent\(this\) is not null[\s\S]*?_drag\?\.Source == this[\s\S]*?EndTabDrag\(\)/);
+  assert.match(unloaded, /DispatcherQueue\.TryPost[\s\S]*?VisualTreeHelper\.GetParent\(this\) is not null[\s\S]*?_drag\?\.Source == this[\s\S]*?EndTabDrag\(\)/);
   assert.match(unloaded, /ReleaseTabStripHolds\(\)/);
   assert.match(tabGroup, /Unloaded \+= TabGroupView_Unloaded;/);
   assert.match(tabGroup, /PointerCaptureLostEvent, new PointerEventHandler\(Tabs_PointerCaptureLost\), true/);
@@ -82,7 +82,7 @@ test("a tab drag is one session that ends when its source leaves the tree", () =
   // completing, for one dispatcher turn, and only that same session is ended then.
   const completed = tabGroup.match(/private void Tabs_TabDragCompleted[\s\S]*?\n    }\r?\n/)?.[0] ?? "";
   assert.match(completed, /drag\.Phase = TabDragPhase\.Completing;/);
-  assert.match(completed, /DispatcherQueue\.TryEnqueue\([\s\S]*?ReferenceEquals\(_drag, drag\)[\s\S]*?EndTabDrag\(\)/);
+  assert.match(completed, /DispatcherQueue\.TryPost\([\s\S]*?ReferenceEquals\(_drag, drag\)[\s\S]*?EndTabDrag\(\)/);
 
   // Held widths and pending slides are released when the strip leaves the screen.
   const release = tabMotion.match(/private void ReleaseTabStripHolds\(\)[\s\S]*?\n    }\r?\n/)?.[0] ?? "";

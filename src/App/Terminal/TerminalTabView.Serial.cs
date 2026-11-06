@@ -27,7 +27,7 @@ public sealed partial class TerminalTabView
 
             var serial = new SerialTerminalSession();
             FollowOutput(serial, connection);
-            serial.Closed += ex => DispatcherQueue.TryEnqueue(() =>
+            serial.Closed += ex => DispatcherQueue.TryPost(() =>
             {
                 if (!ConnectionEnded(connection)) return;
                 if (SerialPortList.Exists(portName))
@@ -73,7 +73,7 @@ public sealed partial class TerminalTabView
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = SerialPortPollInterval;
         var checking = false;
-        timer.Tick += async (_, _) =>
+        timer.OnTick(async () =>
         {
             if (_disposed || connection.Token.IsCancellationRequested || _tab.State != TabConnectionState.Disconnected)
             {
@@ -97,7 +97,7 @@ public sealed partial class TerminalTabView
                 return;
             StopSerialPortWatch();
             await ConnectAsync(isReconnect: true);
-        };
+        });
         _serialPortWatch = timer;
         timer.Start();
     }

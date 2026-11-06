@@ -195,7 +195,7 @@ public sealed unsafe partial class NativeTerminalSurface
                 return;
             _effectsPosted = true;
         }
-        if (!DispatcherQueue.TryEnqueue(ApplyPendingEffects))
+        if (!DispatcherQueue.TryPost(ApplyPendingEffects))
         {
             lock (_effectsGate)
                 _effectsPosted = false;
@@ -346,7 +346,7 @@ public sealed unsafe partial class NativeTerminalSurface
             return effects;
 
         var drawStart = FrameStats.Enabled ? FrameStats.Now() : 0;
-        if (!_renderer.Draw(_cells, Columns, Rows, _dirty, info, _cursorBlinkOn, _focused, _theme.Selection, full))
+        if (!_renderer.Draw(_cells, Columns, Rows, _dirty, info, _cursorBlinkOn, _focused, _theme.Selection, _theme.SelectionForeground, full))
         {
             ForceFull(); // recovery needs a full frame
             return effects;

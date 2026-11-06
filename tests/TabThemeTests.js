@@ -19,12 +19,6 @@ const visualPalette = fs.readFileSync(
 const appXaml = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "App.xaml"),
   "utf8");
-const terminalSurface = fs.readFileSync(
-  path.join(__dirname, "..", "src", "Terminal", "TerminalSurface.cs"),
-  "utf8");
-const terminalTab = fs.readFileSync(
-  path.join(__dirname, "..", "src", "App", "Terminal", "TerminalTabView.cs"),
-  "utf8");
 
 test("tab colors use the live saved theme instead of the launch-only application theme", () => {
   assert.match(viewModel, /_appTheme = environment\.ResolveTheme\(environment\.CurrentTheme\(\)\)/);
@@ -49,7 +43,7 @@ test("a selected tab in an unfocused split keeps the active surface and gains an
 test("a focused selected tab border follows its session color", () => {
   // Session color wins; otherwise the theme's accent, which defaults to the stock blue.
   assert.match(presentation, /FocusedTabBorderColor\(string appTheme, string\? colorTag\)[\s\S]*?parsed\.A > 0 \? parsed : palette\.Accent/);
-  assert.match(visualPalette, /Accent: chrome\.Accent is \{ \} accent \? Hex\(accent\) : DefaultAccent/);
+  assert.match(visualPalette, /Accent: accent is \{ \} picked \? Hex\(picked\) : DefaultAccent/);
   assert.match(visualPalette, /Resources\["SessionDefaultAccentColor"\]/);
   assert.match(appXaml, /<Color x:Key="SessionDefaultAccentColor">#0078D4<\/Color>/);
   assert.match(xaml, /FocusedAccentVisibility\(IsActive, IsGroupFocused\)[\s\S]*?FocusedTabBorderColor\(TabTheme, ColorTag\)/);

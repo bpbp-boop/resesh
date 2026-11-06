@@ -64,16 +64,35 @@ public partial class App : Application
     public static bool IsSessionVisible(Session session) =>
         !session.IsLocal || !session.BuiltIn || AvailableLocalShells.Contains(session.Id);
 
-    /// <summary>Resolves the System choice to the Windows color mode used right now.</summary>
-    public static string ResolveTheme(string? theme)
+    /// <summary>Whether Windows is in light mode right now (its default app background is light).</summary>
+    public static bool SystemIsLight()
     {
-        if (!ThemeCatalog.IsSystem(theme))
-            return ThemeCatalog.Find(theme).Id;
-
         var background = new UISettings().GetColorValue(UIColorType.Background);
         var luminance = (0.2126 * background.R) + (0.7152 * background.G) + (0.0722 * background.B);
-        return luminance >= 128 ? ThemeIds.Light : ThemeIds.Dark;
+        return luminance >= 128;
     }
+
+    /// <summary>The theme the app draws with now: the saved light or dark theme, as the saved
+    /// appearance and (for System) the Windows color mode pick.</summary>
+    public static string CurrentTheme => Settings.Current.ThemeFor(SystemIsLight());
+
+    /// <summary>A theme id as a known one. "system", which older session overrides can hold,
+    /// is the app's current theme.</summary>
+    public static string ResolveTheme(string? theme) =>
+        ThemeCatalog.IsSystem(theme) ? CurrentTheme : ThemeCatalog.Find(theme).Id;
+
+    /// <summary>The terminal colors for a resolved theme id.</summary>
+    public static Resesh.Terminal.Native.TerminalTheme TerminalTheme(string theme)
+    {
+        var palette = ThemeCatalog.Find(theme).Palette;
+        return new(palette.Background, palette.Foreground, palette.Cursor, palette.Selection,
+            palette.SelectionForeground, [.. palette.Ansi]);
+    }
+
+    /// <summary>Adds the theme's brushes for the standard controls when the theme colors
+    /// setting is Everything (never in High Contrast), or removes them; returns their version.</summary>
+    public static int SyncFluentThemeColors() => FluentThemeColors.Install(
+        !IsHighContrast && ThemeColorModes.Normalize(Settings.Current.ThemeColors) == ThemeColorModes.Everything);
 
     public App()
     {
@@ -82,7 +101,7 @@ public partial class App : Application
 
         // Application-level theme must be set before any UI exists; it also themes
         // popups/dialogs, which don't inherit element-level RequestedTheme.
-        RequestedTheme = ThemeCatalog.IsLight(ResolveTheme(Settings.Current.Theme))
+        RequestedTheme = ThemeCatalog.IsLight(CurrentTheme)
             ? ApplicationTheme.Light
             : ApplicationTheme.Dark;
 
@@ -95,6 +114,8 @@ public partial class App : Application
         };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => LogCrash(e.ExceptionObject as Exception);
         TaskScheduler.UnobservedTaskException += (_, e) => LogCrash(e.Exception);
+        // WinUI raises neither event above for these; it fails fast (DispatcherQueueReporting).
+        Resesh.Terminal.DispatcherQueueReporting.UnhandledException = LogCrash;
     }
 
     private static Task? _settingsLoad;
@@ -213,7 +234,8 @@ public partial class App : Application
         // The app-wide chrome brushes are declared without colors; give them the saved
         // theme's before any window draws with them. Not in the constructor: code can't
         // read Application resources until it has returned.
-        ThemeVisualPalette.For(ResolveTheme(Settings.Current.Theme)).ApplyToAppResources();
+        SyncFluentThemeColors();
+        ThemeVisualPalette.For(CurrentTheme).ApplyToAppResources();
 
         _storesLoad!.GetAwaiter().GetResult();
         if (DemoMode.IsEnabled)
@@ -295,10 +317,10 @@ public partial class App : Application
         Program.SetActivationTarget(this);
         // Registering for notification clicks takes ~70 ms of COM work; do it once the
         // first frame is up rather than before the window can appear.
-        _dispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, CommandCompletionNotifications.Register);
+        _dispatcherQueue.TryPost(DispatcherQueuePriority.Low, CommandCompletionNotifications.Register);
         // Every terminal compiles the highlight rules (20-30 ms); do it once, in the background,
         // so opening the first tab does not wait for it.
-        _dispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        _dispatcherQueue.TryPost(DispatcherQueuePriority.Low, () =>
         {
             var rules = Terminal.TerminalTabView.HighlightPayload(Highlights, null);
             _ = Task.Run(() => Resesh.Terminal.TerminalSurface.PrecompileHighlights(rules));
@@ -325,7 +347,7 @@ public partial class App : Application
     /// names sessions or recordings (a jump list item) opens them in the window used last.</summary>
     internal void HandleRedirectedActivation(IReadOnlyList<string> commandLine)
     {
-        _dispatcherQueue?.TryEnqueue(() =>
+        _dispatcherQueue?.TryPost(() =>
         {
             var request = LaunchRequest.Parse(commandLine);
             if (!request.OpensSomething || _lastActiveWindow is not { } window || !_windows.Contains(window))
@@ -361,7 +383,7 @@ public partial class App : Application
         if (Current is not App { _pinnedSessionsSaveQueued: false, _dispatcherQueue: { } queue } app)
             return;
         app._pinnedSessionsSaveQueued = true;
-        queue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        queue.TryPost(DispatcherQueuePriority.Low, () =>
         {
             app._pinnedSessionsSaveQueued = false;
             SavePinnedSessions();
@@ -399,7 +421,7 @@ public partial class App : Application
     internal static void RunOnUiThread(Action action)
     {
         if (_uiQueue is { HasThreadAccess: false } queue)
-            queue.TryEnqueue(() => action());
+            queue.TryPost(() => action());
         else
             action();
     }
@@ -532,7 +554,7 @@ public partial class App : Application
     {
         if (Current is not App app || app._jumpListQueued || !Program.UsesDefaultDataDirectory)
             return;
-        app._jumpListQueued = app._dispatcherQueue?.TryEnqueue(DispatcherQueuePriority.Low, app.UpdateJumpList) == true;
+        app._jumpListQueued = app._dispatcherQueue?.TryPost(DispatcherQueuePriority.Low, app.UpdateJumpList) == true;
     }
 
     private void UpdateJumpList()

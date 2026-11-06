@@ -4,10 +4,8 @@ const path = require("node:path");
 const test = require("node:test");
 
 const catalog = fs.readFileSync(path.join(__dirname, "..", "src", "Core", "Storage", "ThemeCatalog.cs"), "utf8");
-const terminalThemes = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "Native", "TerminalThemes.cs"), "utf8");
 const terminalSurface = fs.readFileSync(path.join(__dirname, "..", "src", "Terminal", "Native", "NativeTerminalSurface.cs"), "utf8");
 const settingsPage = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "SettingsPage.xaml"), "utf8");
-const settingsViewModel = fs.readFileSync(path.join(__dirname, "..", "src", "App", "ViewModels", "SettingsViewModel.cs"), "utf8");
 const appCode = fs.readFileSync(path.join(__dirname, "..", "src", "App", "App.xaml.cs"), "utf8");
 const sessionDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "SessionEditDialog.xaml.cs"), "utf8");
 const localDialog = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Dialogs", "LocalProfileEditDialog.xaml.cs"), "utf8");
@@ -30,17 +28,12 @@ const themeChrome = fs.readFileSync(path.join(__dirname, "..", "src", "App", "Th
 // AppLogic.Tests/ThemeTableTests; these pin a few deliberate choices.
 
 test("Phthalo Green uses its green shell and terminal palette", () => {
-  assert.match(catalog, /new\("phthalo-green", "Phthalo Green"\)/);
-  assert.match(
-    terminalThemes,
-    /\["phthalo-green"\] = New\(\s*0x123524, 0xD7EEE5, 0x72E0AD, 0x245A46,/,
-  );
+  assert.match(catalog, /New\("phthalo-green", "Phthalo Green",\s*0x123524, 0xD7EEE5, 0x72E0AD, 0x245A46,/);
   assert.match(themeChrome, /\["phthalo-green"\] = new\(0x0B2118, 0x2D5A48\)/);
 });
 
 test("Crimson pairs a wine-red terminal with a matching tab and a bold red accent", () => {
-  assert.match(catalog, /new\("crimson", "Crimson"\)/);
-  assert.match(terminalThemes, /\["crimson"\] = New\(\s*0x330B12, 0xF4E4E6,/);
+  assert.match(catalog, /New\("crimson", "Crimson",\s*0x330B12, 0xF4E4E6,/);
   // The active tab is the terminal background, so tab and terminal read as one surface.
   const crimson = themeChrome.match(/\["crimson"\][\s\S]*?\},/)?.[0] ?? "";
   assert.doesNotMatch(crimson, /ActiveTab/);
@@ -51,7 +44,7 @@ test("Crimson pairs a wine-red terminal with a matching tab and a bold red accen
 
 test("the app chrome takes background, text and selection from the terminal palette", () => {
   // One copy of each theme's defining colors: the chrome table adds only the strip and divider.
-  assert.match(visualPalette, /var terminal = Resesh\.Terminal\.Native\.TerminalThemes\.Find\(id\);/);
+  assert.match(visualPalette, /var theme = Resesh\.Core\.Storage\.ThemeCatalog\.Find\(id\);\s*var terminal = theme\.Palette;/);
   assert.match(visualPalette, /var active = chrome\.ActiveTab \?\? terminal\.Background;/);
   assert.match(visualPalette, /TreeForeground: Hex\(terminal\.Foreground\)/);
   assert.match(visualPalette, /TreeSelection: Hex\(terminal\.Selection\)/);
@@ -131,8 +124,7 @@ test("dialogs follow the live session palette and light-dark mode", () => {
   // pushed onto them instead of relying on the window's element theme.
   assert.match(sessionDialog, /InitializeComponent\(\);\s*DialogTheme\.Apply\(this\)/);
   assert.match(localDialog, /DialogTheme\.Apply\(this\)/);
-  // Settings is a page in the window, so it takes the window's theme and palette brushes.
-  assert.match(settingsPage, /Background="\{StaticResource SessionShellBrush\}"/);
+  // Settings is a page in the window, so it takes the window's palette brushes.
   assert.match(settingsPage, /x:Key="SettingsCardBackground" ResourceKey="SettingsCardBackgroundBrush"/);
   // Surfaces, fields, and selection reuse the same brushes as the main window.
   assert.match(dialogTheme, /Set\(dialog, shell,[\s\S]*?"ContentDialogBackground"/);
@@ -187,24 +179,25 @@ test("the status bar takes a themed chrome surface, not a translucent Fluent lay
 });
 
 test("global and per-session theme pickers use the shared catalog", () => {
-  assert.match(settingsViewModel, /List<ThemeChoice> Themes \{ get; \} = \[\.\. ThemeCatalog\.All\]/);
-  assert.match(settingsPage, /ItemsSource="\{x:Bind ViewModel\.Themes\}"/);
+  for (const mode of ["Light", "Dark"]) {
+    assert.match(settingsPage, new RegExp(`Themes="\\{x:Bind ViewModel\\.${mode}Themes\\}"`));
+    assert.match(settingsPage, new RegExp(`SelectedTheme="\\{x:Bind ViewModel\\.${mode}Theme, Mode=TwoWay\\}"`));
+  }
   // Both session editors show the one shared Appearance form.
-  assert.match(fs.readFileSync(path.join(__dirname, "..", "src", "App", "Controls", "SessionAppearanceForm.xaml.cs"), "utf8"), /Concat\(ThemeCatalog\.All\)/);
   assert.match(sessionEditXaml, /<controls:SessionAppearanceForm x:Name="AppearanceForm"/);
   assert.match(localDialogXaml, /<controls:SessionAppearanceForm x:Name="AppearanceForm"/);
 });
 
 test("global theme selection applies immediately in every window", () => {
-  assert.match(settingsPage, /SelectedItem="\{x:Bind ViewModel\.Theme, Mode=TwoWay\}"/);
+  assert.match(settingsPage, /SelectedItem="\{x:Bind ViewModel\.Appearance, Mode=TwoWay\}"/);
   // Each window follows the settings store itself, whichever window saved the theme.
   assert.match(mainWindow, /App\.Settings\.Changed \+= Settings_Changed;/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)/);
 });
 
 test("live theme changes avoid terminal layout and highlight work", () => {
-  // A theme change is SettingsEffect.Theme alone (SettingsEffectsTests), which only recolors.
-  assert.match(mainWindow, /if \(effect\.HasFlag\(SettingsEffect\.Theme\)\)\s*ApplyThemeToApp\(settings\.Theme\);/);
+  // Theme effects recolor without reapplying terminal layout or highlights.
+  assert.match(mainWindow, /if \(effect\.HasFlag\(SettingsEffect\.Theme\)\)\s*ApplyThemeToApp\(App\.CurrentTheme\);/);
   assert.match(mainWindow, /private void ApplyThemeToApp\(string theme\)[\s\S]*?view\.ApplyTheme\(theme\)/);
 
   const applyTheme = terminalTab.match(/public void ApplyTheme\(string theme\)\s*\{[\s\S]*?\n    \}/)?.[0];
@@ -234,9 +227,9 @@ test("light-dark changes commit custom colors in the framework composition frame
 });
 
 test("unknown saved theme identifiers fall back safely", () => {
-  assert.match(catalog, /\?\? DefaultChoice;/);
-  assert.match(terminalThemes, /Themes\.TryGetValue\(id, out var theme\) \? theme : Themes\[DefaultId\]/);
-  assert.match(themeChrome, /ById\.TryGetValue\(id, out var chrome\) \? chrome : ById\[ThemeIds\.Default\]/);
+  assert.match(catalog, /ById\.TryGetValue\(id, out var theme\) \? theme : DefaultChoice/);
+  assert.match(visualPalette, /ThemeCatalog\.Find\(id\);\s*var terminal = theme\.Palette/);
+  assert.match(themeChrome, /var theme = ThemeCatalog\.Find\(id\);/);
 });
 
 test("custom themes recolor the app shell and tab strip", () => {
@@ -274,7 +267,7 @@ test("High Contrast uses Windows system colors across custom chrome", () => {
   assert.match(visualPalette, /SystemColorHighlightTextColor/);
   assert.doesNotMatch(mainWindow, /HighContrastChanged \+=/);
   assert.match(mainWindow, /var highContrastChanged = isHighContrast != _isHighContrast/);
-  assert.match(mainWindow, /highContrastChanged \|\| ThemeCatalog\.IsSystem\(theme\)/);
+  assert.match(mainWindow, /if \(highContrastChanged\s*\|\| ThemeAppearances\.Normalize\(App\.Settings\.Current\.Appearance\) == ThemeAppearances\.System\)\s*ApplyThemeToApp\(App\.CurrentTheme\)/);
   assert.match(mainWindow, /ButtonHoverForegroundColor = palette\.TreeSelectionForeground/);
 });
 
@@ -283,9 +276,8 @@ test("new split groups start with the live app palette", () => {
 });
 
 test("the tab-row divider spans both sides without crossing the active tab", () => {
-  assert.match(terminalSurface, /void SetInitialOptions[\s\S]*?_theme = TerminalThemes\.Find\(theme\);[\s\S]*?Background = new SolidColorBrush\(ToColor\(_theme\.Background\)\);/);
-  assert.match(terminalThemes, /\["solarized-light"\] = New\(\s*0xFDF6E3,/);
-  assert.match(terminalThemes, /\["phthalo-green"\] = New\(\s*0x123524,/);
+  assert.match(terminalSurface, /void SetInitialOptions[\s\S]*?_theme = theme;[\s\S]*?Background = new SolidColorBrush\(ToColor\(_theme\.Background\)\);/);
+  assert.match(appCode, /var palette = ThemeCatalog\.Find\(theme\)\.Palette;[\s\S]*?return new\(palette\.Background, palette\.Foreground, palette\.Cursor, palette\.Selection,/);
   assert.match(tabGroupXaml, /x:Name="LeftTabStripDivider"[\s\S]*?x:Name="RightTabStripDivider"/);
   // Where the gap falls is TabStripSizing.DividerWidths, tested in TabStripSizingTests.cs.
   assert.match(tabGroup, /Tabs\.ContainerFromItem\(Tabs\.SelectedItem\)[\s\S]*?TabStripSizing\.DividerWidths\(/);
@@ -321,7 +313,7 @@ test("live theme changes remove WinUI tab insets again after template rebuild", 
   assert.match(tabGroup, /private void NormalizeTabStripTemplate\(\)/);
   assert.match(tabGroup, /ActualThemeChanged \+= \(_, _\) => QueueTabTemplateRefresh\(\)/);
   assert.match(tabGroup, /QueueTabTemplateRefresh\(\)/);
-  assert.match(tabGroup, /DispatcherQueue\.TryEnqueue\(\(\) => DispatcherQueue\.TryEnqueue/);
+  assert.match(tabGroup, /DispatcherQueue\.TryPost\(\(\) => DispatcherQueue\.TryPost/);
 });
 
 test("live theme changes recolor both retained tab-row divider brushes", () => {
@@ -335,7 +327,7 @@ test("live theme changes recolor both retained tab-row divider brushes", () => {
 
 test("resesh Dark keeps its original divider and bypasses stale Fluent strokes", () => {
   assert.match(themeChrome, /\[ThemeIds\.Dark\] = new\(0x181818, 0x2B2B2B\)/);
-  assert.match(terminalThemes, /\["dark"\] = New\(\s*0x0C0C0C,/);
+  assert.match(catalog, /New\(ThemeIds\.Dark, "resesh Dark",\s*0x0C0C0C,/);
   assert.match(tabGroup, /Resources\["TabViewBorderBrush"\] = divider/);
   assert.match(tabGroup, /ActualThemeChanged \+= \(_, _\) => QueueTabTemplateRefresh\(\)/);
 });

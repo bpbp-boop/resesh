@@ -7,7 +7,7 @@ public sealed class TerminalOverridesTests
 {
     private static readonly AppSettings Defaults = new()
     {
-        Theme = "dark",
+        DarkTheme = "nord",
         FontFamily = "Cascadia Mono",
         FontSize = 14,
         Scrollback = 10000,
@@ -28,9 +28,13 @@ public sealed class TerminalOverridesTests
     [Fact]
     public void WithOverrides_SetMembersWin_NullMembersInherit()
     {
-        var effective = Defaults.WithOverrides(new TerminalOverrides { Theme = "light", FontSize = 18 });
+        var overrides = new TerminalOverrides { Theme = "light", FontSize = 18 };
+        var effective = Defaults.WithOverrides(overrides);
 
-        Assert.Equal("light", effective.Theme);
+        Assert.Equal("light", overrides.EffectiveTheme(Defaults.ThemeFor(systemIsLight: false)));
+        Assert.Equal(Defaults.Appearance, effective.Appearance);
+        Assert.Equal(Defaults.LightTheme, effective.LightTheme);
+        Assert.Equal(Defaults.DarkTheme, effective.DarkTheme);
         Assert.Equal(18, effective.FontSize);
         Assert.Equal(Defaults.FontFamily, effective.FontFamily);
         Assert.Equal(Defaults.Scrollback, effective.Scrollback);

@@ -13,14 +13,12 @@ namespace Resesh.App.Controls;
 /// </summary>
 public sealed partial class SessionAppearanceForm : UserControl
 {
-    private static readonly ThemeChoice UseAppTheme = new("", "Use app setting");
-
     private IReadOnlyList<SessionColorChoice> _colors = SessionColors.All;
     private Shown _loaded = new(0, null, "", double.NaN, double.NaN, 0, 0, 0);
 
     /// <summary>What the controls show, to tell which ones the user changed.</summary>
     private sealed record Shown(
-        int Color, ThemeChoice? Theme, string FontFamily, double FontSize, double Scrollback,
+        int Color, string? Theme, string FontFamily, double FontSize, double Scrollback,
         int Mouse, int Recording, int History);
 
     public SessionAppearanceForm()
@@ -28,7 +26,6 @@ public sealed partial class SessionAppearanceForm : UserControl
         InitializeComponent();
         NumberBoxRanges.Limit(OverrideFontSizeBox, SettingRanges.FontSize);
         NumberBoxRanges.Limit(OverrideScrollbackBox, SettingRanges.Scrollback);
-        OverrideThemeBox.ItemsSource = new[] { UseAppTheme }.Concat(ThemeCatalog.All).ToList();
         OverrideMouseBox.ItemsSource = MouseCaptureChoice.OverrideNames();
     }
 
@@ -42,8 +39,7 @@ public sealed partial class SessionAppearanceForm : UserControl
         ColorBox.SelectedIndex = SessionColors.IndexIn(_colors, session?.ColorTag);
 
         var overrides = session?.Overrides ?? new TerminalOverrides();
-        OverrideThemeBox.SelectedItem = ThemeCatalog.All.FirstOrDefault(theme =>
-            string.Equals(theme.Id, overrides.Theme, StringComparison.OrdinalIgnoreCase)) ?? UseAppTheme;
+        OverrideThemePicker.ThemeId = overrides.Theme;
         OverrideFontFamilyBox.FamilyName = overrides.FontFamily ?? "";
         OverrideFontSizeBox.Value = overrides.FontSize ?? double.NaN;
         OverrideScrollbackBox.Value = overrides.Scrollback ?? double.NaN;
@@ -64,7 +60,7 @@ public sealed partial class SessionAppearanceForm : UserControl
         var saved = basis.Overrides ?? new TerminalOverrides();
         var overrides = saved with
         {
-            Theme = Keep(s => s.Theme, saved.Theme, () => now.Theme?.Id is { Length: > 0 } theme ? theme : null),
+            Theme = Keep(s => s.Theme, saved.Theme, () => now.Theme),
             FontFamily = Keep(s => s.FontFamily, saved.FontFamily,
                 () => string.IsNullOrWhiteSpace(now.FontFamily) ? null : now.FontFamily.Trim()),
             FontSize = Keep(s => s.FontSize, saved.FontSize, () => Whole(now.FontSize, SettingRanges.FontSize)),
@@ -84,7 +80,7 @@ public sealed partial class SessionAppearanceForm : UserControl
     /// <summary>The control for a session settings command to focus; null for other targets.</summary>
     public Control? FocusTarget(SessionSettingsTarget target) => target switch
     {
-        SessionSettingsTarget.Theme => OverrideThemeBox,
+        SessionSettingsTarget.Theme => OverrideThemePicker.FocusTarget,
         SessionSettingsTarget.FontFamily => OverrideFontFamilyBox.FocusTarget,
         SessionSettingsTarget.FontSize => OverrideFontSizeBox,
         SessionSettingsTarget.Scrollback => OverrideScrollbackBox,
@@ -96,7 +92,7 @@ public sealed partial class SessionAppearanceForm : UserControl
 
     private Shown Current() => new(
         ColorBox.SelectedIndex,
-        OverrideThemeBox.SelectedItem as ThemeChoice,
+        OverrideThemePicker.ThemeId,
         OverrideFontFamilyBox.FamilyName ?? "",
         OverrideFontSizeBox.Value,
         OverrideScrollbackBox.Value,

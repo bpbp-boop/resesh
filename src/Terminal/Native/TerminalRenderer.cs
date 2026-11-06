@@ -590,15 +590,23 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     public uint? MarginColor { get; private set; }
 
     public bool Draw(TerminalCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
-        bool cursorShown, bool focused, uint selectionColor, bool full)
+        bool cursorShown, bool focused, uint selectionColor, uint? selectionForeground, bool full)
     {
         lock (DeviceGate)
-            return DrawLocked(cells, cols, rows, dirty, info, cursorShown, focused, selectionColor, full);
+            return DrawLocked(cells, cols, rows, dirty, info, cursorShown, focused, selectionColor, selectionForeground, full);
     }
 
+    /// <summary>The theme's color for selected text during the frame being drawn; null keeps
+    /// each cell's own. Themes with a selection as bright as their text need it to stay legible.</summary>
+    private uint? _selectionForeground;
+
+    private uint ForegroundOf(in TerminalCell c) =>
+        (c.Flags & TerminalCell.Selected) != 0 && _selectionForeground is { } selected ? selected : c.Foreground;
+
     private bool DrawLocked(TerminalCell* cells, int cols, int rows, byte* dirty, in GhosttyFrameInfo info,
-        bool cursorShown, bool focused, uint selectionColor, bool full)
+        bool cursorShown, bool focused, uint selectionColor, uint? selectionForeground, bool full)
     {
+        _selectionForeground = selectionForeground;
         // Resources a device loss left missing, or made on a device since replaced, are rebuilt
         // first; a renderer that missed a recovery (or whose rebuild failed) catches up here.
         if (!EnsureResourcesLocked(notify: true) || _swapChain is null || _canvas is null)
@@ -769,7 +777,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 x += c.Wide == TerminalCell.WideChar ? 2 : 1;
                 continue;
             }
-            var fg = c.Foreground;
+            var fg = ForegroundOf(c);
             var faint = (c.Flags & TerminalCell.Faint) != 0;
             if (BuiltinGlyphs.Covers(c.Codepoint))
             {
@@ -791,7 +799,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                     if (n > 0) { _runAdvances[n - 1] += CellWidth; x++; continue; }
                     break;
                 }
-                if (d.Foreground != fg || StyleOf(d.Flags) != style || ((d.Flags & TerminalCell.Faint) != 0) != faint
+                if (ForegroundOf(d) != fg || StyleOf(d.Flags) != style || ((d.Flags & TerminalCell.Faint) != 0) != faint
                     || d.GraphemeLength > 1 || (d.Flags & TerminalCell.Invisible) != 0 || BuiltinGlyphs.Covers(d.Codepoint))
                     break;
                 var (f, g) = Lookup(d.Codepoint, style);
@@ -847,7 +855,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             var alpha = (c.Flags & TerminalCell.Faint) != 0 ? 0.55f : 1f;
             if ((c.Flags & TerminalCell.Underline) != 0)
             {
-                SetBrush(Rgb(c.UnderlineColor == TerminalCell.DefaultUnderlineColor ? c.Foreground : c.UnderlineColor, alpha));
+                SetBrush(Rgb(c.UnderlineColor == TerminalCell.DefaultUnderlineColor ? ForegroundOf(c) : c.UnderlineColor, alpha));
                 switch (c.UnderlineStyle)
                 {
                     case 2: // double
@@ -885,7 +893,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             }
             if ((c.Flags & (TerminalCell.Strike | TerminalCell.Overline)) != 0)
             {
-                SetBrush(Rgb(c.Foreground, alpha));
+                SetBrush(Rgb(ForegroundOf(c), alpha));
                 if ((c.Flags & TerminalCell.Strike) != 0)
                     _dc.FillRectangle(new Rect(left, top + CellHeight / 2, width, thickness), _brush);
                 if ((c.Flags & TerminalCell.Overline) != 0)
@@ -921,11 +929,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         var text = c.GraphemeLength > 1 ? GraphemeAt?.Invoke(x, y) : null;
         text ??= char.ConvertFromUtf32((int)c.Codepoint);
         var width = (c.Wide == TerminalCell.WideChar ? 2 : 1) * CellWidth;
-        SetBrush(Rgb(c.Foreground));
+        var foreground = ForegroundOf(c);
+        SetBrush(Rgb(foreground));
         var emoji = IsEmojiPresentation(c.Codepoint) || text.Contains('️');
         float left = OriginX + x * CellWidth, top = y * CellHeight;
         if (emoji)
-            DrawEmoji(text, width / CellWidth, c.Foreground, new Vortice.RawRectF(left, top, left + width, top + CellHeight));
+            DrawEmoji(text, width / CellWidth, foreground, new Vortice.RawRectF(left, top, left + width, top + CellHeight));
         else
             DrawCombiningCluster(text, width, new Vector2(left, top));
     }

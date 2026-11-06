@@ -142,14 +142,16 @@ public static class PresentationValues
         if (palette.IsHighContrast)
             return !isActive && isPointerOver ? palette.TreeSelectionForeground : palette.TreeForeground;
 
+        // Greys on Fluent's text-to-surface line; under "Everything" they move onto the theme's.
         var isDark = !ThemeCatalog.IsLight(appTheme);
+        Windows.UI.Color Grey(uint rgb) => FluentThemeColors.Retint(0xFF000000 | rgb, isDark, palette);
         return isActive
             ? isGroupFocused
-                ? isDark ? Rgb(0xFFFFFF) : Rgb(0x333333)
-                : isDark ? Rgb(0xC0C0C0) : Rgb(0x555555)
+                ? isDark ? Grey(0xFFFFFF) : Grey(0x333333)
+                : isDark ? Grey(0xC0C0C0) : Grey(0x555555)
             : isGroupFocused
-                ? isDark ? Rgb(0x9D9D9D) : Rgb(0x616161)
-                : isDark ? Rgb(0x727272) : Rgb(0x8A8A8A);
+                ? isDark ? Grey(0x9D9D9D) : Grey(0x616161)
+                : isDark ? Grey(0x727272) : Grey(0x8A8A8A);
     }
 
     public static Windows.UI.Text.FontWeight TabHeaderFontWeight(bool hasUnseenOutput) =>

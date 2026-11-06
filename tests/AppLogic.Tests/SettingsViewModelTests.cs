@@ -8,6 +8,7 @@ public sealed class SettingsViewModelTests
     private AppSettings _settings = new();
     private readonly List<string> _changes = [];
     private bool _saveSucceeds = true;
+    private bool _systemIsLight;
     private long _historyBytes;
     private int _clears;
 
@@ -16,6 +17,7 @@ public sealed class SettingsViewModelTests
         var settings = new SettingsViewModel(new SettingsEnvironment
         {
             Current = () => _settings,
+            SystemIsLight = () => _systemIsLight,
             Save = updated =>
             {
                 if (!_saveSucceeds)
@@ -162,9 +164,9 @@ public sealed class SettingsViewModelTests
         var raised = new List<string?>();
         settings.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
 
-        settings.Theme = settings.Themes.First(theme => theme.IsLight);
         settings.CopyOnSelect = false;
         settings.FontSize = 16;
+        settings.Refresh();
 
         Assert.Empty(raised);
     }
@@ -262,17 +264,133 @@ public sealed class SettingsViewModelTests
         Assert.Empty(_changes);
     }
 
-    [Fact]
-    public void ThemeSavesTheChoiceId()
+    [Theory]
+    [InlineData(false, ThemeAppearances.Dark, "nord")]
+    [InlineData(true, ThemeAppearances.Light, "solarized-light")]
+    public void SwitchingToThemeKeepsTheDrawnTheme(bool systemIsLight, string appearance, string themeId)
     {
+        _settings = _settings with
+        {
+            Appearance = ThemeAppearances.System,
+            LightTheme = "solarized-light",
+            DarkTheme = "nord",
+            TreePaneWidth = 333,
+        };
+        _systemIsLight = systemIsLight;
         var settings = Settings();
-        var light = settings.Themes.First(theme => theme.IsLight);
+        Assert.True(settings.IsFollowingWindows);
+        Assert.Equal(themeId, settings.Theme.Id);
+
+        settings.Appearance = settings.AppearanceChoices.Single(choice => choice.Id == AppearanceChoice.FixedTheme);
+
+        Assert.Equal(appearance, _settings.Appearance);
+        Assert.Equal(themeId, settings.Theme.Id);
+        Assert.Equal("solarized-light", _settings.LightTheme);
+        Assert.Equal("nord", _settings.DarkTheme);
+        Assert.Equal(333, _settings.TreePaneWidth);
+        Assert.False(settings.IsFollowingWindows);
+        Assert.Equal(AppearanceChoice.FixedTheme, settings.Appearance.Id);
+        Assert.Equal([nameof(SettingsViewModel.Appearance)], _changes);
+    }
+
+    [Fact]
+    public void PickingALightThemeFixesAppearanceAndKeepsTheDarkTheme()
+    {
+        _settings = _settings with { Appearance = ThemeAppearances.System, DarkTheme = "nord" };
+        var settings = Settings();
+        var light = settings.AllThemes.Single(theme => theme.Id == "solarized-light");
 
         settings.Theme = light;
 
-        Assert.Equal(light.Id, _settings.Theme);
+        Assert.Equal(ThemeAppearances.Light, _settings.Appearance);
+        Assert.Equal(light.Id, _settings.LightTheme);
+        Assert.Equal("nord", _settings.DarkTheme);
         Assert.Equal(light, settings.Theme);
+        Assert.False(settings.IsFollowingWindows);
         Assert.Equal([nameof(SettingsViewModel.Theme)], _changes);
+    }
+
+    [Fact]
+    public void SystemThemeSlotsSaveIndependentlyWithoutChangingAppearance()
+    {
+        _settings = _settings with { Appearance = ThemeAppearances.System };
+        var settings = Settings();
+        var light = settings.LightThemes.First(theme => theme.Id != _settings.LightTheme);
+        var dark = settings.DarkThemes.First(theme => theme.Id != _settings.DarkTheme);
+
+        settings.LightTheme = light;
+        settings.DarkTheme = dark;
+
+        Assert.True(settings.IsFollowingWindows);
+        Assert.Equal(ThemeAppearances.System, _settings.Appearance);
+        Assert.Equal(light, settings.LightTheme);
+        Assert.Equal(dark, settings.DarkTheme);
+        Assert.All(settings.LightThemes, theme => Assert.True(theme.IsLight));
+        Assert.All(settings.DarkThemes, theme => Assert.False(theme.IsLight));
+        Assert.Equal([nameof(SettingsViewModel.LightTheme), nameof(SettingsViewModel.DarkTheme)], _changes);
+    }
+
+    [Fact]
+    public void SwitchingToSystemKeepsBothThemeSlots()
+    {
+        _settings = _settings with { Appearance = ThemeAppearances.Light, LightTheme = "solarized-light", DarkTheme = "nord" };
+        var settings = Settings();
+
+        settings.Appearance = settings.AppearanceChoices.Single(choice => choice.Id == ThemeAppearances.System);
+
+        Assert.True(settings.IsFollowingWindows);
+        Assert.Equal(ThemeAppearances.System, _settings.Appearance);
+        Assert.Equal("solarized-light", _settings.LightTheme);
+        Assert.Equal("nord", _settings.DarkTheme);
+    }
+
+    [Fact]
+    public void RefusedAppearanceAndThemeSavesRestoreTheControls()
+    {
+        var settings = Settings();
+        var appearance = settings.Appearance;
+        var light = settings.LightTheme;
+        var dark = settings.DarkTheme;
+        var before = _settings;
+        var raised = new List<string?>();
+        settings.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+        _saveSucceeds = false;
+
+        settings.Appearance = settings.AppearanceChoices.First(choice => choice != appearance);
+        settings.LightTheme = settings.LightThemes.First(theme => theme != light);
+        settings.DarkTheme = settings.DarkThemes.First(theme => theme != dark);
+
+        Assert.Same(before, _settings);
+        Assert.Equal(appearance, settings.Appearance);
+        Assert.Equal(light, settings.LightTheme);
+        Assert.Equal(dark, settings.DarkTheme);
+        Assert.Empty(_changes);
+        Assert.Contains(nameof(SettingsViewModel.Appearance), raised);
+        Assert.Contains(nameof(SettingsViewModel.LightTheme), raised);
+        Assert.Contains(nameof(SettingsViewModel.DarkTheme), raised);
+    }
+
+    [Fact]
+    public void SystemAppearanceFollowsTheMutableWindowsModeWithoutSaving()
+    {
+        _settings = _settings with { Appearance = ThemeAppearances.System };
+        var settings = Settings();
+        var before = _settings;
+        var raised = new List<string?>();
+        settings.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        _systemIsLight = true;
+        settings.ThemeModeChanged();
+        Assert.True(settings.IsLightModeActive);
+
+        _systemIsLight = false;
+        settings.ThemeModeChanged();
+        Assert.False(settings.IsLightModeActive);
+
+        Assert.Equal([nameof(SettingsViewModel.IsLightModeActive), nameof(SettingsViewModel.Theme),
+            nameof(SettingsViewModel.IsLightModeActive), nameof(SettingsViewModel.Theme)], raised);
+        Assert.Same(before, _settings);
+        Assert.Empty(_changes);
     }
 
     [Fact]

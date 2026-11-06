@@ -58,7 +58,7 @@ public sealed partial class MainWindow
         _paneMotionCaptured = true;
         // A capture nothing plays (a change that turned out not to rebuild) must not
         // linger into the next one.
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             if (!_paneMotionWaiting)
                 ResetPaneMotionCapture();
@@ -210,7 +210,7 @@ public sealed partial class MainWindow
         move.Duration = PaneMoveDuration;
         visual.StartAnimation("Translation", move);
         batch.End();
-        batch.Completed += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        batch.Completed += (_, _) => DispatcherQueue.TryPost(() =>
             Microsoft.UI.Xaml.Controls.Canvas.SetZIndex(view, 0));
     }
 
@@ -315,7 +315,7 @@ public sealed partial class MainWindow
         move.Duration = PaneMoveDuration;
         visual.StartAnimation("Translation", move);
         batch.End();
-        batch.Completed += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        batch.Completed += (_, _) => DispatcherQueue.TryPost(() =>
         {
             // A later move may have started its own slide in the meantime.
             if (ReferenceEquals(_slidingTab, content))

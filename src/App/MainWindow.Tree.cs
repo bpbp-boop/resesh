@@ -178,7 +178,7 @@ public sealed partial class MainWindow
 
     private void ScheduleExpansionPass(int generation, int remainingPasses)
     {
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             if (generation != _expansionSyncGeneration || _windowClosed)
                 return;
@@ -215,7 +215,7 @@ public sealed partial class MainWindow
                 var timer = DispatcherQueue.CreateTimer();
                 timer.Interval = TimeSpan.FromMilliseconds(50);
                 timer.IsRepeating = false;
-                timer.Tick += (_, _) => ScheduleExpansionPass(generation, remainingPasses - 1);
+                timer.OnTick(() => ScheduleExpansionPass(generation, remainingPasses - 1));
                 timer.Start();
             }
         });
@@ -319,7 +319,7 @@ public sealed partial class MainWindow
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromMilliseconds(150);
         timer.IsRepeating = false;
-        timer.Tick += (_, _) => ApplyFilterNow();
+        timer.OnTick(ApplyFilterNow);
         return timer;
     }
 
@@ -645,7 +645,7 @@ public sealed partial class MainWindow
         // here lets that remaining work mutate the replacement tree. Persist after the event
         // returns, then rebuild from the store so the visual and saved trees agree: WinUI
         // has moved the nodes itself, whether the drop was refused, saved or failed to save.
-        DispatcherQueue.TryEnqueue(
+        DispatcherQueue.TryPost(
             Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
             () =>
             {

@@ -173,7 +173,7 @@ public sealed partial class HistoryView : UserControl
         App.History.Changed += History_Changed;
         App.SessionsChanged += Sessions_Changed;
         _ = LoadAsync(keepSelection: false);
-        DispatcherQueue.TryEnqueue(() =>
+        DispatcherQueue.TryPost(() =>
         {
             SearchBox.Focus(FocusState.Programmatic);
             SearchBox.SelectAll();
@@ -208,7 +208,7 @@ public sealed partial class HistoryView : UserControl
     }
 
     private void History_Changed() =>
-        DispatcherQueue.TryEnqueue(() =>
+        DispatcherQueue.TryPost(() =>
         {
             if (IsOpen)
                 _ = LoadAsync(keepSelection: true);
@@ -317,7 +317,7 @@ public sealed partial class HistoryView : UserControl
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromMilliseconds(120);
         timer.IsRepeating = false;
-        timer.Tick += (_, _) => _ = RunSearchAsync(keepSelection: false);
+        timer.OnTick(() => _ = RunSearchAsync(keepSelection: false));
         return timer;
     }
 
@@ -671,7 +671,7 @@ public sealed partial class HistoryView : UserControl
         if (_outputSpans.Count > 0)
         {
             // Layout must exist before a match position can be measured.
-            DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+            DispatcherQueue.TryPost(DispatcherQueuePriority.Low, () =>
             {
                 if (_activeMatch < 0 && _outputSpans.Count > 0 && ReferenceEquals(entry, _selected))
                     GoToMatch(0);
@@ -789,11 +789,11 @@ public sealed partial class HistoryView : UserControl
         _feedbackTimer = DispatcherQueue.CreateTimer();
         _feedbackTimer.Interval = TimeSpan.FromMilliseconds(1200);
         _feedbackTimer.IsRepeating = false;
-        _feedbackTimer.Tick += (_, _) =>
+        _feedbackTimer.OnTick(() =>
         {
             CopyCommandIcon.Glyph = "\uE8C8";
             CopyOutputText.Text = "Copy Output";
-        };
+        });
         _feedbackTimer.Start();
     }
 
@@ -807,7 +807,7 @@ public sealed partial class HistoryView : UserControl
             try { App.History.Delete([entry.Id]); }
             catch (Exception exception) when (CommandHistoryStore.IsStorageFailure(exception))
             {
-                DispatcherQueue.TryEnqueue(() => App.ReportRecoverableError(exception));
+                DispatcherQueue.TryPost(() => App.ReportRecoverableError(exception));
             }
         });
     }

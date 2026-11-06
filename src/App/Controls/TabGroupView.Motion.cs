@@ -57,7 +57,7 @@ public sealed partial class TabGroupView
         if (_motionSuppressed)
             return;
         _motionSuppressed = true;
-        DispatcherQueue.TryEnqueue(() => _motionSuppressed = false);
+        DispatcherQueue.TryPost(() => _motionSuppressed = false);
     }
 
     private void CancelTabMotion()
@@ -210,18 +210,20 @@ public sealed partial class TabGroupView
 
     private void ReleaseTabOverflowAfterMotion()
     {
-        _overflowTimer ??= DispatcherQueue.CreateTimer();
+        if (_overflowTimer is null)
+        {
+            _overflowTimer = DispatcherQueue.CreateTimer();
+            _overflowTimer.OnTick(OverflowTimer_Tick);
+        }
         _overflowTimer.Stop();
         _overflowTimer.Interval = TabMoveDuration + TimeSpan.FromMilliseconds(20);
         _overflowTimer.IsRepeating = false;
-        _overflowTimer.Tick -= OverflowTimer_Tick;
-        _overflowTimer.Tick += OverflowTimer_Tick;
         _overflowTimer.Start();
     }
 
-    private void OverflowTimer_Tick(DispatcherQueueTimer sender, object args)
+    private void OverflowTimer_Tick()
     {
-        sender.Stop();
+        _overflowTimer?.Stop();
         if (_motionPending)
             return;
         LetTabsDrawPastStrip(false);
@@ -332,7 +334,7 @@ public sealed partial class TabGroupView
         ScaleDivider(LeftTabStripDivider, slide.FromLeft, slide.ToLeft, anchorRight: false);
         ScaleDivider(RightTabStripDivider, slide.FromRight, slide.ToRight, anchorRight: true);
         batch.End();
-        batch.Completed += (_, _) => DispatcherQueue.TryEnqueue(() =>
+        batch.Completed += (_, _) => DispatcherQueue.TryPost(() =>
         {
             if (version != _dividerSlideVersion)
                 return;

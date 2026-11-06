@@ -25,7 +25,10 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <ComboBox x:Name="OverrideThemeBox" Grid.Column="0" Header="Theme" HorizontalAlignment="Stretch" />
+            <StackPanel Grid.Column="0" Spacing="8">
+                <TextBlock Text="Theme" />
+                <controls:ThemePickerButton x:Name="OverrideThemePicker" InheritLabel="Use app setting" />
+            </StackPanel>
             <controls:FontFamilyPicker x:Name="OverrideFontFamilyBox" Grid.Column="1" Header="Terminal font" ShowAppSettingChoice="True" PlaceholderText="Use app setting" />
         </Grid>
 

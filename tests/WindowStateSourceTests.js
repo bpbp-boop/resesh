@@ -41,7 +41,7 @@ test("a parked pane's selection never moves focus, and focus only goes to a show
   // The queued re-assert yields to any later explicit choice.
   assert.match(focus, /var intent = \+\+_focusIntent;[\s\S]*?intent != _focusIntent/);
   assert.match(member(windowCode, "public void FocusGroupForSelection"), /ViewModel\.Groups\.Contains\(group\)/);
-  assert.doesNotMatch(member(windowCode, "private void FinishLayoutChange"), /TryEnqueue/);
+  assert.doesNotMatch(member(windowCode, "private void FinishLayoutChange"), /TryPost/);
 });
 
 test("splits, zooms and closes the user asked for move focus out of search to the terminal", () => {
@@ -66,9 +66,9 @@ test("splits, zooms and closes the user asked for move focus out of search to th
 
 test("keyboard focus only lands in the pane that is focused when it is given", () => {
   const terminal = member(tabGroup, "private void FocusTerminal");
-  assert.match(terminal, /TryEnqueue\([\s\S]*?ReferenceEquals\(_host\.ViewModel\.FocusedGroup, Group\)[\s\S]*?view\.FocusTerminal\(\)/);
+  assert.match(terminal, /TryPost\([\s\S]*?ReferenceEquals\(_host\.ViewModel\.FocusedGroup, Group\)[\s\S]*?view\.FocusTerminal\(\)/);
   const content = member(windowCode, "private void FocusTabContent");
-  assert.match(content, /TryEnqueue\([\s\S]*?ReferenceEquals\(ViewModel\.TryGroupOf\(tab\), ViewModel\.FocusedGroup\)/);
+  assert.match(content, /TryPost\([\s\S]*?ReferenceEquals\(ViewModel\.TryGroupOf\(tab\), ViewModel\.FocusedGroup\)/);
   assert.match(member(windowCode, "private void FocusActiveTerminal"), /FocusTabContent\(tab, userInitiated: true\)/);
 });
 

@@ -28,7 +28,7 @@ public sealed class SessionsBackupTests : IDisposable
             FolderPath = "Shells",
             Local = new LocalTarget { Executable = "pwsh.exe" },
         });
-        source.Settings.Save(new AppSettings { Theme = "light", FontSize = 17 });
+        source.Settings.Save(new AppSettings { Appearance = ThemeAppearances.Light, LightTheme = "solarized-light", FontSize = 17 });
         source.KnownHosts.Accept("selected.example", 22, "ssh-ed25519", "fingerprint");
         Directory.CreateDirectory(Path.Combine(source.Directory, "icons"));
         File.WriteAllText(Path.Combine(source.Directory, "icons", "lab.svg"), "<svg/>");
@@ -49,12 +49,52 @@ public sealed class SessionsBackupTests : IDisposable
         // Ops and Ops/Prod exist through the selected session, which brings them back on import.
         Assert.Equal(["Ops/Empty"], package.Folders);
         Assert.Empty(package.LocalFolders);
-        Assert.Equal("light", package.Settings.Theme);
+        Assert.Equal(ThemeAppearances.Light, package.Settings.Appearance);
+        Assert.Equal("solarized-light", package.Settings.LightTheme);
         Assert.Single(package.KnownHosts);
         Assert.Equal("<svg/>", Encoding.UTF8.GetString(package.Icons["lab.svg"]));
         Assert.Equal(savedWorkspace.Id, Assert.Single(WorkspaceStore.ParsePayload(package.Workspaces!).Workspaces!).Id);
         using var archive = ZipFile.OpenRead(path);
         Assert.DoesNotContain(archive.Entries, e => e.FullName.Contains("recording", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("system", ThemeAppearances.System, ThemeIds.Light, ThemeIds.Dark)]
+    [InlineData("solarized-light", ThemeAppearances.Light, "solarized-light", ThemeIds.Dark)]
+    [InlineData("nord", ThemeAppearances.Dark, ThemeIds.Light, "nord")]
+    [InlineData("no-such-theme", ThemeAppearances.Dark, ThemeIds.Light, ThemeIds.Default)]
+    public void Import_LegacyThemeMigratesToAppearanceAndModeThemes(
+        string legacyTheme, string appearance, string lightTheme, string darkTheme)
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "legacy-source"));
+        var path = Path.Combine(_dir.FullName, "legacy.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials, new BackupExportOptions());
+        using (var archive = ZipFile.Open(path, ZipArchiveMode.Update))
+        {
+            archive.GetEntry("settings.json")!.Delete();
+            using var writer = new StreamWriter(archive.CreateEntry("settings.json").Open());
+            writer.Write($$"""{"theme":"{{legacyTheme}}"}""");
+        }
+
+        var package = SessionsBackup.Read(path);
+        var target = CreateStores(Path.Combine(_dir.FullName, "legacy-target"));
+        SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>());
+
+        var loaded = new SettingsStore(Path.Combine(target.Directory, "settings.json"));
+        loaded.Load();
+        Assert.Null(loaded.LoadWarning);
+        Assert.Null(loaded.Current.LegacyTheme);
+        Assert.Equal(appearance, loaded.Current.Appearance);
+        Assert.Equal(lightTheme, loaded.Current.LightTheme);
+        Assert.Equal(darkTheme, loaded.Current.DarkTheme);
+        using var saved = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(target.Directory, "settings.json")));
+        Assert.False(saved.RootElement.TryGetProperty("theme", out _));
+        Assert.Equal(appearance, saved.RootElement.GetProperty("appearance").GetString());
+        Assert.Equal(lightTheme, saved.RootElement.GetProperty("lightTheme").GetString());
+        Assert.Equal(darkTheme, saved.RootElement.GetProperty("darkTheme").GetString());
     }
 
     [Fact]

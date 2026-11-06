@@ -19,6 +19,9 @@
                  light/dark change. Their colors come from ThemeVisualPalette.ApplyToAppResources,
                  at startup and on every theme change, so the palettes live only in code. -->
             <SolidColorBrush x:Key="SessionShellBrush" />
+            <!-- App pages hosted in tabs (Settings, Welcome, Import) sit on the selected tab's
+                 color, so the tab and its page read as one surface as a terminal tab does. -->
+            <SolidColorBrush x:Key="SessionPageBrush" />
             <SolidColorBrush x:Key="SessionChromeBrush" />
             <SolidColorBrush x:Key="SessionAccentBrush" />
             <SolidColorBrush x:Key="SessionInputBrush" />
@@ -43,6 +46,23 @@
                 <Setter Property="BorderThickness" Value="1" />
                 <Setter Property="BorderBrush" Value="{StaticResource SettingsCardBorderBrush}" />
                 <Setter Property="Background" Value="{StaticResource SettingsCardBackgroundBrush}" />
+            </Style>
+            <!-- Fluent's menu item and tooltip styles fix their brushes where the style is
+                 defined, so brushes overridden at app level (theme colors set to Everything)
+                 never reach them. These implicit styles look the same names up from the app. -->
+            <Style TargetType="MenuFlyoutItem" BasedOn="{StaticResource DefaultMenuFlyoutItemStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource MenuFlyoutItemForeground}" />
+            </Style>
+            <Style TargetType="ToggleMenuFlyoutItem" BasedOn="{StaticResource DefaultToggleMenuFlyoutItemStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource MenuFlyoutItemForeground}" />
+            </Style>
+            <Style TargetType="MenuFlyoutSubItem" BasedOn="{StaticResource DefaultMenuFlyoutSubItemStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource MenuFlyoutItemForeground}" />
+            </Style>
+            <Style TargetType="ToolTip" BasedOn="{StaticResource DefaultToolTipStyle}">
+                <Setter Property="Foreground" Value="{ThemeResource ToolTipForeground}" />
+                <Setter Property="Background" Value="{ThemeResource ToolTipBackground}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource ToolTipBorderBrush}" />
             </Style>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Dark">

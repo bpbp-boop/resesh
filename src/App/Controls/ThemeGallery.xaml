@@ -1,0 +1,71 @@
+<UserControl
+    x:Class="Resesh.App.Controls.ThemeGallery"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Resesh.App.Controls"
+    xmlns:storage="using:Resesh.Core.Storage">
+    <UserControl.Resources>
+        <Style x:Key="GalleryPageButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+            <Setter Property="Width" Value="32" />
+            <Setter Property="Height" Value="64" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="VerticalAlignment" Value="Top" />
+            <Setter Property="Margin" Value="0,34,0,0" />
+            <Setter Property="IsTabStop" Value="False" />
+            <Setter Property="IsEnabled" Value="False" />
+        </Style>
+    </UserControl.Resources>
+    <!-- The buttons page the row sideways; a plain mouse wheel scrolls the page (see code-behind). -->
+    <Grid Height="204" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6">
+        <Button x:Name="ScrollLeftButton" Style="{StaticResource GalleryPageButtonStyle}"
+                Click="ScrollLeftButton_Click" ToolTipService.ToolTip="Scroll left"
+                AutomationProperties.Name="Scroll left">
+            <FontIcon Glyph="&#xE76B;" FontSize="12" />
+        </Button>
+        <ListView Grid.Column="1"
+            x:Name="ThemeList"
+            SelectionMode="Single"
+            IsMultiSelectCheckBoxEnabled="False"
+            IsItemClickEnabled="False"
+            ScrollViewer.HorizontalScrollMode="Enabled"
+            ScrollViewer.HorizontalScrollBarVisibility="Visible"
+            ScrollViewer.VerticalScrollMode="Disabled"
+            ScrollViewer.VerticalScrollBarVisibility="Disabled"
+            SelectionChanged="ThemeList_SelectionChanged"
+            ContainerContentChanging="ThemeList_ContainerContentChanging">
+            <ListView.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <ItemsStackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </ListView.ItemsPanel>
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="Margin" Value="0,0,10,0" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="UseSystemFocusVisuals" Value="True" />
+                    <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource SessionAccentBrush}" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ListViewItem">
+                                <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" />
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="storage:ThemeChoice">
+                    <controls:ThemeSwatch Theme="{x:Bind}" />
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+        <TextBlock x:Name="NoMatchText" Grid.Column="1" Text="No themes match." Visibility="Collapsed" Margin="5,12,0,0"
+                   Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
+        <Button x:Name="ScrollRightButton" Grid.Column="2" Style="{StaticResource GalleryPageButtonStyle}"
+                Click="ScrollRightButton_Click" ToolTipService.ToolTip="Scroll right"
+                AutomationProperties.Name="Scroll right">
+            <FontIcon Glyph="&#xE76C;" FontSize="12" />
+        </Button>
+    </Grid>
+</UserControl>

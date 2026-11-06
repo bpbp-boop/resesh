@@ -286,7 +286,7 @@ public sealed partial class MainWindow
             return;
         SetFocusedGroup(group);
         var intent = ++_focusIntent;
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             if (intent != _focusIntent || !ViewModel.Groups.Contains(group))
                 return;
@@ -766,8 +766,8 @@ public sealed partial class MainWindow
         UpdateRulerPresentations();
         RefreshTabGroupActions();
         // Re-assert once the rebuilt groups settle into their new rows and columns.
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdatePaneFocusFrame);
+        DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateTitleBarRegions);
+        DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdatePaneFocusFrame);
         PlayPaneMotion();
     }
 
