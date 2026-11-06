@@ -880,7 +880,10 @@ public sealed partial class TabViewModel : ObservableObject
             => SetProperty(ref _isLocked, value);
     }
 
-    public string? ColorTag => Session.ColorTag;
+    /// <summary>The session's colour tag, "" for none. Never null: generated x:Bind code skips
+    /// function updates when a nullable string becomes null, so removing a tag would leave the
+    /// tab's tag line and accent bar in the old colour.</summary>
+    public string ColorTag => Session.ColorTag ?? "";
 
     /// <summary>Set while locked-out after repeated failed unlock attempts.</summary>
     public DateTimeOffset LockoutUntil { get; private set; } = DateTimeOffset.MinValue;

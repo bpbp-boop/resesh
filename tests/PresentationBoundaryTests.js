@@ -22,7 +22,7 @@ test("tab and tree view models expose data instead of WinUI presentation objects
 
   assert.match(tabViewModel, /public string AppTheme => _appTheme/);
   assert.match(tabViewModel, /public string AgentIconKey/);
-  assert.match(tabViewModel, /public string\? ColorTag => Session\.ColorTag/);
+  assert.match(tabViewModel, /public string ColorTag => Session\.ColorTag \?\? ""/);
   assert.match(treeViewModel, /public string\? IconKey => Session\?\.Icon/);
   assert.match(treeViewModel, /public string\? ColorTag => Session\?\.ColorTag/);
 });

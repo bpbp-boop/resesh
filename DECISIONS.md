@@ -2433,3 +2433,14 @@ it from two ellipses (a ring in the colour behind it, then the disc in `AgentBad
 and a bold `TextBlock` at its real size with tight line bounds, so DirectWrite renders the
 symbol at its final size. Symbols are ! ? ✓ ✕ in `SessionBadgeGlyphBrush`. The tabs and
 the workspace rail use the same control.
+
+## 2026-11-06 - Colour tags are a line on top of every tab
+
+The coloured bar at a tab's left edge is gone; the status dot or agent icon now sits centred
+in the tab's leading space (12 px either side). A tag shows instead as the top bar: full
+strength on the focused tab, as before, and at 60% opacity on every other tab, including the
+selected tab of an unfocused split. Tagged lines are at least 2 px, since the default 1 px
+accent bar is too thin to tell tag colours apart. High Contrast shows no tag line on
+inactive tabs, keeping to system colours. `TabViewModel.ColorTag` is "" rather than null
+for no tag: x:Bind skips function updates when a nullable string becomes null, which would
+leave a removed tag's line on screen.

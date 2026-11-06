@@ -64,7 +64,7 @@ test("the active tab and the focused pane are a full step, not a nudge", () => {
   assert.match(presentation, /FocusedTabAccentThickness[\s\S]*?For\(appTheme\)\.AccentBarThickness/);
   assert.match(
     tabGroupXaml,
-    /Height="\{x:Bind local:PresentationValues\.FocusedTabAccentThickness\(TabTheme\), Mode=OneWay\}"/,
+    /Height="\{x:Bind local:PresentationValues\.FocusedTabAccentThickness\(TabTheme, ColorTag\), Mode=OneWay\}"/,
   );
   // Gutters stay neutral: pane gutters take PaneBorder, the tree splitter Divider.
   assert.match(mainWindow, /Width = isColumns \? 1 : double\.NaN/);

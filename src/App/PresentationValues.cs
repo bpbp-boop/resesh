@@ -189,9 +189,20 @@ public static class PresentationValues
     }
 
     /// <summary>Height of the active tab's accent bar. Themes whose accent is the only
-    /// saturated color on screen ask for a thicker bar so it reads as a marker.</summary>
-    public static double FocusedTabAccentThickness(string appTheme) =>
-        ThemeVisualPalette.For(appTheme).AccentBarThickness;
+    /// saturated color on screen ask for a thicker bar so it reads as a marker. A colour tag
+    /// needs at least 2 px to be told apart, here and on the inactive tabs' tag line.</summary>
+    public static double FocusedTabAccentThickness(string appTheme, string? colorTag) =>
+        ParseColor(colorTag).A > 0 ? TagLineThickness(appTheme) : ThemeVisualPalette.For(appTheme).AccentBarThickness;
+
+    public static double TagLineThickness(string appTheme) =>
+        Math.Max(2, ThemeVisualPalette.For(appTheme).AccentBarThickness);
+
+    /// <summary>A tagged tab that is not the focused one shows its colour as a dimmer copy of
+    /// the top bar, so tags still read across the strip. High Contrast keeps to system
+    /// colours, so there the tag shows only on the focused tab's bar, as the selection colour.</summary>
+    public static Visibility TagLineVisibility(string appTheme, string? colorTag, bool isActive, bool isGroupFocused) =>
+        Visible(ParseColor(colorTag).A > 0 && !(isActive && isGroupFocused)
+            && !ThemeVisualPalette.For(appTheme).IsHighContrast);
 
     // ---- workspace rail buttons ----
 

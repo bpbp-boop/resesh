@@ -257,12 +257,23 @@
                                     <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderBorderColor(TabTheme), Mode=OneWay}" />
                                 </Grid.BorderBrush>
                                 <Rectangle
-                                    Height="{x:Bind local:PresentationValues.FocusedTabAccentThickness(TabTheme), Mode=OneWay}"
+                                    Height="{x:Bind local:PresentationValues.FocusedTabAccentThickness(TabTheme, ColorTag), Mode=OneWay}"
                                     VerticalAlignment="Top"
                                     HorizontalAlignment="Stretch"
                                     Visibility="{x:Bind local:PresentationValues.FocusedAccentVisibility(IsActive, IsGroupFocused), Mode=OneWay}">
                                     <Rectangle.Fill>
                                         <SolidColorBrush Color="{x:Bind local:PresentationValues.FocusedTabBorderColor(TabTheme, ColorTag), Mode=OneWay}" />
+                                    </Rectangle.Fill>
+                                </Rectangle>
+                                <!-- The colour tag on every other tab: the top bar, dimmed. -->
+                                <Rectangle
+                                    Height="{x:Bind local:PresentationValues.TagLineThickness(TabTheme), Mode=OneWay}"
+                                    VerticalAlignment="Top"
+                                    HorizontalAlignment="Stretch"
+                                    Opacity="0.6"
+                                    Visibility="{x:Bind local:PresentationValues.TagLineVisibility(TabTheme, ColorTag, IsActive, IsGroupFocused), Mode=OneWay}">
+                                    <Rectangle.Fill>
+                                        <SolidColorBrush Color="{x:Bind local:PresentationValues.ColorTag(ColorTag), Mode=OneWay}" />
                                     </Rectangle.Fill>
                                 </Rectangle>
                                 <Rectangle
@@ -291,12 +302,12 @@
                                     ShowPaused="{x:Bind local:PresentationValues.ProgressShowPaused(Progress), Mode=OneWay}"
                                     Visibility="{x:Bind local:PresentationValues.ProgressVisibility(Progress), Mode=OneWay}"
                                     AutomationProperties.Name="{x:Bind ProgressTooltip, Mode=OneWay}" />
+                                <!-- The status dot or agent icon sits centred in the tab's leading
+                                     space: as much room before it as between it and the title. -->
                                 <Grid
-                                    Margin="10,0,6,0"
+                                    Margin="12,0,6,0"
                                     VerticalAlignment="Center">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
@@ -304,23 +315,15 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <Rectangle
-                                        Grid.Column="0"
-                                        Width="3"
-                                        Height="22"
-                                        Margin="0,0,6,0"
-                                        RadiusX="1.5"
-                                        RadiusY="1.5"
-                                        VerticalAlignment="Center">
-                                        <Rectangle.Fill>
-                                            <SolidColorBrush Color="{x:Bind local:PresentationValues.ColorTag(ColorTag), Mode=OneWay}" />
-                                        </Rectangle.Fill>
-                                    </Rectangle>
                                     <StackPanel
-                                        Grid.Column="1"
+                                        Grid.Column="0"
+                                        Orientation="Horizontal"
+                                        Spacing="6"
+                                        Margin="0,0,12,0"
+                                        VerticalAlignment="Center">
+                                    <StackPanel
                                         Orientation="Horizontal"
                                         Spacing="5"
-                                        Margin="0,0,6,0"
                                         VerticalAlignment="Center"
                                         Visibility="{x:Bind local:PresentationValues.StateDotsVisibility(AgentIconKey, ShowsProgramStatus, State, IsRecording), Mode=OneWay}">
                                         <Ellipse
@@ -346,10 +349,8 @@
                                          program that reports its own state shows the badge alone.
                                          Either one replaces the connection dot while connected. -->
                                     <Grid
-                                        Grid.Column="2"
                                         Width="16"
                                         Height="16"
-                                        Margin="0,0,6,0"
                                         VerticalAlignment="Center"
                                         ToolTipService.ToolTip="{x:Bind AgentTooltip, Mode=OneWay}"
                                         Visibility="{x:Bind local:PresentationValues.AgentSlotVisibility(AgentIconKey, ShowsProgramStatus, State), Mode=OneWay}">
@@ -372,8 +373,9 @@
                                             </controls:AgentBadge.RingBrush>
                                         </controls:AgentBadge>
                                     </Grid>
+                                    </StackPanel>
                                     <FontIcon
-                                        Grid.Column="3"
+                                        Grid.Column="1"
                                         Glyph="&#xE840;"
                                         FontSize="11"
                                         Margin="0,0,6,0"
@@ -385,7 +387,7 @@
                                         </FontIcon.Foreground>
                                     </FontIcon>
                                     <FontIcon
-                                        Grid.Column="4"
+                                        Grid.Column="2"
                                         Glyph="&#xE72E;"
                                         FontSize="11"
                                         Margin="0,0,6,0"
@@ -399,7 +401,7 @@
                                          this particular tab (running program, cwd, or endpoint) —
                                          so several tabs of one host aren't interchangeable. -->
                                     <StackPanel
-                                        Grid.Column="5"
+                                        Grid.Column="3"
                                         MinWidth="0"
                                         VerticalAlignment="Center"
                                         Spacing="0">
@@ -433,7 +435,7 @@
                                             </TextBlock>
                                     </StackPanel>
                                     <ToggleButton
-                                        Grid.Column="6"
+                                        Grid.Column="4"
                                         Width="20" Height="20" MinWidth="0" MinHeight="0" Padding="0"
                                         Margin="6,0,0,0"
                                         VerticalAlignment="Center"
@@ -447,7 +449,7 @@
                                         <FontIcon Glyph="&#xEA8F;" FontSize="11" />
                                     </ToggleButton>
                                     <Button
-                                        Grid.Column="7"
+                                        Grid.Column="5"
                                         Click="TabCloseGlyph_Click"
                                         Padding="3"
                                         Margin="6,0,0,0"
