@@ -35,8 +35,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     private bool _windowClosed;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _filterDebounce;
     private RectInt32? _normalWindowBounds;
-    private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.ResolveTheme(App.Settings.Current.Theme));
+    private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.CurrentTheme);
     private int _themeApplyVersion;
+    private int _fluentThemeColorsVersion = FluentThemeColors.Version;
     private const double TreeIndentationScale = 0.5;
     private string _selectedRailTab = "sessions";
     private bool _sessionsPaneOpen;
@@ -49,7 +50,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
 
     private readonly ViewModelEnvironment _viewModelEnvironment = new()
     {
-        CurrentTheme = () => App.Settings.Current.Theme,
+        CurrentTheme = () => App.CurrentTheme,
         ResolveTheme = App.ResolveTheme,
         ShowAgentIcons = () => App.Settings.Current.ShowAgentIcons,
         IsSessionVisible = App.IsSessionVisible,
@@ -58,7 +59,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             if (tab.View is TerminalTabView view)
             {
-                view.ApplyTheme(App.Settings.Current.Theme);
+                view.ApplyTheme(App.CurrentTheme);
                 view.ApplyNonThemeSettings(App.Settings.Current);
             }
         },
@@ -180,12 +181,12 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         DispatcherQueue.TryEnqueue(() =>
         {
-            var theme = App.Settings.Current.Theme;
             var isHighContrast = App.IsHighContrast;
             var highContrastChanged = isHighContrast != _isHighContrast;
             _isHighContrast = isHighContrast;
-            if (highContrastChanged || ThemeCatalog.IsSystem(theme))
-                ApplyThemeToApp(theme);
+            if (highContrastChanged
+                || ThemeAppearances.Normalize(App.Settings.Current.Appearance) == ThemeAppearances.System)
+                ApplyThemeToApp(App.CurrentTheme);
         });
     }
 
@@ -756,7 +757,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         // fallback drag region across the top strip; without it nothing is draggable.
         ExtendsContentIntoTitleBar = true;
         AppWindow.TitleBar.PreferredHeightOption = Microsoft.UI.Windowing.TitleBarHeightOption.Tall;
-        ApplyTitleBarButtonColors(App.Settings.Current.Theme);
+        ApplyTitleBarButtonColors(App.CurrentTheme);
         TitleBarIcon.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(
             new Uri(Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico")));
         AppTitleBar.Loaded += (_, _) => UpdateTitleBarRegions();
@@ -978,18 +979,16 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             return;
         }
         var dark = !ThemeCatalog.IsLight(theme);
-        var fg = dark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
+        // Fluent's caption colors, moved into the theme when "Everything" colors the controls.
+        Windows.UI.Color Caption(uint argb) => FluentThemeColors.Retint(argb, dark, palette);
+        var fg = dark ? Caption(0xFFFFFFFF) : Caption(0xFF000000);
         tb.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
         tb.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
         tb.ButtonForegroundColor = fg;
-        tb.ButtonInactiveForegroundColor = Windows.UI.Color.FromArgb(255, 128, 128, 128);
-        tb.ButtonHoverBackgroundColor = dark
-            ? Windows.UI.Color.FromArgb(25, 255, 255, 255)
-            : Windows.UI.Color.FromArgb(25, 0, 0, 0);
+        tb.ButtonInactiveForegroundColor = Caption(0xFF808080);
+        tb.ButtonHoverBackgroundColor = dark ? Caption(0x19FFFFFF) : Caption(0x19000000);
         tb.ButtonHoverForegroundColor = fg;
-        tb.ButtonPressedBackgroundColor = dark
-            ? Windows.UI.Color.FromArgb(50, 255, 255, 255)
-            : Windows.UI.Color.FromArgb(50, 0, 0, 0);
+        tb.ButtonPressedBackgroundColor = dark ? Caption(0x32FFFFFF) : Caption(0x32000000);
         tb.ButtonPressedForegroundColor = fg;
     }
 
@@ -1299,6 +1298,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         {
             Current = () => App.Settings.Current,
             Save = App.SaveSettings,
+            SystemIsLight = App.SystemIsLight,
             HistorySize = () => App.History.SizeOnDisk(),
             HistoryDirectory = App.History.Directory,
             ClearHistory = () => App.History.Clear(),
@@ -1374,7 +1374,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
     {
         var settings = App.Settings.Current;
         if (effect.HasFlag(SettingsEffect.Theme))
-            ApplyThemeToApp(settings.Theme);
+            ApplyThemeToApp(App.CurrentTheme);
         if (effect.HasFlag(SettingsEffect.StatusBar))
             ApplyStatusBarVisibility(settings.ShowStatusBar);
         if (effect.HasFlag(SettingsEffect.PaneLayout))
@@ -1429,11 +1429,20 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         theme = App.ResolveTheme(theme);
         var version = ++_themeApplyVersion;
         var requestedTheme = ThemeCatalog.IsLight(theme) ? ElementTheme.Light : ElementTheme.Dark;
-        if (Root.RequestedTheme == requestedTheme)
+        // Theme brushes for the standard controls were just added or removed (theme colors
+        // set to or from Everything): drawn controls read them only when their theme
+        // resources resolve again, which a RequestedTheme change does. Going through the
+        // other theme forces one even when light/dark stays the same.
+        var fluentVersion = App.SyncFluentThemeColors();
+        var reresolve = fluentVersion != _fluentThemeColorsVersion;
+        _fluentThemeColorsVersion = fluentVersion;
+        if (Root.RequestedTheme == requestedTheme && !reresolve)
         {
             ApplyThemePalette(theme);
             return;
         }
+        if (Root.RequestedTheme == requestedTheme)
+            Root.RequestedTheme = requestedTheme == ElementTheme.Light ? ElementTheme.Dark : ElementTheme.Light;
 
         // Fluent controls resolve a light/dark RequestedTheme change during the next
         // composition pass. Apply custom brushes in that pass too, before it is drawn,

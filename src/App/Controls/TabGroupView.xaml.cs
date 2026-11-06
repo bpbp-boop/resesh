@@ -95,7 +95,7 @@ public sealed partial class TabGroupView : UserControl
     private bool _fullTabWidthRefreshQueued;
     private bool _tabDividerRefreshQueued;
     private bool _tabDividerLayoutRefreshPending;
-    private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.ResolveTheme(App.Settings.Current.Theme));
+    private ThemeVisualPalette _themePalette = ThemeVisualPalette.For(App.CurrentTheme);
     private readonly SolidColorBrush _tabBackgroundBrush;
     private readonly SolidColorBrush _tabDividerBrush;
     private readonly SolidColorBrush _focusEdgeBrush = new(Microsoft.UI.Colors.Transparent);

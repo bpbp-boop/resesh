@@ -79,7 +79,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     private FilePaneView? _filePane;
     private CommunityToolkit.WinUI.Controls.GridSplitter? _paneSplitter;
     private Border? _paneSplitterLine;
-    private ThemeVisualPalette _chromePalette = ThemeVisualPalette.For(App.ResolveTheme(App.Settings.Current.Theme));
+    private ThemeVisualPalette _chromePalette = ThemeVisualPalette.For(App.CurrentTheme);
     private bool _paneSplitterActive;
     private LiveLogin? _liveLogin;
     private const double DefaultFilePaneWidth = 340;
@@ -183,9 +183,9 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         // The page's terminal is constructed with these (init handshake), so it opens
         // with the right theme/fonts instead of restyling just after first paint.
         var initial = App.Settings.Current.WithOverrides(Session.Overrides);
-        var initialTheme = App.ResolveTheme(initial.Theme);
+        var initialTheme = App.ResolveTheme(Session.Overrides.EffectiveTheme(App.CurrentTheme));
         _terminal.SetInitialOptions(
-            initial.FontSize, initial.FontFamily, initialTheme,
+            initial.FontSize, initial.FontFamily, App.TerminalTheme(initialTheme),
             initial.CopyOnSelect, initial.RightClickPaste, initial.Scrollback,
             BuildHighlightPayload(),
             fixed80Columns: Session.IsTelnet && Session.TelnetFixed80Columns);
@@ -1948,7 +1948,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         theme = App.ResolveTheme(theme);
         _chromePalette = ThemeVisualPalette.For(theme);
         ApplyPaneSplitterTheme();
-        _terminal.ApplyOptions(theme: App.ResolveTheme(Session.Overrides.EffectiveTheme(theme)));
+        _terminal.ApplyOptions(theme: App.TerminalTheme(App.ResolveTheme(Session.Overrides.EffectiveTheme(theme))));
         _rewindPlayer?.ApplyTheme(theme);
     }
 

@@ -2,15 +2,21 @@
     x:Class="Resesh.App.Controls.SettingsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:app="using:Resesh.App"
     xmlns:controls="using:Resesh.App.Controls"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
     xmlns:recording="using:Resesh.Core.Recording"
-    Background="{StaticResource SessionShellBrush}"
-    Foreground="{StaticResource SessionTreeForegroundBrush}">
+    Background="{StaticResource SessionPageBrush}"
+    Foreground="{StaticResource SessionTreeForegroundBrush}"
+    ActualThemeChanged="SettingsPage_ActualThemeChanged">
 
     <UserControl.Resources>
         <!-- Cards sit on the recessed input surface of the active theme palette. -->
         <StaticResource x:Key="SettingsCardBackground" ResourceKey="SettingsCardBackgroundBrush" />
+        <!-- NavigationView lays a lighter Fluent layer and a card border over its content;
+             the page itself is the surface, continuous with the selected tab above it. -->
+        <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
+        <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
 
         <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource TitleTextBlockStyle}">
             <Setter Property="Margin" Value="0,0,0,4" />
@@ -52,6 +58,9 @@
             <NavigationViewItem x:Name="GeneralItem" Content="General" Tag="General" AutomationProperties.AutomationId="SettingsGeneralTab">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE713;" /></NavigationViewItem.Icon>
             </NavigationViewItem>
+            <NavigationViewItem x:Name="ThemeItem" Content="Theme" Tag="Theme" AutomationProperties.AutomationId="SettingsThemeTab">
+                <NavigationViewItem.Icon><FontIcon Glyph="&#xE790;" /></NavigationViewItem.Icon>
+            </NavigationViewItem>
             <NavigationViewItem x:Name="SessionsItem" Content="Sessions" Tag="Sessions" AutomationProperties.AutomationId="SettingsSessionsTab">
                 <NavigationViewItem.Icon><FontIcon Glyph="&#xE8FD;" /></NavigationViewItem.Icon>
             </NavigationViewItem>
@@ -91,16 +100,7 @@
                         Style="{StaticResource GroupDescription}"
                         Text="These settings apply throughout resesh and take effect as you change them. Saved sessions can override terminal defaults." />
 
-                    <TextBlock Text="Appearance" Style="{StaticResource GroupHeader}" />
-                    <toolkit:SettingsCard x:Name="ThemeCard" Header="Theme">
-                        <ComboBox
-                            x:Name="ThemeBox"
-                            MinWidth="220"
-                            ItemsSource="{x:Bind ViewModel.Themes}"
-                            SelectedItem="{x:Bind ViewModel.Theme, Mode=TwoWay}"
-                            AutomationProperties.Name="Theme"
-                            AutomationProperties.AutomationId="SettingsTheme" />
-                    </toolkit:SettingsCard>
+                    <TextBlock Text="Fonts" Style="{StaticResource GroupHeader}" />
                     <!-- The saved setting is one list: this font, then the fallbacks. Picking a font
                          replaces only the first entry, so the fallbacks survive it. -->
                     <toolkit:SettingsCard x:Name="FontFamilyCard" Header="Terminal font">
@@ -252,6 +252,76 @@
                             AutomationProperties.AutomationId="SettingsWriteCrashReports" />
                     </toolkit:SettingsCard>
                 </StackPanel>
+                </Grid>
+            </ScrollViewer>
+
+            <!-- ==== Theme ==== -->
+            <ScrollViewer x:Name="ThemeSection" Style="{StaticResource SectionScroller}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MaxWidth="1000" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Style="{StaticResource SectionBody}">
+                        <TextBlock Text="Theme" Style="{StaticResource SectionTitle}" />
+                        <TextBlock Style="{StaticResource GroupDescription}"
+                                   Text="Themes color the terminals, tabs, session tree and panes. A saved session can override its terminal's theme." />
+                        <toolkit:SettingsCard x:Name="AppearanceCard" Header="Appearance"
+                                              Description="System switches between a light and a dark theme when Windows does. Theme always uses the one theme you pick.">
+                            <ComboBox x:Name="AppearanceBox" MinWidth="240"
+                                      ItemsSource="{x:Bind ViewModel.AppearanceChoices}"
+                                      DisplayMemberPath="Name" x:SuppressXamlTrimWarnings="True"
+                                      SelectedItem="{x:Bind ViewModel.Appearance, Mode=TwoWay}"
+                                      AutomationProperties.Name="Appearance"
+                                      AutomationProperties.AutomationId="SettingsAppearance" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard x:Name="ThemeColorsCard" Header="Color the app with the theme"
+                                              Description="Accent: the selected tab's bar and resesh's other highlights take a color from the theme, usually its cursor color. Everything: text, buttons, inputs, switches, menus and tooltips take the theme's colors too. Off: the standard blue accent and Windows colors.">
+                            <ComboBox x:Name="ThemeColorsBox" MinWidth="240"
+                                      ItemsSource="{x:Bind ViewModel.ThemeColorsChoices}"
+                                      DisplayMemberPath="Name" x:SuppressXamlTrimWarnings="True"
+                                      SelectedItem="{x:Bind ViewModel.ThemeColors, Mode=TwoWay}"
+                                      AutomationProperties.Name="Color the app with the theme"
+                                      AutomationProperties.AutomationId="SettingsThemeColors" />
+                        </toolkit:SettingsCard>
+                        <controls:ThemeFilterBar x:Name="ThemeFilter" Margin="0,16,0,0" ShowCategories="False"
+                                                 QueryChanged="ThemeFilter_QueryChanged" />
+
+                        <!-- Theme: every theme, a row per category. -->
+                        <StackPanel x:Name="FixedThemePanel"
+                                    Visibility="{x:Bind app:PresentationValues.Collapsed(ViewModel.IsFollowingWindows), Mode=OneWay}">
+                            <TextBlock x:Name="FixedThemeHeader" Text="Theme" Style="{StaticResource SubtitleTextBlockStyle}" Margin="1,20,0,0" />
+                            <controls:ThemeCategoryRows x:Name="FixedGallery"
+                                                        Themes="{x:Bind ViewModel.AllThemes}"
+                                                        SelectedTheme="{x:Bind ViewModel.Theme, Mode=TwoWay}"
+                                                        AutomationProperties.Name="Theme"
+                                                        AutomationProperties.AutomationId="SettingsTheme" />
+                        </StackPanel>
+
+                        <!-- System: a theme for each Windows mode. -->
+                        <StackPanel x:Name="SystemThemesPanel"
+                                    Visibility="{x:Bind app:PresentationValues.Visible(ViewModel.IsFollowingWindows), Mode=OneWay}">
+                            <StackPanel x:Name="LightThemeHeader" Orientation="Horizontal" Spacing="4" Margin="1,20,0,0">
+                                <TextBlock Text="When Windows is in light mode" Style="{StaticResource SubtitleTextBlockStyle}" />
+                                <TextBlock Text=" — in use now" Opacity="0.65"
+                                           Visibility="{x:Bind app:PresentationValues.Visible(ViewModel.IsLightModeActive), Mode=OneWay}" />
+                            </StackPanel>
+                            <controls:ThemeCategoryRows x:Name="LightGallery"
+                                                   Themes="{x:Bind ViewModel.LightThemes}"
+                                                   SelectedTheme="{x:Bind ViewModel.LightTheme, Mode=TwoWay}"
+                                                   AutomationProperties.Name="Theme when Windows is in light mode"
+                                                   AutomationProperties.AutomationId="SettingsLightTheme" />
+                            <StackPanel x:Name="DarkThemeHeader" Orientation="Horizontal" Spacing="4" Margin="1,28,0,0">
+                                <TextBlock Text="When Windows is in dark mode" Style="{StaticResource SubtitleTextBlockStyle}" />
+                                <TextBlock Text=" — in use now" Opacity="0.65"
+                                           Visibility="{x:Bind app:PresentationValues.Collapsed(ViewModel.IsLightModeActive), Mode=OneWay}" />
+                            </StackPanel>
+                            <controls:ThemeCategoryRows x:Name="DarkGallery"
+                                                   Themes="{x:Bind ViewModel.DarkThemes}"
+                                                   SelectedTheme="{x:Bind ViewModel.DarkTheme, Mode=TwoWay}"
+                                                   AutomationProperties.Name="Theme when Windows is in dark mode"
+                                                   AutomationProperties.AutomationId="SettingsDarkTheme" />
+                        </StackPanel>
+                    </StackPanel>
                 </Grid>
             </ScrollViewer>
 

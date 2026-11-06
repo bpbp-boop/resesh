@@ -36,8 +36,9 @@
 
   <ItemGroup>
     <Content Include="..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- No dot inside the name: MRT would read "LICENSE.<x>.txt" as a resource qualifier. -->
+    <Content Include="..\Core\Storage\ColorSchemes\iTerm2-Color-Schemes-LICENSE.txt" Link="iTerm2-Color-Schemes-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\app.ico" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Assets\workspaces.svg" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\SessionTreeIcons\*.png" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\SessionTreeIcons\*.svg" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\AgentIcons\*.svg" CopyToOutputDirectory="PreserveNewest" />

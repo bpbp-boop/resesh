@@ -70,12 +70,12 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
         RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        var appTheme = App.ResolveTheme(App.Settings.Current.Theme);
+        var appTheme = App.CurrentTheme;
         var settings = App.Settings.Current.WithOverrides(_overrides());
         _terminal.SetInitialOptions(
             fontSize ?? settings.FontSize,
             settings.FontFamily,
-            App.ResolveTheme(settings.Theme),
+            App.TerminalTheme(App.ResolveTheme(_overrides().EffectiveTheme(appTheme))),
             copyOnSelect: true,
             rightClickPaste: false,
             scrollback: settings.Scrollback,
@@ -295,7 +295,7 @@ public sealed partial class TerminalPlayerView : Grid, IDisposable
             return;
         theme = App.ResolveTheme(theme);
         _controls.Background = new SolidColorBrush(ThemeVisualPalette.For(theme).InactiveTab);
-        _terminal.ApplyOptions(theme: App.ResolveTheme(_overrides()?.Theme ?? theme));
+        _terminal.ApplyOptions(theme: App.TerminalTheme(App.ResolveTheme(_overrides().EffectiveTheme(theme))));
     }
 
     /// <summary>Applies font and scrollback settings, with the session's overrides on top.</summary>

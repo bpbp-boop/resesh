@@ -2,9 +2,12 @@ using Resesh.Core.Storage;
 
 namespace Resesh.App.ViewModels;
 
-/// <summary>The settings Welcome offers, as one value.</summary>
+/// <summary>The settings Welcome offers, as one value. Theme ids and the appearance are kept
+/// in their canonical form, so two values that draw the same compare equal.</summary>
 public sealed record WelcomeValues(
-    string Theme,
+    string Appearance,
+    string LightTheme,
+    string DarkTheme,
     bool ConfirmCloseActiveSessions,
     bool CopyOnSelect,
     bool RightClickPaste,
@@ -12,12 +15,38 @@ public sealed record WelcomeValues(
     bool KeepCommandHistory)
 {
     public static WelcomeValues Of(AppSettings settings) => new(
-        settings.Theme,
+        ThemeAppearances.Normalize(settings.Appearance),
+        ThemeCatalog.Find(settings.LightTheme).Id,
+        ThemeCatalog.Find(settings.DarkTheme).Id,
         settings.ConfirmCloseActiveSessions,
         settings.CopyOnSelect,
         settings.RightClickPaste,
         settings.WriteCrashReports,
         settings.KeepCommandHistory);
+
+    /// <summary>These values with <paramref name="themeId"/> as the theme for its mode (light
+    /// or dark, as its background); the appearance stays.</summary>
+    public WelcomeValues WithModeTheme(string themeId)
+    {
+        var theme = ThemeCatalog.Find(themeId);
+        return theme.IsLight ? this with { LightTheme = theme.Id } : this with { DarkTheme = theme.Id };
+    }
+
+    /// <summary>These values drawing with <paramref name="themeId"/> whatever mode Windows is
+    /// in, as <see cref="AppSettings.WithFixedTheme"/> saves it.</summary>
+    public WelcomeValues WithFixedTheme(string themeId)
+    {
+        var theme = ThemeCatalog.Find(themeId);
+        return theme.IsLight
+            ? this with { Appearance = ThemeAppearances.Light, LightTheme = theme.Id }
+            : this with { Appearance = ThemeAppearances.Dark, DarkTheme = theme.Id };
+    }
+
+    /// <summary>The theme these values draw with when Windows is in light mode or not.</summary>
+    public string ThemeFor(bool systemIsLight) =>
+        ThemeAppearances.ThemeFor(Appearance, LightTheme, DarkTheme, systemIsLight);
+
+    internal (string, string, string) Theme => (Appearance, LightTheme, DarkTheme);
 }
 
 /// <summary>
@@ -40,8 +69,8 @@ public sealed class WelcomeChoices
     /// <summary>The values the page shows.</summary>
     public WelcomeValues Shown { get; private set; }
 
-    /// <summary>True when the page shows a theme other than the saved one: it is being previewed.</summary>
-    public bool PreviewsTheme => !SameTheme(Shown.Theme, _saved.Theme);
+    /// <summary>True when the page shows a theme choice other than the saved one: it is being previewed.</summary>
+    public bool PreviewsTheme => Shown.Theme != _saved.Theme;
 
     /// <summary>Records what the user picked on the page.</summary>
     public void Choose(WelcomeValues shown) => Shown = shown;
@@ -54,7 +83,9 @@ public sealed class WelcomeChoices
         T Keep<T>(Func<WelcomeValues, T> field) =>
             EqualityComparer<T>.Default.Equals(field(now), field(_saved)) ? field(Shown) : field(now);
         Shown = new WelcomeValues(
-            SameTheme(now.Theme, _saved.Theme) ? Shown.Theme : now.Theme,
+            Keep(values => values.Appearance),
+            Keep(values => values.LightTheme),
+            Keep(values => values.DarkTheme),
             Keep(values => values.ConfirmCloseActiveSessions),
             Keep(values => values.CopyOnSelect),
             Keep(values => values.RightClickPaste),
@@ -65,7 +96,7 @@ public sealed class WelcomeChoices
 
     /// <summary>Whether Finish has anything to save.</summary>
     public bool HasChanges(AppSettings saved) =>
-        saved.OnboardingCompleted != true || !Same(Shown, WelcomeValues.Of(saved));
+        saved.OnboardingCompleted != true || Shown != WelcomeValues.Of(saved);
 
     /// <summary><paramref name="saved"/> with the choices made on the page, and Welcome done.
     /// Only what the user changed here is written.</summary>
@@ -74,7 +105,9 @@ public sealed class WelcomeChoices
         Refresh(saved);
         return saved with
         {
-            Theme = Shown.Theme,
+            Appearance = Shown.Appearance,
+            LightTheme = Shown.LightTheme,
+            DarkTheme = Shown.DarkTheme,
             ConfirmCloseActiveSessions = Shown.ConfirmCloseActiveSessions,
             CopyOnSelect = Shown.CopyOnSelect,
             RightClickPaste = Shown.RightClickPaste,
@@ -83,10 +116,4 @@ public sealed class WelcomeChoices
             OnboardingCompleted = true,
         };
     }
-
-    private static bool Same(WelcomeValues first, WelcomeValues second) =>
-        first with { Theme = second.Theme } == second && SameTheme(first.Theme, second.Theme);
-
-    private static bool SameTheme(string first, string second) =>
-        string.Equals(first, second, StringComparison.OrdinalIgnoreCase);
 }

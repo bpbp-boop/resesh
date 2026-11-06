@@ -10,46 +10,28 @@ const codeBehind = fs.readFileSync(
   path.join(__dirname, "..", "src", "App", "Controls", "OnboardingView.xaml.cs"),
   "utf8");
 
-test("Welcome explains that its theme choice changes the entire app", () => {
-  assert.match(xaml, /Text="Appearance"/);
-  assert.match(
-    xaml,
-    /changes the entire app: menus, session tree, tabs, and terminal colors/);
-  assert.match(
-    xaml,
-    /A theme override for one session changes only that terminal/);
-  assert.match(xaml, /x:Name="LightThemeToggle"/);
-  assert.match(xaml, /x:Name="DarkThemeToggle"/);
-  assert.match(xaml, /x:Name="SystemThemeToggle"/);
+test("Welcome appearance choices stay wired to the draft appearance", () => {
+  for (const mode of ["System", "Fixed"]) {
+    assert.match(xaml, new RegExp(`x:Name="${mode}ThemeToggle"[^>]*Click="${mode}Theme_Click"`));
+  }
+  assert.match(codeBehind, /SystemTheme_Click[\s\S]*?Appearance = ThemeAppearances\.System/);
+  // Leaving System keeps the theme drawn now.
+  assert.match(codeBehind, /FixedTheme_Click[\s\S]*?WithFixedTheme\(_choices\.Shown\.ThemeFor\(App\.SystemIsLight\(\)\)\)/);
 });
 
-test("Welcome filters the shared theme catalog through one native ComboBox", () => {
-  assert.match(xaml, /<ComboBox x:Name="ThemePicker"/);
-  assert.match(xaml, /Header="Color theme"/);
-  assert.match(xaml, /x:Name="ThemePreviewSurface"/);
+test("Welcome gallery picks the fixed theme, or the theme for Windows' mode under System", () => {
+  assert.match(xaml, /<controls:ThemeGallery x:Name="ThemePicker"/);
+  assert.match(xaml, /AutomationProperties\.AutomationId="ThemePicker"/);
+  assert.match(xaml, /SelectionChanged="ThemePicker_SelectionChanged"/);
   assert.match(codeBehind, /ThemeVisualPalette\.For\(resolved\)/);
-  assert.match(
-    codeBehind,
-    /ThemeCatalog\.All[\s\S]*?\.Where\(theme => theme\.Id != ThemeIds\.System && theme\.IsLight == isLight\)/);
-  assert.match(
-    codeBehind,
-    /ThemePicker_SelectionChanged[\s\S]*?SelectTheme\(theme\.Id\)/);
-});
-
-test("Mode has clear ownership of fixed and system theme selection", () => {
-  assert.match(
-    codeBehind,
-    /Mode is a shortcut, not a second persisted setting/);
-  assert.match(codeBehind, /ThemePicker\.IsEnabled = false/);
-  assert.match(codeBehind, /System follows your Windows color mode/);
+  assert.match(codeBehind, /ThemePicker_SelectionChanged[\s\S]*?WithModeTheme\(theme\.Id\)[\s\S]*?WithFixedTheme\(theme\.Id\)/);
+  assert.match(codeBehind, /ThemePicker\.Query = ThemeFilter\.Query/);
 });
 
 test("Welcome keeps custom-theme contrast resources local to the page", () => {
   assert.match(xaml, /x:Key="OnboardingPrimaryTextBrush"/);
   assert.match(xaml, /x:Key="OnboardingSecondaryTextBrush"/);
   assert.match(xaml, /x:Key="OnboardingPreviewBorderBrush"/);
-  assert.match(codeBehind, /EnsureContrast\(palette\.TreeMutedForeground, palette\.Shell, 4\.5\)/);
-  assert.match(codeBehind, /EnsureContrast\(palette\.Frame, palette\.Shell, 3\.0\)/);
 });
 
 test("Welcome buttons keep the native Fluent surface and theme only text and accent", () => {
@@ -85,7 +67,7 @@ test("Welcome import states and completion behavior are consistent", () => {
   assert.match(xaml, /x:Name="FinishSetupButton"[\s\S]*?HorizontalAlignment="Right"/);
   // Welcome compares with the settings saved now, not a copy taken when it opened.
   assert.match(codeBehind, /FinishSetupButton\.IsEnabled = _choices\.HasChanges\(App\.Settings\.Current\)/);
-  assert.match(codeBehind, /_previewTheme\(App\.Settings\.Current\.Theme\)/);
+  assert.match(codeBehind, /_previewTheme\(App\.CurrentTheme\)/);
   assert.doesNotMatch(codeBehind, /_savedSettings/);
   // Settings changed in any window reach an open Welcome, like the Settings pages.
   const windowCode = require("./support/mainWindowSource");

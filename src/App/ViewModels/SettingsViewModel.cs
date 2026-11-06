@@ -14,6 +14,9 @@ public sealed class SettingsEnvironment
     /// <summary>Persists settings; false when they could not be saved.</summary>
     public required Func<AppSettings, bool> Save { get; init; }
 
+    /// <summary>Whether Windows is in light mode, for the System appearance.</summary>
+    public Func<bool> SystemIsLight { get; init; } = () => false;
+
     /// <summary>Bytes of saved command history; throws when history storage fails.</summary>
     public Func<long> HistorySize { get; init; } = () => 0;
     public string HistoryDirectory { get; init; } = "";
@@ -96,16 +99,97 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     private static string? NonBlank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-    // ---- General ----
+    // ---- Theme ----
+
+    public List<AppearanceChoice> AppearanceChoices { get; } = [.. AppearanceChoice.All];
+
+    /// <summary>System (a theme for each Windows mode) or Theme (one theme always).</summary>
+    public AppearanceChoice Appearance
+    {
+        get => AppearanceChoices[IsFollowingWindows ? 0 : 1];
+        set
+        {
+            if (value is null)
+                return;
+            // Leaving System keeps the theme drawn now, so the switch changes nothing on screen.
+            Save(value, s => value.Id == ThemeAppearances.System
+                ? s with { Appearance = ThemeAppearances.System }
+                : ThemeAppearances.Normalize(s.Appearance) == ThemeAppearances.System
+                    ? s.WithFixedTheme(s.ThemeFor(_environment.SystemIsLight()))
+                    : s, () => Appearance);
+            NotifyThemes();
+        }
+    }
+
+    public bool IsFollowingWindows => ThemeAppearances.Normalize(Current.Appearance) == ThemeAppearances.System;
 
     // Bound to ItemsSource: a concrete List lets CsWinRT generate its WinRT marshalling for AOT.
-    public List<ThemeChoice> Themes { get; } = [.. ThemeCatalog.All];
+    public List<ThemeChoice> AllThemes { get; } = [.. ThemeCatalog.All];
+    public List<ThemeChoice> LightThemes { get; } = [.. ThemeCatalog.All.Where(theme => theme.IsLight)];
+    public List<ThemeChoice> DarkThemes { get; } = [.. ThemeCatalog.All.Where(theme => !theme.IsLight)];
 
+    /// <summary>The theme drawn now; picking one fixes the appearance to it (Theme).</summary>
     public ThemeChoice Theme
     {
-        get => ThemeCatalog.Find(Current.Theme);
-        set { if (value is not null) Save(value, s => s with { Theme = value.Id }, () => Theme); }
+        get => ThemeCatalog.Find(Current.ThemeFor(_environment.SystemIsLight()));
+        set
+        {
+            if (value is null)
+                return;
+            Save(value, s => s.WithFixedTheme(value.Id), () => Theme);
+            NotifyThemes();
+        }
     }
+
+    /// <summary>System's theme while Windows is in light mode.</summary>
+    public ThemeChoice LightTheme
+    {
+        get => ThemeCatalog.Find(Current.LightTheme);
+        set
+        {
+            if (value is null)
+                return;
+            Save(value, s => s with { LightTheme = value.Id }, () => LightTheme);
+            NotifyThemes();
+        }
+    }
+
+    /// <summary>System's theme while Windows is in dark mode.</summary>
+    public ThemeChoice DarkTheme
+    {
+        get => ThemeCatalog.Find(Current.DarkTheme);
+        set
+        {
+            if (value is null)
+                return;
+            Save(value, s => s with { DarkTheme = value.Id }, () => DarkTheme);
+            NotifyThemes();
+        }
+    }
+
+    /// <summary>Whether Windows is in light mode, so the page can mark which of System's two
+    /// themes is in use. The page calls <see cref="ThemeModeChanged"/> when that changes.</summary>
+    public bool IsLightModeActive => _environment.SystemIsLight();
+
+    /// <summary>Windows switched between light and dark mode.</summary>
+    public void ThemeModeChanged()
+    {
+        OnPropertyChanged(nameof(IsLightModeActive));
+        OnPropertyChanged(nameof(Theme));
+    }
+
+    /// <summary>One theme setting saved changes what the others show: the drawn theme, the
+    /// mode's theme, and which galleries the page shows. Galleries ignore a selection they
+    /// already show, so these notifications can't echo back into a save.</summary>
+    private void NotifyThemes()
+    {
+        OnPropertyChanged(nameof(IsFollowingWindows));
+        OnPropertyChanged(nameof(Theme));
+        OnPropertyChanged(nameof(LightTheme));
+        OnPropertyChanged(nameof(DarkTheme));
+    }
+
+    // ---- General ----
 
     /// <summary>The terminal font: the first entry of the saved font list. Picking one keeps
     /// the fallbacks after it.</summary>
@@ -209,6 +293,22 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         get => Current.ConfirmMultilinePaste;
         set => Save(value, s => s with { ConfirmMultilinePaste = value }, () => ConfirmMultilinePaste);
+    }
+
+    public List<ThemeColorsChoice> ThemeColorsChoices { get; } = [.. ThemeColorsChoice.All];
+
+    public ThemeColorsChoice ThemeColors
+    {
+        get
+        {
+            var saved = ThemeColorModes.Normalize(Current.ThemeColors);
+            return ThemeColorsChoices.First(choice => choice.Id == saved);
+        }
+        set
+        {
+            if (value is not null)
+                Save(value, s => s with { ThemeColors = value.Id }, () => ThemeColors);
+        }
     }
 
     public bool ShowStatusBar
@@ -375,6 +475,34 @@ public sealed partial class SettingsViewModel : ObservableObject
         get => Current.AgentAlertSound;
         set => Save(value, s => s with { AgentAlertSound = value }, () => AgentAlertSound);
     }
+}
+
+/// <summary>One option in the Settings appearance list: follow Windows with a theme for each
+/// of its modes, or always one theme. Theme is saved as the light or dark appearance its
+/// theme belongs to (<see cref="AppSettings.WithFixedTheme"/>), so it has no saved value.</summary>
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial record AppearanceChoice(string Id, string Name)
+{
+    public const string FixedTheme = "theme";
+
+    /// <summary>System first: <see cref="SettingsViewModel.Appearance"/> indexes this list.</summary>
+    public static IReadOnlyList<AppearanceChoice> All { get; } =
+    [
+        new(ThemeAppearances.System, "System"),
+        new(FixedTheme, "Theme"),
+    ];
+}
+
+/// <summary>One option for how much of the app takes the theme's colors.</summary>
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial record ThemeColorsChoice(string Id, string Name)
+{
+    public static IReadOnlyList<ThemeColorsChoice> All { get; } =
+    [
+        new(ThemeColorModes.Off, "Off"),
+        new(ThemeColorModes.Accent, "Accent"),
+        new(ThemeColorModes.Everything, "Everything"),
+    ];
 }
 
 /// <summary>One option in the Settings sessions pane layout list.</summary>

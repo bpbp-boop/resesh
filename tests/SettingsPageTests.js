@@ -24,8 +24,8 @@ test("settings is an app page tab, not a dialog", () => {
   assert.match(windowCode, /ViewModel\.FindAppPage\(page\) is \{ \} existing/);
 });
 
-test("settings has General / Recording / Highlighting / Agents / Keyboard Shortcuts sections", () => {
-  for (const section of ["General", "Recording", "Highlighting", "Agents", "Shortcuts"])
+test("settings exposes its first-class sections", () => {
+  for (const section of ["General", "Theme", "Recording", "Highlighting", "Agents", "Shortcuts"])
     assert.match(page, new RegExp(`Tag="${section}"`), section);
   // The targets live with the view models, whose commands open Settings at a field.
   assert.match(read("src", "App", "ViewModels", "SettingsTargets.cs"), /enum GlobalSettingsTarget/);
@@ -46,13 +46,15 @@ test("changes apply as they are made, with no Save or Cancel", () => {
 });
 
 test("the page follows the live application palette", () => {
-  assert.match(page, /Background="\{StaticResource SessionShellBrush\}"/);
   assert.match(page, /Foreground="\{StaticResource SessionTreeForegroundBrush\}"/);
   assert.match(page, /x:Key="SettingsCardBackground" ResourceKey="SettingsCardBackgroundBrush"/);
 });
 
 test("settings fields and sections have stable automation IDs", () => {
   for (const automationId of [
+    "SettingsAppearance",
+    "SettingsLightTheme",
+    "SettingsDarkTheme",
     "SettingsTheme",
     "SettingsFontFamily",
     "SettingsFontSize",
@@ -78,6 +80,7 @@ test("settings fields and sections have stable automation IDs", () => {
     "SettingsAgentAlertSound",
     "SettingsSectionSelector",
     "SettingsGeneralTab",
+    "SettingsThemeTab",
     "SettingsRecordingTab",
     "SettingsHighlightingTab",
     "SettingsAgentsTab",
@@ -86,6 +89,20 @@ test("settings fields and sections have stable automation IDs", () => {
   ]) {
     assert.ok(page.includes(`AutomationProperties.AutomationId="${automationId}"`), `missing ${automationId}`);
   }
+});
+
+test("theme galleries are virtualized, searchable and keep their own selection", () => {
+  const gallery = read("src", "App", "Controls", "ThemeGallery.xaml");
+  const galleryCode = read("src", "App", "Controls", "ThemeGallery.xaml.cs");
+  assert.match(gallery, /<ItemsStackPanel Orientation="Horizontal"/);
+  assert.match(gallery, /SelectionMode="Single"/);
+  assert.match(galleryCode, /StringComparison\.OrdinalIgnoreCase/);
+  for (const gallery of ["Fixed", "Light", "Dark"])
+    assert.match(pageCode, new RegExp(`${gallery}Gallery\\.Query = ThemeFilter\\.Query`));
+  // Light and dark are a filter only where one gallery mixes both (Theme).
+  assert.match(pageCode, /ThemeFilter\.ShowModes = !ViewModel\.IsFollowingWindows/);
+  assert.match(pageCode, /ViewModel\.ThemeModeChanged\(\)/);
+  assert.match(galleryCode, /if \(_updating \|\| ThemeList\.SelectedItem is not ThemeChoice picked\)/);
 });
 
 test("inline Settings editors expose stable automation IDs", () => {

@@ -27,6 +27,7 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
     private static readonly Choice NoChange = new() { Label = "No change" };
 
     private readonly IReadOnlyList<Session> _sessions;
+    private bool _initializing = true;
 
     /// <summary>The edit to apply, or null when cancelled or nothing was chosen.</summary>
     public SessionBulkEdit? Result { get; private set; }
@@ -84,13 +85,12 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
         IconBox.ItemsSource = icons;
         IconBox.SelectedIndex = 0;
 
-        var themes = new List<Choice> { NoChange, new() { Change = true, Label = "Use app setting" } };
-        themes.AddRange(ThemeCatalog.All.Select(theme => new Choice { Change = true, Value = theme.Id, Label = theme.Name }));
-        ThemeBox.ItemsSource = themes;
+        ThemeChoicePicker.ThemeId = ThemeIds.Dark;
         ThemeBox.SelectedIndex = 0;
 
         PersistentBox.SelectedIndex = 0;
         PersistenceBackendBox.SelectedIndex = 0;
+        _initializing = false;
         UpdateState();
     }
 
@@ -105,7 +105,6 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
     {
         var login = LoginBox.SelectedItem as Choice ?? NoChange;
         var icon = IconBox.SelectedItem as Choice ?? NoChange;
-        var theme = ThemeBox.SelectedItem as Choice ?? NoChange;
         var jump = JumpBox?.SelectedItem as Choice ?? NoChange;
         return new SessionBulkEdit
         {
@@ -119,8 +118,8 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
             ColorTag = ColorBox.SelectedIndex > 0 ? SessionColors.All[ColorBox.SelectedIndex - 1].Hex : null,
             SetIcon = icon.Change,
             Icon = icon.Value,
-            SetTheme = theme.Change,
-            Theme = theme.Value,
+            SetTheme = ThemeBox.SelectedIndex > 0,
+            Theme = ThemeBox.SelectedIndex == 2 ? ThemeChoicePicker.ThemeId : null,
             Persistent = PersistentBox.SelectedIndex switch
             {
                 1 => true,
@@ -138,6 +137,8 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
 
     private void Field_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateState();
 
+    private void ThemeChoicePicker_SelectionChanged(object? sender, EventArgs e) => UpdateState();
+
     private void KeepUsernames_Changed(object sender, RoutedEventArgs e) => UpdateState();
 
     private void PortBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args) => UpdateState();
@@ -145,8 +146,10 @@ public sealed partial class BulkEditSessionsDialog : ContentDialog
     private void UpdateState()
     {
         // SelectionChanged fires mid-InitializeComponent, before later controls exist.
-        if (ImpactText is null || PersistentBox is null || PersistenceBackendBox is null || KeepUsernamesBox is null)
+        if (_initializing || ImpactText is null || PersistentBox is null || PersistenceBackendBox is null
+            || KeepUsernamesBox is null || ThemeChoicePicker is null)
             return;
+        ThemeChoicePicker.IsEnabled = ThemeBox.SelectedIndex == 2;
         var edit = BuildEdit();
         KeepUsernamesBox.Visibility = edit.Login is null ? Visibility.Collapsed : Visibility.Visible;
         if (edit.IsEmpty)

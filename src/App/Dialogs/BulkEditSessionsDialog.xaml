@@ -3,6 +3,7 @@
     Style="{StaticResource DefaultContentDialogStyle}"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Resesh.App.Controls"
     PrimaryButtonText="Apply"
     CloseButtonText="Cancel"
     DefaultButton="Primary"
@@ -60,11 +61,20 @@
             <ComboBox
                 x:Name="ThemeBox"
                 Header="Terminal theme"
-                DisplayMemberPath="Label"
-                x:SuppressXamlTrimWarnings="True"
                 HorizontalAlignment="Stretch"
                 AutomationProperties.AutomationId="BulkEditTheme"
-                SelectionChanged="Field_SelectionChanged" />
+                SelectionChanged="Field_SelectionChanged">
+                <ComboBoxItem Content="No change" />
+                <ComboBoxItem Content="Use app setting" />
+                <ComboBoxItem Content="Choose theme" />
+            </ComboBox>
+            <controls:ThemePickerButton
+                x:Name="ThemeChoicePicker"
+                HorizontalAlignment="Stretch"
+                IsEnabled="False"
+                AutomationProperties.Name="Terminal theme"
+                AutomationProperties.AutomationId="BulkEditThemePicker"
+                SelectionChanged="ThemeChoicePicker_SelectionChanged" />
             <ComboBox
                 x:Name="PersistentBox"
                 Header="Persistent session"

@@ -87,9 +87,10 @@ public sealed partial class IconPicker : UserControl
     }
 
     /// <summary>The colour built-in marks are drawn in: the theme's primary text colour.</summary>
-    public Color MarkColor => ActualTheme == ElementTheme.Light
-        ? Color.FromArgb(255, 0x1A, 0x1A, 0x1A)
-        : Color.FromArgb(255, 0xFF, 0xFF, 0xFF);
+    public Color MarkColor => FluentThemeColors.Retint(
+        ActualTheme == ElementTheme.Light ? 0xFF1A1A1Au : 0xFFFFFFFFu,
+        fluentDark: ActualTheme != ElementTheme.Light,
+        ThemeVisualPalette.For(App.CurrentTheme));
 
     public void SetChoices(IReadOnlyList<IconPickerChoice> choices, IconPickerChoice? selected)
     {

@@ -24,6 +24,7 @@
     <EmbeddedResource Include="ShellIntegration/Scripts/**/*" LogicalName="ShellIntegration/%(RecursiveDir)%(Filename)%(Extension)" />
     <EmbeddedResource Include="ShellIntegration/LICENSE.upstream" LogicalName="ShellIntegration/LICENSE" />
     <EmbeddedResource Include="ShellIntegration/ATTRIBUTION.md" LogicalName="ShellIntegration/ATTRIBUTION.md" />
+    <EmbeddedResource Include="Storage/ColorSchemes/color-schemes.tsv" LogicalName="ColorSchemes/color-schemes.tsv" />
   </ItemGroup>
 
 </Project>

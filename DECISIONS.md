@@ -2504,3 +2504,85 @@ adapter report, not the session default or a pinned icon), the tab tells the sur
   the agent has exited when nothing else says so.
 - The ruler collapses, as it does on the alternate screen. Its column keeps its width, so
   the grid does not reflow when an agent starts or stops.
+
+## 2026-11-06 - Theme settings and the iTerm2-Color-Schemes collection
+
+- Settings now store an `Appearance` (Light, Dark, or follow Windows) and separate
+  `LightTheme` and `DarkTheme` ids instead of one theme id, so following Windows can use any
+  theme rather than only resesh Light and resesh Dark. Older files keep their look: `theme`
+  is read as `LegacyTheme` and folded in on load and on backup import. `system` becomes the
+  System appearance with the default light and dark themes; a light theme becomes Light
+  appearance plus `LightTheme`; any other id (unknown ones resolve to the default) becomes
+  Dark appearance plus `DarkTheme`. A session override of `system`, which the old override
+  list offered, resolves to the app's current theme.
+- The iTerm2-Color-Schemes collection is pinned in `eng/color-schemes.json`.
+  `eng/update-color-schemes.ps1` regenerates the checked-in TSV from the pinned release's
+  Ghostty files. Builds do not fetch the collection over the network: Core embeds the TSV
+  as a resource and parses it once. Upstream names are the ids; built-in themes win name
+  or id collisions so existing selections retain their meaning.
+- Selection foreground is part of the palette, not just selection background: in 213 of
+  the 890 collection schemes, the selection background is as bright as the normal text.
+  Keeping only that background would make selected text unreadable.
+- Collection themes derive app chrome through `ThemeChromes.Derive`; built-in themes
+  retain their hand-tuned chrome. Core now owns palettes, and Terminal takes
+  `TerminalTheme` objects instead of resolving theme ids itself.
+- About credits iTerm2-Color-Schemes and Mark Badolato, and the app ships the collection's
+  MIT license beside its own license.
+- Settings shows Appearance as **System** or **Theme**, not Light/Dark/System: with a
+  theme per mode, "Light" and "Dark" read as two more themes and users could not tell how
+  they related to the galleries. Theme is saved as the light or dark appearance its theme's
+  background implies plus that mode's theme (`AppSettings.WithFixedTheme`), so the saved
+  shape and the migration above stay as they are, and the other mode's theme survives a
+  trip back to System.
+- Themes are browsed by category (Traditional, Cool, Warm, Pastel, Vivid, Retro, High
+  contrast; `ThemeCategories`). The collection has no tags, so categories are computed:
+  background hue and greyness, the lightness and saturation of ANSI 1-6, text contrast, and
+  name keywords for what a palette can't show (a terminal's own defaults, recreations of
+  old machines). A theme can be in several categories or none; "All" lists every one.
+- Preview cards show a prompt and `cat` output with the user's own highlighting rules
+  applied (`HighlightPreview`, mirroring Resesh.Terminal's Highlighter). The first previews
+  colored the log line with the theme's ANSI colors, but plain output in a terminal is
+  colored by highlighting rules with fixed colors, so the card did not match the terminal.
+- "Color the app with the theme" (`AppSettings.ThemeColors`: Off, Accent, Everything).
+  Accent, the default, gives resesh's own accent brush a color from collection themes
+  (`ThemeAccent.Pick`): the cursor color when it is colorful (max-min channel spread 60+) and
+  stands out from the background at 3:1, else the most colorful ANSI 1-6 that does, else the
+  default blue. The cursor comes first because themes often make it their signature color.
+  Built-ins keep their hand-tuned accent or deliberate absence.
+- Everything also recolors every standard WinUI control (`FluentThemeColors`). What worked,
+  tested by painting overrides red: a ResourceDictionary of same-named mutable brushes merged
+  *after* XamlControlsResources. Brushes added to the app's own theme dictionaries had no
+  effect, even declared in App.xaml, because a dictionary's merged dictionaries are searched
+  before its theme dictionaries. Overriding only Fluent's base names (TextFillColorPrimaryBrush,
+  AccentFill...) missed controls whose own names (ButtonForeground, ToggleSwitchFillOn,
+  NavigationViewItemForeground...) Fluent resolves inside its own dictionary, so instead all
+  ~1,900 Fluent brushes of each light/dark set are copied and each copy is recolored from its
+  Fluent original by one rule (`ThemeRetint`): greys keep their position on the line from
+  Fluent's surface to its text, moved onto the line from the theme's surface to its text
+  (alpha kept, so translucent fills stay translucent over the theme); accent blues take the
+  theme accent's hue at their own lightness; status colors stay. Acrylic becomes solid in its
+  fallback color. The app's own Fluent-grey choices (tab header text, caption buttons, icon
+  marks) go through the same rule. Adding or removing the dictionary reaches drawn controls
+  only after a RequestedTheme change, so windows pass through the other theme once when the
+  setting changes. High Contrast never gets the copies. Status colors (blue for news, green,
+  amber, red) keep their meaning in every mode.
+- Some Fluent styles fix a brush where the style is defined, so app-level copies never reach
+  them: MenuFlyoutItem, ToggleMenuFlyoutItem and MenuFlyoutSubItem text stayed white (found by
+  reading the realized popups' brushes, since screen captures miss windowed menus). Implicit
+  styles in App.xaml, based on the defaults, set those properties with `{ThemeResource}` so
+  the lookup happens in the app's scope; with theme colors off they resolve to Fluent's own
+  values. ToolTip gets the same treatment. The rail's workspaces icon was an SVG with a
+  fixed grey stroke; it is now a font glyph that takes the rail's text color.
+
+## 2026-11-06 - App pages sit on the selected tab's color
+
+- Settings, Welcome and Import used to draw on `SessionShellBrush` (the tab strip color), so
+  their selected tab, which takes the terminal background (`ActiveTab`) to merge with a
+  terminal, stood on a different surface from the page under it in every theme. Settings
+  also showed NavigationView's default content layer (`NavigationViewContentBackground`, a
+  translucent LayerFillColorDefault, plus a card border), a further lighter panel.
+- These pages now draw on `SessionPageBrush`, set to `ActiveTab` by
+  `ThemeVisualPalette.ApplyToAppResources`, and Settings clears the NavigationView content
+  layer and its border. The tab colors stay as they were, so app tabs still match terminal
+  tabs in the strip. Cards and fields keep the `Input` surface for contrast within the page.
+  Welcome measures its text contrast against `ActiveTab` to match.

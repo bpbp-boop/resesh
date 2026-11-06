@@ -49,7 +49,7 @@ public sealed class SettingsStoreTests
             store.Load();
 
             // Lists compare by reference in a record; everything else must equal the defaults.
-            var expected = new AppSettings { Theme = "light", FontSize = 16 };
+            var expected = new AppSettings { Appearance = ThemeAppearances.Light, FontSize = 16 };
             Assert.Null(store.LoadWarning);
             Assert.Empty(store.Current.PinnedSessionIds);
             Assert.Equal(expected, store.Current with
@@ -64,6 +64,43 @@ public sealed class SettingsStoreTests
         }
     }
 
+    [Theory]
+    [InlineData("system", ThemeAppearances.System, ThemeIds.Light, ThemeIds.Dark)]
+    [InlineData("solarized-light", ThemeAppearances.Light, "solarized-light", ThemeIds.Dark)]
+    [InlineData("nord", ThemeAppearances.Dark, ThemeIds.Light, "nord")]
+    [InlineData("no-such-theme", ThemeAppearances.Dark, ThemeIds.Light, ThemeIds.Default)]
+    public void Load_LegacyThemeMigratesAndSavesOnlyAppearanceAndModeThemes(
+        string legacyTheme, string appearance, string lightTheme, string darkTheme)
+    {
+        var directory = Directory.CreateTempSubdirectory("resesh-legacy-theme-");
+        var path = Path.Combine(directory.FullName, "settings.json");
+        try
+        {
+            File.WriteAllText(path, $$"""{"theme":"{{legacyTheme}}"}""");
+            var store = new SettingsStore(path);
+
+            store.Load();
+
+            Assert.Null(store.LoadWarning);
+            Assert.Null(store.Current.LegacyTheme);
+            Assert.Equal(appearance, store.Current.Appearance);
+            Assert.Equal(lightTheme, store.Current.LightTheme);
+            Assert.Equal(darkTheme, store.Current.DarkTheme);
+
+            store.Save(store.Current);
+
+            using var saved = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+            Assert.False(saved.RootElement.TryGetProperty("theme", out _));
+            Assert.Equal(appearance, saved.RootElement.GetProperty("appearance").GetString());
+            Assert.Equal(lightTheme, saved.RootElement.GetProperty("lightTheme").GetString());
+            Assert.Equal(darkTheme, saved.RootElement.GetProperty("darkTheme").GetString());
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
     [Fact]
     public void Save_WritesCamelCaseNamesAndNullValues()
     {
@@ -75,7 +112,10 @@ public sealed class SettingsStoreTests
             var json = File.ReadAllText(path);
             Assert.Contains("\"showStatusBar\": true", json);
             Assert.Contains("\"windowPlacement\": null", json);
-            Assert.Contains("\n  \"theme\": \"dark\"", json);
+            Assert.Contains("\n  \"appearance\": \"dark\"", json);
+            Assert.Contains("\n  \"lightTheme\": \"light\"", json);
+            Assert.Contains("\n  \"darkTheme\": \"dark\"", json);
+            Assert.DoesNotContain("\"theme\":", json);
         }
         finally
         {
@@ -145,7 +185,7 @@ public sealed class SettingsStoreTests
                 if (recordRecent)
                     store.RecordRecentSession(rejectedSession);
                 else
-                    store.Save(original with { Theme = "rejected", RecentSessionIds = new[] { rejectedSession } });
+                    store.Save(original with { DarkTheme = "rejected", RecentSessionIds = new[] { rejectedSession } });
             });
 
             Assert.True(error is IOException or UnauthorizedAccessException, $"Unexpected failure: {error}");
@@ -158,7 +198,7 @@ public sealed class SettingsStoreTests
 
             var loaded = new SettingsStore(path);
             loaded.Load();
-            Assert.Equal(original.Theme, loaded.Current.Theme);
+            Assert.Equal(original.DarkTheme, loaded.Current.DarkTheme);
             Assert.Equal(new[] { acceptedSession, originalSession }, loaded.Current.RecentSessionIds);
             Assert.DoesNotContain(rejectedSession, loaded.Current.RecentSessionIds);
         }
@@ -177,18 +217,18 @@ public sealed class SettingsStoreTests
         try
         {
             var store = new SettingsStore(path);
-            store.Save(new AppSettings { Theme = "recovered" });
-            store.Save(new AppSettings { Theme = "previous-primary" });
+            store.Save(new AppSettings { DarkTheme = "recovered" });
+            store.Save(new AppSettings { DarkTheme = "previous-primary" });
             var backupContents = File.ReadAllText(path + ".bak");
             File.WriteAllText(path, "{invalid");
             store.Load();
             var recovered = store.Current;
             var warning = store.LoadWarning;
-            Assert.Equal("recovered", recovered.Theme);
+            Assert.Equal("recovered", recovered.DarkTheme);
             Assert.NotNull(warning);
             Directory.CreateDirectory(path + ".tmp");
 
-            var error = Record.Exception(() => store.Save(recovered with { Theme = "rejected" }));
+            var error = Record.Exception(() => store.Save(recovered with { DarkTheme = "rejected" }));
 
             Assert.True(error is IOException or UnauthorizedAccessException, $"Unexpected failure: {error}");
             Assert.Same(recovered, store.Current);
@@ -200,7 +240,7 @@ public sealed class SettingsStoreTests
             Assert.Equal(backupContents, File.ReadAllText(path + ".bak"));
             var loaded = new SettingsStore(path);
             loaded.Load();
-            Assert.Equal("recovered", loaded.Current.Theme);
+            Assert.Equal("recovered", loaded.Current.DarkTheme);
             Assert.Equal(18, loaded.Current.FontSize);
 
             var successfulContents = File.ReadAllText(path);

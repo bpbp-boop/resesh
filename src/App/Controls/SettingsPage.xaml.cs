@@ -23,6 +23,12 @@ public sealed partial class SettingsPage : UserControl
     {
         ViewModel = viewModel;
         InitializeComponent();
+        ThemeFilter.ShowModes = !ViewModel.IsFollowingWindows;
+        ViewModel.PropertyChanged += (_, e) =>
+        {
+            if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName == nameof(SettingsViewModel.IsFollowingWindows))
+                ShowThemeFilter();
+        };
         NumberBoxRanges.Limit(FontSizeBox, SettingRanges.FontSize);
         NumberBoxRanges.Limit(ScrollbackBox, SettingRanges.Scrollback);
         NumberBoxRanges.Limit(HistoryDaysBox, SettingRanges.CommandHistoryDays);
@@ -56,7 +62,13 @@ public sealed partial class SettingsPage : UserControl
 
     private (FrameworkElement Card, Control Control)? FieldOf(GlobalSettingsTarget target) => target switch
     {
-        GlobalSettingsTarget.Theme => (ThemeCard, ThemeBox),
+        GlobalSettingsTarget.Appearance => (AppearanceCard, AppearanceBox),
+        GlobalSettingsTarget.ThemeColors => (ThemeColorsCard, ThemeColorsBox),
+        // Under Theme there is one gallery; System has one for each Windows mode.
+        GlobalSettingsTarget.LightTheme when !ViewModel.IsFollowingWindows => (FixedThemeHeader, FixedGallery.FocusTarget),
+        GlobalSettingsTarget.DarkTheme when !ViewModel.IsFollowingWindows => (FixedThemeHeader, FixedGallery.FocusTarget),
+        GlobalSettingsTarget.LightTheme => (LightThemeHeader, LightGallery.FocusTarget),
+        GlobalSettingsTarget.DarkTheme => (DarkThemeHeader, DarkGallery.FocusTarget),
         GlobalSettingsTarget.FontFamily => (FontFamilyCard, FontFamilyBox.FocusTarget),
         GlobalSettingsTarget.FallbackFonts => (FallbackFontsCard, FallbackFontsBox),
         GlobalSettingsTarget.FontSize => (FontSizeCard, FontSizeBox),
@@ -113,6 +125,7 @@ public sealed partial class SettingsPage : UserControl
     private void Show(SettingsSection section)
     {
         GeneralSection.Visibility = PresentationValues.Visible(section == SettingsSection.General);
+        ThemeSection.Visibility = PresentationValues.Visible(section == SettingsSection.Theme);
         SessionsSection.Visibility = PresentationValues.Visible(section == SettingsSection.Sessions);
         IdentitiesSection.Visibility = PresentationValues.Visible(section == SettingsSection.Identities);
         RecordingSection.Visibility = PresentationValues.Visible(section == SettingsSection.Recording);
@@ -122,6 +135,7 @@ public sealed partial class SettingsPage : UserControl
         AboutSection.Visibility = PresentationValues.Visible(section == SettingsSection.About);
         var item = section switch
         {
+            SettingsSection.Theme => ThemeItem,
             SettingsSection.Sessions => SessionsItem,
             SettingsSection.Identities => IdentitiesItem,
             SettingsSection.Recording => RecordingItem,
@@ -139,6 +153,13 @@ public sealed partial class SettingsPage : UserControl
             RefreshIdentities();
         if (section == SettingsSection.Sessions)
             SessionsManager.Refresh();
+        if (section == SettingsSection.Theme)
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                FixedGallery.ScrollToSelection();
+                LightGallery.ScrollToSelection();
+                DarkGallery.ScrollToSelection();
+            });
     }
 
     private void Sections_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -146,6 +167,23 @@ public sealed partial class SettingsPage : UserControl
         if (args.SelectedItemContainer?.Tag is string tag && Enum.TryParse<SettingsSection>(tag, out var section))
             Show(section);
     }
+
+    /// <summary>Light and dark are a filter only in Theme's one gallery of every theme.</summary>
+    private void ShowThemeFilter()
+    {
+        ThemeFilter.ShowModes = !ViewModel.IsFollowingWindows;
+        FixedGallery.ScrollToSelection();
+    }
+
+    private void ThemeFilter_QueryChanged(object? sender, EventArgs args)
+    {
+        FixedGallery.Query = ThemeFilter.Query;
+        LightGallery.Query = ThemeFilter.Query;
+        DarkGallery.Query = ThemeFilter.Query;
+    }
+
+    private void SettingsPage_ActualThemeChanged(FrameworkElement sender, object args) =>
+        ViewModel.ThemeModeChanged();
 
     // Measured on the page, not the window: Settings can sit in a narrow split.
     private void Sections_SizeChanged(object sender, SizeChangedEventArgs e)

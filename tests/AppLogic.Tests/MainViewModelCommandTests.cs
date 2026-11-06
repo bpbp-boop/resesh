@@ -392,15 +392,19 @@ public sealed class MainViewModelCommandTests : IDisposable
         Assert.Equal("Close Tab", titles[^1]);
     }
 
-    [Fact]
-    public void PaletteSettingsEntriesOpenSettingsAtTheirField()
+    [Theory]
+    [InlineData("Theme Settings", GlobalSettingsTarget.Theme)]
+    [InlineData("Appearance (Light, Dark or Windows)", GlobalSettingsTarget.Appearance)]
+    [InlineData("Light Theme", GlobalSettingsTarget.LightTheme)]
+    [InlineData("Dark Theme", GlobalSettingsTarget.DarkTheme)]
+    public void PaletteSettingsEntriesOpenSettingsAtTheirField(string title, GlobalSettingsTarget target)
     {
         var window = Window();
-        var theme = window.Commands.PaletteCommands().Single(d => d.Title() == "Theme");
+        var theme = window.Commands.PaletteCommands().Single(d => d.Title() == title);
 
         theme.Command.Execute(theme.CurrentParameter);
 
-        Assert.Equal(["ShowSettings Theme"], _window.Calls);
+        Assert.Equal([$"ShowSettings {target}"], _window.Calls);
     }
 
     [Fact]

@@ -19,6 +19,7 @@ public sealed partial class AboutView : UserControl
     private static readonly AboutCredit[] Credits =
     [
         new("Ghostty (libghostty-vt)", "Terminal emulation", "MIT", "https://github.com/ghostty-org/ghostty"),
+        new("iTerm2-Color-Schemes (Mark Badolato)", "Terminal color themes", "MIT", "https://github.com/mbadolato/iTerm2-Color-Schemes"),
         new("SSH.NET", "SSH and SFTP", "MIT", "https://github.com/sshnet/SSH.NET"),
         new("zmx", "Persistent remote sessions", "MIT", "https://github.com/neurosnap/zmx"),
         new("Windows App SDK and WinUI", "App framework", "MIT", "https://github.com/microsoft/WindowsAppSDK"),

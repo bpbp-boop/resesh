@@ -540,12 +540,9 @@
                                 Content="Workspaces"
                                 Tag="workspaces"
                                 AutomationProperties.Name="Workspaces">
+                                <!-- A glyph, not artwork, so it takes the rail's text color like its siblings. -->
                                 <NavigationViewItem.Icon>
-                                    <ImageIcon>
-                                        <ImageIcon.Source>
-                                            <SvgImageSource UriSource="ms-appx:///Assets/workspaces.svg" />
-                                        </ImageIcon.Source>
-                                    </ImageIcon>
+                                    <FontIcon Glyph="&#xE81E;" FontSize="16" />
                                 </NavigationViewItem.Icon>
                             </NavigationViewItem>
                             <NavigationViewItem

@@ -52,7 +52,57 @@ public sealed record AppSettings
     /// discovered shell (see LocalShellDiscovery.DefaultProfile).</summary>
     public Guid? DefaultLocalProfileId { get; init; }
 
-    public string Theme { get; set; } = ThemeIds.Default;
+    /// <summary>Whether the app draws with <see cref="LightTheme"/>, <see cref="DarkTheme"/>,
+    /// or whichever matches the Windows color mode; see <see cref="ThemeAppearances"/>.</summary>
+    public string Appearance { get; set; } = ThemeAppearances.Dark;
+
+    /// <summary>The theme for light mode, a light one from <see cref="ThemeCatalog"/>.</summary>
+    public string LightTheme { get; set; } = ThemeIds.Light;
+
+    /// <summary>The theme for dark mode, a dark one from <see cref="ThemeCatalog"/>.</summary>
+    public string DarkTheme { get; set; } = ThemeIds.Dark;
+
+    /// <summary>How much of the app takes its colors from the theme beyond the chrome it
+    /// always does; see <see cref="ThemeColorModes"/>.</summary>
+    public string ThemeColors { get; set; } = ThemeColorModes.Accent;
+
+    /// <summary>The one theme setting of earlier versions, which held a theme id or "system".
+    /// Read from old files and folded into the three above when they load (see
+    /// <see cref="WithLegacyTheme"/>); never written.</summary>
+    [JsonPropertyName("theme")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacyTheme { get; init; }
+
+    /// <summary>The theme the app draws with when Windows is in light mode or not.</summary>
+    public string ThemeFor(bool systemIsLight) =>
+        ThemeAppearances.ThemeFor(Appearance, LightTheme, DarkTheme, systemIsLight);
+
+    /// <summary>These settings drawing with <paramref name="themeId"/> whatever mode Windows is
+    /// in: the appearance becomes the theme's own mode and the theme that mode's. The other
+    /// mode's theme is kept for when the appearance goes back to System.</summary>
+    public AppSettings WithFixedTheme(string themeId)
+    {
+        var theme = ThemeCatalog.Find(themeId);
+        return theme.IsLight
+            ? this with { Appearance = ThemeAppearances.Light, LightTheme = theme.Id }
+            : this with { Appearance = ThemeAppearances.Dark, DarkTheme = theme.Id };
+    }
+
+    /// <summary>These settings with <see cref="LegacyTheme"/> moved into the appearance and the
+    /// theme for its mode: "system" keeps the default light and dark themes, which is what it
+    /// drew with; a fixed theme becomes the appearance its background implies.</summary>
+    internal AppSettings WithLegacyTheme()
+    {
+        if (LegacyTheme is not { } legacy)
+            return this;
+        if (ThemeCatalog.IsSystem(legacy))
+            return this with { LegacyTheme = null, Appearance = ThemeAppearances.System };
+        var theme = ThemeCatalog.Find(legacy);
+        return theme.IsLight
+            ? this with { LegacyTheme = null, Appearance = ThemeAppearances.Light, LightTheme = theme.Id }
+            : this with { LegacyTheme = null, Appearance = ThemeAppearances.Dark, DarkTheme = theme.Id };
+    }
+
     public string FontFamily { get; set; } = FontFamilies.Default;
     public int FontSize { get; set; } = 14;
     public int Scrollback { get; set; } = 10000;
@@ -102,13 +152,13 @@ public sealed record AppSettings
 
     /// <summary>These settings with a session's overrides layered on top (null members inherit).
     /// Overridden sizes are kept to <see cref="SettingRanges"/>: sessions.json can come from a
-    /// backup or a hand edit, and the terminal must not be asked for a 0-point font.</summary>
+    /// backup or a hand edit, and the terminal must not be asked for a 0-point font. A session's
+    /// theme is not a setting here; see <see cref="TerminalOverridesExtensions.EffectiveTheme"/>.</summary>
     public AppSettings WithOverrides(TerminalOverrides? overrides) =>
         overrides is null
             ? this
             : this with
             {
-                Theme = overrides.EffectiveTheme(Theme),
                 // A session's font goes in front of the app's fallbacks rather than replacing them.
                 FontFamily = FontFamilies.Layer(overrides.FontFamily, FontFamily),
                 FontSize = overrides.FontSize is { } fontSize ? SettingRanges.FontSize.Clamp(fontSize) : FontSize,
@@ -254,7 +304,7 @@ public sealed class SettingsStore
         // Validate before AtomicFile.Load accepts the primary, so recovery can use .bak.
         if (settings is not null)
             Validate(settings);
-        return settings;
+        return settings?.WithLegacyTheme();
     }
 
     /// <summary>The one check for saved settings, used by the loader and by backup reading.</summary>

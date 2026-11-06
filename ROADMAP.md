@@ -8,6 +8,9 @@ and the git history.
 
 ## Shipped
 
+- **Theme settings** — a Theme section in Settings: System (a theme for each Windows mode)
+  or Theme (one always), around 900 bundled iTerm2-Color-Schemes themes browsable by
+  category, and previews drawn with the user's highlighting rules.
 - **Tab tear-off** — a tab dropped outside every window opens in a new window under the
   pointer, keeping its live connection; a window's only tab moves its window instead.
 - **Serial consoles** — `SessionKind.Serial` with a `SerialTarget` (port, speed, data bits,

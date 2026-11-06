@@ -41,7 +41,10 @@ public sealed class SettingsEffectsTests
     }
 
     [Theory]
-    [InlineData(nameof(AppSettings.Theme), SettingsEffect.Theme | SettingsEffect.SettingsPages)]
+    [InlineData(nameof(AppSettings.Appearance), SettingsEffect.Theme | SettingsEffect.SettingsPages)]
+    [InlineData(nameof(AppSettings.LightTheme), SettingsEffect.Theme | SettingsEffect.SettingsPages)]
+    [InlineData(nameof(AppSettings.DarkTheme), SettingsEffect.Theme | SettingsEffect.SettingsPages)]
+    [InlineData(nameof(AppSettings.LegacyTheme), SettingsEffect.None)]
     [InlineData(nameof(AppSettings.ShowStatusBar), SettingsEffect.StatusBar | SettingsEffect.SettingsPages)]
     [InlineData(nameof(AppSettings.SessionsPaneLayout), SettingsEffect.PaneLayout | SettingsEffect.SettingsPages)]
     [InlineData(nameof(AppSettings.RecordingDirectory), SettingsEffect.Recordings | SettingsEffect.SettingsPages)]
@@ -55,7 +58,10 @@ public sealed class SettingsEffectsTests
         var before = new AppSettings();
         var after = property switch
         {
-            nameof(AppSettings.Theme) => before with { Theme = "light" },
+            nameof(AppSettings.Appearance) => before with { Appearance = ThemeAppearances.Light },
+            nameof(AppSettings.LightTheme) => before with { LightTheme = "solarized-light" },
+            nameof(AppSettings.DarkTheme) => before with { DarkTheme = "nord" },
+            nameof(AppSettings.LegacyTheme) => before with { LegacyTheme = "light" },
             nameof(AppSettings.ShowStatusBar) => before with { ShowStatusBar = false },
             nameof(AppSettings.SessionsPaneLayout) => before with { SessionsPaneLayout = SessionsPaneLayouts.Dock },
             nameof(AppSettings.RecordingDirectory) => before with { RecordingDirectory = @"D:\casts" },
@@ -83,7 +89,7 @@ public sealed class SettingsEffectsTests
     public void SeveralChangesCombine()
     {
         var before = new AppSettings();
-        var after = before with { Theme = "light", FontSize = 18, ShowStatusBar = false };
+        var after = before with { Appearance = ThemeAppearances.Light, FontSize = 18, ShowStatusBar = false };
 
         Assert.Equal(
             SettingsEffect.Theme | SettingsEffect.Terminals | SettingsEffect.StatusBar | SettingsEffect.SettingsPages,

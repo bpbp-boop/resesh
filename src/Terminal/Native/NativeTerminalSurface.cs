@@ -118,7 +118,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private int _fontSize = TerminalDefaults.FontSize;
     private int _zoomDelta;
     private string _fontFamily = TerminalDefaults.FontFamily;
-    private TerminalTheme _theme = TerminalThemes.Find(TerminalThemes.DefaultId);
+    private TerminalTheme _theme = TerminalTheme.Initial;
     private bool _copyOnSelect;
     private bool _rightClickPaste;
     private TerminalMouseCapture _mouseCapture = TerminalMouseCapture.Scroll;
@@ -892,13 +892,13 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     // ---- options --------------------------------------------------------------------------
 
-    public override void SetInitialOptions(int fontSize, string fontFamily, string theme, bool copyOnSelect,
+    public override void SetInitialOptions(int fontSize, string fontFamily, TerminalTheme theme, bool copyOnSelect,
         bool rightClickPaste, int scrollback, IReadOnlyList<TerminalHighlight>? highlights = null, bool readOnly = false,
         bool fixed80Columns = false)
     {
         _fontSize = fontSize > 0 ? fontSize : TerminalDefaults.FontSize;
         _fontFamily = string.IsNullOrWhiteSpace(fontFamily) ? _fontFamily : fontFamily;
-        _theme = TerminalThemes.Find(theme);
+        _theme = theme;
         _copyOnSelect = copyOnSelect;
         _rightClickPaste = rightClickPaste;
         _scrollback = scrollback;
@@ -909,7 +909,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         Background = new SolidColorBrush(ToColor(_theme.Background));
     }
 
-    public override void ApplyOptions(int? fontSize = null, string? fontFamily = null, string? theme = null,
+    public override void ApplyOptions(int? fontSize = null, string? fontFamily = null, TerminalTheme? theme = null,
         bool? copyOnSelect = null, bool? rightClickPaste = null, int? scrollback = null)
     {
         var relayout = false;
@@ -918,7 +918,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         if (fontChanged) { _fontFamily = fontFamily!; relayout = true; }
         if (theme is not null)
         {
-            _theme = TerminalThemes.Find(theme);
+            _theme = theme;
             ApplyColors(); // repaints the panels in the new font too
         }
         else if (fontChanged)

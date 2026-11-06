@@ -61,3 +61,36 @@ test("PowerShell integration and persistence follow one rule", () => {
   assert.doesNotMatch(sessionDialog, /Turn off Persistent session/);
   assert.match(read("src", "App", "Dialogs", "BulkEditSessionsDialog.xaml.cs"), /edit\.PersistentSkipped\(_sessions\)/);
 });
+
+test("session theme picks preserve untouched ids and expose the real focus target", () => {
+  const form = read("src", "App", "Controls", "SessionAppearanceForm.xaml");
+  assert.match(form, /<controls:ThemePickerButton x:Name="OverrideThemePicker" InheritLabel=/);
+  assert.match(appearance, /OverrideThemePicker\.ThemeId = overrides\.Theme/);
+  assert.match(appearance, /Theme = Keep\(s => s\.Theme, saved\.Theme, \(\) => now\.Theme\)/);
+  assert.match(appearance, /SessionSettingsTarget\.Theme => OverrideThemePicker\.FocusTarget/);
+});
+
+test("the shared theme picker searches both galleries and only emits user choices", () => {
+  const picker = read("src", "App", "Controls", "ThemePickerButton.xaml.cs");
+  const showChoice = picker.match(/private void ShowChoice\(\)[\s\S]*?(?=\n    private void)/)?.[0];
+  assert.ok(showChoice);
+  assert.match(showChoice, /theme\?\.Name \?\? ThemeId \?\? InheritLabel/);
+  assert.doesNotMatch(showChoice, /SelectionChanged\?\.Invoke/);
+  for (const mode of ["Light", "Dark"]) {
+    assert.match(picker, new RegExp(`${mode}Themes\\.Query = Filter\\.Query`));
+    assert.match(picker, new RegExp(`${mode}Themes\\.SelectedTheme =`));
+  }
+  assert.match(picker, /Gallery_SelectionChanged[^;]*=> Pick\(theme\.Id\)/);
+  assert.match(picker, /InheritButton_Click[^;]*=> Pick\(null\)/);
+  assert.match(picker, /ThemeId = id;[\s\S]*?PickerFlyout\.Hide\(\);[\s\S]*?if \(changed\)[\s\S]*?SelectionChanged\?\.Invoke/);
+  assert.match(picker, /AutomationProperties\.SetName\(PickerButton,/);
+});
+
+test("bulk theme edits keep no-change, inherit and a chosen theme distinct", () => {
+  const bulk = read("src", "App", "Dialogs", "BulkEditSessionsDialog.xaml.cs");
+  const xaml = read("src", "App", "Dialogs", "BulkEditSessionsDialog.xaml");
+  assert.match(xaml, /<controls:ThemePickerButton[\s\S]*?x:Name="ThemeChoicePicker"/);
+  assert.match(bulk, /ThemeChoicePicker\.IsEnabled = ThemeBox\.SelectedIndex == 2/);
+  assert.match(bulk, /SetTheme = ThemeBox\.SelectedIndex > 0/);
+  assert.match(bulk, /Theme = ThemeBox\.SelectedIndex == 2 \? ThemeChoicePicker\.ThemeId : null/);
+});

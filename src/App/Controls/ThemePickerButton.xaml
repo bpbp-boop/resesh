@@ -1,0 +1,36 @@
+<UserControl
+    x:Class="Resesh.App.Controls.ThemePickerButton"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Resesh.App.Controls">
+    <DropDownButton x:Name="PickerButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+        <Grid ColumnSpacing="8" ColumnDefinitions="Auto,*">
+            <Border x:Name="Preview" Width="48" Height="20" CornerRadius="3" Padding="3">
+                <StackPanel x:Name="PreviewColors" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center" />
+            </Border>
+            <TextBlock x:Name="ChoiceName" Grid.Column="1" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        </Grid>
+        <DropDownButton.Flyout>
+            <Flyout x:Name="PickerFlyout" Placement="Bottom" Opened="PickerFlyout_Opened">
+                <Flyout.FlyoutPresenterStyle>
+                    <Style TargetType="FlyoutPresenter">
+                        <Setter Property="MaxWidth" Value="760" />
+                        <Setter Property="Padding" Value="16" />
+                    </Style>
+                </Flyout.FlyoutPresenterStyle>
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="560">
+                    <StackPanel Width="688" Spacing="8">
+                        <Button x:Name="InheritButton" HorizontalAlignment="Stretch" Click="InheritButton_Click" />
+                        <controls:ThemeFilterBar x:Name="Filter" QueryChanged="Filter_QueryChanged" />
+                        <TextBlock Text="Light themes" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                        <controls:ThemeGallery x:Name="LightThemes" SelectionChanged="Gallery_SelectionChanged"
+                                               AutomationProperties.Name="Light themes" />
+                        <TextBlock Text="Dark themes" Style="{ThemeResource BodyStrongTextBlockStyle}" />
+                        <controls:ThemeGallery x:Name="DarkThemes" SelectionChanged="Gallery_SelectionChanged"
+                                               AutomationProperties.Name="Dark themes" />
+                    </StackPanel>
+                </ScrollViewer>
+            </Flyout>
+        </DropDownButton.Flyout>
+    </DropDownButton>
+</UserControl>

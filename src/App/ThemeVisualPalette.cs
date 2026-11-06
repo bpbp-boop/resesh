@@ -47,8 +47,15 @@ internal sealed record ThemeVisualPalette(
         if (App.IsHighContrast)
             return HighContrast();
 
-        var terminal = Resesh.Terminal.Native.TerminalThemes.Find(id);
+        var theme = Resesh.Core.Storage.ThemeCatalog.Find(id);
+        var terminal = theme.Palette;
         var chrome = ThemeChromes.Find(id);
+        // Built-ins have a hand-tuned accent or deliberately none; collection themes take one
+        // from their palette unless the user turned theme colors off.
+        var accent = chrome.Accent
+            ?? (!theme.IsBuiltIn && Resesh.Core.Storage.ThemeColorModes.Normalize(App.Settings.Current.ThemeColors) != Resesh.Core.Storage.ThemeColorModes.Off
+                ? Resesh.Core.Storage.ThemeAccent.Pick(terminal)
+                : null);
         var active = chrome.ActiveTab ?? terminal.Background;
         var strip = chrome.Strip;
         var divider = chrome.Divider;
@@ -68,8 +75,8 @@ internal sealed record ThemeVisualPalette(
                 ? Hex(muted)
                 : Blend(terminal.Foreground, strip),
             TreeSelection: Hex(terminal.Selection),
-            TreeSelectionForeground: Hex(terminal.Foreground),
-            Accent: chrome.Accent is { } accent ? Hex(accent) : DefaultAccent,
+            TreeSelectionForeground: Hex(terminal.SelectionForeground ?? terminal.Foreground),
+            Accent: accent is { } picked ? Hex(picked) : DefaultAccent,
             AccentBarThickness: chrome.AccentBarThickness,
             PaneBorder: Hex(chrome.PaneBorder ?? divider),
             PaneFocusBorder: Hex(chrome.PaneFocusBorder ?? terminal.Selection),
@@ -91,6 +98,7 @@ internal sealed record ThemeVisualPalette(
         var resources = Application.Current.Resources;
         void Set(string key, Windows.UI.Color color) => ((SolidColorBrush)resources[key]).Color = color;
         Set("SessionShellBrush", Shell);
+        Set("SessionPageBrush", ActiveTab);
         Set("SessionChromeBrush", Chrome);
         Set("SessionAccentBrush", Accent);
         Set("SessionInputBrush", Input);
@@ -102,6 +110,7 @@ internal sealed record ThemeVisualPalette(
         Set("SessionTreeSelectionForegroundBrush", TreeSelectionForeground);
         Set("SettingsCardBorderBrush", Frame);
         Set("SettingsCardBackgroundBrush", Input);
+        FluentThemeColors.Apply(this);
     }
 
     private static ThemeVisualPalette HighContrast()

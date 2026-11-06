@@ -346,7 +346,7 @@ public sealed unsafe partial class NativeTerminalSurface
             return effects;
 
         var drawStart = FrameStats.Enabled ? FrameStats.Now() : 0;
-        if (!_renderer.Draw(_cells, Columns, Rows, _dirty, info, _cursorBlinkOn, _focused, _theme.Selection, full))
+        if (!_renderer.Draw(_cells, Columns, Rows, _dirty, info, _cursorBlinkOn, _focused, _theme.Selection, _theme.SelectionForeground, full))
         {
             ForceFull(); // recovery needs a full frame
             return effects;

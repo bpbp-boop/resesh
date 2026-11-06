@@ -15,7 +15,7 @@ internal static class DialogTheme
 {
     public static void Apply(ContentDialog dialog, string? theme = null)
     {
-        SetRequestedTheme(dialog, theme ?? App.Settings.Current.Theme);
+        SetRequestedTheme(dialog, theme ?? App.CurrentTheme);
         var shell = Brush("SessionShellBrush");
         var input = Brush("SessionInputBrush");
         var frame = Brush("SessionChromeFrameBrush");

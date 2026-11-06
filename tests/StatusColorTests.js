@@ -55,7 +55,7 @@ test("the app's palette brushes take their colors from the one palette in code",
   assert.ok(declared.length >= 10);
   assert.deepEqual([...declared].sort(), [...new Set(applied)].sort());
   // At startup, before any window draws, and on every theme change after.
-  assert.match(appCode, /void OnLaunched\([\s\S]*?ThemeVisualPalette\.For\(ResolveTheme\(Settings\.Current\.Theme\)\)\.ApplyToAppResources\(\);[\s\S]*?CreateWindowCore\(/);
+  assert.match(appCode, /void OnLaunched\([\s\S]*?ThemeVisualPalette\.For\(CurrentTheme\)\.ApplyToAppResources\(\);[\s\S]*?CreateWindowCore\(/);
   assert.match(mainWindow, /private void ApplyThemePalette\(string theme\)[\s\S]*?palette\.ApplyToAppResources\(\);/);
 });
 

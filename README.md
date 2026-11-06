@@ -218,6 +218,22 @@ as at a shell prompt. Hold Shift to send a click to the program instead. To give
 clicks too (Shift then selects), or nothing at all, change **Settings › Terminal › Mouse in
 programs**, or override it for one session in its Appearance settings.
 
+## Theme settings
+
+In **Settings › Theme**, set **Appearance** to **System** to switch between a light and a
+dark theme when Windows does (pick one of each), or to **Theme** to always use one theme.
+Built-in themes sit alongside around 900 bundled themes from
+[iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes); search them by
+name or browse by category: Traditional, Cool, Warm, Pastel, Vivid, Retro and High contrast.
+Each preview shows a prompt and some log output with your highlighting rules applied, as a
+terminal would show it. **Color the app with the theme** picks how far the theme reaches
+beyond the terminal and chrome: **Accent** (the default) takes resesh's highlight color from
+the theme, **Everything** also colors every standard control (text, buttons, inputs,
+switches, lists, menus, dialogs and tooltips), tab titles and the window buttons,
+and **Off** keeps the standard blue and Windows colors. Theme changes apply and save
+immediately.
+A session can still override its terminal theme in its Appearance settings.
+
 ## Tabs and windows
 
 Drag a tab onto another pane's tab strip to move it there, or onto a pane's terminal to
