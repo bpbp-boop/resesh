@@ -2693,3 +2693,32 @@ Checked: the shim builds with `-Wall -Werror` for x64 and arm64, Terminal.Tests 
 the new DLLs, and a native smoke run kept 5,001 lines of 200-column scrollback and
 exercised line text, copy, VT snapshot, search steps, key and focus encoding. The session
 agent keeps its own pin (b699ea7, Zig 0.16); 1.0 changes nothing about that blocker.
+
+## 2026-11-07 - Website screenshots come from a scripted rig
+
+The earlier captures could not be reproduced: the fake router output, history data and video
+commands were never kept. `tools/screenshot-rig` now holds everything needed to retake them:
+- `demo_server.py` is a SOCKS5 proxy on 127.0.0.1:1080 that gives every `*.isp.example` host
+  its own in-process SSH server (asyncssh) with a persona chosen by role: Junos, IOS XR, Nokia
+  MD-CLI, Arista EOS or a Linux shell that reports OSC 133 marks, exit codes, title and OSC 7.
+  Through a proxy, resesh shows the fictional host names everywhere (tabs, status bar,
+  history targets); nothing leaves the machine. Linux hosts serve a fake tree over SFTP.
+  Canned output dated 27 September 2026 is rewritten to the day the server runs.
+  `--down-from N` picks the `show bgp summary` run from which peer 203.0.113.21 is Active,
+  so compare and history get an earlier healthy run.
+- `seed.py` writes a `--data-dir` with DemoMode's tree, identities, a throwaway key under
+  `C:\Users\Public\Documents\demo-keys` (so no account name shows in Identities & Keys),
+  trusted host keys and Phthalo Green.
+- `rig.py` launches the app, opens layouts through `lastLayout`, types with
+  `winapp ui send-keys` and captures with `PrintWindow(PW_RENDERFULLCONTENT)`, which draws
+  the window even when other windows cover it, so captures never include the desktop.
+
+Findings that shaped it:
+- Posted keys (`winapp ui send-keys`, the default transport) reach the terminal and XAML text
+  boxes but never fire keyboard accelerators and carry no Shift or Ctrl state. Views are opened
+  from menus and the command palette, and multi-select uses UIA `AddToSelection`.
+- ConPTY rewrites colon-separated SGR and drops underline colours, so the terminal showcase
+  (`glyphs.py`) is printed over SSH, not from a local profile.
+- Synchronet BBSes print the client's own address on the welcome screen; telnet.png has that
+  one line painted out.
+- Videos are encoded with the ffmpeg in `imageio-ffmpeg` (libx264, CRF 30, `+faststart`).

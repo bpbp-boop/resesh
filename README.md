@@ -85,6 +85,10 @@ sessions over from SecureCRT, PuTTY and OpenSSH in a few clicks.
 
 ### Command history and compare
 
+<p align="center">
+  <img src="website/assets/compare.png" alt="Compare with Previous for show bgp summary with numbers ignored: one BGP peer changed from Established to Active" width="100%">
+</p>
+
 - Turn on history and resesh keeps **every finished command with its output**, host, folder, time and exit code.
 - Search it all with **Ctrl+Shift+H**: `host:syd-pe in:/etc exit:fail "exact phrase"`, or pick a day on the calendar.
 - Put a command back at the prompt, or reopen the session it ran in.
@@ -93,6 +97,10 @@ sessions over from SecureCRT, PuTTY and OpenSSH in a few clicks.
 - Off by default, local only, never in backups. Deletes are overwritten on disk.
 
 ### Rewind and recording
+
+<p align="center">
+  <img src="website/assets/rewind-poster.jpg" alt="Rewind scrubbed back to a BGP summary from a few seconds earlier while the live session keeps running" width="100%">
+</p>
 
 - **Rewind** the terminal to how it looked minutes ago while the session keeps running, then jump back to live.
 - Record to **asciicast** and a **timestamped text log** at the same time.
@@ -506,7 +514,7 @@ tests/Terminal.Tests  terminal surface tests
 tests/*.js            JavaScript source checks (run with `node --test`)
 installer/            WiX MSI and setup bundle
 eng/                  MSBuild targets, patches and the libghostty-vt build
-tools/                TestSshServer, KeepaliveProbe and terminal benchmarks
+tools/                TestSshServer, KeepaliveProbe, terminal benchmarks and the screenshot rig
 website/              project website
 ```
 
