@@ -865,6 +865,52 @@ class DeviceServer(asyncssh.SSHServer):
     def kbdint_auth_supported(self):
         return False
 
+    def connection_made(self, conn):
+        self.conn = conn
+
+    def connection_requested(self, dest_host, dest_port, orig_host, orig_port):
+        # As a jump host: a channel to another fictional host goes to that host's server.
+        # The channel carries SSH bytes, so it opts out of the connection's text encoding.
+        if dest_host.lower().endswith(".isp.example"):
+            return self.conn.create_tcp_channel(encoding=None), HostPipe(dest_host.lower())
+        return False
+
+
+class HostPipe(asyncssh.SSHTCPSession):
+    """A direct-tcpip channel joined to another fake host's in-process SSH server."""
+
+    def __init__(self, host):
+        self.host = host
+        self.writer = None
+        self.pending = []
+
+    def connection_made(self, chan):
+        self.chan = chan
+        asyncio.ensure_future(self.open())
+
+    async def open(self):
+        port = await HOSTS.port_for(self.host)
+        reader, self.writer = await asyncio.open_connection("127.0.0.1", port)
+        for data in self.pending:
+            self.writer.write(data)
+        self.pending.clear()
+        try:
+            while data := await reader.read(65536):
+                self.chan.write(data)
+        except (ConnectionError, OSError):
+            pass
+        self.chan.close()
+
+    def data_received(self, data, datatype):
+        if self.writer:
+            self.writer.write(data)
+        else:
+            self.pending.append(data)
+
+    def connection_lost(self, exc):
+        if self.writer:
+            self.writer.close()
+
 
 def make_process_handler(host):
     async def handle(process: asyncssh.SSHServerProcess):
@@ -976,7 +1022,8 @@ async def main():
     if not os.path.exists(HOST_KEY_PATH):
         asyncssh.generate_private_key("ssh-ed25519").write_private_key(HOST_KEY_PATH)
     key = asyncssh.read_private_key(HOST_KEY_PATH)
-    hosts = Hosts(key, args.root)
+    global HOSTS
+    hosts = HOSTS = Hosts(key, args.root)
     server = await asyncio.start_server(lambda r, w: socks5(r, w, hosts), "127.0.0.1", args.port)
     print(f"[rig] SOCKS5 on 127.0.0.1:{args.port}; host key {key.get_fingerprint()}", flush=True)
     print(f"[rig] public key {key.export_public_key().decode().strip()}", flush=True)

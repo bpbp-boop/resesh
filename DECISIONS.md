@@ -2706,6 +2706,8 @@ commands were never kept. `tools/screenshot-rig` now holds everything needed to 
   Canned output dated 27 September 2026 is rewritten to the day the server runs.
   `--down-from N` picks the `show bgp summary` run from which peer 203.0.113.21 is Active,
   so compare and history get an earlier healthy run.
+  Each fake host also accepts direct-tcpip channels to another `*.isp.example` host, so a
+  saved jump host works through it (the tunnels screenshot reaches syd-metrics-01 that way).
 - `seed.py` writes a `--data-dir` with DemoMode's tree, identities, a throwaway key under
   `C:\Users\Public\Documents\demo-keys` (so no account name shows in Identities & Keys),
   trusted host keys and Phthalo Green.

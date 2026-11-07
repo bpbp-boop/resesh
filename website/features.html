@@ -250,9 +250,13 @@
             <li>putty serial sessions come across on import</li>
           </ul>
         </div>
-        <div class="row__media row__media--empty">
-          <div class="placeholder placeholder--empty">
-            <span class="placeholder__none">no screenshot yet</span>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="serial-screenshot" aria-label="Enlarge the serial console screenshot">
+            <img src="assets/serial.png" alt="New serial session: the port picker shows COM1 — Communications Port, with speed, data bits, parity, stop bits and flow control" width="708" height="523" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="serial-screenshot" popover aria-label="Enlarged serial console screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="serial-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/serial.png" alt="New serial session: the port picker shows COM1 — Communications Port, with speed, data bits, parity, stop bits and flow control" width="708" height="523">
           </div>
         </div>
       </div>
@@ -275,9 +279,13 @@
             <li>turn the question off in settings, or from the question itself</li>
           </ul>
         </div>
-        <div class="row__media row__media--empty">
-          <div class="placeholder placeholder--empty">
-            <span class="placeholder__none">no screenshot yet</span>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="paste-screenshot" aria-label="Enlarge the safe paste screenshot">
+            <img src="assets/safe-paste.png" alt="Paste and run 4 lines? The question names syd-pe-01, shows the Junos set commands about to run, and has Cancel as the default" width="814" height="530" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="paste-screenshot" popover aria-label="Enlarged safe paste screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="paste-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/safe-paste.png" alt="Paste and run 4 lines? The question names syd-pe-01, shows the Junos set commands about to run, and has Cancel as the default" width="814" height="530">
           </div>
         </div>
       </div>
@@ -801,9 +809,13 @@
             <li>the file pane follows the jump host or proxy; opening a folder in file explorer does not</li>
           </ul>
         </div>
-        <div class="row__media row__media--empty">
-          <div class="placeholder placeholder--empty">
-            <span class="placeholder__none">no screenshot yet</span>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="tunnels-screenshot" aria-label="Enlarge the tunnels screenshot">
+            <img src="assets/tunnels.png" alt="Tunnels for syd-metrics-01, reached through a bastion: two local forwards and a SOCKS tunnel listening, saved with the session" width="674" height="603" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="tunnels-screenshot" popover aria-label="Enlarged tunnels screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="tunnels-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/tunnels.png" alt="Tunnels for syd-metrics-01, reached through a bastion: two local forwards and a SOCKS tunnel listening, saved with the session" width="674" height="603">
           </div>
         </div>
       </div>
