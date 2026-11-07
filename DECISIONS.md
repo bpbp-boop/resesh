@@ -2661,3 +2661,35 @@ adapter report, not the session default or a pinned icon), the tab tells the sur
   their start mode's values. Checked by screenshot in both directions and with Everything
   turned on after a switch, which reads the same start-mode set. Supersedes the "copied for
   each light/dark set" detail in "Theme settings and the iTerm2-Color-Schemes collection".
+
+## 2026-11-07 - libghostty-vt 1.0.0
+
+Moved the pin from Ghostty v1.4.0 (83fb956) to the `vt-1.0.0` tag (0fa3d57), libghostty-vt's
+first release under its own version line, still on Zig 0.17. From 1.0 the C ABI only grows
+within 1.x, so future bumps should not need shim rewrites. The About page now says
+"libghostty-vt 1.0.0"; that is a newer library than the 1.4.0 it said before, not an older one.
+
+Getting to 1.0 broke the C API on purpose, and the shim was ported (its own ABI stays 7, C#
+is unchanged):
+- Renames: `GHOSTTY_MODE_SYNCHRONIZED_OUTPUT`, `GHOSTTY_CURSOR_STYLE_*`,
+  `GHOSTTY_RENDER_STATE_OPT_DIRTY`, `GHOSTTY_TERMINAL_SCROLL_VIEWPORT_*`,
+  `ghostty_{key,mouse}_encoder_set[_from_terminal]`; search steps are
+  `ghostty_search_select_next/prev()`; key text is a `GhosttyString`; encoders fill `uint8_t*`.
+- `GhosttyGridRef`, `GhosttySelection` and `GhosttyStyle` have no `size` field (zero-initialize
+  them); the style's booleans and underline are packed into `flags`.
+- The selection format functions are gone. Copy (`rvt_selection_text`) reads the active
+  selection and formats it with a one-off formatter; `rvt_format_vt` sets its extras by key
+  (the same set as before, palette still off). Line text (`line_text_locked`, called once per
+  line by the overview index) keeps one formatter per terminal and only changes its selection,
+  so it doesn't create a formatter per line.
+- Setting `GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES` to NULL now restores the 10,000-byte
+  default (one page) instead of removing the limit, which would have cut wide terminals to a
+  few hundred rows of scrollback. The shim passes `SIZE_MAX`. The compiler can't catch this
+  kind of change: option values are `void*`, so every key's value type and NULL meaning was
+  checked against the 1.0 headers.
+- The Glyph Protocol is off by default upstream now, so `rvt_new` no longer turns it off.
+
+Checked: the shim builds with `-Wall -Werror` for x64 and arm64, Terminal.Tests pass against
+the new DLLs, and a native smoke run kept 5,001 lines of 200-column scrollback and
+exercised line text, copy, VT snapshot, search steps, key and focus encoding. The session
+agent keeps its own pin (b699ea7, Zig 0.16); 1.0 changes nothing about that blocker.

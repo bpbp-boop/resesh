@@ -247,5 +247,6 @@ bare xterm.js + WebGL it is 1.8–8× faster on burst output (≈1.2× on `yes`-
   engineers) rarely needs it. Revisit if enterprise procurement asks for a VPAT, or to let UI
   tests read terminal text directly.
 - DirectWrite details not yet tuned: ligatures, box-drawing geometry, ClearType vs grayscale.
-- The library's C API is explicitly unstable: the commit is pinned in `eng/ghostty-vt.json` and
-  everything goes through our `reseshvt` shim.
+- The library's C ABI is stable from libghostty-vt 1.0 (additions only within 1.x). The tag is
+  still pinned in `eng/ghostty-vt.json`, and everything still goes through our `reseshvt` shim,
+  which owns locking, snapshots and the flat cell format.

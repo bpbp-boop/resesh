@@ -27,7 +27,8 @@
     <GhosttyVtManifest>$(MSBuildThisFileDirectory)..\..\eng\ghostty-vt.json</GhosttyVtManifest>
   </PropertyGroup>
 
-  <!-- Shown on the About page. The first "version" in ghostty-vt.json is Ghostty's. -->
+  <!-- Shown on the About page. The first "version" in ghostty-vt.json is libghostty-vt's
+       (its own release line since vt-1.0.0, not the Ghostty app's). -->
   <ItemGroup>
     <AssemblyMetadata Include="WindowsAppSdkVersion" Value="$(WindowsAppSdkRuntimeVersion)" />
     <AssemblyMetadata Include="GhosttyVersion" Condition="Exists('$(GhosttyVtManifest)')"
