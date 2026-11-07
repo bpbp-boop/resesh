@@ -64,9 +64,10 @@ sessions over from SecureCRT, PuTTY and OpenSSH in a few clicks.
 
 ### A terminal that's actually fast
 
-- Drawn with **Direct2D/DirectWrite** at your display's refresh rate; parsing by **libghostty-vt**.
-- Less than half the memory of the browser-based terminal it replaced (about 300 MB a window, down from
-  700 MB), and well under half the CPU under heavy SSH output.
+- Drawn with **Direct2D and DirectWrite** straight into the window at your display's refresh rate, using
+  Windows' own text engine for **fast, sharp and accurate glyphs**.
+- Every glyph advances by whole cells, so columns line up and text stays crisp at any display scaling.
+- Output is parsed by **libghostty-vt** on the connection's own thread, so heavy SSH output never stalls the window.
 - Box drawing, Powerline separators, braille and legacy computing glyphs drawn as shapes: **no seams at any zoom**.
 - Nerd Font icons work **without a patched font**.
 - Curly, dotted and dashed underlines, underline colours, true colour, OSC 8 hyperlinks.

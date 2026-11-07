@@ -292,7 +292,9 @@
         </div>
         <div class="row__body">
           <ul class="row__bullets">
-            <li>a window with a terminal uses about 300 mb of memory, down from about 700 mb, and heavy ssh output takes well under half the cpu</li>
+            <li>direct2d and directwrite draw every frame straight into the window at your display's refresh rate, using windows' own text engine for sharp, accurate glyphs</li>
+            <li>each glyph advances by whole cells, so columns line up and text stays crisp at any display scaling or zoom</li>
+            <li>output is parsed by ghostty's terminal core on the connection's own thread, so a flood of ssh output never stalls the window</li>
             <li>ime input for japanese, chinese and korean, plus the emoji panel, voice typing and the touch keyboard</li>
             <li>curly, double, dotted and dashed underlines, underline colours, overlines, and bold in bright colours</li>
             <li>box drawing, block elements, braille, powerline separators, sextants, octants and the legacy computing wedges are drawn as shapes, so cells join with no seams at any zoom</li>
