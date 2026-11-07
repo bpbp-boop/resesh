@@ -980,12 +980,12 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   border-top: 1px solid var(--line);
 }
 
-/* Screenshot-led rows: the title with its description and bullets underneath, then the
-   screenshot centred across the row. */
+/* Screenshot-led rows: the title, the screenshot centred across the row, then the
+   bullets underneath. */
 .row {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "head" "body" "media";
+  grid-template-areas: "head" "media" "body";
   gap: 18px;
   padding: 40px 0;
   border-bottom: 1px solid var(--line);
@@ -1159,73 +1159,6 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
 
 /* Planned rows have no screenshot yet: keep the placeholder short. */
 .row__media--empty .placeholder { aspect-ratio: auto; padding: 18px; }
-
-/* Inline worked examples inside a feature row. */
-.example {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
-  border: 1px solid var(--line2);
-  background: var(--panel);
-  font-size: 12.5px;
-  color: var(--ink3);
-}
-
-.example__ok { color: var(--accent); }
-.example__bad { color: var(--amber); }
-
-.cmdlist {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--line2);
-  background: var(--panel);
-  font-size: 12.5px;
-}
-
-.cmdlist__row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--line);
-}
-
-.cmdlist__row:last-child { border-bottom: 0; }
-
-.cmdlist__dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-.cmdlist__dot--bad { background: var(--amber); }
-
-.cmdlist__cmd {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink2);
-}
-
-.cmdlist__status { color: var(--amber); }
-
-.cmdlist__actions {
-  display: flex;
-  gap: 8px;
-  flex: none;
-  font-size: 11.5px;
-  color: var(--ink3);
-}
-
-.cmdlist__chip {
-  padding: 2px 8px;
-  border: 1px solid var(--line2);
-}
 
 /* ---------------------------------------------------------- non-goals --- */
 

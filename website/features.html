@@ -69,7 +69,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">save sessions in folders, filter by name, and set terminal options for each host. choose an included icon or add your own.</p>
           <ul class="row__bullets">
             <li>local profiles for powershell, cmd, wsl and git bash</li>
             <li>tab badges for claude code, codex, gemini cli, github copilot, cursor, opencode and 21 more agents</li>
@@ -97,7 +96,6 @@
           <span class="badge badge--new row__badge">new</span>
         </div>
         <div class="row__body">
-          <p class="row__text">an identity is a username and one proof: a saved password, a registered key, or a password asked once each time resesh runs. give a folder an identity and every session inside uses it, unless the session chooses another identity or keeps its own login.</p>
           <ul class="row__bullets">
             <li>set identity on any folder, or on the tree root as the default</li>
             <li>a rotated password is changed once; a rejected one can be updated for every session that uses it</li>
@@ -126,7 +124,6 @@
           <span class="badge badge--new row__badge">new</span>
         </div>
         <div class="row__body">
-          <p class="row__text">settings › sessions lists every saved session and local profile in one table. sort it, filter it, select the rows you want and change them together.</p>
           <ul class="row__bullets">
             <li>edit together: login, port, tab colour, icon, theme and persistent shells</li>
             <li>move to a folder, set an identity, duplicate or delete</li>
@@ -153,7 +150,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">keep every finished command with its output, folder, session, time and exit result, then search it across all sessions with <span class="key">ctrl shift h</span>. insert a command at the prompt or reopen the session it ran in.</p>
           <ul class="row__bullets">
             <li>all words must match the command, session, folder or output; quote a phrase with "…"</li>
             <li>filters: <span class="key">host:web01</span> <span class="key">in:/etc</span> <span class="key">exit:fail</span> <span class="key">exit:127</span>, plus session, result, time and a calendar day picker</li>
@@ -181,7 +177,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">when a command has run more than once on the same host, compare with previous shows what changed: added and removed lines, with the changed words marked, unified or side by side.</p>
           <ul class="row__bullets">
             <li>timestamps are ignored by default; ignore numbers hides counters and uptimes</li>
             <li>unchanged stretches fold away; <span class="key">f7</span> and <span class="key">shift f7</span> step between changes</li>
@@ -208,7 +203,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">connect to console servers and lab or management devices over telnet. telnet sessions share the session list, folders, tabs, splits, highlighting and recordings with ssh.</p>
           <ul class="row__bullets">
             <li>type telnet host 2003 in quick connect to reach a console line on a high port</li>
             <li>the window size follows the tab as it resizes, so htop, btop and vim fit the window</li>
@@ -240,7 +234,6 @@
           <span class="badge badge--new row__badge">new</span>
         </div>
         <div class="row__body">
-          <p class="row__text">plug a console cable into a switch, router or firewall and open it like any other session. serial sessions share the session list, folders, tabs, splits, highlighting, history and recordings.</p>
           <ul class="row__bullets">
             <li>the port picker names each adapter (usb serial device, prolific, ftdi) instead of a bare com number</li>
             <li>speed, data bits, parity, stop bits and flow control (none, xon/xoff, rts/cts); 9600 8N1 by default</li>
@@ -270,7 +263,6 @@
           <span class="badge badge--new row__badge">new</span>
         </div>
         <div class="row__body">
-          <p class="row__text">a paste that would press enter asks first, and pastes into slow devices go out at a pace they can keep up with.</p>
           <ul class="row__bullets">
             <li>pasting more than one line shows the lines and the session they will run on, with cancel as the default</li>
             <li>no question when the program handles pasted lines itself (bracketed paste), as shells do</li>
@@ -299,7 +291,6 @@
           <span class="badge badge--new row__badge">new</span>
         </div>
         <div class="row__body">
-          <p class="row__text">terminals are drawn natively, with no browser inside. ghostty's terminal core parses the output, and direct2d and directwrite draw it straight into the window.</p>
           <ul class="row__bullets">
             <li>a window with a terminal uses about 300 mb of memory, down from about 700 mb, and heavy ssh output takes well under half the cpu</li>
             <li>ime input for japanese, chinese and korean, plus the emoji panel, voice typing and the touch keyboard</li>
@@ -330,7 +321,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">on a router or switch, the tab shows the mode you are in and where you are in the configuration, so a tab left in configure mode is easy to spot before you type into it.</p>
           <ul class="row__bullets">
             <li>junos: operational or configure, with the [edit] hierarchy and the routing engine role</li>
             <li>cisco ios, ios xe and ios xr: configure and its submode, such as interface, routing or bgp neighbor; ios xr adds the route processor</li>
@@ -357,13 +347,6 @@
             <span class="row__title">keyword highlighting</span>
           </div>
         </div>
-        <div class="row__body">
-          <p class="row__text">highlight interfaces, IP and MAC addresses, link states and routing protocols. enable rules per session or write your own regular expressions.</p>
-          <div class="example">
-            <span>GigabitEthernet0/1 is <span class="example__ok">up</span>, line protocol is <span class="example__ok">up</span></span>
-            <span>GigabitEthernet0/2 is <span class="example__bad">down</span>, line protocol is <span class="example__bad">down</span></span>
-          </div>
-        </div>
         <div class="row__media">
           <button class="screenshot-trigger" type="button" popovertarget="highlighting-screenshot" aria-label="Enlarge the keyword highlighting screenshot">
             <img src="assets/highlighting.png" alt="Keyword highlighting rule editor beside live output" width="1544" height="1019" loading="lazy">
@@ -383,7 +366,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">the scrollbar shows search matches, highlighted text, bookmarks and command positions. command marks can show exit status; line timestamps show when output arrived.</p>
           <ul class="row__bullets">
             <li>hover anywhere on the ruler to see that line, when it arrived, and the matches, bookmarks and highlights around it; click to jump there</li>
             <li>command detection from shell signals and terminal input</li>
@@ -409,27 +391,6 @@
             <span class="row__title">command list</span>
           </div>
         </div>
-        <div class="row__body">
-          <p class="row__text">view detected commands in order, with exit status where available. select a command to find it in the terminal or copy its output.</p>
-          <div class="cmdlist">
-            <div class="cmdlist__row">
-              <span class="cmdlist__dot"></span>
-              <span class="cmdlist__cmd">show ip interface brief</span>
-              <span class="cmdlist__actions">
-                <span class="cmdlist__chip">jump</span>
-                <span class="cmdlist__chip">copy</span>
-              </span>
-            </div>
-            <div class="cmdlist__row">
-              <span class="cmdlist__dot cmdlist__dot--bad"></span>
-              <span class="cmdlist__cmd">systemctl restart bird &nbsp;<span class="cmdlist__status">exit 1</span></span>
-              <span class="cmdlist__actions">
-                <span class="cmdlist__chip">jump</span>
-                <span class="cmdlist__chip">copy</span>
-              </span>
-            </div>
-          </div>
-        </div>
         <div class="row__media">
           <button class="screenshot-trigger" type="button" popovertarget="commands-screenshot" aria-label="Enlarge the command list screenshot">
             <img src="assets/commands.png" alt="Command list panel: each command with its exit status, the time it ran and a copy button" width="461" height="269" loading="lazy">
@@ -449,7 +410,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">rewind earlier output in the native terminal while the session continues. enable recording to save an asciicast file and a timestamped text log.</p>
           <ul class="row__bullets">
             <li>.cast playback with pause, speed and seek</li>
             <li>text logs for searches and change records</li>
@@ -468,7 +428,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">run any action from the command palette on <span class="key">ctrl shift p</span>, or use a shortcut. press <span class="key">ctrl shift /</span> to see and search every shortcut.</p>
           <ul class="row__bullets">
             <li>tabs: <span class="key">ctrl tab</span>, <span class="key">ctrl 1</span>…<span class="key">ctrl 9</span>, close, clone, reconnect and move</li>
             <li>panes: split right or down, and <span class="key">alt ←</span> <span class="key">→</span> <span class="key">↑</span> <span class="key">↓</span> between split groups, with <span class="key">shift</span> to take the tab along</li>
@@ -496,7 +455,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">remote shells keep running on the host, so closing a tab or losing the connection detaches the shell instead of ending it. reconnect and you're back where you were. each session chooses what keeps its shells alive: the resesh agent, or tmux.</p>
           <ul class="row__bullets">
             <li>the resesh agent is a small program that resesh uploads to your home directory on a linux host (about 2 mb). nothing else is installed, and nothing is downloaded by the host</li>
             <li>the agent passes everything between the program and the terminal through unchanged, so every sequence on the <a href="osc.html">osc page</a> works as it does in a plain session</li>
@@ -528,7 +486,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">turn on shell integration for a session to get exact command boundaries, exit codes and the current folder. click the bell on a running command to get a windows notification when it finishes.</p>
           <ul class="row__bullets">
             <li>bash, zsh, fish and powershell, locally and over ssh</li>
             <li>off by default; network cli sessions keep ordinary startup</li>
@@ -554,7 +511,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">claude code, codex, gemini cli, github copilot, opencode and 22 more coding agents work over ssh as they do in a local terminal, each with its own tab icon. badges show when an agent is working (a gently pulsing dot), waiting for you, finished or failed.</p>
           <ul class="row__bullets">
             <li>selecting, copying and right-click paste work as usual inside agents that use the mouse; the agent still gets the scroll wheel, and shift+click sends it a click</li>
             <li>osc 52: remote programs copy to the windows clipboard. it is write-only, so a host can never read your clipboard, and playback never touches it</li>
@@ -585,7 +541,6 @@
           <span class="badge badge--new row__badge">new</span>
         </div>
         <div class="row__body">
-          <p class="row__text">programs can report their own state through the terminal: idle, working, blocked, done or error. resesh reads these reports (osc 7501) and shows them on the tab, with nothing installed on the server.</p>
           <ul class="row__bullets">
             <li>a known agent gets its icon and state; any other program gets the badge alone</li>
             <li>a done or failed result stays on the tab after the prompt returns, until you look at the tab or type in it</li>
@@ -615,7 +570,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">programs that report progress with osc 9;4, the same sequence windows terminal reads, show a thin bar under the tab and on the taskbar button. file-pane transfers use the same bar.</p>
           <ul class="row__bullets">
             <li>normal, error, paused and indeterminate states</li>
             <li>clears itself when the command ends, even if the program forgets</li>
@@ -640,7 +594,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">each workspace is a button on the left rail. one click switches to it, and the workspace you leave stays connected in the background. save pane sizes, tab order, pinned tabs and the active tab.</p>
           <ul class="row__bullets">
             <li>a dot on the button when a background workspace has new output, a dropped session or an agent waiting</li>
             <li>pick an icon from a set that matches the rail, or show initials (your own or from the name), or both with the initials under the icon; hover a button for its status; Ctrl+Shift+1…9 switches, middle-click closes</li>
@@ -669,7 +622,6 @@
           <span class="badge badge--new row__badge">new</span>
         </div>
         <div class="row__body">
-          <p class="row__text">resesh stays usable in a narrow window or a small split, and the parts of the app that are not terminals behave like tabs too.</p>
           <ul class="row__bullets">
             <li>on a narrow window the sessions pane floats over the tabs, so terminals keep their width; choose automatic, float or dock in settings</li>
             <li>quick connect folds into a search button, and <span class="key">ctrl shift k</span> still opens it</li>
@@ -699,7 +651,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">browse local files and transfer remote files over SFTP. the file pane can follow the terminal folder when resesh can detect it.</p>
           <ul class="row__bullets">
             <li>open local folders straight in explorer</li>
             <li>remote folders through sshfs-win when it's installed</li>
@@ -724,7 +675,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">name and reuse private-key references across sessions and identities, in settings › identities &amp; keys. view fingerprints and update the path if a key file moves. passwords and passphrases are stored in windows credential manager.</p>
           <ul class="row__bullets">
             <li>explicit keyboard-interactive prompts, and a fallback to them when a host refuses the key</li>
             <li>review changed host keys before accepting them</li>
@@ -749,7 +699,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">export a .reseshbackup archive and merge it into another installation. passwords and passphrases are excluded by default. including them requires an encrypted backup.</p>
           <ul class="row__bullets">
             <li>review an import in its own tab, as a folder tree, before anything is added</li>
             <li>logins that repeat are proposed as identities and attached to the folders where they dominate</li>
@@ -776,7 +725,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">in settings &rsaquo; theme, pick system to switch between a light and a dark theme with windows, or theme to always use one. use a different terminal theme for each session.</p>
           <ul class="row__bullets">
             <li>built-in themes plus around 900 bundled themes from <a href="https://github.com/mbadolato/iTerm2-Color-Schemes">iTerm2-Color-Schemes</a></li>
             <li>search by name or browse by category: traditional, cool, warm, pastel, vivid, retro, high contrast</li>
@@ -797,7 +745,6 @@
           </div>
         </div>
         <div class="row__body">
-          <p class="row__text">reach hosts that sit behind a bastion or a proxy, and carry other connections through an SSH session. it is all set in the network section of the session editor.</p>
           <ul class="row__bullets">
             <li>pick another saved SSH session as the jump host; jump hosts can be chained, and telnet sessions can use one too</li>
             <li>each jump host logs in with its own login and has its own host key check, asked for one host at a time as the connection reaches it</li>
