@@ -1050,9 +1050,9 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   margin: 0;
   padding: 0;
   list-style: none;
-  font-size: 13.5px;
-  font-weight: 300;
-  color: var(--ink3);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--ink2);
 }
 
 .row__media {
