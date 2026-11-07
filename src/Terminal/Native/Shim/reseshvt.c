@@ -119,6 +119,7 @@ typedef struct {
   uint32_t marker_hint;
   GhosttySearch search;
   GhosttySelectionGesture gesture;
+  GhosttyFormatter line_formatter; // plain text of one line at a time (line_text_locked); created on first use
   GhosttySelectionGestureEvent gesture_events[4]; // press, release, drag, autoscroll tick
   bool searching;
   RvtSpan spans[RVT_MAX_SPANS];
@@ -415,9 +416,10 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
     free(t);
     return NULL;
   }
-  // The default byte cap keeps only a few hundred rows of a wide terminal; the line limit
-  // is what the user configures.
-  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, NULL);
+  // The default byte cap (one page) keeps only a few hundred rows of a wide terminal; the line
+  // limit is what the user configures.
+  size_t unlimited = SIZE_MAX;
+  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &unlimited);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES, &scrollback_lines);
   // Cluster graphemes (emoji ZWJ sequences, flags, combining marks) into one cell, like
   // Ghostty itself; programs can still turn mode 2027 off.
@@ -427,11 +429,6 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
   // unsupported and fall back, rather than spending up to 10 MB a tab on invisible images.
   uint64_t kitty_images = 0;
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &kitty_images);
-  // Likewise the Glyph Protocol (APC 25a1): it answers support queries and keeps registered
-  // glyphs, which the renderer never draws, so programs would show empty boxes instead of
-  // falling back.
-  bool glyphs = false;
-  ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_GLYPH_PROTOCOL, &glyphs);
   size_t unknown_max = 4096;
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_UNKNOWN_MAX_BYTES, &unknown_max);
   ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_USERDATA, t);
@@ -459,6 +456,7 @@ RVT_API void rvt_free(RvtTerm* t) {
     if (t->markers[i]) ghostty_tracked_grid_ref_free(t->markers[i]);
   free(t->markers);
   if (t->search) ghostty_search_free(t->search);
+  ghostty_formatter_free(t->line_formatter);
   if (t->gesture) ghostty_selection_gesture_free(t->gesture, t->term);
   for (int i = 0; i < 4; i++)
     if (t->gesture_events[i]) ghostty_selection_gesture_event_free(t->gesture_events[i]);
@@ -649,7 +647,7 @@ static void collect_spans(RvtTerm* t, uint16_t rows) {
       if (ghostty_search_tick(t->search, &status) != GHOSTTY_SUCCESS || status != GHOSTTY_SEARCH_STATUS_RUNNING) break;
     }
     GhosttySelectionBuffer buf = { t->match_buf, RVT_MAX_SPANS, 0 };
-    GhosttySelection current = GHOSTTY_INIT_SIZED(GhosttySelection);
+    GhosttySelection current = {0};
     bool has_current = ghostty_search_get(t->search, GHOSTTY_SEARCH_DATA_SELECTED_MATCH, &current) == GHOSTTY_SUCCESS;
     // More on-screen matches than the buffer holds: highlight none rather than read garbage.
     if (ghostty_search_get(t->search, GHOSTTY_SEARCH_DATA_VIEWPORT_MATCHES, &buf) == GHOSTTY_SUCCESS) {
@@ -695,7 +693,7 @@ static int read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, ui
   GhosttyTerminalScrollbar bar = { 0 };
   lock(t);
   if (t->render_held && GetTickCount64() - t->hold_started_ms >= 1000) {
-    GhosttyTerminalModeConfig mode = { GHOSTTY_MODE_SYNC_OUTPUT, false };
+    GhosttyTerminalModeConfig mode = { GHOSTTY_MODE_SYNCHRONIZED_OUTPUT, false };
     ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_MODE, &mode);
     // Programmatic mode changes do not invoke the render-hold callback.
     t->render_held = false;
@@ -735,7 +733,7 @@ static int read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, ui
 
   if (force_all) {
     GhosttyRenderStateDirty full = GHOSTTY_RENDER_STATE_DIRTY_FULL;
-    ghostty_render_state_set(t->rs, GHOSTTY_RENDER_STATE_OPTION_DIRTY, &full);
+    ghostty_render_state_set(t->rs, GHOSTTY_RENDER_STATE_OPT_DIRTY, &full);
   }
   GhosttyRenderStateDirty dirty = GHOSTTY_RENDER_STATE_DIRTY_FALSE;
   ghostty_render_state_get(t->rs, GHOSTTY_RENDER_STATE_DATA_DIRTY, &dirty);
@@ -749,9 +747,9 @@ static int read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, ui
   info->cursor_y = cursor.viewport_y;
   info->cursor_blinking = cursor.blinking;
   switch (cursor.visual_style) {
-    case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR: info->cursor_style = 1; break;
-    case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE: info->cursor_style = 2; break;
-    case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW: info->cursor_style = 3; break;
+    case GHOSTTY_CURSOR_STYLE_BAR: info->cursor_style = 1; break;
+    case GHOSTTY_CURSOR_STYLE_UNDERLINE: info->cursor_style = 2; break;
+    case GHOSTTY_CURSOR_STYLE_BLOCK_HOLLOW: info->cursor_style = 3; break;
     default: info->cursor_style = 0; break;
   }
 
@@ -793,24 +791,25 @@ static int read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, ui
       uint16_t flags = 0;
       bool bg_default = true;
       if (styled) {
-        GhosttyStyle st = GHOSTTY_INIT_SIZED(GhosttyStyle);
+        GhosttyStyle st = {0};
         ghostty_render_state_row_cells_get(t->cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_STYLE, &st);
         GhosttyStyleColor fg_color = st.fg_color;
         // Bold draws the first eight palette colors bright, xterm.js's default.
-        if (st.bold && fg_color.tag == GHOSTTY_STYLE_COLOR_PALETTE && fg_color.value.palette < 8)
+        if ((st.flags & GHOSTTY_STYLE_FLAG_BOLD) && fg_color.tag == GHOSTTY_STYLE_COLOR_PALETTE && fg_color.value.palette < 8)
           fg_color.value.palette += 8;
         fg = resolve(fg_color, &colors, dfg);
         bg_default = st.bg_color.tag == GHOSTTY_STYLE_COLOR_NONE;
         bg = resolve(st.bg_color, &colors, dbg);
-        if (st.bold) flags |= RVT_BOLD;
-        if (st.italic) flags |= RVT_ITALIC;
-        if (st.underline) flags |= RVT_UNDERLINE | (uint16_t)((st.underline & 7) << RVT_UL_STYLE_SHIFT);
-        if (st.overline) flags |= RVT_OVERLINE;
+        if (st.flags & GHOSTTY_STYLE_FLAG_BOLD) flags |= RVT_BOLD;
+        if (st.flags & GHOSTTY_STYLE_FLAG_ITALIC) flags |= RVT_ITALIC;
+        int underline = GHOSTTY_STYLE_UNDERLINE(st);
+        if (underline) flags |= RVT_UNDERLINE | (uint16_t)((underline & 7) << RVT_UL_STYLE_SHIFT);
+        if (st.flags & GHOSTTY_STYLE_FLAG_OVERLINE) flags |= RVT_OVERLINE;
         if (st.underline_color.tag != GHOSTTY_STYLE_COLOR_NONE) ul = resolve(st.underline_color, &colors, dfg);
-        if (st.strikethrough) flags |= RVT_STRIKE;
-        if (st.faint) flags |= RVT_FAINT;
-        if (st.invisible) flags |= RVT_INVISIBLE;
-        if (st.inverse) { uint32_t s = fg; fg = bg; bg = s; bg_default = false; }
+        if (st.flags & GHOSTTY_STYLE_FLAG_STRIKETHROUGH) flags |= RVT_STRIKE;
+        if (st.flags & GHOSTTY_STYLE_FLAG_FAINT) flags |= RVT_FAINT;
+        if (st.flags & GHOSTTY_STYLE_FLAG_INVISIBLE) flags |= RVT_INVISIBLE;
+        if (st.flags & GHOSTTY_STYLE_FLAG_INVERSE) { uint32_t s = fg; fg = bg; bg = s; bg_default = false; }
       } else if (tag == GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE || tag == GHOSTTY_CELL_CONTENT_BG_COLOR_RGB) {
         GhosttyColorRgb rgb;
         if (ghostty_render_state_row_cells_get(t->cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR, &rgb) == GHOSTTY_SUCCESS) {
@@ -850,7 +849,7 @@ RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t row
 // Reads a multi-codepoint grapheme for one viewport cell (emoji ZWJ sequences, combining
 // marks). Returns the number of codepoints written.
 RVT_API int rvt_cell_graphemes(RvtTerm* t, uint16_t x, uint16_t y, uint32_t* out, int cap) {
-  GhosttyGridRef ref = GHOSTTY_INIT_SIZED(GhosttyGridRef);
+  GhosttyGridRef ref = {0};
   GhosttyPoint pt = { .tag = GHOSTTY_POINT_TAG_VIEWPORT, .value = { .coordinate = { .x = x, .y = y } } };
   int n = 0;
   lock(t);
@@ -866,7 +865,7 @@ RVT_API int rvt_cell_graphemes(RvtTerm* t, uint16_t x, uint16_t y, uint32_t* out
 // OSC 8 hyperlink URI of one viewport cell. Returns its length in bytes: 0 when the cell has
 // no hyperlink, -1 when the URI does not fit.
 RVT_API int rvt_cell_hyperlink(RvtTerm* t, uint16_t x, uint16_t y, uint8_t* out, int cap) {
-  GhosttyGridRef ref = GHOSTTY_INIT_SIZED(GhosttyGridRef);
+  GhosttyGridRef ref = {0};
   GhosttyPoint pt = { .tag = GHOSTTY_POINT_TAG_VIEWPORT, .value = { .coordinate = { .x = x, .y = y } } };
   int n = 0;
   lock(t);
@@ -885,10 +884,10 @@ RVT_API void rvt_scroll(RvtTerm* t, int mode, intptr_t value) {
   GhosttyTerminalScrollViewport s;
   memset(&s, 0, sizeof s);
   switch (mode) {
-    case 0: s.tag = GHOSTTY_SCROLL_VIEWPORT_TOP; break;
-    case 1: s.tag = GHOSTTY_SCROLL_VIEWPORT_BOTTOM; break;
-    case 2: s.tag = GHOSTTY_SCROLL_VIEWPORT_DELTA; s.value.delta = value; break;
-    default: s.tag = GHOSTTY_SCROLL_VIEWPORT_ROW; s.value.row = (size_t)value; break;
+    case 0: s.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_TOP; break;
+    case 1: s.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM; break;
+    case 2: s.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA; s.value.delta = value; break;
+    default: s.tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW; s.value.row = (size_t)value; break;
   }
   lock(t);
   ghostty_terminal_scroll_viewport(t->term, s);
@@ -951,17 +950,17 @@ static GhosttyKey key_from_vk(int vk) {
 // 1 press, 2 repeat. utf8 is the text the key produces without ctrl/alt (may be empty).
 // Returns bytes written to out (0 when the key produces nothing), or -1 for an unmapped key.
 RVT_API int rvt_encode_key(RvtTerm* t, int vk, int mods, int action, const char* utf8, size_t utf8_len,
-                           uint32_t unshifted, char* out, size_t cap) {
+                           uint32_t unshifted, uint8_t* out, size_t cap) {
   GhosttyKey key = key_from_vk(vk);
   if (key == GHOSTTY_KEY_UNIDENTIFIED) return -1;
   size_t written = 0;
   lock(t);
-  ghostty_key_encoder_setopt_from_terminal(t->keys, t->term);
+  ghostty_key_encoder_set_from_terminal(t->keys, t->term);
   ghostty_key_event_set_action(t->key, (GhosttyKeyAction)action);
   ghostty_key_event_set_key(t->key, key);
   ghostty_key_event_set_mods(t->key, (GhosttyMods)mods);
   ghostty_key_event_set_consumed_mods(t->key, 0);
-  ghostty_key_event_set_utf8(t->key, utf8_len ? utf8 : NULL, utf8_len);
+  ghostty_key_event_set_utf8(t->key, (GhosttyString){ (const uint8_t*)utf8, utf8_len });
   ghostty_key_event_set_unshifted_codepoint(t->key, unshifted);
   GhosttyResult r = ghostty_key_encoder_encode(t->keys, t->key, out, cap, &written);
   unlock(t);
@@ -978,7 +977,7 @@ RVT_API int rvt_kitty_flags(RvtTerm* t) {
 }
 
 // Focus in/out report (CSI I / CSI O) when the program enabled mode 1004; 0 otherwise.
-RVT_API int rvt_focus(RvtTerm* t, int focused, char* out, size_t cap) {
+RVT_API int rvt_focus(RvtTerm* t, int focused, uint8_t* out, size_t cap) {
   GhosttyTerminalModeConfig mode = { GHOSTTY_MODE_FOCUS_EVENT, false };
   size_t written = 0;
   lock(t);
@@ -1012,16 +1011,16 @@ RVT_API int rvt_bracketed_paste(RvtTerm* t) {
 // action: 0 press, 1 release, 2 motion. button: 0 none, 1 left, 2 right, 3 middle, 4/5 wheel.
 // x/y are surface pixels. Returns bytes for the program (0 when it does not track this event).
 RVT_API int rvt_encode_mouse(RvtTerm* t, int action, int button, int mods, float x, float y,
-                             int any_button_pressed, char* out, size_t cap) {
+                             int any_button_pressed, uint8_t* out, size_t cap) {
   size_t written = 0;
   lock(t);
-  ghostty_mouse_encoder_setopt_from_terminal(t->mouse, t->term);
+  ghostty_mouse_encoder_set_from_terminal(t->mouse, t->term);
   GhosttyMouseEncoderSize size = GHOSTTY_INIT_SIZED(GhosttyMouseEncoderSize);
   size.screen_width = t->screen_w; size.screen_height = t->screen_h;
   size.cell_width = t->cell_w; size.cell_height = t->cell_h;
-  ghostty_mouse_encoder_setopt(t->mouse, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &size);
+  ghostty_mouse_encoder_set(t->mouse, GHOSTTY_MOUSE_ENCODER_OPT_SIZE, &size);
   bool pressed = any_button_pressed != 0;
-  ghostty_mouse_encoder_setopt(t->mouse, GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, &pressed);
+  ghostty_mouse_encoder_set(t->mouse, GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED, &pressed);
   ghostty_mouse_event_set_action(t->mouse_event, (GhosttyMouseAction)action);
   if (button) ghostty_mouse_event_set_button(t->mouse_event, (GhosttyMouseButton)button);
   else ghostty_mouse_event_clear_button(t->mouse_event);
@@ -1037,14 +1036,14 @@ RVT_API int rvt_encode_mouse(RvtTerm* t, int action, int button, int mods, float
 
 // Selects from (x0, y0) to (x1, y1) inclusive, in viewport cells. Returns 0 on success.
 RVT_API int rvt_select(RvtTerm* t, uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1) {
-  GhosttyGridRef a = GHOSTTY_INIT_SIZED(GhosttyGridRef), b = GHOSTTY_INIT_SIZED(GhosttyGridRef);
+  GhosttyGridRef a = {0}, b = {0};
   GhosttyPoint pa = { .tag = GHOSTTY_POINT_TAG_VIEWPORT, .value = { .coordinate = { .x = x0, .y = y0 } } };
   GhosttyPoint pb = { .tag = GHOSTTY_POINT_TAG_VIEWPORT, .value = { .coordinate = { .x = x1, .y = y1 } } };
   int rc = -1;
   lock(t);
   if (ghostty_terminal_grid_ref(t->term, pa, &a) == GHOSTTY_SUCCESS &&
       ghostty_terminal_grid_ref(t->term, pb, &b) == GHOSTTY_SUCCESS) {
-    GhosttySelection sel = GHOSTTY_INIT_SIZED(GhosttySelection);
+    GhosttySelection sel = {0};
     sel.start = a;
     sel.end = b;
     sel.rectangle = false;
@@ -1058,7 +1057,7 @@ RVT_API int rvt_select(RvtTerm* t, uint16_t x0, uint16_t y0, uint16_t x1, uint16
 RVT_API int rvt_select_all(RvtTerm* t) {
   int rc = -1;
   lock(t);
-  GhosttySelection sel = GHOSTTY_INIT_SIZED(GhosttySelection);
+  GhosttySelection sel = {0};
   if (ghostty_terminal_select_all(t->term, &sel) == GHOSTTY_SUCCESS)
     rc = ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SELECTION, &sel) == GHOSTTY_SUCCESS ? 0 : -1;
   unlock(t);
@@ -1071,19 +1070,36 @@ RVT_API void rvt_select_clear(RvtTerm* t) {
   unlock(t);
 }
 
+// Formats the terminal with a one-off formatter; NULL when the output is empty. Free with
+// rvt_free_buffer. Call with the terminal lock held.
+static uint8_t* format_alloc_locked(RvtTerm* t, GhosttyFormatterFormat emit, bool unwrap,
+                                    GhosttyFormatterExtras extras, const GhosttySelection* sel, size_t* out_len) {
+  uint8_t* buf = NULL;
+  *out_len = 0;
+  GhosttyFormatter f = NULL;
+  if (ghostty_formatter_terminal_new(NULL, &f, t->term) != GHOSTTY_SUCCESS) return NULL;
+  if (ghostty_formatter_set(f, GHOSTTY_FORMATTER_OPT_EMIT, &emit) != GHOSTTY_SUCCESS ||
+      ghostty_formatter_set(f, GHOSTTY_FORMATTER_OPT_UNWRAP, &unwrap) != GHOSTTY_SUCCESS ||
+      ghostty_formatter_set(f, GHOSTTY_FORMATTER_OPT_EXTRAS, &extras) != GHOSTTY_SUCCESS ||
+      (sel && ghostty_formatter_set(f, GHOSTTY_FORMATTER_OPT_SELECTION, sel) != GHOSTTY_SUCCESS) ||
+      ghostty_formatter_format_alloc(f, NULL, &buf, out_len) != GHOSTTY_SUCCESS) {
+    buf = NULL;
+    *out_len = 0;
+  }
+  ghostty_formatter_free(f);
+  return buf;
+}
+
 // Plain text of the current selection; free with rvt_free_buffer. Returns NULL when empty.
 RVT_API uint8_t* rvt_selection_text(RvtTerm* t, size_t* out_len) {
-  GhosttyTerminalSelectionFormatOptions opts = GHOSTTY_INIT_SIZED(GhosttyTerminalSelectionFormatOptions);
-  opts.emit = GHOSTTY_FORMATTER_FORMAT_PLAIN;
-  opts.trim = true;
-  opts.unwrap = true;
-  opts.selection = NULL;
   uint8_t* buf = NULL;
   *out_len = 0;
   lock(t);
-  GhosttyResult r = ghostty_terminal_selection_format_alloc(t->term, NULL, opts, &buf, out_len);
+  GhosttySelection sel = {0};
+  if (ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_SELECTION, &sel) == GHOSTTY_SUCCESS)
+    buf = format_alloc_locked(t, GHOSTTY_FORMATTER_FORMAT_PLAIN, true, GHOSTTY_FORMATTER_EXTRAS_NONE, &sel, out_len);
   unlock(t);
-  return r == GHOSTTY_SUCCESS ? buf : NULL;
+  return buf;
 }
 
 RVT_API void rvt_free_buffer(uint8_t* buf, size_t len) {
@@ -1094,31 +1110,12 @@ RVT_API void rvt_free_buffer(uint8_t* buf, size_t len) {
 // scrolling region, ready to replay into a fresh terminal of the same size. This is the
 // rewind keyframe format the WebView player already understands. Free with rvt_free_buffer.
 RVT_API uint8_t* rvt_format_vt(RvtTerm* t, size_t* out_len) {
-  GhosttyFormatterTerminalOptions opts = GHOSTTY_INIT_SIZED(GhosttyFormatterTerminalOptions);
-  opts.emit = GHOSTTY_FORMATTER_FORMAT_VT;
-  opts.unwrap = true;
-  opts.trim = true;
-  opts.extra.size = sizeof opts.extra;
-  opts.extra.modes = true;
-  opts.extra.scrolling_region = true;
-  opts.extra.tabstops = true;
-  opts.extra.screen.size = sizeof opts.extra.screen;
-  opts.extra.screen.cursor = true;
-  opts.extra.screen.style = true;
-  opts.extra.screen.hyperlink = true;
-  opts.extra.screen.charsets = true;
-  opts.selection = NULL;
-  uint8_t* buf = NULL;
-  *out_len = 0;
+  const GhosttyFormatterExtras extras =
+      GHOSTTY_FORMATTER_EXTRA_MODES | GHOSTTY_FORMATTER_EXTRA_SCROLLING_REGION | GHOSTTY_FORMATTER_EXTRA_TABSTOPS |
+      GHOSTTY_FORMATTER_EXTRA_CURSOR | GHOSTTY_FORMATTER_EXTRA_STYLE | GHOSTTY_FORMATTER_EXTRA_HYPERLINK |
+      GHOSTTY_FORMATTER_EXTRA_CHARSETS;
   lock(t);
-  GhosttyFormatter f = NULL;
-  if (ghostty_formatter_terminal_new(NULL, &f, t->term, opts) == GHOSTTY_SUCCESS) {
-    if (ghostty_formatter_format_alloc(f, NULL, &buf, out_len) != GHOSTTY_SUCCESS) {
-      buf = NULL;
-      *out_len = 0;
-    }
-    ghostty_formatter_free(f);
-  }
+  uint8_t* buf = format_alloc_locked(t, GHOSTTY_FORMATTER_FORMAT_VT, true, extras, NULL, out_len);
   unlock(t);
   return buf;
 }
@@ -1144,8 +1141,10 @@ RVT_API int rvt_search_set(RvtTerm* t, const uint8_t* needle, size_t len) {
 // direction: 1 toward older output (up), -1 toward newer. Scrolls the match into view.
 RVT_API void rvt_search_step(RvtTerm* t, int direction) {
   lock(t);
-  if (t->searching)
-    ghostty_search_set(t->search, direction > 0 ? GHOSTTY_SEARCH_OPT_SELECT_NEXT : GHOSTTY_SEARCH_OPT_SELECT_PREV, NULL);
+  if (t->searching) {
+    if (direction > 0) ghostty_search_select_next(t->search);
+    else ghostty_search_select_prev(t->search);
+  }
   unlock(t);
 }
 
@@ -1185,13 +1184,13 @@ RVT_API int rvt_gesture(RvtTerm* t, int kind, double x, double y, uint16_t vx, u
       ghostty_selection_gesture_event_new(NULL, &t->gesture_events[kind], types[kind]) != GHOSTTY_SUCCESS) goto done;
   GhosttySelectionGestureEvent ev = t->gesture_events[kind];
 
-  GhosttyGridRef ref = GHOSTTY_INIT_SIZED(GhosttyGridRef);
+  GhosttyGridRef ref = {0};
   GhosttyPoint pt = { .tag = GHOSTTY_POINT_TAG_VIEWPORT, .value = { .coordinate = { .x = vx, .y = vy } } };
   bool have_ref = ghostty_terminal_grid_ref(t->term, pt, &ref) == GHOSTTY_SUCCESS;
   GhosttySurfacePosition pos = { x, y };
   bool rectangle = (flags & 1) != 0;
   if (kind == 0 && (flags & 2) && have_ref) {
-    GhosttySelection current = GHOSTTY_INIT_SIZED(GhosttySelection);
+    GhosttySelection current = {0};
     if (ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_SELECTION, &current) == GHOSTTY_SUCCESS) {
       current.end = ref;
       rc = ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SELECTION, &current) == GHOSTTY_SUCCESS ? 1 : -1;
@@ -1229,7 +1228,7 @@ RVT_API int rvt_gesture(RvtTerm* t, int kind, double x, double y, uint16_t vx, u
     ghostty_selection_gesture_event_set(ev, GHOSTTY_SELECTION_GESTURE_EVENT_OPT_RECTANGLE, &rectangle);
   }
 
-  GhosttySelection sel = GHOSTTY_INIT_SIZED(GhosttySelection);
+  GhosttySelection sel = {0};
   GhosttyResult r = ghostty_selection_gesture_event(t->gesture, t->term, ev, &sel);
   if (r == GHOSTTY_SUCCESS) {
     rc = ghostty_terminal_set(t->term, GHOSTTY_TERMINAL_OPT_SELECTION, &sel) == GHOSTTY_SUCCESS ? 1 : -1;
@@ -1293,29 +1292,26 @@ static int line_text_locked(RvtTerm* t, int32_t line, uint8_t* out, size_t cap, 
   int rc = -1;
   uint16_t cols = 0;
   ghostty_terminal_get(t->term, GHOSTTY_TERMINAL_DATA_COLS, &cols);
-  GhosttyGridRef a = GHOSTTY_INIT_SIZED(GhosttyGridRef), b = GHOSTTY_INIT_SIZED(GhosttyGridRef);
+  GhosttyGridRef a = {0}, b = {0};
   GhosttyPoint pa = { .tag = GHOSTTY_POINT_TAG_SCREEN, .value = { .coordinate = { .x = 0, .y = (uint32_t)line } } };
   GhosttyPoint pb = { .tag = GHOSTTY_POINT_TAG_SCREEN, .value = { .coordinate = { .x = (uint16_t)(cols ? cols - 1 : 0), .y = (uint32_t)line } } };
   if (cols && ghostty_terminal_grid_ref(t->term, pa, &a) == GHOSTTY_SUCCESS &&
-      ghostty_terminal_grid_ref(t->term, pb, &b) == GHOSTTY_SUCCESS) {
+      ghostty_terminal_grid_ref(t->term, pb, &b) == GHOSTTY_SUCCESS &&
+      (t->line_formatter || ghostty_formatter_terminal_new(NULL, &t->line_formatter, t->term) == GHOSTTY_SUCCESS)) {
     GhosttyRow row = 0;
     if (ghostty_grid_ref_row(&a, &row) == GHOSTTY_SUCCESS) {
       bool cont = false;
       ghostty_row_get(row, GHOSTTY_ROW_DATA_WRAP_CONTINUATION, &cont);
       *wrapped = cont ? 1 : 0;
     }
-    GhosttySelection sel = GHOSTTY_INIT_SIZED(GhosttySelection);
+    // The formatter's defaults are what a line needs: plain text, trimmed, rows not joined.
+    GhosttySelection sel = {0};
     sel.start = a;
     sel.end = b;
-    GhosttyTerminalSelectionFormatOptions opts = GHOSTTY_INIT_SIZED(GhosttyTerminalSelectionFormatOptions);
-    opts.emit = GHOSTTY_FORMATTER_FORMAT_PLAIN;
-    opts.trim = true;
-    opts.unwrap = false;
-    opts.selection = &sel;
     size_t written = 0;
-    GhosttyResult r = ghostty_terminal_selection_format_buf(t->term, opts, out, cap, &written);
-    if (r == GHOSTTY_SUCCESS) rc = (int)written;
-    else if (r == GHOSTTY_NO_VALUE) rc = 0; // an empty line
+    if (ghostty_formatter_set(t->line_formatter, GHOSTTY_FORMATTER_OPT_SELECTION, &sel) == GHOSTTY_SUCCESS &&
+        ghostty_formatter_format_buf(t->line_formatter, out, cap, &written) == GHOSTTY_SUCCESS)
+      rc = (int)written; // 0 for an empty line
     while (rc > 0 && (out[rc - 1] == '\n' || out[rc - 1] == '\r')) rc--;
   }
   return rc;
@@ -1398,7 +1394,7 @@ RVT_API int rvt_search_lines(RvtTerm* t, int32_t* out, int cap, int32_t* current
       if (ghostty_terminal_point_from_grid_ref(t->term, &buf[i].start, GHOSTTY_POINT_TAG_SCREEN, &p) == GHOSTTY_SUCCESS)
         out[n++] = (int32_t)p.y;
     }
-    GhosttySelection selected = GHOSTTY_INIT_SIZED(GhosttySelection);
+    GhosttySelection selected = {0};
     GhosttyPointCoordinate p;
     if (ghostty_search_get(t->search, GHOSTTY_SEARCH_DATA_SELECTED_MATCH, &selected) == GHOSTTY_SUCCESS &&
         ghostty_terminal_point_from_grid_ref(t->term, &selected.start, GHOSTTY_POINT_TAG_SCREEN, &p) == GHOSTTY_SUCCESS)
