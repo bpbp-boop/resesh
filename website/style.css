@@ -980,12 +980,12 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   border-top: 1px solid var(--line);
 }
 
-/* Screenshot first: the title, then the screenshot across the row, then the text
-   underneath as a caption (two columns where there is room). */
+/* Screenshot-led rows: the title with its description and bullets underneath, then the
+   screenshot centred across the row. */
 .row {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "head" "media" "body";
+  grid-template-areas: "head" "body" "media";
   gap: 18px;
   padding: 40px 0;
   border-bottom: 1px solid var(--line);
@@ -1057,7 +1057,7 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
 
 .row__media {
   grid-area: media;
-  justify-self: start;
+  justify-self: center;
   width: fit-content;
   max-width: 100%;
   min-width: 0;
