@@ -980,19 +980,24 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   border-top: 1px solid var(--line);
 }
 
+/* Screenshot first: the title, then the screenshot across the row, then the text
+   underneath as a caption (two columns where there is room). */
 .row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
-  gap: 20px 40px;
-  align-items: start;
-  padding: 28px 0;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "head" "media" "body";
+  gap: 18px;
+  padding: 40px 0;
   border-bottom: 1px solid var(--line);
 }
 
 .row__head {
+  grid-area: head;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px 14px;
   min-width: 0;
 }
 
@@ -1015,13 +1020,14 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   color: var(--ink);
 }
 
-.row__badge { align-self: flex-start; }
+.row__badge { align-self: center; }
 
 .row__body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  grid-column: span 2;
+  grid-area: body;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  gap: 12px 40px;
+  align-items: start;
   min-width: 0;
 }
 
@@ -1050,17 +1056,25 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
 }
 
 .row__media {
+  grid-area: media;
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
   min-width: 0;
   border: 1px solid var(--line2);
   background: var(--panel);
   overflow: hidden;
 }
 
+/* Tall screenshots stay within the viewport; narrow ones sit centred on the panel. */
 .row__media img,
 .row__media video {
   display: block;
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   height: auto;
+  max-height: min(72vh, 760px);
+  margin: 0 auto;
 }
 
 .screenshot-trigger {
@@ -1138,9 +1152,13 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
 }
 
 .row__media--empty {
+  width: 100%;
   border: 1px dashed var(--line2);
   background: transparent;
 }
+
+/* Planned rows have no screenshot yet: keep the placeholder short. */
+.row__media--empty .placeholder { aspect-ratio: auto; padding: 18px; }
 
 /* Inline worked examples inside a feature row. */
 .example {
@@ -1538,9 +1556,11 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   .nav__link:not([href="features.html"]) { display: none; }
 }
 
-/* The session tree is tall and narrow; show its top half in a feature row. */
+/* The session tree is tall and narrow; show its top part in a feature row. */
 .row__media .session-tree-image {
-  max-height: 440px;
+  width: 306px;
+  height: 640px;
+  max-height: none;
   object-fit: cover;
   object-position: top left;
 }
