@@ -16,7 +16,9 @@ public readonly record struct RetintTarget(uint Background, uint Foreground, uin
 /// the theme's text at 6% over whatever it covers. Greys beyond the surface (deeper shadows,
 /// brighter cards) go the same distance past the theme's surface, away from its text.</item>
 /// <item>The accent blues become the theme's accent at the blue's own lightness, so hover and
-/// pressed steps keep their order.</item>
+/// pressed steps keep their order. A blue from the set for the other mode (Fluent's dark set
+/// on a light theme) takes the mirrored lightness: dark mode's light fills under black text
+/// become light mode's dark fills under white text.</item>
 /// <item>Other colors (status green, amber, red) mean something and stay as they are.</item>
 /// </list>
 /// </para>
@@ -29,13 +31,15 @@ public static class ThemeRetint
     /// <summary>Above this channel spread a color is colored rather than grey.</summary>
     private const int MinimumChroma = 40;
 
-    /// <param name="fluentDark">Whether <paramref name="argb"/> is from Fluent's dark set.</param>
+    /// <param name="fluentDark">Whether <paramref name="argb"/> is from Fluent's dark set. It need
+    /// not match the theme: the app can only read the set for the mode it started in.</param>
     /// <param name="isText">Text and glyph colors are kept at 3:1 against the theme's surface.</param>
     public static uint Map(uint argb, bool fluentDark, RetintTarget theme, bool isText = false)
     {
         var alpha = argb & 0xFF000000;
         var rgb = argb & 0xFFFFFF;
         var (hue, _, lightness, chroma) = ColorMath.ToHsl(rgb);
+        var themeDark = ColorMath.RelativeLuminance(theme.Foreground) > ColorMath.RelativeLuminance(theme.Background);
         uint mapped;
         if (chroma > MinimumChroma)
         {
@@ -43,7 +47,7 @@ public static class ThemeRetint
             if (hue is < 185 or > 225)
                 return argb;
             var (accentHue, accentSaturation, _, _) = ColorMath.ToHsl(theme.Accent);
-            mapped = ColorMath.FromHsl(accentHue, accentSaturation, lightness);
+            mapped = ColorMath.FromHsl(accentHue, accentSaturation, fluentDark == themeDark ? lightness : 1 - lightness);
             if (isText)
                 mapped = ColorMath.Readable(mapped, theme.Background, 3, theme.Foreground);
         }
@@ -62,9 +66,7 @@ public static class ThemeRetint
                 // Past the surface, away from the text: the theme goes the same way.
                 var away = fluentDark ? 0.0 : 255.0;
                 var past = (value - from) / (away - from);
-                var themeAway = ColorMath.RelativeLuminance(theme.Foreground) > ColorMath.RelativeLuminance(theme.Background)
-                    ? 0x000000u
-                    : 0xFFFFFFu;
+                var themeAway = themeDark ? 0x000000u : 0xFFFFFFu;
                 mapped = ColorMath.Mix(theme.Background, themeAway, Math.Clamp(past, 0, 1));
             }
         }

@@ -2643,3 +2643,21 @@ adapter report, not the session default or a pinned icon), the tab tells the sur
   `ThemeChoice.Chrome` is that chrome, or `ThemeChrome.Derive` for collection themes.
   `IsBuiltIn` means the theme has tuned chrome. App's `ThemeChromes` table, which repeated
   the built-in ids and needed a test to stay in step with the catalog, is gone.
+
+## 2026-11-07 - Fluent copies come from the start mode's set only
+
+- With theme colors on Everything, switching between a dark and a light theme (Amber CRT
+  Retro to resesh Light) left standard-control text white and scroll bars dark; the other
+  way, text went near-black on the dark theme. Read through code, Fluent's light and dark
+  theme dictionaries both hold the colors of the app's RequestedTheme (fixed at startup):
+  after a dark start, 1,676 of 1,828 "Light" brushes matched their "Default" twins, including
+  TextFillColorPrimaryBrush (white). The copies kept those as their light originals, so the
+  wrong mode's colors were retinted. Elements did resolve to the copies (checked by reference).
+- `FluentThemeColors` now reads only the set for the start mode and keeps one top-level copy
+  per name; theme-dictionary copies are gone. `ThemeRetint.Map` already maps greys from
+  either set onto any theme (text to text, surface to surface, past-surface away from text);
+  accent blues from the other mode's set now take the mirrored lightness, so dark mode's
+  light fills under black text become dark fills under white text. Status colors still keep
+  their start mode's values. Checked by screenshot in both directions and with Everything
+  turned on after a switch, which reads the same start-mode set. Supersedes the "copied for
+  each light/dark set" detail in "Theme settings and the iTerm2-Color-Schemes collection".
