@@ -6,6 +6,7 @@ using Resesh.App.Dialogs;
 using Resesh.App.ViewModels;
 using Resesh.Core.Import;
 using Resesh.Core.Storage;
+using Resesh.Terminal;
 using Windows.UI;
 
 namespace Resesh.App.Controls;
@@ -391,7 +392,7 @@ public sealed partial class OnboardingView : UserControl, IDisposable
         var primary = EnsureContrast(palette.TreeForeground, page, 4.5);
         var secondary = EnsureContrast(palette.TreeMutedForeground, page, 4.5);
         var accentText = EnsureContrast(palette.Accent, page, 4.5);
-        var accentForeground = BetterContrast(Microsoft.UI.Colors.Black, Microsoft.UI.Colors.White, palette.Accent);
+        var accentForeground = ColorMath.PrefersBlackText(RgbColor.ToRgb(palette.Accent)) ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White;
         var previewBorder = EnsureContrast(palette.Frame, page, 3.0);
 
         SetBrush("OnboardingPrimaryTextBrush", primary);
@@ -408,32 +409,8 @@ public sealed partial class OnboardingView : UserControl, IDisposable
 
     private Brush Brush(string key) => (Brush)Resources[key];
 
-    private static Color EnsureContrast(Color foreground, Color background, double minimum)
-    {
-        if (ContrastRatio(foreground, background) >= minimum)
-            return foreground;
-
-        var target = BetterContrast(Microsoft.UI.Colors.Black, Microsoft.UI.Colors.White, background);
-        for (var step = 1; step <= 20; step++)
-        {
-            var candidate = Mix(foreground, target, step / 20.0);
-            if (ContrastRatio(candidate, background) >= minimum)
-                return candidate;
-        }
-        return target;
-    }
-
-    private static Color BetterContrast(Color first, Color second, Color background) =>
-        ContrastRatio(first, background) >= ContrastRatio(second, background) ? first : second;
-
-    private static Color Mix(Color first, Color second, double amount) => Color.FromArgb(
-        255,
-        (byte)Math.Round(first.R + ((second.R - first.R) * amount)),
-        (byte)Math.Round(first.G + ((second.G - first.G) * amount)),
-        (byte)Math.Round(first.B + ((second.B - first.B) * amount)));
-
-    private static double ContrastRatio(Color first, Color second) =>
-        ColorContrast.Ratio((uint)(first.R << 16 | first.G << 8 | first.B), (uint)(second.R << 16 | second.G << 8 | second.B));
+    private static Color EnsureContrast(Color foreground, Color background, double minimum) =>
+        RgbColor.ToColor(ColorMath.Readable(RgbColor.ToRgb(foreground), RgbColor.ToRgb(background), minimum));
 
     private void FinishSetup_Click(object sender, RoutedEventArgs e) => FinishRequested?.Invoke();
 

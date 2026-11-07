@@ -44,7 +44,6 @@ public sealed class SettingsEffectsTests
     [InlineData(nameof(AppSettings.Appearance), SettingsEffect.Theme | SettingsEffect.SettingsPages)]
     [InlineData(nameof(AppSettings.LightTheme), SettingsEffect.Theme | SettingsEffect.SettingsPages)]
     [InlineData(nameof(AppSettings.DarkTheme), SettingsEffect.Theme | SettingsEffect.SettingsPages)]
-    [InlineData(nameof(AppSettings.LegacyTheme), SettingsEffect.None)]
     [InlineData(nameof(AppSettings.ShowStatusBar), SettingsEffect.StatusBar | SettingsEffect.SettingsPages)]
     [InlineData(nameof(AppSettings.SessionsPaneLayout), SettingsEffect.PaneLayout | SettingsEffect.SettingsPages)]
     [InlineData(nameof(AppSettings.RecordingDirectory), SettingsEffect.Recordings | SettingsEffect.SettingsPages)]
@@ -61,7 +60,6 @@ public sealed class SettingsEffectsTests
             nameof(AppSettings.Appearance) => before with { Appearance = ThemeAppearances.Light },
             nameof(AppSettings.LightTheme) => before with { LightTheme = "solarized-light" },
             nameof(AppSettings.DarkTheme) => before with { DarkTheme = "nord" },
-            nameof(AppSettings.LegacyTheme) => before with { LegacyTheme = "light" },
             nameof(AppSettings.ShowStatusBar) => before with { ShowStatusBar = false },
             nameof(AppSettings.SessionsPaneLayout) => before with { SessionsPaneLayout = SessionsPaneLayouts.Dock },
             nameof(AppSettings.RecordingDirectory) => before with { RecordingDirectory = @"D:\casts" },

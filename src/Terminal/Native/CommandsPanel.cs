@@ -114,16 +114,16 @@ internal sealed partial class CommandsPanel : Grid
 
     internal void ApplyTheme(TerminalTheme theme, string fontFamily)
     {
-        var foreground = ToColor(theme.Foreground);
-        _backgroundBrush.Color = ToColor(theme.Background);
+        var foreground = RgbColor.ToColor(theme.Foreground);
+        _backgroundBrush.Color = RgbColor.ToColor(theme.Background);
         _foregroundBrush.Color = foreground;
         _mutedBrush.Color = WithAlpha(foreground, 0xA6);
         _borderBrush.Color = WithAlpha(foreground, 0x52);
         _hoverBrush.Color = WithAlpha(foreground, 0x22);
         _pressedBrush.Color = WithAlpha(foreground, 0x36);
-        _selectedBrush.Color = WithAlpha(ToColor(theme.Selection), 0x78);
-        _successBrush.Color = ToColor(theme.Ansi[AnsiBrightGreen]);
-        _failureBrush.Color = ToColor(theme.Ansi[AnsiBrightRed]);
+        _selectedBrush.Color = WithAlpha(RgbColor.ToColor(theme.Selection), 0x78);
+        _successBrush.Color = RgbColor.ToColor(theme.Ansi[AnsiBrightGreen]);
+        _failureBrush.Color = RgbColor.ToColor(theme.Ansi[AnsiBrightRed]);
         _surface.Background = _backgroundBrush;
         _surface.BorderBrush = _borderBrush;
         _title.Foreground = _foregroundBrush;
@@ -235,8 +235,6 @@ internal sealed partial class CommandsPanel : Grid
         Resources["ListViewItemMinHeight"] = 28d;
         Resources["ListViewItemPadding"] = new Thickness(0);
     }
-
-    internal static Color ToColor(uint rgb) => Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 
     private static Color WithAlpha(Color color, byte alpha) => Color.FromArgb(alpha, color.R, color.G, color.B);
 

@@ -65,8 +65,6 @@ public static class SettingsEffects
         Value(nameof(AppSettings.LightTheme), s => s.LightTheme, SettingsEffect.Theme),
         Value(nameof(AppSettings.DarkTheme), s => s.DarkTheme, SettingsEffect.Theme),
         Value(nameof(AppSettings.ThemeColors), s => s.ThemeColors, SettingsEffect.Theme),
-        // Folded into the three above as settings load; null in every settings the app holds.
-        Value(nameof(AppSettings.LegacyTheme), s => s.LegacyTheme, SettingsEffect.None),
         Value(nameof(AppSettings.ShowStatusBar), s => s.ShowStatusBar, SettingsEffect.StatusBar),
         Value(nameof(AppSettings.SessionsPaneLayout), s => s.SessionsPaneLayout, SettingsEffect.PaneLayout),
         Value(nameof(AppSettings.RecordingDirectory), s => s.RecordingDirectory, SettingsEffect.Recordings),

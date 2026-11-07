@@ -247,7 +247,7 @@ public sealed unsafe partial class NativeTerminalSurface
         {
             _appliedMarginSequence = effects.MarginSequence;
             var color = effects.Margin ?? _theme.Background;
-            Background = new SolidColorBrush(ToColor(color));
+            Background = new SolidColorBrush(RgbColor.ToColor(color));
             _ruler.SetLaneBackground(color);
         }
         if (effects.Poll)

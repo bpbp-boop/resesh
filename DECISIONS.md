@@ -2621,3 +2621,25 @@ adapter report, not the session default or a pinned icon), the tab tells the sur
 - `eng/BannedSymbols.txt` (BannedApiAnalyzers, RS0030 as an error, imported through
   `eng/WindowsAppSdk.props`) bans the raw `TryEnqueue` overloads and `Tick`. XAML's
   `DispatcherTimer` is not affected: its ticks reach `Application.UnhandledException`.
+
+## 2026-11-07 - No theme migration; one copy of color math and theme chrome
+
+- The `theme` setting of earlier versions is no longer read. A settings file or backup that
+  has only `theme` loads with the default appearance and themes. A session override of
+  `system` is no longer special: like any unknown id, it resolves to the default theme.
+  This supersedes the migration in "Theme settings and the iTerm2-Color-Schemes collection"
+  (2026-11-06).
+- `ColorMath` (Core) is the only place that computes luminance, contrast, mixing, HSL and
+  the "move toward black or white until it reads" step. It replaces App's `ColorContrast`
+  and private copies in `ThemeAccent`, `ThemeCategories`, `ThemeRetint`,
+  `FluentThemeColors`, `OnboardingView` and `ThemeVisualPalette`. Luminance now uses the
+  sRGB cutoff 0.04045 everywhere. `ThemeVisualPalette`'s 2:1 blends round instead of
+  truncating. `Readable` steps in twentieths, as Welcome did, rather than tenths. These
+  move colors by at most a step.
+- `RgbColor` (Resesh.Terminal) is the one 0xRRGGBB ⇄ `Windows.UI.Color` conversion for the
+  terminal and the app. It is not part of `HexColor` because Terminal.Tests compiles
+  `HexColor.cs` without the Windows SDK.
+- Hand-tuned chrome is defined next to each built-in palette in `ThemeCatalog`.
+  `ThemeChoice.Chrome` is that chrome, or `ThemeChrome.Derive` for collection themes.
+  `IsBuiltIn` means the theme has tuned chrome. App's `ThemeChromes` table, which repeated
+  the built-in ids and needed a test to stay in step with the catalog, is gone.

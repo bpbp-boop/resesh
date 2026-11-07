@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using Resesh.Core.Models;
 using Resesh.Core.Storage;
+using Resesh.Terminal;
 using Windows.UI;
 
 namespace Resesh.App.Controls;
@@ -125,7 +126,7 @@ public sealed partial class ThemeSwatch : UserControl
     private SolidColorBrush RuleBrush(uint color)
     {
         if (!_ruleBrushes.TryGetValue(color, out var brush))
-            _ruleBrushes[color] = brush = new SolidColorBrush(Rgb(color));
+            _ruleBrushes[color] = brush = new SolidColorBrush(RgbColor.ToColor(color));
         return brush;
     }
 
@@ -159,19 +160,17 @@ public sealed partial class ThemeSwatch : UserControl
         var palette = theme.Palette;
         if (_linesVersion != Volatile.Read(ref _rulesVersion))
             BuildLines();
-        _background.Color = Rgb(palette.Background);
-        _foreground.Color = Rgb(palette.Foreground);
-        _cursor.Color = Rgb(palette.Cursor);
+        _background.Color = RgbColor.ToColor(palette.Background);
+        _foreground.Color = RgbColor.ToColor(palette.Foreground);
+        _cursor.Color = RgbColor.ToColor(palette.Cursor);
         // A faint ring in the text color keeps a dot that matches the background visible.
         _outline.Color = Color.FromArgb(72,
             (byte)(palette.Foreground >> 16), (byte)(palette.Foreground >> 8), (byte)palette.Foreground);
         for (var i = 0; i < _ansi.Length; i++)
-            _ansi[i].Color = Rgb(palette.Ansi[i]);
+            _ansi[i].Color = RgbColor.ToColor(palette.Ansi[i]);
         foreach (var (brush, color) in _tints)
-            brush.Color = Rgb(ColorMath.Mix(palette.Background, color, TintAlpha));
+            brush.Color = RgbColor.ToColor(ColorMath.Mix(palette.Background, color, TintAlpha));
         ThemeName.Text = theme.Name;
         AutomationProperties.SetName(this, theme.Name);
     }
-
-    private static Color Rgb(uint rgb) => Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 }

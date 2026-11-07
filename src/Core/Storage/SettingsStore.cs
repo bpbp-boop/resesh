@@ -66,13 +66,6 @@ public sealed record AppSettings
     /// always does; see <see cref="ThemeColorModes"/>.</summary>
     public string ThemeColors { get; set; } = ThemeColorModes.Accent;
 
-    /// <summary>The one theme setting of earlier versions, which held a theme id or "system".
-    /// Read from old files and folded into the three above when they load (see
-    /// <see cref="WithLegacyTheme"/>); never written.</summary>
-    [JsonPropertyName("theme")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? LegacyTheme { get; init; }
-
     /// <summary>The theme the app draws with when Windows is in light mode or not.</summary>
     public string ThemeFor(bool systemIsLight) =>
         ThemeAppearances.ThemeFor(Appearance, LightTheme, DarkTheme, systemIsLight);
@@ -86,21 +79,6 @@ public sealed record AppSettings
         return theme.IsLight
             ? this with { Appearance = ThemeAppearances.Light, LightTheme = theme.Id }
             : this with { Appearance = ThemeAppearances.Dark, DarkTheme = theme.Id };
-    }
-
-    /// <summary>These settings with <see cref="LegacyTheme"/> moved into the appearance and the
-    /// theme for its mode: "system" keeps the default light and dark themes, which is what it
-    /// drew with; a fixed theme becomes the appearance its background implies.</summary>
-    internal AppSettings WithLegacyTheme()
-    {
-        if (LegacyTheme is not { } legacy)
-            return this;
-        if (ThemeCatalog.IsSystem(legacy))
-            return this with { LegacyTheme = null, Appearance = ThemeAppearances.System };
-        var theme = ThemeCatalog.Find(legacy);
-        return theme.IsLight
-            ? this with { LegacyTheme = null, Appearance = ThemeAppearances.Light, LightTheme = theme.Id }
-            : this with { LegacyTheme = null, Appearance = ThemeAppearances.Dark, DarkTheme = theme.Id };
     }
 
     public string FontFamily { get; set; } = FontFamilies.Default;
@@ -304,7 +282,7 @@ public sealed class SettingsStore
         // Validate before AtomicFile.Load accepts the primary, so recovery can use .bak.
         if (settings is not null)
             Validate(settings);
-        return settings?.WithLegacyTheme();
+        return settings;
     }
 
     /// <summary>The one check for saved settings, used by the loader and by backup reading.</summary>

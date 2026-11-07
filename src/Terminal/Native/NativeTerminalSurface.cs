@@ -179,7 +179,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         AutomationProperties.SetName(this, "Terminal");
         IsTabStop = true;
         UseSystemFocusVisuals = false;
-        Background = new SolidColorBrush(ToColor(_theme.Background));
+        Background = new SolidColorBrush(RgbColor.ToColor(_theme.Background));
         _panel.IsHitTestVisible = false;
         _panel.Clip = _panelClip;
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -876,7 +876,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             return;
         fixed (uint* palette = _theme.Ansi)
             GhosttyNative.rvt_set_colors(_term, _theme.Foreground, _theme.Background, _theme.Cursor, palette);
-        Background = new SolidColorBrush(ToColor(_theme.Background));
+        Background = new SolidColorBrush(RgbColor.ToColor(_theme.Background));
         _commandsPanel.ApplyTheme(_theme, _fontFamily);
         var b = _theme.Background;
         var luminance = ((b >> 16) & 0xFF) * 299 + ((b >> 8) & 0xFF) * 587 + (b & 0xFF) * 114;
@@ -886,9 +886,6 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _marginColor = null; // the next frame reapplies an extended margin over the new theme
         ApplyTextInputStyle();
     }
-
-    private static Windows.UI.Color ToColor(uint rgb) =>
-        Windows.UI.Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
 
     // ---- options --------------------------------------------------------------------------
 
@@ -906,7 +903,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _fixed80Columns = fixed80Columns;
         lock (_renderGate)
             _highlighter.SetRules(highlights);
-        Background = new SolidColorBrush(ToColor(_theme.Background));
+        Background = new SolidColorBrush(RgbColor.ToColor(_theme.Background));
     }
 
     public override void ApplyOptions(int? fontSize = null, string? fontFamily = null, TerminalTheme? theme = null,

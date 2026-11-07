@@ -76,10 +76,9 @@ public partial class App : Application
     /// appearance and (for System) the Windows color mode pick.</summary>
     public static string CurrentTheme => Settings.Current.ThemeFor(SystemIsLight());
 
-    /// <summary>A theme id as a known one. "system", which older session overrides can hold,
-    /// is the app's current theme.</summary>
-    public static string ResolveTheme(string? theme) =>
-        ThemeCatalog.IsSystem(theme) ? CurrentTheme : ThemeCatalog.Find(theme).Id;
+    /// <summary>A theme id as a known one: an unknown id (a session override naming a theme
+    /// this version lacks) is the default theme.</summary>
+    public static string ResolveTheme(string? theme) => ThemeCatalog.Find(theme).Id;
 
     /// <summary>The terminal colors for a resolved theme id.</summary>
     public static Resesh.Terminal.Native.TerminalTheme TerminalTheme(string theme)

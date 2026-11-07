@@ -54,7 +54,6 @@ public sealed class ThemeRetintTests
         // A dark accent on a dark surface: as text it is lifted to 3:1.
         var target = Dark with { Accent = 0x300060 };
         var text = ThemeRetint.Map(0xFF0078D4, fluentDark: true, target, isText: true) & 0xFFFFFF;
-        double a = ColorMath.RelativeLuminance(text), b = ColorMath.RelativeLuminance(target.Background);
-        Assert.True((Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05) >= 3);
+        Assert.True(ColorMath.Contrast(text, target.Background) >= 3);
     }
 }

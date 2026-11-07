@@ -347,12 +347,9 @@ public sealed partial class HighlightRulesEditor : UserControl
 
     /// <summary>A typed colour, accepted exactly when the terminal accepts it.</summary>
     internal static Windows.UI.Color? TryParseColor(string text) =>
-        Resesh.Terminal.HexColor.Parse(text) is { } rgb ? ToColor(rgb) : null;
+        Resesh.Terminal.HexColor.Parse(text) is { } rgb ? Resesh.Terminal.RgbColor.ToColor(rgb) : null;
 
     /// <summary>A stored rule's colour as the terminal reads it: none means the default.</summary>
     internal static Windows.UI.Color? TryParseRuleColor(string? text) =>
-        Resesh.Terminal.HexColor.ParseHighlight(text) is { } rgb ? ToColor(rgb) : null;
-
-    private static Windows.UI.Color ToColor(uint rgb) =>
-        Windows.UI.Color.FromArgb(255, (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
+        Resesh.Terminal.HexColor.ParseHighlight(text) is { } rgb ? Resesh.Terminal.RgbColor.ToColor(rgb) : null;
 }

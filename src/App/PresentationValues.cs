@@ -268,11 +268,5 @@ public static class PresentationValues
     /// <summary>A stored <c>#rrggbb</c>, read as the terminal reads highlight colours;
     /// transparent when it is not one.</summary>
     private static Windows.UI.Color ParseColor(string? value) =>
-        Resesh.Terminal.HexColor.Parse(value) is { } rgb ? Rgb(rgb) : Windows.UI.Color.FromArgb(0, 0, 0, 0);
-
-    private static Windows.UI.Color Rgb(uint rgb) => Windows.UI.Color.FromArgb(
-        255,
-        (byte)(rgb >> 16),
-        (byte)(rgb >> 8),
-        (byte)rgb);
+        Resesh.Terminal.HexColor.Parse(value) is { } rgb ? Resesh.Terminal.RgbColor.ToColor(rgb) : Windows.UI.Color.FromArgb(0, 0, 0, 0);
 }

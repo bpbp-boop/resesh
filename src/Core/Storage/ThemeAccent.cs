@@ -39,7 +39,7 @@ public static class ThemeAccent
         for (var i = 1; i <= 6; i++)
         {
             var color = palette.Ansi[i];
-            var chroma = Chroma(color);
+            var chroma = ColorMath.ToHsl(color).Chroma;
             if (chroma > bestChroma && Usable(color, palette.Background))
                 (best, bestChroma) = (color, chroma);
         }
@@ -47,17 +47,5 @@ public static class ThemeAccent
     }
 
     private static bool Usable(uint color, uint background) =>
-        Chroma(color) >= MinimumChroma && Contrast(color, background) >= MinimumContrast;
-
-    private static int Chroma(uint rgb)
-    {
-        int r = (int)(rgb >> 16) & 0xFF, g = (int)(rgb >> 8) & 0xFF, b = (int)rgb & 0xFF;
-        return Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b));
-    }
-
-    private static double Contrast(uint first, uint second)
-    {
-        double a = ColorMath.RelativeLuminance(first), b = ColorMath.RelativeLuminance(second);
-        return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
-    }
+        ColorMath.ToHsl(color).Chroma >= MinimumChroma && ColorMath.Contrast(color, background) >= MinimumContrast;
 }

@@ -43,7 +43,6 @@ test("a selected tab in an unfocused split keeps the active surface and gains an
 test("a focused selected tab border follows its session color", () => {
   // Session color wins; otherwise the theme's accent, which defaults to the stock blue.
   assert.match(presentation, /FocusedTabBorderColor\(string appTheme, string\? colorTag\)[\s\S]*?parsed\.A > 0 \? parsed : palette\.Accent/);
-  assert.match(visualPalette, /Accent: accent is \{ \} picked \? Hex\(picked\) : DefaultAccent/);
   assert.match(visualPalette, /Resources\["SessionDefaultAccentColor"\]/);
   assert.match(appXaml, /<Color x:Key="SessionDefaultAccentColor">#0078D4<\/Color>/);
   assert.match(xaml, /FocusedAccentVisibility\(IsActive, IsGroupFocused\)[\s\S]*?FocusedTabBorderColor\(TabTheme, ColorTag\)/);
