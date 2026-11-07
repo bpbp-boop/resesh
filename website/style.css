@@ -1057,7 +1057,7 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
 
 .row__media {
   grid-area: media;
-  justify-self: center;
+  justify-self: start;
   width: fit-content;
   max-width: 100%;
   min-width: 0;
@@ -1073,8 +1073,8 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   width: auto;
   max-width: 100%;
   height: auto;
-  max-height: min(72vh, 760px);
-  margin: 0 auto;
+  max-height: min(70vh, 620px);
+  margin: 0;
 }
 
 .screenshot-trigger {
@@ -1487,15 +1487,6 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   .bento { grid-template-columns: minmax(0, 1fr); }
   .nav { gap: 18px; }
   .nav__link:not([href="features.html"]) { display: none; }
-}
-
-/* The session tree is tall and narrow; show its top part in a feature row. */
-.row__media .session-tree-image {
-  width: 306px;
-  height: 640px;
-  max-height: none;
-  object-fit: cover;
-  object-position: top left;
 }
 
 /* ------------------------------------------------------ demo videos --- */
