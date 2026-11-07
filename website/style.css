@@ -1055,6 +1055,19 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   color: var(--ink2);
 }
 
+/* The same accent mark as the front page's lists, with wrapped lines hanging after it. */
+.row__bullets li {
+  position: relative;
+  padding-left: 22px;
+}
+
+.row__bullets li::before {
+  content: "·";
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+
 .row__media {
   grid-area: media;
   justify-self: start;
