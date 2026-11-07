@@ -667,17 +667,21 @@
         </div>
         <div class="row__body">
           <ul class="row__bullets">
-            <li>open local folders straight in explorer</li>
-            <li>remote folders through sshfs-win when it's installed</li>
+            <li>open a file pane right beside the ssh session in the same tab, from the tab's files button: the terminal on one side, the host's files on the other</li>
+            <li>it browses the host over sftp and follows the terminal's current folder, so the files you see are the ones the shell is working on</li>
+            <li>transfer files between the pane and your pc without opening another program or logging in again</li>
+            <li>drag the divider to size the pane; the width is remembered for every tab</li>
+            <li>local shells get the same pane for local folders, which also open straight in explorer</li>
+            <li>remote folders open in explorer through sshfs-win when it's installed</li>
           </ul>
         </div>
         <div class="row__media">
           <button class="screenshot-trigger" type="button" popovertarget="sftp-screenshot" aria-label="Enlarge the file transfer screenshot">
-            <img src="assets/sftp.png" alt="SFTP file pane following the terminal directory" width="543" height="312" loading="lazy">
+            <img src="assets/sftp.png" alt="An SSH session on syd-bastion-01 with the file pane open beside it, listing the same playbooks folder the terminal is in" width="1436" height="728" loading="lazy">
           </button>
           <div class="screenshot-popover" id="sftp-screenshot" popover aria-label="Enlarged file transfer screenshot">
             <button class="screenshot-popover__close" type="button" popovertarget="sftp-screenshot" popovertargetaction="hide">close</button>
-            <img src="assets/sftp.png" alt="SFTP file pane following the terminal directory" width="543" height="312">
+            <img src="assets/sftp.png" alt="An SSH session on syd-bastion-01 with the file pane open beside it, listing the same playbooks folder the terminal is in" width="1436" height="728">
           </div>
         </div>
       </div>
