@@ -17,15 +17,17 @@ namespace Resesh.App;
 /// XamlControlsResources, so the copies win (the app's own theme dictionaries are searched
 /// after merged ones, so they would not), and <see cref="Apply"/> recolors each copy from its
 /// Fluent original with <see cref="ThemeRetint"/> on every theme change. Copying every name,
-/// not only Fluent's base ones, matters: control-level names such as ButtonForeground were
+/// not only Fluent's base names, matters: control-level names such as ButtonForeground were
 /// resolved from the base names inside Fluent's own dictionary and would not follow them.
 /// Acrylic surfaces become solid in their fallback color, gradients keep their stops.
 /// </para>
 /// <para>
-/// Each name is copied three times: into a Dark and a Light theme dictionary, and once at the
-/// top level, recolored from whichever set the theme drawn now uses. XamlControlsResources
-/// answers some names (MenuFlyoutItemForeground) at its top level, which a lookup finds before
-/// any theme dictionary, so menu text stayed white with theme copies alone.
+/// The originals come from the set for the app's RequestedTheme, the mode it started in, only.
+/// Read through code, Fluent's other set holds that mode's colors too (white text in "Light"
+/// after a dark start), so copies taken from it turned text white when a dark start switched
+/// to a light theme. <see cref="ThemeRetint"/> maps a color from either set onto any theme, so
+/// one set serves both modes, and the copies sit at the dictionary's top level, found before
+/// any theme dictionary whichever mode an element is drawn in.
 /// </para>
 /// <para>
 /// Adding or removing the dictionary reaches drawn controls only when their theme resources
@@ -35,12 +37,15 @@ namespace Resesh.App;
 /// </summary>
 internal static class FluentThemeColors
 {
-    /// <summary>One recolorable copy, a brush or a gradient stop, with its Fluent originals
-    /// (0xAARRGGBB) from the dark and light sets. <paramref name="Set"/> is the set a theme
-    /// copy belongs to; null for a top-level copy, which follows the mode drawn now.</summary>
-    private sealed record Entry(uint Dark, uint Light, bool? Set, bool IsText, SolidColorBrush? Brush, GradientStop? Stop);
+    /// <summary>One recolorable copy, a brush or a gradient stop, with its Fluent original
+    /// (0xAARRGGBB) from the set <see cref="_originalsDark"/> names.</summary>
+    private sealed record Entry(uint Original, bool IsText, SolidColorBrush? Brush, GradientStop? Stop);
 
     private static readonly List<Entry> Entries = [];
+
+    /// <summary>Whether the originals are Fluent's dark set: the app's RequestedTheme when the
+    /// copies were made.</summary>
+    private static bool _originalsDark;
 
     /// <summary>The app's own fixed light/dark brushes (App.xaml's theme dictionaries) that
     /// stand for a theme surface or the accent rather than a status, with the role each takes.
@@ -85,11 +90,9 @@ internal static class FluentThemeColors
         if (!_installed)
             return;
         var target = Target(palette);
-        var drawnDark = ColorMath.RelativeLuminance(target.Foreground) > ColorMath.RelativeLuminance(target.Background);
         foreach (var entry in Entries)
         {
-            var dark = entry.Set ?? drawnDark;
-            var color = Argb(ThemeRetint.Map(dark ? entry.Dark : entry.Light, dark, target, entry.IsText));
+            var color = Argb(ThemeRetint.Map(entry.Original, _originalsDark, target, entry.IsText));
             if (entry.Brush is { } brush)
                 brush.Color = color;
             else
@@ -115,35 +118,18 @@ internal static class FluentThemeColors
 
     private static ResourceDictionary Copy(XamlControlsResources fluent)
     {
-        var dark = new Dictionary<object, object>();
-        var light = new Dictionary<object, object>();
-        Collect(fluent, true, dark);
-        Collect(fluent, false, light);
+        _originalsDark = Application.Current.RequestedTheme == ApplicationTheme.Dark;
+        var originals = new Dictionary<object, object>();
+        Collect(fluent, _originalsDark, originals);
         var copies = new ResourceDictionary();
-        copies.ThemeDictionaries["Dark"] = CopySet(dark, light, true);
-        copies.ThemeDictionaries["Light"] = CopySet(light, dark, false);
-        foreach (var (key, value) in dark)
-        {
-            if (Brush(value) is { } darkColor)
-            {
-                var lightColor = light.TryGetValue(key, out var other) && Brush(other) is { } color ? color : darkColor;
-                copies[key] = Track(darkColor.Color, lightColor.Color, null, IsText(key), darkColor.Opacity);
-            }
-        }
-        return copies;
-    }
-
-    /// <summary>One theme dictionary of copies; <paramref name="other"/> is the other set, so a
-    /// copy keeps both originals.</summary>
-    private static ResourceDictionary CopySet(Dictionary<object, object> originals, Dictionary<object, object> other, bool dark)
-    {
-        var copy = new ResourceDictionary();
         foreach (var (key, value) in originals)
         {
             var isText = IsText(key);
             if (Brush(value) is { } solid)
             {
-                copy[key] = Track(solid.Color, solid.Color, dark, isText, solid.Opacity);
+                var brush = new SolidColorBrush { Opacity = solid.Opacity };
+                Entries.Add(new Entry(Argb(solid.Color), isText, brush, null));
+                copies[key] = brush;
             }
             else if (value is LinearGradientBrush gradient)
             {
@@ -151,10 +137,10 @@ internal static class FluentThemeColors
                 foreach (var stop in gradient.GradientStops)
                 {
                     var copyStop = new GradientStop { Offset = stop.Offset };
-                    Entries.Add(new Entry(Argb(stop.Color), Argb(stop.Color), dark, isText, null, copyStop));
+                    Entries.Add(new Entry(Argb(stop.Color), isText, null, copyStop));
                     stops.Add(copyStop);
                 }
-                copy[key] = new LinearGradientBrush
+                copies[key] = new LinearGradientBrush
                 {
                     StartPoint = gradient.StartPoint,
                     EndPoint = gradient.EndPoint,
@@ -166,8 +152,8 @@ internal static class FluentThemeColors
             }
         }
         foreach (var (key, brush) in AppCopies)
-            copy[key] = brush;
-        return copy;
+            copies[key] = brush;
+        return copies;
     }
 
     /// <summary>A brush's color as a solid one: acrylic becomes its fallback color, so menus and
@@ -196,13 +182,6 @@ internal static class FluentThemeColors
         }
         foreach (var merged in dictionary.MergedDictionaries)
             Collect(merged, dark, into);
-    }
-
-    private static SolidColorBrush Track(Color dark, Color light, bool? set, bool isText, double opacity)
-    {
-        var brush = new SolidColorBrush { Opacity = opacity };
-        Entries.Add(new Entry(Argb(dark), Argb(light), set, isText, brush, null));
-        return brush;
     }
 
     private static uint Argb(Color color) => (uint)(color.A << 24 | color.R << 16 | color.G << 8 | color.B);

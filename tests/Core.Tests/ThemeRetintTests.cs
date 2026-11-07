@@ -16,6 +16,23 @@ public sealed class ThemeRetintTests
     }
 
     [Fact]
+    public void EitherFluentSetGivesTheSameThemeText()
+    {
+        // The app reads only the set for the mode it started in, then draws themes of both modes.
+        Assert.Equal(0xFF4C4F69u, ThemeRetint.Map(0xFFFFFFFF, fluentDark: true, Light));
+        Assert.Equal(0xFFFFB000u, ThemeRetint.Map(0xFF000000, fluentDark: false, Dark));
+    }
+
+    [Fact]
+    public void AccentFillsFromTheOtherModeKeepWhiteTextReadable()
+    {
+        // Dark mode's light accent fill (under black text) on a light theme, where its text is white.
+        var fill = ThemeRetint.Map(0xFF4CC2FF, fluentDark: true, Light) & 0xFFFFFF;
+        Assert.True(ColorMath.Contrast(fill, 0xFFFFFF) >= 4.5, $"{fill:X6}");
+        Assert.Equal(0xFFFFFFFFu, ThemeRetint.Map(0xFF000000, fluentDark: true, Light));
+    }
+
+    [Fact]
     public void TranslucentFillsKeepTheirAlphaOverTheThemeText() =>
         Assert.Equal(0x0FFFB000u, ThemeRetint.Map(0x0FFFFFFF, fluentDark: true, Dark));
 
