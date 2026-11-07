@@ -339,14 +339,13 @@
             <li>a bare host# is only read as cisco when the login banner or the session icon says so, so a linux root prompt is left alone</li>
           </ul>
         </div>
-        <div class="row__media row__media--text">
-          <div class="termblock">
-            <span><span class="termblock__prompt">syd-pe-01</span> · junos</span>
-            <span class="termblock__out">&nbsp;&nbsp;configure · /protocols bgp</span>
-            <span><span class="termblock__prompt">bne-agg-01</span> · ios</span>
-            <span class="termblock__out">&nbsp;&nbsp;configure · interface</span>
-            <span><span class="termblock__prompt">mel-pe-01</span> · md-cli</span>
-            <span class="termblock__out">&nbsp;&nbsp;private* · configure router</span>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="cli-mode-screenshot" aria-label="Enlarge the CLI mode screenshot">
+            <img src="assets/cli-mode.png" alt="Three router tabs: syd-pe-01 in Junos configure at /protocols bgp, syd-p-01 in IOS XR configure interface mode, and mel-bng-01 in Nokia MD-CLI private* at /configure router" width="1236" height="400" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="cli-mode-screenshot" popover aria-label="Enlarged CLI mode screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="cli-mode-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/cli-mode.png" alt="Three router tabs: syd-pe-01 in Junos configure at /protocols bgp, syd-p-01 in IOS XR configure interface mode, and mel-bng-01 in Nokia MD-CLI private* at /configure router" width="1236" height="400">
           </div>
         </div>
       </div>
@@ -510,13 +509,13 @@
             <li>the agent is built on <a href="https://github.com/neurosnap/zmx">zmx</a> and libghostty-vt</li>
           </ul>
         </div>
-        <div class="row__media row__media--text">
-          <div class="termblock">
-            <span><span class="termblock__prompt">manage remote sessions</span> — core-sw-01</span>
-            <span class="termblock__out"><span class="termblock__ok">detached</span>&nbsp;&nbsp;~/configs&nbsp;&nbsp;&nbsp;&nbsp;vim&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2h</span>
-            <span class="termblock__out"><span class="termblock__ok">detached</span>&nbsp;&nbsp;/var/log&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;journalctl&nbsp;18m</span>
-            <span class="termblock__out">in a tab&nbsp;&nbsp;~&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;bash&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;4m</span>
-            <span class="termblock__out">[resume]&nbsp;&nbsp;[end session]&nbsp;&nbsp;[end all detached]</span>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="persistent-screenshot" aria-label="Enlarge the remote sessions screenshot">
+            <img src="assets/persistent.png" alt="Remote Sessions for syd-bastion-01: four persistent shells by folder and program, two detached and two attached elsewhere, with Resume, End Session and End All Detached" width="647" height="642" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="persistent-screenshot" popover aria-label="Enlarged remote sessions screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="persistent-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/persistent.png" alt="Remote Sessions for syd-bastion-01: four persistent shells by folder and program, two detached and two attached elsewhere, with Resume, End Session and End All Detached" width="647" height="642">
           </div>
         </div>
       </div>
@@ -536,11 +535,13 @@
             <li>the notification opens the tab at that command's output</li>
           </ul>
         </div>
-        <div class="row__media row__media--text">
-          <div class="termblock">
-            <span><span class="termblock__prompt">$</span> make release &nbsp;<span class="termblock__out">🔔 notify when finished</span></span>
-            <span class="termblock__out">…</span>
-            <span class="termblock__out"><span class="termblock__ok">✓ make</span> finished on build-01 · exit 0 · 14m 02s</span>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="notify-screenshot" aria-label="Enlarge the command alert screenshot">
+            <img src="assets/notify.png" alt="deploy.sh running on lab-automation-01 with the bell beside the tab turned on, so resesh notifies when it finishes" width="650" height="208" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="notify-screenshot" popover aria-label="Enlarged command alert screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="notify-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/notify.png" alt="deploy.sh running on lab-automation-01 with the bell beside the tab turned on, so resesh notifies when it finishes" width="650" height="208">
           </div>
         </div>
       </div>
@@ -564,14 +565,13 @@
             <li>osc 8 links open in your browser and show their real target on hover</li>
           </ul>
         </div>
-        <div class="row__media row__media--text">
-          <div class="termblock">
-            <span><span class="termblock__prompt">$</span> printf '\e[&gt;q'</span>
-            <span class="termblock__out">reply: \eP&gt;|Resesh\e\\</span>
-            <span><span class="termblock__prompt">$</span> echo $COLORTERM</span>
-            <span class="termblock__out">truecolor</span>
-            <span><span class="termblock__prompt">$</span> printf '\e]52;c;%s\a' "$(printf hi | base64)"</span>
-            <span class="termblock__out"><span class="termblock__ok">→ "hi" is on the windows clipboard</span></span>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="agents-screenshot" aria-label="Enlarge the coding agents screenshot">
+            <img src="assets/agents.png" alt="Claude Code working on syd-bastion-01 over SSH, with its icon on the tab, beside Codex waiting for permission on syd-bastion-02" width="660" height="276" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="agents-screenshot" popover aria-label="Enlarged coding agents screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="agents-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/agents.png" alt="Claude Code working on syd-bastion-01 over SSH, with its icon on the tab, beside Codex waiting for permission on syd-bastion-02" width="660" height="276">
           </div>
         </div>
       </div>
@@ -596,13 +596,13 @@
             <li>tmux drops these reports, so there the codex, claude code and shell-wrapper adapters pass status through a tmux option instead (tmux 3.0 or newer)</li>
           </ul>
         </div>
-        <div class="row__media row__media--text">
-          <div class="termblock">
-            <span><span class="termblock__prompt">osc 7501</span> — the program reports</span>
-            <span class="termblock__out">state=working → working badge</span>
-            <span class="termblock__out">state=blocked → <span class="termblock__ok">● needs you</span></span>
-            <span class="termblock__out">state=done&nbsp;&nbsp;&nbsp;&nbsp;→ kept until seen</span>
-            <span class="termblock__out">state=error&nbsp;&nbsp;&nbsp;→ failed badge</span>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="status-screenshot" aria-label="Enlarge the program status screenshot">
+            <img src="assets/status.png" alt="Tabs reporting their own state: a deploy script still working with its progress bar, another whose deploy failed, and a running command" width="810" height="276" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="status-screenshot" popover aria-label="Enlarged program status screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="status-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/status.png" alt="Tabs reporting their own state: a deploy script still working with its progress bar, another whose deploy failed, and a running command" width="810" height="276">
           </div>
         </div>
       </div>
@@ -621,12 +621,13 @@
             <li>clears itself when the command ends, even if the program forgets</li>
           </ul>
         </div>
-        <div class="row__media row__media--text">
-          <div class="termblock">
-            <span><span class="termblock__prompt">$</span> printf '\e]9;4;1;60\a'</span>
-            <span class="termblock__out">tab and taskbar at 60%</span>
-            <span><span class="termblock__prompt">$</span> printf '\e]9;4;2\a'</span>
-            <span class="termblock__out">the bar switches to its error state</span>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="progress-screenshot" aria-label="Enlarge the progress screenshot">
+            <img src="assets/progress.png" alt="deploy.sh on syd-metrics-01 at step 3 of 5, with its progress shown as a bar under the tab" width="520" height="276" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="progress-screenshot" popover aria-label="Enlarged progress screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="progress-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/progress.png" alt="deploy.sh on syd-metrics-01 at step 3 of 5, with its progress shown as a bar under the tab" width="520" height="276">
           </div>
         </div>
       </div>
@@ -679,13 +680,13 @@
             <li>optionally start resesh when you sign in to windows</li>
           </ul>
         </div>
-        <div class="row__media row__media--text">
-          <div class="termblock">
-            <span><span class="termblock__prompt">taskbar › resesh</span></span>
-            <span class="termblock__out">pinned&nbsp;&nbsp;&nbsp;syd-pe-01</span>
-            <span class="termblock__out">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;syd-bastion-01</span>
-            <span class="termblock__out">recent&nbsp;&nbsp;&nbsp;lab-sw-01 · build-01</span>
-            <span class="termblock__out">tasks&nbsp;&nbsp;&nbsp;&nbsp;new window</span>
+        <div class="row__media">
+          <button class="screenshot-trigger" type="button" popovertarget="narrow-screenshot" aria-label="Enlarge the narrow window screenshot">
+            <img src="assets/narrow.png" alt="A narrow window: the sessions pane floats over the terminal, and quick connect has folded into a search button" width="804" height="893" loading="lazy">
+          </button>
+          <div class="screenshot-popover" id="narrow-screenshot" popover aria-label="Enlarged narrow window screenshot">
+            <button class="screenshot-popover__close" type="button" popovertarget="narrow-screenshot" popovertargetaction="hide">close</button>
+            <img src="assets/narrow.png" alt="A narrow window: the sessions pane floats over the terminal, and quick connect has folded into a search button" width="804" height="893">
           </div>
         </div>
       </div>

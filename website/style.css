@@ -1128,13 +1128,6 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   border-color: var(--accent);
   color: var(--accent);
 }
-/* A text visual (termblock) in place of a screenshot keeps its own border. */
-.row__media--text {
-  border: 0;
-  background: transparent;
-}
-
-.row__media--text .termblock { font-size: 12.5px; }
 
 .termblock__ok { color: var(--accent); }
 

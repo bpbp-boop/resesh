@@ -430,6 +430,35 @@ class Linux(Persona):
                        f" Memory usage: 22%               IPv4 address for ens3: 192.0.2.40\n\n"
                        f"Last login: Sun Sep 27 07:58:02 2026 from 198.51.100.77\n")
 
+    async def agent(self, name):
+        """A coding agent stand-in: reports its state with OSC 7501, as agents do through
+        resesh's adapters, so the tab shows the agent's icon and badge."""
+        title, state, lines = AGENT_DEMOS[name]
+        final = state in ("done", "error")
+        # A finished result only stays on the tab if it arrives while you look elsewhere.
+        self.write(f"{ESC}]0;{title}\a{ESC}]7501;state={'working' if final else state}:app={name}\a")
+        if final:
+            await asyncio.sleep(5)
+            self.write(f"{ESC}]7501;state={state}:app={name}\a")
+        self.write("\n".join(lines) + "\n")
+        await asyncio.sleep(3600)
+
+    async def deploy(self, fail, hold):
+        """A deploy script reporting progress with OSC 9;4 and its result with OSC 7501."""
+        self.write(f"{ESC}]7501;state=working:app=deploy\a")
+        steps = ["render inventory", "lint policies", "push syd-pe-01", "push syd-pe-02", "verify bgp"]
+        for i, step in enumerate(steps):
+            pct = int((i + 1) * 100 / len(steps)) if not hold else min(60, int((i + 1) * 100 / len(steps)))
+            self.write(f"{ESC}]9;4;1;{pct}\a[{i + 1}/{len(steps)}] {step}\n")
+            await asyncio.sleep(0.6)
+            if hold and pct >= 60:
+                await asyncio.sleep(3600)
+        if fail:
+            self.write(f"{ESC}]9;4;2;100\a{ESC}]7501;state=error:app=deploy\averify bgp: 203.0.113.21 Active\n")
+            self.last_exit = 1
+        else:
+            self.write(f"{ESC}]9;4;0\a{ESC}]7501;state=done:app=deploy\adone\n")
+
     def tilde(self):
         home = f"/home/{self.user}"
         return "~" + self.cwd[len(home):] if self.cwd.startswith(home) else self.cwd
@@ -445,6 +474,11 @@ class Linux(Persona):
         cmd = line.strip()
         self.write(f"{ESC}]133;C{OSC_END}")
         if not cmd:
+            return True
+        if "resesh-tmux-bootstrap" in cmd or "resesh-app" in cmd:
+            # The persistent-shell bootstrap typed into the shell: tmux would clear the
+            # screen and start a fresh shell, so do just that.
+            self.write(f"{ESC}[H{ESC}[2J{ESC}[3J")
             return True
         self.last_exit = 0
         argv = cmd.split()
@@ -492,6 +526,12 @@ class Linux(Persona):
         if prog == "systemctl":
             self.write(SYSTEMCTL)
             self.last_exit = 3 if "failed" in cmd else 0
+            return True
+        if prog in AGENT_DEMOS:
+            await self.agent(prog)
+            return True
+        if prog == "./deploy.sh":
+            await self.deploy(fail="--fail" in argv, hold="--hold" in argv)
             return True
         if prog == "sleep":
             await asyncio.sleep(float(argv[1]) if len(argv) > 1 else 1)
@@ -745,6 +785,47 @@ Et49/1     spine-01             connected    routed   full   400G   400GBASE-DR4
 Et50/1     spine-02             connected    routed   full   400G   400GBASE-DR4
 """
 
+# name: (window title, OSC 7501 state, lines printed)
+AGENT_DEMOS = {
+    "claude": ("Claude Code", "working",
+               ["Reading policies/peer-in-64496.j2", "Updating the import policy for 203.0.113.29 …"]),
+    "codex": ("Codex", "blocked",
+              ["Wants to run: ansible-playbook bgp-policy.yml --limit syd-pe", "Allow? [y/N]"]),
+    "gemini": ("Gemini CLI", "done", ["Summary written to notes/CHG-4190.md"]),
+    "opencode": ("opencode", "error", ["Lint failed: policies/reject-bogons.j2 line 12"]),
+}
+
+# Fictional shells on resesh's private tmux server, for the persistent sessions manager.
+# Every demo session id starts c7fe3f75-8527, so they share the tmux name prefix.
+TMUX_NAME = "sc7fe3f758527"
+TMUX_SHELLS = [  # slot, attached clients, minutes ago, command, folder
+    (1, 0, 125, "vim", "/home/sysops/configs"),
+    (2, 0, 18, "journalctl", "/var/log"),
+    (3, 1, 46, "htop", "/home/sysops"),
+]
+
+
+def tmux_answer(command: str) -> str | None:
+    """resesh's discovery and management probes, answered from TMUX_SHELLS. The tab's own
+    new shell (slot 0, the first free one) is listed only by the manager, which runs after
+    it starts."""
+    if "resesh-app list-panes" not in command:
+        return None
+    now = int(dt.datetime.now().timestamp())
+    rows = list(TMUX_SHELLS)
+    manage = "session_created" in command
+    if manage:
+        rows.insert(0, (0, 1, 4, "bash", "/home/sysops/netops/playbooks"))
+    out = []
+    for slot, attached, minutes, cmd, path in rows:
+        name = TMUX_NAME if slot == 0 else f"{TMUX_NAME}-{slot + 1}"
+        if manage:
+            out.append(f"{name}|11|{attached}|{now - minutes * 60}|{cmd}|{path}")
+        else:
+            out.append(f"{name}|1|{attached}|{path}")
+    return "\n".join(out) + "\n"
+
+
 GIT_PULL = """Updating 51b9a0d..8c1f2e7
 Fast-forward
  policies/peer-in-64496.j2 | 14 ++++++++++++++
@@ -915,9 +996,16 @@ class HostPipe(asyncssh.SSHTCPSession):
 def make_process_handler(host):
     async def handle(process: asyncssh.SSHServerProcess):
         if process.command is not None:
-            # Probes (platform, /proc cwd, tmux): answer like a box without those tools.
-            process.exit(127)
-            return
+            answer = tmux_answer(process.command)
+            if answer is not None:
+                process.stdout.write(answer)
+                process.exit(0)
+                return
+            if "resesh-tmux-bootstrap" not in process.command and "attach-session" not in process.command:
+                # Other probes (platform, /proc cwd): answer like a box without those tools.
+                process.exit(127)
+                return
+            # The persistent-shell bootstrap: behave as the shell tmux would have started.
         persona = persona_for(host)(host, process.get_extra_info("username") or "netops", process)
         try:
             # Clears resesh's own "Connecting to … via SOCKS5 proxy" notice and scrollback, so
