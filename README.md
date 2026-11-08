@@ -44,6 +44,8 @@ sessions over from SecureCRT, PuTTY and OpenSSH in a few clicks.
 - **Colour tags** carried onto the tab accent.
 - **Shared logins (identities):** set one username and password or key on a folder and every session
   inside uses it. Rotate a password once; a rejected one can be updated for every session that uses it.
+  **Tidy up logins** (Settings › Identities & Keys) groups older sessions that share a username, key or
+  saved password into identities.
 - **Bulk edit:** one sortable table of every session. Change the login, port, colour, icon, theme,
   folder or jump host of fifty sessions at once.
 - Local profiles for **PowerShell, cmd, WSL and Git Bash** in the same list.

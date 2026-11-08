@@ -2790,3 +2790,18 @@ than under a note saying they need it, and **Start resesh when I sign in** is hi
 `--data-dir` and demo mode rather than disabled with a reason. Card descriptions that are data
 (an identity's username and usage, a key's fingerprint, history size, a link's address) stay.
 Explanations live in the README.
+
+## 2026-11-08 - Login tidy-up reuses the import planner
+
+- Settings › Identities & Keys › Tidy up logins runs `ImportIdentityPlanner` over saved SSH
+  sessions that keep their own login (`LoginTidyUp`), so suggestions, names, pre-ticking and the
+  dominant-folder rule match the import review.
+- Saved passwords are compared through HMAC-SHA256 with a key generated once per process: the
+  tokens stay stable while the dialog replans on every tick, but never reach disk or match
+  across runs. A group's shared password is copied to the new identity, and the sessions' own
+  copies are deleted only after the session write succeeds.
+- A folder is attached only when no session in its subtree already inherits its login
+  (`canAttach` on the planner); otherwise the tidy-up would change sessions it does not list.
+  Those sessions get the identity explicitly instead.
+- Converted sessions have `Username` cleared: a leftover username would override the
+  identity's.

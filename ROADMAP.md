@@ -118,7 +118,7 @@ store key passphrases in Credential Manager.
 
 ---
 
-## Identities (Phase A built)
+## Identities (Phases A and B built)
 
 Goal: describe who you log in as once, for a whole part of the session tree, instead of
 repeating a username and password in every session. The main pain is repetition: a new
@@ -181,10 +181,13 @@ resolver. Backups export identities without secrets unless the encrypted option 
   Settings › Identities & Keys (replaces the SSH Keys dialog; includes the default
   identity for the tree root), failed-password update, in-memory cache for
   ask-every-time, drop note when a move changes a login, backup.
-- B: tidy-up assistant for existing sessions. (Importer suggestions shipped with A: the import
-  review is a tab that groups repeated logins into identities, attached where they dominate;
-  key logins and directory accounts are pre-ticked, plain repeated usernames are offered
-  unticked because their passwords usually differ per host.)
+- B (built): tidy-up assistant for existing sessions (Settings › Identities & Keys › Tidy up
+  logins). It runs the importer's planner over SSH sessions that keep their own login, compares
+  saved passwords in memory through a per-process HMAC, attaches folders only where no session
+  already inherits, and moves a shared saved password onto the identity. (Importer suggestions
+  shipped with A: the import review is a tab that groups repeated logins into identities,
+  attached where they dominate; key logins and directory accounts are pre-ticked, plain
+  repeated usernames are offered unticked because their passwords usually differ per host.)
 - Later: Agent (after SSH agent support), GSSAPI, lens attributes.
 
 **Accepted cost:** one stored secret now visibly unlocks many sessions (it usually did

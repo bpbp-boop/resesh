@@ -176,6 +176,12 @@ public sealed partial class SettingsPage
             RefreshIdentities();
     }
 
+    private async void TidyUpLogins_Click(object sender, RoutedEventArgs e)
+    {
+        if (await TidyUpLoginsDialog.RunAsync(XamlRoot))
+            RefreshIdentities();
+    }
+
     private void DefaultIdentityBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_refreshingIdentities || DefaultIdentityBox.SelectedItem is not DefaultChoice choice)

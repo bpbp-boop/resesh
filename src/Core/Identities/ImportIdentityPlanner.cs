@@ -74,7 +74,8 @@ public static class ImportIdentityPlanner
         IReadOnlyList<Identity> existingIdentities,
         Func<string, Guid?> existingFolderIdentity,
         Func<Guid, string?> keyPathOf,
-        IReadOnlySet<string>? declined = null)
+        IReadOnlySet<string>? declined = null,
+        Func<string, bool>? canAttach = null)
     {
         declined ??= new HashSet<string>();
         var ssh = candidates.Where(c => c.IsSsh).ToList();
@@ -109,7 +110,7 @@ public static class ImportIdentityPlanner
                 var local = existingIdentities.FirstOrDefault(i => i.Id == localId);
                 inherited = local is null ? null : LoginOf(local, keyPathOf);
             }
-            else if (folder.Length > 0)
+            else if (folder.Length > 0 && (canAttach?.Invoke(folder) ?? true))
             {
                 var subtree = ssh.Where(c => FolderPaths.IsSelfOrDescendant(c.FolderPath, folder)).ToList();
                 var dominant = subtree
