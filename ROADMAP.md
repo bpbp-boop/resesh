@@ -662,6 +662,12 @@ app's trace log of 2026-10-14 shows `can't find pane: =sa100d35791f8-3` on a rea
 - Ruler: next/prev **error** jump (failed-exit marks only).
 - Live verification loose end: a real 2FA/Duo keyboard-interactive exchange is untested.
   Password and private-key auth are in daily use against real hosts.
+- Accessibility names: workspace list items and command palette entries announce their
+  type name (`Resesh.App.ViewModels.WorkspaceItemViewModel`, `…CommandPaletteEntry`), and
+  the rewind slider has no name at all. Found while driving the app through UI Automation
+  for the website screenshots (`tools/screenshot-rig`).
+- `SECURITY.md`: a private way to report vulnerabilities. The app holds credentials, and a
+  team's security review asks for one.
 
 ---
 
@@ -702,6 +708,38 @@ have `synchronize-panes` if they truly want it.
   GSSAPI/jump-host defaults.
 - **Auto-reconnect UX** — backoff + toast on drop, auto-reattach when the session is
   tmux-persistent.
+- **Shared read-only session source** — a step before NetBox for teams without it: point
+  resesh at a sessions file on a shared folder or in a git checkout, shown as its own
+  read-only root (the shape NetBox's source root already plans: deterministic ids, a
+  per-user overlay for credentials and colours, "Copy to my sessions"). Reload on change.
+  Gives a team one session list without each person maintaining hundreds of devices or
+  passing backups around. Build it behind the same `IInventorySource` so NetBox slots in.
+- **OpenSSH certificates** — log in with a user certificate (`id_ed25519-cert.pub` next to
+  the key, also through the SSH agent once it lands) and trust hosts signed by a certificate
+  authority (`@cert-authority` lines from `known_hosts`, or a CA key added in Settings)
+  instead of trusting each host key one by one. Teams that run an SSH CA expect both.
+  Check what SSH.NET 2026.0.0 supports for user certificates; host CA trust is ours to
+  implement in the host-key check.
+- **Anti-idle** — per session or folder, send a chosen keystroke (none, space+backspace,
+  Enter, or a NUL) after N seconds without input, so network gear with an exec timeout
+  keeps the session. SSH keepalives don't reset a device's own idle timer. Off by default;
+  never while a full-screen program or a paste is running.
+- **Console file transfer** — XMODEM, YMODEM and ZMODEM send and receive on serial and
+  telnet tabs (and over SSH for ZMODEM `rz`/`sz`), for ROMMON recovery and image pushes over a
+  console cable, with progress on the tab bar (OSC 9;4 path). Plus an optional built-in
+  TFTP server bound to a chosen interface, serving one folder, for config backups and
+  firmware loads from devices that only speak TFTP. Both are reasons engineers keep
+  SecureCRT installed.
+- **Team rollout: updates and managed settings** — an update check against GitHub releases
+  (off by setting, never automatic install) with a note in the title bar, and settings an
+  admin can set for every user through the registry (ADMX template for Group Policy and
+  Intune): recording folder and file-name pattern, history on or off and retention, the
+  risky-command list, update check, and which settings users may change. The MSI already
+  installs per machine; this makes it manageable at that scale.
+- **Recording for audit** — a file-name pattern (`{session}_{host}_{user}_{yyyy-MM-dd_HHmm}`)
+  and a recording folder that can be a shared path, plus "always record" for a folder (like
+  identities) so production sessions are recorded without each person turning it on.
+  Together with managed settings, a team can enforce where logs go.
 - **Per-session color schemes** — extend the settings-override layer + the palettes in
   `terminal.html`; `Session.ColorTag` already exists as the tab accent.
 - **Foreground-process title side channel** — tmux-grade `pane_current_command` on plain

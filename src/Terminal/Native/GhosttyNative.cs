@@ -44,7 +44,7 @@ internal static unsafe partial class GhosttyNative
 {
     public const int CompressDone = 0, CompressPending = 1, CompressWait = 2;
     private const string Library = "reseshvt";
-    private const int ExpectedAbi = 11;
+    private const int ExpectedAbi = 12;
 
     private static readonly Lazy<string?> LoadError = new(Load);
 
@@ -88,7 +88,7 @@ internal static unsafe partial class GhosttyNative
     [LibraryImport(Library)]
     public static partial int rvt_read_frame(IntPtr term, TerminalCell* cells, ushort cols, ushort rows,
         byte* dirtyRows, int forceAll, GhosttyFrameInfo* info);
-    [LibraryImport(Library)] public static partial int rvt_cell_graphemes(IntPtr term, ushort x, ushort y, uint* output, int capacity);
+    [LibraryImport(Library)] public static partial int rvt_frame_graphemes(IntPtr term, ushort x, ushort y, uint* output, int capacity);
     [LibraryImport(Library)] public static partial int rvt_cell_hyperlink(IntPtr term, ushort x, ushort y, byte* output, int capacity);
     [LibraryImport(Library)] public static partial void rvt_scroll(IntPtr term, int mode, nint value);
     [LibraryImport(Library)] public static partial void rvt_reset(IntPtr term);

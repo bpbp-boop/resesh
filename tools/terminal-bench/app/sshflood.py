@@ -57,17 +57,20 @@ STYLES = (
 
 
 def parse_name(name):
-    # <workload>[-x<repeat>][-r<MB/s>]: -x5 streams the workload five times back to back,
-    # -r2 streams it at 2 MB/s (looping) for PACED_SECONDS. Frame benchmarks need runs
-    # longer than one 8 MB burst.
-    repeat, rate = 1, 0.0
+    # <workload>[-x<repeat>][-r<MB/s>][-w<seconds>]: -x5 streams the workload five times back
+    # to back, -r2 streams it at 2 MB/s (looping) for PACED_SECONDS, -w5 waits five seconds
+    # after the shell opens before streaming (lets a freshly launched app settle). Frame
+    # benchmarks need runs longer than one 8 MB burst.
+    repeat, rate, wait = 1, 0.0, 0.0
     parts = name.split('-')
     for part in parts[1:]:
         if part.startswith('x') and part[1:].isdigit():
             repeat = int(part[1:])
         elif part.startswith('r'):
             rate = float(part[1:])
-    return parts[0], repeat, rate
+        elif part.startswith('w'):
+            wait = float(part[1:])
+    return parts[0], repeat, rate, wait
 
 
 PACED_SECONDS = 10
@@ -97,11 +100,15 @@ async def handle(process):
         return
     if name == 'styles':
         process.stdout.write(STYLES.encode())
-    name, repeat, rate = parse_name(name)
+    name, repeat, rate, wait = parse_name(name)
     path = os.path.join(WORKLOADS, name + '.bin')
+    if wait:
+        await asyncio.sleep(wait)
     if os.path.exists(path):
         with open(path, 'rb') as f:
             data = f.read()
+        loop = asyncio.get_running_loop()
+        start = loop.time()
         if rate:
             await paced(process, data, rate)
         else:
@@ -109,6 +116,10 @@ async def handle(process):
                 for i in range(0, len(data), 32768):
                     process.stdout.write(data[i:i + 32768])
                     await process.stdout.drain()
+            # What the client took in, from the server's side: frame logs only cover drawn frames.
+            seconds = loop.time() - start
+            print(f'{process.get_extra_info("username")}: {len(data) * repeat / 1e6:.1f} MB in {seconds:.2f} s'
+                  f' = {len(data) * repeat / 1e6 / seconds:.1f} MB/s', flush=True)
     elif name != 'styles':
         process.stdout.write(f'no workload {name}\r\n'.encode())
     # Idle like a quiet shell until the client closes; a resize or break is not the end.
@@ -151,6 +162,10 @@ async def main():
 
 if __name__ == '__main__':
     try:
-        asyncio.run(main())
+        # Not Windows' default ProactorEventLoop: against SSH.NET's flow control it stalls the
+        # stream at random into a steady 25 MB/s (125 MB/s for a bare SSH.NET client), which
+        # read as a client-side cap in the 2026-11-08 render benchmarks. Reproduced with no
+        # terminal at all; the selector loop streams at ~600 MB/s every run.
+        asyncio.run(main(), loop_factory=asyncio.SelectorEventLoop)
     except KeyboardInterrupt:
         sys.exit(0)

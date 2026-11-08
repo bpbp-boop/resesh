@@ -22,7 +22,7 @@ __declspec(dllimport) uint64_t __stdcall GetTickCount64(void);
 __declspec(dllimport) int __stdcall QueryPerformanceCounter(int64_t* count);
 __declspec(dllimport) int __stdcall QueryPerformanceFrequency(int64_t* frequency);
 
-#define RVT_ABI_VERSION 11
+#define RVT_ABI_VERSION 12
 
 // ---- events -------------------------------------------------------------------------------
 
@@ -144,7 +144,57 @@ typedef struct {
   uint8_t snap_alternate, snap_mouse_shape;
   uint64_t compress_activity; // libghostty-vt activity token when compression was last scheduled
   bool compress_scheduled;    // RVT_EVENT_COMPRESS sent and rvt_compress hasn't finished
+  // Multi-codepoint graphemes of the cells the renderer last read, per viewport row (see
+  // rvt_frame_graphemes). Guarded by rs_lock, like the render state they are copied from.
+  struct RvtGraphemeRow* grapheme_rows;
+  uint16_t grapheme_row_count;
 } RvtTerm;
+
+// One row's grapheme clusters: entries point into a codepoint pool, both reused across frames.
+typedef struct { uint16_t x; uint16_t len; uint32_t offset; } RvtGrapheme;
+typedef struct RvtGraphemeRow {
+  RvtGrapheme* items;
+  uint32_t count, capacity;
+  uint32_t* pool;
+  uint32_t pool_len, pool_capacity;
+} RvtGraphemeRow;
+
+#define RVT_MAX_GRAPHEME 32
+
+static void free_grapheme_rows(RvtTerm* t) {
+  for (uint16_t i = 0; i < t->grapheme_row_count; i++) {
+    free(t->grapheme_rows[i].items);
+    free(t->grapheme_rows[i].pool);
+  }
+  free(t->grapheme_rows);
+  t->grapheme_rows = NULL;
+  t->grapheme_row_count = 0;
+}
+
+// Appends one cell's codepoints to its row. False when memory ran out (the cell then draws
+// its base codepoint alone).
+static bool push_grapheme(RvtGraphemeRow* row, uint16_t x, const uint32_t* cps, uint16_t len) {
+  if (row->count == row->capacity) {
+    uint32_t cap = row->capacity ? row->capacity * 2 : 8;
+    RvtGrapheme* items = realloc(row->items, cap * sizeof *items);
+    if (!items) return false;
+    row->items = items;
+    row->capacity = cap;
+  }
+  if (row->pool_len + len > row->pool_capacity) {
+    uint32_t cap = row->pool_capacity ? row->pool_capacity * 2 : 64;
+    while (cap < row->pool_len + len) cap *= 2;
+    uint32_t* pool = realloc(row->pool, cap * sizeof *pool);
+    if (!pool) return false;
+    row->pool = pool;
+    row->pool_capacity = cap;
+  }
+  memcpy(row->pool + row->pool_len, cps, len * sizeof *cps);
+  RvtGrapheme g = { x, len, row->pool_len };
+  row->items[row->count++] = g;
+  row->pool_len += len;
+  return true;
+}
 
 static uint32_t pack(GhosttyColorRgb c) { return ((uint32_t)c.r << 16) | ((uint32_t)c.g << 8) | c.b; }
 static GhosttyColorRgb unpack(uint32_t v) {
@@ -468,6 +518,7 @@ RVT_API void rvt_free(RvtTerm* t) {
   ghostty_render_state_row_iterator_free(t->it);
   ghostty_render_state_free(t->rs);
   ghostty_terminal_free(t->term);
+  free_grapheme_rows(t);
   ReleaseSRWLockExclusive(&t->lock); // not unlock(): the terminal is gone
   free(t);
 }
@@ -761,6 +812,13 @@ static int read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, ui
   info->cursor_color = colors.cursor_has_value ? pack(colors.cursor) : dfg;
   if (dirty == GHOSTTY_RENDER_STATE_DIRTY_FALSE) return 0;
 
+  if (t->grapheme_row_count != rows) {
+    // A resize: the caller reads every row again, so nothing kept here is lost.
+    free_grapheme_rows(t);
+    t->grapheme_rows = calloc(rows, sizeof *t->grapheme_rows);
+    if (t->grapheme_rows) t->grapheme_row_count = rows;
+  }
+
   ghostty_render_state_get(t->rs, GHOSTTY_RENDER_STATE_DATA_ROW_ITERATOR, &t->it);
   uint16_t y = 0;
   int count = 0;
@@ -770,6 +828,8 @@ static int read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, ui
     bool has_sel = ghostty_render_state_row_get(t->it, GHOSTTY_RENDER_STATE_ROW_DATA_SELECTION, &sel) == GHOSTTY_SUCCESS;
     ghostty_render_state_row_get(t->it, GHOSTTY_RENDER_STATE_ROW_DATA_CELLS, &t->cells);
     RvtCell* row = out + (size_t)y * cols;
+    RvtGraphemeRow* graphemes = y < t->grapheme_row_count ? &t->grapheme_rows[y] : NULL;
+    if (graphemes) graphemes->count = graphemes->pool_len = 0;
     uint16_t x = 0;
     while (x < cols && ghostty_render_state_row_cells_next(t->cells)) {
       RvtCell* c = &row[x];
@@ -784,8 +844,28 @@ static int read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, ui
       GhosttyCellContentTag tag = GHOSTTY_CELL_CONTENT_CODEPOINT;
       ghostty_cell_get(raw, GHOSTTY_CELL_DATA_CONTENT_TAG, &tag);
       uint32_t glen = cp ? 1 : 0;
-      if (tag == GHOSTTY_CELL_CONTENT_CODEPOINT_GRAPHEME)
-        ghostty_render_state_row_cells_get(t->cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN, &glen);
+      if (tag == GHOSTTY_CELL_CONTENT_CODEPOINT_GRAPHEME) {
+        // Copied with the cell, from the same snapshot, so the renderer never has to read
+        // the live terminal (which may already hold newer output) to draw it.
+        // Almost every cluster fits the stack buffer; a longer one (a pile of combining marks)
+        // is read again into one of its own size, so no mark is dropped.
+        uint32_t cps[RVT_MAX_GRAPHEME];
+        uint32_t* all = cps;
+        GhosttyCodepointBuffer buf = { cps, RVT_MAX_GRAPHEME, 0 };
+        GhosttyResult r = ghostty_render_state_row_cells_get(t->cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, &buf);
+        if (r == GHOSTTY_OUT_OF_SPACE && buf.len <= UINT16_MAX && (all = malloc(buf.len * sizeof *all)) != NULL) {
+          GhosttyCodepointBuffer big = { all, buf.len, 0 };
+          r = ghostty_render_state_row_cells_get(t->cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, &big);
+          buf = big;
+        } else if (!all) {
+          all = cps; // out of memory: keep the first RVT_MAX_GRAPHEME
+        }
+        glen = (uint32_t)buf.len;
+        uint16_t kept = (uint16_t)(buf.len < buf.cap ? buf.len : buf.cap);
+        if ((r != GHOSTTY_SUCCESS && r != GHOSTTY_OUT_OF_SPACE) || kept < 2 || !graphemes || !push_grapheme(graphemes, x, all, kept))
+          glen = cp ? 1 : 0;
+        if (all != cps) free(all);
+      }
 
       uint32_t fg = dfg, bg = dbg, ul = RVT_UL_DEFAULT;
       uint16_t flags = 0;
@@ -846,19 +926,24 @@ RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t row
   return count;
 }
 
-// Reads a multi-codepoint grapheme for one viewport cell (emoji ZWJ sequences, combining
-// marks). Returns the number of codepoints written.
-RVT_API int rvt_cell_graphemes(RvtTerm* t, uint16_t x, uint16_t y, uint32_t* out, int cap) {
-  GhosttyGridRef ref = {0};
-  GhosttyPoint pt = { .tag = GHOSTTY_POINT_TAG_VIEWPORT, .value = { .coordinate = { .x = x, .y = y } } };
+// The multi-codepoint grapheme of a cell as the last rvt_read_frame copied it: the text that
+// matches the cells the caller holds. Takes only the snapshot lock, never the terminal lock,
+// so drawing never waits on the parser. Returns the cluster's codepoint count, 0 for a cell
+// without one (or one whose row the caller has not read since a resize); when that is more
+// than cap, only cap were written and the caller asks again with room for all of them.
+RVT_API int rvt_frame_graphemes(RvtTerm* t, uint16_t x, uint16_t y, uint32_t* out, int cap) {
   int n = 0;
-  lock(t);
-  if (ghostty_terminal_grid_ref(t->term, pt, &ref) == GHOSTTY_SUCCESS) {
-    size_t len = 0;
-    if (ghostty_grid_ref_graphemes(&ref, out, (size_t)cap, &len) == GHOSTTY_SUCCESS)
-      n = (int)len;
+  AcquireSRWLockExclusive(&t->rs_lock);
+  if (y < t->grapheme_row_count) {
+    const RvtGraphemeRow* row = &t->grapheme_rows[y];
+    for (uint32_t i = 0; i < row->count; i++) {
+      if (row->items[i].x != x) continue;
+      n = row->items[i].len;
+      memcpy(out, row->pool + row->items[i].offset, (size_t)(n < cap ? n : cap) * sizeof *out);
+      break;
+    }
   }
-  unlock(t);
+  ReleaseSRWLockExclusive(&t->rs_lock);
   return n;
 }
 

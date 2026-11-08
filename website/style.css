@@ -980,19 +980,24 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   border-top: 1px solid var(--line);
 }
 
+/* Screenshot-led rows: the title, the screenshot centred across the row, then the
+   bullets underneath. */
 .row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
-  gap: 20px 40px;
-  align-items: start;
-  padding: 28px 0;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "head" "media" "body";
+  gap: 18px;
+  padding: 40px 0;
   border-bottom: 1px solid var(--line);
 }
 
 .row__head {
+  grid-area: head;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px 14px;
   min-width: 0;
 }
 
@@ -1015,13 +1020,14 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   color: var(--ink);
 }
 
-.row__badge { align-self: flex-start; }
+.row__badge { align-self: center; }
 
 .row__body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  grid-column: span 2;
+  grid-area: body;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
+  gap: 12px 40px;
+  align-items: start;
   min-width: 0;
 }
 
@@ -1044,23 +1050,44 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   margin: 0;
   padding: 0;
   list-style: none;
-  font-size: 13.5px;
-  font-weight: 300;
-  color: var(--ink3);
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--ink2);
+}
+
+/* The same accent mark as the front page's lists, with wrapped lines hanging after it. */
+.row__bullets li {
+  position: relative;
+  padding-left: 22px;
+}
+
+.row__bullets li::before {
+  content: "·";
+  position: absolute;
+  left: 0;
+  color: var(--accent);
 }
 
 .row__media {
+  grid-area: media;
+  justify-self: start;
+  width: fit-content;
+  max-width: 100%;
   min-width: 0;
   border: 1px solid var(--line2);
   background: var(--panel);
   overflow: hidden;
 }
 
+/* Tall screenshots stay within the viewport; narrow ones sit centred on the panel. */
 .row__media img,
 .row__media video {
   display: block;
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   height: auto;
+  max-height: min(70vh, 620px);
+  margin: 0;
 }
 
 .screenshot-trigger {
@@ -1128,13 +1155,6 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   border-color: var(--accent);
   color: var(--accent);
 }
-/* A text visual (termblock) in place of a screenshot keeps its own border. */
-.row__media--text {
-  border: 0;
-  background: transparent;
-}
-
-.row__media--text .termblock { font-size: 12.5px; }
 
 .termblock__ok { color: var(--accent); }
 
@@ -1145,76 +1165,13 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
 }
 
 .row__media--empty {
+  width: 100%;
   border: 1px dashed var(--line2);
   background: transparent;
 }
 
-/* Inline worked examples inside a feature row. */
-.example {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
-  border: 1px solid var(--line2);
-  background: var(--panel);
-  font-size: 12.5px;
-  color: var(--ink3);
-}
-
-.example__ok { color: var(--accent); }
-.example__bad { color: var(--amber); }
-
-.cmdlist {
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--line2);
-  background: var(--panel);
-  font-size: 12.5px;
-}
-
-.cmdlist__row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 12px;
-  border-bottom: 1px solid var(--line);
-}
-
-.cmdlist__row:last-child { border-bottom: 0; }
-
-.cmdlist__dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-.cmdlist__dot--bad { background: var(--amber); }
-
-.cmdlist__cmd {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink2);
-}
-
-.cmdlist__status { color: var(--amber); }
-
-.cmdlist__actions {
-  display: flex;
-  gap: 8px;
-  flex: none;
-  font-size: 11.5px;
-  color: var(--ink3);
-}
-
-.cmdlist__chip {
-  padding: 2px 8px;
-  border: 1px solid var(--line2);
-}
+/* Planned rows have no screenshot yet: keep the placeholder short. */
+.row__media--empty .placeholder { aspect-ratio: auto; padding: 18px; }
 
 /* ---------------------------------------------------------- non-goals --- */
 
@@ -1543,13 +1500,6 @@ button { transition: color var(--hover-ease), border-color var(--hover-ease); }
   .bento { grid-template-columns: minmax(0, 1fr); }
   .nav { gap: 18px; }
   .nav__link:not([href="features.html"]) { display: none; }
-}
-
-/* The session tree is tall and narrow; show its top half in a feature row. */
-.row__media .session-tree-image {
-  max-height: 440px;
-  object-fit: cover;
-  object-position: top left;
 }
 
 /* ------------------------------------------------------ demo videos --- */
