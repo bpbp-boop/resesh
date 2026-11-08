@@ -2789,7 +2789,8 @@ agent alerts sit inside the **Show agent icons** expander (it opens with the swi
 than under a note saying they need it, and **Start resesh when I sign in** is hidden under
 `--data-dir` and demo mode rather than disabled with a reason. Card descriptions that are data
 (an identity's username and usage, a key's fingerprint, history size, a link's address) stay.
-Explanations live in the README.
+So does "custom" on a highlighting rule: a custom rule can match a built-in's name and colour,
+and only it can be deleted. Explanations live in the README.
 
 ## 2026-11-08 - Login tidy-up reuses the import planner
 

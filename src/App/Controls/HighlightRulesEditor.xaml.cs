@@ -21,12 +21,15 @@ public sealed class HighlightRuleItem(HighlightRule rule, bool edited, Action<st
 
     public Brush SwatchBrush { get; } = new SolidColorBrush(HighlightRulesEditor.TryParseRuleColor(rule.Color) ?? Colors.Transparent);
 
-    /// <summary>Only a state worth noticing: an edited built-in, or a colour the terminal cannot
-    /// read. The terminal skips such a rule, so the list says so (with an empty swatch) rather
-    /// than showing a colour that is never painted.</summary>
-    public string StateTag { get; } = HighlightRulesEditor.TryParseRuleColor(rule.Color) is null
-        ? "invalid color, not applied"
-        : edited ? "edited" : "";
+    /// <summary>"custom" on user rules, which can share a built-in's name and colour but alone
+    /// can be deleted; "edited" on a changed built-in; and a colour the terminal cannot read.
+    /// The terminal skips such a rule, so the list says so (with an empty swatch) rather than
+    /// showing a colour that is never painted.</summary>
+    public string StateTag { get; } = string.Join(" · ", new[]
+    {
+        rule.IsBuiltin ? edited ? "edited" : "" : "custom",
+        HighlightRulesEditor.TryParseRuleColor(rule.Color) is null ? "invalid color, not applied" : "",
+    }.Where(part => part.Length > 0));
     public Windows.UI.Text.FontWeight NameWeight => Rule.Bold ? FontWeights.SemiBold : FontWeights.Normal;
     public string EnabledAutomationId => $"SettingsHighlightRuleEnabled_{Rule.Id}";
 
