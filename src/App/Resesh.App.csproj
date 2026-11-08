@@ -84,4 +84,23 @@
 
   <Import Project="..\..\eng\WindowsAppRuntimeResources.targets" />
 
+  <!-- Native AOT links Brotli from the ILCompiler and runtime packs into the exe, and rewind
+       decompresses with it. Brotli before 1.2.1 has a decoder overflow (CVE-2026-111497),
+       fixed in .NET 10.0.14, so refuse to publish with older packs. This checks the versions
+       the publish resolved, not the SDK's default, so RuntimeFrameworkVersion can't slip an
+       old pack past it. -->
+  <Target Name="RequirePatchedBrotli" BeforeTargets="PrepareForPublish"
+          DependsOnTargets="ProcessFrameworkReferences">
+    <ItemGroup>
+      <_BrotliPack Include="@(PackageReference)" Condition="'%(PackageReference.Identity)' == 'Microsoft.DotNet.ILCompiler'">
+        <PackVersion>%(PackageReference.Version)</PackVersion>
+      </_BrotliPack>
+      <_BrotliPack Include="@(RuntimePack)" Condition="$([System.String]::Copy('%(RuntimePack.Identity)').StartsWith('Microsoft.NETCore.App.Runtime.'))">
+        <PackVersion>%(RuntimePack.NuGetPackageVersion)</PackVersion>
+      </_BrotliPack>
+    </ItemGroup>
+    <Error Condition="'@(_BrotliPack)' != '' and $([MSBuild]::VersionLessThan('%(_BrotliPack.PackVersion)', '10.0.14'))"
+           Text="%(_BrotliPack.Identity) %(_BrotliPack.PackVersion) links a Brotli vulnerable to CVE-2026-111497. Publish with .NET 10.0.14 or later." />
+  </Target>
+
 </Project>
