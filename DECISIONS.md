@@ -2778,3 +2778,35 @@ while holding the terminal lock. The cap counts a chunk at its raw size until it
   10.0.14). Rewind only decodes what it compressed itself in memory, never data from the
   remote host, but Native AOT links the SDK's own copy into the exe. `Resesh.App.csproj`
   therefore refuses to publish with an SDK whose bundled runtime is older than 10.0.14.
+
+## 2026-11-08 - Settings carries no taglines or helper text
+
+Settings pages show titles, group headers, setting names and state, nothing else: no section
+taglines, no card descriptions explaining a setting, no muted secondary labels. A setting that
+needed explaining was fixed in its layout instead: Appearance's choices are named **Match
+Windows** and **One theme**, the sessions pane's automatic layout is **Float when narrow**,
+agent alerts sit inside the **Show agent icons** expander (it opens with the switch) rather
+than under a note saying they need it, and **Start resesh when I sign in** is hidden under
+`--data-dir` and demo mode rather than disabled with a reason. Card descriptions that are data
+(an identity's username and usage, a key's fingerprint, history size, a link's address) stay.
+Explanations live in the README.
+
+## 2026-11-08 - Login tidy-up reuses the import planner
+
+- Settings › Identities & Keys › Tidy up logins runs `ImportIdentityPlanner` over saved SSH
+  sessions that keep their own login (`LoginTidyUp`), so suggestions, names, pre-ticking and the
+  dominant-folder rule match the import review.
+- Saved passwords are compared through HMAC-SHA256 with a key generated once per process: the
+  tokens stay stable while the dialog replans on every tick, but never reach disk or match
+  across runs. A group's shared password is copied to the new identity, and the sessions' own
+  copies are deleted only after the session write succeeds. A failed delete doesn't undo the
+  saved logins: the dialog keeps the leftover ids and offers Retry, because a replan would no
+  longer see the converted sessions.
+- A session whose password is stored but unreadable (`ICredentialService.Has` without `Read`:
+  a `--data-dir` copy encrypted for another Windows user) is left out entirely, so the tidy-up
+  never deletes a password still recoverable under that account.
+- A folder is attached only when no session in its subtree already inherits its login
+  (`canAttach` on the planner); otherwise the tidy-up would change sessions it does not list.
+  Those sessions get the identity explicitly instead.
+- Converted sessions have `Username` cleared: a leftover username would override the
+  identity's.

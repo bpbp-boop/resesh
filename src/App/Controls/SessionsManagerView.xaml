@@ -43,15 +43,8 @@
             IsClosable="True"
             AutomationProperties.AutomationId="SessionsManagerStatus" />
 
-        <!-- The section header lives here so the notification can sit level with it. -->
-        <StackPanel>
-            <TextBlock Text="Sessions" Style="{StaticResource TitleTextBlockStyle}" Margin="0,0,0,4" />
-            <TextBlock
-                Margin="1,0,0,0"
-                TextWrapping="Wrap"
-                Opacity="0.75"
-                Text="Select rows with Ctrl or Shift, then edit, move, set an identity, duplicate, or delete them together. Changes are saved as you make them." />
-        </StackPanel>
+        <!-- The section title lives here so the notification can sit level with it. -->
+        <TextBlock Text="Sessions" Style="{StaticResource TitleTextBlockStyle}" Margin="0,0,0,4" />
 
         <!-- Filters -->
         <Grid Grid.Row="1" ColumnSpacing="8">
@@ -63,7 +56,7 @@
             </Grid.ColumnDefinitions>
             <TextBox
                 x:Name="FilterBox"
-                PlaceholderText="Filter by name, host, user, identity, folder, or notes"
+                PlaceholderText="Filter sessions"
                 TextChanged="FilterBox_TextChanged"
                 AutomationProperties.Name="Filter sessions"
                 AutomationProperties.AutomationId="SessionsManagerFilter" />

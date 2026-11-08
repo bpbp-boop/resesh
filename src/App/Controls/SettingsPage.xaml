@@ -24,11 +24,6 @@
         <Style x:Key="GroupHeader" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
             <Setter Property="Margin" Value="1,20,0,4" />
         </Style>
-        <Style x:Key="GroupDescription" TargetType="TextBlock">
-            <Setter Property="Margin" Value="1,0,0,6" />
-            <Setter Property="TextWrapping" Value="Wrap" />
-            <Setter Property="Opacity" Value="0.75" />
-        </Style>
         <Style x:Key="SectionScroller" TargetType="ScrollViewer">
             <Setter Property="VerticalScrollBarVisibility" Value="Auto" />
             <Setter Property="HorizontalScrollBarVisibility" Value="Disabled" />
@@ -96,9 +91,6 @@
                     </Grid.ColumnDefinitions>
                 <StackPanel Style="{StaticResource SectionBody}">
                     <TextBlock Text="General" Style="{StaticResource SectionTitle}" />
-                    <TextBlock
-                        Style="{StaticResource GroupDescription}"
-                        Text="These settings apply throughout resesh and take effect as you change them. Saved sessions can override terminal defaults." />
 
                     <TextBlock Text="Fonts" Style="{StaticResource GroupHeader}" />
                     <!-- The saved setting is one list: this font, then the fallbacks. Picking a font
@@ -111,10 +103,7 @@
                             AutomationProperties.Name="Terminal font"
                             AutomationProperties.AutomationId="SettingsFontFamily" />
                     </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        x:Name="FallbackFontsCard"
-                        Header="Fallback fonts"
-                        Description="Tried in order for characters the terminal font doesn't have, such as icons from a Nerd Font. Separate with commas.">
+                    <toolkit:SettingsCard x:Name="FallbackFontsCard" Header="Fallback fonts">
                         <TextBox
                             x:Name="FallbackFontsBox"
                             MinWidth="280"
@@ -123,9 +112,7 @@
                             AutomationProperties.Name="Fallback fonts"
                             AutomationProperties.AutomationId="SettingsFallbackFonts" />
                     </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        Header="Restore default fonts"
-                        Description="Cascadia Mono, falling back to Consolas.">
+                    <toolkit:SettingsCard Header="Restore default fonts">
                         <Button
                             Content="Reset"
                             Command="{x:Bind ViewModel.ResetFontsCommand}"
@@ -166,10 +153,7 @@
                             AutomationProperties.Name="Paste with right-click"
                             AutomationProperties.AutomationId="SettingsRightClickPaste" />
                     </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        x:Name="MouseCaptureCard"
-                        Header="Mouse in programs"
-                        Description="What programs that use the mouse, such as Claude Code, Codex and vim, receive. With scrolling only, you select, copy and right-click paste as usual. Hold Shift to do the other thing.">
+                    <toolkit:SettingsCard x:Name="MouseCaptureCard" Header="Mouse in programs">
                         <ComboBox
                             x:Name="MouseCaptureBox"
                             MinWidth="220"
@@ -180,10 +164,7 @@
                             AutomationProperties.Name="Mouse in programs"
                             AutomationProperties.AutomationId="SettingsMouseCapture" />
                     </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        x:Name="ConfirmMultilinePasteCard"
-                        Header="Confirm multi-line pastes"
-                        Description="Ask before pasting text that would press Enter. Skipped when the program handles pasted lines itself (bracketed paste).">
+                    <toolkit:SettingsCard x:Name="ConfirmMultilinePasteCard" Header="Confirm multi-line pastes">
                         <ToggleSwitch
                             x:Name="ConfirmMultilinePasteSwitch"
                             IsOn="{x:Bind ViewModel.ConfirmMultilinePaste, Mode=TwoWay}"
@@ -199,10 +180,7 @@
                             AutomationProperties.Name="Show status bar"
                             AutomationProperties.AutomationId="SettingsShowStatusBar" />
                     </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        x:Name="SessionsPaneLayoutCard"
-                        Header="Sessions pane"
-                        Description="Float the pane over the tabs, or dock it beside them. Automatic floats it when the window is narrow.">
+                    <toolkit:SettingsCard x:Name="SessionsPaneLayoutCard" Header="Sessions pane">
                         <ComboBox
                             x:Name="SessionsPaneLayoutBox"
                             MinWidth="220"
@@ -220,31 +198,25 @@
                             AutomationProperties.Name="Reopen last layout at startup"
                             AutomationProperties.AutomationId="SettingsReopenLastLayout" />
                     </toolkit:SettingsCard>
+                    <!-- Hidden with a custom data folder or in demo mode: a sign-in launch would open the usual data. -->
                     <toolkit:SettingsCard
                         x:Name="LaunchAtSignInCard"
                         Header="Start resesh when I sign in to Windows"
-                        Description="{x:Bind ViewModel.LaunchAtSignInDescription}"
-                        IsEnabled="{x:Bind ViewModel.CanLaunchAtSignIn}">
+                        Visibility="{x:Bind app:PresentationValues.Visible(ViewModel.CanLaunchAtSignIn)}">
                         <ToggleSwitch
                             x:Name="LaunchAtSignInSwitch"
                             IsOn="{x:Bind ViewModel.LaunchAtSignIn, Mode=TwoWay}"
                             AutomationProperties.Name="Start resesh when I sign in to Windows"
                             AutomationProperties.AutomationId="SettingsLaunchAtSignIn" />
                     </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        x:Name="ConfirmCloseCard"
-                        Header="Confirm before closing active sessions"
-                        Description="Ask before a close or exit ends a connected session or a running local shell.">
+                    <toolkit:SettingsCard x:Name="ConfirmCloseCard" Header="Confirm before closing active sessions">
                         <ToggleSwitch
                             x:Name="ConfirmCloseSwitch"
                             IsOn="{x:Bind ViewModel.ConfirmCloseActiveSessions, Mode=TwoWay}"
                             AutomationProperties.Name="Confirm before closing active sessions"
                             AutomationProperties.AutomationId="SettingsConfirmCloseActiveSessions" />
                     </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        x:Name="CrashReportsCard"
-                        Header="Write crash reports"
-                        Description="Save a local report when resesh hits an unexpected error. Reports stay on this computer.">
+                    <toolkit:SettingsCard x:Name="CrashReportsCard" Header="Write crash reports">
                         <ToggleSwitch
                             x:Name="CrashReportsSwitch"
                             IsOn="{x:Bind ViewModel.WriteCrashReports, Mode=TwoWay}"
@@ -263,10 +235,7 @@
                     </Grid.ColumnDefinitions>
                     <StackPanel Style="{StaticResource SectionBody}">
                         <TextBlock Text="Theme" Style="{StaticResource SectionTitle}" />
-                        <TextBlock Style="{StaticResource GroupDescription}"
-                                   Text="Themes color the terminals, tabs, session tree and panes. A saved session can override its terminal's theme." />
-                        <toolkit:SettingsCard x:Name="AppearanceCard" Header="Appearance"
-                                              Description="System switches between a light and a dark theme when Windows does. Theme always uses the one theme you pick.">
+                        <toolkit:SettingsCard x:Name="AppearanceCard" Header="Appearance">
                             <ComboBox x:Name="AppearanceBox" MinWidth="240"
                                       ItemsSource="{x:Bind ViewModel.AppearanceChoices}"
                                       DisplayMemberPath="Name" x:SuppressXamlTrimWarnings="True"
@@ -274,8 +243,7 @@
                                       AutomationProperties.Name="Appearance"
                                       AutomationProperties.AutomationId="SettingsAppearance" />
                         </toolkit:SettingsCard>
-                        <toolkit:SettingsCard x:Name="ThemeColorsCard" Header="Color the app with the theme"
-                                              Description="Accent: the selected tab's bar and resesh's other highlights take a color from the theme, usually its cursor color. Everything: text, buttons, inputs, switches, menus and tooltips take the theme's colors too. Off: the standard blue accent and Windows colors.">
+                        <toolkit:SettingsCard x:Name="ThemeColorsCard" Header="Color the app with the theme">
                             <ComboBox x:Name="ThemeColorsBox" MinWidth="240"
                                       ItemsSource="{x:Bind ViewModel.ThemeColorsChoices}"
                                       DisplayMemberPath="Name" x:SuppressXamlTrimWarnings="True"
@@ -287,9 +255,8 @@
                                                  QueryChanged="ThemeFilter_QueryChanged" />
 
                         <!-- Theme: every theme, a row per category. -->
-                        <StackPanel x:Name="FixedThemePanel"
+                        <StackPanel x:Name="FixedThemePanel" Margin="0,12,0,0"
                                     Visibility="{x:Bind app:PresentationValues.Collapsed(ViewModel.IsFollowingWindows), Mode=OneWay}">
-                            <TextBlock x:Name="FixedThemeHeader" Text="Theme" Style="{StaticResource SubtitleTextBlockStyle}" Margin="1,20,0,0" />
                             <controls:ThemeCategoryRows x:Name="FixedGallery"
                                                         Themes="{x:Bind ViewModel.AllThemes}"
                                                         SelectedTheme="{x:Bind ViewModel.Theme, Mode=TwoWay}"
@@ -300,21 +267,13 @@
                         <!-- System: a theme for each Windows mode. -->
                         <StackPanel x:Name="SystemThemesPanel"
                                     Visibility="{x:Bind app:PresentationValues.Visible(ViewModel.IsFollowingWindows), Mode=OneWay}">
-                            <StackPanel x:Name="LightThemeHeader" Orientation="Horizontal" Spacing="4" Margin="1,20,0,0">
-                                <TextBlock Text="When Windows is in light mode" Style="{StaticResource SubtitleTextBlockStyle}" />
-                                <TextBlock Text=" — in use now" Opacity="0.65"
-                                           Visibility="{x:Bind app:PresentationValues.Visible(ViewModel.IsLightModeActive), Mode=OneWay}" />
-                            </StackPanel>
+                            <TextBlock x:Name="LightThemeHeader" Text="Light mode" Style="{StaticResource SubtitleTextBlockStyle}" Margin="1,20,0,0" />
                             <controls:ThemeCategoryRows x:Name="LightGallery"
                                                    Themes="{x:Bind ViewModel.LightThemes}"
                                                    SelectedTheme="{x:Bind ViewModel.LightTheme, Mode=TwoWay}"
                                                    AutomationProperties.Name="Theme when Windows is in light mode"
                                                    AutomationProperties.AutomationId="SettingsLightTheme" />
-                            <StackPanel x:Name="DarkThemeHeader" Orientation="Horizontal" Spacing="4" Margin="1,28,0,0">
-                                <TextBlock Text="When Windows is in dark mode" Style="{StaticResource SubtitleTextBlockStyle}" />
-                                <TextBlock Text=" — in use now" Opacity="0.65"
-                                           Visibility="{x:Bind app:PresentationValues.Collapsed(ViewModel.IsLightModeActive), Mode=OneWay}" />
-                            </StackPanel>
+                            <TextBlock x:Name="DarkThemeHeader" Text="Dark mode" Style="{StaticResource SubtitleTextBlockStyle}" Margin="1,28,0,0" />
                             <controls:ThemeCategoryRows x:Name="DarkGallery"
                                                    Themes="{x:Bind ViewModel.DarkThemes}"
                                                    SelectedTheme="{x:Bind ViewModel.DarkTheme, Mode=TwoWay}"
@@ -341,16 +300,10 @@
                     </Grid.ColumnDefinitions>
                 <StackPanel Style="{StaticResource SectionBody}">
                     <TextBlock Text="Identities &amp; Keys" Style="{StaticResource SectionTitle}" />
-                    <TextBlock
-                        Style="{StaticResource GroupDescription}"
-                        Text="An identity is a username and how it signs in. Attach one to a folder (right-click the folder in the session tree and choose Set Identity) and every session inside that inherits its login uses it, including sessions added later." />
                     <InfoBar x:Name="IdentityStatus" IsOpen="False" IsClosable="True" />
 
                     <TextBlock Text="Identities" Style="{StaticResource GroupHeader}" />
-                    <toolkit:SettingsCard
-                        x:Name="DefaultIdentityCard"
-                        Header="Default identity"
-                        Description="Used by sessions that inherit their login when no folder above them has an identity.">
+                    <toolkit:SettingsCard x:Name="DefaultIdentityCard" Header="Default identity">
                         <ComboBox
                             x:Name="DefaultIdentityBox"
                             MinWidth="240"
@@ -361,16 +314,18 @@
                             AutomationProperties.AutomationId="SettingsDefaultIdentity" />
                     </toolkit:SettingsCard>
                     <StackPanel x:Name="IdentityRows" Spacing="4" />
-                    <Button
-                        Margin="0,6,0,0"
-                        Content="New identity…"
-                        Click="NewIdentity_Click"
-                        AutomationProperties.AutomationId="SettingsNewIdentity" />
+                    <StackPanel Margin="0,6,0,0" Orientation="Horizontal" Spacing="8">
+                        <Button
+                            Content="New identity"
+                            Click="NewIdentity_Click"
+                            AutomationProperties.AutomationId="SettingsNewIdentity" />
+                        <Button
+                            Content="Tidy up logins"
+                            Click="TidyUpLogins_Click"
+                            AutomationProperties.AutomationId="SettingsTidyUpLogins" />
+                    </StackPanel>
 
                     <TextBlock Text="SSH keys" Style="{StaticResource GroupHeader}" />
-                    <TextBlock
-                        Style="{StaticResource GroupDescription}"
-                        Text="resesh records where each private key is stored. It never copies, moves, or deletes key files." />
                     <StackPanel x:Name="KeyRows" Spacing="4" />
                     <Button
                         Margin="0,6,0,0"
@@ -379,9 +334,6 @@
                         AutomationProperties.AutomationId="SettingsAddKey" />
 
                     <TextBlock x:Name="SshAlgorithmsHeader" Text="SSH algorithms" Style="{StaticResource GroupHeader}" />
-                    <TextBlock
-                        Style="{StaticResource GroupDescription}"
-                        Text="What every SSH session offers unless it chooses its own on its Advanced tab. A connection uses the first one in each list that the host also has. Everything is on by default, including the legacy algorithms older devices need; turn legacy off to harden connections to modern hosts." />
                     <ContentControl
                         x:Name="SshAlgorithmsHost"
                         HorizontalAlignment="Stretch"
@@ -398,12 +350,8 @@
                     </Grid.ColumnDefinitions>
                 <StackPanel Style="{StaticResource SectionBody}">
                     <TextBlock Text="Recording" Style="{StaticResource SectionTitle}" />
-                    <TextBlock
-                        Style="{StaticResource GroupDescription}"
-                        Text="Keep a searchable history of commands, record terminal output to disk, or keep bounded in-memory history for instant rewind." />
 
                     <TextBlock Text="Command history" Style="{StaticResource GroupHeader}" />
-                    <TextBlock x:Name="HistoryDescription" Style="{StaticResource GroupDescription}" />
                     <toolkit:SettingsCard x:Name="KeepHistoryCard" Header="Keep a searchable command history">
                         <ToggleSwitch
                             x:Name="KeepHistorySwitch"
@@ -438,9 +386,6 @@
                     </toolkit:SettingsCard>
 
                     <TextBlock Text="Disk recording" Style="{StaticResource GroupHeader}" />
-                    <TextBlock
-                        Style="{StaticResource GroupDescription}"
-                        Text="Each recording writes an asciicast .cast file and a timestamped .log rendered from committed terminal lines. Both can include secrets that a server prints." />
                     <toolkit:SettingsCard x:Name="RecordingDirectoryCard" Header="Recording directory">
                         <TextBox
                             x:Name="RecordingDirectoryBox"
@@ -458,9 +403,6 @@
                     </toolkit:SettingsCard>
 
                     <TextBlock Text="Instant rewind" Style="{StaticResource GroupHeader}" />
-                    <TextBlock
-                        Style="{StaticResource GroupDescription}"
-                        Text="Rewind data stays in memory and is deleted when the tab closes." />
                     <toolkit:SettingsCard x:Name="RewindMinutesCard" Header="Rewind history (minutes)">
                         <NumberBox
                             x:Name="RewindMinutesBox"
@@ -495,9 +437,6 @@
                     </Grid.ColumnDefinitions>
                 <StackPanel Style="{StaticResource SectionBody}" Spacing="12">
                     <TextBlock Text="Highlighting" Style="{StaticResource SectionTitle}" />
-                    <TextBlock
-                        Style="{StaticResource GroupDescription}"
-                        Text="Enable the built-in network rules, and create or edit custom regular-expression rules. Open terminals update as soon as a rule is saved or toggled." />
                     <InfoBar
                         x:Name="HighlightSaveError"
                         IsOpen="False"
@@ -517,51 +456,43 @@
                     </Grid.ColumnDefinitions>
                 <StackPanel Style="{StaticResource SectionBody}">
                     <TextBlock Text="Agents" Style="{StaticResource SectionTitle}" />
-                    <TextBlock
-                        Style="{StaticResource GroupDescription}"
-                        Text="Track supported coding agents in each terminal tab. resesh can notify you when an agent needs a response." />
 
-                    <TextBlock Text="Tab display" Style="{StaticResource GroupHeader}" />
-                    <toolkit:SettingsCard
+                    <TextBlock Text="Status" Style="{StaticResource GroupHeader}" />
+                    <!-- Alerts depend on the recognition the icons turn on, so they sit inside it. -->
+                    <toolkit:SettingsExpander
                         x:Name="AgentIconsCard"
                         Header="Show agent icons"
-                        Description="Replace a session icon while resesh recognizes a supported agent in that tab.">
+                        IsExpanded="{x:Bind ViewModel.AgentAlertsEnabled, Mode=OneWay}">
                         <ToggleSwitch
                             x:Name="AgentIconsSwitch"
                             IsOn="{x:Bind ViewModel.ShowAgentIcons, Mode=TwoWay}"
                             AutomationProperties.Name="Show agent icons"
                             AutomationProperties.AutomationId="SettingsShowAgentIcons" />
-                    </toolkit:SettingsCard>
-
-                    <TextBlock Text="Background alerts" Style="{StaticResource GroupHeader}" />
-                    <TextBlock
-                        Style="{StaticResource GroupDescription}"
-                        Text="Get your attention when an agent waits for a response. Turn on agent icons to use alerts." />
-                    <toolkit:SettingsCard
-                        x:Name="AgentFlashCard"
-                        Header="Flash the taskbar"
-                        IsEnabled="{x:Bind ViewModel.AgentAlertsEnabled, Mode=OneWay}">
-                        <ToggleSwitch
-                            x:Name="AgentFlashSwitch"
-                            IsOn="{x:Bind ViewModel.AgentAlertFlash, Mode=TwoWay}"
-                            AutomationProperties.Name="Flash the taskbar"
-                            AutomationProperties.AutomationId="SettingsAgentAlertFlash" />
-                    </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        x:Name="AgentSoundCard"
-                        Header="Play the notification sound"
-                        IsEnabled="{x:Bind ViewModel.AgentAlertsEnabled, Mode=OneWay}">
-                        <ToggleSwitch
-                            x:Name="AgentSoundSwitch"
-                            IsOn="{x:Bind ViewModel.AgentAlertSound, Mode=TwoWay}"
-                            AutomationProperties.Name="Play the notification sound"
-                            AutomationProperties.AutomationId="SettingsAgentAlertSound" />
-                    </toolkit:SettingsCard>
+                        <toolkit:SettingsExpander.Items>
+                            <toolkit:SettingsCard
+                                x:Name="AgentFlashCard"
+                                Header="Flash the taskbar"
+                                IsEnabled="{x:Bind ViewModel.AgentAlertsEnabled, Mode=OneWay}">
+                                <ToggleSwitch
+                                    x:Name="AgentFlashSwitch"
+                                    IsOn="{x:Bind ViewModel.AgentAlertFlash, Mode=TwoWay}"
+                                    AutomationProperties.Name="Flash the taskbar"
+                                    AutomationProperties.AutomationId="SettingsAgentAlertFlash" />
+                            </toolkit:SettingsCard>
+                            <toolkit:SettingsCard
+                                x:Name="AgentSoundCard"
+                                Header="Play the notification sound"
+                                IsEnabled="{x:Bind ViewModel.AgentAlertsEnabled, Mode=OneWay}">
+                                <ToggleSwitch
+                                    x:Name="AgentSoundSwitch"
+                                    IsOn="{x:Bind ViewModel.AgentAlertSound, Mode=TwoWay}"
+                                    AutomationProperties.Name="Play the notification sound"
+                                    AutomationProperties.AutomationId="SettingsAgentAlertSound" />
+                            </toolkit:SettingsCard>
+                        </toolkit:SettingsExpander.Items>
+                    </toolkit:SettingsExpander>
 
                     <TextBlock Text="Agent adapters" Style="{StaticResource GroupHeader}" />
-                    <TextBlock
-                        Style="{StaticResource GroupDescription}"
-                        Text="resesh identifies supported agents automatically. Agents that report their own status need no adapter: Claude Code 2.1.295 or later, Pi 1.1.0 or later, oh-my-pi, Crush and Factory Droid. Add an adapter to get exact working, waiting, and finished states from the others." />
                     <controls:AgentAdaptersView />
                 </StackPanel>
                 </Grid>

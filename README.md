@@ -44,6 +44,8 @@ sessions over from SecureCRT, PuTTY and OpenSSH in a few clicks.
 - **Colour tags** carried onto the tab accent.
 - **Shared logins (identities):** set one username and password or key on a folder and every session
   inside uses it. Rotate a password once; a rejected one can be updated for every session that uses it.
+  **Tidy up logins** (Settings › Identities & Keys) groups older sessions that share a username, key or
+  saved password into identities.
 - **Bulk edit:** one sortable table of every session. Change the login, port, colour, icon, theme,
   folder or jump host of fifty sessions at once.
 - Local profiles for **PowerShell, cmd, WSL and Git Bash** in the same list.
@@ -131,6 +133,8 @@ sessions over from SecureCRT, PuTTY and OpenSSH in a few clicks.
 - Claude Code, Codex, Gemini CLI, GitHub Copilot, Cursor, OpenCode and 20+ more are recognised and
   get their own tab icon.
 - Tab badges show whether an agent is **working, waiting for you, done or failed**, so you can leave it running.
+- Claude Code 2.1.295 or later, Pi 1.1.0 or later, oh-my-pi, Crush and Factory Droid report their own
+  status. For the others, copy an adapter from **Settings › Agents** for exact working, waiting and finished states.
 - Any program can report status (OSC 7501) and progress (OSC 9;4) to the tab and taskbar. Nothing to install on the server.
 - OSC 52 copy to the Windows clipboard (write-only; hosts can never read it), Shift+Enter for a new line in the prompt.
 - Mouse-aware: select, copy and right-click paste still work inside agents and vim.
@@ -351,8 +355,8 @@ programs**, or override it for one session in its Appearance settings.
 <details>
 <summary><strong>Themes</strong></summary>
 
-In **Settings › Theme**, set **Appearance** to **System** to switch between a light and a
-dark theme when Windows does (pick one of each), or to **Theme** to always use one theme.
+In **Settings › Theme**, set **Appearance** to **Match Windows** to switch between a light and a
+dark theme when Windows does (pick one of each), or to **One theme** to always use one theme.
 Built-in themes sit alongside around 900 bundled themes from
 [iTerm2-Color-Schemes](https://github.com/mbadolato/iTerm2-Color-Schemes); search them by
 name or browse by category: Traditional, Cool, Warm, Pastel, Vivid, Retro and High contrast.

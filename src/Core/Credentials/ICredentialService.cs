@@ -9,6 +9,10 @@ public interface ICredentialService
     /// <summary>Returns the stored secret for a session, or null if none.</summary>
     string? Read(Guid sessionId);
 
+    /// <summary>True when a secret is stored for the session, even one <see cref="Read"/> cannot
+    /// decrypt (saved under another Windows user), so callers never treat it as absent and drop it.</summary>
+    bool Has(Guid sessionId) => Read(sessionId) is not null;
+
     void Write(Guid sessionId, string secret);
 
     /// <summary>Deletes the secret; no-op if absent.</summary>

@@ -15,7 +15,7 @@
     <Grid>
         <!-- ==== Rules, with a standing preview of every enabled rule ==== -->
         <StackPanel x:Name="ListPanel" Spacing="4">
-            <TextBlock Text="Highlighting rules" Style="{StaticResource GroupHeader}" Margin="1,4,0,4" />
+            <TextBlock Text="Rules" Style="{StaticResource GroupHeader}" Margin="1,4,0,4" />
             <ListView
                 x:Name="RuleList"
                 SelectionMode="Single"
@@ -34,7 +34,7 @@
                                 AutomationProperties.AutomationId="{x:Bind EnabledAutomationId}" />
                             <Border Width="14" Height="14" CornerRadius="2" VerticalAlignment="Center" Background="{x:Bind SwatchBrush}" />
                             <TextBlock MinWidth="190" VerticalAlignment="Center" Text="{x:Bind Name}" FontWeight="{x:Bind NameWeight}" />
-                            <TextBlock VerticalAlignment="Center" Text="{x:Bind PackTag}" FontSize="12" Opacity="0.6" />
+                            <TextBlock VerticalAlignment="Center" Text="{x:Bind StateTag}" FontSize="12" Opacity="0.6" />
                         </StackPanel>
                     </DataTemplate>
                 </ListView.ItemTemplate>
@@ -70,15 +70,13 @@
                 <TextBox
                     x:Name="NameBox"
                     MinWidth="320"
-                    PlaceholderText="e.g. Customer VRF names"
                     AutomationProperties.Name="Name"
                     AutomationProperties.AutomationId="SettingsHighlightName" />
             </toolkit:SettingsCard>
-            <toolkit:SettingsCard Header="Regular expression (applied per line)">
+            <toolkit:SettingsCard Header="Regular expression">
                 <TextBox
                     x:Name="PatternBox"
                     MinWidth="320"
-                    PlaceholderText="\bVRF-[A-Z]+\b"
                     FontFamily="{StaticResource CodeFont}"
                     AutomationProperties.Name="Regular expression"
                     AutomationProperties.AutomationId="SettingsHighlightPattern"
@@ -93,18 +91,19 @@
             </toolkit:SettingsCard>
 
             <TextBlock Text="Appearance" Style="{StaticResource GroupHeader}" />
-            <toolkit:SettingsCard Header="Color (#RRGGBB)">
+            <toolkit:SettingsCard Header="Color">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <TextBox
                         x:Name="ColorBox"
                         MinWidth="160"
+                        PlaceholderText="#RRGGBB"
                         AutomationProperties.Name="Color"
                         AutomationProperties.AutomationId="SettingsHighlightColor"
                         TextChanged="FormField_TextChanged" />
                     <Border x:Name="Swatch" Width="20" Height="20" CornerRadius="3" VerticalAlignment="Center" />
                 </StackPanel>
             </toolkit:SettingsCard>
-            <toolkit:SettingsCard Header="Bold (renders as a background tint)">
+            <toolkit:SettingsCard Header="Bold">
                 <ToggleSwitch
                     x:Name="BoldSwitch"
                     AutomationProperties.Name="Bold"

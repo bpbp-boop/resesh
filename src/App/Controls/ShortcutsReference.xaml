@@ -72,22 +72,16 @@
         </DataTemplate>
     </UserControl.Resources>
 
-    <Grid RowDefinitions="Auto,Auto,*" RowSpacing="12">
-        <TextBlock
-            Text="Terminal shortcuts work while a terminal has focus. All others work anywhere in the window, including the terminal. Ctrl with a single letter always goes to the shell."
-            TextWrapping="Wrap"
-            Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
-
+    <Grid RowDefinitions="Auto,*" RowSpacing="12">
         <TextBox
             x:Name="SearchBox"
-            Grid.Row="1"
             HorizontalAlignment="Stretch"
             PlaceholderText="Search shortcuts"
             AutomationProperties.Name="Search shortcuts"
             AutomationProperties.AutomationId="KeyboardShortcutsSearch"
             TextChanged="SearchBox_TextChanged" />
 
-        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Padding="0,0,16,0" Spacing="20">
                 <ItemsControl ItemsSource="{x:Bind Groups}">
                     <ItemsControl.ItemsPanel>

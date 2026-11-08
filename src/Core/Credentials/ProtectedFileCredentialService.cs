@@ -56,6 +56,12 @@ public sealed class ProtectedFileCredentialService : ICredentialService
         }
     }
 
+    public bool Has(Guid sessionId)
+    {
+        lock (_gate)
+            return EnsureLoaded().ContainsKey(sessionId);
+    }
+
     public void Write(Guid sessionId, string secret)
     {
         CredentialStoreException.ThrowIfTooLong(secret);

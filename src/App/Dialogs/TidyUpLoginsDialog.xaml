@@ -1,0 +1,27 @@
+<ContentDialog
+    x:Class="Resesh.App.Dialogs.TidyUpLoginsDialog"
+    Style="{StaticResource DefaultContentDialogStyle}"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Tidy up logins"
+    PrimaryButtonText="Apply"
+    CloseButtonText="Cancel"
+    DefaultButton="Primary"
+    PrimaryButtonClick="OnPrimaryButtonClick">
+
+    <StackPanel Width="520" Spacing="12">
+        <InfoBar x:Name="ErrorBar" IsOpen="False" IsClosable="True" Severity="Error" />
+        <TextBlock x:Name="Intro" TextWrapping="Wrap" />
+        <ScrollViewer MaxHeight="420" VerticalScrollBarVisibility="Auto">
+            <StackPanel
+                x:Name="SuggestionRows"
+                Spacing="8"
+                AutomationProperties.AutomationId="TidyUpSuggestions" />
+        </ScrollViewer>
+        <TextBlock
+            x:Name="SummaryText"
+            Style="{ThemeResource CaptionTextBlockStyle}"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            TextWrapping="Wrap" />
+    </StackPanel>
+</ContentDialog>

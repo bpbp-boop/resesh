@@ -10,22 +10,6 @@
     </UserControl.Resources>
 
     <StackPanel Spacing="4">
-        <TextBlock
-            Margin="1,0,0,6"
-            Opacity="0.75"
-            TextWrapping="Wrap"
-            Text="Manual setup: copy an adapter to the target shown below. resesh does not install adapters or change any host. An adapter only reports status; it cannot approve requests or send input." />
-        <TextBlock
-            Margin="1,0,0,6"
-            Opacity="0.75"
-            TextWrapping="Wrap"
-            Text="Claude Code adapters return terminalSequence JSON for Claude to emit in interactive sessions. The reserved resesh-agent title may show as a desktop notification in other terminals." />
-        <TextBlock
-            Margin="1,0,0,6"
-            Opacity="0.75"
-            TextWrapping="Wrap"
-            Text="In a persistent (tmux) session, tmux discards an agent's own status reports. The Codex, Claude Code (Linux, macOS, WSL) and shell adapters report there through a tmux pane option instead, which needs tmux 3.0 or later; without an adapter, agents are identified by command and title only." />
-
         <!-- One adapter per expander: its destination stays visible and Copy works without
              expanding; the explanation and code stay behind the chevron. -->
         <ItemsControl ItemsSource="{x:Bind Adapters}">
@@ -80,7 +64,6 @@
 
         <toolkit:SettingsExpander
             Header="Protocol reference"
-            Description="For custom integrations"
             AutomationProperties.AutomationId="SettingsAgentProtocolReference">
             <toolkit:SettingsExpander.ItemsHeader>
                 <Border Margin="16,12" Style="{StaticResource PreviewSurfaceStyle}">

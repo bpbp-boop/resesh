@@ -381,14 +381,13 @@ public sealed class SettingsViewModelTests
 
         _systemIsLight = true;
         settings.ThemeModeChanged();
-        Assert.True(settings.IsLightModeActive);
+        Assert.Equal(_settings.LightTheme, settings.Theme.Id);
 
         _systemIsLight = false;
         settings.ThemeModeChanged();
-        Assert.False(settings.IsLightModeActive);
+        Assert.Equal(_settings.DarkTheme, settings.Theme.Id);
 
-        Assert.Equal([nameof(SettingsViewModel.IsLightModeActive), nameof(SettingsViewModel.Theme),
-            nameof(SettingsViewModel.IsLightModeActive), nameof(SettingsViewModel.Theme)], raised);
+        Assert.Equal([nameof(SettingsViewModel.Theme), nameof(SettingsViewModel.Theme)], raised);
         Assert.Same(before, _settings);
         Assert.Empty(_changes);
     }
