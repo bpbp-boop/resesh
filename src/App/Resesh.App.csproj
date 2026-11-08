@@ -84,4 +84,12 @@
 
   <Import Project="..\..\eng\WindowsAppRuntimeResources.targets" />
 
+  <!-- Native AOT links the SDK's own copy of Brotli into the exe, and rewind decompresses
+       with it. Brotli before 1.2.1 has a decoder overflow (CVE-2026-111497), fixed in .NET
+       10.0.14, so refuse to publish with an older SDK. -->
+  <Target Name="RequirePatchedBrotli" BeforeTargets="PrepareForPublish"
+          Condition="$([MSBuild]::VersionLessThan('$(BundledNETCoreAppPackageVersion)', '10.0.14'))">
+    <Error Text="This SDK bundles .NET $(BundledNETCoreAppPackageVersion), whose Brotli is vulnerable to CVE-2026-111497. Install an SDK with .NET 10.0.14 or later before publishing." />
+  </Target>
+
 </Project>

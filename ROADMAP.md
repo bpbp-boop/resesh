@@ -59,7 +59,7 @@ and the git history.
   search matches, highlight-rule hits, bookmarks, command marks (OSC 133, OSC 3008,
   Enter-gated prompt discovery) with exit-status colors, per-line timestamps, and a
   commands panel with jump / copy-output actions.
-- **Recording & rewind** — bounded in-memory rewind with xterm state keyframes, paired
+- **Recording & rewind** — bounded, Brotli-compressed in-memory rewind with state keyframes, paired
   asciicast v2 and timestamped plain logs rendered from terminal output, plus `.cast` playback with
   pause, speed, and seek controls.
 - **Workspaces & layout restore** — named ordered tab-group layouts with pinned and active

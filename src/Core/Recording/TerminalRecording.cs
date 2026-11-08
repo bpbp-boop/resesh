@@ -37,13 +37,21 @@ public sealed record TerminalRecording(
 /// <summary>
 /// One ordered capture point for terminal output and resize events. The bounded in-memory
 /// stream feeds instant rewind; an optional writer consumes the same events for disk recording.
+/// Rewind events are grouped into blocks of about 64 KB, and each sealed block and keyframe is
+/// Brotli-compressed on the thread pool, so the same cap holds several times more history.
+/// The newest block stays raw until it fills or a keyframe arrives.
 /// </summary>
 public sealed class TerminalCapture : IDisposable
 {
     private readonly object _gate = new();
     private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
-    private readonly LinkedList<TerminalRecordingEvent> _events = [];
-    private readonly List<TerminalKeyframe> _keyframes = [];
+    // Sealed blocks, oldest first, then the raw events of the block still filling.
+    private readonly List<RewindEventBlock> _blocks = [];
+    private readonly List<TerminalRecordingEvent> _open = [];
+    private long _openBytes;
+    private readonly List<RewindKeyframe> _keyframes = [];
+    private readonly Queue<RewindChunk> _uncompressed = new();
+    private bool _compressing;
     private TimeSpan _maximumAge;
     private long _maximumBytes;
     private readonly bool _retainForRewind;
@@ -53,7 +61,7 @@ public sealed class TerminalCapture : IDisposable
     private bool _hasCaptureTimestamp;
     private int _currentColumns;
     private int _currentRows;
-    private TerminalKeyframe? _anchor;
+    private RewindKeyframe? _anchor;
     private TerminalDiskRecorder? _recorder;
     // A recorder that failed under the lock, waiting to be closed and reported outside it.
     private TerminalDiskRecorder? _failedRecorder;
@@ -171,7 +179,8 @@ public sealed class TerminalCapture : IDisposable
         }
     }
 
-    private bool HasRewindDataLocked => _anchor is not null || _keyframes.Count > 0 || _events.Count > 0;
+    private bool HasRewindDataLocked =>
+        _anchor is not null || _keyframes.Count > 0 || _blocks.Count > 0 || _open.Count > 0;
 
     public void CaptureOutput(ReadOnlySpan<byte> data, long unixTimeMilliseconds)
     {
@@ -203,6 +212,7 @@ public sealed class TerminalCapture : IDisposable
             ArrayPool<char>.Shared.Return(rented);
         }
         ReportRecordingFailure();
+        StartCompression();
         if (appended)
             Changed?.Invoke();
     }
@@ -223,6 +233,7 @@ public sealed class TerminalCapture : IDisposable
                 string.Create(CultureInfo.InvariantCulture, $"{columns}x{rows}")));
         }
         ReportRecordingFailure();
+        StartCompression();
         if (changed)
             Changed?.Invoke();
     }
@@ -244,25 +255,38 @@ public sealed class TerminalCapture : IDisposable
             _currentRows = rows;
             if (_retainForRewind && !_rewindDisabled)
             {
-                var frame = new TerminalKeyframe(
+                // Seal first: no block may hold events from both sides of a keyframe.
+                SealOpenBlockLocked();
+                var frame = new RewindKeyframe(
                     ToElapsedLocked(unixTimeMilliseconds), columns, rows, state.ToArray());
                 _keyframes.Add(frame);
-                _keyframeBytes += FrameBytes(frame);
+                _keyframeBytes += frame.Bytes;
+                _uncompressed.Enqueue(frame);
                 changed = true;
                 TrimLocked();
             }
         }
+        StartCompression();
         if (changed)
             Changed?.Invoke();
     }
 
+    /// <summary>The keyframe at or before <paramref name="atTime"/> and the events after it.
+    /// Picks the pieces under the lock and decompresses them outside it, so scrubbing never
+    /// holds up terminal output.</summary>
     public TerminalRewindSlice Snapshot(double? atTime = null)
     {
+        RewindKeyframe? frame;
+        RewindEventBlock[] blocks;
+        TerminalRecordingEvent[] open;
+        double target, after, earliest, latest;
         lock (_gate)
         {
             ThrowIfDisposed();
-            var target = Math.Clamp(atTime ?? _latestTime, EarliestTimeLocked(), _latestTime);
-            var frame = _anchor;
+            earliest = EarliestTimeLocked();
+            latest = _latestTime;
+            target = Math.Clamp(atTime ?? _latestTime, earliest, _latestTime);
+            frame = _anchor;
             for (var index = _keyframes.Count - 1; index >= 0; index--)
             {
                 if (_keyframes[index].Time <= target)
@@ -272,12 +296,89 @@ public sealed class TerminalCapture : IDisposable
                 }
             }
 
-            var after = frame?.Time ?? double.NegativeInfinity;
-            var events = _events
-                .Where(item => item.Time > after && item.Time <= target)
+            after = frame?.Time ?? double.NegativeInfinity;
+            var from = after;
+            var until = target;
+            blocks = _blocks
+                .Where(block => block.LastTime > from && block.FirstTime <= until)
                 .ToArray();
-            return new TerminalRewindSlice(
-                StartedAt, InitialColumns, InitialRows, EarliestTimeLocked(), _latestTime, frame, events);
+            open = _open
+                .Where(item => item.Time > from && item.Time <= until)
+                .ToArray();
+        }
+
+        var events = new List<TerminalRecordingEvent>();
+        foreach (var block in blocks)
+        {
+            foreach (var item in block.Events())
+            {
+                if (item.Time > after && item.Time <= target)
+                    events.Add(item);
+            }
+        }
+        events.AddRange(open);
+        return new TerminalRewindSlice(
+            StartedAt, InitialColumns, InitialRows, earliest, latest, frame?.ToKeyframe(), events);
+    }
+
+    /// <summary>Runs compression on the calling thread instead of the thread pool. Tests set it.</summary>
+    internal bool CompressInline { get; set; }
+
+    /// <summary>Bytes counted against the cap: raw, or compressed once the compressor is done.</summary>
+    internal long RetainedBytes
+    {
+        get
+        {
+            lock (_gate)
+                return RetainedBytesLocked();
+        }
+    }
+
+    /// <summary>Starts the compressor if chunks are waiting and it is not already running.
+    /// Called outside the lock.</summary>
+    private void StartCompression()
+    {
+        lock (_gate)
+        {
+            if (_compressing || _disposed || _uncompressed.Count == 0)
+                return;
+            _compressing = true;
+        }
+        if (CompressInline)
+            CompressPending();
+        else
+            ThreadPool.UnsafeQueueUserWorkItem(static capture => capture.CompressPending(), this, preferLocal: false);
+    }
+
+    private void CompressPending()
+    {
+        while (true)
+        {
+            RewindChunk? chunk;
+            lock (_gate)
+            {
+                if (_disposed || !_uncompressed.TryDequeue(out chunk))
+                {
+                    _compressing = false;
+                    return;
+                }
+                if (chunk.Dropped)
+                    continue;
+            }
+
+            if (chunk.Compress() is not { } compressed)
+                continue;
+
+            lock (_gate)
+            {
+                if (chunk.Dropped || _disposed)
+                    continue;
+                var change = chunk.UseCompressed(compressed);
+                if (chunk is RewindEventBlock)
+                    _eventBytes += change;
+                else if (chunk != _anchor)
+                    _keyframeBytes += change;
+            }
         }
     }
 
@@ -350,10 +451,29 @@ public sealed class TerminalCapture : IDisposable
         if (!_retainForRewind || _rewindDisabled)
             return false;
 
-        _events.AddLast(item);
-        _eventBytes += EventBytes(item);
+        var bytes = EventBytes(item);
+        _open.Add(item);
+        _openBytes += bytes;
+        _eventBytes += bytes;
+        if (_openBytes >= BlockBytes)
+            SealOpenBlockLocked();
         TrimLocked();
         return true;
+    }
+
+    /// <summary>Raw event bytes per block. Larger blocks compress a little better but leave
+    /// more raw output in the open block and cost more to decompress on every seek.</summary>
+    private const long BlockBytes = 64 * 1024;
+
+    private void SealOpenBlockLocked()
+    {
+        if (_open.Count == 0)
+            return;
+        var block = new RewindEventBlock([.. _open], _openBytes);
+        _blocks.Add(block);
+        _uncompressed.Enqueue(block);
+        _open.Clear();
+        _openBytes = 0;
     }
 
     private void FailRecordingLocked(TerminalDiskRecorder recorder, Exception exception)
@@ -419,7 +539,7 @@ public sealed class TerminalCapture : IDisposable
     private void TrimLocked()
     {
         var cutoff = _latestTime - _maximumAge.TotalSeconds;
-        TerminalKeyframe? ageFrame = null;
+        RewindKeyframe? ageFrame = null;
         foreach (var frame in _keyframes)
         {
             if (frame.Time > cutoff)
@@ -443,11 +563,16 @@ public sealed class TerminalCapture : IDisposable
     }
 
     private long RetainedBytesLocked() =>
-        _eventBytes + _keyframeBytes + (_anchor is null ? 0 : FrameBytes(_anchor));
+        _eventBytes + _keyframeBytes + (_anchor?.Bytes ?? 0);
 
     private void DisableRewindLocked()
     {
-        _events.Clear();
+        foreach (var chunk in _uncompressed)
+            chunk.Dropped = true;
+        _uncompressed.Clear();
+        _blocks.Clear();
+        _open.Clear();
+        _openBytes = 0;
         _keyframes.Clear();
         _eventBytes = 0;
         _keyframeBytes = 0;
@@ -455,29 +580,47 @@ public sealed class TerminalCapture : IDisposable
         _rewindDisabled = true;
     }
 
-    private void PromoteAnchorLocked(TerminalKeyframe frame)
+    private void PromoteAnchorLocked(RewindKeyframe frame)
     {
+        if (_anchor is { } previous && previous != frame)
+            previous.Dropped = true;
         _anchor = frame;
-        while (_events.First is { } first && first.Value.Time <= frame.Time)
+
+        var blocks = 0;
+        while (blocks < _blocks.Count && _blocks[blocks].LastTime <= frame.Time)
         {
-            _eventBytes -= EventBytes(first.Value);
-            _events.RemoveFirst();
+            _eventBytes -= _blocks[blocks].Bytes;
+            _blocks[blocks].Dropped = true;
+            blocks++;
         }
+        _blocks.RemoveRange(0, blocks);
+
+        // Each keyframe seals the open block, so its events all follow the newest keyframe.
+        var events = 0;
+        while (events < _open.Count && _open[events].Time <= frame.Time)
+        {
+            var bytes = EventBytes(_open[events]);
+            _openBytes -= bytes;
+            _eventBytes -= bytes;
+            events++;
+        }
+        _open.RemoveRange(0, events);
+
         while (_keyframes.Count > 0 && _keyframes[0].Time <= frame.Time)
         {
-            _keyframeBytes -= FrameBytes(_keyframes[0]);
+            _keyframeBytes -= _keyframes[0].Bytes;
+            if (_keyframes[0] != frame)
+                _keyframes[0].Dropped = true;
             _keyframes.RemoveAt(0);
         }
     }
 
     private double EarliestTimeLocked() =>
-        _anchor?.Time ?? _events.First?.Value.Time ?? 0;
+        _anchor?.Time
+        ?? (_blocks.Count > 0 ? _blocks[0].FirstTime : _open.Count > 0 ? _open[0].Time : 0);
 
     private static long EventBytes(TerminalRecordingEvent item) =>
         32L + Encoding.UTF8.GetByteCount(item.Data);
-
-    private static long FrameBytes(TerminalKeyframe frame) =>
-        48L + frame.State.Length;
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 

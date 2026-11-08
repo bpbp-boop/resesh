@@ -2693,3 +2693,23 @@ Checked: the shim builds with `-Wall -Werror` for x64 and arm64, Terminal.Tests 
 the new DLLs, and a native smoke run kept 5,001 lines of 200-column scrollback and
 exercised line text, copy, VT snapshot, search steps, key and focus encoding. The session
 agent keeps its own pin (b699ea7, Zig 0.16); 1.0 changes nothing about that blocker.
+
+## 2026-11-08 - Rewind is Brotli-compressed in 64 KB blocks
+
+Rewind used to keep every output chunk as its own `string` (UTF-16, so twice the UTF-8 size
+counted against the cap) and every keyframe raw. Now output events are grouped into blocks of
+about 64 KB of UTF-8. A block is sealed when it fills or a keyframe arrives, so no block spans
+a keyframe and trimming still drops whole blocks. Each sealed block and each keyframe is
+compressed on the thread pool, never on the terminal's output thread, which captures keyframes
+while holding the terminal lock. The cap counts a chunk at its raw size until it is compressed.
+
+- Brotli quality 2, window 22. On 12.8 MB of colored `git log -p` output: 64 KB blocks went 3.8x at
+  q1 (446 MB/s), 4.0x at q2 (196 MB/s), 4.3x at q4 (104 MB/s) and 4.6x at q5 (59 MB/s). 256 KB
+  blocks gained about 10% but made each seek decompress more. zlib at its fastest level only
+  reached 3.1x. .NET 10 has no zstd.
+- `Snapshot` picks blocks under the lock and decompresses them outside it. A chunk's payload is
+  swapped with one reference write, so it is either raw or compressed, never half of each.
+- Brotli's decoder had an overflow (CVE-2026-111497; Brotli 1.0.3 to 1.2.0, fixed in .NET
+  10.0.14). Rewind only decodes what it compressed itself in memory, never data from the
+  remote host, but Native AOT links the SDK's own copy into the exe. `Resesh.App.csproj`
+  therefore refuses to publish with an SDK whose bundled runtime is older than 10.0.14.
