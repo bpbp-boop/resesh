@@ -256,3 +256,58 @@ worker passes keep a 100 ms pace. Batched build → worker build, same session:
 \* The logs stalls are gen2 GC pauses (11–13 ms, 7–9 per run in both builds) landing in the
 measured window; none line up with annotation work. Allocation is 2–3 MB per frame, much of it
 outside the renderer (rewind keyframes copy ~1 MB of VT text each).
+
+## Render-path pass (2026-11-08)
+
+SSH floods (`sshflood.py`), JIT Release builds (not AOT), maximized 383×109 on the same 4K
+144 Hz / RX 6800 XT machine, compared at the same output rate (the flood settled at either
+25.2 MB/s or faster at random, a benchmark-server artifact explained below, and record time
+rises with the rate). µs, medians.
+
+| workload | build | fps | record p50 | GPU p50 | Present p50 |
+|---|---|---:|---:|---:|---:|
+| logs | master 57c4d6b | 109 | ~1,000–1,200 | 1,870 | 324 |
+| logs | background bitmap + punctuation-run shaping (e96cc72) | 111–115 | 1,166 | 410 | ~190 |
+| logs, Cascadia Code (ligatures) | e96cc72 | 111–114 | 1,144–1,172 | 410 | — |
+| color | master | 119 | ~1,050 | 1,828 | 296 |
+| color | e96cc72 | 113–123 | 999–1,180 | 532 | ~200 |
+| tui | master → 38e842c | 128 → 126 | 88 → 117 | 956 → 278 | 247 → 145 |
+| unicode | master → 38e842c | 125 → 130 | 1,146 → 1,334 | 2,289 → 354 | 271 → 204 |
+
+- **Cell backgrounds from one bitmap cut GPU time 4–6×** at full screen: Direct2D's cost was the
+  full-width fill plus a rectangle per color run on every row.
+- **Partial presents, snapshot graphemes and allocation-free glyph runs (912b720) were level
+  within noise** on these floods: they redraw 42–109 rows a frame, so the copy saving does not
+  show, and allocations track output rate. Typing latency was not measured.
+- **Shaping whole words cost ~2.4 ms a frame** on a Cascadia Code logs flood (every timestamp
+  missed the cache) and ~0.8 ms with Cascadia Mono, which has `calt`. Shaping only runs of
+  punctuation (e96cc72) brought both back to the unshaped level.
+
+### The 25.2 MB/s floods were the flood server (same day)
+
+About half of all SSH floods, in every build, ran at exactly 25.2 MB/s. It was not resesh:
+- In those runs the reader thread was idle 80–97% of the time (parse busy 18% on logs, 3% on
+  tui, which parses at ~880 MB/s), and thread stacks showed the reader waiting in
+  `ShellStream.Read` and SSH.NET's socket thread waiting in `recv`: nothing was arriving.
+- A bare SSH.NET console client with no terminal showed the same thing against `sshflood.py`:
+  11 of 15 tui floods sat at a flat 125 MB/s, the rest ran at 250–320 MB/s. An asyncssh client
+  never did (15/15 at 325–400 MB/s).
+- Running the server on asyncio's `SelectorEventLoop` instead of Windows' default
+  `ProactorEventLoop` removed the plateau: the bare client got ~600 MB/s every run, and resesh
+  no longer showed 25.2 MB/s. `sshflood.py` now uses it. The selector loop still stalls ~1.5 s
+  now and then early in a stream with SSH.NET as the client (3 of 10); the asyncssh client
+  never stalls, so this is an SSH.NET-client/Python-server pairing on Windows loopback, below
+  resesh. SSH.NET's 2 GB channel window rules out flow control. The 2026-10-29 "SwitchToThread
+  capped SSH at exactly 25.2 MB/s" finding above was most likely this artifact too.
+- Drawing has no effect on intake: the same flood in a visible tab and in a hidden one (parsed,
+  not drawn) ran at the same server-measured 100–112 MB/s, six pairs.
+
+What remains: the whole app takes SSH data in at ~95–115 MB/s on this machine (AOT and JIT
+alike, server-measured), against ~600 MB/s for `SshTerminalSession` alone in a console with
+no UI. SSH.NET's socket thread is CPU-bound in `Session.ReceiveMessage` in the app; why it is
+slower there is not yet known. It is above the parser's speed on text-heavy floods (logs
+~150 MB/s) and far above any real link a terminal sees.
+
+`sshflood.py` also takes `-w<seconds>` (wait before streaming) and prints each stream's
+server-side rate, which covers tabs that are parsed but not drawn.
+

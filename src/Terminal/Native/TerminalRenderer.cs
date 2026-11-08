@@ -57,6 +57,9 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private IDXGISwapChain1? _swapChain;
     private ID3D11Texture2D? _canvas;
     private ID2D1Bitmap1? _canvasBitmap;
+    private const int SwapChainBuffers = 2;
+    // The canvas bands each present copies, instead of the whole window-sized canvas.
+    private readonly PresentRegions _regions = new(SwapChainBuffers);
 
     private static readonly (FontWeight Weight, FontStyle Style)[] Styles =
     [
@@ -342,6 +345,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         _boxThickness = Math.Clamp((int)MathF.Ceiling(metrics.UnderlineThickness * scale), 1, Math.Max(1, CellWidth / 5));
         DisposeGlyphGeometries();
         ResetClusterCaches();
+        ResetLigatures();
 
         _emojiFormat?.Dispose();
         _emojiFormat = s_dwrite.CreateTextFormat("Segoe UI Emoji", FontWeight.Normal, FontStyle.Normal, emPixels * 0.9f);
@@ -453,6 +457,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Ignore), 96, 96,
                 BitmapOptions.Target | BitmapOptions.CannotDraw));
         _dc.Target = _canvasBitmap;
+        _regions.InvalidateAll(); // new buffers hold nothing yet
 
         if (_swapChain is null)
         {
@@ -463,14 +468,14 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 Format = Format.B8G8R8A8_UNorm,
                 SampleDescription = new SampleDescription(1, 0),
                 BufferUsage = Usage.RenderTargetOutput,
-                BufferCount = 2,
+                BufferCount = SwapChainBuffers,
                 Scaling = Scaling.Stretch,
                 SwapEffect = SwapEffect.FlipSequential,
                 AlphaMode = DxgiAlphaMode.Ignore,
             });
             return true;
         }
-        _swapChain.ResizeBuffers(2, (uint)bufferWidth, (uint)bufferHeight, Format.B8G8R8A8_UNorm, SwapChainFlags.None).CheckError();
+        _swapChain.ResizeBuffers(SwapChainBuffers, (uint)bufferWidth, (uint)bufferHeight, Format.B8G8R8A8_UNorm, SwapChainFlags.None).CheckError();
         return false;
     }
 
@@ -493,6 +498,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         using (var backBuffer = _swapChain.GetBuffer<ID3D11Texture2D>(0))
             s_context!.CopyResource(backBuffer, _canvas);
         _swapChain.Present(1, PresentFlags.None);
+        _regions.InvalidateAll(); // the other buffer still holds what was there before
     }
 
     /// <summary>Maps the physical-pixel swap chain onto the panel's DIP layout.</summary>
@@ -612,11 +618,11 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         if (!EnsureResourcesLocked(notify: true) || _swapChain is null || _canvas is null)
             return false;
         var observedGeneration = _generation;
-        if (_runGlyphs.Length < cols)
-        {
-            _runGlyphs = new ushort[cols];
-            _runAdvances = new float[cols];
-        }
+        EnsureRunCapacity(cols, keep: 0);
+        // Ligatures break at the cursor's cell whether or not it is in a blink's off phase,
+        // so they do not change shape as it blinks.
+        _cursorRow = info.CursorVisible != 0 ? info.CursorY : -1;
+        _cursorColumn = info.CursorX;
 
         var stats = FrameStats.Enabled;
         var gpuSlot = stats ? BeginGpuTiming() : -1;
@@ -659,8 +665,14 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             _extendedMargin = extend;
             full = true;
         }
+        if (full)
+            _regions.InvalidateAll();
+        _bitmapBackgrounds = UpdateBackgrounds(cells, cols, rows, dirty, full, info.DefaultBackground, selectionColor);
         if (rows > 0 && (full || dirty[rows - 1] != 0))
+        {
             DrawBottomMargin(cells + (rows - 1) * cols, cols, rows, info.DefaultBackground, extend);
+            _regions.Add(rows * CellHeight, PixelHeight);
+        }
         for (var y = 0; y < rows; y++)
         {
             if (dirty[y] == 0 && !full)
@@ -668,9 +680,13 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             dirty[y] = 0;
             rowsDrawn++;
             DrawRow(cells + y * cols, cols, y, info.DefaultBackground, selectionColor, extend);
+            AddRowRegion(y);
         }
         if (cursorShown && info.CursorVisible != 0 && info.CursorY < rows && info.CursorX < cols)
+        {
             DrawCursor(cells + info.CursorY * cols + info.CursorX, info, focused);
+            AddRowRegion(info.CursorY);
+        }
         var endDrawStart = stats ? FrameStats.Now() : 0;
         var endDraw = _dc.EndDraw();
         if (endDraw == Vortice.Direct2D1.ResultCode.RecreateTarget)
@@ -682,7 +698,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
         var copyStart = stats ? FrameStats.Now() : 0;
         using (var backBuffer = _swapChain.GetBuffer<ID3D11Texture2D>(0))
-            s_context!.CopyResource(backBuffer, _canvas);
+            CopyToBackBuffer(backBuffer);
         if (stats)
             EndGpuTiming(gpuSlot);
         var presentStart = stats ? FrameStats.Now() : 0;
@@ -704,6 +720,27 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         }
         present.CheckError();
         return true;
+    }
+
+    /// <summary>A drawn row's band, with a row of slack each side: glyphs that overhang their
+    /// cell (italics, tall fallback fonts) draw into the neighbors on the canvas.</summary>
+    private void AddRowRegion(int y) => _regions.Add((y - 1) * CellHeight, (y + 2) * CellHeight);
+
+    /// <summary>Brings the back buffer up to date with the canvas: only the bands drawn since
+    /// this buffer was last presented, or all of it after anything that touched the whole
+    /// canvas. Copying the window-sized canvas every frame cost ~33 MB of bandwidth at 4K
+    /// per surface even when one row changed.</summary>
+    private void CopyToBackBuffer(ID3D11Texture2D backBuffer)
+    {
+        var bands = _regions.Take(_bufferHeight);
+        if (bands is null)
+        {
+            s_context!.CopyResource(backBuffer, _canvas);
+            return;
+        }
+        var width = Math.Min(_bufferWidth, Math.Max(PixelWidth, 1));
+        foreach (var (top, bottom) in bands)
+            s_context!.CopySubresourceRegion(backBuffer, 0, 0, (uint)top, 0, _canvas, 0, new Box(0, top, 0, width, bottom, 1));
     }
 
     /// <summary>The strip below the last row, which no row repaint covers. When extending,
@@ -730,35 +767,38 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         }
     }
 
+    /// <summary>This frame's cell backgrounds come from the background bitmap.</summary>
+    private bool _bitmapBackgrounds;
+
     private void DrawRow(TerminalCell* row, int cols, int y, uint defaultBackground, uint selectionColor, bool extend)
     {
         float top = y * CellHeight;
-        SetBrush(Rgb(defaultBackground));
-        _dc.FillRectangle(new Rect(0, top, PixelWidth, CellHeight), _brush);
-        if (extend && cols > 0)
+        float gridRight = OriginX + cols * CellWidth;
+        // The margins either side of the grid: the theme color, or the edge cells' when extending.
+        SetBrush(Rgb(extend && cols > 0 && MarginBackgroundOf(row[0]) is { } leftBg ? leftBg : defaultBackground));
+        _dc.FillRectangle(new Rect(0, top, OriginX, CellHeight), _brush);
+        if (gridRight < PixelWidth)
         {
-            if (MarginBackgroundOf(row[0]) is { } leftBg)
-            {
-                SetBrush(Rgb(leftBg));
-                _dc.FillRectangle(new Rect(0, top, OriginX, CellHeight), _brush);
-            }
-            float gridRight = OriginX + cols * CellWidth;
-            if (gridRight < PixelWidth && MarginBackgroundOf(row[cols - 1]) is { } rightBg)
-            {
-                SetBrush(Rgb(rightBg));
-                _dc.FillRectangle(new Rect(gridRight, top, PixelWidth - gridRight, CellHeight), _brush);
-            }
+            SetBrush(Rgb(extend && cols > 0 && MarginBackgroundOf(row[cols - 1]) is { } rightBg ? rightBg : defaultBackground));
+            _dc.FillRectangle(new Rect(gridRight, top, PixelWidth - gridRight, CellHeight), _brush);
         }
 
-        // Background runs: selection, then find matches, override the cell background.
-        for (var x = 0; x < cols;)
+        if (_bitmapBackgrounds)
+            DrawRowBackground(cols, y);
+        else
         {
-            if (BackgroundOf(row[x], selectionColor) is not { } bg) { x++; continue; }
-            var start = x;
-            while (x < cols && BackgroundOf(row[x], selectionColor) == bg)
-                x++;
-            SetBrush(Rgb(bg));
-            _dc.FillRectangle(new Rect(OriginX + start * CellWidth, top, (x - start) * CellWidth, CellHeight), _brush);
+            SetBrush(Rgb(defaultBackground));
+            _dc.FillRectangle(new Rect(OriginX, top, cols * CellWidth, CellHeight), _brush);
+            // Background runs: selection, then find matches, override the cell background.
+            for (var x = 0; x < cols;)
+            {
+                if (BackgroundOf(row[x], selectionColor) is not { } bg) { x++; continue; }
+                var start = x;
+                while (x < cols && BackgroundOf(row[x], selectionColor) == bg)
+                    x++;
+                SetBrush(Rgb(bg));
+                _dc.FillRectangle(new Rect(OriginX + start * CellWidth, top, (x - start) * CellWidth, CellHeight), _brush);
+            }
         }
 
         // Glyph runs: same face, style and color; every glyph advances whole cells.
@@ -790,6 +830,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             var (face, _) = Lookup(c.Codepoint, style);
             var start = x;
             var n = 0;
+            var shaped = false;
+            var scannedTo = 0; // where the last ligature scan stopped: a new one may start there
             while (x < cols)
             {
                 ref var d = ref row[x];
@@ -799,42 +841,95 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                     if (n > 0) { _runAdvances[n - 1] += CellWidth; x++; continue; }
                     break;
                 }
-                if (ForegroundOf(d) != fg || StyleOf(d.Flags) != style || ((d.Flags & TerminalCell.Faint) != 0) != faint
-                    || d.GraphemeLength > 1 || (d.Flags & TerminalCell.Invisible) != 0 || BuiltinGlyphs.Covers(d.Codepoint))
+                if (!SameRun(d, fg, style, faint))
                     break;
                 var (f, g) = Lookup(d.Codepoint, style);
                 if (f != face || _isEmojiFace[f]) break;
+                if (IsPunctuation(d.Codepoint) && x >= scannedTo && (x == start || x == scannedTo || !IsPunctuation(row[x - 1].Codepoint)))
+                {
+                    var cells = ShapeWordAt(row, cols, y, x, fg, style, faint, face, selectionColor, ref n, out var scanned);
+                    scannedTo = x + scanned;
+                    if (cells > 0)
+                    {
+                        shaped = true;
+                        x += cells;
+                        continue;
+                    }
+                }
+                // A shaped word can hold more glyphs than cells, so the run can outgrow the row.
+                EnsureRunCapacity(n + 1, keep: n);
                 _runGlyphs[n] = g;
                 _runAdvances[n] = d.Wide == TerminalCell.WideChar ? 2 * CellWidth : CellWidth;
+                _runOffsets[n] = default;
                 n++;
                 x++;
             }
             if (n == 0) { x++; continue; }
             SetBrush(Rgb(fg, faint ? 0.55f : 1f));
-            var run = new GlyphRun
-            {
-                FontFace = _faces[style][face],
-                FontEmSize = _emSize,
-                Indices = _runGlyphs.AsSpan(0, n).ToArray(),
-                Advances = _runAdvances.AsSpan(0, n).ToArray(),
-            };
-            DrawRun(new Vector2(OriginX + start * CellWidth, baseline), run, face);
+            fixed (ushort* glyphs = _runGlyphs)
+            fixed (float* advances = _runAdvances)
+            fixed (GlyphOffset* offsets = _runOffsets)
+                DrawRun(new Vector2(OriginX + start * CellWidth, baseline), style, face, glyphs, advances, shaped ? offsets : null, n);
         }
         DrawDecorations(row, cols, top, baseline);
     }
 
-    private void DrawRun(Vector2 origin, GlyphRun run, int face)
+    /// <summary>Whether a cell continues a glyph run of this color and style.</summary>
+    private bool SameRun(in TerminalCell d, uint fg, int style, bool faint) =>
+        ForegroundOf(d) == fg && StyleOf(d.Flags) == style && ((d.Flags & TerminalCell.Faint) != 0) == faint
+        && d.GraphemeLength <= 1 && (d.Flags & TerminalCell.Invisible) == 0 && !BuiltinGlyphs.Covers(d.Codepoint);
+
+    private int _cursorRow = -1;
+    private int _cursorColumn;
+
+    /// <summary>When the run of punctuation starting at <paramref name="x"/> shapes into
+    /// ligatures, appends its glyphs to the run and returns the cells it covers; 0 to draw it
+    /// cell by cell. It stops at a change of background as well as of color or style, so a
+    /// ligature never straddles two highlights. <paramref name="scanned"/> is how many cells
+    /// the run covered (at least one), so the next run can start right after it.</summary>
+    private int ShapeWordAt(TerminalCell* row, int cols, int y, int x, uint fg, int style, bool faint, int face,
+        uint selectionColor, ref int n, out int scanned)
     {
-        if (face != _symbolsFace)
+        scanned = 1;
+        var end = y == _cursorRow && _cursorColumn > x ? Math.Min(cols, _cursorColumn) : cols;
+        if (y == _cursorRow && _cursorColumn == x)
+            return 0;
+        Span<char> text = stackalloc char[MaxShapedLength];
+        var length = 0;
+        var background = BackgroundOf(row[x], selectionColor);
+        for (var i = x; i < end && length < MaxShapedLength; i++)
         {
-            _dc.DrawGlyphRun(origin, run, _brush, MeasuringMode.Natural);
-            return;
+            ref var d = ref row[i];
+            if (d.Wide != TerminalCell.Narrow || !IsPunctuation(d.Codepoint) || !SameRun(d, fg, style, faint)
+                || BackgroundOf(d, selectionColor) != background || Lookup(d.Codepoint, style).Face != face)
+                break;
+            text[length++] = (char)d.Codepoint;
         }
-        _dc.TextRenderingParams = _symbolParams;
-        _dc.TextAntialiasMode = Vortice.Direct2D1.TextAntialiasMode.Grayscale;
-        _dc.DrawGlyphRun(origin, run, _brush, MeasuringMode.Natural);
-        _dc.TextAntialiasMode = Vortice.Direct2D1.TextAntialiasMode.Cleartype;
-        _dc.TextRenderingParams = null;
+        scanned = Math.Max(1, length);
+        if (length < 2 || ShapedWordFor(style, face, text[..length]) is not { } word)
+            return 0;
+        EnsureRunCapacity(n + word.Glyphs.Length, keep: n);
+        word.Glyphs.CopyTo(_runGlyphs.AsSpan(n));
+        word.Advances.CopyTo(_runAdvances.AsSpan(n));
+        word.Offsets.CopyTo(_runOffsets.AsSpan(n));
+        n += word.Glyphs.Length;
+        return length;
+    }
+
+    /// <summary>Grows the run buffers to <paramref name="capacity"/>, keeping the first
+    /// <paramref name="keep"/> entries.</summary>
+    private void EnsureRunCapacity(int capacity, int keep)
+    {
+        if (_runGlyphs.Length >= capacity)
+            return;
+        capacity = Math.Max(capacity, _runGlyphs.Length * 2);
+        var glyphs = new ushort[capacity];
+        var advances = new float[capacity];
+        var offsets = new GlyphOffset[capacity];
+        _runGlyphs.AsSpan(0, keep).CopyTo(glyphs);
+        _runAdvances.AsSpan(0, keep).CopyTo(advances);
+        _runOffsets.AsSpan(0, keep).CopyTo(offsets);
+        (_runGlyphs, _runAdvances, _runOffsets) = (glyphs, advances, offsets);
     }
 
     private const ushort DecorationFlags = TerminalCell.Underline | TerminalCell.Strike | TerminalCell.Overline;
@@ -927,7 +1022,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private void DrawCluster(int x, int y, in TerminalCell c)
     {
         var text = c.GraphemeLength > 1 ? GraphemeAt?.Invoke(x, y) : null;
-        text ??= char.ConvertFromUtf32((int)c.Codepoint);
+        text ??= GraphemeText.Intern(c.Codepoint);
         var width = (c.Wide == TerminalCell.WideChar ? 2 : 1) * CellWidth;
         var foreground = ForegroundOf(c);
         SetBrush(Rgb(foreground));
@@ -972,14 +1067,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         if (_isEmojiFace[face] || cell->GraphemeLength > 1)
             return;
         SetBrush(Rgb(info.DefaultBackground));
-        var run = new GlyphRun
-        {
-            FontFace = _faces[style][face],
-            FontEmSize = _emSize,
-            Indices = [glyph],
-            Advances = [width],
-        };
-        DrawRun(new Vector2(left, top + _baseline), run, face);
+        float advance = width;
+        DrawRun(new Vector2(left, top + _baseline), style, face, &glyph, &advance, null, 1);
     }
 
     private void DisposeFaces()
@@ -999,6 +1088,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     {
         DisposeGpuQueries();
         ResetClusterCaches();
+        ResetLigatures();
+        DisposeBackgrounds();
         ReleaseSwapChain();
         DisposeFaces();
         DisposeGlyphGeometries();
