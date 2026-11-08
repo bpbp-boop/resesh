@@ -67,6 +67,7 @@ credentials or logs, use `.\demo.ps1` or pass `--data-dir <scratch folder>` to t
 - **View models** hold logic that can be tested without a window (`AppLogic.Tests` runs them
   headless). Keep WinUI types out of `src/Core`.
 - Match the surrounding code's comment density and naming. XML doc comments explain *why*.
+- Cut taglines, helper text and secondary labels. If a screen needs them to make sense, fix the layout.
 
 ## Documentation
 
@@ -84,11 +85,3 @@ credentials or logs, use `.\demo.ps1` or pass `--data-dir <scratch folder>` to t
   ("Open SSH sessions faster", "Stop terminals flashing black when panes resize"), with no
   type prefixes. The body explains what was wrong and why the change fixes it.
 - Don't commit build output, `.artifacts/`, publish profiles, or `*.user` files.
-
-## Bend
-
-When using Bend:
-- run `bend guide` to learn it
-- use `LAWS.bend` to keep important rules
-- run `bend PROOF.bend` before committing
-- parallelize the code whenever possible
