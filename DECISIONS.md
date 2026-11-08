@@ -2799,7 +2799,12 @@ Explanations live in the README.
 - Saved passwords are compared through HMAC-SHA256 with a key generated once per process: the
   tokens stay stable while the dialog replans on every tick, but never reach disk or match
   across runs. A group's shared password is copied to the new identity, and the sessions' own
-  copies are deleted only after the session write succeeds.
+  copies are deleted only after the session write succeeds. A failed delete doesn't undo the
+  saved logins: the dialog keeps the leftover ids and offers Retry, because a replan would no
+  longer see the converted sessions.
+- A session whose password is stored but unreadable (`ICredentialService.Has` without `Read`:
+  a `--data-dir` copy encrypted for another Windows user) is left out entirely, so the tidy-up
+  never deletes a password still recoverable under that account.
 - A folder is attached only when no session in its subtree already inherits its login
   (`canAttach` on the planner); otherwise the tidy-up would change sessions it does not list.
   Those sessions get the identity explicitly instead.

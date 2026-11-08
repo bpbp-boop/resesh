@@ -15,8 +15,9 @@ public sealed record LoginTidyUpPlan
     /// <summary>The saved session each planned candidate stands for, by reference.</summary>
     public required IReadOnlyDictionary<ImportCandidate, Session> Sessions { get; init; }
 
-    /// <summary>Sessions whose login the plan changes (inherit or explicit identity).</summary>
-    public int ChangedSessions => Plan.Choices.Values.Count(choice => choice.Kind != ImportLoginKind.Own);
+    /// <summary>Sessions whose login the plan changes: those moving to a login it still offers.</summary>
+    public int ChangedSessions => Plan.Choices.Values.Count(choice => choice is { Kind: not ImportLoginKind.Own, Login: { } login }
+        && Plan.Suggestions.Any(s => s.Login.Key == login.Key));
 }
 
 /// <summary>
@@ -37,7 +38,7 @@ public static class LoginTidyUp
         IReadOnlyList<Identity> identities,
         Func<string, Guid?> folderIdentity,
         Func<Guid, string?> keyPathOf,
-        Func<Guid, string?> savedPasswordOf,
+        ICredentialService credentials,
         IReadOnlySet<string>? declined = null)
     {
         var bySession = new Dictionary<ImportCandidate, Session>(ReferenceEqualityComparer.Instance);
@@ -55,9 +56,15 @@ public static class LoginTidyUp
                 if (string.IsNullOrWhiteSpace(keyPath))
                     continue;
             }
-            else if (savedPasswordOf(session.Id) is { Length: > 0 } password)
+            else if (credentials.Read(session.Id) is { Length: > 0 } password)
             {
                 fingerprint = Convert.ToHexString(HMACSHA256.HashData(FingerprintKey, Encoding.UTF8.GetBytes(password)));
+            }
+            else if (credentials.Has(session.Id))
+            {
+                // Saved but unreadable (another Windows user's encryption): converting would
+                // delete a password that is still recoverable under that account.
+                continue;
             }
             bySession[new ImportCandidate
             {
@@ -86,11 +93,13 @@ public static class LoginTidyUp
 
     /// <summary>
     /// Saves the plan: new identities first (with the shared saved password when the group had
-    /// one), then folder attachments and every changed session in one write, then drops the
-    /// per-session passwords they no longer use. If the session write fails, the identities and
-    /// folder attachments made for it are removed again. Returns the identities created.
+    /// one), then folder attachments and every changed session in one write. If that write fails,
+    /// the identities and folder attachments made for it are removed again and the error is
+    /// thrown. Once it succeeds the logins are changed, so the per-session passwords they no
+    /// longer use are removed best-effort: any left behind are returned for
+    /// <see cref="RemoveSessionPasswords"/> to retry.
     /// </summary>
-    public static IReadOnlyList<Identity> Apply(LoginTidyUpPlan tidyUp, SessionStore store, IdentityStore identities,
+    public static LoginTidyUpResult Apply(LoginTidyUpPlan tidyUp, SessionStore store, IdentityStore identities,
         SshKeyStore keys, ICredentialService credentials)
     {
         var plan = tidyUp.Plan;
@@ -168,8 +177,33 @@ public static class LoginTidyUp
             throw;
         }
 
-        foreach (var id in dropPasswords)
-            credentials.Delete(id);
-        return created;
+        var (left, error) = RemoveSessionPasswords(credentials, dropPasswords);
+        return new LoginTidyUpResult(created, left, error);
+    }
+
+    /// <summary>Deletes the given sessions' own passwords, returning those that could not be
+    /// deleted and the first error.</summary>
+    public static (IReadOnlyList<Guid> Left, Exception? Error) RemoveSessionPasswords(
+        ICredentialService credentials, IEnumerable<Guid> sessionIds)
+    {
+        var left = new List<Guid>();
+        Exception? first = null;
+        foreach (var id in sessionIds)
+        {
+            try
+            {
+                credentials.Delete(id);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                left.Add(id);
+                first ??= ex;
+            }
+        }
+        return (left, first);
     }
 }
+
+/// <summary>What <see cref="LoginTidyUp.Apply"/> did. The session changes are saved even when
+/// <see cref="PasswordsLeft"/> is not empty: those are unused copies still to delete.</summary>
+public sealed record LoginTidyUpResult(IReadOnlyList<Identity> Created, IReadOnlyList<Guid> PasswordsLeft, Exception? PasswordError);

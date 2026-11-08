@@ -14,21 +14,26 @@ public sealed partial class TidyUpLoginsDialog : ContentDialog
     private readonly HashSet<string> _declined = [];
     private LoginTidyUpPlan _plan;
 
+    /// <summary>Session passwords the logins no longer use that a delete failed on; once set,
+    /// the logins are saved and Apply only retries these.</summary>
+    private IReadOnlyList<Guid> _passwordsLeft = [];
+    private bool _applied;
+
     private TidyUpLoginsDialog()
     {
         InitializeComponent();
         DialogTheme.Apply(this);
-        var all = Plan();
+        // Every login gets a row, declined or not, so it can be ticked back on.
+        var all = Plan(new HashSet<string>());
         foreach (var suggestion in all.Plan.Suggestions.Where(s => !s.LikelyShared))
             _declined.Add(suggestion.Login.Key);
-        _plan = Plan();
+        _plan = Plan(_declined);
 
         Intro.Text = all.Plan.Suggestions.Count == 0
             ? "No login repeats across sessions that keep their own login, so there is nothing to group."
             : "Each ticked login becomes one identity that its sessions share. Sessions in the listed folders "
               + "inherit it, and so will sessions you add there later. Saved passwords move to the identity.";
-        foreach (var suggestion in all.Plan.Suggestions)
-            SuggestionRows.Children.Add(SuggestionCard(suggestion));
+        ShowSuggestions(all);
         UpdateSummary();
     }
 
@@ -36,17 +41,28 @@ public sealed partial class TidyUpLoginsDialog : ContentDialog
     public static async Task<bool> RunAsync(XamlRoot xamlRoot)
     {
         var dialog = new TidyUpLoginsDialog { XamlRoot = xamlRoot };
-        return await dialog.ShowModalAsync() == ContentDialogResult.Primary;
+        var result = await dialog.ShowModalAsync();
+        return result == ContentDialogResult.Primary || dialog._applied;
     }
 
-    private LoginTidyUpPlan Plan() =>
+    private static LoginTidyUpPlan Plan(IReadOnlySet<string> declined) =>
         LoginTidyUp.Plan(App.Store.Sessions, App.Identities.Identities, App.Store.FolderIdentity,
-            id => App.SshKeys.Find(id)?.Path, App.Credentials.Read, _declined);
+            id => App.SshKeys.Find(id)?.Path, App.Credentials, declined);
 
     private void Replan()
     {
-        _plan = Plan();
+        _plan = Plan(_declined);
+        // Declining one login can move another's folders (a nested folder now inherits from
+        // further up), so every card is rebuilt from the plan Apply would save.
+        ShowSuggestions(Plan(new HashSet<string>()));
         UpdateSummary();
+    }
+
+    private void ShowSuggestions(LoginTidyUpPlan all)
+    {
+        SuggestionRows.Children.Clear();
+        foreach (var suggestion in all.Plan.Suggestions)
+            SuggestionRows.Children.Add(SuggestionCard(suggestion));
     }
 
     private void UpdateSummary()
@@ -65,6 +81,8 @@ public sealed partial class TidyUpLoginsDialog : ContentDialog
     private UIElement SuggestionCard(IdentitySuggestion suggestion)
     {
         var key = suggestion.Login.Key;
+        var planned = _plan.Plan.Suggestions.FirstOrDefault(s => s.Login.Key == key) ?? suggestion;
+        var ifShared = _declined.Contains(key) ? "If shared: " : "";
         var proof = suggestion.Existing is not null ? "existing identity"
             : suggestion.Login.UsesKey ? $"key {Path.GetFileName(suggestion.Login.KeyPath)}"
             : suggestion.Login.SharesSavedPassword ? "same saved password"
@@ -78,12 +96,12 @@ public sealed partial class TidyUpLoginsDialog : ContentDialog
         });
         var user = suggestion.Name.Equals(suggestion.Login.Username, StringComparison.OrdinalIgnoreCase)
             ? "" : $"{suggestion.Login.Username} · ";
-        lines.Children.Add(Muted($"{user}{proof} · {Count(suggestion.SessionCount, "session")}"));
-        var folders = suggestion.Folders.Count > 0
-            ? Muted($"Inherited in {string.Join(", ", suggestion.Folders.Take(5))}"
-                + (suggestion.Folders.Count > 5 ? $" and {suggestion.Folders.Count - 5} more" : ""))
-            : Muted("Chosen by each session");
-        ToolTipService.SetToolTip(folders, string.Join("\n", suggestion.Folders));
+        lines.Children.Add(Muted($"{user}{proof} · {Count(planned.SessionCount, "session")}"));
+        var folders = planned.Folders.Count > 0
+            ? Muted($"{ifShared}{(ifShared.Length > 0 ? "inherited" : "Inherited")} in {string.Join(", ", planned.Folders.Take(5))}"
+                + (planned.Folders.Count > 5 ? $" and {planned.Folders.Count - 5} more" : ""))
+            : Muted($"{ifShared}{(ifShared.Length > 0 ? "chosen" : "Chosen")} by each session");
+        ToolTipService.SetToolTip(folders, string.Join("\n", planned.Folders));
         lines.Children.Add(folders);
         if (!suggestion.LikelyShared)
         {
@@ -112,8 +130,15 @@ public sealed partial class TidyUpLoginsDialog : ContentDialog
     {
         try
         {
+            if (_passwordsLeft.Count > 0)
+            {
+                ShowPasswordsLeft(LoginTidyUp.RemoveSessionPasswords(App.Credentials, _passwordsLeft), args);
+                return;
+            }
             // Replan against the stores as they are now; another window may have changed them.
-            LoginTidyUp.Apply(Plan(), App.Store, App.Identities, App.SshKeys, App.Credentials);
+            var result = LoginTidyUp.Apply(Plan(_declined), App.Store, App.Identities, App.SshKeys, App.Credentials);
+            _applied = true;
+            ShowPasswordsLeft((result.PasswordsLeft, result.PasswordError), args);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -121,5 +146,26 @@ public sealed partial class TidyUpLoginsDialog : ContentDialog
             ErrorBar.IsOpen = true;
             args.Cancel = true;
         }
+    }
+
+    /// <summary>Keeps the dialog open to retry when unused session passwords are left behind;
+    /// the logins themselves are already saved by then.</summary>
+    private void ShowPasswordsLeft((IReadOnlyList<Guid> Left, Exception? Error) removal, ContentDialogButtonClickEventArgs args)
+    {
+        _passwordsLeft = removal.Left;
+        if (removal.Left.Count == 0)
+            return;
+        args.Cancel = true;
+        SuggestionRows.Children.Clear();
+        SuggestionRows.Visibility = Visibility.Collapsed;
+        Intro.Text = "";
+        SummaryText.Text = "";
+        ErrorBar.Severity = InfoBarSeverity.Warning;
+        ErrorBar.Message = $"The logins were changed, but {Count(removal.Left.Count, "old saved password")} "
+            + $"could not be removed: {removal.Error?.Message}";
+        ErrorBar.IsOpen = true;
+        PrimaryButtonText = "Retry";
+        CloseButtonText = "Close";
+        IsPrimaryButtonEnabled = true;
     }
 }
