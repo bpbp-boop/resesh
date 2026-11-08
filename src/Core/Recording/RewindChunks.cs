@@ -18,8 +18,9 @@ internal abstract class RewindChunk
     /// <summary>Trimmed while waiting for compression: the compressor skips it.</summary>
     public bool Dropped { get; set; }
 
-    /// <summary>The compressed payload, or null when compression would not save space.
-    /// Called outside the lock, only by the compressor.</summary>
+    /// <summary>The compressed payload, or null when it would not lower <see cref="Bytes"/>.
+    /// Called outside the lock, only by the compressor, which is also the only writer of
+    /// <see cref="Bytes"/>.</summary>
     public abstract object? Compress();
 
     /// <summary>Swaps in what <see cref="Compress"/> returned; returns the change in
@@ -95,7 +96,8 @@ internal sealed class RewindKeyframe : RewindChunk
     }
 
     public override object? Compress() =>
-        Volatile.Read(ref _payload) is byte[] raw && RewindCompression.Compress(raw) is { } data
+        Volatile.Read(ref _payload) is byte[] raw && RewindCompression.Compress(raw) is { } data &&
+        Overhead + data.Length < Bytes
             ? new CompressedPayload(data, raw.Length)
             : null;
 
@@ -150,7 +152,10 @@ internal sealed class RewindEventBlock : RewindChunk
             WriteString(writer, item.Type);
             WriteString(writer, item.Data);
         }
-        return RewindCompression.Compress(writer.WrittenSpan) is { } data
+        // A small block (a keyframe sealed it early) can count more compressed than raw:
+        // its fixed overhead outweighs what Brotli saves.
+        return RewindCompression.Compress(writer.WrittenSpan) is { } data &&
+            Overhead + data.Length < Bytes
             ? new CompressedPayload(data, writer.WrittenCount)
             : null;
     }

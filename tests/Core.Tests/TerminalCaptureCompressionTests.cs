@@ -74,24 +74,98 @@ public sealed class TerminalCaptureCompressionTests
     }
 
     [Fact]
-    public void BackgroundCompressionShrinksWhatIsRetained()
+    public void BackgroundCompressionEndsWhereInlineCompressionDoes()
     {
         var started = DateTimeOffset.UtcNow;
-        using var capture = new TerminalCapture(80, 24, startedAt: started);
-        for (var index = 0; index < 5000; index++)
-            capture.CaptureOutput(Line(index), started.AddMilliseconds(index).ToUnixTimeMilliseconds());
         var keyframe = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Range(0, 2000).Select(index => $"row {index % 24}\r\n")));
-        capture.CaptureKeyframe(keyframe, 80, 24, started.AddSeconds(10).ToUnixTimeMilliseconds());
-        var raw = capture.RetainedBytes;
+        void Feed(TerminalCapture target)
+        {
+            for (var index = 0; index < 5000; index++)
+                target.CaptureOutput(Line(index), started.AddMilliseconds(index).ToUnixTimeMilliseconds());
+            target.CaptureKeyframe(keyframe, 80, 24, started.AddSeconds(10).ToUnixTimeMilliseconds());
+        }
+        // Held back, so the raw size is read before any chunk is compressed.
+        using var raw = new TerminalCapture(80, 24, startedAt: started) { SuspendCompression = true };
+        using var inline = new TerminalCapture(80, 24, startedAt: started) { CompressInline = true };
+        using var background = new TerminalCapture(80, 24, startedAt: started);
+        Feed(raw);
+        Feed(inline);
+        Feed(background);
 
         // Generous: other tests can keep the thread pool busy for a while.
         var deadline = DateTime.UtcNow.AddSeconds(30);
-        while (capture.RetainedBytes > raw / 2 && DateTime.UtcNow < deadline)
+        while (background.RetainedBytes != inline.RetainedBytes && DateTime.UtcNow < deadline)
             Thread.Sleep(10);
 
-        Assert.True(capture.RetainedBytes <= raw / 2, $"Still {capture.RetainedBytes} of {raw} bytes.");
-        Assert.Equal(keyframe, capture.Snapshot().Keyframe?.State.ToArray());
-        Assert.Equal(5000, capture.Snapshot(9).Events.Count);
+        Assert.Equal(inline.RetainedBytes, background.RetainedBytes);
+        Assert.True(background.RetainedBytes <= raw.RetainedBytes / 2,
+            $"{background.RetainedBytes} of {raw.RetainedBytes} raw bytes.");
+        Assert.Equal(0, background.PendingCompressionCount);
+        Assert.Equal(keyframe, background.Snapshot().Keyframe?.State.ToArray());
+        Assert.Equal(5000, background.Snapshot(9).Events.Count);
+    }
+
+    [Fact]
+    public void TrimmedChunksDoNotWaitForAStalledCompressor()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(
+            80, 24, startedAt: started, maximumAge: TimeSpan.FromSeconds(5))
+        {
+            SuspendCompression = true,
+        };
+        for (var second = 0; second < 600; second++)
+        {
+            for (var line = 0; line < 100; line++)
+                capture.CaptureOutput(Line(line), started.AddSeconds(second).AddMilliseconds(line).ToUnixTimeMilliseconds());
+            capture.CaptureKeyframe(new byte[] { 1 }, 80, 24,
+                started.AddSeconds(second).AddMilliseconds(500).ToUnixTimeMilliseconds());
+        }
+
+        // Ten minutes of output, but only the last few seconds' chunks are still queued.
+        Assert.InRange(capture.PendingCompressionCount, 1, 16);
+    }
+
+    [Fact]
+    public void ABlockTooSmallToGainFromCompressionStaysRaw()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var raw = new TerminalCapture(80, 24, startedAt: started) { SuspendCompression = true };
+        using var compressed = new TerminalCapture(80, 24, startedAt: started) { CompressInline = true };
+        foreach (var capture in new[] { raw, compressed })
+        {
+            capture.CaptureOutput("x"u8, started.ToUnixTimeMilliseconds());
+            capture.CaptureKeyframe("y"u8.ToArray(), 80, 24, started.AddSeconds(1).ToUnixTimeMilliseconds());
+        }
+
+        Assert.Equal(raw.RetainedBytes, compressed.RetainedBytes);
+    }
+
+    [Fact]
+    public void DisablingRewindMidCompressionLeavesNothingCounted()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(80, 24, startedAt: started, maximumBytes: 256 * 1024)
+        {
+            CompressInline = true,
+        };
+        var disabled = false;
+        capture.ChunkCompressed = () =>
+        {
+            if (disabled)
+                return;
+            disabled = true;
+            // With no keyframe to trim to, output past the cap turns rewind off while the first
+            // block's compressed result is in hand.
+            capture.CaptureOutput(new byte[300 * 1024], started.AddSeconds(4).ToUnixTimeMilliseconds());
+        };
+        for (var index = 0; index < 2000; index++)
+            capture.CaptureOutput(Line(index), started.AddMilliseconds(index).ToUnixTimeMilliseconds());
+
+        Assert.True(disabled);
+        Assert.False(capture.HasRewindData);
+        Assert.Equal(0, capture.PendingCompressionCount);
+        Assert.Equal(0, capture.RetainedBytes);
     }
 
     [Fact]

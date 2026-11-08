@@ -324,6 +324,22 @@ public sealed class TerminalCapture : IDisposable
     /// <summary>Runs compression on the calling thread instead of the thread pool. Tests set it.</summary>
     internal bool CompressInline { get; set; }
 
+    /// <summary>Never starts the compressor, as if the thread pool were starved. Tests set it.</summary>
+    internal bool SuspendCompression { get; set; }
+
+    /// <summary>Runs after a chunk is compressed, before the result is applied. Tests set it.</summary>
+    internal Action? ChunkCompressed { get; set; }
+
+    /// <summary>Chunks waiting for the compressor.</summary>
+    internal int PendingCompressionCount
+    {
+        get
+        {
+            lock (_gate)
+                return _uncompressed.Count;
+        }
+    }
+
     /// <summary>Bytes counted against the cap: raw, or compressed once the compressor is done.</summary>
     internal long RetainedBytes
     {
@@ -340,7 +356,7 @@ public sealed class TerminalCapture : IDisposable
     {
         lock (_gate)
         {
-            if (_compressing || _disposed || _uncompressed.Count == 0)
+            if (_compressing || _disposed || SuspendCompression || _uncompressed.Count == 0)
                 return;
             _compressing = true;
         }
@@ -368,6 +384,7 @@ public sealed class TerminalCapture : IDisposable
 
             if (chunk.Compress() is not { } compressed)
                 continue;
+            ChunkCompressed?.Invoke();
 
             lock (_gate)
             {
@@ -560,6 +577,12 @@ public sealed class TerminalCapture : IDisposable
             DisableRewindLocked();
             break;
         }
+
+        // Trimmed chunks no longer count against the cap, so they must not wait in the queue
+        // holding raw memory either, however far behind the compressor is. Chunks are queued
+        // oldest first and trimmed oldest first, so the trimmed ones are at the front.
+        while (_uncompressed.TryPeek(out var pending) && pending.Dropped)
+            _uncompressed.Dequeue();
     }
 
     private long RetainedBytesLocked() =>
@@ -567,8 +590,13 @@ public sealed class TerminalCapture : IDisposable
 
     private void DisableRewindLocked()
     {
-        foreach (var chunk in _uncompressed)
-            chunk.Dropped = true;
+        // Every retained chunk, not only the queued ones: the compressor may be working on one
+        // and must not add its size back to counters reset below.
+        foreach (var block in _blocks)
+            block.Dropped = true;
+        foreach (var frame in _keyframes)
+            frame.Dropped = true;
+        _anchor?.Dropped = true;
         _uncompressed.Clear();
         _blocks.Clear();
         _open.Clear();
