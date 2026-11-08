@@ -70,6 +70,8 @@ sessions over from SecureCRT, PuTTY and OpenSSH in a few clicks.
 - Output is parsed by **libghostty-vt** on the connection's own thread, so heavy SSH output never stalls the window.
 - Box drawing, Powerline separators, braille and legacy computing glyphs drawn as shapes: **no seams at any zoom**.
 - Nerd Font icons work **without a patched font**.
+- **Programming ligatures** (`->`, `!=`, `===`) in fonts that have them, like Cascadia Code, Fira Code and JetBrains Mono,
+  kept on the cell grid.
 - Curly, dotted and dashed underlines, underline colours, true colour, OSC 8 hyperlinks.
 - IME input for Japanese, Chinese and Korean, plus the emoji panel, voice typing and the touch keyboard.
 - Rectangle select (Alt+drag), Shift+click to extend, per-tab zoom.

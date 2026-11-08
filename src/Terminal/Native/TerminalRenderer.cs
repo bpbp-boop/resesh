@@ -345,6 +345,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         _boxThickness = Math.Clamp((int)MathF.Ceiling(metrics.UnderlineThickness * scale), 1, Math.Max(1, CellWidth / 5));
         DisposeGlyphGeometries();
         ResetClusterCaches();
+        ResetLigatures();
 
         _emojiFormat?.Dispose();
         _emojiFormat = s_dwrite.CreateTextFormat("Segoe UI Emoji", FontWeight.Normal, FontStyle.Normal, emPixels * 0.9f);
@@ -617,11 +618,11 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         if (!EnsureResourcesLocked(notify: true) || _swapChain is null || _canvas is null)
             return false;
         var observedGeneration = _generation;
-        if (_runGlyphs.Length < cols)
-        {
-            _runGlyphs = new ushort[cols];
-            _runAdvances = new float[cols];
-        }
+        EnsureRunCapacity(cols, keep: 0);
+        // Ligatures break at the cursor's cell whether or not it is in a blink's off phase,
+        // so they do not change shape as it blinks.
+        _cursorRow = info.CursorVisible != 0 ? info.CursorY : -1;
+        _cursorColumn = info.CursorX;
 
         var stats = FrameStats.Enabled;
         var gpuSlot = stats ? BeginGpuTiming() : -1;
@@ -825,6 +826,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             var (face, _) = Lookup(c.Codepoint, style);
             var start = x;
             var n = 0;
+            var shaped = false;
             while (x < cols)
             {
                 ref var d = ref row[x];
@@ -834,13 +836,19 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                     if (n > 0) { _runAdvances[n - 1] += CellWidth; x++; continue; }
                     break;
                 }
-                if (ForegroundOf(d) != fg || StyleOf(d.Flags) != style || ((d.Flags & TerminalCell.Faint) != 0) != faint
-                    || d.GraphemeLength > 1 || (d.Flags & TerminalCell.Invisible) != 0 || BuiltinGlyphs.Covers(d.Codepoint))
+                if (!SameRun(d, fg, style, faint))
                     break;
                 var (f, g) = Lookup(d.Codepoint, style);
                 if (f != face || _isEmojiFace[f]) break;
+                if ((x == start || row[x - 1].Codepoint is 0 or ' ') && ShapeWordAt(row, cols, y, x, fg, style, faint, face, ref n) is > 0 and var cells)
+                {
+                    shaped = true;
+                    x += cells;
+                    continue;
+                }
                 _runGlyphs[n] = g;
                 _runAdvances[n] = d.Wide == TerminalCell.WideChar ? 2 * CellWidth : CellWidth;
+                _runOffsets[n] = default;
                 n++;
                 x++;
             }
@@ -848,9 +856,63 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             SetBrush(Rgb(fg, faint ? 0.55f : 1f));
             fixed (ushort* glyphs = _runGlyphs)
             fixed (float* advances = _runAdvances)
-                DrawRun(new Vector2(OriginX + start * CellWidth, baseline), style, face, glyphs, advances, null, n);
+            fixed (GlyphOffset* offsets = _runOffsets)
+                DrawRun(new Vector2(OriginX + start * CellWidth, baseline), style, face, glyphs, advances, shaped ? offsets : null, n);
         }
         DrawDecorations(row, cols, top, baseline);
+    }
+
+    /// <summary>Whether a cell continues a glyph run of this color and style.</summary>
+    private bool SameRun(in TerminalCell d, uint fg, int style, bool faint) =>
+        ForegroundOf(d) == fg && StyleOf(d.Flags) == style && ((d.Flags & TerminalCell.Faint) != 0) == faint
+        && d.GraphemeLength <= 1 && (d.Flags & TerminalCell.Invisible) == 0 && !BuiltinGlyphs.Covers(d.Codepoint);
+
+    private int _cursorRow = -1;
+    private int _cursorColumn;
+
+    /// <summary>When the word starting at <paramref name="x"/> shapes into ligatures, appends
+    /// its glyphs to the run and returns the cells it covers; 0 to draw it cell by cell.</summary>
+    private int ShapeWordAt(TerminalCell* row, int cols, int y, int x, uint fg, int style, bool faint, int face, ref int n)
+    {
+        var end = y == _cursorRow && _cursorColumn > x ? Math.Min(cols, _cursorColumn) : cols;
+        if (y == _cursorRow && _cursorColumn == x)
+            return 0;
+        Span<char> text = stackalloc char[MaxShapedLength];
+        var length = 0;
+        var punctuation = false;
+        for (var i = x; i < end && length < MaxShapedLength; i++)
+        {
+            ref var d = ref row[i];
+            if (d.Wide != TerminalCell.Narrow || !IsLigatureCandidate(d.Codepoint) || !SameRun(d, fg, style, faint)
+                || Lookup(d.Codepoint, style).Face != face)
+                break;
+            punctuation |= IsPunctuation(d.Codepoint);
+            text[length++] = (char)d.Codepoint;
+        }
+        if (length < 2 || !punctuation || ShapedWordFor(style, face, text[..length]) is not { } word)
+            return 0;
+        EnsureRunCapacity(n + word.Glyphs.Length, keep: n);
+        word.Glyphs.CopyTo(_runGlyphs.AsSpan(n));
+        word.Advances.CopyTo(_runAdvances.AsSpan(n));
+        word.Offsets.CopyTo(_runOffsets.AsSpan(n));
+        n += word.Glyphs.Length;
+        return length;
+    }
+
+    /// <summary>Grows the run buffers to <paramref name="capacity"/>, keeping the first
+    /// <paramref name="keep"/> entries.</summary>
+    private void EnsureRunCapacity(int capacity, int keep)
+    {
+        if (_runGlyphs.Length >= capacity)
+            return;
+        capacity = Math.Max(capacity, _runGlyphs.Length * 2);
+        var glyphs = new ushort[capacity];
+        var advances = new float[capacity];
+        var offsets = new GlyphOffset[capacity];
+        _runGlyphs.AsSpan(0, keep).CopyTo(glyphs);
+        _runAdvances.AsSpan(0, keep).CopyTo(advances);
+        _runOffsets.AsSpan(0, keep).CopyTo(offsets);
+        (_runGlyphs, _runAdvances, _runOffsets) = (glyphs, advances, offsets);
     }
 
     private const ushort DecorationFlags = TerminalCell.Underline | TerminalCell.Strike | TerminalCell.Overline;
@@ -1009,6 +1071,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     {
         DisposeGpuQueries();
         ResetClusterCaches();
+        ResetLigatures();
         ReleaseSwapChain();
         DisposeFaces();
         DisposeGlyphGeometries();
