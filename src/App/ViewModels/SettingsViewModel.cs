@@ -103,7 +103,7 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public List<AppearanceChoice> AppearanceChoices { get; } = [.. AppearanceChoice.All];
 
-    /// <summary>System (a theme for each Windows mode) or Theme (one theme always).</summary>
+    /// <summary>Match Windows (a theme for each Windows mode) or One theme (always the same).</summary>
     public AppearanceChoice Appearance
     {
         get => AppearanceChoices[IsFollowingWindows ? 0 : 1];
@@ -128,7 +128,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     public List<ThemeChoice> LightThemes { get; } = [.. ThemeCatalog.All.Where(theme => theme.IsLight)];
     public List<ThemeChoice> DarkThemes { get; } = [.. ThemeCatalog.All.Where(theme => !theme.IsLight)];
 
-    /// <summary>The theme drawn now; picking one fixes the appearance to it (Theme).</summary>
+    /// <summary>The theme drawn now; picking one fixes the appearance to it (One theme).</summary>
     public ThemeChoice Theme
     {
         get => ThemeCatalog.Find(Current.ThemeFor(_environment.SystemIsLight()));
@@ -167,16 +167,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
     }
 
-    /// <summary>Whether Windows is in light mode, so the page can mark which of System's two
-    /// themes is in use. The page calls <see cref="ThemeModeChanged"/> when that changes.</summary>
-    public bool IsLightModeActive => _environment.SystemIsLight();
-
-    /// <summary>Windows switched between light and dark mode.</summary>
-    public void ThemeModeChanged()
-    {
-        OnPropertyChanged(nameof(IsLightModeActive));
-        OnPropertyChanged(nameof(Theme));
-    }
+    /// <summary>Windows switched between light and dark mode, which can change the drawn theme.</summary>
+    public void ThemeModeChanged() => OnPropertyChanged(nameof(Theme));
 
     /// <summary>One theme setting saved changes what the others show: the drawn theme, the
     /// mode's theme, and which galleries the page shows. Galleries ignore a selection they
@@ -319,7 +311,7 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     public List<SessionsPaneLayoutChoice> SessionsPaneLayoutChoices { get; } =
     [
-        new(SessionsPaneLayouts.Automatic, "Automatic"),
+        new(SessionsPaneLayouts.Automatic, "Float when narrow"),
         new(SessionsPaneLayouts.Float, "Float over tabs"),
         new(SessionsPaneLayouts.Dock, "Dock beside tabs"),
     ];
@@ -345,10 +337,6 @@ public sealed partial class SettingsViewModel : ObservableObject
     }
 
     public bool CanLaunchAtSignIn => _environment.CanLaunchAtSignIn;
-
-    public string LaunchAtSignInDescription => _environment.CanLaunchAtSignIn
-        ? "Task Manager's Startup apps page can also turn this off."
-        : "Unavailable in demo mode or with --data-dir: resesh would start with your usual data instead.";
 
     public bool LaunchAtSignIn
     {
@@ -488,8 +476,8 @@ public sealed partial record AppearanceChoice(string Id, string Name)
     /// <summary>System first: <see cref="SettingsViewModel.Appearance"/> indexes this list.</summary>
     public static IReadOnlyList<AppearanceChoice> All { get; } =
     [
-        new(ThemeAppearances.System, "System"),
-        new(FixedTheme, "Theme"),
+        new(ThemeAppearances.System, "Match Windows"),
+        new(FixedTheme, "One theme"),
     ];
 }
 

@@ -8,7 +8,7 @@ using Windows.ApplicationModel.DataTransfer;
 namespace Resesh.App.Controls;
 
 /// <summary>An open-source project resesh is built on, with its license.</summary>
-public sealed record AboutCredit(string Name, string Purpose, string License, string Url)
+public sealed record AboutCredit(string Name, string License, string Url)
 {
     public Uri Uri => new(Url);
 }
@@ -18,16 +18,16 @@ public sealed partial class AboutView : UserControl
 {
     private static readonly AboutCredit[] Credits =
     [
-        new("Ghostty (libghostty-vt)", "Terminal emulation", "MIT", "https://github.com/ghostty-org/ghostty"),
-        new("iTerm2-Color-Schemes (Mark Badolato)", "Terminal color themes", "MIT", "https://github.com/mbadolato/iTerm2-Color-Schemes"),
-        new("SSH.NET", "SSH and SFTP", "MIT", "https://github.com/sshnet/SSH.NET"),
-        new("zmx", "Persistent remote sessions", "MIT", "https://github.com/neurosnap/zmx"),
-        new("Windows App SDK and WinUI", "App framework", "MIT", "https://github.com/microsoft/WindowsAppSDK"),
-        new("Windows Community Toolkit", "Settings controls, MVVM", "MIT", "https://github.com/CommunityToolkit/Windows"),
-        new("Vortice.Windows", "Direct2D and Direct3D bindings", "MIT", "https://github.com/amerkoleci/Vortice.Windows"),
-        new("Microsoft.Data.Sqlite", "Command history storage", "MIT", "https://github.com/dotnet/efcore"),
-        new("Lucide", "Session tree icons", "ISC", "https://lucide.dev/"),
-        new("Simple Icons", "Brand icons", "CC0", "https://simpleicons.org/"),
+        new("Ghostty (libghostty-vt)", "MIT", "https://github.com/ghostty-org/ghostty"),
+        new("iTerm2-Color-Schemes (Mark Badolato)", "MIT", "https://github.com/mbadolato/iTerm2-Color-Schemes"),
+        new("SSH.NET", "MIT", "https://github.com/sshnet/SSH.NET"),
+        new("zmx", "MIT", "https://github.com/neurosnap/zmx"),
+        new("Windows App SDK and WinUI", "MIT", "https://github.com/microsoft/WindowsAppSDK"),
+        new("Windows Community Toolkit", "MIT", "https://github.com/CommunityToolkit/Windows"),
+        new("Vortice.Windows", "MIT", "https://github.com/amerkoleci/Vortice.Windows"),
+        new("Microsoft.Data.Sqlite", "MIT", "https://github.com/dotnet/efcore"),
+        new("Lucide", "ISC", "https://lucide.dev/"),
+        new("Simple Icons", "CC0", "https://simpleicons.org/"),
     ];
 
     private readonly string _dataFolder = Program.DataDirectory;

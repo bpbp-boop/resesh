@@ -12,7 +12,7 @@ using Resesh.Core.Storage;
 namespace Resesh.App.Controls;
 
 /// <summary>One rule in the list. Toggling its check box enables or disables it at once.</summary>
-public sealed class HighlightRuleItem(HighlightRule rule, string packTag, Action<string, bool> setEnabled)
+public sealed class HighlightRuleItem(HighlightRule rule, bool edited, Action<string, bool> setEnabled)
 {
     private bool _enabled = rule.Enabled;
 
@@ -21,11 +21,12 @@ public sealed class HighlightRuleItem(HighlightRule rule, string packTag, Action
 
     public Brush SwatchBrush { get; } = new SolidColorBrush(HighlightRulesEditor.TryParseRuleColor(rule.Color) ?? Colors.Transparent);
 
-    /// <summary>The terminal skips a rule whose colour it cannot read, so the list says so
-    /// (with an empty swatch) rather than showing a colour that is never painted.</summary>
-    public string PackTag { get; } = HighlightRulesEditor.TryParseRuleColor(rule.Color) is null
-        ? (packTag.Length == 0 ? "" : packTag + " · ") + "invalid color, not applied"
-        : packTag;
+    /// <summary>Only a state worth noticing: an edited built-in, or a colour the terminal cannot
+    /// read. The terminal skips such a rule, so the list says so (with an empty swatch) rather
+    /// than showing a colour that is never painted.</summary>
+    public string StateTag { get; } = HighlightRulesEditor.TryParseRuleColor(rule.Color) is null
+        ? "invalid color, not applied"
+        : edited ? "edited" : "";
     public Windows.UI.Text.FontWeight NameWeight => Rule.Bold ? FontWeights.SemiBold : FontWeights.Normal;
     public string EnabledAutomationId => $"SettingsHighlightRuleEnabled_{Rule.Id}";
 
@@ -85,10 +86,7 @@ public sealed partial class HighlightRulesEditor : UserControl
         Rules.Clear();
         foreach (var rule in _draft.AllRules)
         {
-            var packTag = rule.IsBuiltin
-                ? _draft.IsOverridden(rule.Id) ? rule.Pack + " · edited" : rule.Pack
-                : "custom";
-            Rules.Add(new HighlightRuleItem(rule, packTag, (id, enabled) =>
+            Rules.Add(new HighlightRuleItem(rule, rule.IsBuiltin && _draft.IsOverridden(rule.Id), (id, enabled) =>
             {
                 _draft.SetEnabled(id, enabled);
                 RaiseChanged();

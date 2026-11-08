@@ -1,7 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Resesh.App.ViewModels;
-using Resesh.Core.Input;
 using Resesh.Core.Storage;
 
 namespace Resesh.App.Controls;
@@ -32,10 +31,6 @@ public sealed partial class SettingsPage : UserControl
         NumberBoxRanges.Limit(FontSizeBox, SettingRanges.FontSize);
         NumberBoxRanges.Limit(ScrollbackBox, SettingRanges.Scrollback);
         NumberBoxRanges.Limit(HistoryDaysBox, SettingRanges.CommandHistoryDays);
-        HistoryDescription.Text =
-            "Save each finished command with its output, folder, and result on this computer, and search it with "
-            + $"{AppShortcuts.Label(ShortcutIds.CommandHistory)}. Output can include secrets that a server prints. "
-            + "A saved session can turn history off in its options.";
         var highlightEditor = new HighlightRulesEditor(_highlightDraft);
         highlightEditor.Changed += CommitHighlights;
         HighlightEditorHost.Content = highlightEditor;
@@ -48,6 +43,9 @@ public sealed partial class SettingsPage : UserControl
     public void Navigate(GlobalSettingsTarget target)
     {
         Show(SettingsCatalog.Of(target).Section);
+        // The alert switches live inside the agent icons expander, which is closed while icons are off.
+        if (target is GlobalSettingsTarget.AgentAlertFlash or GlobalSettingsTarget.AgentAlertSound)
+            AgentIconsCard.IsExpanded = true;
         if (target == GlobalSettingsTarget.Sessions)
             DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, SessionsManager.FocusFilter);
         if (FieldOf(target) is not var (card, control))
@@ -64,9 +62,9 @@ public sealed partial class SettingsPage : UserControl
     {
         GlobalSettingsTarget.Appearance => (AppearanceCard, AppearanceBox),
         GlobalSettingsTarget.ThemeColors => (ThemeColorsCard, ThemeColorsBox),
-        // Under Theme there is one gallery; System has one for each Windows mode.
-        GlobalSettingsTarget.LightTheme when !ViewModel.IsFollowingWindows => (FixedThemeHeader, FixedGallery.FocusTarget),
-        GlobalSettingsTarget.DarkTheme when !ViewModel.IsFollowingWindows => (FixedThemeHeader, FixedGallery.FocusTarget),
+        // One theme shows one gallery; Match Windows shows one for each Windows mode.
+        GlobalSettingsTarget.LightTheme when !ViewModel.IsFollowingWindows => (FixedGallery, FixedGallery.FocusTarget),
+        GlobalSettingsTarget.DarkTheme when !ViewModel.IsFollowingWindows => (FixedGallery, FixedGallery.FocusTarget),
         GlobalSettingsTarget.LightTheme => (LightThemeHeader, LightGallery.FocusTarget),
         GlobalSettingsTarget.DarkTheme => (DarkThemeHeader, DarkGallery.FocusTarget),
         GlobalSettingsTarget.FontFamily => (FontFamilyCard, FontFamilyBox.FocusTarget),

@@ -158,7 +158,6 @@ test("built-in rules are editable with a reset back to the shipped defaults", ()
   assert.match(highlightPanel, /SaveBuiltinOverride/);
   assert.match(highlightPanel, /Reset to default/);
   assert.match(highlightPanel, /ResetBuiltin/);
-  assert.match(highlightPanel, /· edited/);
 
   const store = read("src", "Core", "Storage", "HighlightsStore.cs");
   assert.match(store, /public void SaveBuiltinOverride/);
@@ -167,12 +166,11 @@ test("built-in rules are editable with a reset back to the shipped defaults", ()
   assert.match(store, /BuiltinOverrides/);
 });
 
-test("the Agents section groups controls and keeps adapter details collapsed", () => {
-  assert.match(page, /Text="Tab display"/);
-  assert.match(page, /Text="Background alerts"/);
-  assert.match(page, /Text="Agent adapters"/);
+test("the Agents section nests alerts under agent icons and keeps adapter details collapsed", () => {
+  // Alerts need the recognition the icons turn on; nesting shows that without helper text.
+  assert.match(page, /x:Name="AgentIconsCard"[\s\S]*?<toolkit:SettingsExpander\.Items>[\s\S]*?x:Name="AgentFlashCard"[\s\S]*?x:Name="AgentSoundCard"[\s\S]*?<\/toolkit:SettingsExpander\.Items>/);
+  assert.match(pageCode, /AgentAlertFlash or GlobalSettingsTarget\.AgentAlertSound\)\s*AgentIconsCard\.IsExpanded = true;/);
   assert.match(page, /<controls:AgentAdaptersView \/>/);
-  assert.match(agentPanel, /Manual setup:/);
   assert.match(agentPanel, /IsExpanded="False"/);
   assert.match(agentPanel, /Content="Copy"/);
   assert.match(agentPanel, /Header="Protocol reference"/);

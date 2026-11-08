@@ -29,10 +29,6 @@
             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
                 <TextBlock Text="resesh" Style="{StaticResource TitleTextBlockStyle}" />
                 <TextBlock
-                    Text="A tabbed SSH and local terminal client for Windows."
-                    TextWrapping="Wrap"
-                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
-                <TextBlock
                     x:Name="VersionLine"
                     Margin="0,4,0,0"
                     IsTextSelectionEnabled="True"
@@ -65,7 +61,6 @@
         <toolkit:SettingsCard
             x:Name="ReleasesCard"
             Header="Release notes"
-            Description="What changed in each version, and downloads for the latest one"
             IsClickEnabled="True"
             Click="Link_Click">
             <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
@@ -74,7 +69,6 @@
         <toolkit:SettingsCard
             x:Name="IssuesCard"
             Header="Report a problem"
-            Description="Open an issue on GitHub. Copy details above first and paste them in."
             IsClickEnabled="True"
             Click="Link_Click">
             <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
@@ -127,7 +121,6 @@
         <toolkit:SettingsCard
             x:Name="LicenseCard"
             Header="GNU General Public License, version 2"
-            Description="resesh is free software: you can use, study, share, and change it under the terms of the GPL."
             IsClickEnabled="True"
             Click="Link_Click">
             <toolkit:SettingsCard.ActionIcon><FontIcon Glyph="&#xE8A7;" /></toolkit:SettingsCard.ActionIcon>
@@ -145,18 +138,11 @@
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="local:AboutCredit">
                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Padding="0,6">
-                            <StackPanel Spacing="1">
-                                <HyperlinkButton
-                                    Padding="0"
-                                    Content="{x:Bind Name}"
-                                    NavigateUri="{x:Bind Uri}"
-                                    ToolTipService.ToolTip="{x:Bind Url}" />
-                                <TextBlock
-                                    Text="{x:Bind Purpose}"
-                                    TextWrapping="Wrap"
-                                    FontSize="12"
-                                    Foreground="{StaticResource SessionTreeMutedForegroundBrush}" />
-                            </StackPanel>
+                            <HyperlinkButton
+                                Padding="0"
+                                Content="{x:Bind Name}"
+                                NavigateUri="{x:Bind Uri}"
+                                ToolTipService.ToolTip="{x:Bind Url}" />
                             <TextBlock
                                 Grid.Column="1"
                                 Text="{x:Bind License}"

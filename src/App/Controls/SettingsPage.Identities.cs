@@ -55,7 +55,7 @@ public sealed partial class SettingsPage
             var sessions = App.Store.Sessions;
             var folderSettings = App.Store.FolderSettings;
 
-            var choices = new List<DefaultChoice> { new() { Label = "None (ask when connecting)" } };
+            var choices = new List<DefaultChoice> { new() { Label = "Ask when connecting" } };
             choices.AddRange(identities.Select(identity => new DefaultChoice { Identity = identity, Label = identity.Name }));
             DefaultIdentityBox.ItemsSource = choices;
             var rootId = App.Store.FolderIdentity("");
@@ -65,12 +65,7 @@ public sealed partial class SettingsPage
             IdentityRows.Children.Clear();
             if (identities.Count == 0)
             {
-                IdentityRows.Children.Add(new SettingsCard
-                {
-                    Header = "No identities yet",
-                    Description = "Connect to a session with no login and choose to remember it for the folder, "
-                        + "or create one here.",
-                });
+                IdentityRows.Children.Add(new SettingsCard { Header = "No identities yet" });
             }
             foreach (var identity in identities)
                 IdentityRows.Children.Add(IdentityRow(identity, sessions, folderSettings));
