@@ -256,3 +256,28 @@ worker passes keep a 100 ms pace. Batched build → worker build, same session:
 \* The logs stalls are gen2 GC pauses (11–13 ms, 7–9 per run in both builds) landing in the
 measured window; none line up with annotation work. Allocation is 2–3 MB per frame, much of it
 outside the renderer (rewind keyframes copy ~1 MB of VT text each).
+
+## Render-path pass (2026-11-08)
+
+SSH floods (`sshflood.py`), JIT Release builds (not AOT), maximized 383×109 on the same 4K
+144 Hz / RX 6800 XT machine, compared at the same output rate (the flood settles at either
+~25 MB/s or faster at random, and record time rises with the rate). µs, medians.
+
+| workload | build | fps | record p50 | GPU p50 | Present p50 |
+|---|---|---:|---:|---:|---:|
+| logs | master 57c4d6b | 109 | ~1,000–1,200 | 1,870 | 324 |
+| logs | background bitmap + punctuation-run shaping (e96cc72) | 111–115 | 1,166 | 410 | ~190 |
+| logs, Cascadia Code (ligatures) | e96cc72 | 111–114 | 1,144–1,172 | 410 | — |
+| color | master | 119 | ~1,050 | 1,828 | 296 |
+| color | e96cc72 | 113–123 | 999–1,180 | 532 | ~200 |
+| tui | master → 38e842c | 128 → 126 | 88 → 117 | 956 → 278 | 247 → 145 |
+| unicode | master → 38e842c | 125 → 130 | 1,146 → 1,334 | 2,289 → 354 | 271 → 204 |
+
+- **Cell backgrounds from one bitmap cut GPU time 4–6×** at full screen: Direct2D's cost was the
+  full-width fill plus a rectangle per color run on every row.
+- **Partial presents, snapshot graphemes and allocation-free glyph runs (912b720) were level
+  within noise** on these floods: they redraw 42–109 rows a frame, so the copy saving does not
+  show, and allocations track output rate. Typing latency was not measured.
+- **Shaping whole words cost ~2.4 ms a frame** on a Cascadia Code logs flood (every timestamp
+  missed the cache) and ~0.8 ms with Cascadia Mono, which has `calt`. Shaping only runs of
+  punctuation (e96cc72) brought both back to the unshaped level.
