@@ -4,11 +4,14 @@ using Vortice.DirectWrite;
 namespace Resesh.Terminal.Native;
 
 /// <summary>
-/// Programming-font ligatures (<c>-&gt;</c>, <c>!=</c>, <c>===</c>): runs of ASCII punctuation
-/// shaped with DirectWrite, then pinned back to the cell grid. Only words with punctuation are
-/// shaped, because that is where these fonts put their ligatures. A word is the cells between
-/// spaces, so a cache keyed by its text hits on almost every line. Fonts without ligature
-/// features (Cascadia Mono, Consolas) skip shaping altogether.
+/// Programming-font ligatures (<c>-&gt;</c>, <c>!=</c>, <c>===</c>): runs of two or more ASCII
+/// punctuation characters shaped with DirectWrite, then pinned back to the cell grid. That is
+/// where these fonts put their ligatures, and the same few runs repeat on every line, so a
+/// cache keyed by their text almost always hits; shaping whole words missed on every
+/// timestamp and path in a log flood (~2.4 ms a full-screen frame). The price is the rare
+/// ligature that involves letters or digits (Fira Code's <c>www</c> and <c>0x</c>). Fonts
+/// without ligature features (Consolas) skip shaping altogether; Cascadia Mono has calt, so it
+/// is shaped and its runs cache as unchanged.
 /// </summary>
 internal sealed unsafe partial class TerminalRenderer
 {
@@ -43,8 +46,6 @@ internal sealed unsafe partial class TerminalRenderer
         _analyzer = null;
         _latinKnown = false;
     }
-
-    private static bool IsLigatureCandidate(uint codepoint) => codepoint is > ' ' and < 0x7F;
 
     private static bool IsPunctuation(uint codepoint) =>
         codepoint is > ' ' and < 0x7F && !(codepoint is >= '0' and <= '9' or >= 'A' and <= 'Z' or >= 'a' and <= 'z');

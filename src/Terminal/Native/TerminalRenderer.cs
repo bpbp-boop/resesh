@@ -844,7 +844,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                     break;
                 var (f, g) = Lookup(d.Codepoint, style);
                 if (f != face || _isEmojiFace[f]) break;
-                if ((x == start || row[x - 1].Codepoint is 0 or ' ') && ShapeWordAt(row, cols, y, x, fg, style, faint, face, ref n) is > 0 and var cells)
+                if (IsPunctuation(d.Codepoint) && (x == start || !IsPunctuation(row[x - 1].Codepoint))
+                    && ShapeWordAt(row, cols, y, x, fg, style, faint, face, selectionColor, ref n) is > 0 and var cells)
                 {
                     shaped = true;
                     x += cells;
@@ -874,26 +875,28 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private int _cursorRow = -1;
     private int _cursorColumn;
 
-    /// <summary>When the word starting at <paramref name="x"/> shapes into ligatures, appends
-    /// its glyphs to the run and returns the cells it covers; 0 to draw it cell by cell.</summary>
-    private int ShapeWordAt(TerminalCell* row, int cols, int y, int x, uint fg, int style, bool faint, int face, ref int n)
+    /// <summary>When the run of punctuation starting at <paramref name="x"/> shapes into
+    /// ligatures, appends its glyphs to the run and returns the cells it covers; 0 to draw it
+    /// cell by cell. It stops at a change of background as well as of color or style, so a
+    /// ligature never straddles two highlights.</summary>
+    private int ShapeWordAt(TerminalCell* row, int cols, int y, int x, uint fg, int style, bool faint, int face,
+        uint selectionColor, ref int n)
     {
         var end = y == _cursorRow && _cursorColumn > x ? Math.Min(cols, _cursorColumn) : cols;
         if (y == _cursorRow && _cursorColumn == x)
             return 0;
         Span<char> text = stackalloc char[MaxShapedLength];
         var length = 0;
-        var punctuation = false;
+        var background = BackgroundOf(row[x], selectionColor);
         for (var i = x; i < end && length < MaxShapedLength; i++)
         {
             ref var d = ref row[i];
-            if (d.Wide != TerminalCell.Narrow || !IsLigatureCandidate(d.Codepoint) || !SameRun(d, fg, style, faint)
-                || Lookup(d.Codepoint, style).Face != face)
+            if (d.Wide != TerminalCell.Narrow || !IsPunctuation(d.Codepoint) || !SameRun(d, fg, style, faint)
+                || BackgroundOf(d, selectionColor) != background || Lookup(d.Codepoint, style).Face != face)
                 break;
-            punctuation |= IsPunctuation(d.Codepoint);
             text[length++] = (char)d.Codepoint;
         }
-        if (length < 2 || !punctuation || ShapedWordFor(style, face, text[..length]) is not { } word)
+        if (length < 2 || ShapedWordFor(style, face, text[..length]) is not { } word)
             return 0;
         EnsureRunCapacity(n + word.Glyphs.Length, keep: n);
         word.Glyphs.CopyTo(_runGlyphs.AsSpan(n));
