@@ -856,18 +856,15 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void MarkCursorDirty() => Volatile.Write(ref _cursorRowDirty, 1);
 
+    /// <summary>The grapheme text of a cell as the last frame read it, so it always matches the
+    /// cells in <see cref="_cells"/>. Shared strings: no allocation once a cluster was seen.</summary>
     private string? GraphemeAt(int x, int y)
     {
         if (_term == IntPtr.Zero)
             return null;
         var buffer = stackalloc uint[32];
-        var n = GhosttyNative.rvt_cell_graphemes(_term, (ushort)x, (ushort)y, buffer, 32);
-        if (n <= 0)
-            return null;
-        var builder = new StringBuilder(n * 2);
-        for (var i = 0; i < n; i++)
-            builder.Append(char.ConvertFromUtf32((int)buffer[i]));
-        return builder.ToString();
+        var n = GhosttyNative.rvt_frame_graphemes(_term, (ushort)x, (ushort)y, buffer, 32);
+        return n <= 0 ? null : GraphemeText.Intern(new ReadOnlySpan<uint>(buffer, n));
     }
 
     private void ApplyColors()

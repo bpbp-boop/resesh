@@ -57,6 +57,9 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private IDXGISwapChain1? _swapChain;
     private ID3D11Texture2D? _canvas;
     private ID2D1Bitmap1? _canvasBitmap;
+    private const int SwapChainBuffers = 2;
+    // The canvas bands each present copies, instead of the whole window-sized canvas.
+    private readonly PresentRegions _regions = new(SwapChainBuffers);
 
     private static readonly (FontWeight Weight, FontStyle Style)[] Styles =
     [
@@ -453,6 +456,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Ignore), 96, 96,
                 BitmapOptions.Target | BitmapOptions.CannotDraw));
         _dc.Target = _canvasBitmap;
+        _regions.InvalidateAll(); // new buffers hold nothing yet
 
         if (_swapChain is null)
         {
@@ -463,14 +467,14 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 Format = Format.B8G8R8A8_UNorm,
                 SampleDescription = new SampleDescription(1, 0),
                 BufferUsage = Usage.RenderTargetOutput,
-                BufferCount = 2,
+                BufferCount = SwapChainBuffers,
                 Scaling = Scaling.Stretch,
                 SwapEffect = SwapEffect.FlipSequential,
                 AlphaMode = DxgiAlphaMode.Ignore,
             });
             return true;
         }
-        _swapChain.ResizeBuffers(2, (uint)bufferWidth, (uint)bufferHeight, Format.B8G8R8A8_UNorm, SwapChainFlags.None).CheckError();
+        _swapChain.ResizeBuffers(SwapChainBuffers, (uint)bufferWidth, (uint)bufferHeight, Format.B8G8R8A8_UNorm, SwapChainFlags.None).CheckError();
         return false;
     }
 
@@ -493,6 +497,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         using (var backBuffer = _swapChain.GetBuffer<ID3D11Texture2D>(0))
             s_context!.CopyResource(backBuffer, _canvas);
         _swapChain.Present(1, PresentFlags.None);
+        _regions.InvalidateAll(); // the other buffer still holds what was there before
     }
 
     /// <summary>Maps the physical-pixel swap chain onto the panel's DIP layout.</summary>
@@ -659,8 +664,13 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             _extendedMargin = extend;
             full = true;
         }
+        if (full)
+            _regions.InvalidateAll();
         if (rows > 0 && (full || dirty[rows - 1] != 0))
+        {
             DrawBottomMargin(cells + (rows - 1) * cols, cols, rows, info.DefaultBackground, extend);
+            _regions.Add(rows * CellHeight, PixelHeight);
+        }
         for (var y = 0; y < rows; y++)
         {
             if (dirty[y] == 0 && !full)
@@ -668,9 +678,13 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             dirty[y] = 0;
             rowsDrawn++;
             DrawRow(cells + y * cols, cols, y, info.DefaultBackground, selectionColor, extend);
+            AddRowRegion(y);
         }
         if (cursorShown && info.CursorVisible != 0 && info.CursorY < rows && info.CursorX < cols)
+        {
             DrawCursor(cells + info.CursorY * cols + info.CursorX, info, focused);
+            AddRowRegion(info.CursorY);
+        }
         var endDrawStart = stats ? FrameStats.Now() : 0;
         var endDraw = _dc.EndDraw();
         if (endDraw == Vortice.Direct2D1.ResultCode.RecreateTarget)
@@ -682,7 +696,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
         var copyStart = stats ? FrameStats.Now() : 0;
         using (var backBuffer = _swapChain.GetBuffer<ID3D11Texture2D>(0))
-            s_context!.CopyResource(backBuffer, _canvas);
+            CopyToBackBuffer(backBuffer);
         if (stats)
             EndGpuTiming(gpuSlot);
         var presentStart = stats ? FrameStats.Now() : 0;
@@ -704,6 +718,27 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         }
         present.CheckError();
         return true;
+    }
+
+    /// <summary>A drawn row's band, with a row of slack each side: glyphs that overhang their
+    /// cell (italics, tall fallback fonts) draw into the neighbors on the canvas.</summary>
+    private void AddRowRegion(int y) => _regions.Add((y - 1) * CellHeight, (y + 2) * CellHeight);
+
+    /// <summary>Brings the back buffer up to date with the canvas: only the bands drawn since
+    /// this buffer was last presented, or all of it after anything that touched the whole
+    /// canvas. Copying the window-sized canvas every frame cost ~33 MB of bandwidth at 4K
+    /// per surface even when one row changed.</summary>
+    private void CopyToBackBuffer(ID3D11Texture2D backBuffer)
+    {
+        var bands = _regions.Take(_bufferHeight);
+        if (bands is null)
+        {
+            s_context!.CopyResource(backBuffer, _canvas);
+            return;
+        }
+        var width = Math.Min(_bufferWidth, Math.Max(PixelWidth, 1));
+        foreach (var (top, bottom) in bands)
+            s_context!.CopySubresourceRegion(backBuffer, 0, 0, (uint)top, 0, _canvas, 0, new Box(0, top, 0, width, bottom, 1));
     }
 
     /// <summary>The strip below the last row, which no row repaint covers. When extending,
@@ -811,30 +846,11 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             }
             if (n == 0) { x++; continue; }
             SetBrush(Rgb(fg, faint ? 0.55f : 1f));
-            var run = new GlyphRun
-            {
-                FontFace = _faces[style][face],
-                FontEmSize = _emSize,
-                Indices = _runGlyphs.AsSpan(0, n).ToArray(),
-                Advances = _runAdvances.AsSpan(0, n).ToArray(),
-            };
-            DrawRun(new Vector2(OriginX + start * CellWidth, baseline), run, face);
+            fixed (ushort* glyphs = _runGlyphs)
+            fixed (float* advances = _runAdvances)
+                DrawRun(new Vector2(OriginX + start * CellWidth, baseline), style, face, glyphs, advances, null, n);
         }
         DrawDecorations(row, cols, top, baseline);
-    }
-
-    private void DrawRun(Vector2 origin, GlyphRun run, int face)
-    {
-        if (face != _symbolsFace)
-        {
-            _dc.DrawGlyphRun(origin, run, _brush, MeasuringMode.Natural);
-            return;
-        }
-        _dc.TextRenderingParams = _symbolParams;
-        _dc.TextAntialiasMode = Vortice.Direct2D1.TextAntialiasMode.Grayscale;
-        _dc.DrawGlyphRun(origin, run, _brush, MeasuringMode.Natural);
-        _dc.TextAntialiasMode = Vortice.Direct2D1.TextAntialiasMode.Cleartype;
-        _dc.TextRenderingParams = null;
     }
 
     private const ushort DecorationFlags = TerminalCell.Underline | TerminalCell.Strike | TerminalCell.Overline;
@@ -927,7 +943,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private void DrawCluster(int x, int y, in TerminalCell c)
     {
         var text = c.GraphemeLength > 1 ? GraphemeAt?.Invoke(x, y) : null;
-        text ??= char.ConvertFromUtf32((int)c.Codepoint);
+        text ??= GraphemeText.Intern(c.Codepoint);
         var width = (c.Wide == TerminalCell.WideChar ? 2 : 1) * CellWidth;
         var foreground = ForegroundOf(c);
         SetBrush(Rgb(foreground));
@@ -972,14 +988,8 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         if (_isEmojiFace[face] || cell->GraphemeLength > 1)
             return;
         SetBrush(Rgb(info.DefaultBackground));
-        var run = new GlyphRun
-        {
-            FontFace = _faces[style][face],
-            FontEmSize = _emSize,
-            Indices = [glyph],
-            Advances = [width],
-        };
-        DrawRun(new Vector2(left, top + _baseline), run, face);
+        float advance = width;
+        DrawRun(new Vector2(left, top + _baseline), style, face, &glyph, &advance, null, 1);
     }
 
     private void DisposeFaces()

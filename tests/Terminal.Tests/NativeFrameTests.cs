@@ -27,6 +27,27 @@ public sealed unsafe class NativeFrameTests
     }
 
     [WindowsNativeFact]
+    public void GraphemesComeFromTheFrameTheCellsWereReadFrom()
+    {
+        using var terminal = new NativeTerminal();
+        const string family = "\U0001F468‍\U0001F469‍\U0001F467"; // man, ZWJ, woman, ZWJ, girl
+        terminal.Write(family + " é");
+        terminal.ReadFrame(forceAll: true);
+        Assert.True(terminal.Cells[0].GraphemeLength > 1);
+        Assert.Equal(family, terminal.GraphemeAt(0, 0));
+        Assert.Equal("é", terminal.GraphemeAt(3, 0));
+        Assert.Null(terminal.GraphemeAt(1, 0)); // the wide character's spacer
+        Assert.Null(terminal.GraphemeAt(5, 0));
+
+        // Newer output the renderer has not read yet must not leak into the frame it draws.
+        terminal.Write("\u001b[H\u001b[2Jö");
+        Assert.Equal(family, terminal.GraphemeAt(0, 0));
+        terminal.ReadFrame();
+        Assert.Equal("ö", terminal.GraphemeAt(0, 0));
+        Assert.Null(terminal.GraphemeAt(3, 0));
+    }
+
+    [WindowsNativeFact]
     public void PrefetchedLinesMatchLinesReadOneByOne()
     {
         using var terminal = new NativeTerminal();
@@ -567,6 +588,13 @@ public sealed unsafe class NativeFrameTests
             fixed (byte* dirty = Dirty)
             fixed (GhosttyFrameInfo* info = &Info)
                 return GhosttyNative.rvt_read_frame(Handle, cells, Columns, Rows, dirty, forceAll ? 1 : 0, info);
+        }
+
+        public string? GraphemeAt(int x, int y)
+        {
+            var buffer = stackalloc uint[32];
+            var n = GhosttyNative.rvt_frame_graphemes(Handle, (ushort)x, (ushort)y, buffer, 32);
+            return n <= 0 ? null : string.Concat(Enumerable.Range(0, n).Select(i => char.ConvertFromUtf32((int)buffer[i])));
         }
 
         public void Dispose() => GhosttyNative.rvt_free(Handle);

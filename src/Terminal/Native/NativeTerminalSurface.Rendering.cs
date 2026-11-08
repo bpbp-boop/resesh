@@ -58,6 +58,7 @@ public sealed unsafe partial class NativeTerminalSurface
         public uint? Margin;
         public long MarginSequence;   // the frame Margin came from
         public bool Poll;             // synchronized output is holding the frame
+        public bool Drew;             // a frame was presented (render loop only; not merged)
 
         public readonly bool Any => HasInfo || Annotate || HoverMoved || MarginChanged || Poll;
 
@@ -139,6 +140,7 @@ public sealed unsafe partial class NativeTerminalSurface
 
     private void RenderLoop()
     {
+        var idleReads = 0;
         while (true)
         {
             _renderWake.WaitOne();
@@ -153,9 +155,16 @@ public sealed unsafe partial class NativeTerminalSurface
             if (effects.Any)
                 PostEffects(effects);
             // At most one frame per composition: the first request after a quiet spell (a
-            // keystroke's echo) draws at once, and output that keeps coming gathers here.
-            if ((effects.HasInfo || poll) && !_renderStop && DwmFlush() < 0)
+            // keystroke's echo) draws at once, and output that keeps coming gathers here. A read
+            // that drew nothing presented nothing, so waiting out a composition after it would
+            // only delay the next frame (an echo landing just after it); a run of them, from
+            // output that changes nothing on screen, is still paced.
+            idleReads = effects.HasInfo && !effects.Drew ? idleReads + 1 : 0;
+            var pace = effects.Drew || poll || idleReads > 1;
+            if (pace && !_renderStop && DwmFlush() < 0)
                 Thread.Sleep(4);
+            if (pace)
+                idleReads = 0;
             if (poll)
                 _renderWake.Set();
         }
@@ -351,6 +360,7 @@ public sealed unsafe partial class NativeTerminalSurface
             ForceFull(); // recovery needs a full frame
             return effects;
         }
+        effects.Drew = true;
         if (FrameStats.Enabled)
             RecordFrameStats(frameStart, readEnd, drawStart, full);
         if (_renderer.MarginColor != _marginColor)
