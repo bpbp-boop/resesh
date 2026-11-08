@@ -45,6 +45,12 @@ public sealed unsafe class NativeFrameTests
         terminal.ReadFrame();
         Assert.Equal("ö", terminal.GraphemeAt(0, 0));
         Assert.Null(terminal.GraphemeAt(3, 0));
+
+        // Longer than the shim's stack buffer: every mark is kept.
+        var stacked = "a" + string.Concat(Enumerable.Repeat("́̈", 30));
+        terminal.Write("[H[2J" + stacked);
+        terminal.ReadFrame();
+        Assert.Equal(stacked, terminal.GraphemeAt(0, 0));
     }
 
     [WindowsNativeFact]
@@ -592,9 +598,12 @@ public sealed unsafe class NativeFrameTests
 
         public string? GraphemeAt(int x, int y)
         {
-            var buffer = stackalloc uint[32];
-            var n = GhosttyNative.rvt_frame_graphemes(Handle, (ushort)x, (ushort)y, buffer, 32);
-            return n <= 0 ? null : string.Concat(Enumerable.Range(0, n).Select(i => char.ConvertFromUtf32((int)buffer[i])));
+            var buffer = new uint[256];
+            fixed (uint* codepoints = buffer)
+            {
+                var n = GhosttyNative.rvt_frame_graphemes(Handle, (ushort)x, (ushort)y, codepoints, buffer.Length);
+                return n <= 0 ? null : string.Concat(buffer.Take(n).Select(c => char.ConvertFromUtf32((int)c)));
+            }
         }
 
         public void Dispose() => GhosttyNative.rvt_free(Handle);

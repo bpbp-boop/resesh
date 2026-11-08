@@ -831,6 +831,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             var start = x;
             var n = 0;
             var shaped = false;
+            var scannedTo = 0; // where the last ligature scan stopped: a new one may start there
             while (x < cols)
             {
                 ref var d = ref row[x];
@@ -844,13 +845,19 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                     break;
                 var (f, g) = Lookup(d.Codepoint, style);
                 if (f != face || _isEmojiFace[f]) break;
-                if (IsPunctuation(d.Codepoint) && (x == start || !IsPunctuation(row[x - 1].Codepoint))
-                    && ShapeWordAt(row, cols, y, x, fg, style, faint, face, selectionColor, ref n) is > 0 and var cells)
+                if (IsPunctuation(d.Codepoint) && x >= scannedTo && (x == start || x == scannedTo || !IsPunctuation(row[x - 1].Codepoint)))
                 {
-                    shaped = true;
-                    x += cells;
-                    continue;
+                    var cells = ShapeWordAt(row, cols, y, x, fg, style, faint, face, selectionColor, ref n, out var scanned);
+                    scannedTo = x + scanned;
+                    if (cells > 0)
+                    {
+                        shaped = true;
+                        x += cells;
+                        continue;
+                    }
                 }
+                // A shaped word can hold more glyphs than cells, so the run can outgrow the row.
+                EnsureRunCapacity(n + 1, keep: n);
                 _runGlyphs[n] = g;
                 _runAdvances[n] = d.Wide == TerminalCell.WideChar ? 2 * CellWidth : CellWidth;
                 _runOffsets[n] = default;
@@ -878,10 +885,12 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     /// <summary>When the run of punctuation starting at <paramref name="x"/> shapes into
     /// ligatures, appends its glyphs to the run and returns the cells it covers; 0 to draw it
     /// cell by cell. It stops at a change of background as well as of color or style, so a
-    /// ligature never straddles two highlights.</summary>
+    /// ligature never straddles two highlights. <paramref name="scanned"/> is how many cells
+    /// the run covered (at least one), so the next run can start right after it.</summary>
     private int ShapeWordAt(TerminalCell* row, int cols, int y, int x, uint fg, int style, bool faint, int face,
-        uint selectionColor, ref int n)
+        uint selectionColor, ref int n, out int scanned)
     {
+        scanned = 1;
         var end = y == _cursorRow && _cursorColumn > x ? Math.Min(cols, _cursorColumn) : cols;
         if (y == _cursorRow && _cursorColumn == x)
             return 0;
@@ -896,6 +905,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 break;
             text[length++] = (char)d.Codepoint;
         }
+        scanned = Math.Max(1, length);
         if (length < 2 || ShapedWordFor(style, face, text[..length]) is not { } word)
             return 0;
         EnsureRunCapacity(n + word.Glyphs.Length, keep: n);

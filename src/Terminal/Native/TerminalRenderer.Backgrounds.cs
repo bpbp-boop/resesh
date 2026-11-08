@@ -70,7 +70,13 @@ internal sealed unsafe partial class TerminalRenderer
                         line[x] = 0xFF000000 | (BackgroundOf(row[x], selectionColor) ?? defaultBackground);
                 }
                 var band = new RectU { Left = 0, Top = (uint)first, Right = (uint)cols, Bottom = (uint)y };
-                CopyFromMemory(_backgrounds, &band, pixels + first * cols, (uint)(cols * sizeof(uint)));
+                if (!CopyFromMemory(_backgrounds, &band, pixels + first * cols, (uint)(cols * sizeof(uint))))
+                {
+                    // Called inside the frame's draw batch: fall back to rectangles rather than
+                    // throw past EndDraw. The next frame makes the bitmap again, every row.
+                    DisposeBackgrounds();
+                    return false;
+                }
             }
         }
         return true;
@@ -80,11 +86,11 @@ internal sealed unsafe partial class TerminalRenderer
     // six bitmap methods before it (d2d1.h). Vortice's public overloads take managed arrays.
     private const int CopyFromMemorySlot = 10;
 
-    private static void CopyFromMemory(ID2D1Bitmap1 bitmap, RectU* destination, void* source, uint pitch)
+    private static bool CopyFromMemory(ID2D1Bitmap1 bitmap, RectU* destination, void* source, uint pitch)
     {
         var self = bitmap.NativePointer;
         var copy = (delegate* unmanaged[Stdcall]<IntPtr, RectU*, void*, uint, int>)(*(void***)self)[CopyFromMemorySlot];
-        Marshal.ThrowExceptionForHR(copy(self, destination, source, pitch));
+        return copy(self, destination, source, pitch) >= 0;
     }
 
     /// <summary>Row <paramref name="y"/>'s cell backgrounds, from the bitmap.</summary>

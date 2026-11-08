@@ -864,7 +864,13 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             return null;
         var buffer = stackalloc uint[32];
         var n = GhosttyNative.rvt_frame_graphemes(_term, (ushort)x, (ushort)y, buffer, 32);
-        return n <= 0 ? null : GraphemeText.Intern(new ReadOnlySpan<uint>(buffer, n));
+        if (n <= 32)
+            return n <= 0 ? null : GraphemeText.Intern(new ReadOnlySpan<uint>(buffer, n));
+        // A long pile of combining marks: ask again with room for all of it.
+        var all = new uint[n];
+        fixed (uint* codepoints = all)
+            n = Math.Min(n, GhosttyNative.rvt_frame_graphemes(_term, (ushort)x, (ushort)y, codepoints, all.Length));
+        return n <= 0 ? null : GraphemeText.Intern(all.AsSpan(0, n));
     }
 
     private void ApplyColors()

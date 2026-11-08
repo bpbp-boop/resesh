@@ -847,13 +847,24 @@ static int read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, ui
       if (tag == GHOSTTY_CELL_CONTENT_CODEPOINT_GRAPHEME) {
         // Copied with the cell, from the same snapshot, so the renderer never has to read
         // the live terminal (which may already hold newer output) to draw it.
+        // Almost every cluster fits the stack buffer; a longer one (a pile of combining marks)
+        // is read again into one of its own size, so no mark is dropped.
         uint32_t cps[RVT_MAX_GRAPHEME];
+        uint32_t* all = cps;
         GhosttyCodepointBuffer buf = { cps, RVT_MAX_GRAPHEME, 0 };
         GhosttyResult r = ghostty_render_state_row_cells_get(t->cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, &buf);
+        if (r == GHOSTTY_OUT_OF_SPACE && buf.len <= UINT16_MAX && (all = malloc(buf.len * sizeof *all)) != NULL) {
+          GhosttyCodepointBuffer big = { all, buf.len, 0 };
+          r = ghostty_render_state_row_cells_get(t->cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, &big);
+          buf = big;
+        } else if (!all) {
+          all = cps; // out of memory: keep the first RVT_MAX_GRAPHEME
+        }
         glen = (uint32_t)buf.len;
-        uint16_t kept = (uint16_t)(buf.len < RVT_MAX_GRAPHEME ? buf.len : RVT_MAX_GRAPHEME);
-        if ((r != GHOSTTY_SUCCESS && r != GHOSTTY_OUT_OF_SPACE) || kept < 2 || !graphemes || !push_grapheme(graphemes, x, cps, kept))
+        uint16_t kept = (uint16_t)(buf.len < buf.cap ? buf.len : buf.cap);
+        if ((r != GHOSTTY_SUCCESS && r != GHOSTTY_OUT_OF_SPACE) || kept < 2 || !graphemes || !push_grapheme(graphemes, x, all, kept))
           glen = cp ? 1 : 0;
+        if (all != cps) free(all);
       }
 
       uint32_t fg = dfg, bg = dbg, ul = RVT_UL_DEFAULT;
@@ -917,8 +928,9 @@ RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t row
 
 // The multi-codepoint grapheme of a cell as the last rvt_read_frame copied it: the text that
 // matches the cells the caller holds. Takes only the snapshot lock, never the terminal lock,
-// so drawing never waits on the parser. Returns the codepoints written, 0 for a cell without
-// one (or one whose row the caller has not read since a resize).
+// so drawing never waits on the parser. Returns the cluster's codepoint count, 0 for a cell
+// without one (or one whose row the caller has not read since a resize); when that is more
+// than cap, only cap were written and the caller asks again with room for all of them.
 RVT_API int rvt_frame_graphemes(RvtTerm* t, uint16_t x, uint16_t y, uint32_t* out, int cap) {
   int n = 0;
   AcquireSRWLockExclusive(&t->rs_lock);
@@ -926,8 +938,8 @@ RVT_API int rvt_frame_graphemes(RvtTerm* t, uint16_t x, uint16_t y, uint32_t* ou
     const RvtGraphemeRow* row = &t->grapheme_rows[y];
     for (uint32_t i = 0; i < row->count; i++) {
       if (row->items[i].x != x) continue;
-      n = row->items[i].len < cap ? row->items[i].len : cap;
-      memcpy(out, row->pool + row->items[i].offset, (size_t)n * sizeof *out);
+      n = row->items[i].len;
+      memcpy(out, row->pool + row->items[i].offset, (size_t)(n < cap ? n : cap) * sizeof *out);
       break;
     }
   }

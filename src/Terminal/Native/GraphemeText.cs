@@ -35,7 +35,7 @@ internal static class GraphemeText
     /// <summary>The text of <paramref name="codepoints"/>, shared.</summary>
     public static string Intern(ReadOnlySpan<uint> codepoints)
     {
-        Span<char> chars = stackalloc char[codepoints.Length * 2];
+        Span<char> chars = codepoints.Length <= 256 ? stackalloc char[codepoints.Length * 2] : new char[codepoints.Length * 2];
         var length = 0;
         foreach (var codepoint in codepoints)
         {
