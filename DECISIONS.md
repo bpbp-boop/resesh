@@ -2724,3 +2724,32 @@ Findings that shaped it:
 - Synchronet BBSes print the client's own address on the welcome screen; telnet.png has that
   one line painted out.
 - Videos are encoded with the ffmpeg in `imageio-ffmpeg` (libx264, CRF 30, `+faststart`).
+
+## 2026-11-08 - Render path: snapshot graphemes, partial presents, ligatures, background bitmap
+
+Changes made after comparing the renderer with Wintty's (Ghostty's DX12 renderer on WinUI):
+- **Graphemes come from the render-state snapshot.** `rvt_read_frame` copies each dirty row's
+  multi-codepoint clusters (`GRAPHEMES_BUF`) alongside its cells and `rvt_frame_graphemes`
+  serves them under `rs_lock` only. Reading them from the live terminal took its lock per
+  cluster cell mid-draw and could return text newer than the cells (shim ABI 12).
+- **Two COM calls go through the vtable**: `ID2D1RenderTarget::DrawGlyphRun` (slot 29) and
+  `ID2D1Bitmap::CopyFromMemory` (slot 10). Vortice 3.8.3's public overloads take managed
+  arrays sized to the call, which allocated on every glyph run of every frame; slots are
+  counted from the Windows SDK's d2d1.h.
+- **Presents copy only changed bands.** The two-buffer flip chain hands back the buffer shown
+  two presents ago, so `PresentRegions` copies the bands drawn this frame and the previous
+  one, and everything for two presents after a full frame, a Clear or new buffers. Bands get
+  a row of slack each side because glyphs overhang their cells on the canvas.
+- **Ligatures are shaped per word, ASCII with punctuation only.** Programming fonts put their
+  ligatures there; letters-only words, non-ASCII text and fonts without liga/calt/clig skip
+  shaping. Each cluster's advances are forced to sum to its cells, so the grid holds. Runs
+  break at the cursor cell whenever the cursor is visible, blink phase or not, so a ligature
+  never changes shape as the cursor blinks. The script is taken once from AnalyzeScript("a").
+- **Cell backgrounds are one cols × rows bitmap** drawn per row with nearest-neighbor
+  scaling, the way Ghostty and Wintty do it with a per-cell color buffer. The bitmap is
+  written for all dirty rows before anything is drawn, so no draw recorded this frame reads a
+  row being replaced. Rows still draw background then glyphs one row at a time, which keeps
+  today's overhang behavior.
+- **Not taken from Wintty:** their SwapChainPanel chain has no frame-latency waitable either,
+  and their FreeType grayscale text with no gamma handling is a step down from DirectWrite
+  ClearType.

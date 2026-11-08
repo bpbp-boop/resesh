@@ -667,6 +667,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         }
         if (full)
             _regions.InvalidateAll();
+        _bitmapBackgrounds = UpdateBackgrounds(cells, cols, rows, dirty, full, info.DefaultBackground, selectionColor);
         if (rows > 0 && (full || dirty[rows - 1] != 0))
         {
             DrawBottomMargin(cells + (rows - 1) * cols, cols, rows, info.DefaultBackground, extend);
@@ -766,35 +767,38 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         }
     }
 
+    /// <summary>This frame's cell backgrounds come from the background bitmap.</summary>
+    private bool _bitmapBackgrounds;
+
     private void DrawRow(TerminalCell* row, int cols, int y, uint defaultBackground, uint selectionColor, bool extend)
     {
         float top = y * CellHeight;
-        SetBrush(Rgb(defaultBackground));
-        _dc.FillRectangle(new Rect(0, top, PixelWidth, CellHeight), _brush);
-        if (extend && cols > 0)
+        float gridRight = OriginX + cols * CellWidth;
+        // The margins either side of the grid: the theme color, or the edge cells' when extending.
+        SetBrush(Rgb(extend && cols > 0 && MarginBackgroundOf(row[0]) is { } leftBg ? leftBg : defaultBackground));
+        _dc.FillRectangle(new Rect(0, top, OriginX, CellHeight), _brush);
+        if (gridRight < PixelWidth)
         {
-            if (MarginBackgroundOf(row[0]) is { } leftBg)
-            {
-                SetBrush(Rgb(leftBg));
-                _dc.FillRectangle(new Rect(0, top, OriginX, CellHeight), _brush);
-            }
-            float gridRight = OriginX + cols * CellWidth;
-            if (gridRight < PixelWidth && MarginBackgroundOf(row[cols - 1]) is { } rightBg)
-            {
-                SetBrush(Rgb(rightBg));
-                _dc.FillRectangle(new Rect(gridRight, top, PixelWidth - gridRight, CellHeight), _brush);
-            }
+            SetBrush(Rgb(extend && cols > 0 && MarginBackgroundOf(row[cols - 1]) is { } rightBg ? rightBg : defaultBackground));
+            _dc.FillRectangle(new Rect(gridRight, top, PixelWidth - gridRight, CellHeight), _brush);
         }
 
-        // Background runs: selection, then find matches, override the cell background.
-        for (var x = 0; x < cols;)
+        if (_bitmapBackgrounds)
+            DrawRowBackground(cols, y);
+        else
         {
-            if (BackgroundOf(row[x], selectionColor) is not { } bg) { x++; continue; }
-            var start = x;
-            while (x < cols && BackgroundOf(row[x], selectionColor) == bg)
-                x++;
-            SetBrush(Rgb(bg));
-            _dc.FillRectangle(new Rect(OriginX + start * CellWidth, top, (x - start) * CellWidth, CellHeight), _brush);
+            SetBrush(Rgb(defaultBackground));
+            _dc.FillRectangle(new Rect(OriginX, top, cols * CellWidth, CellHeight), _brush);
+            // Background runs: selection, then find matches, override the cell background.
+            for (var x = 0; x < cols;)
+            {
+                if (BackgroundOf(row[x], selectionColor) is not { } bg) { x++; continue; }
+                var start = x;
+                while (x < cols && BackgroundOf(row[x], selectionColor) == bg)
+                    x++;
+                SetBrush(Rgb(bg));
+                _dc.FillRectangle(new Rect(OriginX + start * CellWidth, top, (x - start) * CellWidth, CellHeight), _brush);
+            }
         }
 
         // Glyph runs: same face, style and color; every glyph advances whole cells.
@@ -1072,6 +1076,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         DisposeGpuQueries();
         ResetClusterCaches();
         ResetLigatures();
+        DisposeBackgrounds();
         ReleaseSwapChain();
         DisposeFaces();
         DisposeGlyphGeometries();
