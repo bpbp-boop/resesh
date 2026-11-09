@@ -132,6 +132,18 @@ public sealed partial class TabViewModel : ObservableObject
     /// <summary>A native app page hosted in the tab strip instead of a terminal session.</summary>
     public bool IsAppPage => Page != AppPage.None;
 
+    /// <summary>The section a Settings tab shows, which its second line names.</summary>
+    public SettingsSection SettingsSection
+    {
+        get => _settingsSection;
+        set
+        {
+            if (SetProperty(ref _settingsSection, value))
+                OnPropertyChanged(nameof(Subtitle));
+        }
+    }
+    private SettingsSection _settingsSection;
+
     public bool IsOnboarding => Page == AppPage.Welcome;
 
     /// <summary>What this tab's target kind supports; drives menu naming and visibility.</summary>
@@ -783,7 +795,7 @@ public sealed partial class TabViewModel : ObservableObject
             if (IsOnboarding)
                 return "Setup resesh";
             if (Page == AppPage.Settings)
-                return "Preferences";
+                return SettingsCatalog.SectionTitle(SettingsSection);
             if (Page == AppPage.Import)
                 return "Review sessions";
             var attached = IsAttachedToRemoteSession;

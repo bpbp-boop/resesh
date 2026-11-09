@@ -18,6 +18,12 @@
         <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
         <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
 
+        <!-- Rows sized to their control rather than the toolkit's 68px, so a section fits on
+             screen. The toolkit reads these here, not from App.xaml. SettingsExpander's header
+             ignores both, here or there. -->
+        <x:Double x:Key="SettingsCardMinHeight">48</x:Double>
+        <Thickness x:Key="SettingsCardPadding">16,8,16,8</Thickness>
+
         <Style x:Key="SectionTitle" TargetType="TextBlock" BasedOn="{StaticResource TitleTextBlockStyle}">
             <Setter Property="Margin" Value="0,0,0,4" />
         </Style>
@@ -228,13 +234,19 @@
             </ScrollViewer>
 
             <!-- ==== Theme ==== -->
+            <!-- The settings keep the other sections' width; the theme cards use up to five columns. -->
             <ScrollViewer x:Name="ThemeSection" Style="{StaticResource SectionScroller}">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" MaxWidth="1000" />
+                        <ColumnDefinition Width="*" MaxWidth="1640" />
                     </Grid.ColumnDefinitions>
                     <StackPanel Style="{StaticResource SectionBody}">
                         <TextBlock Text="Theme" Style="{StaticResource SectionTitle}" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" MaxWidth="944" />
+                            </Grid.ColumnDefinitions>
+                        <StackPanel Spacing="4">
                         <toolkit:SettingsCard x:Name="AppearanceCard" Header="Appearance">
                             <ComboBox x:Name="AppearanceBox" MinWidth="240"
                                       ItemsSource="{x:Bind ViewModel.AppearanceChoices}"
@@ -253,6 +265,8 @@
                         </toolkit:SettingsCard>
                         <controls:ThemeFilterBar x:Name="ThemeFilter" Margin="0,16,0,0" ShowCategories="False"
                                                  QueryChanged="ThemeFilter_QueryChanged" />
+                        </StackPanel>
+                        </Grid>
 
                         <!-- Theme: every theme, a row per category. -->
                         <StackPanel x:Name="FixedThemePanel" Margin="0,12,0,0"

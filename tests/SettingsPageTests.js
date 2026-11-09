@@ -105,6 +105,24 @@ test("theme galleries are virtualized, searchable and keep their own selection",
   assert.match(galleryCode, /if \(_updating \|\| ThemeList\.SelectedItem is not ThemeChoice picked\)/);
 });
 
+test("Settings lays themes out in wrapping grids that show a few rows at a time", () => {
+  const rows = read("src", "App", "Controls", "ThemeCategoryRows.cs");
+  const grid = read("src", "App", "Controls", "ThemeGrid.xaml");
+  const gridCode = read("src", "App", "Controls", "ThemeGrid.xaml.cs");
+  assert.match(rows, /new ThemeGrid \{/);
+  assert.match(grid, /<ItemsWrapGrid Orientation="Horizontal"/);
+  // The grid grows with the page, so a wheel turn over it scrolls the page.
+  assert.match(grid, /ScrollViewer\.VerticalScrollMode="Disabled"/);
+  assert.match(grid, /x:Name="MoreButton"/);
+  // The current theme shows even when it is past the cut.
+  assert.match(gridCode, /shown\[\^1\] = match/);
+});
+
+test("the Settings tab names the open section", () => {
+  assert.match(pageCode, /SectionShown\?\.Invoke\(section\)/);
+  assert.match(read("src", "App", "MainWindow.xaml.cs"), /page\.SectionShown \+= section => tab\.SettingsSection = section/);
+});
+
 test("inline Settings editors expose stable automation IDs", () => {
   for (const automationId of [
     "SettingsHighlightRules",

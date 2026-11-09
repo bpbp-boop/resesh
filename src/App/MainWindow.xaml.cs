@@ -1309,6 +1309,7 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             SetLaunchAtSignIn = enabled => Interop.SignInLaunch.TrySet(enabled, Environment.ProcessPath!),
         });
         var page = new SettingsPage(settings);
+        page.SectionShown += section => tab.SettingsSection = section;
         page.ConnectRequested += session => App.WindowFor(tab)?.ConnectSession(session);
         // Settings can be dragged to another window, so its sessions go through the window hosting it now.
         page.SessionsView.Owner = () => App.WindowFor(tab)?.ViewModel;

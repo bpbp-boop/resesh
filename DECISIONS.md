@@ -2811,3 +2811,19 @@ and only it can be deleted. Explanations live in the README.
   Those sessions get the identity explicitly instead.
 - Converted sessions have `Username` cleared: a leftover username would override the
   identity's.
+
+## 2026-11-09 - Compact Settings rows and wrapping theme grids
+
+- Settings rows are 48px high with 8px vertical padding, set by overriding the toolkit's
+  `SettingsCardMinHeight` and `SettingsCardPadding` in `SettingsPage.xaml`'s resources. With
+  CommunityToolkit SettingsControls 8.2.251219 the same keys in App.xaml are ignored, and an
+  implicit `SettingsCard` style based on `DefaultSettingsCardStyle` crashes the page in
+  `MeasureOverride` (COMException 0x80004005). `SettingsExpander`'s header keeps its own
+  height whichever way `SettingsExpanderHeaderPadding` or `ExpanderMinHeight` is set.
+- Settings > Theme shows each category as a wrapping grid (`ThemeGrid`) instead of a sideways
+  carousel: two rows at first, four more per "Show more". The grid sizes to its content so
+  the page scrolls over it, which means it realizes every card it shows; the row cap keeps
+  that bounded. The current theme takes the last place when it is past the cut, so it is
+  always visible. Welcome keeps the carousel (`ThemeGallery`), which fits its narrow column.
+- The Theme section is up to 1640px wide (five columns) while its settings and search stay
+  at the other sections' width.

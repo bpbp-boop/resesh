@@ -120,6 +120,9 @@ public sealed partial class SettingsPage : UserControl
         return picker;
     }
 
+    /// <summary>Raised with each section shown, for the tab to name it.</summary>
+    public event Action<SettingsSection>? SectionShown;
+
     private void Show(SettingsSection section)
     {
         GeneralSection.Visibility = PresentationValues.Visible(section == SettingsSection.General);
@@ -145,19 +148,13 @@ public sealed partial class SettingsPage : UserControl
         };
         if (!ReferenceEquals(Sections.SelectedItem, item))
             Sections.SelectedItem = item;
+        SectionShown?.Invoke(section);
         if (section == SettingsSection.Recording)
             ViewModel.RefreshHistoryUsage();
         if (section == SettingsSection.Identities)
             RefreshIdentities();
         if (section == SettingsSection.Sessions)
             SessionsManager.Refresh();
-        if (section == SettingsSection.Theme)
-            DispatcherQueue.TryPost(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-            {
-                FixedGallery.ScrollToSelection();
-                LightGallery.ScrollToSelection();
-                DarkGallery.ScrollToSelection();
-            });
     }
 
     private void Sections_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -167,11 +164,7 @@ public sealed partial class SettingsPage : UserControl
     }
 
     /// <summary>Light and dark are a filter only in Theme's one gallery of every theme.</summary>
-    private void ShowThemeFilter()
-    {
-        ThemeFilter.ShowModes = !ViewModel.IsFollowingWindows;
-        FixedGallery.ScrollToSelection();
-    }
+    private void ShowThemeFilter() => ThemeFilter.ShowModes = !ViewModel.IsFollowingWindows;
 
     private void ThemeFilter_QueryChanged(object? sender, EventArgs args)
     {

@@ -5,9 +5,9 @@ using Resesh.Core.Storage;
 
 namespace Resesh.App.Controls;
 
-/// <summary>Themes laid out one category per row, each row its own <see cref="ThemeGallery"/>,
-/// then "Other" for themes in no category. A theme in several categories shows in each row,
-/// selected in all of them. Rows with nothing matching <see cref="Query"/> hide.</summary>
+/// <summary>Themes laid out one category per group, each group its own <see cref="ThemeGrid"/>,
+/// then "Other" for themes in no category. A theme in several categories shows in each group,
+/// selected in all of them. Groups with nothing matching <see cref="Query"/> hide.</summary>
 public sealed partial class ThemeCategoryRows : UserControl
 {
     public static readonly DependencyProperty ThemesProperty = DependencyProperty.Register(
@@ -18,7 +18,7 @@ public sealed partial class ThemeCategoryRows : UserControl
         nameof(Query), typeof(ThemeQuery), typeof(ThemeCategoryRows), new PropertyMetadata(ThemeQuery.All, Refilter));
 
     private readonly StackPanel _panel = new();
-    private readonly List<(FrameworkElement Header, ThemeGallery Gallery, List<ThemeChoice> Themes)> _rows = [];
+    private readonly List<(FrameworkElement Header, ThemeGrid Gallery, List<ThemeChoice> Themes)> _rows = [];
 
     public ThemeCategoryRows() => Content = _panel;
 
@@ -44,12 +44,6 @@ public sealed partial class ThemeCategoryRows : UserControl
     /// <summary>The first visible row's list, for keyboard navigation from Settings.</summary>
     public Control FocusTarget =>
         _rows.FirstOrDefault(row => row.Header.Visibility == Visibility.Visible).Gallery?.FocusTarget ?? this;
-
-    public void ScrollToSelection()
-    {
-        foreach (var row in _rows)
-            row.Gallery.ScrollToSelection();
-    }
 
     private static void Rebuild(DependencyObject sender, DependencyPropertyChangedEventArgs args) => ((ThemeCategoryRows)sender).Build();
 
@@ -83,7 +77,7 @@ public sealed partial class ThemeCategoryRows : UserControl
             Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
             Margin = new Thickness(1, 16, 0, 4),
         };
-        var gallery = new ThemeGallery { Themes = themes, SelectedTheme = SelectedTheme };
+        var gallery = new ThemeGrid { Themes = themes, SelectedTheme = SelectedTheme };
         AutomationProperties.SetName(gallery, $"{name} themes");
         AutomationProperties.SetAutomationId(gallery, "ThemeRow" + string.Concat(name.Where(char.IsLetter)));
         gallery.SelectionChanged += (_, theme) => SelectedTheme = theme;
