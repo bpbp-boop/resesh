@@ -285,6 +285,97 @@ interface. Nautobot's API is close to NetBox's, and Ansible inventory or CSV cou
 
 ---
 
+## Tree health: alerts from existing monitoring (design)
+
+Goal: see where the fleet hurts from the session tree, then go there in one click. resesh
+shows alerts that the team's monitoring already raises; it never polls devices, sets
+thresholds or decides what is healthy. Read-only like NetBox: nothing is acknowledged,
+silenced or written back. Mockup: the "Session tree" board on the design canvas
+(claude.ai/artifact/5uD4AS2gQy4YaDbnNuZvoN).
+
+**Sources** behind an `IAlertSource` interface, next to `IInventorySource`:
+- Zabbix (`problem.get`, with the host from `trigger.get`) and Prometheus Alertmanager
+  (`/api/v2/alerts`) first: the first real install uses Zabbix for network devices and
+  Prometheus for servers and VMs, both at once. LibreNMS (`/api/v0/alerts?state=1`) after.
+- Per-user read-only token in Credential Manager, polled every 30–60 s, plus a manual
+  refresh. The status line under the tree shows each source's alert count, last poll and
+  any error, as the NetBox source does.
+- Alerts that are acknowledged or silenced at the source show muted and don't count.
+
+**Matching an alert to a session**, first hit wins:
+1. A NetBox device id carried by the alert (an Alertmanager label or LibreNMS field, named
+   in source settings).
+2. Hostname, case-insensitive and with a configurable domain suffix stripped, against the
+   inventory device name, then the session name.
+3. IP address against the device's primary/OOB IP or the session's host.
+Your own sessions match too, so this is useful before NetBox lands. Alerts matching nothing
+are counted in the status line ("3 unmatched") with a list, so a broken mapping is visible
+rather than silent.
+
+**Many sources at once.** Mixed estates are the normal case (Zabbix watching the network,
+Prometheus the servers, maybe LibreNMS left over somewhere), so several sources run side by
+side from day one and none is "the" source:
+- Each source polls on its own and keeps its own alert set. The tree shows the union,
+  merged per device after matching, so one device can carry alerts from several sources
+  (a hypervisor down in Prometheus and its switch port down in Zabbix).
+- A device's colour is its worst alert from any source; counts stay per device, so the same
+  outage seen by two systems is one red device, not two. Alerts are not deduplicated
+  across sources: the tooltip lists each with its source, and "Open alert in …" becomes a
+  submenu when there is more than one.
+- A source that fails keeps showing its last alerts, marked stale with their age, and its
+  status line goes red. It never clears its alerts or affects the others, so one
+  unreachable Zabbix doesn't make the network look healthy.
+- Optional scope per source: a NetBox filter or tree folder it applies to (Zabbix → role
+  in switch, router, firewall; Prometheus → servers and VMs). Alerts outside a scope still
+  match but count as unmatched, which catches a source's names colliding with another's
+  devices.
+- Matching settings (id label, domain suffix to strip) are per source, since Zabbix host
+  names and Prometheus `instance` labels rarely follow the same convention.
+- The Problems only chip can narrow to one source from its menu, for "what does Zabbix
+  think is broken".
+
+**Display:**
+- Severity maps to two levels, critical (red) and warning (amber); info is dropped. Each
+  source type has a fixed mapping: Zabbix Disaster and High → critical, Average and Warning
+  → warning, Information and Not classified dropped; Alertmanager's `severity` label
+  (`critical`, `warning`; other values → warning, `info`/`none` dropped).
+- A device with alerts gets a coloured dot and a second line with the worst alert's
+  summary, run through `AgentText.Sanitize` (alert text is remote input). Healthy devices
+  stay plain.
+- Every folder, lens group and root shows red/amber counts of the devices under it, so a
+  collapsed region still says something is wrong. Counts are per device, not per alert.
+- NetBox status other than active (planned, offline, decommissioning) shows the device
+  muted with its status, whatever its alerts.
+- **Problems only** chip above the tree: hides devices without alerts and folders left
+  empty, keeping the current lens.
+- Open tabs to an alerting device get the same badge on the tab; the Sessions rail button
+  gets a dot while any critical alert exists.
+- Context menu adds "Open alert in <source>". Tooltip lists every alert on the device
+  with age.
+- No Windows notifications for fleet alerts by default: the monitoring system already
+  pages people, and a second channel is noise. A per-source opt-in for criticals can come
+  later through the alerts list plumbing.
+
+**Lenses** come from the NetBox design (Location, Role, Platform, Tag, custom); health
+adds nothing to them except the rolled-up counts, which `SessionTreeBuilder` computes
+after building the tree for the active lens.
+
+**Build order:** (1) Zabbix and Alertmanager sources running together, hostname/IP
+matching against your own sessions, merge per device, device dot + reason line + folder
+counts; (2) Problems only, tab and rail badges, per-source status lines with stale and
+unmatched states; (3) NetBox id matching and per-source scopes once the inventory root
+exists; (4) LibreNMS; (5) the Facts sidebar's alert list for the connected host.
+
+**Open questions:**
+- Can scopes be inferred (a source that only ever matches network roles) instead of set
+  by hand?
+- Poll from every desktop or allow a shared relay? Polling is fine at team scale; revisit
+  only if a source's API rate limits bite.
+- Should the alerts list (under Program status, below) show fleet criticals too, or stay
+  about tabs?
+
+---
+
 ## Telnet & serial consoles
 
 Console-cable and terminal-server access — the last standing objection from the SecureCRT
@@ -782,7 +873,8 @@ have `synchronize-panes` if they truly want it.
 | 5 | GSSAPI productization (path chosen by spike) | M | Depends on spike |
 | 6 | NetBox inventory source (read-only root → lenses → config context → console ports) | M–L | Medium |
 | 7 | Remote session agent (zmx fork → snapshot and status → upload → app backend) | L | Medium |
-| 8 | Backlog picks | — | — |
+| 8 | Tree health (Zabbix + Alertmanager together → counts and filter → NetBox matching) | M | Low |
+| 9 | Backlog picks | — | — |
 
 Within connectivity, tunnels, jump hosts and proxies are done; agent auth is what remains.
 Telnet/serial rides directly behind connectivity:
@@ -791,4 +883,5 @@ enumeration + device-arrival plumbing), and together they close the console-cabl
 cheaply. GSSAPI ships last only because its spike must settle the approach first.
 NetBox's first steps (read-only root, lenses, overlays) don't depend on anything above.
 Config-context jump hosts can use the shipped jump hosts, and attribute-based identities wait for
-Identities.
+Identities. Tree health's first step matches your own sessions and doesn't wait for NetBox;
+its lenses and id matching do.
