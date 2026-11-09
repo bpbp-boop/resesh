@@ -1,20 +1,19 @@
-using System.Collections.ObjectModel;
-using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media;
 using Resesh.Core.Storage;
 using Resesh.Terminal;
 
 namespace Resesh.App.Controls;
 
 /// <summary>Themes in rows that wrap to the available width: <see cref="Rows"/> of them, or
-/// all of them when that is null. It sizes to its content rather than scrolling, so every card
-/// it shows is built, none virtualized; past the first row they are added a row at a time
-/// while the window is idle, so a long list never stalls it. The selected theme always shows,
-/// in the last place, when it would otherwise be past the cut. Filtering and reordering never
-/// change the saved choice.</summary>
+/// all of them when that is null. The list has no ScrollViewer of its own, so the page scrolls
+/// over it and its ItemsWrapGrid builds only the cards near the page's viewport, however many
+/// themes it holds. A grid out of view gets its themes once it comes into view, its height
+/// held for them till then. The selected theme always shows, in the last place, when
+/// it would otherwise be past the cut. Filtering and reordering never change the saved choice.</summary>
 public sealed partial class ThemeGrid : UserControl
 {
     public static readonly DependencyProperty ThemesProperty = DependencyProperty.Register(
@@ -32,11 +31,15 @@ public sealed partial class ThemeGrid : UserControl
     private int _columns;
     // Themes shuffled or sorted by name, or null for the catalog's order.
     private List<ThemeChoice>? _order;
-    // Every theme to show, and the ones added to the list so far.
-    private List<ThemeChoice> _target = [];
-    private ObservableCollection<ThemeChoice> _shown = [];
-    // Bumped by each refilter, so rows queued for an older list are dropped.
-    private int _generation;
+    // Every theme to show.
+    private List<ThemeChoice> _shown = [];
+    // Whether the list holds _shown. An ItemsWrapGrid given items before it is laid out in its
+    // place takes the whole window as its view and builds every card that fits, so a grid gets
+    // its themes only once it sits, at its reserved height, in the page's view.
+    private bool _populated;
+    private ScrollViewer? _scroller;
+    // One row of cards with the gap below; every grid shows the same card.
+    private static double s_rowHeight;
 
     public ThemeGrid()
     {
@@ -50,6 +53,14 @@ public sealed partial class ThemeGrid : UserControl
                 ApplyFilter();
                 ColumnsChanged?.Invoke(this, EventArgs.Empty);
             }
+            else
+                PopulateIfVisible();
+        };
+        EffectiveViewportChanged += (_, _) => PopulateIfVisible();
+        ThemeList.SizeChanged += (_, _) =>
+        {
+            if (ThemeList.ContainerFromIndex(0) is FrameworkElement card && card.ActualHeight > 0)
+                s_rowHeight = card.ActualHeight + card.Margin.Bottom;
         };
     }
 
@@ -101,7 +112,7 @@ public sealed partial class ThemeGrid : UserControl
     {
         if (Themes is not { Count: > 1 } themes)
             return;
-        var shown = _target;
+        var shown = _shown;
         var selected = MatchingSelection(shown);
         var place = selected is null ? -1 : shown.IndexOf(selected);
         var order = themes.ToArray();
@@ -140,7 +151,7 @@ public sealed partial class ThemeGrid : UserControl
     {
         var grid = (ThemeGrid)sender;
         // A pick from another row can be past this row's cut; it shows in the last place.
-        if (grid.SelectedTheme is { } theme && !grid._target.Any(shownTheme => Same(shownTheme, theme)))
+        if (grid.SelectedTheme is { } theme && !grid._shown.Any(shownTheme => Same(shownTheme, theme)))
             grid.ApplyFilter();
         else
             grid.FollowSelection();
@@ -156,9 +167,35 @@ public sealed partial class ThemeGrid : UserControl
         if (SelectedTheme is { } selected && shown.Count == limit && !shown.Any(theme => Same(theme, selected))
             && matches.FirstOrDefault(theme => Same(theme, selected)) is { } match)
             shown[^1] = match;
-        _target = shown;
-        var generation = ++_generation;
-        _shown = [.. shown.Take(_columns)];
+        _shown = shown;
+        // An unfilled grid waits for the layout pass that puts it at its new height.
+        if (_populated)
+            Populate();
+        else
+            MinHeight = RowCount * RowHeight;
+    }
+
+    /// <summary>Gives an unfilled grid its themes once it is laid out in the page's view.</summary>
+    private void PopulateIfVisible()
+    {
+        if (_populated || _columns == 0 || ActualHeight < MinHeight - 0.5)
+            return;
+        if (_scroller is null)
+            for (var node = VisualTreeHelper.GetParent(this); node is not null && _scroller is null; node = VisualTreeHelper.GetParent(node))
+                _scroller = node as ScrollViewer;
+        if (_scroller is { } scroller)
+        {
+            var top = TransformToVisual(scroller).TransformPoint(default).Y;
+            if (top > scroller.ViewportHeight || top + ActualHeight < 0)
+                return;
+        }
+        Populate();
+    }
+
+    private void Populate()
+    {
+        _populated = true;
+        MinHeight = 0;
         _updating = true;
         try
         {
@@ -166,35 +203,23 @@ public sealed partial class ThemeGrid : UserControl
             ThemeList.SelectedItem = MatchingSelection(_shown);
         }
         finally { _updating = false; }
-        if (shown.Count > _shown.Count)
-            AfterLayout(generation);
     }
 
-    /// <summary>Adds the next row of cards, then queues the one after it.</summary>
-    private void AddRow(int generation)
-    {
-        if (generation != _generation)
-            return;
-        var end = Math.Min(_target.Count, _shown.Count + _columns);
-        for (var i = _shown.Count; i < end; i++)
-            _shown.Add(_target[i]);
-        if (ThemeList.SelectedItem is null && MatchingSelection(_shown) is not null)
-            FollowSelection();
-        if (_shown.Count < _target.Count)
-            AfterLayout(generation);
-    }
+    private int RowCount => (_shown.Count + _columns - 1) / _columns;
 
-    /// <summary>Queues the next row once the cards just added are laid out. Queued straight
-    /// away, several idle turns can run before one layout pass, which then builds all their
-    /// cards at once and stalls the window.</summary>
-    private void AfterLayout(int generation)
+    /// <summary>A card measured off-screen, until a grid laid out with cards gives the real height.</summary>
+    private static double RowHeight
     {
-        void Laid(object? sender, object args)
+        get
         {
-            ThemeList.LayoutUpdated -= Laid;
-            DispatcherQueue.TryPost(DispatcherQueuePriority.Low, () => AddRow(generation));
+            if (s_rowHeight <= 0)
+            {
+                var card = new ThemeSwatch { Theme = ThemeCatalog.All[0] };
+                card.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+                s_rowHeight = card.DesiredSize.Height + 10;
+            }
+            return s_rowHeight;
         }
-        ThemeList.LayoutUpdated += Laid;
     }
 
     private ThemeChoice? MatchingSelection(IList<ThemeChoice> shown) =>
@@ -205,6 +230,8 @@ public sealed partial class ThemeGrid : UserControl
 
     private void FollowSelection()
     {
+        if (!_populated)
+            return;
         _updating = true;
         try { ThemeList.SelectedItem = MatchingSelection(_shown); }
         finally { _updating = false; }

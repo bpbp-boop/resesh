@@ -2838,3 +2838,27 @@ and only it can be deleted. Explanations live in the README.
   "Show less" and goes back to All. The page owns the tab, so the links ask it through
   `ThemeCategoryRows.CategoryRequested`. Shuffling keeps the current theme in its place and
   never changes the choice; either order lasts until the theme list is rebuilt.
+
+## 2026-11-09 - Theme grids virtualize against the page
+
+- `ThemeGrid`'s ListView has a template with only an `ItemsPresenter`. With the default
+  template's ScrollViewer, even with scrolling off, the list was as tall as its items and
+  built every card it held, so the grid used to add a row per layout pass. With no
+  ScrollViewer of its own, `ItemsWrapGrid` virtualizes against the page's ScrollViewer: a
+  category tab of 209 themes builds the cards in view plus `CacheLength="1"` (half a screen
+  each way), and leaving it tears down those instead of all of them. Tearing down a card
+  costs about 1 ms, so the old way froze the window for 220 ms on the way back to All.
+- An `ItemsWrapGrid` given items before it has been laid out in its place takes the whole
+  window as its view and builds every card that fits: opening Theme built both rows of all
+  eight sections in one frame. So a grid out of view holds its height (`MinHeight`, rows
+  times a card's height, first measured off-screen and then taken from a laid-out card) and
+  gets its themes in the layout pass that puts it in the view (`PopulateIfVisible`).
+- The eight ANSI dots on a card are one `Path` of ellipse geometries filled by a
+  `LinearGradientBrush` with a hard stop at each dot's edges. Eight `Ellipse` elements (or
+  eight round `Border`s, measured the same) were a fifth of a card's build and teardown cost.
+  Swapping the sample lines' runs for `TextHighlighter`s, or the four lines for one
+  `TextBlock`, or Cascadia Mono for Consolas, changed nothing measurable.
+- Measured in a Debug build at 1906x1073 (three columns), as the longest frame: opening Theme
+  119 ms to 92 ms (most of what remains is the section's controls, 52 ms with no cards);
+  All after a category tab 275 ms to 49 ms; typing a search 62 ms to 32 ms; clearing it
+  69 ms to 28 ms; opening a category tab 72 ms to 40 ms.

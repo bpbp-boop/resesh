@@ -105,16 +105,18 @@ test("theme galleries are virtualized, searchable and keep their own selection",
   assert.match(galleryCode, /if \(_updating \|\| ThemeList\.SelectedItem is not ThemeChoice picked\)/);
 });
 
-test("Settings lays themes out in wrapping grids that show a few rows at a time", () => {
+test("Settings lays themes out in wrapping grids that build only the cards in view", () => {
   const rows = read("src", "App", "Controls", "ThemeCategoryRows.cs");
   const grid = read("src", "App", "Controls", "ThemeGrid.xaml");
   const gridCode = read("src", "App", "Controls", "ThemeGrid.xaml.cs");
   assert.match(rows, /new ThemeGrid \{/);
   assert.match(grid, /<ItemsWrapGrid Orientation="Horizontal"/);
-  // The grid grows with the page, so a wheel turn over it scrolls the page.
-  assert.match(grid, /ScrollViewer\.VerticalScrollMode="Disabled"/);
-  // A long list is added a row at a time, after each layout pass, so it never stalls the window.
-  assert.match(gridCode, /ThemeList\.LayoutUpdated \+= Laid/);
+  // No ScrollViewer of its own: a wheel turn over it scrolls the page, and the ItemsWrapGrid
+  // virtualizes against the page's viewport instead of building every card.
+  assert.match(grid, /<ControlTemplate TargetType="ListView">\s*<ItemsPresenter \/>\s*<\/ControlTemplate>/);
+  // A grid out of view gets its themes once it is laid out in view, its height held till then.
+  assert.match(gridCode, /EffectiveViewportChanged \+= \(_, _\) => PopulateIfVisible\(\)/);
+  assert.match(gridCode, /MinHeight = RowCount \* RowHeight/);
   // The current theme shows even when it is past the cut.
   assert.match(gridCode, /shown\[\^1\] = match/);
 });

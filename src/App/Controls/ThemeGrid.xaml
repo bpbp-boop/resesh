@@ -4,21 +4,24 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:Resesh.App.Controls"
     xmlns:storage="using:Resesh.Core.Storage">
-    <!-- Grows with the page instead of scrolling itself, so a wheel turn scrolls the page. -->
+    <!-- No ScrollViewer in the template: the grid grows with the page, so a wheel turn scrolls
+         the page, and the ItemsWrapGrid virtualizes against the page's viewport. With one,
+         even with scrolling off, the list is as tall as its items and builds every card. -->
         <ListView
             x:Name="ThemeList"
             SelectionMode="Single"
             IsMultiSelectCheckBoxEnabled="False"
             IsItemClickEnabled="False"
-            ScrollViewer.HorizontalScrollMode="Disabled"
-            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-            ScrollViewer.VerticalScrollMode="Disabled"
-            ScrollViewer.VerticalScrollBarVisibility="Disabled"
             SelectionChanged="ThemeList_SelectionChanged"
             ContainerContentChanging="ThemeList_ContainerContentChanging">
+            <ListView.Template>
+                <ControlTemplate TargetType="ListView">
+                    <ItemsPresenter />
+                </ControlTemplate>
+            </ListView.Template>
             <ListView.ItemsPanel>
                 <ItemsPanelTemplate>
-                    <ItemsWrapGrid Orientation="Horizontal" />
+                    <ItemsWrapGrid Orientation="Horizontal" CacheLength="1" />
                 </ItemsPanelTemplate>
             </ListView.ItemsPanel>
             <ListView.ItemContainerStyle>
