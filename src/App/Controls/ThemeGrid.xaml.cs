@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -37,6 +38,9 @@ public sealed partial class ThemeGrid : UserControl
     // place takes the whole window as its view and builds every card that fits, so a grid gets
     // its themes only once it sits, at its reserved height, in the page's view.
     private bool _populated;
+    // The list's items, edited in place. A new ItemsSource or a Clear resets the list, and a
+    // list with no ScrollViewer of its own then scrolls the page's to the top.
+    private readonly ObservableCollection<ThemeChoice> _items = [];
     private ScrollViewer? _scroller;
     // One row of cards with the gap below; every grid shows the same card.
     private static double s_rowHeight;
@@ -44,6 +48,7 @@ public sealed partial class ThemeGrid : UserControl
     public ThemeGrid()
     {
         InitializeComponent();
+        ThemeList.ItemsSource = _items;
         SizeChanged += (_, args) =>
         {
             var columns = Math.Max(1, (int)((args.NewSize.Width + 10) / ItemStride));
@@ -199,7 +204,15 @@ public sealed partial class ThemeGrid : UserControl
         _updating = true;
         try
         {
-            ThemeList.ItemsSource = _shown;
+            for (var i = 0; i < _shown.Count; i++)
+            {
+                if (i == _items.Count)
+                    _items.Add(_shown[i]);
+                else if (!ReferenceEquals(_items[i], _shown[i]))
+                    _items[i] = _shown[i];
+            }
+            while (_items.Count > _shown.Count)
+                _items.RemoveAt(_items.Count - 1);
             ThemeList.SelectedItem = MatchingSelection(_shown);
         }
         finally { _updating = false; }

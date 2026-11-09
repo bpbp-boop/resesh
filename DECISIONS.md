@@ -2873,3 +2873,13 @@ and only it can be deleted. Explanations live in the README.
   Our copies of those two keys are what the lookup finds, so recoloring them in place fails.
 - `Apply` puts a fresh brush in the dictionary when a copy refuses its color. WinUI looks the
   two keys up again on every draw, so the fresh brush is used from the next frame.
+
+## 2026-11-10 - Theme grids edit their items in place
+
+- A `ListView` with no ScrollViewer in its template scrolls the nearest one, the Settings page's,
+  to the top whenever its items reset: a new `ItemsSource`, or `Clear()` on its collection. Each
+  theme grid got its themes as a new `ItemsSource` when it scrolled into view, so scrolling down
+  the Theme section jumped back to the Traditional header, and sorting or shuffling a lower
+  section did the same. `ThemeGrid` now sets its `ItemsSource` once, to an
+  `ObservableCollection`, and syncs it with adds, replaces and removes. Going from a category
+  tab's 241 themes back to 8 takes about 1 ms.
