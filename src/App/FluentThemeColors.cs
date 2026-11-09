@@ -39,7 +39,7 @@ internal static class FluentThemeColors
 {
     /// <summary>One recolorable copy, a brush or a gradient stop, with its Fluent original
     /// (0xAARRGGBB) from the set <see cref="_originalsDark"/> names.</summary>
-    private sealed record Entry(uint Original, bool IsText, SolidColorBrush? Brush, GradientStop? Stop);
+    private sealed record Entry(object Key, uint Original, bool IsText, SolidColorBrush? Brush, GradientStop? Stop);
 
     private static readonly List<Entry> Entries = [];
 
@@ -90,16 +90,38 @@ internal static class FluentThemeColors
         if (!_installed)
             return;
         var target = Target(palette);
-        foreach (var entry in Entries)
+        for (var i = 0; i < Entries.Count; i++)
         {
+            var entry = Entries[i];
             var color = Argb(ThemeRetint.Map(entry.Original, _originalsDark, target, entry.IsText));
-            if (entry.Brush is { } brush)
-                brush.Color = color;
-            else
+            if (entry.Brush is not { } brush)
                 entry.Stop!.Color = color;
+            else if (!TrySetColor(brush, color))
+            {
+                var fresh = new SolidColorBrush { Color = color, Opacity = brush.Opacity };
+                _copies![entry.Key] = fresh;
+                Entries[i] = entry with { Brush = fresh };
+            }
         }
         foreach (var (key, role) in AppBrushes)
             AppCopies[key].Color = role(palette);
+    }
+
+    /// <summary>Sets a copy's color, or returns false when WinUI has frozen it. Drawing a text
+    /// highlight looks up TextControlHighlighterForeground and -Background and freezes what it
+    /// finds (TextHighlightRenderer.cpp), so after that a set fails with E_ACCESSDENIED. WinUI
+    /// looks those two up again on every draw, so a fresh brush in the dictionary is picked up.</summary>
+    private static bool TrySetColor(SolidColorBrush brush, Color color)
+    {
+        try
+        {
+            brush.Color = color;
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>An app color chosen on Fluent's grey scale (0xAARRGGBB, for its dark or light
@@ -128,7 +150,7 @@ internal static class FluentThemeColors
             if (Brush(value) is { } solid)
             {
                 var brush = new SolidColorBrush { Opacity = solid.Opacity };
-                Entries.Add(new Entry(Argb(solid.Color), isText, brush, null));
+                Entries.Add(new Entry(key, Argb(solid.Color), isText, brush, null));
                 copies[key] = brush;
             }
             else if (value is LinearGradientBrush gradient)
@@ -137,7 +159,7 @@ internal static class FluentThemeColors
                 foreach (var stop in gradient.GradientStops)
                 {
                     var copyStop = new GradientStop { Offset = stop.Offset };
-                    Entries.Add(new Entry(Argb(stop.Color), isText, null, copyStop));
+                    Entries.Add(new Entry(key, Argb(stop.Color), isText, null, copyStop));
                     stops.Add(copyStop);
                 }
                 copies[key] = new LinearGradientBrush
