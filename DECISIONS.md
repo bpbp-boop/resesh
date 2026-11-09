@@ -2862,3 +2862,14 @@ and only it can be deleted. Explanations live in the README.
   119 ms to 92 ms (most of what remains is the section's controls, 52 ms with no cards);
   All after a category tab 275 ms to 49 ms; typing a search 62 ms to 32 ms; clearing it
   69 ms to 28 ms; opening a category tab 72 ms to 40 ms.
+## 2026-11-09 - WinUI freezes the text highlighter brushes
+
+- With theme colors set to Everything, changing the theme could crash with
+  `UnauthorizedAccessException` (E_ACCESSDENIED) from `SolidColorBrush.Color` in
+  `FluentThemeColors.Apply`. Seen after locking and unlocking Windows with a session open.
+- Drawing a `TextBlock` with `TextHighlighters` (theme swatches, History) looks up
+  `TextControlHighlighterForeground` and `-Background` and "simulates freezing" the brushes it
+  finds (`TextHighlightRenderer.cpp`); `SetValue` on a frozen object returns E_ACCESSDENIED.
+  Our copies of those two keys are what the lookup finds, so recoloring them in place fails.
+- `Apply` puts a fresh brush in the dictionary when a copy refuses its color. WinUI looks the
+  two keys up again on every draw, so the fresh brush is used from the next frame.
