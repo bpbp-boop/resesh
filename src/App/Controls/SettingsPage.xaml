@@ -263,12 +263,12 @@
                                       AutomationProperties.Name="Color the app with the theme"
                                       AutomationProperties.AutomationId="SettingsThemeColors" />
                         </toolkit:SettingsCard>
-                        <controls:ThemeFilterBar x:Name="ThemeFilter" Margin="0,16,0,0" ShowCategories="False"
+                        <controls:ThemeFilterBar x:Name="ThemeFilter" Margin="0,16,0,0"
                                                  QueryChanged="ThemeFilter_QueryChanged" />
                         </StackPanel>
                         </Grid>
 
-                        <!-- Theme: every theme, a row per category. -->
+                        <!-- Theme: every theme, a section per category. -->
                         <StackPanel x:Name="FixedThemePanel" Margin="0,12,0,0"
                                     Visibility="{x:Bind app:PresentationValues.Collapsed(ViewModel.IsFollowingWindows), Mode=OneWay}">
                             <controls:ThemeCategoryRows x:Name="FixedGallery"

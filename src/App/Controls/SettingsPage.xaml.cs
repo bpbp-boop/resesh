@@ -23,6 +23,10 @@ public sealed partial class SettingsPage : UserControl
         ViewModel = viewModel;
         InitializeComponent();
         ThemeFilter.ShowModes = !ViewModel.IsFollowingWindows;
+        // A section's "See all" and "Show less" pick the category tab, so the bar stays the one filter.
+        FixedGallery.CategoryRequested += ThemeFilter.ShowCategory;
+        LightGallery.CategoryRequested += ThemeFilter.ShowCategory;
+        DarkGallery.CategoryRequested += ThemeFilter.ShowCategory;
         ViewModel.PropertyChanged += (_, e) =>
         {
             if (string.IsNullOrEmpty(e.PropertyName) || e.PropertyName == nameof(SettingsViewModel.IsFollowingWindows))

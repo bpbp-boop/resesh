@@ -118,6 +118,20 @@ test("Settings lays themes out in wrapping grids that show a few rows at a time"
   assert.match(gridCode, /shown\[\^1\] = match/);
 });
 
+test("theme sections link to their category tab and back, and shuffle in place", () => {
+  const rows = read("src", "App", "Controls", "ThemeCategoryRows.cs");
+  const gridCode = read("src", "App", "Controls", "ThemeGrid.xaml.cs");
+  const filter = read("src", "App", "Controls", "ThemeFilterBar.xaml.cs");
+  assert.match(rows, /"See all"/);
+  assert.match(rows, /"Show less"/);
+  assert.match(rows, /grid\.Shuffle\(\)/);
+  assert.match(gridCode, /Random\.Shared\.Shuffle/);
+  // Every section, Other included, has a tab to open.
+  assert.match(filter, /ThemeCategories\.OtherName/);
+  for (const gallery of ["Fixed", "Light", "Dark"])
+    assert.match(pageCode, new RegExp(`${gallery}Gallery\\.CategoryRequested \\+= ThemeFilter\\.ShowCategory`));
+});
+
 test("the Settings tab names the open section", () => {
   assert.match(pageCode, /SectionShown\?\.Invoke\(section\)/);
   assert.match(read("src", "App", "MainWindow.xaml.cs"), /page\.SectionShown \+= section => tab\.SettingsSection = section/);

@@ -2812,7 +2812,7 @@ and only it can be deleted. Explanations live in the README.
 - Converted sessions have `Username` cleared: a leftover username would override the
   identity's.
 
-## 2026-11-09 - Compact Settings rows and wrapping theme grids
+## 2026-11-09 - Compact Settings rows and theme sections
 
 - Settings rows are 48px high with 8px vertical padding, set by overriding the toolkit's
   `SettingsCardMinHeight` and `SettingsCardPadding` in `SettingsPage.xaml`'s resources. With
@@ -2827,3 +2827,10 @@ and only it can be deleted. Explanations live in the README.
   always visible. Welcome keeps the carousel (`ThemeGallery`), which fits its narrow column.
 - The Theme section is up to 1640px wide (five columns) while its settings and search stay
   at the other sections' width.
+- The theme filter puts light/dark beside the search box and the categories (All, each
+  category, then Other for the uncategorized) on their own row: they combine ("dark and
+  cool"), which one row of tabs could not express. On All, each section has a count, a die
+  that reshuffles it and "See all", which opens that category's tab; there the link reads
+  "Show less" and goes back to All. The page owns the tab, so the links ask it through
+  `ThemeCategoryRows.CategoryRequested`. Shuffling keeps the current theme in its place and
+  never changes the choice; the order lasts until the theme list is rebuilt.
