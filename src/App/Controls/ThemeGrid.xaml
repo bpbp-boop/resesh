@@ -5,7 +5,6 @@
     xmlns:controls="using:Resesh.App.Controls"
     xmlns:storage="using:Resesh.Core.Storage">
     <!-- Grows with the page instead of scrolling itself, so a wheel turn scrolls the page. -->
-    <StackPanel>
         <ListView
             x:Name="ThemeList"
             SelectionMode="Single"
@@ -44,6 +43,4 @@
                 </DataTemplate>
             </ListView.ItemTemplate>
         </ListView>
-        <HyperlinkButton x:Name="MoreButton" Content="Show more" Visibility="Collapsed" Click="MoreButton_Click" />
-    </StackPanel>
 </UserControl>

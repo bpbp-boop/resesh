@@ -113,7 +113,8 @@ test("Settings lays themes out in wrapping grids that show a few rows at a time"
   assert.match(grid, /<ItemsWrapGrid Orientation="Horizontal"/);
   // The grid grows with the page, so a wheel turn over it scrolls the page.
   assert.match(grid, /ScrollViewer\.VerticalScrollMode="Disabled"/);
-  assert.match(grid, /x:Name="MoreButton"/);
+  // A long list is added a row at a time, after each layout pass, so it never stalls the window.
+  assert.match(gridCode, /ThemeList\.LayoutUpdated \+= Laid/);
   // The current theme shows even when it is past the cut.
   assert.match(gridCode, /shown\[\^1\] = match/);
 });
@@ -126,6 +127,9 @@ test("theme sections link to their category tab and back, and shuffle in place",
   assert.match(rows, /"Show less"/);
   assert.match(rows, /grid\.Shuffle\(\)/);
   assert.match(gridCode, /Random\.Shared\.Shuffle/);
+  assert.match(rows, /grid\.SortByName\(\)/);
+  // "See all" shows every theme of the category, not a few more rows.
+  assert.match(rows, /section\.Grid\.Rows = focused \? null : OverviewRows/);
   // Every section, Other included, has a tab to open.
   assert.match(filter, /ThemeCategories\.OtherName/);
   for (const gallery of ["Fixed", "Light", "Dark"])

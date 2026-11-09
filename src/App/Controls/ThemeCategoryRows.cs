@@ -11,8 +11,9 @@ namespace Resesh.App.Controls;
 /// <summary>Themes in a section per category, each its own <see cref="ThemeGrid"/>, then
 /// "Other" for themes in no category. With <see cref="Query"/> on all categories every
 /// section shows a couple of rows and "See all"; with it on one category only that section
-/// shows, with "Show more" and "Show less". The page owns the category filter, so both links
-/// ask it through <see cref="CategoryRequested"/>. A theme in several categories shows in
+/// shows, every theme of it, with "Show less". The page owns the category filter, so both
+/// links ask it through <see cref="CategoryRequested"/>. Each section can be sorted A to Z or
+/// shuffled, and keeps that order in both views. A theme in several categories shows in
 /// each section, selected in all of them. Sections with nothing matching hide.</summary>
 public sealed partial class ThemeCategoryRows : UserControl
 {
@@ -24,7 +25,6 @@ public sealed partial class ThemeCategoryRows : UserControl
         nameof(Query), typeof(ThemeQuery), typeof(ThemeCategoryRows), new PropertyMetadata(ThemeQuery.All, Refilter));
 
     private const int OverviewRows = 2;
-    private const int CategoryRows = 4;
 
     // A die showing five: a rounded outline and its pips, filled even-odd so the face is hollow.
     private const string DiePath =
@@ -123,23 +123,24 @@ public sealed partial class ThemeCategoryRows : UserControl
         heading.Children.Add(title);
         heading.Children.Add(count);
 
-        var shuffle = new Button
+        var sort = HeaderButton($"Sort {name} themes A to Z", new TextBlock
         {
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-            BorderThickness = new Thickness(0),
-            Padding = new Thickness(8),
-            Content = new Viewbox
-            {
-                Width = 16,
-                Height = 16,
-                Child = new PathIcon { Data = PresentationValues.IconPathGeometry(DiePath) },
-            },
-        };
-        var shuffleName = $"Shuffle {name} themes";
-        ToolTipService.SetToolTip(shuffle, shuffleName);
-        AutomationProperties.SetName(shuffle, shuffleName);
+            Text = "A–Z",
+            FontSize = 12,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Height = 16,
+            LineHeight = 16,
+            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+        });
+        var shuffle = HeaderButton($"Shuffle {name} themes", new Viewbox
+        {
+            Width = 16,
+            Height = 16,
+            Child = new PathIcon { Data = PresentationValues.IconPathGeometry(DiePath) },
+        });
         var toggle = new HyperlinkButton();
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, VerticalAlignment = VerticalAlignment.Center };
+        actions.Children.Add(sort);
         actions.Children.Add(shuffle);
         actions.Children.Add(toggle);
 
@@ -151,13 +152,14 @@ public sealed partial class ThemeCategoryRows : UserControl
         header.Children.Add(heading);
         header.Children.Add(actions);
 
-        var grid = new ThemeGrid { Themes = themes, SelectedTheme = SelectedTheme, FirstRows = OverviewRows, CanShowMore = false };
+        var grid = new ThemeGrid { Themes = themes, SelectedTheme = SelectedTheme, Rows = OverviewRows };
         AutomationProperties.SetName(grid, $"{name} themes");
         AutomationProperties.SetAutomationId(grid, "ThemeRow" + string.Concat(name.Where(char.IsLetter)));
         grid.SelectionChanged += (_, theme) => SelectedTheme = theme;
         grid.ColumnsChanged += (_, _) => header.Width = grid.RowWidth - 1;
 
         var section = new Section(category, other, header, count, toggle, grid, themes);
+        sort.Click += (_, _) => grid.SortByName();
         shuffle.Click += (_, _) => grid.Shuffle();
         toggle.Click += (_, _) =>
         {
@@ -170,6 +172,21 @@ public sealed partial class ThemeCategoryRows : UserControl
         _panel.Children.Add(header);
         _panel.Children.Add(grid);
         _sections.Add(section);
+    }
+
+    /// <summary>A quiet icon button for a section header, named by its tooltip.</summary>
+    private static Button HeaderButton(string name, UIElement icon)
+    {
+        var button = new Button
+        {
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(8),
+            Content = icon,
+        };
+        ToolTipService.SetToolTip(button, name);
+        AutomationProperties.SetName(button, name);
+        return button;
     }
 
     private void ApplyQuery()
@@ -187,12 +204,7 @@ public sealed partial class ThemeCategoryRows : UserControl
             section.Header.Visibility = section.Grid.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
             section.Count.Text = matching.ToString("N0");
             section.Toggle.Content = focused ? "Show less" : "See all";
-            // Only on a change: each one lays the grid's cards out again.
-            if (section.Grid.CanShowMore != focused)
-                section.Grid.CanShowMore = focused;
-            var rows = focused ? CategoryRows : OverviewRows;
-            if (section.Grid.FirstRows != rows)
-                section.Grid.FirstRows = rows;
+            section.Grid.Rows = focused ? null : OverviewRows;
             section.Grid.Query = gridQuery;
         }
         _noMatch.Visibility = anyShown ? Visibility.Collapsed : Visibility.Visible;

@@ -2821,16 +2821,20 @@ and only it can be deleted. Explanations live in the README.
   `MeasureOverride` (COMException 0x80004005). `SettingsExpander`'s header keeps its own
   height whichever way `SettingsExpanderHeaderPadding` or `ExpanderMinHeight` is set.
 - Settings > Theme shows each category as a wrapping grid (`ThemeGrid`) instead of a sideways
-  carousel: two rows at first, four more per "Show more". The grid sizes to its content so
-  the page scrolls over it, which means it realizes every card it shows; the row cap keeps
-  that bounded. The current theme takes the last place when it is past the cut, so it is
-  always visible. Welcome keeps the carousel (`ThemeGallery`), which fits its narrow column.
+  carousel: two rows on All, every theme on the category's own tab. The grid sizes to its
+  content so the page scrolls over it, which means it builds every card it shows, about
+  14 ms each in a Debug build (3.4 s for 243 at once). So past the first row it adds a row
+  at a time, each queued after the previous row's layout pass: queued straight away, several
+  rows ran before one layout and built together, stalling the window for 700+ ms. The
+  current theme takes the last place when it is past the cut, so it is always visible.
+  Welcome keeps the carousel (`ThemeGallery`), which fits its narrow column.
 - The Theme section is up to 1640px wide (five columns) while its settings and search stay
   at the other sections' width.
-- The theme filter puts light/dark beside the search box and the categories (All, each
-  category, then Other for the uncategorized) on their own row: they combine ("dark and
-  cool"), which one row of tabs could not express. On All, each section has a count, a die
-  that reshuffles it and "See all", which opens that category's tab; there the link reads
+- The theme filter puts light/dark in a dropdown beside the search box and the categories
+  (All, each category, then Other for the uncategorized) on a row of tabs: they combine
+  ("dark and cool"), which one row of tabs could not express, and a second row of tabs beside
+  the search box looked out of place. On All, each section has a count, A–Z and a die that
+  reorder it, and "See all", which opens that category's tab; there the link reads
   "Show less" and goes back to All. The page owns the tab, so the links ask it through
   `ThemeCategoryRows.CategoryRequested`. Shuffling keeps the current theme in its place and
-  never changes the choice; the order lasts until the theme list is rebuilt.
+  never changes the choice; either order lasts until the theme list is rebuilt.

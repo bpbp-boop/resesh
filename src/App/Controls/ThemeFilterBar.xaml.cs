@@ -18,24 +18,24 @@ public sealed partial class ThemeFilterBar : UserControl
         InitializeComponent();
         SearchBox.PlaceholderText = $"Search {ThemeCatalog.All.Count:N0} themes";
         foreach (var (name, light) in new (string, bool?)[] { ("Light & dark", null), ("Light", true), ("Dark", false) })
-            ModeBar.Items.Add(Item(name, light));
+            ModeBox.Items.Add(new ComboBoxItem { Content = name, Tag = (object?)light ?? "any" });
         CategoryBar.Items.Add(Item("All", ThemeCategory.None));
         foreach (var (category, name) in ThemeCategories.All)
             CategoryBar.Items.Add(Item(name, category));
         CategoryBar.Items.Add(Item(ThemeCategories.OtherName, OtherTag));
-        ModeBar.SelectedItem = ModeBar.Items[0];
+        ModeBox.SelectedIndex = 0;
         CategoryBar.SelectedItem = CategoryBar.Items[0];
     }
 
     /// <summary>Adds the light/dark choice, for a gallery that lists both.</summary>
     public bool ShowModes
     {
-        get => ModeBar.Visibility == Visibility.Visible;
+        get => ModeBox.Visibility == Visibility.Visible;
         set
         {
-            ModeBar.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
+            ModeBox.Visibility = value ? Visibility.Visible : Visibility.Collapsed;
             if (!value)
-                ModeBar.SelectedItem = ModeBar.Items[0];
+                ModeBox.SelectedIndex = 0;
         }
     }
 
@@ -60,11 +60,11 @@ public sealed partial class ThemeFilterBar : UserControl
         return item;
     }
 
-    private static SelectorBarItem Item(string text, bool? light) => Item(text, (object?)light ?? "any");
-
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs args) => Update();
 
     private void Bar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args) => Update();
+
+    private void ModeBox_SelectionChanged(object sender, SelectionChangedEventArgs args) => Update();
 
     private void Update()
     {
@@ -72,7 +72,7 @@ public sealed partial class ThemeFilterBar : UserControl
         var query = new ThemeQuery(
             SearchBox.Text,
             tag is ThemeCategory category ? category : ThemeCategory.None,
-            ModeBar.SelectedItem?.Tag is bool light ? light : null,
+            (ModeBox.SelectedItem as ComboBoxItem)?.Tag is bool light ? light : null,
             Equals(tag, OtherTag));
         if (query == _query)
             return;

@@ -3,8 +3,8 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- Search with light or dark beside it (where a gallery mixes both), then the categories.
-         Light or dark and a category combine, so they are separate single-select bars.
-         Items are added in code from ThemeCategories.All. -->
+         Light or dark and a category combine, so light or dark is a dropdown rather than a
+         second row of tabs. Items are added in code from ThemeCategories.All. -->
     <StackPanel Spacing="4">
         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
             <TextBox x:Name="SearchBox"
@@ -12,11 +12,12 @@
                      TextChanged="SearchBox_TextChanged"
                      AutomationProperties.Name="Search themes"
                      AutomationProperties.AutomationId="ThemeSearch" />
-            <SelectorBar x:Name="ModeBar" Grid.Column="1" Visibility="Collapsed"
-                         VerticalAlignment="Center"
-                         SelectionChanged="Bar_SelectionChanged"
-                         AutomationProperties.Name="Light or dark"
-                         AutomationProperties.AutomationId="ThemeModeFilter" />
+            <ComboBox x:Name="ModeBox" Grid.Column="1" Visibility="Collapsed"
+                      MinWidth="140"
+                      VerticalAlignment="Center"
+                      SelectionChanged="ModeBox_SelectionChanged"
+                      AutomationProperties.Name="Light or dark"
+                      AutomationProperties.AutomationId="ThemeModeFilter" />
         </Grid>
         <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto"
                       VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">

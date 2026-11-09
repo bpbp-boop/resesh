@@ -1,16 +1,20 @@
+using System.Collections.ObjectModel;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Resesh.Core.Storage;
+using Resesh.Terminal;
 
 namespace Resesh.App.Controls;
 
-/// <summary>Themes in rows that wrap to the available width, <see cref="FirstRows"/> rows at
-/// first and, when <see cref="CanShowMore"/>, more on request. It sizes to its content rather
-/// than scrolling, so it shows only what it has realized: every card is built, none
-/// virtualized. The selected theme always shows, in the last place, when it would otherwise be
-/// past the cut. Filtering and shuffling never change the saved choice.</summary>
+/// <summary>Themes in rows that wrap to the available width: <see cref="Rows"/> of them, or
+/// all of them when that is null. It sizes to its content rather than scrolling, so every card
+/// it shows is built, none virtualized; past the first row they are added a row at a time
+/// while the window is idle, so a long list never stalls it. The selected theme always shows,
+/// in the last place, when it would otherwise be past the cut. Filtering and reordering never
+/// change the saved choice.</summary>
 public sealed partial class ThemeGrid : UserControl
 {
     public static readonly DependencyProperty ThemesProperty = DependencyProperty.Register(
@@ -20,17 +24,19 @@ public sealed partial class ThemeGrid : UserControl
     public static readonly DependencyProperty QueryProperty = DependencyProperty.Register(
         nameof(Query), typeof(ThemeQuery), typeof(ThemeGrid), new PropertyMetadata(ThemeQuery.All, Reset));
 
-    private const int MoreRows = 4;
     // ThemeSwatch's width plus the container's right margin.
     private const double ItemStride = 296 + 10;
 
     private bool _updating;
-    private int _firstRows = 2;
-    private int _rows = 2;
+    private int? _rows = 2;
     private int _columns;
-    private bool _canShowMore = true;
-    // Themes in a shuffled order, or null for their own order.
+    // Themes shuffled or sorted by name, or null for the catalog's order.
     private List<ThemeChoice>? _order;
+    // Every theme to show, and the ones added to the list so far.
+    private List<ThemeChoice> _target = [];
+    private ObservableCollection<ThemeChoice> _shown = [];
+    // Bumped by each refilter, so rows queued for an older list are dropped.
+    private int _generation;
 
     public ThemeGrid()
     {
@@ -65,24 +71,15 @@ public sealed partial class ThemeGrid : UserControl
         set => SetValue(QueryProperty, value ?? ThemeQuery.All);
     }
 
-    /// <summary>Rows shown before any "Show more"; setting it collapses back to them.</summary>
-    public int FirstRows
+    /// <summary>How many rows to show, or null for every matching theme.</summary>
+    public int? Rows
     {
-        get => _firstRows;
+        get => _rows;
         set
         {
-            _firstRows = _rows = Math.Max(1, value);
-            ApplyFilter();
-        }
-    }
-
-    /// <summary>Offers "Show more" when themes are past the cut.</summary>
-    public bool CanShowMore
-    {
-        get => _canShowMore;
-        set
-        {
-            _canShowMore = value;
+            if (_rows == value)
+                return;
+            _rows = value is { } rows ? Math.Max(1, rows) : null;
             ApplyFilter();
         }
     }
@@ -104,7 +101,7 @@ public sealed partial class ThemeGrid : UserControl
     {
         if (Themes is not { Count: > 1 } themes)
             return;
-        var shown = ThemeList.ItemsSource as List<ThemeChoice> ?? [];
+        var shown = _target;
         var selected = MatchingSelection(shown);
         var place = selected is null ? -1 : shown.IndexOf(selected);
         var order = themes.ToArray();
@@ -123,24 +120,27 @@ public sealed partial class ThemeGrid : UserControl
         ApplyFilter();
     }
 
+    /// <summary>Puts the themes in name order, A to Z.</summary>
+    public void SortByName()
+    {
+        _order = Themes?.OrderBy(theme => theme.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        ApplyFilter();
+    }
+
     private static void ThemesUpdated(DependencyObject sender, DependencyPropertyChangedEventArgs args)
     {
         ((ThemeGrid)sender)._order = null;
         Reset(sender, args);
     }
 
-    private static void Reset(DependencyObject sender, DependencyPropertyChangedEventArgs args)
-    {
-        var grid = (ThemeGrid)sender;
-        grid._rows = grid._firstRows;
-        grid.ApplyFilter();
-    }
+    private static void Reset(DependencyObject sender, DependencyPropertyChangedEventArgs args) =>
+        ((ThemeGrid)sender).ApplyFilter();
 
     private static void SelectionUpdated(DependencyObject sender, DependencyPropertyChangedEventArgs args)
     {
         var grid = (ThemeGrid)sender;
         // A pick from another row can be past this row's cut; it shows in the last place.
-        if (grid.SelectedTheme is { } theme && grid.ThemeList.ItemsSource is List<ThemeChoice> shown && !shown.Any(shownTheme => Same(shownTheme, theme)))
+        if (grid.SelectedTheme is { } theme && !grid._target.Any(shownTheme => Same(shownTheme, theme)))
             grid.ApplyFilter();
         else
             grid.FollowSelection();
@@ -151,22 +151,53 @@ public sealed partial class ThemeGrid : UserControl
         if (_columns == 0)
             return; // laid out once the width is known
         var matches = ((IEnumerable<ThemeChoice>?)_order ?? Themes)?.Where(Query.Matches).ToList() ?? [];
-        var limit = _columns * _rows;
+        var limit = _rows is { } rows ? _columns * rows : int.MaxValue;
         var shown = matches.Take(limit).ToList();
         if (SelectedTheme is { } selected && shown.Count == limit && !shown.Any(theme => Same(theme, selected))
             && matches.FirstOrDefault(theme => Same(theme, selected)) is { } match)
             shown[^1] = match;
+        _target = shown;
+        var generation = ++_generation;
+        _shown = [.. shown.Take(_columns)];
         _updating = true;
         try
         {
-            ThemeList.ItemsSource = shown;
-            ThemeList.SelectedItem = MatchingSelection(shown);
+            ThemeList.ItemsSource = _shown;
+            ThemeList.SelectedItem = MatchingSelection(_shown);
         }
         finally { _updating = false; }
-        MoreButton.Visibility = _canShowMore && matches.Count > limit ? Visibility.Visible : Visibility.Collapsed;
+        if (shown.Count > _shown.Count)
+            AfterLayout(generation);
     }
 
-    private ThemeChoice? MatchingSelection(List<ThemeChoice> shown) =>
+    /// <summary>Adds the next row of cards, then queues the one after it.</summary>
+    private void AddRow(int generation)
+    {
+        if (generation != _generation)
+            return;
+        var end = Math.Min(_target.Count, _shown.Count + _columns);
+        for (var i = _shown.Count; i < end; i++)
+            _shown.Add(_target[i]);
+        if (ThemeList.SelectedItem is null && MatchingSelection(_shown) is not null)
+            FollowSelection();
+        if (_shown.Count < _target.Count)
+            AfterLayout(generation);
+    }
+
+    /// <summary>Queues the next row once the cards just added are laid out. Queued straight
+    /// away, several idle turns can run before one layout pass, which then builds all their
+    /// cards at once and stalls the window.</summary>
+    private void AfterLayout(int generation)
+    {
+        void Laid(object? sender, object args)
+        {
+            ThemeList.LayoutUpdated -= Laid;
+            DispatcherQueue.TryPost(DispatcherQueuePriority.Low, () => AddRow(generation));
+        }
+        ThemeList.LayoutUpdated += Laid;
+    }
+
+    private ThemeChoice? MatchingSelection(IList<ThemeChoice> shown) =>
         SelectedTheme is { } selected ? shown.FirstOrDefault(theme => Same(theme, selected)) : null;
 
     private static bool Same(ThemeChoice a, ThemeChoice b) =>
@@ -175,14 +206,8 @@ public sealed partial class ThemeGrid : UserControl
     private void FollowSelection()
     {
         _updating = true;
-        try { ThemeList.SelectedItem = ThemeList.ItemsSource is List<ThemeChoice> shown ? MatchingSelection(shown) : null; }
+        try { ThemeList.SelectedItem = MatchingSelection(_shown); }
         finally { _updating = false; }
-    }
-
-    private void MoreButton_Click(object sender, RoutedEventArgs args)
-    {
-        _rows += MoreRows;
-        ApplyFilter();
     }
 
     private void ThemeList_SelectionChanged(object sender, SelectionChangedEventArgs args)
