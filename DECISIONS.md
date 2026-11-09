@@ -2811,3 +2811,15 @@ and only it can be deleted. Explanations live in the README.
   Those sessions get the identity explicitly instead.
 - Converted sessions have `Username` cleared: a leftover username would override the
   identity's.
+
+## 2026-11-09 - WinUI freezes the text highlighter brushes
+
+- With theme colors set to Everything, changing the theme could crash with
+  `UnauthorizedAccessException` (E_ACCESSDENIED) from `SolidColorBrush.Color` in
+  `FluentThemeColors.Apply`. Seen after locking and unlocking Windows with a session open.
+- Drawing a `TextBlock` with `TextHighlighters` (theme swatches, History) looks up
+  `TextControlHighlighterForeground` and `-Background` and "simulates freezing" the brushes it
+  finds (`TextHighlightRenderer.cpp`); `SetValue` on a frozen object returns E_ACCESSDENIED.
+  Our copies of those two keys are what the lookup finds, so recoloring them in place fails.
+- `Apply` puts a fresh brush in the dictionary when a copy refuses its color. WinUI looks the
+  two keys up again on every draw, so the fresh brush is used from the next frame.
