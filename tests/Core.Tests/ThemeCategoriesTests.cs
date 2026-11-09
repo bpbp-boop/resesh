@@ -40,4 +40,17 @@ public sealed class ThemeCategoriesTests
 
         Assert.InRange(count, 20, (int)(ThemeCatalog.All.Count * 0.4));
     }
+
+    [Fact]
+    public void UncategorizedQuery_MatchesOnlyThemesInNoCategory()
+    {
+        var query = new ThemeQuery(Uncategorized: true);
+        var matches = ThemeCatalog.All.Where(query.Matches).ToList();
+
+        Assert.NotEmpty(matches);
+        Assert.All(matches, theme => Assert.Equal(ThemeCategory.None, theme.Categories));
+        Assert.Equal(ThemeCatalog.All.Count(theme => theme.Categories == ThemeCategory.None), matches.Count);
+        Assert.True(query.IsOneCategory);
+        Assert.False(ThemeQuery.All.IsOneCategory);
+    }
 }

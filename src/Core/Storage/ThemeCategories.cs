@@ -25,15 +25,19 @@ public enum ThemeCategory
 }
 
 /// <summary>What a theme browser shows: names containing <see cref="Text"/> (any case), in
-/// <see cref="Category"/> unless it is None, and light or dark ones only when
-/// <see cref="Light"/> says which.</summary>
-public sealed record ThemeQuery(string Text = "", ThemeCategory Category = ThemeCategory.None, bool? Light = null)
+/// <see cref="Category"/> unless it is None, only themes in no category when
+/// <see cref="Uncategorized"/>, and light or dark ones only when <see cref="Light"/> says which.</summary>
+public sealed record ThemeQuery(string Text = "", ThemeCategory Category = ThemeCategory.None, bool? Light = null, bool Uncategorized = false)
 {
     public static ThemeQuery All { get; } = new();
+
+    /// <summary>True when the query narrows to one category, or to the uncategorized themes.</summary>
+    public bool IsOneCategory => Category != ThemeCategory.None || Uncategorized;
 
     public bool Matches(ThemeChoice theme) =>
         theme.Name.Contains(Text, StringComparison.OrdinalIgnoreCase)
         && (Category == ThemeCategory.None || theme.Categories.HasFlag(Category))
+        && (!Uncategorized || theme.Categories == ThemeCategory.None)
         && (Light is not { } light || theme.IsLight == light);
 }
 
@@ -54,6 +58,9 @@ public static partial class ThemeCategories
         (ThemeCategory.Retro, "Retro"),
         (ThemeCategory.HighContrast, "High contrast"),
     ];
+
+    /// <summary>The label for themes in no category.</summary>
+    public const string OtherName = "Other";
 
     public static ThemeCategory Of(string name, ThemePalette palette)
     {

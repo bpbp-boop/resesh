@@ -105,6 +105,44 @@ test("theme galleries are virtualized, searchable and keep their own selection",
   assert.match(galleryCode, /if \(_updating \|\| ThemeList\.SelectedItem is not ThemeChoice picked\)/);
 });
 
+test("Settings lays themes out in wrapping grids that build only the cards in view", () => {
+  const rows = read("src", "App", "Controls", "ThemeCategoryRows.cs");
+  const grid = read("src", "App", "Controls", "ThemeGrid.xaml");
+  const gridCode = read("src", "App", "Controls", "ThemeGrid.xaml.cs");
+  assert.match(rows, /new ThemeGrid \{/);
+  assert.match(grid, /<ItemsWrapGrid Orientation="Horizontal"/);
+  // No ScrollViewer of its own: a wheel turn over it scrolls the page, and the ItemsWrapGrid
+  // virtualizes against the page's viewport instead of building every card.
+  assert.match(grid, /<ControlTemplate TargetType="ListView">\s*<ItemsPresenter \/>\s*<\/ControlTemplate>/);
+  // A grid out of view gets its themes once it is laid out in view, its height held till then.
+  assert.match(gridCode, /EffectiveViewportChanged \+= \(_, _\) => PopulateIfVisible\(\)/);
+  assert.match(gridCode, /MinHeight = RowCount \* RowHeight/);
+  // The current theme shows even when it is past the cut.
+  assert.match(gridCode, /shown\[\^1\] = match/);
+});
+
+test("theme sections link to their category tab and back, and shuffle in place", () => {
+  const rows = read("src", "App", "Controls", "ThemeCategoryRows.cs");
+  const gridCode = read("src", "App", "Controls", "ThemeGrid.xaml.cs");
+  const filter = read("src", "App", "Controls", "ThemeFilterBar.xaml.cs");
+  assert.match(rows, /"See all"/);
+  assert.match(rows, /"Show less"/);
+  assert.match(rows, /grid\.Shuffle\(\)/);
+  assert.match(gridCode, /Random\.Shared\.Shuffle/);
+  assert.match(rows, /grid\.SortByName\(\)/);
+  // "See all" shows every theme of the category, not a few more rows.
+  assert.match(rows, /section\.Grid\.Rows = focused \? null : OverviewRows/);
+  // Every section, Other included, has a tab to open.
+  assert.match(filter, /ThemeCategories\.OtherName/);
+  for (const gallery of ["Fixed", "Light", "Dark"])
+    assert.match(pageCode, new RegExp(`${gallery}Gallery\\.CategoryRequested \\+= ThemeFilter\\.ShowCategory`));
+});
+
+test("the Settings tab names the open section", () => {
+  assert.match(pageCode, /SectionShown\?\.Invoke\(section\)/);
+  assert.match(read("src", "App", "MainWindow.xaml.cs"), /page\.SectionShown \+= section => tab\.SettingsSection = section/);
+});
+
 test("inline Settings editors expose stable automation IDs", () => {
   for (const automationId of [
     "SettingsHighlightRules",

@@ -2,27 +2,29 @@
     x:Class="Resesh.App.Controls.ThemeFilterBar"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <!-- Search, then the categories (and, where a gallery mixes both, light or dark) as
-         single-select bars. Items are added in code from ThemeCategories.All. -->
+    <!-- Search with light or dark beside it (where a gallery mixes both), then the categories.
+         Light or dark and a category combine, so light or dark is a dropdown rather than a
+         second row of tabs. Items are added in code from ThemeCategories.All. -->
     <StackPanel Spacing="4">
-        <TextBox x:Name="SearchBox"
-                 TextChanged="SearchBox_TextChanged"
-                 AutomationProperties.Name="Search themes"
-                 AutomationProperties.AutomationId="ThemeSearch" />
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+            <TextBox x:Name="SearchBox"
+                     VerticalAlignment="Center"
+                     TextChanged="SearchBox_TextChanged"
+                     AutomationProperties.Name="Search themes"
+                     AutomationProperties.AutomationId="ThemeSearch" />
+            <ComboBox x:Name="ModeBox" Grid.Column="1" Visibility="Collapsed"
+                      MinWidth="140"
+                      VerticalAlignment="Center"
+                      SelectionChanged="ModeBox_SelectionChanged"
+                      AutomationProperties.Name="Light or dark"
+                      AutomationProperties.AutomationId="ThemeModeFilter" />
+        </Grid>
         <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto"
                       VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
-            <StackPanel Orientation="Horizontal" Spacing="12">
-                <SelectorBar x:Name="ModeBar" Visibility="Collapsed"
-                             SelectionChanged="Bar_SelectionChanged"
-                             AutomationProperties.Name="Light or dark"
-                             AutomationProperties.AutomationId="ThemeModeFilter" />
-                <Rectangle x:Name="ModeDivider" Width="1" Margin="0,10" Visibility="Collapsed"
-                           Fill="{ThemeResource SessionChromeFrameBrush}" />
-                <SelectorBar x:Name="CategoryBar"
-                             SelectionChanged="Bar_SelectionChanged"
-                             AutomationProperties.Name="Theme category"
-                             AutomationProperties.AutomationId="ThemeCategoryFilter" />
-            </StackPanel>
+            <SelectorBar x:Name="CategoryBar"
+                         SelectionChanged="Bar_SelectionChanged"
+                         AutomationProperties.Name="Theme category"
+                         AutomationProperties.AutomationId="ThemeCategoryFilter" />
         </ScrollViewer>
     </StackPanel>
 </UserControl>

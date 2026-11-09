@@ -1,0 +1,49 @@
+<UserControl
+    x:Class="Resesh.App.Controls.ThemeGrid"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Resesh.App.Controls"
+    xmlns:storage="using:Resesh.Core.Storage">
+    <!-- No ScrollViewer in the template: the grid grows with the page, so a wheel turn scrolls
+         the page, and the ItemsWrapGrid virtualizes against the page's viewport. With one,
+         even with scrolling off, the list is as tall as its items and builds every card. -->
+        <ListView
+            x:Name="ThemeList"
+            SelectionMode="Single"
+            IsMultiSelectCheckBoxEnabled="False"
+            IsItemClickEnabled="False"
+            SelectionChanged="ThemeList_SelectionChanged"
+            ContainerContentChanging="ThemeList_ContainerContentChanging">
+            <ListView.Template>
+                <ControlTemplate TargetType="ListView">
+                    <ItemsPresenter />
+                </ControlTemplate>
+            </ListView.Template>
+            <ListView.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <ItemsWrapGrid Orientation="Horizontal" CacheLength="1" />
+                </ItemsPanelTemplate>
+            </ListView.ItemsPanel>
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="Margin" Value="0,0,10,10" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="UseSystemFocusVisuals" Value="True" />
+                    <Setter Property="FocusVisualPrimaryBrush" Value="{StaticResource SessionAccentBrush}" />
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ListViewItem">
+                                <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}" />
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Style>
+            </ListView.ItemContainerStyle>
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="storage:ThemeChoice">
+                    <controls:ThemeSwatch Theme="{x:Bind}" />
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+</UserControl>

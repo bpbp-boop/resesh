@@ -2812,6 +2812,56 @@ and only it can be deleted. Explanations live in the README.
 - Converted sessions have `Username` cleared: a leftover username would override the
   identity's.
 
+## 2026-11-09 - Compact Settings rows and theme sections
+
+- Settings rows are 48px high with 8px vertical padding, set by overriding the toolkit's
+  `SettingsCardMinHeight` and `SettingsCardPadding` in `SettingsPage.xaml`'s resources. With
+  CommunityToolkit SettingsControls 8.2.251219 the same keys in App.xaml are ignored, and an
+  implicit `SettingsCard` style based on `DefaultSettingsCardStyle` crashes the page in
+  `MeasureOverride` (COMException 0x80004005). `SettingsExpander`'s header keeps its own
+  height whichever way `SettingsExpanderHeaderPadding` or `ExpanderMinHeight` is set.
+- Settings > Theme shows each category as a wrapping grid (`ThemeGrid`) instead of a sideways
+  carousel: two rows on All, every theme on the category's own tab. The grid sizes to its
+  content so the page scrolls over it, which means it builds every card it shows, about
+  14 ms each in a Debug build (3.4 s for 243 at once). So past the first row it adds a row
+  at a time, each queued after the previous row's layout pass: queued straight away, several
+  rows ran before one layout and built together, stalling the window for 700+ ms. The
+  current theme takes the last place when it is past the cut, so it is always visible.
+  Welcome keeps the carousel (`ThemeGallery`), which fits its narrow column.
+- The Theme section is up to 1640px wide (five columns) while its settings and search stay
+  at the other sections' width.
+- The theme filter puts light/dark in a dropdown beside the search box and the categories
+  (All, each category, then Other for the uncategorized) on a row of tabs: they combine
+  ("dark and cool"), which one row of tabs could not express, and a second row of tabs beside
+  the search box looked out of place. On All, each section has a count, A–Z and a die that
+  reorder it, and "See all", which opens that category's tab; there the link reads
+  "Show less" and goes back to All. The page owns the tab, so the links ask it through
+  `ThemeCategoryRows.CategoryRequested`. Shuffling keeps the current theme in its place and
+  never changes the choice; either order lasts until the theme list is rebuilt.
+
+## 2026-11-09 - Theme grids virtualize against the page
+
+- `ThemeGrid`'s ListView has a template with only an `ItemsPresenter`. With the default
+  template's ScrollViewer, even with scrolling off, the list was as tall as its items and
+  built every card it held, so the grid used to add a row per layout pass. With no
+  ScrollViewer of its own, `ItemsWrapGrid` virtualizes against the page's ScrollViewer: a
+  category tab of 209 themes builds the cards in view plus `CacheLength="1"` (half a screen
+  each way), and leaving it tears down those instead of all of them. Tearing down a card
+  costs about 1 ms, so the old way froze the window for 220 ms on the way back to All.
+- An `ItemsWrapGrid` given items before it has been laid out in its place takes the whole
+  window as its view and builds every card that fits: opening Theme built both rows of all
+  eight sections in one frame. So a grid out of view holds its height (`MinHeight`, rows
+  times a card's height, first measured off-screen and then taken from a laid-out card) and
+  gets its themes in the layout pass that puts it in the view (`PopulateIfVisible`).
+- The eight ANSI dots on a card are one `Path` of ellipse geometries filled by a
+  `LinearGradientBrush` with a hard stop at each dot's edges. Eight `Ellipse` elements (or
+  eight round `Border`s, measured the same) were a fifth of a card's build and teardown cost.
+  Swapping the sample lines' runs for `TextHighlighter`s, or the four lines for one
+  `TextBlock`, or Cascadia Mono for Consolas, changed nothing measurable.
+- Measured in a Debug build at 1906x1073 (three columns), as the longest frame: opening Theme
+  119 ms to 92 ms (most of what remains is the section's controls, 52 ms with no cards);
+  All after a category tab 275 ms to 49 ms; typing a search 62 ms to 32 ms; clearing it
+  69 ms to 28 ms; opening a category tab 72 ms to 40 ms.
 ## 2026-11-09 - WinUI freezes the text highlighter brushes
 
 - With theme colors set to Everything, changing the theme could crash with

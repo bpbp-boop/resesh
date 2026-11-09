@@ -244,6 +244,20 @@ public sealed class MainViewModelCommandTests : IDisposable
     }
 
     [Fact]
+    public void SettingsTabSubtitleNamesTheOpenSection()
+    {
+        var settings = TabViewModel.CreateAppPage(AppPage.Settings, Environment());
+        Assert.Equal("General", settings.Subtitle);
+
+        var raised = new List<string?>();
+        settings.PropertyChanged += (_, args) => raised.Add(args.PropertyName);
+        settings.SettingsSection = SettingsSection.Identities;
+
+        Assert.Equal("Identities & Keys", settings.Subtitle);
+        Assert.Contains(nameof(TabViewModel.Subtitle), raised);
+    }
+
+    [Fact]
     public void FindAppPageReturnsTheOpenPageOnly()
     {
         var window = Window();

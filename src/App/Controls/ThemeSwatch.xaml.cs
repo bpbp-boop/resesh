@@ -4,7 +4,6 @@ using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Shapes;
 using Resesh.Core.Models;
 using Resesh.Core.Storage;
 using Resesh.Terminal;
@@ -46,6 +45,14 @@ public sealed partial class ThemeSwatch : UserControl
     // Recolored, not replaced, when a recycled container shows another theme.
     private readonly SolidColorBrush _background = new(), _foreground = new(), _cursor = new(), _outline = new();
     private readonly SolidColorBrush[] _ansi = new SolidColorBrush[16];
+    // Two stops per dot, at its left and right edges (ThemeSwatch.xaml's geometry: 14 wide, 7 apart).
+    private readonly LinearGradientBrush _dotFill = new()
+    {
+        MappingMode = BrushMappingMode.Absolute,
+        StartPoint = new(0, 0),
+        EndPoint = new(DotsWidth, 0),
+    };
+    private const double DotSize = 14, DotStride = 21, DotsWidth = 7 * DotStride + DotSize;
     private readonly Dictionary<uint, SolidColorBrush> _ruleBrushes = [];
     private readonly List<(SolidColorBrush Brush, uint Color)> _tints = [];
     private readonly TextBlock[] _lines = new TextBlock[SampleLines.Length];
@@ -59,6 +66,13 @@ public sealed partial class ThemeSwatch : UserControl
         Preview.Background = _background;
         Sample.Foreground = _foreground;
         Cursor.Background = _cursor;
+        for (var i = 0; i < 8; i++)
+        {
+            _dotFill.GradientStops.Add(new GradientStop { Offset = i * DotStride / DotsWidth });
+            _dotFill.GradientStops.Add(new GradientStop { Offset = (i * DotStride + DotSize) / DotsWidth });
+        }
+        Dots.Fill = _dotFill;
+        Dots.Stroke = _outline;
         var font = new FontFamily("Cascadia Mono, Consolas");
         for (var i = 0; i < _lines.Length; i++)
         {
@@ -66,8 +80,6 @@ public sealed partial class ThemeSwatch : UserControl
             _lines[i] = new TextBlock { FontFamily = font, FontSize = 9, TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.Clip };
             Lines.Children.Add(_lines[i]);
         }
-        for (var i = 0; i < 8; i++)
-            Dots.Children.Add(new Ellipse { Width = 14, Height = 14, StrokeThickness = 1, Fill = _ansi[i], Stroke = _outline });
     }
 
     private static IReadOnlyList<HighlightSpan>[] Painted()
@@ -168,6 +180,8 @@ public sealed partial class ThemeSwatch : UserControl
             (byte)(palette.Foreground >> 16), (byte)(palette.Foreground >> 8), (byte)palette.Foreground);
         for (var i = 0; i < _ansi.Length; i++)
             _ansi[i].Color = RgbColor.ToColor(palette.Ansi[i]);
+        for (var i = 0; i < _dotFill.GradientStops.Count; i++)
+            _dotFill.GradientStops[i].Color = _ansi[i / 2].Color;
         foreach (var (brush, color) in _tints)
             brush.Color = RgbColor.ToColor(ColorMath.Mix(palette.Background, color, TintAlpha));
         ThemeName.Text = theme.Name;
