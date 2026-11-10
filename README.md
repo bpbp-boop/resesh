@@ -433,7 +433,9 @@ as other unreadable session files. The invalid file is kept aside, and the app s
 recovery warning. A file with two sessions sharing one ID still loads; the first is kept.
 
 Pass `--data-dir <folder>` to keep everything in a folder of your choice instead; passwords
-are then stored DPAPI-encrypted in that folder rather than in Credential Manager.
+are then stored DPAPI-encrypted in that folder rather than in Credential Manager. Add
+`--background` to open the windows behind everything else without taking focus, for scripted
+checks that run while you keep working.
 
 </details>
 

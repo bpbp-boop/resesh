@@ -27,10 +27,23 @@ public sealed partial class MainWindow
     /// <summary>Shows this window in front, restoring it if minimized, for a launch redirected here.</summary>
     public void BringToFront()
     {
+        if (Program.Profile.IsBackground)
+        {
+            ShowInBackground();
+            return;
+        }
         if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
             presenter.Restore();
         Activate();
         Interop.WindowAlerts.BringToForeground(WinRT.Interop.WindowNative.GetWindowHandle(this));
+    }
+
+    /// <summary>Shows this window behind the others without taking focus, for --background
+    /// runs that automated checks drive while the user keeps working.</summary>
+    public void ShowInBackground()
+    {
+        AppWindow.Show(activateWindow: false);
+        Interop.WindowAlerts.SendToBack(WinRT.Interop.WindowNative.GetWindowHandle(this));
     }
 
     public bool IsWindowHidden { get; private set; }

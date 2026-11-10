@@ -511,7 +511,16 @@ public partial class App : Application
             RefreshWindowTitles();
             RefreshWorkspaceRails(); // its workspaces are no longer open elsewhere
         };
-        window.Activate();
+        if (Program.Profile.IsBackground)
+        {
+            // Never activated, so it would otherwise never become the window launches reuse.
+            window.ShowInBackground();
+            _lastActiveWindow = window;
+        }
+        else
+        {
+            window.Activate();
+        }
         RefreshWindowTitles();
         return window;
     }

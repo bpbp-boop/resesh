@@ -12,6 +12,7 @@ internal sealed record DataProfile
 {
     public const string DemoOption = "--demo";
     public const string DataDirectoryOption = "--data-dir";
+    public const string BackgroundOption = "--background";
 
     /// <summary>The disposable screenshot data set. Takes precedence over --data-dir.</summary>
     public bool IsDemo { get; private init; }
@@ -24,6 +25,11 @@ internal sealed record DataProfile
     /// folder must not fall back to the real profile: the user asked to keep it untouched.</summary>
     public string? Error { get; private init; }
 
+    /// <summary>Windows open behind the others and never take focus, so automated checks can
+    /// drive the app while the user keeps working. Left out of the relaunch command: a
+    /// taskbar relaunch is the user asking to see the window.</summary>
+    public bool IsBackground { get; private init; }
+
     /// <summary>The user's real data: no demo, no --data-dir.</summary>
     public bool IsDefault => !IsDemo && DataDirectory is null && Error is null;
 
@@ -33,6 +39,7 @@ internal sealed record DataProfile
     public static DataProfile Parse(IReadOnlyList<string> args, string? currentDirectory = null)
     {
         var demo = false;
+        var background = false;
         string? directory = null;
         string? error = null;
         for (var i = 1; i < args.Count; i++)
@@ -40,6 +47,10 @@ internal sealed record DataProfile
             if (args[i].Equals(DemoOption, StringComparison.OrdinalIgnoreCase))
             {
                 demo = true;
+            }
+            else if (args[i].Equals(BackgroundOption, StringComparison.OrdinalIgnoreCase))
+            {
+                background = true;
             }
             else if (args[i].Equals(DataDirectoryOption, StringComparison.OrdinalIgnoreCase))
             {
@@ -67,8 +78,8 @@ internal sealed record DataProfile
             }
         }
         return demo
-            ? new DataProfile { IsDemo = true }
-            : new DataProfile { DataDirectory = directory, Error = error };
+            ? new DataProfile { IsDemo = true, IsBackground = background }
+            : new DataProfile { DataDirectory = directory, Error = error, IsBackground = background };
     }
 
     /// <summary>The command line that reopens this profile, for the taskbar's relaunch entry.</summary>

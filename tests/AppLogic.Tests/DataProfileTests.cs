@@ -61,6 +61,17 @@ public sealed class DataProfileTests
     }
 
     [Fact]
+    public void Background_is_read_with_the_data_set_but_left_out_of_the_relaunch()
+    {
+        var profile = DataProfile.Parse([Exe, "--Background", "--data-dir", @"C:\scratch"]);
+        Assert.True(profile.IsBackground);
+        Assert.Equal(@"C:\scratch", profile.DataDirectory);
+        Assert.Equal($"\"{Exe}\" --data-dir \"C:\\scratch\"", profile.RelaunchCommand(Exe));
+        Assert.True(DataProfile.Parse([Exe, "--demo", "--background"]).IsBackground);
+        Assert.False(DataProfile.Parse([Exe]).IsBackground);
+    }
+
+    [Fact]
     public void First_data_dir_wins()
     {
         Assert.Equal(@"C:\one", DataProfile.Parse([Exe, "--data-dir", @"C:\one", "--data-dir", @"C:\two"]).DataDirectory);
