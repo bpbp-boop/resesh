@@ -150,3 +150,13 @@ test("stopping the sessions pane animation restores the pane and the gutter", ()
   const start = source.match(/private void StartSessionsPaneAnimation\([\s\S]*?\n    }\r?\n/)?.[0] ?? "";
   assert.match(start, /^[^]*?\{\s*CancelSessionsPaneAnimation\(\);/);
 });
+
+// GridSplitter unboxes GridLength on every drag, which Native AOT can't do unless the type is
+// rooted. The build's WinRTUnboxCheck enforces that, so make sure the app still runs it.
+test("app builds run the WinRT unbox check that keeps GridSplitter working under AOT", () => {
+  const app = path.join(__dirname, "..", "src", "App");
+  assert.ok(fs.readFileSync(path.join(app, "Resesh.App.csproj"), "utf8")
+    .includes(String.raw`<Import Project="..\..\eng\WinRTUnboxCheck.targets" />`));
+  assert.match(fs.readFileSync(path.join(app, "WinRTUnboxedTypes.cs"), "utf8"),
+    /\[assembly: GeneratedWinRTExposedExternalType\(typeof\(Microsoft\.UI\.Xaml\.GridLength\)\)\]/);
+});

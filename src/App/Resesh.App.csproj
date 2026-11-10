@@ -83,6 +83,7 @@
   </ItemGroup>
 
   <Import Project="..\..\eng\WindowsAppRuntimeResources.targets" />
+  <Import Project="..\..\eng\WinRTUnboxCheck.targets" />
 
   <!-- Native AOT links Brotli from the ILCompiler and runtime packs into the exe, and rewind
        decompresses with it. Brotli before 1.2.1 has a decoder overflow (CVE-2026-111497),

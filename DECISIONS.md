@@ -2901,3 +2901,30 @@ and only it can be deleted. Explanations live in the README.
   section did the same. `ThemeGrid` now sets its `ItemsSource` once, to an
   `ObservableCollection`, and syncs it with adds, replaces and removes. Going from a category
   tab's 241 themes back to 8 takes about 1 ms.
+
+## 2026-11-10 - Native AOT can't unbox WinRT value types it hasn't rooted; the build checks
+
+v0.31.0 crashed (`InvalidCastException` in `GridSplitter.IsStarColumn`) when a column splitter
+was dragged. The toolkit reads each track with `(GridLength)definition.GetValue(...)`. WinUI hands
+boxed values back as `IReference<T>`, and C#/WinRT finds `T` by name; under Native AOT that only
+works when something roots `T` for reflection, otherwise the value arrives as a bare
+`WinRT.IInspectable`. Upstream: microsoft/CsWinRT#1917, CommunityToolkit/Windows#612.
+
+- Probed in an AOT publish by reading native-boxed values: `GridLength`, `CornerRadius`,
+  `TextTrimming` and `OpticalMarginAlignment` came back as `IInspectable`; `Thickness` and
+  `FontWeight` worked only because the XAML compiler's type info names them with `typeof`.
+  Enums fail the same way as structs. A cast throws; `is T` quietly answers false (so
+  `CommandsPanel`'s `OverlayCornerRadius` lookup always used its fallback, which happens to
+  match the theme's 8).
+- `[assembly: GeneratedWinRTExposedExternalType(typeof(T))]` fixes both: the `typeof` in the
+  attribute is what roots `T`; it generates no code. Checked in the same probe: every type
+  above unboxed once listed.
+- `eng/WinRTUnboxCheck` runs after the app compiles (Debug too). It scans the IL of the app
+  and every referenced assembly for `unbox`, `unbox.any` and `isinst` of projected value types
+  (including `Nullable<T>`) and fails with RESESH0001 for any type not listed in
+  `src/App/WinRTUnboxedTypes.cs`. Code in the XAML compiler's `*_XamlTypeInfo` classes is
+  skipped, since it roots what it unboxes. It takes about a second and is skipped when no
+  input changed. Removing `GridLength` from the list reproduces an error naming
+  `GridSplitter.IsStarColumn`.
+- Not covered: unboxing through a generic `T` (the IL names `T`, not the type), and values
+  read through reflection or `dynamic`, which the app doesn't use.

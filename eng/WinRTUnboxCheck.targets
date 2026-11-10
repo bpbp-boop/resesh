@@ -1,0 +1,37 @@
+<Project>
+
+  <!-- Fails the build when the app or a library it ships unboxes a WinRT struct or enum that
+       Native AOT can't unbox, unless WinRTUnboxedTypes.cs roots that type. Runs on every build,
+       so Debug builds catch what would otherwise only break the AOT release. See
+       WinRTUnboxCheck/Program.cs. Skip with -p:SkipWinRTUnboxCheck=true. -->
+  <PropertyGroup>
+    <_WinRTUnboxCheckProject>$(MSBuildThisFileDirectory)WinRTUnboxCheck\WinRTUnboxCheck.csproj</_WinRTUnboxCheckProject>
+    <_WinRTUnboxListFile>$(MSBuildProjectDirectory)\WinRTUnboxedTypes.cs</_WinRTUnboxListFile>
+  </PropertyGroup>
+
+  <Target Name="CheckWinRTUnboxing" AfterTargets="CoreCompile"
+          Condition="'$(SkipWinRTUnboxCheck)' != 'true'"
+          Inputs="@(IntermediateAssembly);@(ReferencePath);$(_WinRTUnboxCheckProject);$(MSBuildThisFileDirectory)WinRTUnboxCheck\Program.cs"
+          Outputs="$(IntermediateOutputPath)winrt-unbox-check.stamp">
+    <PropertyGroup>
+      <_WinRTUnboxReferences>$(IntermediateOutputPath)winrt-unbox-check.references</_WinRTUnboxReferences>
+      <_WinRTUnboxStamp>$(IntermediateOutputPath)winrt-unbox-check.stamp</_WinRTUnboxStamp>
+    </PropertyGroup>
+    <MSBuild Projects="$(_WinRTUnboxCheckProject)" Targets="Restore;Build"
+             Properties="Configuration=Release;MSBuildRestoreSessionId=$([System.Guid]::NewGuid())"
+             RemoveProperties="Platform;RuntimeIdentifier;SelfContained;PublishAot;TargetFramework;PublishDir;OutDir;OutputPath;IntermediateOutputPath">
+      <Output TaskParameter="TargetOutputs" ItemName="_WinRTUnboxCheckTool" />
+    </MSBuild>
+
+    <WriteLinesToFile File="$(_WinRTUnboxReferences)" Lines="@(ReferencePath->'%(FullPath)')" Overwrite="true" />
+    <Exec Command="dotnet exec &quot;@(_WinRTUnboxCheckTool)&quot; &quot;@(IntermediateAssembly->'%(FullPath)')&quot; &quot;$(_WinRTUnboxListFile)&quot; &quot;$(_WinRTUnboxReferences)&quot;"
+          IgnoreExitCode="true" StandardOutputImportance="low">
+      <Output TaskParameter="ExitCode" PropertyName="_WinRTUnboxExitCode" />
+    </Exec>
+    <!-- Exit code 1 means findings, already logged as errors from the tool's output. -->
+    <Error Condition="'$(_WinRTUnboxExitCode)' != '0' and '$(_WinRTUnboxExitCode)' != '1'"
+           Text="WinRTUnboxCheck failed with exit code $(_WinRTUnboxExitCode)." />
+    <Touch Condition="'$(_WinRTUnboxExitCode)' == '0'" Files="$(_WinRTUnboxStamp)" AlwaysCreate="true" />
+  </Target>
+
+</Project>
