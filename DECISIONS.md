@@ -2946,11 +2946,12 @@ works when something roots `T` for reflection, otherwise the value arrives as a 
 - 2.6.5 drops system backdrops under the System Composition Engine. The app uses none.
 - Checked on x64: Debug build, the test suites, and a Native AOT publish with .NET SDK
   10.0.404, launched with `--background --data-dir`: a local PowerShell tab rendered and took
-  input, and Settings opened. Not checked: dragging the splitters in the AOT build (needs real
-  pointer input) and ARM64.
+  input, and Settings opened. Splitter drags, Settings and a move between monitors were checked by hand in
+  that build. Not checked: ARM64.
 - The self-contained payload still has no `Microsoft.WindowsAppRuntime.Insights.Resource.dll`,
   but 2.6.4 stopped notifications needing it (WindowsAppSDK#6071, #6387), so the target that
   extracted it from the Runtime package's MSIX is gone. Checked in a Debug build with the DLL
   moved out of the output folder: trace.log shows `AppNotificationManager.Register`
   succeeding with `setting=Enabled`, the same as with it. An AOT publish without the DLL
-  starts and opens a terminal tab.
+  starts and opens a terminal tab. A toast being shown was not confirmed: the test windows
+  were in the foreground, where the app stays quiet on purpose.
