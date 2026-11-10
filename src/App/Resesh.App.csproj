@@ -56,7 +56,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK.InteractiveExperiences" Version="$(WindowsAppSdkInteractiveExperiencesVersion)" />
-    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="$(WindowsAppSdkRuntimeVersion)" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="$(WindowsAppSdkRuntimeVersion)" />
     <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="$(WindowsAppSdkWinUIVersion)" />
     <!-- CommunityToolkit.WinUI still declares the old monolithic SDK package. Keep its
          dependency satisfied without importing that package's assets or build targets. -->
@@ -82,7 +82,6 @@
     <UpToDateCheckInput Include="..\Terminal\wwwroot\**" />
   </ItemGroup>
 
-  <Import Project="..\..\eng\WindowsAppRuntimeResources.targets" />
   <Import Project="..\..\eng\WinRTUnboxCheck.targets" />
 
   <!-- Native AOT links Brotli from the ILCompiler and runtime packs into the exe, and rewind

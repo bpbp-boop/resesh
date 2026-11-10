@@ -2948,3 +2948,9 @@ works when something roots `T` for reflection, otherwise the value arrives as a 
   10.0.404, launched with `--background --data-dir`: a local PowerShell tab rendered and took
   input, and Settings opened. Not checked: dragging the splitters in the AOT build (needs real
   pointer input) and ARM64.
+- The self-contained payload still has no `Microsoft.WindowsAppRuntime.Insights.Resource.dll`,
+  but 2.6.4 stopped notifications needing it (WindowsAppSDK#6071, #6387), so the target that
+  extracted it from the Runtime package's MSIX is gone. Checked in a Debug build with the DLL
+  moved out of the output folder: trace.log shows `AppNotificationManager.Register`
+  succeeding with `setting=Enabled`, the same as with it. An AOT publish without the DLL
+  starts and opens a terminal tab.
