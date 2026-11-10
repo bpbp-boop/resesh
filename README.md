@@ -454,7 +454,7 @@ src/App/bin/x64/Debug/net10.0-windows10.0.19041.0/Resesh.App.exe
 On ARM64, use `-p:Platform=ARM64`. The native step reruns when `eng/ghostty-vt.json`, the script or
 `src/Terminal/Native/Shim/` changes; pass `-p:SkipGhosttyVtBuild=true` to skip it.
 
-Built on WinUI 3 (Windows App SDK 2.4), C# and .NET 10, [SSH.NET](https://github.com/sshnet/SSH.NET)
+Built on WinUI 3 (Windows App SDK 2.6), C# and .NET 10, [SSH.NET](https://github.com/sshnet/SSH.NET)
 for transport, and [libghostty-vt](https://github.com/ghostty-org/ghostty) drawn with Direct2D/DirectWrite
 into a XAML `SwapChainPanel`. Release builds are unpackaged, self-contained and Native AOT.
 Contributor conventions are in [AGENTS.md](AGENTS.md); version-specific findings and design decisions

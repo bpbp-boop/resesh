@@ -2928,3 +2928,23 @@ works when something roots `T` for reflection, otherwise the value arrives as a 
   `GridSplitter.IsStarColumn`.
 - Not covered: unboxing through a generic `T` (the IL names `T`, not the type), and values
   read through reflection or `dynamic`, which the app doesn't use.
+
+## 2026-11-11 - Windows App SDK 2.6.5
+
+- Runtime, WinUI and InteractiveExperiences are all pinned to 2.6.5. The component packages
+  now share the SDK's version (they were 2.4.0, 2.3.6 and 2.1.6); these are the versions the
+  `Microsoft.WindowsAppSDK` 2.6.5 metapackage depends on.
+- Taken for fixes, not APIs. The ones that touch this app: rendering corruption with several
+  graphics adapters or monitors, and windows turning transparent on Windows 10 (2.6.5); an
+  access violation at shutdown while a `TextBox` is alive (2.6.4); a fail-fast when a
+  `KeyboardAccelerator` on an OEM key such as comma shows its shortcut label, which Settings'
+  Ctrl+, does, and two `NavigationView` crashes (2.5.1).
+- 2.6.4 keeps the original exception in the crash dump when a `DispatcherQueue` callback or
+  `DispatcherQueueTimer.Tick` handler throws. Its notes say nothing about raising an
+  unhandled-exception event, so `DispatcherQueueReporting` and the ban on the raw calls stay:
+  they are still what gets the exception into crash.log.
+- 2.6.5 drops system backdrops under the System Composition Engine. The app uses none.
+- Checked on x64: Debug build, the test suites, and a Native AOT publish with .NET SDK
+  10.0.404, launched with `--background --data-dir`: a local PowerShell tab rendered and took
+  input, and Settings opened. Not checked: dragging the splitters in the AOT build (needs real
+  pointer input) and ARM64.
