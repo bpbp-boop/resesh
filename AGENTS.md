@@ -59,6 +59,9 @@ credentials or logs, use `.\demo.ps1` or pass `--data-dir <scratch folder>` to t
 
 - **Native AOT.** Release builds are AOT-compiled and trimmed. Avoid reflection; heed trimming
   and AOT analyzer warnings rather than suppressing them without a reason in a comment.
+  Unboxing a WinRT struct or enum (`(GridLength)GetValue(...)`, `value is CornerRadius`) only
+  works under AOT if the type is listed in `src/App/WinRTUnboxedTypes.cs`; the build fails
+  with RESESH0001 when shipped code, the toolkit's included, unboxes one that isn't.
 - **XAML bindings** use `x:Bind`, not `{Binding}`. Types shown through `DisplayMemberPath` or
   other runtime binding need `[GeneratedBindableCustomProperty]`.
 - **Dispatcher callbacks** go through `TryPost` and `OnTick` (`DispatcherQueueReporting`), not
