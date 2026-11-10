@@ -48,7 +48,7 @@ def title(hwnd) -> str:
 class App:
     def __init__(self, data_dir: str, width=1920, height=1080, wait=8.0):
         self.data_dir = data_dir
-        self.proc = subprocess.Popen([EXE, "--data-dir", data_dir])
+        self.proc = subprocess.Popen([EXE, "--background", "--data-dir", data_dir])
         self.hwnd = None
         deadline = time.time() + 40
         while time.time() < deadline and not self.hwnd:

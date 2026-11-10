@@ -40,6 +40,17 @@ node --test tests/*.js
 Run the tests that cover what you changed before calling work done; CI (`.github/workflows/
 build-release.yml`) runs all four suites on every push and pull request.
 
+**In-app checks must never take over the user's screen.** The user keeps working while you
+test. Launch with `--background` (windows open behind everything and never take focus) and
+drive the app only with input that needs no focus: `winapp ui invoke`, `set-value`,
+`get-value`, `inspect`, `wait-for`, `send-keys` with the default post-message transport, and
+`winapp ui screenshot` or `tools/screenshot-rig`'s `PrintWindow` capture. Do not use `click`,
+`hover`, `drag`, `touch`, `pen`, `scroll --wheel`, `send-keys --via send-input`, or
+`focus`: they move the real pointer or need the window in front. Posted keys never fire
+keyboard accelerators, so reach commands through menus or the command palette. If a check
+can only be done with real input (drag-and-drop, hover, true focus behaviour), say so and ask
+the user to do it, rather than taking the screen.
+
 To launch the app for manual checks without touching the user's real sessions, settings,
 credentials or logs, use `.\demo.ps1` or pass `--data-dir <scratch folder>` to the built exe
 (its passwords are kept DPAPI-encrypted in that folder, not in Credential Manager).

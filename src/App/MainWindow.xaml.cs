@@ -201,7 +201,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         _normalWindowBounds = Rect(bounds);
         AppWindow.MoveAndResize(_normalWindowBounds.Value);
 
-        if (placement!.IsMaximized && AppWindow.Presenter is OverlappedPresenter presenter)
+        // Maximizing shows and activates the window, which --background must not do.
+        if (placement!.IsMaximized && !Program.Profile.IsBackground && AppWindow.Presenter is OverlappedPresenter presenter)
             presenter.Maximize();
     }
 

@@ -2873,3 +2873,22 @@ and only it can be deleted. Explanations live in the README.
   Our copies of those two keys are what the lookup finds, so recoloring them in place fails.
 - `Apply` puts a fresh brush in the dictionary when a copy refuses its color. WinUI looks the
   two keys up again on every draw, so the fresh brush is used from the next frame.
+
+## 2026-11-10 - Automated checks run in the background
+
+- Agents testing in the app took over the user's screen: `Window.Activate()` took focus on
+  launch, and simulated clicks and keys moved the real pointer. `--background` (read with
+  the data set in `DataProfile`) shows each window with `AppWindow.Show(activateWindow:
+  false)` and sends it to the bottom of the z-order (`SetWindowPos(HWND_BOTTOM,
+  SWP_NOACTIVATE)`). `BringToFront` (redirected launches, workspace switches) does the same
+  instead of activating, and a saved maximized placement is not restored, since
+  `OverlappedPresenter.Maximize` shows and activates the window.
+- XAML content loads, terminals draw and UIA sees the full tree in a window that was never
+  activated. Checked with a scratch `--data-dir`: invoking Open PowerShell, typing with
+  posted keys and capturing with `winapp ui screenshot` all worked, and the foreground window
+  stayed the user's throughout.
+- A window that was never activated never becomes `_lastActiveWindow`, which redirected
+  launches reuse, so `CreateWindowCore` sets it for background windows.
+- The option is left out of the taskbar relaunch command: a relaunch is the user asking to
+  see the window. Notification clicks still bring their window forward for the same reason.
+- AGENTS.md lists which `winapp ui` commands need no focus.
