@@ -2892,3 +2892,12 @@ and only it can be deleted. Explanations live in the README.
 - The option is left out of the taskbar relaunch command: a relaunch is the user asking to
   see the window. Notification clicks still bring their window forward for the same reason.
 - AGENTS.md lists which `winapp ui` commands need no focus.
+## 2026-11-10 - Theme grids edit their items in place
+
+- A `ListView` with no ScrollViewer in its template scrolls the nearest one, the Settings page's,
+  to the top whenever its items reset: a new `ItemsSource`, or `Clear()` on its collection. Each
+  theme grid got its themes as a new `ItemsSource` when it scrolled into view, so scrolling down
+  the Theme section jumped back to the Traditional header, and sorting or shuffling a lower
+  section did the same. `ThemeGrid` now sets its `ItemsSource` once, to an
+  `ObservableCollection`, and syncs it with adds, replaces and removes. Going from a category
+  tab's 241 themes back to 8 takes about 1 ms.

@@ -117,6 +117,9 @@ test("Settings lays themes out in wrapping grids that build only the cards in vi
   // A grid out of view gets its themes once it is laid out in view, its height held till then.
   assert.match(gridCode, /EffectiveViewportChanged \+= \(_, _\) => PopulateIfVisible\(\)/);
   assert.match(gridCode, /MinHeight = RowCount \* RowHeight/);
+  // Resetting the list scrolls the page to the top, so its items are edited in place.
+  assert.equal((gridCode.match(/ItemsSource =/g) ?? []).length, 1);
+  assert.doesNotMatch(gridCode, /_items\.Clear\(\)/);
   // The current theme shows even when it is past the cut.
   assert.match(gridCode, /shown\[\^1\] = match/);
 });
