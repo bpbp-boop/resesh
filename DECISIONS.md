@@ -2955,3 +2955,16 @@ works when something roots `T` for reflection, otherwise the value arrives as a 
   succeeding with `setting=Enabled`, the same as with it. An AOT publish without the DLL
   starts and opens a terminal tab. A toast being shown was not confirmed: the test windows
   were in the foreground, where the app stays quiet on purpose.
+
+## 2026-11-12 - Use libghostty-vt Windows release archives
+
+libghostty-vt 1.0.1 ships Windows x64 and Arm64 SDK archives. The terminal build now
+downloads the matching archive from release.files.ghostty.org, verifies its SHA256
+against eng/ghostty-vt.json, and compiles only reseshvt.c with the existing Zig 0.17
+MSVC target. The archives use the GNU ABI but provide MSVC-compatible import libraries;
+we retain dynamic linking and the existing DLL layout. The static library requires
+GNU runtime symbols and cannot be linked with MSVC's link.exe.
+
+This removes the desktop Ghostty checkout and upstream Zig build. Zig is still needed
+for our shim and for the separate Linux session-agent source build, which retains its
+own Ghostty and Zig 0.16 pins in eng/agent/agent.json. Arm64 validation runs in CI.

@@ -60,7 +60,7 @@ jobs:
           path: .artifacts/ghostty-vt/x64
           key: ghostty-vt-x64-${{ hashFiles('eng/ghostty-vt.json', 'eng/build-ghostty-vt.ps1', 'src/Terminal/Native/Shim/**') }}
 
-      - name: Build libghostty-vt
+      - name: Download libghostty-vt and build shim
         if: steps.ghostty-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./eng/build-ghostty-vt.ps1 -Architecture x64 -BuildRoot "$env:RUNNER_TEMP/ghostty-build"
@@ -111,8 +111,8 @@ jobs:
           "VERSION=$version" >> $env:GITHUB_ENV
 
       # The terminal's native libraries (libghostty-vt and our reseshvt shim). The installer
-      # refuses to build without them. Zig and the Ghostty commit are pinned in
-      # eng/ghostty-vt.json; a cold build takes a few minutes, so the output is cached, keyed
+      # refuses to build without them. Zig and the Windows SDK archive hashes are pinned in
+      # eng/ghostty-vt.json. Only our shim is compiled; the output cache is keyed
       # on the same files as the test job's cache.
       - name: Cache libghostty-vt
         id: ghostty-cache
@@ -121,7 +121,7 @@ jobs:
           path: .artifacts/ghostty-vt/${{ matrix.asset_architecture }}
           key: ghostty-vt-${{ matrix.asset_architecture }}-${{ hashFiles('eng/ghostty-vt.json', 'eng/build-ghostty-vt.ps1', 'src/Terminal/Native/Shim/**') }}
 
-      - name: Build libghostty-vt
+      - name: Download libghostty-vt and build shim
         if: steps.ghostty-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: ./eng/build-ghostty-vt.ps1 -Architecture "${{ matrix.asset_architecture }}" -BuildRoot "$env:RUNNER_TEMP/ghostty-build"

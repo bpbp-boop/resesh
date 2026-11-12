@@ -13,8 +13,8 @@
 # -Tests also builds the unit tests as resesh-agent-tests, to copy to a Linux host and run.
 #
 # Zig is shared with build-ghostty-vt.ps1 (-ZigRoot is that script's -BuildRoot) and is
-# downloaded here when it is not there yet. The Ghostty checkout made here is separate
-# from that script's, which stays unpatched.
+# downloaded here when it is not there yet. This script still builds Ghostty from source,
+# independently of the desktop terminal's prebuilt Windows SDK.
 param(
     [ValidateSet('x86_64', 'aarch64')]
     [string[]]$Architecture = @('x86_64', 'aarch64'),
