@@ -79,7 +79,7 @@
       <_GhosttyVtStale Condition="'$(_GhosttyVtInputsHash)'!='$(_GhosttyVtBuiltHash)' or !Exists('$(GhosttyVtDir)ghostty-vt.dll') or !Exists('$(GhosttyVtDir)reseshvt.dll')">true</_GhosttyVtStale>
     </PropertyGroup>
     <Message Condition="'$(_GhosttyVtStale)'=='true'" Importance="high"
-             Text="Building the terminal's native libraries for $(GhosttyVtArchitecture) (the first build downloads Zig and Ghostty and takes several minutes)..." />
+             Text="Building the terminal's native libraries for $(GhosttyVtArchitecture) (the first build downloads Zig and the Ghostty Windows SDK)..." />
     <Exec Condition="'$(_GhosttyVtStale)'=='true'"
           Command="$(GhosttyVtPowerShell) -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\..\eng\build-ghostty-vt.ps1&quot; -Architecture $(GhosttyVtArchitecture)" />
     <WriteLinesToFile Condition="'$(_GhosttyVtStale)'=='true'" File="$(GhosttyVtStamp)"

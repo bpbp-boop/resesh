@@ -443,7 +443,7 @@ checks that run while you keep working.
 
 Requires the .NET 10 SDK on Windows 10 21H2 or later, and Git. The build also builds the terminal's
 native libraries with `eng/build-ghostty-vt.ps1` whenever they are missing or out of date (it downloads
-the pinned Zig and Ghostty commit; `-BuildRoot` holds about 2 GB of toolchain and caches), so the
+the pinned Zig compiler and checksum-verified Ghostty Windows SDK, then compiles only our shim), so the
 first build takes several minutes:
 
 ```

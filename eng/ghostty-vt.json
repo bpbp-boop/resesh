@@ -1,9 +1,13 @@
 {
   "ghostty": {
     "repository": "https://github.com/ghostty-org/ghostty",
-    "commit": "0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec",
-    "version": "1.0.0",
-    "license": "MIT"
+    "commit": "108cacb17ed8990840cd14abfce43d8ed8503ca1",
+    "version": "1.0.1",
+    "license": "MIT",
+    "sha256": {
+      "x86_64-windows-gnu": "8e2eb9e1822e85d786b456c8beb86f49d09c318c91f0c2913f91e7ffa12cda29",
+      "aarch64-windows-gnu": "cc61da5f968ea0b08639bdf019c6b7da46bad1d985774fd8a2de57af32862892"
+    }
   },
   "zig": {
     "version": "0.17.0",
@@ -12,6 +16,6 @@
     }
   },
   "abi": {
-    "reseshvt": 7
+    "reseshvt": 12
   }
 }

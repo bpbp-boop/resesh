@@ -1,9 +1,9 @@
-# Builds the libghostty-vt terminal surface's native DLLs from the commit pinned in
-# eng/ghostty-vt.json: ghostty-vt.dll (upstream, unpatched) and reseshvt.dll (our shim in
+# Prepares the libghostty-vt terminal surface's native DLLs using eng/ghostty-vt.json:
+# ghostty-vt.dll (the upstream Windows release) and reseshvt.dll (our shim in
 # src/Terminal/Native/Shim). Output: .artifacts/ghostty-vt/<arch>/, which the Terminal
 # project links into the app output when present.
 #
-# -BuildRoot holds Zig, the Ghostty checkout and Zig caches (~2 GB); point it at a fast drive.
+# -BuildRoot holds Zig, the downloaded Windows SDK and the shim's compiler cache.
 param(
     [ValidateSet('x64', 'arm64')]
     [string]$Architecture = 'x64',
@@ -31,23 +31,24 @@ if (-not (Test-Path $zig)) {
     Remove-Item $zip
 }
 
-$src = Join-Path $BuildRoot 'ghostty'
-if (-not (Test-Path (Join-Path $src '.git'))) {
-    git clone --filter=blob:none $pin.ghostty.repository $src
-    if ($LASTEXITCODE -ne 0) { throw 'clone failed' }
+$sdkTarget = if ($Architecture -eq 'x64') { 'x86_64-windows-gnu' } else { 'aarch64-windows-gnu' }
+$sdkName = "ghostty-vt-$($pin.ghostty.version)-$sdkTarget"
+$zip = Join-Path $BuildRoot "$sdkName.zip"
+$expected = $pin.ghostty.sha256.$sdkTarget
+if (-not $expected) { throw "Missing Windows SDK hash for $sdkTarget" }
+if (-not (Test-Path $zip)) {
+    Invoke-WebRequest "https://release.files.ghostty.org/libghostty-vt/$($pin.ghostty.version)/$sdkName.zip" -OutFile $zip
 }
-git -C $src fetch --depth 1 origin $pin.ghostty.commit
-git -C $src checkout --detach --force $pin.ghostty.commit
-if ($LASTEXITCODE -ne 0) { throw "checkout of $($pin.ghostty.commit) failed" }
+if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne $expected) {
+    Remove-Item -LiteralPath $zip
+    throw 'Ghostty Windows SDK archive hash mismatch; removed cached download'
+}
+# Extract the verified archive each time the shim is built, so headers and libraries match.
+Expand-Archive $zip -DestinationPath $BuildRoot -Force
+$prefix = Join-Path $BuildRoot $sdkName
 
 $env:ZIG_GLOBAL_CACHE_DIR = Join-Path $BuildRoot 'zig-global-cache'
 $env:ZIG_LOCAL_CACHE_DIR = Join-Path $BuildRoot 'zig-local-cache'
-$prefix = Join-Path $BuildRoot "vt-$Architecture"
-Push-Location $src
-try {
-    & $zig build -Demit-lib-vt -Doptimize=ReleaseFast "-Dtarget=$target" --prefix $prefix
-    if ($LASTEXITCODE -ne 0) { throw 'libghostty-vt build failed' }
-} finally { Pop-Location }
 
 $out = Join-Path $repo ".artifacts\ghostty-vt\$Architecture"
 New-Item -ItemType Directory -Force $out | Out-Null
@@ -56,6 +57,6 @@ New-Item -ItemType Directory -Force $out | Out-Null
     -o (Join-Path $out 'reseshvt.dll')
 if ($LASTEXITCODE -ne 0) { throw 'reseshvt build failed' }
 Copy-Item (Join-Path $prefix 'bin\ghostty-vt.dll') $out -Force
-Copy-Item (Join-Path $src 'LICENSE') (Join-Path $out 'LICENSE.ghostty.txt') -Force
+Copy-Item (Join-Path $prefix 'LICENSE') (Join-Path $out 'LICENSE.ghostty.txt') -Force
 Remove-Item (Join-Path $out '*.pdb'), (Join-Path $out '*.lib') -ErrorAction SilentlyContinue
-Write-Host "libghostty-vt $($pin.ghostty.commit.Substring(0, 8)) for $Architecture -> $out"
+Write-Host "libghostty-vt $($pin.ghostty.version) for $Architecture -> $out"
