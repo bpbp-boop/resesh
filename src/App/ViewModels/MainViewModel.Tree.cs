@@ -207,6 +207,13 @@ public sealed partial class MainViewModel
             .DistinctBy(session => session.Id)
             .ToList();
 
+    /// <summary>"Edit Sessions…" and "Color tag", for folders and multi-selections that
+    /// hold at least one session; nothing otherwise.</summary>
+    private IEnumerable<MenuEntry> BulkEditEntries(IReadOnlyList<TreeNodeViewModel> selection) =>
+        CanBulkEditSelection(selection)
+            ? [new("Edit Sessions…", BulkEditSelectionCommand, selection), ColorTagMenu(selection)]
+            : [];
+
     /// <summary>"Color tag" with one item per tag, the selection's shared tag checked.</summary>
     private MenuEntry ColorTagMenu(IReadOnlyList<TreeNodeViewModel> selection)
     {
@@ -441,11 +448,7 @@ public sealed partial class MainViewModel
                     new("New Folder…", NewSubfolderCommand, folder),
                     MenuEntry.Separator,
                 };
-                if (CanBulkEditSelection(selection))
-                {
-                    menu.Add(new("Edit Sessions…", BulkEditSelectionCommand, selection));
-                    menu.Add(ColorTagMenu(selection));
-                }
+                menu.AddRange(BulkEditEntries(selection));
                 if (!folder.IsLocalScope)
                     menu.Add(new("Set Identity…", SetFolderIdentityCommand, folder));
                 menu.Add(new("Rename…", RenameFolderCommand, folder));
@@ -465,11 +468,7 @@ public sealed partial class MainViewModel
                     new("Open in existing splits", OpenSelectionInExistingSplitsCommand, selection),
                     MenuEntry.Separator,
                 };
-                if (CanBulkEditSelection(selection))
-                {
-                    menu.Add(new("Edit Sessions…", BulkEditSelectionCommand, selection));
-                    menu.Add(ColorTagMenu(selection));
-                }
+                menu.AddRange(BulkEditEntries(selection));
                 menu.Add(new("Delete", DeleteSelectionCommand, selection));
                 return menu;
             }

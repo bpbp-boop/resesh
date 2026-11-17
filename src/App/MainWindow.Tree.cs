@@ -75,17 +75,12 @@ public sealed partial class MainWindow
             _paneGutters.Contains(line) ? _themePalette.PaneBorder : _themePalette.Divider);
     }
 
-    /// <summary>Outlines the focused pane like a folder: its sides rise from the bottom to
-    /// the top of its content, and the line under its tab strip runs along the top to the
-    /// selected tab, which stays open to the content. The sides sit exactly on the
-    /// one-pixel gutters the pane shares with its neighbours, so a seam never doubles.
+    /// <summary>Outlines the focused pane (geometry: <see cref="PaneFrameGeometry"/>).
     /// Normally drawn only when split, on the gutters: a lone pane needs no focus mark.
     /// A session drawn in a theme other than the app's (a Crimson production session, say)
-    /// is always outlined, split or not, on every side: where no gutter exists the edge
-    /// takes the pane's own outermost pixel. The color is that session theme's.
-    /// A colour-tagged session is outlined the same way in its tag colour, two pixels wide,
-    /// so the session about to take a risky command is unmistakable. High Contrast keeps to
-    /// system colours and draws no tag frame.</summary>
+    /// is always outlined, split or not, on every side, in that theme's colour. A
+    /// colour-tagged session is outlined the same way in its tag colour, wider. High
+    /// Contrast keeps to system colours and draws no tag frame.</summary>
     private void UpdatePaneFocusFrame()
     {
         var sessionPalette = ViewModel.ActiveSessionTheme is { } theme
@@ -101,7 +96,7 @@ public sealed partial class MainWindow
                 ? view
                 : null;
         var color = tagged ? tag : (sessionPalette ?? _themePalette).PaneFocusBorder;
-        var t = tagged ? 2 : 1;
+        var t = PaneFrameGeometry.Thickness(tagged);
         foreach (var groupView in _groupViews.Values)
         {
             groupView.SetFocusEdge(ReferenceEquals(groupView, focused) ? color : null, t);
@@ -119,39 +114,21 @@ public sealed partial class MainWindow
             return;
         }
 
-        // A gutter on a side means a neighbour there; the edge sits on that gutter.
-        var gutterLeft = pane.X > 0.5;
-        var gutterRight = pane.Right < GroupArea.ActualWidth - 0.5;
-        var gutterBelow = pane.Bottom < GroupArea.ActualHeight - 0.5;
-        // A wider edge keeps its outer pixel on the gutter and grows into the pane.
-        var leftX = gutterLeft ? pane.X - 1 : pane.X;
-        var rightX = gutterRight ? pane.Right + 1 - t : pane.Right - t;
-        var bottomY = gutterBelow ? pane.Bottom + 1 - t : pane.Bottom - t;
-        var top = pane.Y + focused!.ContentEdgeTop + 1 - t;
-        PlaceFrameEdge(PaneFocusLeft, gutterLeft || themed, leftX, top, t, bottomY + t - top);
-        PlaceFrameEdge(PaneFocusRight, gutterRight || themed, rightX, top, t, bottomY + t - top);
-        // The bottom spans to whichever sides are drawn so the corners join.
-        var bottomLeft = gutterLeft || themed ? leftX : pane.X;
-        var bottomRight = gutterRight || themed ? rightX + t : pane.Right;
-        PlaceFrameEdge(PaneFocusBottom, gutterBelow || themed, bottomLeft, bottomY, bottomRight - bottomLeft, t);
-
-        // The terminal steps in by as much of each edge as lies inside the pane, so the
-        // frame never covers its last row or column: all of it where there is no gutter,
-        // all but the gutter pixel where there is.
-        double Inset(bool drawn, bool gutter) => drawn ? (gutter ? t - 1 : t) : 0;
-        focused.SetContentInset(new Thickness(
-            Inset(gutterLeft || themed, gutterLeft),
-            0,
-            Inset(gutterRight || themed, gutterRight),
-            Inset(gutterBelow || themed, gutterBelow)));
+        var frame = PaneFrameGeometry.For(
+            new FrameRect(pane.X, pane.Y, pane.Width, pane.Height),
+            GroupArea.ActualWidth, GroupArea.ActualHeight, focused!.ContentEdgeTop, t, allSides: themed);
+        PlaceFrameEdge(PaneFocusLeft, frame.Left);
+        PlaceFrameEdge(PaneFocusRight, frame.Right);
+        PlaceFrameEdge(PaneFocusBottom, frame.Bottom);
+        focused.SetContentInset(new Thickness(frame.InsetLeft, 0, frame.InsetRight, frame.InsetBottom));
     }
 
-    private void PlaceFrameEdge(Microsoft.UI.Xaml.Shapes.Rectangle edge, bool shown,
-        double x, double y, double width, double height)
+    private void PlaceFrameEdge(Microsoft.UI.Xaml.Shapes.Rectangle edge, FrameRect? rect)
     {
-        edge.Visibility = shown && width > 0 && height > 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (edge.Visibility == Visibility.Collapsed)
+        edge.Visibility = rect is null ? Visibility.Collapsed : Visibility.Visible;
+        if (rect is not { } shown)
             return;
+        var (x, y, width, height) = shown;
         edge.Fill = _paneFocusBrush;
         Canvas.SetLeft(edge, x);
         Canvas.SetTop(edge, y);
