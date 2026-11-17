@@ -62,6 +62,12 @@ public sealed class CommitConfirmedWatcherTests
         Feed(watcher, "admin@mx1# commit confirmed 1\r\ncommit confirmed will be automatically rolled back in 1 minutes unless confirmed\r\n[edit]\r\nadmin@mx1# ");
         Feed(watcher, "\r\nBroadcast Message from root@mx1\r\n        (no tty) at 9:01 UTC...\r\n\r\nCommit was not confirmed; automatic rollback complete.\r\n\r\n");
         Assert.Equal(CommitTimerStatus.RolledBack, watcher.Timer.Status);
+
+        // A commit armed straight after the rollback counts down, though its reminder lands within
+        // a minute of the rollback.
+        _clock.Now += TimeSpan.FromSeconds(30);
+        Feed(watcher, "\r\n# commit confirmed will be rolled back in 0 minutes\r\n[edit]\r\nadmin@mx1# ");
+        AssertArmed(watcher, TimeSpan.Zero);
     }
 
     [Fact]

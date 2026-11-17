@@ -186,7 +186,7 @@ public sealed partial class CommitConfirmedWatcher(TimeProvider? timeProvider = 
             if (Timeout(armed.Groups["minutes"].Value, TimeSpan.FromMinutes(1), minimum: 0) is { } left)
             {
                 var deadline = _time.GetUtcNow() + left;
-                if (Timer.Deadline is not { } current || (deadline - current).Duration() >= TimeSpan.FromMinutes(1))
+                if (Timer is not { Status: CommitTimerStatus.Armed, Deadline: { } current } || (deadline - current).Duration() >= TimeSpan.FromMinutes(1))
                     ArmAt(deadline);
             }
             if (_pending is { Kind: PendingKind.Arm })
