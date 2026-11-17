@@ -2990,6 +2990,15 @@ deadline the tab shows 0:00 for five minutes instead of claiming a rollback.
 The vendor message texts come from vendor documentation, not captured sessions; the tests are
 written against those texts and should be refreshed from real captures.
 
+The command's options are parsed in any order (`commit best-effort confirmed 60`), and the
+values of `comment`, `label`, `description`, `persist-id` and `at` are skipped, so a persist-id
+of 123 is not a 123-minute timer. Timeouts outside 1 to 65535, the range all three platforms
+accept, are ignored rather than converted. One watcher serves a tab across reconnects because
+the timer runs on the device, but each connection starts it with a clean parser and no pending
+command, under a lock that also turns away the old reader (a reconnect does not wait for it).
+An exception from the watcher is reported once and switches it off for the tab: the reader
+thread must never die for a countdown.
+
 ## 2026-11-17 - x:Bind function bindings skip a null argument
 
 A function binding such as `{x:Bind local:PresentationValues.CommitBadgeVisibility(CommitCountdown)}`

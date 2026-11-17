@@ -513,7 +513,9 @@ public sealed partial record ThemeColorsChoice(string Id, string Name)
 [WinRT.GeneratedBindableCustomProperty]
 public sealed partial record WorkspaceRailIconChoice(string Id, string Name)
 {
-    public static IReadOnlyList<WorkspaceRailIconChoice> All { get; } =
+    /// <summary>A concrete List: it is bound to ItemsSource, and under AOT a collection
+    /// expression typed as an interface does not cross the WinRT boundary.</summary>
+    public static List<WorkspaceRailIconChoice> All { get; } =
     [
         new(WorkspaceRailIconModes.Always, "Always"),
         new(WorkspaceRailIconModes.WhenOpen, "When a workspace is open"),

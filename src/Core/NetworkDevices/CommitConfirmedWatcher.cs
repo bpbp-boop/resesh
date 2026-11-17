@@ -55,6 +55,18 @@ public sealed partial class CommitConfirmedWatcher(TimeProvider? timeProvider = 
 
     public CommitTimer Timer { get; private set; } = CommitTimer.None;
 
+    /// <summary>A new connection starts: what was half-read from the old one is dropped,
+    /// including a commit it echoed but never answered, which proves nothing. The timer
+    /// stays, because it runs on the device.</summary>
+    public void ResetConnection()
+    {
+        _utf8.Reset();
+        ClearLine();
+        _escape = EscapeState.None;
+        _afterCarriageReturn = false;
+        _pending = null;
+    }
+
     /// <summary>Reads more output. True when <see cref="Timer"/> changed.</summary>
     public bool Feed(ReadOnlySpan<byte> data)
     {
@@ -169,9 +181,13 @@ public sealed partial class CommitConfirmedWatcher(TimeProvider? timeProvider = 
         if (JunosArmed().Match(line) is { Success: true } armed)
         {
             // Junos rounds to whole minutes; a reminder within a minute of the timer keeps it steady.
-            var deadline = _time.GetUtcNow() + TimeSpan.FromMinutes(int.Parse(armed.Groups["minutes"].Value));
-            if (Timer.Deadline is not { } current || (deadline - current).Duration() >= TimeSpan.FromMinutes(1))
-                ArmAt(deadline);
+            // A number no device would print is not a reminder.
+            if (Timeout(armed.Groups["minutes"].Value, TimeSpan.FromMinutes(1)) is { } left)
+            {
+                var deadline = _time.GetUtcNow() + left;
+                if (Timer.Deadline is not { } current || (deadline - current).Duration() >= TimeSpan.FromMinutes(1))
+                    ArmAt(deadline);
+            }
             if (_pending is { Kind: PendingKind.Arm })
                 _pending = null;
             return;
@@ -187,50 +203,76 @@ public sealed partial class CommitConfirmedWatcher(TimeProvider? timeProvider = 
 
     private void OnCommand(string prompt, string command)
     {
-        var words = command.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        if (words.Length == 0 || !words[0].Equals("commit", StringComparison.OrdinalIgnoreCase))
-            return;
         var xr = XrPrompt().IsMatch(prompt);
         var nokia = NokiaPrompt().IsMatch(prompt);
-        var confirmed = words.Length > 1 && words[1].Equals("confirmed", StringComparison.OrdinalIgnoreCase);
-        if (!confirmed)
+        if (ParseCommit(command, xr) is not { } commit)
+            return;
+        var now = _time.GetUtcNow();
+        _pending = commit switch
         {
+            // MD-CLI ends its confirmed commit with "accept" or "cancel".
+            { Confirmed: true, Action: "accept" } => new PendingCommit(PendingKind.Confirm, TimeSpan.Zero, now),
+            { Confirmed: true, Action: "cancel" } => new PendingCommit(PendingKind.Cancel, TimeSpan.Zero, now),
+            { Confirmed: true } => new PendingCommit(PendingKind.Arm, commit.Timeout ?? (xr ? XrDefault : JunosDefault), now),
             // Any other commit (commit, commit check, commit comment …, commit and-quit)
             // confirms the pending one on Junos and IOS XR. MD-CLI confirms only with
             // "commit confirmed accept", so a plain commit there leaves the timer running.
-            if (Timer.Status == CommitTimerStatus.Armed && !nokia)
-                _pending = new PendingCommit(PendingKind.Confirm, TimeSpan.Zero, _time.GetUtcNow());
-            return;
-        }
-
-        var rest = words.Skip(2).Select(word => word.ToLowerInvariant()).ToList();
-        // MD-CLI ends its confirmed commit with "accept" or "cancel".
-        if (rest.FirstOrDefault() is "accept")
-        {
-            _pending = new PendingCommit(PendingKind.Confirm, TimeSpan.Zero, _time.GetUtcNow());
-            return;
-        }
-        if (rest.FirstOrDefault() is "cancel")
-        {
-            _pending = new PendingCommit(PendingKind.Cancel, TimeSpan.Zero, _time.GetUtcNow());
-            return;
-        }
-        _pending = new PendingCommit(PendingKind.Arm, Duration(rest, xr), _time.GetUtcNow());
+            _ when Timer.Status == CommitTimerStatus.Armed && !nokia => new PendingCommit(PendingKind.Confirm, TimeSpan.Zero, now),
+            _ => _pending,
+        };
     }
 
-    /// <summary>How long a "commit confirmed" waits: minutes on Junos and MD-CLI, seconds on
-    /// IOS XR unless "minutes" says otherwise. Each platform's default when no time is given.</summary>
-    private static TimeSpan Duration(List<string> words, bool xr)
+    // Options that take a value, which is never read as a keyword or a timeout: a label of
+    // "confirmed" or a persist-id of 123 is not a timer.
+    private static readonly HashSet<string> ValueOptions = ["comment", "label", "description", "persist-id", "at"];
+
+    /// <summary>A commit command's options, in any order ("commit best-effort confirmed 60",
+    /// "commit confirmed 5 comment \"x\"", "commit confirmed persist-id 123"); null when the
+    /// command is not a commit. The timeout is minutes on Junos and MD-CLI, seconds on IOS XR
+    /// unless "minutes" says otherwise, and null when none is given.</summary>
+    private static ParsedCommit? ParseCommit(string command, bool xr)
     {
-        for (var index = 0; index < words.Count; index++)
+        var words = Words().Matches(command).Select(match => match.Value.ToLowerInvariant()).ToList();
+        if (words is not ["commit", ..])
+            return null;
+        var confirmed = false;
+        string? action = null;
+        TimeSpan? timeout = null;
+        for (var index = 1; index < words.Count; index++)
         {
-            if (words[index] == "minutes" && index + 1 < words.Count && int.TryParse(words[index + 1], out var minutes))
-                return TimeSpan.FromMinutes(minutes);
-            if (int.TryParse(words[index], out var value))
-                return xr ? TimeSpan.FromSeconds(value) : TimeSpan.FromMinutes(value);
+            var word = words[index];
+            if (ValueOptions.Contains(word))
+            {
+                index++; // skip the value
+                continue;
+            }
+            if (word != "confirmed")
+                continue;
+            confirmed = true;
+            var next = index + 1 < words.Count ? words[index + 1] : null;
+            if (next is "accept" or "cancel")
+            {
+                action = next;
+                index++;
+            }
+            else if (next == "minutes" && index + 2 < words.Count)
+            {
+                timeout = Timeout(words[index + 2], TimeSpan.FromMinutes(1));
+                index += 2;
+            }
+            else if (next is not null && Timeout(next, xr ? TimeSpan.FromSeconds(1) : TimeSpan.FromMinutes(1)) is { } value)
+            {
+                timeout = value;
+                index++;
+            }
         }
-        return xr ? XrDefault : JunosDefault;
+        return new ParsedCommit(confirmed, action, timeout);
     }
+
+    /// <summary><paramref name="text"/> units, or null when it is not a number a device takes
+    /// (1 to 65535 on all three platforms), so nothing out of range reaches a TimeSpan.</summary>
+    private static TimeSpan? Timeout(string text, TimeSpan unit) =>
+        int.TryParse(text, out var value) && value is >= 1 and <= 65535 ? unit * value : null;
 
     /// <summary>The device prompted again with no error since the commit: it took effect.</summary>
     private void Settle()
@@ -281,13 +323,21 @@ public sealed partial class CommitConfirmedWatcher(TimeProvider? timeProvider = 
     [GeneratedRegex(@"Commit was not confirmed; automatic rollback complete", RegexOptions.IgnoreCase)]
     private static partial Regex JunosRolledBack();
 
-    // Junos "error: commit failed", IOS XR "% Failed to commit", MD-CLI "MINOR: MGMT_CORE #...: ... commit failed".
-    [GeneratedRegex(@"commit failed|failed to commit|no configuration changes|^error:|^MINOR:|^MAJOR:|^CRITICAL:", RegexOptions.IgnoreCase)]
+    // A refused commit. Junos "error: commit failed", "syntax error, expecting <command>",
+    // "unknown command."; IOS XR "% Failed to commit", "% Invalid input detected at '^' marker.",
+    // "% Incomplete command."; MD-CLI "MINOR: MGMT_CORE #...: ...".
+    [GeneratedRegex(@"commit failed|failed to commit|no configuration changes|syntax error|unknown command|^error:|^%\s*(?:invalid input|incomplete command|ambiguous command)|^MINOR:|^MAJOR:|^CRITICAL:", RegexOptions.IgnoreCase)]
     private static partial Regex CommitFailed();
+
+    // A command's words, a quoted value counting as one.
+    [GeneratedRegex(@"""[^""]*""|'[^']*'|\S+")]
+    private static partial Regex Words();
 
     private enum EscapeState { None, Escape, Csi, String, StringEscape }
 
     private enum PendingKind { Arm, Confirm, Cancel }
 
     private sealed record PendingCommit(PendingKind Kind, TimeSpan Duration, DateTimeOffset At);
+
+    private sealed record ParsedCommit(bool Confirmed, string? Action, TimeSpan? Timeout);
 }

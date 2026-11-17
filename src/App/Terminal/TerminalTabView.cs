@@ -70,7 +70,11 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
     // Confirmed commits on network devices, read from the output on the reader thread; the
     // tab counts down to the rollback. One per tab: the device's timer outlives a reconnect.
+    // A reconnect does not wait for the old reader, so two can be in Feed at once: the lock
+    // serializes them and the old one is turned away inside it.
     private readonly CommitConfirmedWatcher _commits = new();
+    private readonly Lock _commitsGate = new();
+    private bool _commitsFailed;
     private DispatcherQueueTimer? _commitTick;
 
     // Progress from OSC 9;4 and OSC 7501 in the terminal and from file-pane transfers,
@@ -875,14 +879,16 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
     /// <summary>Draws a backend's output as it arrives, and marks the tab when nobody is
     /// looking. The handler runs on the backend's reader thread.</summary>
-    private void FollowOutput(ITerminalBackend backend, TerminalConnectionLifetime connection) =>
+    private void FollowOutput(ITerminalBackend backend, TerminalConnectionLifetime connection)
+    {
+        lock (_commitsGate)
+            _commits.ResetConnection();
         backend.OutputReceived += data =>
         {
             if (connection.Token.IsCancellationRequested) return;
             _terminal.WriteOutput(data);
-            if (_commits.Feed(data))
+            if (WatchCommits(data, connection) is { } timer)
             {
-                var timer = _commits.Timer;
                 DispatcherQueue.TryPost(() =>
                 {
                     if (!_disposed) ShowCommitTimer(timer);
@@ -895,6 +901,29 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                     if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
                 });
         };
+    }
+
+    /// <summary>Feeds output to the commit watcher on the reader thread; the new timer when it
+    /// changed, else null. A watcher that throws is reported and switched off for the tab:
+    /// the countdown is a convenience, and the reader must never die for it.</summary>
+    private CommitTimer? WatchCommits(ReadOnlySpan<byte> data, TerminalConnectionLifetime connection)
+    {
+        lock (_commitsGate)
+        {
+            if (_commitsFailed || connection.Token.IsCancellationRequested)
+                return null;
+            try
+            {
+                return _commits.Feed(data) ? _commits.Timer : null;
+            }
+            catch (Exception exception)
+            {
+                _commitsFailed = true;
+                DispatcherQueue.TryPost(() => App.ReportRecoverableError(exception)); // it shows UI
+                return null;
+            }
+        }
+    }
 
     /// <summary>Shows a confirmed-commit timer on the tab and ticks its countdown each second
     /// until there is nothing left to show.</summary>

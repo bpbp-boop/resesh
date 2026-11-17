@@ -203,4 +203,87 @@ public sealed class CommitConfirmedWatcherTests
         Feed(watcher, "commit\r\n       ^\r\nunknown command.\r\nroot@mx1> ");
         AssertArmed(watcher, TimeSpan.FromMinutes(5));
     }
+
+    [Fact]
+    public void IosXrConfirmedAfterOtherOptionsStillArms()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "RP/0/RP0/CPU0:pe1(config)#commit confirmed 300\r\nRP/0/RP0/CPU0:pe1(config)#");
+        _clock.Now += TimeSpan.FromSeconds(30);
+
+        // A new trial commit restarts the timer; it does not confirm the old one.
+        Feed(watcher, "commit best-effort confirmed 60\r\nRP/0/RP0/CPU0:pe1(config)#");
+        AssertArmed(watcher, TimeSpan.FromSeconds(60));
+    }
+
+    [Theory]
+    [InlineData("commit confirmed persist-id 123", 10)]
+    [InlineData("commit confirmed 5 persist-id 123", 5)]
+    [InlineData("commit persist-id 7 confirmed", 10)]
+    public void MdCliOptionValuesAreNotTheTimeout(string command, int minutes)
+    {
+        var watcher = Watcher();
+        Feed(watcher, $"A:admin@sr1# {command}\r\n!A:admin@sr1# ");
+        AssertArmed(watcher, TimeSpan.FromMinutes(minutes));
+    }
+
+    [Theory]
+    [InlineData("commit comment \"confirmed 5\"")]
+    [InlineData("commit label confirmed")]
+    public void ConfirmedInsideAValueIsAPlainCommit(string command)
+    {
+        var watcher = Watcher();
+        Feed(watcher, "RP/0/RP0/CPU0:pe1(config)#commit confirmed 300\r\nRP/0/RP0/CPU0:pe1(config)#");
+
+        Feed(watcher, $"{command}\r\nRP/0/RP0/CPU0:pe1(config)#");
+        Assert.Equal(CommitTimerStatus.None, watcher.Timer.Status); // a plain commit confirms
+    }
+
+    [Theory]
+    [InlineData("RP/0/RP0/CPU0:pe1(config)#", "commit bogus", "                     ^\r\n% Invalid input detected at '^' marker.")]
+    [InlineData("RP/0/RP0/CPU0:pe1(config)#", "commit comm", "% Incomplete command.")]
+    [InlineData("admin@mx1#", "commit bogus", "                ^\r\nsyntax error, expecting <command>.")]
+    public void ASyntaxErrorKeepsTheTimer(string prompt, string command, string error)
+    {
+        var watcher = Watcher();
+        Feed(watcher, $"{prompt}commit confirmed 300\r\n{prompt}");
+        var armed = watcher.Timer;
+        Assert.Equal(CommitTimerStatus.Armed, armed.Status);
+
+        Feed(watcher, $"{command}\r\n{error}\r\n{prompt}");
+        Assert.Equal(armed, watcher.Timer);
+    }
+
+    [Theory]
+    [InlineData("99999999999")]
+    [InlineData("200000000")]
+    [InlineData("0")]
+    public void AnImpossibleReminderIsIgnoredRatherThanThrown(string minutes)
+    {
+        var watcher = Watcher();
+
+        Assert.False(Feed(watcher, $"# commit confirmed will be rolled back in {minutes} minutes\r\n"));
+        Assert.Equal(CommitTimer.None, watcher.Timer);
+    }
+
+    [Fact]
+    public void AnImpossibleTimeoutFallsBackToTheDefault()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "A:admin@sr1# commit confirmed 99999999999\r\n!A:admin@sr1# ");
+        AssertArmed(watcher, TimeSpan.FromMinutes(10));
+    }
+
+    [Fact]
+    public void AReconnectDropsAnUnansweredCommitButKeepsTheTimer()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "RP/0/RP0/CPU0:pe1(config)#commit confirmed 300\r\nRP/0/RP0/CPU0:pe1(config)#");
+        var armed = watcher.Timer;
+        Feed(watcher, "commit\r\n"); // the connection drops before the device answers
+
+        watcher.ResetConnection();
+        Feed(watcher, "\r\nRP/0/RP0/CPU0:pe1#");
+        Assert.Equal(armed, watcher.Timer);
+    }
 }
