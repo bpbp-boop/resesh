@@ -257,7 +257,6 @@ public sealed class CommitConfirmedWatcherTests
     [Theory]
     [InlineData("99999999999")]
     [InlineData("200000000")]
-    [InlineData("0")]
     public void AnImpossibleReminderIsIgnoredRatherThanThrown(string minutes)
     {
         var watcher = Watcher();
@@ -285,5 +284,44 @@ public sealed class CommitConfirmedWatcherTests
         watcher.ResetConnection();
         Feed(watcher, "\r\nRP/0/RP0/CPU0:pe1#");
         Assert.Equal(armed, watcher.Timer);
+    }
+
+    [Fact]
+    public void AZeroMinuteReminderIsTheLastMinute()
+    {
+        var watcher = Watcher();
+        // The commit that armed it was not seen; the reminder alone says time is nearly up.
+        Assert.True(Feed(watcher, "\r\n# commit confirmed will be rolled back in 0 minutes\r\n[edit]\r\nadmin@mx1# "));
+        AssertArmed(watcher, TimeSpan.Zero);
+        Assert.True(CommitCountdown.For(watcher.Timer, _clock.Now)!.Urgent);
+
+        // A timer already known to end within the minute keeps its own deadline.
+        var known = Watcher();
+        Feed(known, "admin@mx1# commit confirmed 1\r\ncommit confirmed will be automatically rolled back in 1 minutes unless confirmed\r\n[edit]\r\nadmin@mx1# ");
+        _clock.Now += TimeSpan.FromSeconds(20);
+        var deadline = known.Timer.Deadline;
+        Feed(known, "show | compare\r\n\r\n# commit confirmed will be rolled back in 0 minutes\r\n[edit]\r\nadmin@mx1# ");
+        Assert.Equal(deadline, known.Timer.Deadline);
+    }
+
+    [Theory]
+    [InlineData("commit confirmed 5 # confirmed accept", 5)]
+    [InlineData("commit confirmed # 30", 10)]
+    [InlineData("commit confirmed 5 comment \"# not a comment\"", 5)]
+    public void MdCliIgnoresAnUnquotedComment(string command, int minutes)
+    {
+        var watcher = Watcher();
+        Feed(watcher, $"A:admin@sr1# {command}\r\n!A:admin@sr1# ");
+        AssertArmed(watcher, TimeSpan.FromMinutes(minutes));
+    }
+
+    [Theory]
+    [InlineData("commit confirmed timeout 5", 5)]
+    [InlineData("commit confirmed timeout 5 persist-id 123", 5)]
+    public void MdCliTakesTheOptionalTimeoutKeyword(string command, int minutes)
+    {
+        var watcher = Watcher();
+        Feed(watcher, $"A:admin@sr1# {command}\r\n!A:admin@sr1# ");
+        AssertArmed(watcher, TimeSpan.FromMinutes(minutes));
     }
 }

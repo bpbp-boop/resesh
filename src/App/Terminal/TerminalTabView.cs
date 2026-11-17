@@ -887,11 +887,17 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         {
             if (connection.Token.IsCancellationRequested) return;
             _terminal.WriteOutput(data);
-            if (WatchCommits(data, connection) is { } timer)
+            if (WatchCommits(data, connection))
             {
+                // The latest timer when the post runs, not a snapshot from this reader: an old
+                // reader's post can land after a new one's and must not undo it.
                 DispatcherQueue.TryPost(() =>
                 {
-                    if (!_disposed) ShowCommitTimer(timer);
+                    if (_disposed) return;
+                    CommitTimer latest;
+                    lock (_commitsGate)
+                        latest = _commits.Timer;
+                    ShowCommitTimer(latest);
                 });
             }
             // Benign cross-thread reads: worst case is one redundant enqueue.
@@ -903,24 +909,24 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         };
     }
 
-    /// <summary>Feeds output to the commit watcher on the reader thread; the new timer when it
-    /// changed, else null. A watcher that throws is reported and switched off for the tab:
-    /// the countdown is a convenience, and the reader must never die for it.</summary>
-    private CommitTimer? WatchCommits(ReadOnlySpan<byte> data, TerminalConnectionLifetime connection)
+    /// <summary>Feeds output to the commit watcher on the reader thread; true when its timer
+    /// changed. A watcher that throws is reported and switched off for the tab: the
+    /// countdown is a convenience, and the reader must never die for it.</summary>
+    private bool WatchCommits(ReadOnlySpan<byte> data, TerminalConnectionLifetime connection)
     {
         lock (_commitsGate)
         {
             if (_commitsFailed || connection.Token.IsCancellationRequested)
-                return null;
+                return false;
             try
             {
-                return _commits.Feed(data) ? _commits.Timer : null;
+                return _commits.Feed(data);
             }
             catch (Exception exception)
             {
                 _commitsFailed = true;
                 DispatcherQueue.TryPost(() => App.ReportRecoverableError(exception)); // it shows UI
-                return null;
+                return false;
             }
         }
     }

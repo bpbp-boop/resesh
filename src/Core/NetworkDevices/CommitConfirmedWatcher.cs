@@ -181,8 +181,9 @@ public sealed partial class CommitConfirmedWatcher(TimeProvider? timeProvider = 
         if (JunosArmed().Match(line) is { Success: true } armed)
         {
             // Junos rounds to whole minutes; a reminder within a minute of the timer keeps it steady.
-            // A number no device would print is not a reminder.
-            if (Timeout(armed.Groups["minutes"].Value, TimeSpan.FromMinutes(1)) is { } left)
+            // "0 minutes" is the last minute, taken as no time left: a countdown that ends early
+            // is safe, one that ends late is not. A number no device would print is not a reminder.
+            if (Timeout(armed.Groups["minutes"].Value, TimeSpan.FromMinutes(1), minimum: 0) is { } left)
             {
                 var deadline = _time.GetUtcNow() + left;
                 if (Timer.Deadline is not { } current || (deadline - current).Duration() >= TimeSpan.FromMinutes(1))
@@ -205,7 +206,7 @@ public sealed partial class CommitConfirmedWatcher(TimeProvider? timeProvider = 
     {
         var xr = XrPrompt().IsMatch(prompt);
         var nokia = NokiaPrompt().IsMatch(prompt);
-        if (ParseCommit(command, xr) is not { } commit)
+        if (ParseCommit(command, xr, nokia) is not { } commit)
             return;
         var now = _time.GetUtcNow();
         _pending = commit switch
@@ -229,10 +230,13 @@ public sealed partial class CommitConfirmedWatcher(TimeProvider? timeProvider = 
     /// <summary>A commit command's options, in any order ("commit best-effort confirmed 60",
     /// "commit confirmed 5 comment \"x\"", "commit confirmed persist-id 123"); null when the
     /// command is not a commit. The timeout is minutes on Junos and MD-CLI, seconds on IOS XR
-    /// unless "minutes" says otherwise, and null when none is given.</summary>
-    private static ParsedCommit? ParseCommit(string command, bool xr)
+    /// unless "minutes" says otherwise, and null when none is given. MD-CLI ignores everything
+    /// after an unquoted #, so a comment there is no part of the command.</summary>
+    private static ParsedCommit? ParseCommit(string command, bool xr, bool nokia)
     {
-        var words = Words().Matches(command).Select(match => match.Value.ToLowerInvariant()).ToList();
+        var words = Words().Matches(command).Select(match => match.Value.ToLowerInvariant())
+            .TakeWhile(word => !(nokia && word.StartsWith('#')))
+            .ToList();
         if (words is not ["commit", ..])
             return null;
         var confirmed = false;
@@ -260,6 +264,12 @@ public sealed partial class CommitConfirmedWatcher(TimeProvider? timeProvider = 
                 timeout = Timeout(words[index + 2], TimeSpan.FromMinutes(1));
                 index += 2;
             }
+            // MD-CLI's optional keyword: "commit confirmed timeout 5" is "commit confirmed 5".
+            else if (next == "timeout" && index + 2 < words.Count)
+            {
+                timeout = Timeout(words[index + 2], xr ? TimeSpan.FromSeconds(1) : TimeSpan.FromMinutes(1));
+                index += 2;
+            }
             else if (next is not null && Timeout(next, xr ? TimeSpan.FromSeconds(1) : TimeSpan.FromMinutes(1)) is { } value)
             {
                 timeout = value;
@@ -270,9 +280,10 @@ public sealed partial class CommitConfirmedWatcher(TimeProvider? timeProvider = 
     }
 
     /// <summary><paramref name="text"/> units, or null when it is not a number a device takes
-    /// (1 to 65535 on all three platforms), so nothing out of range reaches a TimeSpan.</summary>
-    private static TimeSpan? Timeout(string text, TimeSpan unit) =>
-        int.TryParse(text, out var value) && value is >= 1 and <= 65535 ? unit * value : null;
+    /// (1 to 65535 on all three platforms; a Junos reminder can say 0), so nothing out of
+    /// range reaches a TimeSpan.</summary>
+    private static TimeSpan? Timeout(string text, TimeSpan unit, int minimum = 1) =>
+        int.TryParse(text, out var value) && value >= minimum && value <= 65535 ? unit * value : null;
 
     /// <summary>The device prompted again with no error since the commit: it took effect.</summary>
     private void Settle()

@@ -2997,7 +2997,13 @@ accept, are ignored rather than converted. One watcher serves a tab across recon
 the timer runs on the device, but each connection starts it with a clean parser and no pending
 command, under a lock that also turns away the old reader (a reconnect does not wait for it).
 An exception from the watcher is reported once and switches it off for the tab: the reader
-thread must never die for a countdown.
+thread must never die for a countdown. The UI applies the watcher's latest timer, read under
+the same lock when its post runs, never a reader's snapshot, so an old reader's late post
+cannot undo a newer countdown.
+
+A Junos reminder of "0 minutes" is the last minute and arms the timer at no time left: a
+countdown that ends early is safe, one that ends late is not. On MD-CLI an unquoted `#` starts
+a comment the device ignores, and `timeout` may name the timeout (`commit confirmed timeout 5`).
 
 ## 2026-11-17 - x:Bind function bindings skip a null argument
 
