@@ -46,6 +46,7 @@ public sealed class SettingsEffectsTests
     [InlineData(nameof(AppSettings.DarkTheme), SettingsEffect.Theme | SettingsEffect.SettingsPages)]
     [InlineData(nameof(AppSettings.ShowStatusBar), SettingsEffect.StatusBar | SettingsEffect.SettingsPages)]
     [InlineData(nameof(AppSettings.SessionsPaneLayout), SettingsEffect.PaneLayout | SettingsEffect.SettingsPages)]
+    [InlineData(nameof(AppSettings.WorkspaceRailIcons), SettingsEffect.WorkspaceRail | SettingsEffect.SettingsPages)]
     [InlineData(nameof(AppSettings.RecordingDirectory), SettingsEffect.Recordings | SettingsEffect.SettingsPages)]
     [InlineData(nameof(AppSettings.FontSize), SettingsEffect.Terminals | SettingsEffect.SettingsPages)]
     [InlineData(nameof(AppSettings.ShowAgentIcons), SettingsEffect.Terminals | SettingsEffect.SettingsPages)]
@@ -62,6 +63,7 @@ public sealed class SettingsEffectsTests
             nameof(AppSettings.DarkTheme) => before with { DarkTheme = "nord" },
             nameof(AppSettings.ShowStatusBar) => before with { ShowStatusBar = false },
             nameof(AppSettings.SessionsPaneLayout) => before with { SessionsPaneLayout = SessionsPaneLayouts.Dock },
+            nameof(AppSettings.WorkspaceRailIcons) => before with { WorkspaceRailIcons = WorkspaceRailIconModes.Never },
             nameof(AppSettings.RecordingDirectory) => before with { RecordingDirectory = @"D:\casts" },
             nameof(AppSettings.FontSize) => before with { FontSize = 18 },
             nameof(AppSettings.ShowAgentIcons) => before with { ShowAgentIcons = false },

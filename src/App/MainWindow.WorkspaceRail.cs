@@ -488,6 +488,49 @@ public sealed partial class MainWindow
             : "New workspace";
         ToolTipService.SetToolTip(NewWorkspaceRailButton, newTip);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(NewWorkspaceRailButton, newTip);
+        ApplyWorkspaceRailVisibility();
+    }
+
+    /// <summary>Shows or hides the rail's workspace buttons as Settings asks. "When a
+    /// workspace is open" counts the saved workspaces open in this window.</summary>
+    private void ApplyWorkspaceRailVisibility()
+    {
+        var anyOpen = App.Workspaces.Workspaces.Any(workspace => IsWorkspaceOpen(workspace.Id));
+        WorkspaceRailSection.Visibility = PresentationValues.Visible(
+            WorkspaceRailIconModes.Shows(App.Settings.Current.WorkspaceRailIcons, anyOpen));
+    }
+
+    /// <summary>Right-click anywhere on the rail outside a workspace button: the one place
+    /// to bring the buttons back from the rail itself once they are hidden.</summary>
+    private void Rail_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
+    {
+        if (args.Handled)
+            return;
+        args.Handled = true;
+        var menu = new MenuFlyout();
+        menu.Items.Add(WorkspaceIconsMenu());
+        var target = args.OriginalSource as FrameworkElement ?? (FrameworkElement)sender;
+        if (args.TryGetPosition(target, out var point))
+            menu.ShowAt(target, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Position = point });
+        else
+            menu.ShowAt(target);
+    }
+
+    private MenuFlyoutSubItem WorkspaceIconsMenu()
+    {
+        var current = WorkspaceRailIconModes.Normalize(App.Settings.Current.WorkspaceRailIcons);
+        var submenu = new MenuFlyoutSubItem { Text = "Workspace icons" };
+        foreach (var choice in WorkspaceRailIconChoice.All)
+        {
+            var item = new RadioMenuFlyoutItem
+            {
+                Text = choice.Name, GroupName = "WorkspaceRailIcons", IsChecked = choice.Id == current,
+            };
+            item.Click += (_, _) =>
+                App.SaveSettings(App.Settings.Current with { WorkspaceRailIcons = choice.Id });
+            submenu.Items.Add(item);
+        }
+        return submenu;
     }
 
     /// <summary>Puts the Workspaces pane's row for a workspace at its place and brings it up
@@ -595,6 +638,8 @@ public sealed partial class MainWindow
             save.Click += (_, _) => _ = NewWorkspaceAsync();
             save.IsEnabled = item.IsActive && ViewModel.ShownTabs.Any(tab => !tab.IsAppPage);
             menu.Items.Add(save);
+            menu.Items.Add(new MenuFlyoutSeparator());
+            menu.Items.Add(WorkspaceIconsMenu());
             return menu;
         }
 
@@ -618,6 +663,8 @@ public sealed partial class MainWindow
         menu.Items.Add(close);
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(Item("Delete…", ViewModel.DeleteWorkspaceCommand, workspace));
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(WorkspaceIconsMenu());
         return menu;
     }
 

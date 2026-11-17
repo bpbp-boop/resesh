@@ -224,4 +224,23 @@ public sealed class TabStateTests
         tab.MarkDisconnected();
         Assert.False(tab.AcceptsCommands);
     }
+
+    [Fact]
+    public void ConfirmingACommitHidesTheCountdownAndItIsNeverNull()
+    {
+        var tab = Local();
+        var changes = new List<string?>();
+        tab.PropertyChanged += (_, e) => changes.Add(e.PropertyName);
+        Assert.False(tab.CommitCountdown.IsShown);
+
+        tab.CommitTimer = new Resesh.Core.NetworkDevices.CommitTimer(
+            Resesh.Core.NetworkDevices.CommitTimerStatus.Armed, DateTimeOffset.UtcNow.AddMinutes(5));
+        Assert.True(tab.CommitCountdown.IsShown);
+
+        changes.Clear();
+        tab.CommitTimer = Resesh.Core.NetworkDevices.CommitTimer.None;
+        Assert.NotNull(tab.CommitCountdown);
+        Assert.False(tab.CommitCountdown.IsShown);
+        Assert.Contains(nameof(TabViewModel.CommitCountdown), changes);
+    }
 }

@@ -2968,3 +2968,33 @@ GNU runtime symbols and cannot be linked with MSVC's link.exe.
 This removes the desktop Ghostty checkout and upstream Zig build. Zig is still needed
 for our shim and for the separate Linux session-agent source build, which retains its
 own Ghostty and Zig 0.16 pins in eng/agent/agent.json. Arm64 validation runs in CI.
+
+## 2026-11-17 - Commit confirmed countdown reads the raw output stream
+
+`CommitConfirmedWatcher` (Core) reads each connection's output on the reader thread rather than
+the rendered screen the terminal's `CommandTracker` uses for CLI mode. It needs no terminal, so it
+is tested as plain text, and it sees every byte even when the screen scrolls or a pager redraws.
+It strips escape sequences, applies backspaces and treats a bare carriage return as a redraw.
+
+The command comes from the device's echo after a configuration prompt (`user@host#`,
+`A:user@host#`, `RP/0/RP0/CPU0:host(config)#`), which is the same on all three platforms and
+works however the command was typed or pasted. A commit only counts once the device
+prompts again with no error in between, so a commit the device refused neither arms nor
+confirms a timer. Junos also prints how long is left and that it rolled back; those messages
+correct the timer. IOS XR counts in seconds (default 600) unless `minutes` is given; Junos and
+MD-CLI count in minutes (default 10). On MD-CLI only `commit confirmed accept` confirms: a
+plain `commit` there leaves the timer running, because showing it confirmed when it is not is
+the failure that matters. IOS XR and MD-CLI say nothing when they roll back, so after the
+deadline the tab shows 0:00 for five minutes instead of claiming a rollback.
+
+The vendor message texts come from vendor documentation, not captured sessions; the tests are
+written against those texts and should be refreshed from real captures.
+
+## 2026-11-17 - x:Bind function bindings skip a null argument
+
+A function binding such as `{x:Bind local:PresentationValues.CommitBadgeVisibility(CommitCountdown)}`
+is generated as `if (obj != null) Update_...()`: when the bound property becomes null the
+function is not called and the target keeps its last value, and when it starts null the target
+keeps its XAML default. The commit countdown badge stayed on the tab, frozen, after the commit
+was confirmed. A property bound through function bindings is therefore never null: the tab's
+`CommitCountdown` is `CommitCountdown.Hidden` when there is nothing to show.

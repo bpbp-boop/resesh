@@ -66,6 +66,7 @@ public sealed partial class MainViewModel
     private void OnActiveTabStateChanged()
     {
         OnPropertyChanged(nameof(ActiveSessionTheme));
+        OnPropertyChanged(nameof(ActiveColorTag));
         OnPropertyChanged(nameof(ActiveStartAgainVerb));
         OnPropertyChanged(nameof(ActiveStopVerb));
         OnPropertyChanged(nameof(ShowSendBreak));

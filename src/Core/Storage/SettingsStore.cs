@@ -34,6 +34,9 @@ public sealed record AppSettings
     /// <see cref="SessionsPaneLayouts"/>.</summary>
     public string SessionsPaneLayout { get; set; } = SessionsPaneLayouts.Automatic;
 
+    /// <summary>When the rail shows the workspace buttons; see <see cref="WorkspaceRailIconModes"/>.</summary>
+    public string WorkspaceRailIcons { get; set; } = WorkspaceRailIconModes.Always;
+
 
     /// <summary>Restore the clean-exit tab-group layout when the app next launches.</summary>
     public bool ReopenLastLayoutAtStartup { get; init; }
@@ -176,6 +179,31 @@ public static class SessionsPaneLayouts
 
     /// <summary>A saved value this version knows, or <see cref="Automatic"/>.</summary>
     public static string Normalize(string? layout) => layout is Float or Dock ? layout : Automatic;
+}
+
+/// <summary>Saved values of <see cref="AppSettings.WorkspaceRailIcons"/>. Hidden buttons
+/// hide nothing else: workspaces still open from the Workspaces pane and the palette.</summary>
+public static class WorkspaceRailIconModes
+{
+    public const string Always = "always";
+
+    /// <summary>Only while the window has a saved workspace open, so a window used
+    /// without workspaces keeps a bare rail.</summary>
+    public const string WhenOpen = "whenOpen";
+
+    public const string Never = "never";
+
+    /// <summary>A saved value this version knows, or <see cref="Always"/>.</summary>
+    public static string Normalize(string? mode) => mode is WhenOpen or Never ? mode : Always;
+
+    /// <summary>Whether the rail shows the workspace buttons in a window that has
+    /// <paramref name="anyOpen"/> saved workspaces open.</summary>
+    public static bool Shows(string? mode, bool anyOpen) => Normalize(mode) switch
+    {
+        Never => false,
+        WhenOpen => anyOpen,
+        _ => true,
+    };
 }
 
 /// <summary>Saved values of <see cref="AppSettings.MouseCapture"/>.</summary>

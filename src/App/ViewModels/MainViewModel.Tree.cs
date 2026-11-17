@@ -6,13 +6,24 @@ using Resesh.Core.Storage;
 
 namespace Resesh.App.ViewModels;
 
-/// <summary>One item of a context menu the view materializes: a command, or a separator.</summary>
+/// <summary>One item of a context menu the view materializes: a command, a submenu, or a
+/// separator. <see cref="Swatch"/> draws a colour beside the text; <see cref="IsChecked"/>
+/// marks the choice the selection already has.</summary>
 public sealed record MenuEntry(string Text, ICommand? Command = null, object? Parameter = null)
 {
     public static readonly MenuEntry Separator = new("");
 
-    public bool IsSeparator => Command is null;
+    public IReadOnlyList<MenuEntry>? Children { get; init; }
+
+    public string? Swatch { get; init; }
+
+    public bool IsChecked { get; init; }
+
+    public bool IsSeparator => Command is null && Children is null;
 }
+
+/// <summary>The colour tag to give every session of a tree selection; null clears it.</summary>
+public sealed record ColorTagChange(IReadOnlyList<TreeNodeViewModel> Nodes, string? Hex);
 
 // Session tree selection and the actions on it. The view owns pointer, focus, and drag
 // mechanics; everything that decides what an action does lives here.
@@ -159,6 +170,62 @@ public sealed partial class MainViewModel
 
     private bool CanDeleteSelection(IReadOnlyList<TreeNodeViewModel>? nodes) =>
         SelectionOrCurrent(nodes) is { Count: > 0 } items && !items.All(node => node.IsLocalRoot);
+
+    /// <summary>Edits every session of the selection at once, with the Sessions manager's
+    /// bulk editor.</summary>
+    [RelayCommand(CanExecute = nameof(CanBulkEditSelection),
+        AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
+    private Task BulkEditSelectionAsync(IReadOnlyList<TreeNodeViewModel>? nodes) =>
+        ReportingStoreFailures(async () =>
+        {
+            var sessions = StoredSessionsOf(SelectionOrCurrent(nodes));
+            if (sessions.Count > 0 && await Services.BulkEditSessionsAsync(sessions) is { } edit)
+                EditSessions(sessions.Select(session => session.Id), edit);
+        });
+
+    private bool CanBulkEditSelection(IReadOnlyList<TreeNodeViewModel>? nodes) =>
+        StoredSessionsOf(SelectionOrCurrent(nodes)).Count > 0;
+
+    [RelayCommand(AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]
+    private Task SetSelectionColorTagAsync(ColorTagChange change) =>
+        ReportingStoreFailures(() =>
+        {
+            EditSessions(StoredSessionsOf(change.Nodes).Select(session => session.Id),
+                new SessionBulkEdit { SetColor = true, ColorTag = change.Hex });
+            return Task.CompletedTask;
+        });
+
+    /// <summary>The saved records of the selection's sessions. A folder counts every session
+    /// under it in the store, as deleting it would, including ones a filter hides.</summary>
+    private List<Session> StoredSessionsOf(IReadOnlyList<TreeNodeViewModel> nodes) =>
+        nodes.SelectMany(node => node switch
+            {
+                { Session: { } session } => _store.Find(session.Id) is { } saved ? [saved] : [],
+                { IsFolder: true, IsLocalRoot: false } folder => _store.SessionsInFolder(folder.FolderPath, KindOf(folder)),
+                _ => (IReadOnlyList<Session>)[],
+            })
+            .DistinctBy(session => session.Id)
+            .ToList();
+
+    /// <summary>"Color tag" with one item per tag, the selection's shared tag checked.</summary>
+    private MenuEntry ColorTagMenu(IReadOnlyList<TreeNodeViewModel> selection)
+    {
+        var tags = StoredSessionsOf(selection)
+            .Select(session => SessionColors.Find(session.ColorTag)?.Hex ?? (string.IsNullOrWhiteSpace(session.ColorTag) ? null : session.ColorTag))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var shared = tags.Count == 1 ? tags[0] : "\0"; // "\0": mixed, nothing checked
+        return new MenuEntry("Color tag")
+        {
+            Children = SessionColors.All
+                .Select(choice => new MenuEntry(choice.Name, SetSelectionColorTagCommand, new ColorTagChange(selection, choice.Hex))
+                {
+                    Swatch = choice.Hex,
+                    IsChecked = string.Equals(choice.Hex, shared, StringComparison.OrdinalIgnoreCase),
+                })
+                .ToList(),
+        };
+    }
 
     // ---- Folder and profile commands (context menu) ----
 
@@ -342,6 +409,7 @@ public sealed partial class MainViewModel
                     new("Connect in new split", OpenSelectionInNewSplitsCommand, selection),
                     MenuEntry.Separator,
                     new("Edit…", EditSelectionCommand, selection),
+                    ColorTagMenu(selection),
                     new("Delete", DeleteSelectionCommand, selection),
                 ];
 
@@ -373,6 +441,11 @@ public sealed partial class MainViewModel
                     new("New Folder…", NewSubfolderCommand, folder),
                     MenuEntry.Separator,
                 };
+                if (CanBulkEditSelection(selection))
+                {
+                    menu.Add(new("Edit Sessions…", BulkEditSelectionCommand, selection));
+                    menu.Add(ColorTagMenu(selection));
+                }
                 if (!folder.IsLocalScope)
                     menu.Add(new("Set Identity…", SetFolderIdentityCommand, folder));
                 menu.Add(new("Rename…", RenameFolderCommand, folder));
@@ -380,18 +453,26 @@ public sealed partial class MainViewModel
                 return menu;
             }
 
-            // Mixed selections get the shared subset.
+            // Mixed selections get the shared subset, and edits that apply to many sessions.
             default:
-                return
-                [
+            {
+                var menu = new List<MenuEntry>
+                {
                     new("Connect in Tabs", OpenSelectionCommand, selection),
                     new("Open in new window", OpenSelectionInNewWindowCommand, selection),
                     new("Open in one new split", OpenSelectionInOneNewSplitCommand, selection),
                     new("Open in new splits", OpenSelectionInNewSplitsCommand, selection),
                     new("Open in existing splits", OpenSelectionInExistingSplitsCommand, selection),
                     MenuEntry.Separator,
-                    new("Delete", DeleteSelectionCommand, selection),
-                ];
+                };
+                if (CanBulkEditSelection(selection))
+                {
+                    menu.Add(new("Edit Sessions…", BulkEditSelectionCommand, selection));
+                    menu.Add(ColorTagMenu(selection));
+                }
+                menu.Add(new("Delete", DeleteSelectionCommand, selection));
+                return menu;
+            }
         }
     }
 }

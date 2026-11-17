@@ -72,7 +72,7 @@
           <ul class="row__bullets">
             <li>local profiles for powershell, cmd, wsl and git bash</li>
             <li>tab badges for claude code, codex, gemini cli, github copilot, cursor, opencode and 21 more agents</li>
-            <li>color tags carried onto the tab accent</li>
+            <li>color tags carried onto the tab accent; the focused pane is framed in the tag color, so you can see which device you are typing into</li>
             <li>nokia, juniper, cisco, arista and vyos icons, suggested from the login banner</li>
           </ul>
         </div>
@@ -129,6 +129,7 @@
             <li>move to a folder, set an identity, duplicate or delete</li>
             <li>each change is one write to the session store, so it lands whole or not at all</li>
             <li>in the session tree, select several sessions and open them in new splits, in one new split, or across the splits already open</li>
+            <li>right-click a folder or a selection in the session tree to edit every session in it, or give them all a color tag</li>
           </ul>
         </div>
         <div class="row__media">
@@ -328,6 +329,7 @@
             <li>junos: operational or configure, with the [edit] hierarchy and the routing engine role</li>
             <li>cisco ios, ios xe and ios xr: configure and its submode, such as interface, routing or bgp neighbor; ios xr adds the route processor</li>
             <li>nokia sr os md-cli: global, exclusive, private or read-only, the path, and a star for uncommitted changes</li>
+            <li>commit confirmed on junos, ios xr or md-cli counts down on the tab to the rollback, turns red in the last minute, and clears when the commit is confirmed</li>
             <li>read from the prompt on screen; nothing is sent to the device</li>
             <li>a bare host# is only read as cisco when the login banner or the session icon says so, so a linux root prompt is left alone</li>
           </ul>
@@ -615,6 +617,7 @@
             <li>a workspace changes only when you save it; unsaved changes show on its button and survive a restart until you save or revert them</li>
             <li>a dot on the button when a background workspace has new output, a dropped session or an agent waiting; hover a button for its status, middle-click closes it</li>
             <li>pick an icon from a set that matches the rail, or show initials (your own or from the name), or both with the initials under the icon</li>
+            <li>hide the workspace buttons on the rail, or show them only while a workspace is open</li>
             <li>backups keep each workspace's sessions when you import them on another pc</li>
           </ul>
         </div>

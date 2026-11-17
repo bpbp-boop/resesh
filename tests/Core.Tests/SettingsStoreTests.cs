@@ -97,6 +97,18 @@ public sealed class SettingsStoreTests
         Assert.Equal(SessionsPaneLayouts.Automatic, new AppSettings().SessionsPaneLayout);
     }
 
+    [Theory]
+    [InlineData(WorkspaceRailIconModes.Always, false, true)]
+    [InlineData(WorkspaceRailIconModes.WhenOpen, false, false)]
+    [InlineData(WorkspaceRailIconModes.WhenOpen, true, true)]
+    [InlineData(WorkspaceRailIconModes.Never, true, false)]
+    [InlineData("sideways", false, true)]
+    public void WorkspaceRailIconsShowAsTheModeSays(string mode, bool anyOpen, bool shows)
+    {
+        Assert.Equal(WorkspaceRailIconModes.Always, new AppSettings().WorkspaceRailIcons);
+        Assert.Equal(shows, WorkspaceRailIconModes.Shows(mode, anyOpen));
+    }
+
     [Fact]
     public void RecordRecentSession_KeepsNewestUniqueSessionsWithinLimit()
     {

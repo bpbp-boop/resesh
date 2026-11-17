@@ -41,13 +41,15 @@ sessions over from SecureCRT, PuTTY and OpenSSH in a few clicks.
 - Icons for Linux distros, cloud providers, databases and network vendors (Cisco, Juniper, Nokia, Arista,
   VyOS, MikroTik, Fortinet, Palo Alto…). Network gear gets its icon **suggested from the login banner**.
   Drop in your own.
-- **Colour tags** carried onto the tab accent.
+- **Colour tags** carried onto the tab accent, with the focused pane framed in the tag colour so you
+  can see which device you are typing into. Tag a whole folder or selection from the tree's right-click menu.
 - **Shared logins (identities):** set one username and password or key on a folder and every session
   inside uses it. Rotate a password once; a rejected one can be updated for every session that uses it.
   **Tidy up logins** (Settings › Identities & Keys) groups older sessions that share a username, key or
   saved password into identities.
 - **Bulk edit:** one sortable table of every session. Change the login, port, colour, icon, theme,
-  folder or jump host of fifty sessions at once.
+  folder or jump host of fifty sessions at once, from the table or a right-click on a folder or
+  selection in the tree.
 - Local profiles for **PowerShell, cmd, WSL and Git Bash** in the same list.
 - Pinned and recent sessions in the **taskbar jump list**.
 
@@ -85,6 +87,8 @@ sessions over from SecureCRT, PuTTY and OpenSSH in a few clicks.
   or your own regular expressions, per session.
 - **CLI mode on the tab:** see at a glance which tab is sitting in Junos `configure`, Cisco
   `config-if` or Nokia MD-CLI `private*` before you type into it.
+- **Commit confirmed countdown:** after `commit confirmed` on Junos, IOS XR or Nokia MD-CLI the tab counts
+  down to the rollback, turns red in the last minute, and clears when the commit is confirmed.
 - **Safe paste:** a paste that would press Enter shows you the lines and the target session first.
 - **Slow paste** per line or per character for devices with tiny input buffers, with progress and Esc to stop.
 
@@ -124,6 +128,7 @@ sessions over from SecureCRT, PuTTY and OpenSSH in a few clicks.
   connection and all.
 - **Workspaces** on the left rail: save tabs, splits, sizes and pinned tabs, then switch with one click.
   The workspace you leave stays connected, with a dot when something happens there.
+  Hide the rail's workspace icons, or show them only while a workspace is open.
 - Restore your last layout on startup.
 - Settings and Welcome are tabs too: split them next to a terminal or move them to another window.
 - On a narrow window the sessions pane floats so terminals keep their width.

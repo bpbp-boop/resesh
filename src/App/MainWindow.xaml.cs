@@ -127,9 +127,9 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             {
                 ApplyTaskbarProgress();
             }
-            else if (e.PropertyName == nameof(MainViewModel.ActiveSessionTheme))
+            else if (e.PropertyName is nameof(MainViewModel.ActiveSessionTheme) or nameof(MainViewModel.ActiveColorTag))
             {
-                UpdatePaneFocusFrame(); // the focused pane's outline follows its session theme
+                UpdatePaneFocusFrame(); // the focused pane's outline follows its session theme and tag
             }
         };
         ScheduleExpansionSync();
@@ -1389,6 +1389,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
             ViewModel.RefreshRecentSessions();
         if (effect.HasFlag(SettingsEffect.SettingsPages))
             RefreshSettingsPages();
+        if (effect.HasFlag(SettingsEffect.WorkspaceRail))
+            ApplyWorkspaceRailVisibility();
     }
 
     /// <summary>Terminals re-read the saved highlighting rules.</summary>

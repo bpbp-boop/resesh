@@ -82,22 +82,32 @@ public sealed partial class MainWindow
     /// Normally drawn only when split, on the gutters: a lone pane needs no focus mark.
     /// A session drawn in a theme other than the app's (a Crimson production session, say)
     /// is always outlined, split or not, on every side: where no gutter exists the edge
-    /// takes the pane's own outermost pixel. The color is that session theme's.</summary>
+    /// takes the pane's own outermost pixel. The color is that session theme's.
+    /// A colour-tagged session is outlined the same way in its tag colour, two pixels wide,
+    /// so the session about to take a risky command is unmistakable. High Contrast keeps to
+    /// system colours and draws no tag frame.</summary>
     private void UpdatePaneFocusFrame()
     {
         var sessionPalette = ViewModel.ActiveSessionTheme is { } theme
             ? ThemeVisualPalette.For(App.ResolveTheme(theme))
             : null;
+        var tag = PresentationValues.ColorTag(ViewModel.ActiveColorTag);
+        var tagged = tag.A > 0 && !_themePalette.IsHighContrast;
         // Palettes are records, so this compares colors: a theme override that matches the
         // app theme (or High Contrast, which overrides both) draws nothing special.
-        var themed = sessionPalette is not null && sessionPalette != _themePalette;
+        var themed = (sessionPalette is not null && sessionPalette != _themePalette) || tagged;
         var focused = (ViewModel.IsSplit || themed)
             && _groupViews.TryGetValue(ViewModel.FocusedGroup, out var view)
                 ? view
                 : null;
-        var color = (sessionPalette ?? _themePalette).PaneFocusBorder;
+        var color = tagged ? tag : (sessionPalette ?? _themePalette).PaneFocusBorder;
+        var t = tagged ? 2 : 1;
         foreach (var groupView in _groupViews.Values)
-            groupView.SetFocusEdge(ReferenceEquals(groupView, focused) ? color : null);
+        {
+            groupView.SetFocusEdge(ReferenceEquals(groupView, focused) ? color : null, t);
+            if (!ReferenceEquals(groupView, focused))
+                groupView.SetContentInset(default);
+        }
 
         _paneFocusBrush.Color = color;
         var bounds = focused is null ? null : PaneLayoutBounds(focused);
@@ -113,16 +123,27 @@ public sealed partial class MainWindow
         var gutterLeft = pane.X > 0.5;
         var gutterRight = pane.Right < GroupArea.ActualWidth - 0.5;
         var gutterBelow = pane.Bottom < GroupArea.ActualHeight - 0.5;
+        // A wider edge keeps its outer pixel on the gutter and grows into the pane.
         var leftX = gutterLeft ? pane.X - 1 : pane.X;
-        var rightX = gutterRight ? pane.Right : pane.Right - 1;
-        var bottomY = gutterBelow ? pane.Bottom : pane.Bottom - 1;
-        var top = pane.Y + focused!.ContentEdgeTop;
-        PlaceFrameEdge(PaneFocusLeft, gutterLeft || themed, leftX, top, 1, bottomY + 1 - top);
-        PlaceFrameEdge(PaneFocusRight, gutterRight || themed, rightX, top, 1, bottomY + 1 - top);
+        var rightX = gutterRight ? pane.Right + 1 - t : pane.Right - t;
+        var bottomY = gutterBelow ? pane.Bottom + 1 - t : pane.Bottom - t;
+        var top = pane.Y + focused!.ContentEdgeTop + 1 - t;
+        PlaceFrameEdge(PaneFocusLeft, gutterLeft || themed, leftX, top, t, bottomY + t - top);
+        PlaceFrameEdge(PaneFocusRight, gutterRight || themed, rightX, top, t, bottomY + t - top);
         // The bottom spans to whichever sides are drawn so the corners join.
         var bottomLeft = gutterLeft || themed ? leftX : pane.X;
-        var bottomRight = gutterRight || themed ? rightX + 1 : pane.Right;
-        PlaceFrameEdge(PaneFocusBottom, gutterBelow || themed, bottomLeft, bottomY, bottomRight - bottomLeft, 1);
+        var bottomRight = gutterRight || themed ? rightX + t : pane.Right;
+        PlaceFrameEdge(PaneFocusBottom, gutterBelow || themed, bottomLeft, bottomY, bottomRight - bottomLeft, t);
+
+        // The terminal steps in by as much of each edge as lies inside the pane, so the
+        // frame never covers its last row or column: all of it where there is no gutter,
+        // all but the gutter pixel where there is.
+        double Inset(bool drawn, bool gutter) => drawn ? (gutter ? t - 1 : t) : 0;
+        focused.SetContentInset(new Thickness(
+            Inset(gutterLeft || themed, gutterLeft),
+            0,
+            Inset(gutterRight || themed, gutterRight),
+            Inset(gutterBelow || themed, gutterBelow)));
     }
 
     private void PlaceFrameEdge(Microsoft.UI.Xaml.Shapes.Rectangle edge, bool shown,
@@ -507,12 +528,37 @@ public sealed partial class MainWindow
             return null;
         var menu = new MenuFlyout();
         foreach (var entry in entries)
-        {
-            menu.Items.Add(entry.IsSeparator
-                ? new MenuFlyoutSeparator()
-                : new MenuFlyoutItem { Text = entry.Text, Command = entry.Command, CommandParameter = entry.Parameter });
-        }
+            menu.Items.Add(MenuItemFor(entry));
         return menu;
+    }
+
+    private static MenuFlyoutItemBase MenuItemFor(MenuEntry entry)
+    {
+        if (entry.Children is { } children)
+        {
+            var submenu = new MenuFlyoutSubItem { Text = entry.Text };
+            foreach (var child in children)
+                submenu.Items.Add(MenuItemFor(child));
+            return submenu;
+        }
+        if (entry.IsSeparator)
+            return new MenuFlyoutSeparator();
+        var item = entry.Swatch is null && !entry.IsChecked
+            ? new MenuFlyoutItem()
+            : new ToggleMenuFlyoutItem { IsChecked = entry.IsChecked };
+        item.Text = entry.Text;
+        item.Command = entry.Command;
+        item.CommandParameter = entry.Parameter;
+        // A colour tag's own colour, from the session data rather than the theme.
+        if (PresentationValues.ColorTag(entry.Swatch) is { A: > 0 } swatch)
+        {
+            item.Icon = new FontIcon
+            {
+                Glyph = "", // FullCircleMask
+                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(swatch),
+            };
+        }
+        return item;
     }
 
     private void ConnectInNewWindow(IReadOnlyList<Session> sessions)

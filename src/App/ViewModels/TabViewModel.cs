@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.Input;
 using Resesh.Core.Agents;
 using Resesh.Core.Backend;
 using Resesh.Core.Models;
+using Resesh.Core.NetworkDevices;
 
 namespace Resesh.App.ViewModels;
 
@@ -415,6 +416,40 @@ public sealed partial class TabViewModel : ObservableObject
                 OnPropertyChanged(nameof(StateText));
             }
         }
+    }
+
+    // ---- confirmed commit on a network device (CommitConfirmedWatcher) ----
+
+    private CommitTimer _commitTimer = CommitTimer.None;
+    private CommitCountdown _commitCountdown = CommitCountdown.Hidden;
+
+    /// <summary>The session's confirmed-commit timer, as the terminal's output last showed it.
+    /// It runs on the device, so it outlives a disconnect.</summary>
+    public CommitTimer CommitTimer
+    {
+        get => _commitTimer;
+        set
+        {
+            if (SetProperty(ref _commitTimer, value))
+                RefreshCommitCountdown(DateTimeOffset.UtcNow);
+        }
+    }
+
+    /// <summary>What the tab shows for <see cref="CommitTimer"/>. Never null: x:Bind skips a
+    /// function binding whose argument is null, so a countdown that went to null would stay
+    /// on the tab, frozen, and one that started null would show an empty badge.</summary>
+    public CommitCountdown CommitCountdown
+    {
+        get => _commitCountdown;
+        private set => SetProperty(ref _commitCountdown, value);
+    }
+
+    /// <summary>Recomputes the countdown; the view calls this every second while one shows.
+    /// False once there is nothing left to show.</summary>
+    public bool RefreshCommitCountdown(DateTimeOffset now)
+    {
+        CommitCountdown = CommitCountdown.For(_commitTimer, now) ?? CommitCountdown.Hidden;
+        return CommitCountdown.IsShown;
     }
 
     /// <summary>Called (UI thread) when session output arrives; marks the tab unless it's visible.

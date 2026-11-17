@@ -41,22 +41,31 @@ test("the focused pane is outlined like a folder open at its selected tab", () =
   // Sides and bottom are drawn over the shared one-pixel gutters, from the top of the
   // pane's content (not the tab strip) down, so a seam never doubles.
   assert.match(mainWindowXaml, /<Canvas x:Name="PaneFocusFrame" Grid\.Column="3" IsHitTestVisible="False">/);
-  assert.match(mainWindow, /var top = pane\.Y \+ focused!\.ContentEdgeTop;/);
+  // A wider (tagged) edge keeps its outer pixel on the gutter and grows into the pane.
+  assert.match(mainWindow, /var top = pane\.Y \+ focused!\.ContentEdgeTop \+ 1 - t;/);
   assert.match(mainWindow, /var leftX = gutterLeft \? pane\.X - 1 : pane\.X;/);
-  assert.match(mainWindow, /PlaceFrameEdge\(PaneFocusLeft, gutterLeft \|\| themed, leftX, top, 1, bottomY \+ 1 - top\)/);
-  assert.match(mainWindow, /PlaceFrameEdge\(PaneFocusRight, gutterRight \|\| themed, rightX, top, 1, bottomY \+ 1 - top\)/);
+  assert.match(mainWindow, /PlaceFrameEdge\(PaneFocusLeft, gutterLeft \|\| themed, leftX, top, t, bottomY \+ t - top\)/);
+  assert.match(mainWindow, /PlaceFrameEdge\(PaneFocusRight, gutterRight \|\| themed, rightX, top, t, bottomY \+ t - top\)/);
   assert.match(mainWindow, /PlaceFrameEdge\(PaneFocusBottom, gutterBelow \|\| themed,/);
   // The top is the tab strip's own bottom line, which already leaves the selected tab open.
-  assert.match(tabGroup, /internal void SetFocusEdge\(Windows\.UI\.Color\? color\)/);
-  assert.match(tabGroup, /var edge = _showsFocusEdge \? _focusEdgeBrush : _tabDividerBrush;\s*LeftTabStripDivider\.Fill = edge;\s*RightTabStripDivider\.Fill = edge;/);
-  assert.match(mainWindow, /groupView\.SetFocusEdge\(ReferenceEquals\(groupView, focused\) \? color : null\)/);
-  // Drawn when split, or always (every side) for a session themed unlike the app,
-  // in that session's theme.
-  assert.match(mainWindow, /var themed = sessionPalette is not null && sessionPalette != _themePalette;/);
+  assert.match(tabGroup, /internal void SetFocusEdge\(Windows\.UI\.Color\? color, double thickness = 1\)/);
+  assert.match(tabGroup, /var edge = _showsFocusEdge \? _focusEdgeBrush : _tabDividerBrush;[\s\S]*?LeftTabStripDivider\.Fill = edge;\s*RightTabStripDivider\.Fill = edge;/);
+  assert.match(mainWindow, /groupView\.SetFocusEdge\(ReferenceEquals\(groupView, focused\) \? color : null, t\)/);
+  // Drawn when split, or always (every side) for a session themed unlike the app or
+  // colour-tagged: in the tag colour, two pixels wide, else in that session's theme.
+  assert.match(mainWindow, /var tagged = tag\.A > 0 && !_themePalette\.IsHighContrast;/);
+  assert.match(mainWindow, /var themed = \(sessionPalette is not null && sessionPalette != _themePalette\) \|\| tagged;/);
   assert.match(mainWindow, /var focused = \(ViewModel\.IsSplit \|\| themed\)\s*&& _groupViews\.TryGetValue\(ViewModel\.FocusedGroup, out var view\)/);
-  assert.match(mainWindow, /var color = \(sessionPalette \?\? _themePalette\)\.PaneFocusBorder;/);
-  // It follows focus, theme, session edits, resizes and layout rebuilds.
-  assert.match(mainWindow, /e\.PropertyName == nameof\(MainViewModel\.ActiveSessionTheme\)\)\s*\{\s*UpdatePaneFocusFrame\(\)/);
+  assert.match(mainWindow, /var color = tagged \? tag : \(sessionPalette \?\? _themePalette\)\.PaneFocusBorder;/);
+  assert.match(mainWindow, /var t = tagged \? 2 : 1;/);
+  // The terminal steps in by however much of the frame lies inside the pane, so the frame
+  // never covers its last row or column; other panes get their full area back.
+  assert.match(mainWindow, /double Inset\(bool drawn, bool gutter\) => drawn \? \(gutter \? t - 1 : t\) : 0;/);
+  assert.match(mainWindow, /focused\.SetContentInset\(new Thickness\(/);
+  assert.match(mainWindow, /if \(!ReferenceEquals\(groupView, focused\)\)\s*groupView\.SetContentInset\(default\);/);
+  assert.match(tabGroup, /TerminalHost\.Padding = inset;/);
+  // It follows focus, theme, tag, session edits, resizes and layout rebuilds.
+  assert.match(mainWindow, /e\.PropertyName is nameof\(MainViewModel\.ActiveSessionTheme\) or nameof\(MainViewModel\.ActiveColorTag\)\)\s*\{\s*UpdatePaneFocusFrame\(\)/);
   assert.match(mainWindow, /private void RepaintSplitterLines\(\)[\s\S]*?UpdatePaneFocusFrame\(\);/);
   assert.match(mainWindow, /view\.SizeChanged \+= \(_, _\) => UpdatePaneFocusFrame\(\)/);
   assert.match(mainWindow, /DispatcherQueuePriority\.Low, UpdatePaneFocusFrame\)/);

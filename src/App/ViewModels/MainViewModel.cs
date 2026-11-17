@@ -179,6 +179,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     /// takes this theme so a session such as production is flagged where keystrokes go.</summary>
     public string? ActiveSessionTheme => ActiveTab?.Session.Overrides?.Theme;
 
+    /// <summary>The active tab's colour tag, if any. The focused pane is framed in it, so a
+    /// tagged session is flagged where keystrokes go even when it shares the app theme.</summary>
+    public string? ActiveColorTag => ActiveTab?.Session.ColorTag;
+
     public void NotifyActiveTabChanged()
     {
         OnPropertyChanged(nameof(StatusText));
@@ -579,6 +583,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         RefreshTree(); // first: it recounts the sessions the status text shows
         OnPropertyChanged(nameof(ActiveSessionTheme));
+        OnPropertyChanged(nameof(ActiveColorTag));
         OnPropertyChanged(nameof(StatusText)); // the session count, and the login in the endpoint
         OnActiveTabStateChanged();
         RefreshRecentSessions();

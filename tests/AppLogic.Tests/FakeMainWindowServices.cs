@@ -53,6 +53,12 @@ internal sealed class FakeMainWindowServices : IMainWindowServices
         RecordAsync($"EditSessionSettings {tab.Session.Name} {target}");
     public Task ImportSessionsAsync() => RecordAsync("ImportSessions");
     public Task SetFolderIdentityAsync(string folderPath) => RecordAsync($"SetFolderIdentity:{folderPath}");
+    public SessionBulkEdit? BulkEditAnswer { get; set; }
+    public Task<SessionBulkEdit?> BulkEditSessionsAsync(IReadOnlyList<Session> sessions)
+    {
+        Record($"BulkEdit {string.Join(",", sessions.Select(s => s.Name))}");
+        return Task.FromResult(BulkEditAnswer);
+    }
     public Task ExportBackupAsync() => RecordAsync("ExportBackup");
     public Task ImportBackupAsync() => RecordAsync("ImportBackup");
 

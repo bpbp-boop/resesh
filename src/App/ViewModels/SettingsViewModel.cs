@@ -330,6 +330,22 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
     }
 
+    public IReadOnlyList<WorkspaceRailIconChoice> WorkspaceRailIconChoices => WorkspaceRailIconChoice.All;
+
+    public WorkspaceRailIconChoice WorkspaceRailIcons
+    {
+        get
+        {
+            var saved = WorkspaceRailIconModes.Normalize(Current.WorkspaceRailIcons);
+            return WorkspaceRailIconChoice.All.First(choice => choice.Id == saved);
+        }
+        set
+        {
+            if (value is not null)
+                Save(value, s => s with { WorkspaceRailIcons = value.Id }, () => WorkspaceRailIcons);
+        }
+    }
+
     public bool ReopenLastLayoutAtStartup
     {
         get => Current.ReopenLastLayoutAtStartup;
@@ -490,6 +506,18 @@ public sealed partial record ThemeColorsChoice(string Id, string Name)
         new(ThemeColorModes.Off, "Off"),
         new(ThemeColorModes.Accent, "Accent"),
         new(ThemeColorModes.Everything, "Everything"),
+    ];
+}
+
+/// <summary>One option for when the rail shows workspace buttons, in Settings and the rail's menu.</summary>
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial record WorkspaceRailIconChoice(string Id, string Name)
+{
+    public static IReadOnlyList<WorkspaceRailIconChoice> All { get; } =
+    [
+        new(WorkspaceRailIconModes.Always, "Always"),
+        new(WorkspaceRailIconModes.WhenOpen, "When a workspace is open"),
+        new(WorkspaceRailIconModes.Never, "Never"),
     ];
 }
 

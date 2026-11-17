@@ -1,0 +1,206 @@
+using System.Text;
+using Resesh.Core.NetworkDevices;
+
+namespace Resesh.Core.Tests;
+
+public sealed class CommitConfirmedWatcherTests
+{
+    private sealed class Clock : TimeProvider
+    {
+        public DateTimeOffset Now = new(2026, 11, 17, 9, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private readonly Clock _clock = new();
+
+    private CommitConfirmedWatcher Watcher() => new(_clock);
+
+    private static bool Feed(CommitConfirmedWatcher watcher, string text) =>
+        watcher.Feed(Encoding.UTF8.GetBytes(text));
+
+    private void AssertArmed(CommitConfirmedWatcher watcher, TimeSpan left)
+    {
+        Assert.Equal(CommitTimerStatus.Armed, watcher.Timer.Status);
+        Assert.Equal(_clock.Now + left, watcher.Timer.Deadline);
+    }
+
+    [Fact]
+    public void JunosArmsFromItsOwnMessageAndConfirmsOnCommit()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "[edit]\r\nadmin@mx1# ");
+        Feed(watcher, "commit confirmed 5\r\n");
+        Assert.Equal(CommitTimerStatus.None, watcher.Timer.Status);
+
+        Assert.True(Feed(watcher, "commit confirmed will be automatically rolled back in 5 minutes unless confirmed\r\ncommit complete\r\n\r\n# commit confirmed will be rolled back in 5 minutes\r\n[edit]\r\nadmin@mx1# "));
+        AssertArmed(watcher, TimeSpan.FromMinutes(5));
+
+        Feed(watcher, "commit\r\ncommit complete\r\n\r\n[edit]\r\nadmin@mx1# ");
+        Assert.Equal(CommitTimer.None, watcher.Timer);
+    }
+
+    [Fact]
+    public void JunosCommitCheckConfirmsAndAReminderKeepsTheTimerSteady()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "admin@mx1# commit confirmed\r\ncommit confirmed will be automatically rolled back in 10 minutes unless confirmed\r\ncommit complete\r\n[edit]\r\nadmin@mx1# ");
+        AssertArmed(watcher, TimeSpan.FromMinutes(10));
+        var deadline = watcher.Timer.Deadline;
+
+        _clock.Now += TimeSpan.FromSeconds(90);
+        Feed(watcher, "show | compare\r\n\r\n# commit confirmed will be rolled back in 8 minutes\r\n[edit]\r\nadmin@mx1# ");
+        Assert.Equal(deadline, watcher.Timer.Deadline);
+
+        Feed(watcher, "commit check\r\nconfiguration check succeeds\r\n[edit]\r\nadmin@mx1# ");
+        Assert.Equal(CommitTimerStatus.None, watcher.Timer.Status);
+    }
+
+    [Fact]
+    public void JunosSaysWhenItRolledBack()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "admin@mx1# commit confirmed 1\r\ncommit confirmed will be automatically rolled back in 1 minutes unless confirmed\r\n[edit]\r\nadmin@mx1# ");
+        Feed(watcher, "\r\nBroadcast Message from root@mx1\r\n        (no tty) at 9:01 UTC...\r\n\r\nCommit was not confirmed; automatic rollback complete.\r\n\r\n");
+        Assert.Equal(CommitTimerStatus.RolledBack, watcher.Timer.Status);
+    }
+
+    [Fact]
+    public void AFailedCommitArmsNothing()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "admin@mx1# commit confirmed 5\r\nerror: configuration check-out failed\r\n[edit]\r\nadmin@mx1# ");
+        Assert.Equal(CommitTimerStatus.None, watcher.Timer.Status);
+    }
+
+    [Fact]
+    public void IosXrCountsInSecondsAndConfirmsOnCommit()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "RP/0/RP0/CPU0:pe1(config)#commit confirmed 300\r\nThu Nov 17 09:00:00.000 UTC\r\nRP/0/RP0/CPU0:pe1(config)#");
+        AssertArmed(watcher, TimeSpan.FromSeconds(300));
+
+        Feed(watcher, "commit\r\nThu Nov 17 09:01:00.000 UTC\r\nRP/0/RP0/CPU0:pe1(config)#");
+        Assert.Equal(CommitTimerStatus.None, watcher.Timer.Status);
+    }
+
+    [Theory]
+    [InlineData("commit confirmed minutes 3", 180)]
+    [InlineData("commit confirmed", 600)]
+    [InlineData("commit confirmed 45 label lab", 45)]
+    public void IosXrDurations(string command, int seconds)
+    {
+        var watcher = Watcher();
+        Feed(watcher, $"RP/0/RSP0/CPU0:pe2(config-if)#{command}\r\nRP/0/RSP0/CPU0:pe2(config-if)#");
+        AssertArmed(watcher, TimeSpan.FromSeconds(seconds));
+    }
+
+    [Fact]
+    public void IosXrWithNothingToCommitArmsNothing()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "RP/0/RP0/CPU0:pe1(config)#commit confirmed 60\r\n% No configuration changes to commit.\r\nRP/0/RP0/CPU0:pe1(config)#");
+        Assert.Equal(CommitTimerStatus.None, watcher.Timer.Status);
+    }
+
+    [Fact]
+    public void MdCliConfirmsOnlyWithAccept()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "[ex:/configure]\r\nA:admin@sr1# commit confirmed 5\r\n\r\n[ex:/configure]\r\n!A:admin@sr1# ");
+        AssertArmed(watcher, TimeSpan.FromMinutes(5));
+
+        Feed(watcher, "commit\r\n\r\n[ex:/configure]\r\n!A:admin@sr1# ");
+        AssertArmed(watcher, TimeSpan.FromMinutes(5));
+
+        Feed(watcher, "commit confirmed accept\r\n\r\n[ex:/configure]\r\nA:admin@sr1# ");
+        Assert.Equal(CommitTimerStatus.None, watcher.Timer.Status);
+    }
+
+    [Fact]
+    public void MdCliCancelRollsBack()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "*(ex)A:admin@sr1# commit confirmed\r\n!(ex)A:admin@sr1# ");
+        AssertArmed(watcher, TimeSpan.FromMinutes(10));
+
+        Feed(watcher, "commit confirmed cancel\r\n(ex)A:admin@sr1# ");
+        Assert.Equal(CommitTimerStatus.RolledBack, watcher.Timer.Status);
+    }
+
+    [Fact]
+    public void EchoSplitAcrossReadsWithColourAndBackspaceStillCounts()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "\x1b[1madmin@mx1#\x1b[0m ");
+        foreach (var ch in "commit confirmd")
+            Feed(watcher, ch.ToString());
+        Feed(watcher, "\bed 2\r");
+        Feed(watcher, "\ncommit confirmed will be automatically rolled back in 2 minutes unless confirmed\r\n[edit]\r\nadmin@mx1# ");
+        AssertArmed(watcher, TimeSpan.FromMinutes(2));
+    }
+
+    [Fact]
+    public void ShellPromptsAndOtherOutputLeaveItAlone()
+    {
+        var watcher = Watcher();
+        Assert.False(Feed(watcher, "user@host:~$ git commit -m 'commit confirmed 5'\r\n[main 1a2b3c] commit confirmed 5\r\nuser@host:~$ "));
+        Assert.Equal(CommitTimer.None, watcher.Timer);
+    }
+
+    [Fact]
+    public void CountdownCountsDownThenLingersAndGoes()
+    {
+        var deadline = _clock.Now + TimeSpan.FromSeconds(125);
+        var armed = new CommitTimer(CommitTimerStatus.Armed, deadline);
+
+        Assert.Equal("2:05", CommitCountdown.For(armed, _clock.Now)!.Text);
+        Assert.False(CommitCountdown.For(armed, _clock.Now)!.Urgent);
+        Assert.Equal("0:01", CommitCountdown.For(armed, deadline - TimeSpan.FromMilliseconds(300))!.Text);
+        Assert.True(CommitCountdown.For(armed, deadline - TimeSpan.FromSeconds(59))!.Urgent);
+        Assert.Equal("0:00", CommitCountdown.For(armed, deadline + TimeSpan.FromMinutes(1))!.Text);
+        Assert.Null(CommitCountdown.For(armed, deadline + CommitCountdown.Linger));
+        Assert.Null(CommitCountdown.For(CommitTimer.None, _clock.Now));
+    }
+
+    [Fact]
+    public void CountdownSaysWhenItRolledBack()
+    {
+        var rolledBack = new CommitTimer(CommitTimerStatus.RolledBack, _clock.Now);
+
+        Assert.Equal("rolled back", CommitCountdown.For(rolledBack, _clock.Now + TimeSpan.FromMinutes(1))!.Text);
+        Assert.Null(CommitCountdown.For(rolledBack, _clock.Now + CommitCountdown.Linger));
+    }
+
+    [Fact]
+    public void JunosRollbackCompareThenCommitConfirms()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "admin@mx1# commit confirmed 5\r\ncommit confirmed will be automatically rolled back in 5 minutes unless confirmed\r\ncommit complete\r\n\r\n# commit confirmed will be rolled back in 5 minutes\r\n[edit]\r\nadmin@mx1# ");
+        Feed(watcher, "rollback 1\r\nload complete\r\n\r\n# commit confirmed will be rolled back in 4 minutes\r\n[edit]\r\nadmin@mx1# ");
+        Feed(watcher, "show | compare\r\n[edit interfaces ge-0/0/0 unit 0 family inet]\r\n-       address 192.0.2.1/24;\r\n\r\n# commit confirmed will be rolled back in 4 minutes\r\n[edit]\r\nadmin@mx1# ");
+        Assert.Equal(CommitTimerStatus.Armed, watcher.Timer.Status);
+
+        Assert.True(Feed(watcher, "commit\r\ncommit complete\r\n\r\n[edit]\r\nadmin@mx1# "));
+        Assert.Equal(CommitTimer.None, watcher.Timer);
+    }
+
+    [Fact]
+    public void JunosCommitAndQuitConfirmsAtTheOperationalPrompt()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "root@core01.adl1# commit confirmed 5\r\ncommit confirmed will be automatically rolled back in 5 minutes unless confirmed\r\ncommit complete\r\n\r\n# commit confirmed will be rolled back in 5 minutes\r\n[edit]\r\nroot@core01.adl1# ");
+        AssertArmed(watcher, TimeSpan.FromMinutes(5));
+
+        Assert.True(Feed(watcher, "commit and-quit\r\ncommit complete\r\nExiting configuration mode\r\n\r\nroot@core01.adl1> "));
+        Assert.Equal(CommitTimer.None, watcher.Timer);
+    }
+
+    [Fact]
+    public void CommitTypedAtTheOperationalPromptConfirmsNothing()
+    {
+        var watcher = Watcher();
+        Feed(watcher, "root@mx1# commit confirmed 5\r\ncommit confirmed will be automatically rolled back in 5 minutes unless confirmed\r\nroot@mx1# exit\r\nExiting configuration mode\r\n\r\nroot@mx1> ");
+        Feed(watcher, "commit\r\n       ^\r\nunknown command.\r\nroot@mx1> ");
+        AssertArmed(watcher, TimeSpan.FromMinutes(5));
+    }
+}

@@ -81,6 +81,7 @@ public sealed partial class SettingsPage : UserControl
         GlobalSettingsTarget.ConfirmMultilinePaste => (ConfirmMultilinePasteCard, ConfirmMultilinePasteSwitch),
         GlobalSettingsTarget.ShowStatusBar => (ShowStatusBarCard, ShowStatusBarSwitch),
         GlobalSettingsTarget.SessionsPaneLayout => (SessionsPaneLayoutCard, SessionsPaneLayoutBox),
+        GlobalSettingsTarget.WorkspaceRailIcons => (WorkspaceRailIconsCard, WorkspaceRailIconsBox),
         GlobalSettingsTarget.ReopenLastLayout => (ReopenLastLayoutCard, ReopenLastLayoutSwitch),
         GlobalSettingsTarget.LaunchAtSignIn => (LaunchAtSignInCard, LaunchAtSignInSwitch),
         GlobalSettingsTarget.ConfirmCloseActiveSessions => (ConfirmCloseCard, ConfirmCloseSwitch),
