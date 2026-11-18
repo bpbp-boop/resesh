@@ -526,7 +526,8 @@ public sealed partial class TabGroupView : UserControl
     }
 
     /// <summary>Keeps the terminal clear of the window's pane-focus frame, which is drawn over
-    /// this pane's outer pixels where it has no neighbour on that side.</summary>
+    /// this pane's outer pixels. The window reserves the same room whether or not the frame is
+    /// shown, so the terminal never moves when focus does.</summary>
     internal void SetContentInset(Thickness inset)
     {
         if (TerminalHost.Padding != inset)

@@ -56,9 +56,10 @@ test("the focused pane is outlined like a folder open at its selected tab", () =
   assert.match(mainWindow, /var focused = \(ViewModel\.IsSplit \|\| themed\)\s*&& _groupViews\.TryGetValue\(ViewModel\.FocusedGroup, out var view\)/);
   assert.match(mainWindow, /var color = tagged \? tag : \(sessionPalette \?\? _themePalette\)\.PaneFocusBorder;/);
   assert.match(mainWindow, /var t = PaneFrameGeometry\.Thickness\(tagged\);/);
-  // The focused pane's terminal clears the frame; other panes get their full area back.
-  assert.match(mainWindow, /focused\.SetContentInset\(new Thickness\(frame\.InsetLeft, 0, frame\.InsetRight, frame\.InsetBottom\)\);/);
-  assert.match(mainWindow, /if \(!ReferenceEquals\(groupView, focused\)\)\s*groupView\.SetContentInset\(default\);/);
+  // Every pane reserves room for a frame from its position alone, never from focus, so
+  // changing the focused pane or tab never shifts a terminal.
+  assert.match(mainWindow, /foreach \(var groupView in _groupViews\.Values\)[\s\S]*?PaneFrameGeometry\.ReservedInset\([\s\S]*?groupView\.SetContentInset\(new Thickness\(inset\.Left, 0, inset\.Right, inset\.Bottom\)\);/);
+  assert.doesNotMatch(mainWindow, /focused\.SetContentInset|SetContentInset\(default\)/);
   assert.match(tabGroup, /TerminalHost\.Padding = inset;/);
   // It follows focus, theme, tag, session edits, resizes and layout rebuilds.
   assert.match(mainWindow, /e\.PropertyName is nameof\(MainViewModel\.ActiveSessionTheme\) or nameof\(MainViewModel\.ActiveColorTag\)\)\s*\{\s*UpdatePaneFocusFrame\(\)/);
