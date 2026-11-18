@@ -3013,3 +3013,12 @@ function is not called and the target keeps its last value, and when it starts n
 keeps its XAML default. The commit countdown badge stayed on the tab, frozen, after the commit
 was confirmed. A property bound through function bindings is therefore never null: the tab's
 `CommitCountdown` is `CommitCountdown.Hidden` when there is nothing to show.
+
+## 2026-11-18 - Every pane reserves room for the focus frame
+
+Insetting only the focused pane's terminal to clear its frame made both terminals move a pixel
+or two, and sometimes reflow, every time focus or the active tab changed: the pane losing focus
+grew back and the one gaining it shrank. Every pane now keeps the widest frame's room on each
+side (`PaneFrameGeometry.ReservedInset`): one pixel beside a gutter, which carries the frame's
+outer pixel, and two on an outer edge. It depends only on where the pane sits, so focus and tab
+changes only recolour the frame. The cost is up to two pixels per side on panes never framed.

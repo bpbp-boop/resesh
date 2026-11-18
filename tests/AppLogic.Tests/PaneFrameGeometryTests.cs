@@ -10,23 +10,24 @@ public sealed class PaneFrameGeometryTests
     private static PaneFrame Frame(FrameRect pane, bool tagged, bool allSides) =>
         PaneFrameGeometry.For(pane, Width, Height, StripEdge, PaneFrameGeometry.Thickness(tagged), allSides);
 
+    private static PaneInset Reserved(FrameRect pane) => PaneFrameGeometry.ReservedInset(pane, Width, Height);
+
     [Fact]
     public void ALonePaneIsFramedOnlyWhenThemedOrTagged()
     {
         var lone = new FrameRect(0, 0, Width, Height);
 
         var plain = Frame(lone, tagged: false, allSides: false);
-        Assert.Equal(new PaneFrame(null, null, null, 0, 0, 0), plain);
+        Assert.Equal(new PaneFrame(null, null, null), plain);
 
         var themed = Frame(lone, tagged: false, allSides: true);
         Assert.Equal(new FrameRect(0, 35, 1, 565), themed.Left);
         Assert.Equal(new FrameRect(999, 35, 1, 565), themed.Right);
         Assert.Equal(new FrameRect(0, 599, 1000, 1), themed.Bottom);
-        Assert.Equal((1, 1, 1), (themed.InsetLeft, themed.InsetRight, themed.InsetBottom));
     }
 
     [Fact]
-    public void ATaggedLonePaneIsTwoPixelsInsideAndTheContentClearsIt()
+    public void ATaggedLonePaneIsTwoPixelsInside()
     {
         var frame = Frame(new FrameRect(0, 0, Width, Height), tagged: true, allSides: true);
 
@@ -34,9 +35,6 @@ public sealed class PaneFrameGeometryTests
         Assert.Equal(new FrameRect(0, 34, 2, 566), frame.Left);
         Assert.Equal(new FrameRect(998, 34, 2, 566), frame.Right);
         Assert.Equal(new FrameRect(0, 598, 1000, 2), frame.Bottom);
-        // The last row and column are never under the frame.
-        Assert.Equal((2, 2, 2), (frame.InsetLeft, frame.InsetRight, frame.InsetBottom));
-        Assert.True(frame.Bottom!.Value.Y >= Height - frame.InsetBottom);
     }
 
     [Fact]
@@ -49,13 +47,11 @@ public sealed class PaneFrameGeometryTests
         Assert.Equal(new FrameRect(500, 35, 1, 565), plain.Left);
         Assert.Null(plain.Right);
         Assert.Null(plain.Bottom);
-        Assert.Equal((0, 0, 0), (plain.InsetLeft, plain.InsetRight, plain.InsetBottom));
 
         var tagged = Frame(right, tagged: true, allSides: true);
         Assert.Equal(new FrameRect(500, 34, 2, 566), tagged.Left); // gutter pixel plus one inside
         Assert.Equal(new FrameRect(998, 34, 2, 566), tagged.Right);
         Assert.Equal(new FrameRect(500, 598, 500, 2), tagged.Bottom); // spans corner to corner
-        Assert.Equal((1, 2, 2), (tagged.InsetLeft, tagged.InsetRight, tagged.InsetBottom));
     }
 
     [Fact]
@@ -66,7 +62,6 @@ public sealed class PaneFrameGeometryTests
         var frame = Frame(top, tagged: true, allSides: true);
 
         Assert.Equal(new FrameRect(0, 298, 1000, 2), frame.Bottom);
-        Assert.Equal(1, frame.InsetBottom);
     }
 
     [Fact]
@@ -77,5 +72,44 @@ public sealed class PaneFrameGeometryTests
         Assert.Null(frame.Left);
         Assert.Null(frame.Right);
         Assert.NotNull(frame.Bottom);
+    }
+
+    [Fact]
+    public void EveryPaneReservesTheWidestFrameByPositionAlone()
+    {
+        Assert.Equal(new PaneInset(2, 2, 2), Reserved(new FrameRect(0, 0, Width, Height)));
+        // Left half of a split: gutter on the right, which carries the frame's outer pixel.
+        Assert.Equal(new PaneInset(2, 1, 2), Reserved(new FrameRect(0, 0, 500, Height)));
+        Assert.Equal(new PaneInset(1, 2, 2), Reserved(new FrameRect(501, 0, 499, Height)));
+        Assert.Equal(new PaneInset(2, 2, 1), Reserved(new FrameRect(0, 0, Width, 299)));
+    }
+
+    public static TheoryData<double, double, double, double> Panes => new()
+    {
+        { 0, 0, Width, Height },     // lone
+        { 0, 0, 500, Height },       // left of a split
+        { 501, 0, 499, Height },     // right of a split
+        { 0, 0, Width, 299 },        // above another
+        { 0, 300, Width, 300 },      // below another
+        { 334, 0, 332, 299 },        // middle of a grid
+    };
+
+    [Theory]
+    [MemberData(nameof(Panes))]
+    public void NoFrameEverReachesPastTheReservedSpace(double x, double y, double w, double h)
+    {
+        var pane = new FrameRect(x, y, w, h);
+        var reserved = Reserved(pane);
+        foreach (var tagged in new[] { false, true })
+        foreach (var allSides in new[] { false, true })
+        {
+            var frame = Frame(pane, tagged, allSides);
+            if (frame.Left is { } left)
+                Assert.True(left.Right <= pane.X + reserved.Left, $"left {tagged}/{allSides}");
+            if (frame.Right is { } right)
+                Assert.True(right.X >= pane.Right - reserved.Right, $"right {tagged}/{allSides}");
+            if (frame.Bottom is { } bottom)
+                Assert.True(bottom.Y >= pane.Bottom - reserved.Bottom, $"bottom {tagged}/{allSides}");
+        }
     }
 }

@@ -100,8 +100,15 @@ public sealed partial class MainWindow
         foreach (var groupView in _groupViews.Values)
         {
             groupView.SetFocusEdge(ReferenceEquals(groupView, focused) ? color : null, t);
-            if (!ReferenceEquals(groupView, focused))
-                groupView.SetContentInset(default);
+            // Every pane keeps room for a frame whether it has one or not, so focus and tab
+            // changes never resize or shift a terminal.
+            if (PaneLayoutBounds(groupView) is { } laidOut)
+            {
+                var inset = PaneFrameGeometry.ReservedInset(
+                    new FrameRect(laidOut.X, laidOut.Y, laidOut.Width, laidOut.Height),
+                    GroupArea.ActualWidth, GroupArea.ActualHeight);
+                groupView.SetContentInset(new Thickness(inset.Left, 0, inset.Right, inset.Bottom));
+            }
         }
 
         _paneFocusBrush.Color = color;
@@ -120,7 +127,6 @@ public sealed partial class MainWindow
         PlaceFrameEdge(PaneFocusLeft, frame.Left);
         PlaceFrameEdge(PaneFocusRight, frame.Right);
         PlaceFrameEdge(PaneFocusBottom, frame.Bottom);
-        focused.SetContentInset(new Thickness(frame.InsetLeft, 0, frame.InsetRight, frame.InsetBottom));
     }
 
     private void PlaceFrameEdge(Microsoft.UI.Xaml.Shapes.Rectangle edge, FrameRect? rect)
