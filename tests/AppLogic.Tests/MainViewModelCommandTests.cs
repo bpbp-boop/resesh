@@ -521,7 +521,7 @@ public sealed class MainViewModelCommandTests : IDisposable
 
         window.TreeSelection.SelectOnly(session);
         Assert.Equal(
-            ["Connect", "Connect in new window", "Connect in new split", "-", "Edit…", "Delete"],
+            ["Connect", "Connect in new window", "Connect in new split", "-", "Edit…", "Color tag", "Delete"],
             MenuTexts(window));
 
         window.TreeSelection.SelectOnly(localRoot.Children.Single());
@@ -537,14 +537,47 @@ public sealed class MainViewModelCommandTests : IDisposable
             ["Connect in Tabs", "Open in new window", "Open in one new split", "Open in new splits",
 "Open in existing splits", "-",
              "Expand All", "Collapse All", "-",
-             "New Session…", "New Folder…", "-", "Set Identity…", "Rename…", "Delete"],
+             "New Session…", "New Folder…", "-", "Edit Sessions…", "Color tag", "Set Identity…", "Rename…", "Delete"],
             MenuTexts(window));
 
         window.TreeSelection.Toggle(session);
         Assert.Equal(
             ["Connect in Tabs", "Open in new window", "Open in one new split", "Open in new splits",
-"Open in existing splits", "-", "Delete"],
+"Open in existing splits", "-", "Edit Sessions…", "Color tag", "Delete"],
             MenuTexts(window));
+    }
+
+    [Fact]
+    public void ColorTagMenuTagsEverySessionOfTheSelection()
+    {
+        var (window, _, folder, session) = Tree();
+        window.TreeSelection.SelectOnly(folder);
+        window.TreeSelection.Toggle(session);
+
+        var tags = window.BuildSelectionMenu().Single(entry => entry.Text == "Color tag").Children!;
+        Assert.Equal(SessionColors.All.Select(choice => choice.Name), tags.Select(tag => tag.Text));
+        Assert.True(tags[0].IsChecked); // none tagged yet
+        var red = tags.Single(tag => tag.Text == "Red");
+        red.Command!.Execute(red.Parameter);
+
+        Assert.All(_store.Sessions.Where(s => s.Kind == SessionKind.Ssh),
+            s => Assert.Equal(SessionColors.Named[0].Hex, s.ColorTag));
+        var after = window.BuildSelectionMenu().Single(entry => entry.Text == "Color tag").Children!;
+        Assert.Equal(["Red"], after.Where(tag => tag.IsChecked).Select(tag => tag.Text));
+    }
+
+    [Fact]
+    public void BulkEditSelectionEditsTheSessionsUnderAFolder()
+    {
+        var (window, _, folder, _) = Tree();
+        _window.BulkEditAnswer = new SessionBulkEdit { Port = 2222 };
+        window.TreeSelection.SelectOnly(folder);
+
+        window.BulkEditSelectionCommand.Execute(null);
+
+        Assert.Equal(["BulkEdit edge"], _window.Calls);
+        Assert.Equal(2222, _store.Sessions.Single(s => s.Name == "edge").Port);
+        Assert.NotEqual(2222, _store.Sessions.Single(s => s.Name == "spine").Port);
     }
 
     [Fact]

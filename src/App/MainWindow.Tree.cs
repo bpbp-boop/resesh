@@ -75,29 +75,34 @@ public sealed partial class MainWindow
             _paneGutters.Contains(line) ? _themePalette.PaneBorder : _themePalette.Divider);
     }
 
-    /// <summary>Outlines the focused pane like a folder: its sides rise from the bottom to
-    /// the top of its content, and the line under its tab strip runs along the top to the
-    /// selected tab, which stays open to the content. The sides sit exactly on the
-    /// one-pixel gutters the pane shares with its neighbours, so a seam never doubles.
+    /// <summary>Outlines the focused pane (geometry: <see cref="PaneFrameGeometry"/>).
     /// Normally drawn only when split, on the gutters: a lone pane needs no focus mark.
     /// A session drawn in a theme other than the app's (a Crimson production session, say)
-    /// is always outlined, split or not, on every side: where no gutter exists the edge
-    /// takes the pane's own outermost pixel. The color is that session theme's.</summary>
+    /// is always outlined, split or not, on every side, in that theme's colour. A
+    /// colour-tagged session is outlined the same way in its tag colour, wider. High
+    /// Contrast keeps to system colours and draws no tag frame.</summary>
     private void UpdatePaneFocusFrame()
     {
         var sessionPalette = ViewModel.ActiveSessionTheme is { } theme
             ? ThemeVisualPalette.For(App.ResolveTheme(theme))
             : null;
+        var tag = PresentationValues.ColorTag(ViewModel.ActiveColorTag);
+        var tagged = tag.A > 0 && !_themePalette.IsHighContrast;
         // Palettes are records, so this compares colors: a theme override that matches the
         // app theme (or High Contrast, which overrides both) draws nothing special.
-        var themed = sessionPalette is not null && sessionPalette != _themePalette;
+        var themed = (sessionPalette is not null && sessionPalette != _themePalette) || tagged;
         var focused = (ViewModel.IsSplit || themed)
             && _groupViews.TryGetValue(ViewModel.FocusedGroup, out var view)
                 ? view
                 : null;
-        var color = (sessionPalette ?? _themePalette).PaneFocusBorder;
+        var color = tagged ? tag : (sessionPalette ?? _themePalette).PaneFocusBorder;
+        var t = PaneFrameGeometry.Thickness(tagged);
         foreach (var groupView in _groupViews.Values)
-            groupView.SetFocusEdge(ReferenceEquals(groupView, focused) ? color : null);
+        {
+            groupView.SetFocusEdge(ReferenceEquals(groupView, focused) ? color : null, t);
+            if (!ReferenceEquals(groupView, focused))
+                groupView.SetContentInset(default);
+        }
 
         _paneFocusBrush.Color = color;
         var bounds = focused is null ? null : PaneLayoutBounds(focused);
@@ -109,28 +114,21 @@ public sealed partial class MainWindow
             return;
         }
 
-        // A gutter on a side means a neighbour there; the edge sits on that gutter.
-        var gutterLeft = pane.X > 0.5;
-        var gutterRight = pane.Right < GroupArea.ActualWidth - 0.5;
-        var gutterBelow = pane.Bottom < GroupArea.ActualHeight - 0.5;
-        var leftX = gutterLeft ? pane.X - 1 : pane.X;
-        var rightX = gutterRight ? pane.Right : pane.Right - 1;
-        var bottomY = gutterBelow ? pane.Bottom : pane.Bottom - 1;
-        var top = pane.Y + focused!.ContentEdgeTop;
-        PlaceFrameEdge(PaneFocusLeft, gutterLeft || themed, leftX, top, 1, bottomY + 1 - top);
-        PlaceFrameEdge(PaneFocusRight, gutterRight || themed, rightX, top, 1, bottomY + 1 - top);
-        // The bottom spans to whichever sides are drawn so the corners join.
-        var bottomLeft = gutterLeft || themed ? leftX : pane.X;
-        var bottomRight = gutterRight || themed ? rightX + 1 : pane.Right;
-        PlaceFrameEdge(PaneFocusBottom, gutterBelow || themed, bottomLeft, bottomY, bottomRight - bottomLeft, 1);
+        var frame = PaneFrameGeometry.For(
+            new FrameRect(pane.X, pane.Y, pane.Width, pane.Height),
+            GroupArea.ActualWidth, GroupArea.ActualHeight, focused!.ContentEdgeTop, t, allSides: themed);
+        PlaceFrameEdge(PaneFocusLeft, frame.Left);
+        PlaceFrameEdge(PaneFocusRight, frame.Right);
+        PlaceFrameEdge(PaneFocusBottom, frame.Bottom);
+        focused.SetContentInset(new Thickness(frame.InsetLeft, 0, frame.InsetRight, frame.InsetBottom));
     }
 
-    private void PlaceFrameEdge(Microsoft.UI.Xaml.Shapes.Rectangle edge, bool shown,
-        double x, double y, double width, double height)
+    private void PlaceFrameEdge(Microsoft.UI.Xaml.Shapes.Rectangle edge, FrameRect? rect)
     {
-        edge.Visibility = shown && width > 0 && height > 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (edge.Visibility == Visibility.Collapsed)
+        edge.Visibility = rect is null ? Visibility.Collapsed : Visibility.Visible;
+        if (rect is not { } shown)
             return;
+        var (x, y, width, height) = shown;
         edge.Fill = _paneFocusBrush;
         Canvas.SetLeft(edge, x);
         Canvas.SetTop(edge, y);
@@ -507,12 +505,37 @@ public sealed partial class MainWindow
             return null;
         var menu = new MenuFlyout();
         foreach (var entry in entries)
-        {
-            menu.Items.Add(entry.IsSeparator
-                ? new MenuFlyoutSeparator()
-                : new MenuFlyoutItem { Text = entry.Text, Command = entry.Command, CommandParameter = entry.Parameter });
-        }
+            menu.Items.Add(MenuItemFor(entry));
         return menu;
+    }
+
+    private static MenuFlyoutItemBase MenuItemFor(MenuEntry entry)
+    {
+        if (entry.Children is { } children)
+        {
+            var submenu = new MenuFlyoutSubItem { Text = entry.Text };
+            foreach (var child in children)
+                submenu.Items.Add(MenuItemFor(child));
+            return submenu;
+        }
+        if (entry.IsSeparator)
+            return new MenuFlyoutSeparator();
+        var item = entry.Swatch is null && !entry.IsChecked
+            ? new MenuFlyoutItem()
+            : new ToggleMenuFlyoutItem { IsChecked = entry.IsChecked };
+        item.Text = entry.Text;
+        item.Command = entry.Command;
+        item.CommandParameter = entry.Parameter;
+        // A colour tag's own colour, from the session data rather than the theme.
+        if (PresentationValues.ColorTag(entry.Swatch) is { A: > 0 } swatch)
+        {
+            item.Icon = new FontIcon
+            {
+                Glyph = "", // FullCircleMask
+                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(swatch),
+            };
+        }
+        return item;
     }
 
     private void ConnectInNewWindow(IReadOnlyList<Session> sessions)

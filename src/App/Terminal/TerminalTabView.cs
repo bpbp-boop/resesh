@@ -11,6 +11,7 @@ using Resesh.Core.History;
 using Resesh.Core.Identities;
 using Resesh.Core.Local;
 using Resesh.Core.Models;
+using Resesh.Core.NetworkDevices;
 using Resesh.Core.Recording;
 using Resesh.Core.Sftp;
 using Resesh.Core.Ssh;
@@ -66,6 +67,15 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     private readonly AgentTracker _agent;
     private DispatcherQueueTimer? _agentPoll;
     private bool _agentPollBusy;
+
+    // Confirmed commits on network devices, read from the output on the reader thread; the
+    // tab counts down to the rollback. One per tab: the device's timer outlives a reconnect.
+    // A reconnect does not wait for the old reader, so two can be in Feed at once: the lock
+    // serializes them and the old one is turned away inside it.
+    private readonly CommitConfirmedWatcher _commits = new();
+    private readonly Lock _commitsGate = new();
+    private bool _commitsFailed;
+    private DispatcherQueueTimer? _commitTick;
 
     // Progress from OSC 9;4 and OSC 7501 in the terminal and from file-pane transfers,
     // combined on the tab.
@@ -869,11 +879,27 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
     /// <summary>Draws a backend's output as it arrives, and marks the tab when nobody is
     /// looking. The handler runs on the backend's reader thread.</summary>
-    private void FollowOutput(ITerminalBackend backend, TerminalConnectionLifetime connection) =>
+    private void FollowOutput(ITerminalBackend backend, TerminalConnectionLifetime connection)
+    {
+        lock (_commitsGate)
+            _commits.ResetConnection();
         backend.OutputReceived += data =>
         {
             if (connection.Token.IsCancellationRequested) return;
             _terminal.WriteOutput(data);
+            if (WatchCommits(data, connection))
+            {
+                // The latest timer when the post runs, not a snapshot from this reader: an old
+                // reader's post can land after a new one's and must not undo it.
+                DispatcherQueue.TryPost(() =>
+                {
+                    if (_disposed) return;
+                    CommitTimer latest;
+                    lock (_commitsGate)
+                        latest = _commits.Timer;
+                    ShowCommitTimer(latest);
+                });
+            }
             // Benign cross-thread reads: worst case is one redundant enqueue.
             if (!_tab.IsActive && !_tab.HasUnseenOutput)
                 DispatcherQueue.TryPost(() =>
@@ -881,6 +907,54 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                     if (!connection.Token.IsCancellationRequested) _tab.NotifyOutputActivity();
                 });
         };
+    }
+
+    /// <summary>Feeds output to the commit watcher on the reader thread; true when its timer
+    /// changed. A watcher that throws is reported and switched off for the tab: the
+    /// countdown is a convenience, and the reader must never die for it.</summary>
+    private bool WatchCommits(ReadOnlySpan<byte> data, TerminalConnectionLifetime connection)
+    {
+        lock (_commitsGate)
+        {
+            if (_commitsFailed || connection.Token.IsCancellationRequested)
+                return false;
+            try
+            {
+                return _commits.Feed(data);
+            }
+            catch (Exception exception)
+            {
+                _commitsFailed = true;
+                DispatcherQueue.TryPost(() => App.ReportRecoverableError(exception)); // it shows UI
+                return false;
+            }
+        }
+    }
+
+    /// <summary>Shows a confirmed-commit timer on the tab and ticks its countdown each second
+    /// until there is nothing left to show.</summary>
+    private void ShowCommitTimer(CommitTimer timer)
+    {
+        _tab.CommitTimer = timer;
+        if (!_tab.CommitCountdown.IsShown)
+        {
+            _commitTick?.Stop();
+            return;
+        }
+        if (_commitTick is null)
+        {
+            _commitTick = DispatcherQueue.CreateTimer();
+            _commitTick.Interval = TimeSpan.FromSeconds(1);
+            _commitTick.IsRepeating = true;
+            _commitTick.OnTick(() =>
+            {
+                if (!_tab.RefreshCommitCountdown(DateTimeOffset.UtcNow))
+                    _commitTick?.Stop();
+            });
+        }
+        if (!_commitTick.IsRunning)
+            _commitTick.Start();
+    }
 
     /// <summary>The live connection ended by itself: the tab stops (a local process exits,
     /// with its code) and agent tracking ends; the caller then says why. False, and nothing
@@ -2679,6 +2753,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         StopSerialPortWatch();
         _agentPoll?.Stop();
         _agentPoll = null;
+        _commitTick?.Stop();
+        _commitTick = null;
         CleanupActions.Run(App.ReportRecoverableError,
             () => _connection.Dispose(),
             () => _closing.Cancel(), // SSHFS mounts and management connections still coming up stop

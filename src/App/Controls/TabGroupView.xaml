@@ -265,12 +265,12 @@
                                         <SolidColorBrush Color="{x:Bind local:PresentationValues.FocusedTabBorderColor(TabTheme, ColorTag), Mode=OneWay}" />
                                     </Rectangle.Fill>
                                 </Rectangle>
-                                <!-- The colour tag on every other tab: the top bar, dimmed. -->
+                                <!-- The colour tag on every other tab: a faint hairline. -->
                                 <Rectangle
-                                    Height="{x:Bind local:PresentationValues.TagLineThickness(TabTheme), Mode=OneWay}"
+                                    Height="{x:Bind local:PresentationValues.InactiveTagLineThickness}"
                                     VerticalAlignment="Top"
                                     HorizontalAlignment="Stretch"
-                                    Opacity="0.6"
+                                    Opacity="0.5"
                                     Visibility="{x:Bind local:PresentationValues.TagLineVisibility(TabTheme, ColorTag, IsActive, IsGroupFocused), Mode=OneWay}">
                                     <Rectangle.Fill>
                                         <SolidColorBrush Color="{x:Bind local:PresentationValues.ColorTag(ColorTag), Mode=OneWay}" />
@@ -386,8 +386,11 @@
                                             <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(TabTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
                                         </FontIcon.Foreground>
                                     </FontIcon>
-                                    <FontIcon
+                                    <StackPanel
                                         Grid.Column="2"
+                                        Orientation="Horizontal"
+                                        VerticalAlignment="Center">
+                                    <FontIcon
                                         Glyph="&#xE72E;"
                                         FontSize="11"
                                         Margin="0,0,6,0"
@@ -397,6 +400,31 @@
                                             <SolidColorBrush Color="{x:Bind local:PresentationValues.TabHeaderForegroundColor(TabTheme, IsActive, IsGroupFocused, IsPointerOver), Mode=OneWay}" />
                                         </FontIcon.Foreground>
                                     </FontIcon>
+                                    <!-- A confirmed commit's countdown to rollback on a network device. -->
+                                    <Border
+                                        Padding="5,1"
+                                        Margin="0,0,6,0"
+                                        CornerRadius="3"
+                                        VerticalAlignment="Center"
+                                        Background="{x:Bind local:PresentationValues.CommitBadgeBrush(CommitCountdown), Mode=OneWay}"
+                                        Visibility="{x:Bind local:PresentationValues.CommitBadgeVisibility(CommitCountdown), Mode=OneWay}"
+                                        ToolTipService.ToolTip="{x:Bind local:PresentationValues.CommitBadgeTooltip(CommitCountdown), Mode=OneWay}"
+                                        AutomationProperties.Name="{x:Bind local:PresentationValues.CommitBadgeTooltip(CommitCountdown), Mode=OneWay}">
+                                        <StackPanel Orientation="Horizontal" Spacing="3">
+                                            <FontIcon
+                                                Glyph="&#xE916;"
+                                                FontSize="10"
+                                                VerticalAlignment="Center"
+                                                Foreground="{ThemeResource SessionBadgeGlyphBrush}" />
+                                            <TextBlock
+                                                Text="{x:Bind local:PresentationValues.CommitBadgeText(CommitCountdown), Mode=OneWay}"
+                                                FontSize="11"
+                                                FontWeight="SemiBold"
+                                                VerticalAlignment="Center"
+                                                Foreground="{ThemeResource SessionBadgeGlyphBrush}" />
+                                        </StackPanel>
+                                    </Border>
+                                    </StackPanel>
                                     <!-- Two lines: the session name, and whatever best identifies
                                          this particular tab (running program, cwd, or endpoint) —
                                          so several tabs of one host aren't interchangeable. -->

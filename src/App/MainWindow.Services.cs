@@ -116,6 +116,9 @@ public sealed partial class MainWindow
     Task IMainWindowServices.SetFolderIdentityAsync(string folderPath) =>
         Dialogs.FolderIdentityDialog.EditAsync(Root.XamlRoot, folderPath);
 
+    Task<SessionBulkEdit?> IMainWindowServices.BulkEditSessionsAsync(IReadOnlyList<Session> sessions) =>
+        Dialogs.BulkEditSessionsDialog.EditAsync(Root.XamlRoot, sessions);
+
     Task IMainWindowServices.ShowKeyboardShortcutsAsync() =>
         ShowThenRefocusAsync(ShowKeyboardShortcutsAsync, InvokedFromTerminal);
 

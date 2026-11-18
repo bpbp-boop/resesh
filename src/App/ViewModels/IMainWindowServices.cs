@@ -38,6 +38,9 @@ public interface IMainWindowServices
 
     /// <summary>Opens the identity dialog for a remote folder ("" = the tree root) and saves it.</summary>
     Task SetFolderIdentityAsync(string folderPath);
+
+    /// <summary>Opens the bulk session editor; null when cancelled.</summary>
+    Task<SessionBulkEdit?> BulkEditSessionsAsync(IReadOnlyList<Session> sessions);
     Task ExportBackupAsync();
     Task ImportBackupAsync();
 

@@ -523,7 +523,7 @@
                         </ResourceDictionary.ThemeDictionaries>
                     </ResourceDictionary>
                 </Border.Resources>
-                <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+                <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Background="Transparent" ContextRequested="Rail_ContextRequested">
                     <Button
                         x:Name="SessionsPaneToggleButton"
                         Width="44"
@@ -603,6 +603,7 @@
                          beside it, so they live outside the NavigationView with a marker of
                          their own. Home appears once a workspace exists; + is always there. -->
                     <ScrollViewer
+                        x:Name="WorkspaceRailSection"
                         Grid.Row="3"
                         VerticalScrollBarVisibility="Hidden"
                         HorizontalScrollMode="Disabled">

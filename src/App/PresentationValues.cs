@@ -5,6 +5,7 @@ using Resesh.App.Icons;
 using Resesh.App.ViewModels;
 using Resesh.Core.Agents;
 using Resesh.Core.Models;
+using Resesh.Core.NetworkDevices;
 using Resesh.Core.Storage;
 
 namespace Resesh.App;
@@ -192,19 +193,35 @@ public static class PresentationValues
 
     /// <summary>Height of the active tab's accent bar. Themes whose accent is the only
     /// saturated color on screen ask for a thicker bar so it reads as a marker. A colour tag
-    /// needs at least 2 px to be told apart, here and on the inactive tabs' tag line.</summary>
+    /// needs at least 2 px to be told apart on the focused tab.</summary>
     public static double FocusedTabAccentThickness(string appTheme, string? colorTag) =>
         ParseColor(colorTag).A > 0 ? TagLineThickness(appTheme) : ThemeVisualPalette.For(appTheme).AccentBarThickness;
 
     public static double TagLineThickness(string appTheme) =>
         Math.Max(2, ThemeVisualPalette.For(appTheme).AccentBarThickness);
 
-    /// <summary>A tagged tab that is not the focused one shows its colour as a dimmer copy of
-    /// the top bar, so tags still read across the strip. High Contrast keeps to system
+    /// <summary>The tag line on every tab but the focused one: a faint hairline, so tags still
+    /// read across the strip without competing with the focused tab's bar.</summary>
+    public const double InactiveTagLineThickness = 1;
+
+    /// <summary>A tagged tab that is not the focused one shows its colour as a thin, faint
+    /// copy of the top bar, so tags still read across the strip. High Contrast keeps to system
     /// colours, so there the tag shows only on the focused tab's bar, as the selection colour.</summary>
     public static Visibility TagLineVisibility(string appTheme, string? colorTag, bool isActive, bool isGroupFocused) =>
         Visible(ParseColor(colorTag).A > 0 && !(isActive && isGroupFocused)
             && !ThemeVisualPalette.For(appTheme).IsHighContrast);
+
+    // ---- confirmed-commit countdown ----
+
+    public static Visibility CommitBadgeVisibility(CommitCountdown countdown) => Visible(countdown.IsShown);
+
+    public static string CommitBadgeText(CommitCountdown countdown) => countdown.Text;
+
+    public static string CommitBadgeTooltip(CommitCountdown countdown) => countdown.Tooltip;
+
+    /// <summary>Caution while there is time, critical in the last minute and after.</summary>
+    public static Brush CommitBadgeBrush(CommitCountdown countdown) =>
+        ResourceBrush(countdown.Urgent ? "SessionStatusCriticalBrush" : "SessionStatusCautionBrush");
 
     // ---- workspace rail buttons ----
 

@@ -197,6 +197,17 @@
                             AutomationProperties.Name="Sessions pane"
                             AutomationProperties.AutomationId="SettingsSessionsPaneLayout" />
                     </toolkit:SettingsCard>
+                    <toolkit:SettingsCard x:Name="WorkspaceRailIconsCard" Header="Workspace icons in the rail">
+                        <ComboBox
+                            x:Name="WorkspaceRailIconsBox"
+                            MinWidth="220"
+                            ItemsSource="{x:Bind ViewModel.WorkspaceRailIconChoices}"
+                            DisplayMemberPath="Name"
+                            x:SuppressXamlTrimWarnings="True"
+                            SelectedItem="{x:Bind ViewModel.WorkspaceRailIcons, Mode=TwoWay}"
+                            AutomationProperties.Name="Workspace icons in the rail"
+                            AutomationProperties.AutomationId="SettingsWorkspaceRailIcons" />
+                    </toolkit:SettingsCard>
                     <toolkit:SettingsCard x:Name="ReopenLastLayoutCard" Header="Reopen last layout at startup">
                         <ToggleSwitch
                             x:Name="ReopenLastLayoutSwitch"

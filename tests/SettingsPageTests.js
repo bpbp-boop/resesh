@@ -64,6 +64,7 @@ test("settings fields and sections have stable automation IDs", () => {
     "SettingsMouseCapture",
     "SettingsShowStatusBar",
     "SettingsSessionsPaneLayout",
+    "SettingsWorkspaceRailIcons",
     "SettingsReopenLastLayout",
     "SettingsLaunchAtSignIn",
     "SettingsConfirmCloseActiveSessions",

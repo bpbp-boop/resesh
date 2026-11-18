@@ -8,6 +8,11 @@ and the git history.
 
 ## Shipped
 
+- **Commit confirmed countdown** — Junos, IOS XR and Nokia MD-CLI `commit confirmed` counts
+  down on the tab to the rollback, read from the device's echo and messages
+  (`CommitConfirmedWatcher`). Alongside: the focused pane framed in its session's colour tag,
+  Edit Sessions… and Color tag on tree folders and selections, and a setting for when the
+  rail shows workspace icons.
 - **Theme settings** — a Theme section in Settings: System (a theme for each Windows mode)
   or Theme (one always), around 900 bundled iTerm2-Color-Schemes themes browsable by
   category, and previews drawn with the user's highlighting rules.

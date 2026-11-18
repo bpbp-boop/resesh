@@ -28,6 +28,9 @@ public enum SettingsEffect
 
     /// <summary>Settings and Welcome pages re-read the values they show.</summary>
     SettingsPages = 1 << 6,
+
+    /// <summary>The rail shows or hides its workspace buttons.</summary>
+    WorkspaceRail = 1 << 7,
 }
 
 /// <summary>
@@ -67,6 +70,7 @@ public static class SettingsEffects
         Value(nameof(AppSettings.ThemeColors), s => s.ThemeColors, SettingsEffect.Theme),
         Value(nameof(AppSettings.ShowStatusBar), s => s.ShowStatusBar, SettingsEffect.StatusBar),
         Value(nameof(AppSettings.SessionsPaneLayout), s => s.SessionsPaneLayout, SettingsEffect.PaneLayout),
+        Value(nameof(AppSettings.WorkspaceRailIcons), s => s.WorkspaceRailIcons, SettingsEffect.WorkspaceRail),
         Value(nameof(AppSettings.RecordingDirectory), s => s.RecordingDirectory, SettingsEffect.Recordings),
 
         // Options a running terminal takes at once (TerminalTabView.ApplyNonThemeSettings).
@@ -117,5 +121,5 @@ public static class SettingsEffects
     /// <summary>Everything, for a window that has to apply the settings from scratch.</summary>
     public const SettingsEffect All = SettingsEffect.Theme | SettingsEffect.StatusBar | SettingsEffect.PaneLayout
         | SettingsEffect.Recordings | SettingsEffect.Terminals | SettingsEffect.RecentSessions
-        | SettingsEffect.SettingsPages;
+        | SettingsEffect.SettingsPages | SettingsEffect.WorkspaceRail;
 }

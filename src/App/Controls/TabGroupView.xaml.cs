@@ -100,6 +100,7 @@ public sealed partial class TabGroupView : UserControl
     private readonly SolidColorBrush _tabDividerBrush;
     private readonly SolidColorBrush _focusEdgeBrush = new(Microsoft.UI.Colors.Transparent);
     private bool _showsFocusEdge;
+    private double _focusEdgeThickness = 1;
     private TabViewModel? _filePaneButtonTab;
     private Terminal.TerminalTabView? _filePaneButtonView;
     private double _expandedTabActionsWidth = TabStripSizing.ExpandedTabActionsFallbackWidth;
@@ -515,19 +516,31 @@ public sealed partial class TabGroupView : UserControl
     /// <summary>Draws the line under the tab strip in the pane-focus color, or the plain
     /// divider when null. With the window's focus frame down the pane's sides, this closes
     /// a folder-shaped outline whose only opening is the selected tab.</summary>
-    internal void SetFocusEdge(Windows.UI.Color? color)
+    internal void SetFocusEdge(Windows.UI.Color? color, double thickness = 1)
     {
         _showsFocusEdge = color is not null;
+        _focusEdgeThickness = thickness;
         if (color is { } focus)
             _focusEdgeBrush.Color = focus;
         ApplyStripEdge();
     }
 
+    /// <summary>Keeps the terminal clear of the window's pane-focus frame, which is drawn over
+    /// this pane's outer pixels where it has no neighbour on that side.</summary>
+    internal void SetContentInset(Thickness inset)
+    {
+        if (TerminalHost.Padding != inset)
+            TerminalHost.Padding = inset;
+    }
+
     private void ApplyStripEdge()
     {
         var edge = _showsFocusEdge ? _focusEdgeBrush : _tabDividerBrush;
+        var height = _showsFocusEdge ? _focusEdgeThickness : 1;
         LeftTabStripDivider.Fill = edge;
         RightTabStripDivider.Fill = edge;
+        LeftTabStripDivider.Height = height;
+        RightTabStripDivider.Height = height;
     }
 
     private void QueueTabTemplateRefresh()
