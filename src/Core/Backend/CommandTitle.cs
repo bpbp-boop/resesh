@@ -66,6 +66,69 @@ public static class CommandTitle
         var sep = name.LastIndexOfAny(Separators);
         if (sep >= 0)
             name = name[(sep + 1)..]; // "/usr/bin/python3" and "\vim" (alias bypass) alike
+        if (cut < 0 && IsSsh(name))
+            name = SshDestination(tokens.AsSpan(i + 1)) is { } destination ? $"ssh {destination}" : "ssh";
         return name.Length switch { 0 => null, > 48 => name[..48], _ => name };
+    }
+
+    private static bool IsSsh(string name) =>
+        name.Equals("ssh", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("ssh.exe", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>OpenSSH options that take an argument, per ssh(1).</summary>
+    private const string SshOptionsWithArgument = "BbcDEeFIiJLlmOoPpQRSWw";
+
+    /// <summary>
+    /// The host an ssh command line connects to, as typed ("alice@web1"), so tabs that each
+    /// ssh somewhere else don't all read "ssh". Null when no destination can be found.
+    /// </summary>
+    private static string? SshDestination(ReadOnlySpan<string> args)
+    {
+        string? user = null;
+        string? destination = null;
+        for (var i = 0; i < args.Length && destination is null; i++)
+        {
+            var arg = args[i];
+            if (arg == "--")
+            {
+                if (i + 1 < args.Length)
+                    destination = args[i + 1];
+                break;
+            }
+            if (arg.Length < 2 || arg[0] != '-')
+            {
+                destination = arg;
+                break;
+            }
+            // Flags bundle ("-tt", "-vp22"); the first that takes an argument consumes the
+            // rest of the token, or the next token when nothing is left.
+            for (var c = 1; c < arg.Length; c++)
+            {
+                if (!SshOptionsWithArgument.Contains(arg[c]))
+                    continue;
+                var value = c + 1 < arg.Length ? arg[(c + 1)..] : i + 1 < args.Length ? args[++i] : null;
+                if (arg[c] == 'l')
+                    user = value?.Trim('"', '\'');
+                break;
+            }
+        }
+        if (destination is null)
+            return null;
+
+        destination = destination.Trim('"', '\'');
+        var cut = destination.IndexOfAny(Operators);
+        if (cut >= 0)
+            destination = destination[..cut];
+        if (destination.StartsWith("ssh://", StringComparison.OrdinalIgnoreCase))
+        {
+            // ssh://[user@]host[:port] — the port is noise next to the host name.
+            destination = destination["ssh://".Length..].TrimEnd('/');
+            var port = destination.LastIndexOf(':');
+            if (port > destination.LastIndexOf(']'))
+                destination = destination[..port];
+        }
+        if (destination.Length == 0)
+            return null;
+        return user is { Length: > 0 } && !destination.Contains('@') ? $"{user}@{destination}" : destination;
     }
 }
