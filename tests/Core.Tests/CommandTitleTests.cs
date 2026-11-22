@@ -50,6 +50,23 @@ public sealed class CommandTitleTests
         Assert.Equal(expected, CommandTitle.ProgramName(line));
 
     [Theory]
+    [InlineData("ssh web1", "ssh web1")]
+    [InlineData("ssh alice@web1 uptime", "ssh alice@web1")]
+    [InlineData("ssh -p 2222 -i ~/.ssh/id_ed25519 alice@web1", "ssh alice@web1")]
+    [InlineData("ssh -tt -vp2222 web1", "ssh web1")] // bundled flags, attached argument
+    [InlineData("ssh -l alice web1", "ssh alice@web1")]
+    [InlineData("ssh -J bastion -o StrictHostKeyChecking=no web1", "ssh web1")]
+    [InlineData("ssh ssh://alice@web1:2222", "ssh alice@web1")]
+    [InlineData("ssh -- web1", "ssh web1")]
+    [InlineData(@"C:\Windows\System32\OpenSSH\ssh.exe web1", "ssh web1")]
+    [InlineData("sudo ssh root@db1", "ssh root@db1")]
+    [InlineData("ssh web1;ls", "ssh web1")]
+    [InlineData("ssh -V", "ssh")]
+    [InlineData("ssh", "ssh")]
+    public void ProgramName_NamesTheSshDestination(string line, string expected) =>
+        Assert.Equal(expected, CommandTitle.ProgramName(line));
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
