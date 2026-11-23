@@ -667,7 +667,22 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         bool cursorShown, bool focused, uint selectionColor, uint? selectionForeground, bool full)
     {
         lock (DeviceGate)
-            return DrawLocked(cells, cols, rows, dirty, info, cursorShown, focused, selectionColor, selectionForeground, full);
+        {
+            // Resources a device loss left missing, or made on a device since replaced, are rebuilt
+            // first; a renderer that missed a recovery (or whose rebuild failed) catches up here.
+            if (!EnsureResourcesLocked(notify: true) || _swapChain is null)
+                return false;
+            var observedGeneration = s_generation;
+            try
+            {
+                return DrawLocked(cells, cols, rows, dirty, info, cursorShown, focused, selectionColor, selectionForeground, full);
+            }
+            catch (SharpGen.Runtime.SharpGenException ex) when (IsDeviceLost(ex))
+            {
+                RecoverShared(observedGeneration);
+                return false;
+            }
+        }
     }
 
     /// <summary>The theme's color for selected text during the frame being drawn; null keeps
@@ -681,9 +696,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         bool cursorShown, bool focused, uint selectionColor, uint? selectionForeground, bool full)
     {
         _selectionForeground = selectionForeground;
-        // Resources a device loss left missing, or made on a device since replaced, are rebuilt
-        // first; a renderer that missed a recovery (or whose rebuild failed) catches up here.
-        if (!EnsureResourcesLocked(notify: true) || _swapChain is null)
+        if (_swapChain is null)
             return false;
         if (_canvas is null)
             full = true;

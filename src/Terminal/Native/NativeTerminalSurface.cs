@@ -272,11 +272,14 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             ForceFull();
             if (_visible)
             {
-                PrimeSwapChain();
-                RequestFrame();
-                // A hidden surface never draws, so its buffers hold whatever was last shown.
-                // Draw before the frame that reveals it (a tab switch, a split).
-                DrawFrame();
+                if (!_renderingPaused)
+                {
+                    PrimeSwapChain();
+                    RequestFrame();
+                    // A hidden surface never draws, so its buffers hold whatever was last shown.
+                    // Draw before the frame that reveals it (a tab switch, a split).
+                    DrawFrame();
+                }
             }
             else
             {
@@ -762,7 +765,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void PrimeSwapChainLocked()
     {
-        if (_disposed || _renderer.SwapChain is not null || XamlRoot is not { } root)
+        if (_disposed || _renderingPaused || _renderer.SwapChain is not null || XamlRoot is not { } root)
             return;
         var scale = (float)root.RasterizationScale;
         var width = (int)Math.Ceiling(root.Size.Width * scale);

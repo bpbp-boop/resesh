@@ -22,7 +22,7 @@ internal sealed unsafe partial class TerminalRenderer
     // Shared across all renderers on s_d2dDevice (guarded by DeviceGate): one 16 MB texture
     // for the process instead of one per tab, shelf-packed by each surface's cell pixel size.
     private static ID2D1Bitmap1? s_emojiAtlas;
-    private static readonly Dictionary<(string Text, int CellWidth, int CellHeight, int Cells, uint Color), RawRectF> s_emojiSlots = [];
+    private static readonly Dictionary<(string Text, int CellWidth, int CellHeight, int Cells, uint Color, float EmSize), RawRectF> s_emojiSlots = [];
     private static int s_emojiX;
     private static int s_emojiY;
     private static int s_emojiRowHeight;
@@ -34,7 +34,7 @@ internal sealed unsafe partial class TerminalRenderer
     /// for their monochrome layers.</summary>
     private void DrawEmoji(string text, int cells, uint color, RawRectF cell)
     {
-        var key = (text, CellWidth, CellHeight, cells, color);
+        var key = (text, CellWidth, CellHeight, cells, color, _emSize);
         if (!s_emojiSlots.TryGetValue(key, out var source))
         {
             if (!TryRasterizeEmoji(text, cells, out source))
