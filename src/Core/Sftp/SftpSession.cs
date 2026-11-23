@@ -152,7 +152,7 @@ public sealed class SftpSession : IDisposable
         var normalized = RemotePath.Normalize(path);
         return RemoteFileEntry.Sort(
             client.ListDirectory(normalized)
-                .Where(f => f.Name is not "." and not "..")
+                .Where(f => f.Name is not "." and not ".." && RemotePath.IsValidName(f.Name))
                 .Select(f => ToEntry(normalized, f)));
     }
 
@@ -243,10 +243,10 @@ public sealed class SftpSession : IDisposable
             using var target = client.Open(remotePath, FileMode.Create, FileAccess.Write);
             CopyWithProgress(local, target, progress, token);
         }
-        catch (Exception e) when (created || e is OperationCanceledException)
+        catch when (created)
         {
-            // Only a file this upload created (or a cancelled one, as before) is removed;
-            // an existing file overwritten in place stays as far as it got.
+            // Only a file this upload created is removed on failure or cancel; an existing
+            // file or symlink overwritten in place must never be unlinked.
             TryDeleteRemote(client, remotePath);
             throw;
         }

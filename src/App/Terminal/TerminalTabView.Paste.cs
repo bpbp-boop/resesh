@@ -63,11 +63,11 @@ public sealed partial class TerminalTabView
     /// <summary>Stops a slow paste as soon as the tab leaves the connected state.</summary>
     private void WirePaste()
     {
-        _tab.PropertyChanged += (_, e) =>
+        SubscribeTab((_, e) =>
         {
             if (e.PropertyName == nameof(TabViewModel.State) && _tab.State != TabConnectionState.Connected)
                 CancelPacedPaste();
-        };
+        });
     }
 
     private bool IsLive(TerminalConnectionLifetime connection) =>

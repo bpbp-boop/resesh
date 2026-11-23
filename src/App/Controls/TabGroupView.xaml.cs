@@ -84,7 +84,7 @@ public sealed partial class TabGroupView : UserControl
     private ContentPresenter? _tabViewport;
     private double _dragInitialScrollOffset;
     private double _dragPointerX;
-    private readonly DispatcherTimer _dragScrollTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _dragScrollTimer;
 
     private readonly ITabGroupHost _host;
     private readonly MenuFlyout _tabMenu;
@@ -115,22 +115,19 @@ public sealed partial class TabGroupView : UserControl
         _tabBackgroundBrush = new SolidColorBrush(_themePalette.InactiveTab);
         _tabDividerBrush = new SolidColorBrush(_themePalette.Divider);
         InitializeComponent();
+        _dragScrollTimer = DispatcherQueue.CreateTimer();
+        _dragScrollTimer.Interval = TimeSpan.FromMilliseconds(30);
+        _dragScrollTimer.IsRepeating = true;
+        _dragScrollTimer.OnTick(ScrollDraggedTabs);
         _tabMenu = BuildTabMenu();
+        _tabMenu.Closed += TabMenu_Closed;
         ObserveFilePaneButtonTab();
 
         // Source changes refresh the layout and action buttons. WinUI's native tab-items
         // event runs when it has received the new collection state; use that event to
         // recover full equal widths after a removal. Size changes cover a group that gains
         // space when a neighboring split is removed or resized.
-        Group.Tabs.CollectionChanged += (_, e) =>
-        {
-            CaptureTabMotion();
-            if (_drag?.Source == this)
-                EndTabDrag();
-            QueueTabWidthRefresh();
-            UpdateTabActionButtons();
-            QueueTabDividerRefresh();
-        };
+        Group.Tabs.CollectionChanged += GroupTabs_CollectionChanged;
         Tabs.TabItemsChanged += (_, e) =>
         {
             // The full refresh briefly lays tabs out at content width, so skip it when the
@@ -166,17 +163,7 @@ public sealed partial class TabGroupView : UserControl
         // that event reads the stale value and leaves the surviving terminal collapsed
         // (observed: blank terminal area after closing the active tab). This handler runs
         // when the write-back lands and re-syncs against the settled value.
-        Group.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(TabGroupViewModel.SelectedTab))
-            {
-                SyncTerminalVisibility();
-                _host.ViewModel.NotifyActiveTabChanged();
-                ObserveFilePaneButtonTab();
-                FocusTerminal(Group.SelectedTab);
-                QueueTabDividerRefresh();
-            }
-        };
+        Group.PropertyChanged += Group_PropertyChanged;
 
         // Middle-click closes a tab (same confirmed pathway); TabView has no built-in support.
         Tabs.AddHandler(PointerPressedEvent, new PointerEventHandler(Tabs_PointerPressed), true);
@@ -205,9 +192,67 @@ public sealed partial class TabGroupView : UserControl
         _tabDragLayer.Children.Add(_tabDragPreview);
         TabStripHost.Children.Add(_tabDragLayer);
         AddHandler(DragOverEvent, new DragEventHandler(UpdateTabDragPreview), true);
-        _dragScrollTimer.Tick += (_, _) => ScrollDraggedTabs();
         Unloaded += TabGroupView_Unloaded;
         Tabs.AddHandler(PointerCaptureLostEvent, new PointerEventHandler(Tabs_PointerCaptureLost), true);
+    }
+
+    public void Dispose()
+    {
+        _dragScrollTimer.Stop();
+        Group.Tabs.CollectionChanged -= GroupTabs_CollectionChanged;
+        Group.PropertyChanged -= Group_PropertyChanged;
+        _tabMenu.Closed -= TabMenu_Closed;
+        if (_filePaneButtonTab is not null)
+        {
+            _filePaneButtonTab.PropertyChanged -= FilePaneButtonTab_PropertyChanged;
+            _filePaneButtonTab = null;
+        }
+        if (_filePaneButtonView is not null)
+        {
+            _filePaneButtonView.FilePaneOpenChanged -= ActionButtonView_StateChanged;
+            _filePaneButtonView.CommandsPanelOpenChanged -= ActionButtonView_StateChanged;
+            _filePaneButtonView.CaptureStateChanged -= ActionButtonView_StateChanged;
+            _filePaneButtonView = null;
+        }
+        _menuTab = null;
+        _middleClickTab = null;
+        _previewTab = null;
+        _agent.Items.Clear();
+        _highlight.Items.Clear();
+    }
+
+    private void GroupTabs_CollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        CaptureTabMotion();
+        if (_menuTab is not null && !Group.Tabs.Contains(_menuTab))
+            _menuTab = null;
+        if (_drag?.Source == this)
+            EndTabDrag();
+        QueueTabWidthRefresh();
+        UpdateTabActionButtons();
+        QueueTabDividerRefresh();
+    }
+
+    private void Group_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(TabGroupViewModel.SelectedTab))
+        {
+            SyncTerminalVisibility();
+            _host.ViewModel.NotifyActiveTabChanged();
+            ObserveFilePaneButtonTab();
+            FocusTerminal(Group.SelectedTab);
+            QueueTabDividerRefresh();
+        }
+    }
+
+    private void TabMenu_Closed(object? sender, object e)
+    {
+        // Defer past the flyout's Click handler (WinUI can raise Closed before Click).
+        DispatcherQueue.TryPost(() =>
+        {
+            if (!_tabMenu.IsOpen)
+                _menuTab = null;
+        });
     }
 
     private async Task PrepareTabDragPreviewAsync(TabViewModel tab, Windows.Foundation.Point pointer)

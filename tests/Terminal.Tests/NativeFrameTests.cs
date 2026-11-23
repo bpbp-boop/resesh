@@ -557,6 +557,26 @@ public sealed unsafe class NativeFrameTests
         Assert.Equal((uint)'n', terminal.Cells[0].Codepoint);
     }
 
+    [WindowsNativeFact]
+    public void NativeShimHandlesDefensiveEdgeCasesCleanly()
+    {
+        using var terminal = new NativeTerminal();
+        terminal.Write("e\u0301");
+        Assert.True(terminal.ReadFrame(forceAll: true) > 0);
+        // Negative or zero capacity returns the cluster length without writing past out.
+        var len = GhosttyNative.rvt_frame_graphemes(terminal.Handle, 0, 0, null, 0);
+        Assert.Equal(2, len);
+        Assert.Equal(2, GhosttyNative.rvt_frame_graphemes(terminal.Handle, 0, 0, null, -5));
+
+        // Invalid gesture kind initializes out-params cleanly.
+        var rc = GhosttyNative.rvt_gesture(terminal.Handle, 99, 0, 0, 0, 0, 0, 0, 0,
+            out var autoscroll, out var clicks, out var dragged);
+        Assert.Equal(-1, rc);
+        Assert.Equal(0, autoscroll);
+        Assert.Equal(0, clicks);
+        Assert.Equal(0, dragged);
+    }
+
     private sealed class WindowsNativeFactAttribute : FactAttribute
     {
         public WindowsNativeFactAttribute()

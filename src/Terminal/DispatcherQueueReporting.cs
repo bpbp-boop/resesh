@@ -30,12 +30,35 @@ public static class DispatcherQueueReporting
         queue.TryEnqueue(priority, () => Run(callback));
 #pragma warning restore RS0030
 
+    /// <summary><see cref="DispatcherQueue.TryEnqueue(DispatcherQueueHandler)"/> for async work,
+    /// reporting what <paramref name="callback"/> throws before or after an await.</summary>
+    public static bool TryPostAsync(this DispatcherQueue queue, Func<Task> callback) =>
+#pragma warning disable RS0030 // the one place the raw API is wrapped
+        queue.TryEnqueue(() => RunAsync(callback));
+#pragma warning restore RS0030
+
+    /// <summary><see cref="DispatcherQueue.TryEnqueue(DispatcherQueuePriority, DispatcherQueueHandler)"/>
+    /// for async work, reporting what <paramref name="callback"/> throws before or after an await.</summary>
+    public static bool TryPostAsync(this DispatcherQueue queue, DispatcherQueuePriority priority, Func<Task> callback) =>
+#pragma warning disable RS0030 // the one place the raw API is wrapped
+        queue.TryEnqueue(priority, () => RunAsync(callback));
+#pragma warning restore RS0030
+
     /// <summary>Runs <paramref name="tick"/> on every tick of <paramref name="timer"/>, reporting
     /// what it throws.</summary>
     public static void OnTick(this DispatcherQueueTimer timer, Action tick)
     {
 #pragma warning disable RS0030 // the one place the raw API is wrapped
         timer.Tick += (_, _) => Run(tick);
+#pragma warning restore RS0030
+    }
+
+    /// <summary>Runs async <paramref name="tick"/> on every tick of <paramref name="timer"/>,
+    /// reporting what it throws before or after an await.</summary>
+    public static void OnTickAsync(this DispatcherQueueTimer timer, Func<Task> tick)
+    {
+#pragma warning disable RS0030 // the one place the raw API is wrapped
+        timer.Tick += (_, _) => RunAsync(tick);
 #pragma warning restore RS0030
     }
 
@@ -49,6 +72,42 @@ public static class DispatcherQueueReporting
         // never catches: the exception goes on to fail fast exactly as it did unwrapped.
         catch (Exception exception) when (Report(exception))
         {
+        }
+    }
+
+    private static void RunAsync(Func<Task> callback)
+    {
+        Task task;
+        try
+        {
+            task = callback();
+        }
+        catch (Exception exception) when (Report(exception))
+        {
+            return;
+        }
+        if (task.IsCompleted)
+        {
+            if (task.IsFaulted && task.Exception is { } aggregate)
+            {
+                var inner = aggregate.InnerExceptions.Count == 1 ? aggregate.InnerExceptions[0] : aggregate;
+                Report(inner);
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(inner);
+            }
+            return;
+        }
+        _ = ObserveAsync(task);
+    }
+
+    private static async Task ObserveAsync(Task task)
+    {
+        try
+        {
+            await task;
+        }
+        catch (Exception exception)
+        {
+            Report(exception);
         }
     }
 

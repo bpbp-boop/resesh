@@ -493,10 +493,7 @@ public sealed partial class MainWindow
     {
         if (group.Tabs.Count > 0 || !_groupLayout.Remove(group))
             return;
-        if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(_groupViews[group]) is Panel parent)
-            parent.Children.Remove(_groupViews[group]);
-        _groupViews.Remove(group);
-        ViewModel.Groups.Remove(group);
+        DropGroupView(group);
     }
 
     internal void ShowOperationNotice(string title, string message) => ShowWorkspaceNotice(title, message);

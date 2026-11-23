@@ -102,10 +102,11 @@ public sealed partial class MainWindow
         var group = ViewModel.FocusedGroup;
         var tab = TabViewModel.CreateAppPage(AppPage.Import, _viewModelEnvironment);
         ViewModel.AttachTab(tab, group, group.Tabs.Count);
-        MainWindow Host() => App.WindowFor(tab) ?? this;
+        var fallback = new WeakReference<MainWindow>(this);
+        MainWindow? Host() => App.WindowFor(tab) ?? (fallback.TryGetTarget(out var window) ? window : null);
         var view = new ImportView(scan, sourceName);
-        view.CloseRequested += () => Host().CloseTabCore(tab);
-        view.ManageIdentitiesRequested += () => _ = Host().ShowSettingsAsync(GlobalSettingsTarget.Identities);
+        view.CloseRequested += () => Host()?.CloseTabCore(tab);
+        view.ManageIdentitiesRequested += () => { if (Host() is { } host) _ = host.ShowSettingsAsync(GlobalSettingsTarget.Identities); };
         tab.View = view;
         _groupViews[group].AddTerminal(view);
         group.SelectedTab = tab;
@@ -116,16 +117,18 @@ public sealed partial class MainWindow
     // Welcome can be dragged to another window, so its actions go to the window hosting it now.
     private void OpenWelcome() => OpenAppPage(AppPage.Welcome, tab =>
     {
-        MainWindow Host() => App.WindowFor(tab) ?? this;
+        var fallback = new WeakReference<MainWindow>(this);
+        MainWindow? HostOrNull() => App.WindowFor(tab) ?? (fallback.TryGetTarget(out var window) ? window : null);
+        MainWindow Host() => HostOrNull() ?? throw new InvalidOperationException("The tab is no longer in a window.");
         var view = new OnboardingView(
             App.Settings.Current,
             App.PreviewThemeInAllWindows,
             Core.Local.LocalShellDiscovery.DefaultProfile(
                 App.Store, App.Settings.Current.DefaultLocalProfileId, App.AvailableLocalShells)?.Name);
-        view.FinishRequested += () => Host().FinishOnboarding(tab, view);
-        view.NewSessionRequested += () => _ = Host().OpenSessionEditorAsync(existing: null, defaultFolder: "");
-        view.LocalShellRequested += () => Host().OpenDefaultLocalProfile();
-        view.ManageIdentitiesRequested += () => _ = Host().ShowSettingsAsync(GlobalSettingsTarget.Identities);
+        view.FinishRequested += () => HostOrNull()?.FinishOnboarding(tab, view);
+        view.NewSessionRequested += () => { if (HostOrNull() is { } host) _ = host.OpenSessionEditorAsync(existing: null, defaultFolder: ""); };
+        view.LocalShellRequested += () => HostOrNull()?.OpenDefaultLocalProfile();
+        view.ManageIdentitiesRequested += () => { if (HostOrNull() is { } host) _ = host.ShowSettingsAsync(GlobalSettingsTarget.Identities); };
         view.ReviewImport = (scan, source) => Host().ReviewImportAsync(scan, source);
         return view;
     });
@@ -559,6 +562,8 @@ public sealed partial class MainWindow
             tab.View as UIElement,
             () => ViewModel.DetachTab(tab),
             dispose ? () => (tab.View as IDisposable)?.Dispose() : () => { });
+        if (dispose)
+            tab.View = null;
         Trace($"RemoveTabCore: done; selected now '{group.SelectedTab?.Header ?? "(null)"}'");
         if (collapseEmptyPane)
             CollapseGroupIfEmpty(group);
@@ -731,10 +736,7 @@ public sealed partial class MainWindow
         var wasFocused = ReferenceEquals(ViewModel.FocusedGroup, group);
         if (!_groupLayout.Remove(group))
             return;
-        if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(_groupViews[group]) is Panel parent)
-            parent.Children.Remove(_groupViews[group]);
-        _groupViews.Remove(group);
-        ViewModel.Groups.Remove(group);
+        DropGroupView(group);
         SyncGroupOrder();
 
         if (wasFocused)

@@ -66,7 +66,7 @@ public sealed partial class FilePaneView : UserControl, IDisposable
     private CancellationTokenSource? _opCts;
     private CancellationTokenSource? _navCts;
     private readonly TransferProgressBuffer _transferProgress = new();
-    private readonly DispatcherTimer _transferTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _transferTimer;
     private RemoteFileEntry? _menuEntry;
     private bool IsDisposed => _activity.State == FilePaneState.Disposed;
     private bool IsBusy => _activity.IsBusy;
@@ -105,7 +105,10 @@ public sealed partial class FilePaneView : UserControl, IDisposable
         _connectFactory = connectFactory;
         _openInExplorer = openInExplorer;
         _localFiles = localFiles;
-        _transferTimer.Tick += (_, _) => RenderTransferProgress();
+        _transferTimer = DispatcherQueue.CreateTimer();
+        _transferTimer.Interval = TimeSpan.FromMilliseconds(100);
+        _transferTimer.IsRepeating = true;
+        _transferTimer.OnTick(RenderTransferProgress);
         _pathBox.PlaceholderText = localFiles is null ? "/" : @"C:\";
         // Compact rows in the codebase's tree style (default ListViewItems are 40px tall).
         var itemStyle = new Style(typeof(ListViewItem));
@@ -669,7 +672,7 @@ public sealed partial class FilePaneView : UserControl, IDisposable
 
     private static bool IsExpected(Exception ex) => ex is SshSessionException
         or Renci.SshNet.Common.SshException or IOException or UnauthorizedAccessException
-        or InvalidOperationException or ObjectDisposedException;
+        or System.ComponentModel.Win32Exception or InvalidOperationException or ObjectDisposedException;
 
     private void ReportTransfer(string verb, string name, int index, int count, long done, long total)
     {
@@ -712,12 +715,21 @@ public sealed partial class FilePaneView : UserControl, IDisposable
 
     private async Task PickAndUploadAsync()
     {
-        var picker = new Windows.Storage.Pickers.FileOpenPicker();
-        picker.FileTypeFilter.Add("*");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle());
-        var files = await picker.PickMultipleFilesAsync();
-        if (files.Count > 0)
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker();
+            picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle());
+            var files = await picker.PickMultipleFilesAsync();
+            if (IsDisposed || files.Count == 0)
+                return;
             await UploadPathsAsync(files.Select(f => f.Path).Where(p => !string.IsNullOrEmpty(p)).ToList());
+        }
+        catch (Exception ex) when (IsExpected(ex) || ex is System.Runtime.InteropServices.COMException)
+        {
+            if (!IsDisposed)
+                ShowStatus($"Upload failed: {ex.Message}", isError: true);
+        }
     }
 
     private async void Pane_Drop(object sender, DragEventArgs e)
@@ -750,17 +762,23 @@ public sealed partial class FilePaneView : UserControl, IDisposable
         var target = _currentPath;
         await RunOperationAsync("Upload failed", async (sftp, token) =>
         {
-            // Plan first so progress can show a stable total, then confirm overwrites once.
-            var files = new List<(string Local, string Remote, long Size)>();
-            var directories = new List<string>();
-            foreach (var local in localPaths)
+            // Plan first off the UI thread so large dropped directory trees never freeze input,
+            // then confirm overwrites once.
+            var (files, directories) = await Task.Run(() =>
             {
-                var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(local));
-                if (Directory.Exists(local))
-                    PlanLocalDirectory(local, RemotePath.Join(target, name), files, directories);
-                else if (File.Exists(local))
-                    files.Add((local, RemotePath.Join(target, name), new FileInfo(local).Length));
-            }
+                var plannedFiles = new List<(string Local, string Remote, long Size)>();
+                var plannedDirectories = new List<string>();
+                foreach (var local in localPaths)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(local));
+                    if (Directory.Exists(local))
+                        PlanLocalDirectory(local, RemotePath.Join(target, name), plannedFiles, plannedDirectories, token);
+                    else if (File.Exists(local))
+                        plannedFiles.Add((local, RemotePath.Join(target, name), new FileInfo(local).Length));
+                }
+                return (plannedFiles, plannedDirectories);
+            }, token);
             if (files.Count == 0 && directories.Count == 0)
                 return;
 
@@ -806,13 +824,17 @@ public sealed partial class FilePaneView : UserControl, IDisposable
     }
 
     private static void PlanLocalDirectory(
-        string localDir, string remoteDir, List<(string, string, long)> files, List<string> directories)
+        string localDir, string remoteDir, List<(string, string, long)> files, List<string> directories, CancellationToken token)
     {
+        token.ThrowIfCancellationRequested();
         directories.Add(remoteDir);
         foreach (var dir in Directory.EnumerateDirectories(localDir))
-            PlanLocalDirectory(dir, RemotePath.Join(remoteDir, Path.GetFileName(dir)), files, directories);
+            PlanLocalDirectory(dir, RemotePath.Join(remoteDir, Path.GetFileName(dir)), files, directories, token);
         foreach (var file in Directory.EnumerateFiles(localDir))
+        {
+            token.ThrowIfCancellationRequested();
             files.Add((file, RemotePath.Join(remoteDir, Path.GetFileName(file)), new FileInfo(file).Length));
+        }
     }
 
     // ---- downloads ----
@@ -822,13 +844,21 @@ public sealed partial class FilePaneView : UserControl, IDisposable
         var selection = SelectedEntries();
         if (selection.Count == 0)
             return;
-        var picker = new Windows.Storage.Pickers.FolderPicker();
-        picker.FileTypeFilter.Add("*");
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle());
-        var folder = await picker.PickSingleFolderAsync();
-        if (folder is null)
-            return;
-        await DownloadEntriesAsync(selection, folder.Path, openAfter: false);
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FolderPicker();
+            picker.FileTypeFilter.Add("*");
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, WindowHandle());
+            var folder = await picker.PickSingleFolderAsync();
+            if (IsDisposed || folder is null)
+                return;
+            await DownloadEntriesAsync(selection, folder.Path, openAfter: false);
+        }
+        catch (Exception ex) when (IsExpected(ex) || ex is System.Runtime.InteropServices.COMException)
+        {
+            if (!IsDisposed)
+                ShowStatus($"Download failed: {ex.Message}", isError: true);
+        }
     }
 
     private async Task DownloadAndOpenAsync(RemoteFileEntry? entry = null)

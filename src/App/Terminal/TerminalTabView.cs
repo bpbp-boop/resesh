@@ -273,22 +273,31 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         WirePaste();
         WireConnectionFollowers();
 
-        Loaded += async (_, _) =>
-        {
-            if (_initialLaunchStarted || _disposed)
-                return;
-            _initialLaunchStarted = true;
+        Loaded += TerminalTabView_Loaded;
+    }
 
+    private async void TerminalTabView_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (_initialLaunchStarted || _disposed)
+            return;
+        _initialLaunchStarted = true;
+
+        try
+        {
             // Capture must exist before the backend can emit. The page reports its measured
             // size later; until then both transports start at the terminal's 80x24 default.
             EnsureCapture(_terminal.Columns, _terminal.Rows);
-            if (initial.AlwaysRecord)
+            if (App.Settings.Current.AlwaysRecord)
                 TryStartAutomaticRecording();
 
             await Task.WhenAll(
                 _terminal.InitializeAsync(),
                 ConnectAsync(isReconnect: false));
-        };
+        }
+        catch (Exception ex)
+        {
+            App.ReportRecoverableError(ex);
+        }
     }
 
     private void EnsureCapture(int columns, int rows)
@@ -477,6 +486,14 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     /// and marked commands; all of the mapping happens in the tracker. Detection can say
     /// WHICH agent is running; only an adapter's structured event may say it is waiting.
     /// </summary>
+    private readonly List<System.ComponentModel.PropertyChangedEventHandler> _tabHandlers = [];
+
+    private void SubscribeTab(System.ComponentModel.PropertyChangedEventHandler handler)
+    {
+        _tabHandlers.Add(handler);
+        _tab.PropertyChanged += handler;
+    }
+
     private void WireAgentSignals()
     {
         _terminal.AgentOscReceived += (code, data) =>
@@ -495,13 +512,15 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _terminal.CommandObserved += command => ApplyAgent(tracker => tracker.ObserveCommand(command));
         _terminal.PromptContextChanged += (_, _) => ApplyAgent(tracker => tracker.ObserveCommand(""));
 
-        _tab.PropertyChanged += (_, e) =>
+        SubscribeTab((_, e) =>
         {
+            if (_disposed)
+                return;
             if (e.PropertyName == nameof(TabViewModel.IsActive) && _tab.IsActive)
                 ApplyAgent(tracker => tracker.ObserveViewed());
             else if (e.PropertyName == nameof(TabViewModel.Session))
                 RefreshAgentDefault();
-        };
+        });
         PushAgentState(); // a session default shows before anything has been observed
     }
 
@@ -528,14 +547,16 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         };
         _terminal.PromptContextChanged += (_, _) =>
             DispatcherQueue.TryPost(ClearReportedProgress);
-        _tab.PropertyChanged += (_, e) =>
+        SubscribeTab((_, e) =>
         {
+            if (_disposed)
+                return;
             if (e.PropertyName == nameof(TabViewModel.State) && _tab.State != TabConnectionState.Connected)
             {
                 ClearReportedProgress();
                 _tmuxStatusReport = null; // a reattach repeats the report; let it count again
             }
-        };
+        });
     }
 
     /// <summary>
@@ -548,7 +569,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     private void WireConnectionFollowers()
     {
         var wasConnected = false;
-        _tab.PropertyChanged += (_, e) =>
+        SubscribeTab((_, e) =>
         {
             if (_disposed)
                 return;
@@ -568,7 +589,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 ApplyPromptPlatform();
                 _terminal.SetFixed80Columns(Session.IsTelnet && Session.TelnetFixed80Columns);
             }
-        };
+        });
     }
 
     /// <summary>How prompts are read: as the device the SSH banner named on this connection,
@@ -661,6 +682,8 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
     private void PushAgentState()
     {
+        if (_disposed)
+            return;
         var snapshot = _agent.Current;
         _tab.Agent = snapshot;
         _terminal.SetAgentRunning(_agent.AgentRunning);
@@ -1505,27 +1528,12 @@ public sealed partial class TerminalTabView : Grid, IDisposable
     }
 
     /// <summary>Marshals tmux selection onto the UI thread while the SSH worker waits.</summary>
-    private TmuxChoice SelectTmuxSessionBlocking(TmuxConnectPlan.Choose choose, CancellationToken token)
-    {
-        var tcs = new TaskCompletionSource<TmuxChoice?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!DispatcherQueue.TryPost(async () =>
-        {
-            try
-            {
-                if (token.IsCancellationRequested) return;
-                tcs.TrySetResult(await ConnectDialogs.SelectTmuxSessionAsync(XamlRoot, Session.Name, choose.Sessions, token));
-            }
-            catch (Exception ex)
-            {
-                tcs.TrySetException(ex);
-            }
-        }))
-        {
-            throw new OperationCanceledException("The tmux session selector could not open.");
-        }
-        return tcs.Task.WaitAsync(token).GetAwaiter().GetResult()
-            ?? throw new OperationCanceledException("tmux session selection was cancelled.");
-    }
+    private TmuxChoice SelectTmuxSessionBlocking(TmuxConnectPlan.Choose choose, CancellationToken token) =>
+        RunOnUiBlocking(
+            () => ConnectDialogs.SelectTmuxSessionAsync(XamlRoot, Session.Name, choose.Sessions, token),
+            token,
+            "The tmux session selector could not open.")
+        ?? throw new OperationCanceledException("tmux session selection was cancelled.");
 
     /// <summary>The session to connect as (login applied), its secret, and the identity
     /// whose stored or remembered password supplied it (so a rejection can offer an update).</summary>
@@ -1932,10 +1940,10 @@ public sealed partial class TerminalTabView : Grid, IDisposable
 
     /// <summary>Runs UI work for the connect thread and waits for it: a login prompt in the
     /// middle of a connect, like the host-key decision.</summary>
-    private T RunOnUiBlocking<T>(Func<Task<T>> work, CancellationToken token)
+    private T RunOnUiBlocking<T>(Func<Task<T>> work, CancellationToken token, string dispatchFailedMessage = "The login prompt could not open.")
     {
         var tcs = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!DispatcherQueue.TryPost(async () =>
+        if (!DispatcherQueue.TryPostAsync(async () =>
         {
             try
             {
@@ -1950,7 +1958,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             {
                 tcs.TrySetException(ex);
             }
-        })) throw new OperationCanceledException("The login prompt could not open.");
+        })) throw new OperationCanceledException(dispatchFailedMessage);
         return tcs.Task.WaitAsync(token).GetAwaiter().GetResult();
     }
 
@@ -1973,46 +1981,27 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         }, token);
 
     /// <summary>Marshals the host-key decision onto the UI thread; called from the connect thread.</summary>
-    private bool ConfirmHostKeyBlocking(HostKeyInfo info, Dialling dialling, CancellationToken token)
-    {
-        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!DispatcherQueue.TryPost(async () =>
-        {
-            try
-            {
-                if (token.IsCancellationRequested) return;
-                tcs.TrySetResult(await ConnectDialogs.ConfirmHostKeyAsync(XamlRoot, info, RouteStep(dialling.Host, dialling.Route), token));
-            }
-            catch (Exception ex)
-            {
-                tcs.TrySetException(ex);
-            }
-        })) throw new OperationCanceledException("The host-key dialog could not open.");
-        return tcs.Task.WaitAsync(token).GetAwaiter().GetResult();
-    }
+    private bool ConfirmHostKeyBlocking(HostKeyInfo info, Dialling dialling, CancellationToken token) =>
+        RunOnUiBlocking(
+            () => ConnectDialogs.ConfirmHostKeyAsync(XamlRoot, info, RouteStep(dialling.Host, dialling.Route), token),
+            token,
+            "The host-key dialog could not open.");
 
     /// <summary>Marshals server keyboard-interactive challenges onto the UI thread.</summary>
     private IReadOnlyList<string>? PromptKeyboardInteractiveBlocking(
         IReadOnlyList<KeyboardInteractivePrompt> prompts, Dialling dialling, CancellationToken token)
     {
-        var tcs = new TaskCompletionSource<IReadOnlyList<string>?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!DispatcherQueue.TryPost(async () =>
+        try
         {
-            try
-            {
-                if (token.IsCancellationRequested) return;
-                tcs.TrySetResult(await ConnectDialogs.PromptKeyboardInteractiveAsync(
-                    XamlRoot, PromptTitle(dialling.Host ?? Session, "Authenticate to", dialling.Route), prompts, token));
-            }
-            catch (Exception ex)
-            {
-                tcs.TrySetException(ex);
-            }
-        }))
+            return RunOnUiBlocking(
+                () => ConnectDialogs.PromptKeyboardInteractiveAsync(
+                    XamlRoot, PromptTitle(dialling.Host ?? Session, "Authenticate to", dialling.Route), prompts, token),
+                token);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {
             return null;
         }
-        return tcs.Task.WaitAsync(token).GetAwaiter().GetResult();
     }
 
     /// <summary>Applies the app chrome theme and this session's effective terminal theme
@@ -2563,7 +2552,13 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 + "reached through a jump host or proxy. Use the file pane instead.");
         var mount = _sshfsMount;
         // A mount made for another target (the session was edited and reconnected) is replaced.
-        if (mount is not { IsAlive: true } || _sshfsTarget != SshfsTarget(session))
+        // IsAlive probes the mounted root, which can stall on a hung remote mount, so check off the UI thread.
+        var mountAlive = mount is not null
+            && _sshfsTarget == SshfsTarget(session)
+            && await Task.Run(() => mount.IsAlive, _closing.Token);
+        if (_disposed)
+            return;
+        if (!mountAlive)
         {
             var mounting = _sshfsMounting ??= MountSshfsAsync(session, live.Secret);
             try
@@ -2578,7 +2573,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             if (mount is null || _disposed)
                 return; // the tab closed during the mount
         }
-        Interop.SshfsIntegration.OpenInExplorer(mount.Root, path);
+        Interop.SshfsIntegration.OpenInExplorer(mount!.Root, path);
     }
 
     private async Task<Interop.SshfsMount?> MountSshfsAsync(Session session, string secret)
@@ -2748,6 +2743,9 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        foreach (var handler in _tabHandlers)
+            _tab.PropertyChanged -= handler;
+        _tabHandlers.Clear();
         _tab.Progress = TerminalProgress.None;
         CancelPacedPaste();
         StopSerialPortWatch();
@@ -2755,18 +2753,19 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _agentPoll = null;
         _commitTick?.Stop();
         _commitTick = null;
+        var sshfsMount = _sshfsMount;
+        _sshfsMount = null;
         CleanupActions.Run(App.ReportRecoverableError,
             () => _connection.Dispose(),
             () => _closing.Cancel(), // SSHFS mounts and management connections still coming up stop
             () => _tmuxReservation.Dispose(),
             () => { if (IsFilePaneOpen) SaveFilePaneWidth(); },
             () => _filePane?.Dispose(),
-            () => _sshfsMount?.Dispose(),
+            () => { if (sshfsMount is not null) _ = Task.Run(sshfsMount.Dispose); },
             () => _rewindPlayer?.Dispose(),
             () => _terminal.Dispose(),
             () => _capture?.Dispose());
         _filePane = null;
-        _sshfsMount = null;
         _rewindPlayer = null;
         _backend = null;
         _ssh = null;

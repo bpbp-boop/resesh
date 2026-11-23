@@ -14,12 +14,12 @@ public sealed class SessionsBackupTests : IDisposable
     private readonly DirectoryInfo _dir = Directory.CreateTempSubdirectory("sessions-backup-test");
 
     [Fact]
-    public void ExportRead_FolderScopeIncludesOnlyThatSubtreeAndGlobalBackupData()
+    public void ExportRead_FolderScopeIncludesOnlyThatSubtreeWithoutGlobalSettingsOrWorkspaces()
     {
         var source = CreateStores(Path.Combine(_dir.FullName, "source"));
-        var selected = Ssh("Selected", "selected.example", "Ops/Prod");
+        var selected = Ssh("Selected", "selected.example", "Ops/Prod") with { Icon = "lab.svg" };
         source.Sessions.Add(selected);
-        source.Sessions.Add(Ssh("Other", "other.example", "Personal"));
+        source.Sessions.Add(Ssh("Other", "other.example", "Personal") with { Icon = "unused.svg" });
         source.Sessions.CreateFolder("Ops/Empty");
         source.Sessions.Add(new Session
         {
@@ -32,10 +32,11 @@ public sealed class SessionsBackupTests : IDisposable
         source.KnownHosts.Accept("selected.example", 22, "ssh-ed25519", "fingerprint");
         Directory.CreateDirectory(Path.Combine(source.Directory, "icons"));
         File.WriteAllText(Path.Combine(source.Directory, "icons", "lab.svg"), "<svg/>");
+        File.WriteAllText(Path.Combine(source.Directory, "icons", "unused.svg"), "<svg unused/>");
         File.WriteAllText(Path.Combine(source.Directory, "recording.cast"), "must not be exported");
         var sourceWorkspaces = new WorkspaceStore(Path.Combine(source.Directory, "workspaces.json"));
         sourceWorkspaces.Load();
-        var savedWorkspace = sourceWorkspaces.SaveAs("Ops", new WorkspaceLayout { Groups = [new WorkspaceGroup()] });
+        sourceWorkspaces.SaveAs("Ops", new WorkspaceLayout { Groups = [new WorkspaceGroup()] });
 
         var path = Path.Combine(_dir.FullName, "filtered.reseshbackup");
         SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
@@ -45,17 +46,91 @@ public sealed class SessionsBackupTests : IDisposable
         Assert.False(SessionsBackup.IsEncrypted(path));
         var package = SessionsBackup.Read(path);
         Assert.Equal(SessionsBackup.CurrentSchemaVersion, package.Manifest.SchemaVersion);
+        Assert.Equal("Ssh:Ops", package.Manifest.Scope);
         Assert.Equal(selected.Id, Assert.Single(package.Sessions).Id);
         // Ops and Ops/Prod exist through the selected session, which brings them back on import.
         Assert.Equal(["Ops/Empty"], package.Folders);
         Assert.Empty(package.LocalFolders);
-        Assert.Equal(ThemeAppearances.Light, package.Settings.Appearance);
-        Assert.Equal("solarized-light", package.Settings.LightTheme);
         Assert.Single(package.KnownHosts);
+        Assert.Equal(["lab.svg"], package.Icons.Keys);
         Assert.Equal("<svg/>", Encoding.UTF8.GetString(package.Icons["lab.svg"]));
-        Assert.Equal(savedWorkspace.Id, Assert.Single(WorkspaceStore.ParsePayload(package.Workspaces!).Workspaces!).Id);
+        Assert.Null(package.Workspaces);
         using var archive = ZipFile.OpenRead(path);
+        Assert.Null(archive.GetEntry("settings.json"));
+        Assert.Null(archive.GetEntry("workspaces.json"));
         Assert.DoesNotContain(archive.Entries, e => e.FullName.Contains("recording", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Import_ScopedBackupPreservesTargetSettingsAndWorkspaces()
+    {
+        var source = CreateStores(Path.Combine(_dir.FullName, "scoped-import-source"));
+        source.Sessions.Add(Ssh("Router", "r1.example", "Ops"));
+        source.Settings.Save(new AppSettings { FontSize = 21 });
+        var path = Path.Combine(_dir.FullName, "scoped-import.reseshbackup");
+        SessionsBackup.Export(path, source.Directory, source.Sessions, source.Settings,
+            source.KnownHosts, source.Highlights, source.SshKeys, source.Credentials,
+            new BackupExportOptions { Scope = new BackupScope(SessionKind.Ssh, "Ops") });
+
+        // Simulate an older scoped archive that still carried settings and workspaces.
+        var package = SessionsBackup.Read(path) with
+        {
+            Settings = new AppSettings { FontSize = 21 },
+            Workspaces = Encoding.UTF8.GetBytes("{\"workspaces\":[]}"),
+        };
+
+        var target = CreateStores(Path.Combine(_dir.FullName, "scoped-import-target"));
+        target.Settings.Save(new AppSettings { FontSize = 14, Appearance = ThemeAppearances.Dark });
+        var targetWorkspaces = new WorkspaceStore(Path.Combine(target.Directory, "workspaces.json"));
+        targetWorkspaces.Load();
+        var keptWorkspace = targetWorkspaces.SaveAs("Keep me", new WorkspaceLayout { Groups = [new WorkspaceGroup()] });
+
+        SessionsBackup.Import(package, target.Directory, target.Sessions, target.Settings,
+            target.KnownHosts, target.Highlights, target.SshKeys, target.Credentials,
+            new Dictionary<Guid, BackupConflictResolution>(), workspaceStore: targetWorkspaces);
+
+        Assert.Single(target.Sessions.Sessions, s => s.Name == "Router");
+        Assert.Equal(14, target.Settings.Current.FontSize);
+        Assert.Equal(ThemeAppearances.Dark, target.Settings.Current.Appearance);
+        Assert.Equal(keptWorkspace.Id, Assert.Single(targetWorkspaces.Workspaces).Id);
+    }
+
+    [Fact]
+    public void BoundedReadStream_RejectsPerEntryAndArchiveDecompressionOverruns()
+    {
+        var budget = new SessionsBackup.ArchiveReadBudget(maxBytes: 12);
+        using (var exact = new SessionsBackup.BoundedReadStream(new MemoryStream(new byte[8]), maxEntryBytes: 8, budget))
+        {
+            using var dest = new MemoryStream();
+            exact.CopyTo(dest);
+            Assert.Equal(8, dest.Length);
+        }
+
+        // Exceeds per-entry cap (9 > 8) even though it would fit if uncapped.
+        using (var overEntry = new SessionsBackup.BoundedReadStream(new MemoryStream(new byte[9]), maxEntryBytes: 8, new SessionsBackup.ArchiveReadBudget(100)))
+        {
+            Assert.Throws<InvalidDataException>(() => overEntry.CopyTo(Stream.Null));
+        }
+
+        // Fits per-entry cap (5 <= 8) but exceeds remaining cumulative archive budget (8 + 5 > 12).
+        using (var overArchive = new SessionsBackup.BoundedReadStream(new MemoryStream(new byte[5]), maxEntryBytes: 8, budget))
+        {
+            Assert.Throws<InvalidDataException>(() => overArchive.CopyTo(Stream.Null));
+        }
+    }
+
+    [Fact]
+    public void Read_RejectsOversizedEncryptedBackupBeforeReadingIt()
+    {
+        var path = Path.Combine(_dir.FullName, "oversized-encrypted.reseshbackup");
+        using (var stream = File.Create(path))
+        {
+            stream.Write("SESSBKP1"u8);
+            stream.SetLength((200L * 1024 * 1024) + 1);
+        }
+
+        Assert.True(SessionsBackup.IsEncrypted(path));
+        Assert.Throws<InvalidDataException>(() => SessionsBackup.Read(path, "any passphrase"));
     }
 
     [Fact]

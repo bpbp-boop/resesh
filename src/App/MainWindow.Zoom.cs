@@ -173,9 +173,12 @@ public sealed partial class MainWindow
 
     private void DropGroupView(TabGroupViewModel group)
     {
-        if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(_groupViews[group]) is Panel parent)
-            parent.Children.Remove(_groupViews[group]);
-        _groupViews.Remove(group);
+        if (_groupViews.Remove(group, out var view))
+        {
+            if (Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(view) is Panel parent)
+                parent.Children.Remove(view);
+            view.Dispose();
+        }
         ViewModel.Groups.Remove(group);
     }
 

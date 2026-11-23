@@ -328,7 +328,7 @@ static void on_semantic(GhosttyTerminal term, void* user, const GhosttyTerminalS
   (void)term;
   RvtTerm* t = (RvtTerm*)user;
   if (alternate_active(t)) return; // marks belong to the normal screen, as in terminal.html
-  uint8_t buf[sizeof(RvtSemanticEvent) + 4096];
+  _Alignas(RvtSemanticEvent) uint8_t buf[sizeof(RvtSemanticEvent) + 4096];
   RvtSemanticEvent* e = (RvtSemanticEvent*)buf;
   memset(e, 0, sizeof *e);
   e->kind = (int32_t)ev->kind;
@@ -369,8 +369,10 @@ static void emit_osc_text(RvtTerm* t, const char* head, const GhosttyString* a, 
     }
     size_t room = sizeof buf - n;
     size_t len = parts[i]->len < room ? parts[i]->len : room;
-    memcpy(buf + n, parts[i]->ptr, len);
-    n += len;
+    if (len > 0 && parts[i]->ptr) {
+      memcpy(buf + n, parts[i]->ptr, len);
+      n += len;
+    }
   }
   emit(t, RVT_EVENT_OSC, buf, n);
 }
@@ -408,8 +410,10 @@ static void on_program_status(GhosttyTerminal term, void* user, const GhosttyTer
     buf[n++] = 0x1F;
     size_t room = sizeof buf - n;
     size_t len = fields[i]->len < room ? fields[i]->len : room;
-    memcpy(buf + n, fields[i]->ptr, len);
-    n += len;
+    if (len > 0 && fields[i]->ptr) {
+      memcpy(buf + n, fields[i]->ptr, len);
+      n += len;
+    }
   }
   emit((RvtTerm*)user, RVT_EVENT_OSC, buf, n);
 }
@@ -501,6 +505,9 @@ RVT_API RvtTerm* rvt_new(uint16_t cols, uint16_t rows, size_t scrollback_lines, 
 
 RVT_API void rvt_free(RvtTerm* t) {
   if (!t) return;
+  // Same lock order as rvt_read_frame (rs_lock before lock) so no reader can still touch
+  // render state or grapheme rows while teardown runs.
+  AcquireSRWLockExclusive(&t->rs_lock);
   lock(t);
   for (uint32_t i = 0; i < t->marker_capacity; i++)
     if (t->markers[i]) ghostty_tracked_grid_ref_free(t->markers[i]);
@@ -520,6 +527,7 @@ RVT_API void rvt_free(RvtTerm* t) {
   ghostty_terminal_free(t->term);
   free_grapheme_rows(t);
   ReleaseSRWLockExclusive(&t->lock); // not unlock(): the terminal is gone
+  ReleaseSRWLockExclusive(&t->rs_lock);
   free(t);
 }
 
@@ -849,7 +857,7 @@ static int read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, ui
         // the live terminal (which may already hold newer output) to draw it.
         // Almost every cluster fits the stack buffer; a longer one (a pile of combining marks)
         // is read again into one of its own size, so no mark is dropped.
-        uint32_t cps[RVT_MAX_GRAPHEME];
+        uint32_t cps[RVT_MAX_GRAPHEME] = {0};
         uint32_t* all = cps;
         GhosttyCodepointBuffer buf = { cps, RVT_MAX_GRAPHEME, 0 };
         GhosttyResult r = ghostty_render_state_row_cells_get(t->cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, &buf);
@@ -858,11 +866,11 @@ static int read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t rows, ui
           r = ghostty_render_state_row_cells_get(t->cells, GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF, &big);
           buf = big;
         } else if (!all) {
-          all = cps; // out of memory: keep the first RVT_MAX_GRAPHEME
+          all = cps;
         }
         glen = (uint32_t)buf.len;
         uint16_t kept = (uint16_t)(buf.len < buf.cap ? buf.len : buf.cap);
-        if ((r != GHOSTTY_SUCCESS && r != GHOSTTY_OUT_OF_SPACE) || kept < 2 || !graphemes || !push_grapheme(graphemes, x, all, kept))
+        if (r != GHOSTTY_SUCCESS || kept < 2 || !graphemes || !push_grapheme(graphemes, x, all, kept))
           glen = cp ? 1 : 0;
         if (all != cps) free(all);
       }
@@ -932,6 +940,7 @@ RVT_API int rvt_read_frame(RvtTerm* t, RvtCell* out, uint16_t cols, uint16_t row
 // without one (or one whose row the caller has not read since a resize); when that is more
 // than cap, only cap were written and the caller asks again with room for all of them.
 RVT_API int rvt_frame_graphemes(RvtTerm* t, uint16_t x, uint16_t y, uint32_t* out, int cap) {
+  if (!t) return 0;
   int n = 0;
   AcquireSRWLockExclusive(&t->rs_lock);
   if (y < t->grapheme_row_count) {
@@ -939,7 +948,8 @@ RVT_API int rvt_frame_graphemes(RvtTerm* t, uint16_t x, uint16_t y, uint32_t* ou
     for (uint32_t i = 0; i < row->count; i++) {
       if (row->items[i].x != x) continue;
       n = row->items[i].len;
-      memcpy(out, row->pool + row->items[i].offset, (size_t)(n < cap ? n : cap) * sizeof *out);
+      if (out && cap > 0)
+        memcpy(out, row->pool + row->items[i].offset, (size_t)(n < cap ? n : cap) * sizeof *out);
       break;
     }
   }
@@ -1261,7 +1271,10 @@ RVT_API int rvt_gesture(RvtTerm* t, int kind, double x, double y, uint16_t vx, u
   static const GhosttySelectionGestureEventType types[4] = {
     GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_PRESS, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_RELEASE,
     GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG, GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_AUTOSCROLL_TICK };
-  if (kind < 0 || kind > 3) return -1;
+  if (autoscroll) *autoscroll = 0;
+  if (clicks) *clicks = 0;
+  if (dragged) *dragged = 0;
+  if (!t || kind < 0 || kind > 3) return -1;
   int rc = -1;
   lock(t);
   if (!t->gesture && ghostty_selection_gesture_new(NULL, &t->gesture) != GHOSTTY_SUCCESS) goto done;
@@ -1328,9 +1341,9 @@ RVT_API int rvt_gesture(RvtTerm* t, int kind, double x, double y, uint16_t vx, u
   ghostty_selection_gesture_get(t->gesture, t->term, GHOSTTY_SELECTION_GESTURE_DATA_AUTOSCROLL, &as);
   ghostty_selection_gesture_get(t->gesture, t->term, GHOSTTY_SELECTION_GESTURE_DATA_CLICK_COUNT, &count);
   ghostty_selection_gesture_get(t->gesture, t->term, GHOSTTY_SELECTION_GESTURE_DATA_DRAGGED, &drag);
-  *autoscroll = (int)as;
-  *clicks = count;
-  *dragged = drag ? 1 : 0;
+  if (autoscroll) *autoscroll = (int)as;
+  if (clicks) *clicks = count;
+  if (dragged) *dragged = drag ? 1 : 0;
 done:
   unlock(t);
   return rc;

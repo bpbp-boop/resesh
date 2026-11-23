@@ -9,7 +9,7 @@ public sealed record KeyboardInteractivePrompt(string Text, bool IsSecret);
 /// <summary>
 /// Connection plumbing shared by the terminal (SshClient) and the file pane (SftpClient):
 /// auth-method construction, failure classification, and the fast TCP preflight.
-/// Auth methods are stateful in SSH.NET â€” build a fresh set per client, never share them.
+/// Auth methods are stateful in SSH.NET — build a fresh set per client, never share them.
 /// </summary>
 internal static class SshConnectionFactory
 {
@@ -81,7 +81,7 @@ internal static class SshConnectionFactory
     internal static SshSessionException Classify(Exception ex) => ex switch
     {
         SshAuthenticationException => new SshSessionException(
-            SshFailureKind.AuthenticationFailed, "Authentication failed â€” check the username and credential.", ex),
+            SshFailureKind.AuthenticationFailed, "Authentication failed — check the username and credential.", ex),
         ProxyException => new SshSessionException(
             SshFailureKind.HostUnreachable, $"The proxy refused the connection: {ex.Message}", ex),
         // "No matching key exchange algorithm (server offers ...)": the host was reached

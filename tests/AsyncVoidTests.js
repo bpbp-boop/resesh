@@ -30,3 +30,21 @@ test("async void is reserved for event handlers", () => {
   }
   assert.deepEqual(offenders, []);
 });
+
+test("dispatcher callbacks do not pass async void lambdas to Action overloads or use DispatcherTimer", () => {
+  // Passing async () => ... to TryPost/OnTick (which take Action) turns it into async void,
+  // bypassing DispatcherQueueReporting after the first await; use TryPostAsync/OnTickAsync.
+  // DispatcherTimer.Tick similarly bypasses DispatcherQueueReporting and BannedSymbols.txt.
+  const offenders = [];
+  for (const file of sourceFiles(src)) {
+    const text = fs.readFileSync(file, "utf8");
+    const rel = path.relative(src, file);
+    if (/\bTryPost\s*\(\s*async\b/.test(text))
+      offenders.push(`${rel}: TryPost(async ...)`);
+    if (/\bOnTick\s*\(\s*async\b/.test(text))
+      offenders.push(`${rel}: OnTick(async ...)`);
+    if (/\bDispatcherTimer\b/.test(text))
+      offenders.push(`${rel}: DispatcherTimer`);
+  }
+  assert.deepEqual(offenders, []);
+});

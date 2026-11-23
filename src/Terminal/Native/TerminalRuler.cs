@@ -66,6 +66,8 @@ internal sealed partial class TerminalRuler : Grid
     /// adds it to its own grid.</summary>
     internal FrameworkElement Card => _card;
 
+    internal void StopTimers() => _hideTimer.Stop();
+
     internal TerminalRuler()
     {
         _hideTimer = DispatcherQueue.CreateTimer();

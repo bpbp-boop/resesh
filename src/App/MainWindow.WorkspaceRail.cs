@@ -219,7 +219,8 @@ public sealed partial class MainWindow
         var parked = _parkedWorkspaces[id];
         if (parked.Groups.Count > 1 && parked.Layout.Remove(group))
         {
-            _groupViews.Remove(group);
+            if (_groupViews.Remove(group, out var view))
+                view.Dispose();
             ViewModel.BackgroundGroups.Remove(group);
             if (ReferenceEquals(parked.FocusedGroup, group))
                 parked.FocusedGroup = parked.Groups[0];
@@ -385,7 +386,8 @@ public sealed partial class MainWindow
             // The panes go with the workspace, so none collapses as it empties.
             foreach (var tab in group.Tabs.ToList())
                 RemoveTabCore(tab, dispose: true, collapseEmptyPane: false);
-            _groupViews.Remove(group);
+            if (_groupViews.Remove(group, out var view))
+                view.Dispose();
             ViewModel.BackgroundGroups.Remove(group);
         }
         App.RefreshWorkspaceRails();

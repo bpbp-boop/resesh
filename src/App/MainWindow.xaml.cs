@@ -1454,6 +1454,8 @@ public sealed partial class MainWindow : Window, ITabGroupHost, IMainWindowServi
         void ApplyPaletteBeforeRender(object? sender, object args)
         {
             Microsoft.UI.Xaml.Media.CompositionTarget.Rendering -= ApplyPaletteBeforeRender;
+            if (_windowClosed)
+                return;
             if (version == _themeApplyVersion)
                 ApplyThemePalette(theme);
         }

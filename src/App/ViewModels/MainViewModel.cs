@@ -332,6 +332,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             {
                 Resesh.Core.Backend.CleanupActions.Run(_environment.ReportError,
                     () => (tab.View as IDisposable)?.Dispose());
+                tab.View = null;
             }
             group.Tabs.Clear();
             group.SelectedTab = null;

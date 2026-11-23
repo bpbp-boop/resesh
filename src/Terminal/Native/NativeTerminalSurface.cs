@@ -324,7 +324,12 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             return;
         _disposed = true;
         _blinkTimer.Stop();
-        StopRenderThread();
+        _flashTimer.Stop();
+        _toastTimer?.Stop();
+        _annotationTimer?.Stop();
+        _autoscrollTimer?.Stop();
+        _ruler.StopTimers();
+        var renderExited = StopRenderThread();
         _annotations?.Dispose(wait: true); // its pass may be reading the terminal freed below
         _commands?.Dispose();
         _commandBuffer?.Detach();
@@ -346,6 +351,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _rendererRetry?.Dispose();
         }
         _compressTimer?.Dispose();
+        if (renderExited)
+            _renderWake.Dispose();
         if (_self.IsAllocated)
             _self.Free();
         _renderer.SwapChainChanged -= OnRendererSwapChainChanged;
@@ -1789,7 +1796,9 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void CreateCommandTracker()
     {
-        _annotations?.Dispose(wait: false);
+        // Wait for any in-flight pass to finish and detach its markers so an orphaned worker
+        // can never outlive this surface's Dispose() and call rvt_marker_free on a freed _term.
+        _annotations?.Dispose(wait: true);
         _commandBuffer?.Detach();
         var commandBuffer = new TerminalCommandBuffer(() => _disposed ? IntPtr.Zero : _term);
         _commandBuffer = commandBuffer;
