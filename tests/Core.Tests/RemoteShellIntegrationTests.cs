@@ -193,4 +193,18 @@ public sealed class RemoteShellIntegrationTests
         Assert.DoesNotContain("ExecutionPolicy", command);
         Assert.Throws<NotSupportedException>(() => RemoteShellIntegration.LaunchCommand(ShellIntegrationMode.PowerShell, @"C:\cache", tmux: true));
     }
+
+    [Theory]
+    [InlineData(ShellIntegrationMode.Bash)]
+    [InlineData(ShellIntegrationMode.PowerShell)]
+    public void Setup_StagesAtomicallyIntoAReusableContentAddressedDirectory(ShellIntegrationMode mode)
+    {
+        var first = RemoteShellIntegration.BuildSetup(mode, new string('a', 32));
+        var second = RemoteShellIntegration.BuildSetup(mode, new string('b', 32));
+        Assert.Contains(".ready", first);
+        Assert.Contains(".tmp-" + new string('a', 32), first);
+        Assert.Contains(".tmp-" + new string('b', 32), second);
+        // The published target directory depends only on content hash, not the per-connect id.
+        Assert.DoesNotContain(RemoteShellIntegration.ReadyPrefix + "'+" + new string('a', 32), first);
+    }
 }

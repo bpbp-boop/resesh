@@ -40,8 +40,8 @@ public sealed class TmuxSlotReservationsTests
         try
         {
             var claims = await Task.WhenAll(owners.Select(owner => Task.Run(() => owner.TryReserve(0))));
-            Assert.Single(claims.Where(claimed => claimed));
-            Assert.Single(owners.Where(owner => owner.Slot == 0));
+            Assert.Single(claims, claimed => claimed);
+            Assert.Single(owners, owner => owner.Slot == 0);
         }
         finally
         {

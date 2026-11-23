@@ -36,7 +36,8 @@ internal static class RemoteShellIntegration
     private static string QuotePowerShell(string text) => "'" + text.Replace("'", "''") + "'";
 
     /// <summary>Code sent to a separate exec channel's stdin, never to the interactive PTY.
-    /// Each installation has an exclusive directory; existing scripts are never overwritten.</summary>
+    /// Installs into a content-addressed directory per version, staging via a unique temp path
+    /// and atomically renaming so repeated connects reuse one cache folder without leaking.</summary>
     public static string BuildSetup(ShellIntegrationMode mode, string id)
     {
         if (!IsSupported(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
@@ -50,15 +51,20 @@ internal static class RemoteShellIntegration
             body.AppendLine("$root=[Environment]::GetFolderPath('LocalApplicationData')");
             body.AppendLine("if (-not [IO.Path]::IsPathRooted($root)) { throw 'No user cache directory.' }");
             body.AppendLine("foreach ($part in @('Resesh','shell-integration')) { $root=Join-Path $root $part; if (Test-Path -LiteralPath $root) { if ((Get-Item -LiteralPath $root).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Cache is a link.' } }; [IO.Directory]::CreateDirectory($root) | Out-Null }");
-            body.AppendLine($"$root=Join-Path $root '{version}-{id}'");
-            body.AppendLine("if (Test-Path -LiteralPath $root) { throw 'Installation already exists.' }; [IO.Directory]::CreateDirectory($root) | Out-Null");
+            body.AppendLine($"$target=Join-Path $root '{version}'");
+            body.AppendLine("$ready=Join-Path $target '.ready'");
+            body.AppendLine("if (Test-Path -LiteralPath $target) { if ((Get-Item -LiteralPath $target).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Cache is a link.' }; if (Test-Path -LiteralPath $ready -PathType Leaf) { [Console]::WriteLine('" + ReadyPrefix + "'+$target); exit 0 } }");
+            body.AppendLine($"$stage=Join-Path $root '{version}.tmp-{id}'");
+            body.AppendLine("if (Test-Path -LiteralPath $stage) { throw 'Installation already exists.' }; [IO.Directory]::CreateDirectory($stage) | Out-Null");
             foreach (var (file, content) in files)
             {
                 var encoded = Convert.ToBase64String(Encoding.UTF8.GetBytes(content));
-                body.AppendLine($"$file=Join-Path $root {QuotePowerShell(file.Replace('/', '\\'))}; [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($file)) | Out-Null");
+                body.AppendLine($"$file=Join-Path $stage {QuotePowerShell(file.Replace('/', '\\'))}; [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($file)) | Out-Null");
                 body.AppendLine($"[IO.File]::WriteAllBytes($file,[Convert]::FromBase64String('{encoded}'))");
             }
-            body.AppendLine($"[Console]::WriteLine('{ReadyPrefix}'+$root)");
+            body.AppendLine("[IO.File]::WriteAllText((Join-Path $stage '.ready'),'ok')");
+            body.AppendLine("try { [IO.Directory]::Move($stage,$target) } catch { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue; if (-not (Test-Path -LiteralPath $target) -or ((Get-Item -LiteralPath $target).Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not (Test-Path -LiteralPath $ready -PathType Leaf)) { throw } }");
+            body.AppendLine($"[Console]::WriteLine('{ReadyPrefix}'+$target)");
             return body.ToString();
         }
 
@@ -66,15 +72,20 @@ internal static class RemoteShellIntegration
         script.AppendLine($"command -v {ShellName(mode)} >/dev/null 2>&1 || {{ printf 'Selected shell {ShellName(mode)} was not found in PATH.\\n' >&2; exit 1; }}");
         script.AppendLine("test -n \"${HOME:-}\" && test -d \"$HOME\" || { printf 'The account home directory is unavailable.\\n' >&2; exit 1; }");
         script.AppendLine("root=\"$HOME\"\nfor part in .cache resesh shell-integration; do\n  root=\"$root/$part\"\n  test ! -L \"$root\" || { printf 'The script cache contains a symbolic link.\\n' >&2; exit 1; }\n  if test ! -d \"$root\"; then mkdir -m 700 \"$root\"; fi\n  test -O \"$root\" || { printf 'The script cache directory is not owned by this account.\\n' >&2; exit 1; }\ndone");
-        script.AppendLine($"root=\"$root/{version}-{id}\"\nmkdir -m 700 \"$root\"");
+        script.AppendLine($"target=\"$root/{version}\"");
+        script.AppendLine("if test -L \"$target\"; then printf 'The script cache contains a symbolic link.\\n' >&2; exit 1; fi");
+        script.AppendLine($"if test -d \"$target\" && test -O \"$target\" && test -f \"$target/.ready\"; then printf '{ReadyPrefix}%s\\n' \"$target\"; exit 0; fi");
+        script.AppendLine($"stage=\"$root/{version}.tmp-{id}\"\nmkdir -m 700 \"$stage\"");
         foreach (var directory in files.Keys.Select(Path.GetDirectoryName).Where(d => !string.IsNullOrEmpty(d)).Distinct())
-            script.AppendLine($"mkdir -p \"$root/\"{QuotePosix(directory!.Replace('\\', '/'))}");
+            script.AppendLine($"mkdir -p \"$stage/\"{QuotePosix(directory!.Replace('\\', '/'))}");
         foreach (var (file, content) in files)
         {
             var octal = string.Concat(Encoding.UTF8.GetBytes(content).Select(b => "\\" + Convert.ToString(b, 8).PadLeft(3, '0')));
-            script.AppendLine($"printf {QuotePosix(octal)} > \"$root/\"{QuotePosix(file)}");
+            script.AppendLine($"printf {QuotePosix(octal)} > \"$stage/\"{QuotePosix(file)}");
         }
-        script.AppendLine($"printf '{ReadyPrefix}%s\\n' \"$root\"");
+        script.AppendLine(": > \"$stage/.ready\"");
+        script.AppendLine("if ! mv \"$stage\" \"$target\" 2>/dev/null; then rm -rf \"$stage\"; test ! -L \"$target\" && test -d \"$target\" && test -O \"$target\" && test -f \"$target/.ready\" || { printf 'Could not install shell integration scripts.\\n' >&2; exit 1; }; fi");
+        script.AppendLine($"printf '{ReadyPrefix}%s\\n' \"$target\"");
         // AppendLine uses the client's OS newline. A Windows CR after "done"
         // is part of the token to Unix sh, so the entire setup fails to parse.
         return script.ToString().Replace("\r\n", "\n");

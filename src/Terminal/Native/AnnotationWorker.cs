@@ -180,9 +180,9 @@ internal sealed class AnnotationWorker
         var observedMs = Interlocked.Exchange(ref _observedMs, 0);
         if (observedMs > 0)
             _lineTimes.Note(observedMs);
-        var more = _overview.Advance();
-        var ticks = new List<(int Line, uint Color)>();
         var rules = _highlighter.Rules;
+        var more = _overview.Advance(rules);
+        var ticks = new List<(int Line, uint Color)>();
         foreach (var (line, mask) in _overview.Lines())
         {
             var index = 31 - System.Numerics.BitOperations.LeadingZeroCount(mask); // the last rule wins, as in terminal.html

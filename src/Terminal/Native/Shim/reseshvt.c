@@ -126,6 +126,8 @@ typedef struct {
   int span_count;
   uint32_t span_hash;
   GhosttySelection match_buf[RVT_MAX_SPANS];
+  GhosttySelection* search_buf;
+  size_t search_buf_cap;
   RvtSrwLock lock;
   volatile long waiting; // callers other than rvt_write blocked in lock()
   RvtEventFn on_event;
@@ -513,6 +515,7 @@ RVT_API void rvt_free(RvtTerm* t) {
     if (t->markers[i]) ghostty_tracked_grid_ref_free(t->markers[i]);
   free(t->markers);
   if (t->search) ghostty_search_free(t->search);
+  free(t->search_buf);
   ghostty_formatter_free(t->line_formatter);
   if (t->gesture) ghostty_selection_gesture_free(t->gesture, t->term);
   for (int i = 0; i < 4; i++)
@@ -1477,19 +1480,27 @@ RVT_API void rvt_marker_free(RvtTerm* t, uint32_t id) {
 // selected match's line in *current (-1 when none). Returns the number written.
 RVT_API int rvt_search_lines(RvtTerm* t, int32_t* out, int cap, int32_t* current) {
   *current = -1;
-  if (cap <= 0) return 0;
+  if (!t || cap <= 0) return 0;
   int n = 0;
-  GhosttySelection* buf = (GhosttySelection*)calloc((size_t)cap, sizeof(GhosttySelection));
-  if (!buf) return 0;
   lock(t);
   if (t->searching && t->search) {
-    GhosttySelectionBuffer matches = { buf, (size_t)cap, 0 };
+    size_t needed = (size_t)cap;
+    if (needed > t->search_buf_cap) {
+      GhosttySelection* grown = (GhosttySelection*)realloc(t->search_buf, needed * sizeof(GhosttySelection));
+      if (!grown) {
+        unlock(t);
+        return 0;
+      }
+      t->search_buf = grown;
+      t->search_buf_cap = needed;
+    }
+    GhosttySelectionBuffer matches = { t->search_buf, needed, 0 };
     GhosttyResult r = ghostty_search_get(t->search, GHOSTTY_SEARCH_DATA_MATCHES, &matches);
     // More matches than fit leaves the buffer unfilled: no ticks rather than wrong ones.
     size_t count = r == GHOSTTY_SUCCESS ? matches.len : 0;
     for (size_t i = 0; i < count && n < cap; i++) {
       GhosttyPointCoordinate p;
-      if (ghostty_terminal_point_from_grid_ref(t->term, &buf[i].start, GHOSTTY_POINT_TAG_SCREEN, &p) == GHOSTTY_SUCCESS)
+      if (ghostty_terminal_point_from_grid_ref(t->term, &t->search_buf[i].start, GHOSTTY_POINT_TAG_SCREEN, &p) == GHOSTTY_SUCCESS)
         out[n++] = (int32_t)p.y;
     }
     GhosttySelection selected = {0};
@@ -1499,7 +1510,6 @@ RVT_API int rvt_search_lines(RvtTerm* t, int32_t* out, int cap, int32_t* current
       *current = (int32_t)p.y;
   }
   unlock(t);
-  free(buf);
   return n;
 }
 

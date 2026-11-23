@@ -24,7 +24,7 @@ public sealed class PresentRegionsTests
         regions.Add(10, 20);
         Assert.Equal([(10, 20)], regions.Take(100));
         Assert.Equal([(10, 20)], regions.Take(100)); // the other buffer
-        Assert.Empty(regions.Take(100));
+        Assert.Empty(regions.Take(100)!);
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public sealed class PresentRegionsTests
         var regions = new PresentRegions(2);
         regions.Take(100);
         regions.Take(100);
-        Assert.Empty(regions.Take(100));
+        Assert.Empty(regions.Take(100)!);
         return regions;
     }
 }

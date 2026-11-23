@@ -21,6 +21,7 @@ internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlight
     private const int ReanchorGap = 4096;
 
     private readonly Dictionary<long, uint> _scrollback = [];
+    private long _minScrollbackVirtual = long.MaxValue;
     private readonly Dictionary<int, uint> _live = []; // absolute line -> mask, rebuilt each pass
     private ICommandMarker? _anchor;
     private long _anchorVirtual;
@@ -32,16 +33,18 @@ internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlight
         _anchor?.Dispose();
         _anchor = null;
         _scrollback.Clear();
+        _minScrollbackVirtual = long.MaxValue;
         _live.Clear();
         _nextVirtual = -1;
     }
 
     /// <summary>Scans up to one slice of new scrollback plus the live screen area. Returns true
     /// when scrollback remains unscanned (the caller schedules another pass).</summary>
-    public bool Advance()
+    public bool Advance(IReadOnlyList<Highlighter.Rule>? rules = null)
     {
         _live.Clear();
-        if (!highlighter.HasOverviewRules || buffer.IsAlternate || buffer.Length == 0)
+        var activeRules = rules ?? highlighter.Rules;
+        if (!Highlighter.HasOverviewRulesIn(activeRules) || buffer.IsAlternate || buffer.Length == 0)
             return false;
         if (_anchor is null || _anchor.Line < 0)
         {
@@ -67,15 +70,20 @@ internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlight
                 // One line more: Mask looks at the next line to see whether it continues this one.
                 buffer.Prefetch(line, Math.Min(ChunkLines, liveStart - line) + 1);
             }
-            var mask = Mask(line);
+            var mask = Mask(line, activeRules);
             if (mask != 0)
-                _scrollback[line + offset] = mask;
+            {
+                var virtualLine = line + offset;
+                _scrollback[virtualLine] = mask;
+                if (virtualLine < _minScrollbackVirtual)
+                    _minScrollbackVirtual = virtualLine;
+            }
             _nextVirtual = line + offset + 1;
         }
         buffer.Prefetch(liveStart, buffer.Length - liveStart);
         for (var line = liveStart; line < buffer.Length; line++)
         {
-            var mask = Mask(line);
+            var mask = Mask(line, activeRules);
             if (mask != 0)
                 _live[line] = mask;
         }
@@ -87,16 +95,17 @@ internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlight
             _anchor.Dispose();
             _anchor = fresh;
         }
-        // Forget entries trimmed off the top.
-        if (_scrollback.Count > 0 && _scrollback.Keys.Min() - offset < 0)
+        // Forget entries trimmed off the top (O(1) check on steady-state passes).
+        if (_scrollback.Count > 0 && _minScrollbackVirtual - offset < 0)
         {
             foreach (var key in _scrollback.Keys.Where(k => k - offset < 0).ToList())
                 _scrollback.Remove(key);
+            _minScrollbackVirtual = _scrollback.Count > 0 ? _scrollback.Keys.Min() : long.MaxValue;
         }
         return _nextVirtual - offset < liveStart;
     }
 
-    private uint Mask(int line)
+    private uint Mask(int line, IReadOnlyList<Highlighter.Rule> rules)
     {
         if (buffer.IsWrapped(line))
             return 0; // a soft wrap belongs to the line it continues; scanned there
@@ -105,7 +114,7 @@ internal sealed class OverviewIndex(ICommandBuffer buffer, Highlighter highlight
             return 0;
         for (var next = line + 1; buffer.IsWrapped(next) && buffer.LineText(next) is { } more && text.Length < 4096; next++)
             text += more;
-        return highlighter.OverviewMask(text);
+        return Highlighter.OverviewMask(text, rules);
     }
 
     /// <summary>Absolute line -> rule mask for every indexed line still in the buffer.</summary>

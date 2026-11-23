@@ -1,0 +1,12 @@
+<Project>
+  <!-- Shared compiler defaults across Core, Terminal and App. Warnings fail the build so
+       nullable, AOT and trimming regressions never slip in quietly. NU1903 is kept as a
+       warning locally because Publish already enforces the patched Brotli pack via
+       RequirePatchedBrotli. -->
+  <PropertyGroup>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1903</WarningsNotAsErrors>
+  </PropertyGroup>
+</Project>

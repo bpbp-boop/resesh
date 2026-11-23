@@ -94,22 +94,18 @@ public sealed unsafe partial class NativeTerminalSurface
     {
         if (_term == IntPtr.Zero || _cells == null || x < 0 || y < 0 || x >= Columns || y >= Rows)
             return null;
-        return HyperlinkAt(x, y) ?? UrlAt(x, y);
-    }
-
-    private LinkHit? HyperlinkAt(int x, int y)
-    {
         if (RefreshCommands() is null || _commandBuffer is not { } buffer)
             return null;
-        return buffer.HyperlinkAt(x, y) is { } hit ? new LinkHit(hit.Uri, hit.Spans) : null;
+        return HyperlinkAt(buffer, x, y) ?? UrlAt(buffer, x, y);
     }
+
+    private static LinkHit? HyperlinkAt(TerminalCommandBuffer buffer, int x, int y) =>
+        buffer.HyperlinkAt(x, y) is { } hit ? new LinkHit(hit.Uri, hit.Spans) : null;
 
     /// <summary>A plain URL in the logical line under the pointer: soft-wrapped rows on
     /// screen are joined, as WebLinksAddon joins wrapped buffer lines.</summary>
-    private LinkHit? UrlAt(int x, int y)
+    private LinkHit? UrlAt(TerminalCommandBuffer buffer, int x, int y)
     {
-        if (RefreshCommands() is null || _commandBuffer is not { } buffer)
-            return null;
         var top = y;
         while (top > 0 && buffer.IsWrapped(buffer.ViewportTop + top))
             top--;

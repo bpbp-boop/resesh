@@ -39,12 +39,14 @@ internal struct GhosttySemanticEvent
 internal sealed unsafe partial class TerminalCommandBuffer(Func<IntPtr> terminal) : ICommandBuffer
 {
     private GhosttyBufferInfo _info;
+    private int _generation = 1;
     private IntPtr Terminal => terminal();
     private readonly Dictionary<int, (string? Text, bool Wrapped)> _lines = [];
     private readonly HashSet<NativeMarker> _live = [];
 
     internal void Refresh()
     {
+        _generation++;
         _lines.Clear();
         var term = terminal();
         if (term == IntPtr.Zero)
@@ -216,6 +218,8 @@ internal sealed unsafe partial class TerminalCommandBuffer(Func<IntPtr> terminal
     private sealed partial class NativeMarker(TerminalCommandBuffer owner, uint id) : ICommandMarker
     {
         private bool _disposed;
+        private int _cachedGeneration;
+        private int _cachedLine = -1;
 
         public bool IsDisposed => _disposed || Line < 0;
 
@@ -225,13 +229,18 @@ internal sealed unsafe partial class TerminalCommandBuffer(Func<IntPtr> terminal
             {
                 if (_disposed)
                     return -1;
+                if (_cachedGeneration == owner._generation)
+                    return _cachedLine;
                 var term = owner.Terminal;
                 var line = term == IntPtr.Zero ? -1 : GhosttyNative.rvt_marker_line(term, id);
                 if (line < 0)
                 {
                     owner._live.Remove(this);
                     Release(term);
+                    return -1;
                 }
+                _cachedLine = line;
+                _cachedGeneration = owner._generation;
                 return line;
             }
         }
@@ -241,6 +250,7 @@ internal sealed unsafe partial class TerminalCommandBuffer(Func<IntPtr> terminal
             if (_disposed)
                 return;
             _disposed = true;
+            _cachedLine = -1;
             if (term != IntPtr.Zero)
                 GhosttyNative.rvt_marker_free(term, id);
         }

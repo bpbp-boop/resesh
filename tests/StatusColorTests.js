@@ -85,7 +85,11 @@ test("code never reads App.xaml's themed brushes through the application", () =>
     [...themeDictionary(theme).matchAll(/x:Key="(\w+)"/g)].map(match => match[1])));
   assert.ok(themed.has("SessionSplitterHoverBrush"));
   const sources = fs.readdirSync(path.join(__dirname, "..", "src", "App"), { recursive: true })
-    .filter(file => file.endsWith(".cs") && path.basename(file) !== "ThemeResources.cs");
+    .filter(file => {
+      const parts = file.split(path.sep);
+      return !parts.includes("bin") && !parts.includes("obj")
+        && file.endsWith(".cs") && path.basename(file) !== "ThemeResources.cs";
+    });
   for (const file of sources) {
     const source = read("src", "App", file);
     for (const match of source.matchAll(/Application\.Current\.Resources\s*(?:\[|\.TryGetValue\()\s*"(\w+)"/g))

@@ -148,7 +148,7 @@ public sealed class TelnetProtocolTests
     }
 
     [Fact]
-    public void Session_OverLoopback_NegotiatesAndExchangesData()
+    public async Task Session_OverLoopback_NegotiatesAndExchangesData()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -165,9 +165,9 @@ public sealed class TelnetProtocolTests
         };
         session.Closed += _ => closed.Set();
 
-        var accept = listener.AcceptSocketAsync();
+        var accept = Task.Run(listener.AcceptSocket);
         session.Connect("127.0.0.1", port, "xterm-256color", 120, 40);
-        using var server = accept.GetAwaiter().GetResult();
+        using var server = await accept;
         server.ReceiveTimeout = 5000;
 
         // The client's unprompted offers arrive first.

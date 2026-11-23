@@ -28,7 +28,7 @@ internal sealed class Highlighter
 
     internal sealed record Rule(string Id, Regex Pattern, uint Color, bool Tint, bool Underline, bool ShowInOverview);
 
-    private IReadOnlyList<Rule> _rules = [];
+    private volatile IReadOnlyList<Rule> _rules = [];
     // Row text and its column map, reused for every row: a scrolling frame repaints every
     // row, so building strings here showed up as most of the highlighter's cost and garbage.
     private char[] _text = new char[256];
@@ -249,12 +249,14 @@ internal sealed class Highlighter
 
     /// <summary>Lines whose text matches an overview rule, as a bitmask of rule indexes (the
     /// ruler's highlight lane). 0 when nothing matches.</summary>
-    public uint OverviewMask(string text)
+    public uint OverviewMask(string text) => OverviewMask(text, _rules);
+
+    public static uint OverviewMask(string text, IReadOnlyList<Rule> rules)
     {
         uint mask = 0;
-        for (var i = 0; i < _rules.Count && i < 32; i++)
+        for (var i = 0; i < rules.Count && i < 32; i++)
         {
-            var rule = _rules[i];
+            var rule = rules[i];
             if (!rule.ShowInOverview)
                 continue;
             try
@@ -269,7 +271,15 @@ internal sealed class Highlighter
         return mask;
     }
 
-    public bool HasOverviewRules => _rules.Any(r => r.ShowInOverview);
+    public bool HasOverviewRules => HasOverviewRulesIn(_rules);
+
+    public static bool HasOverviewRulesIn(IReadOnlyList<Rule> rules)
+    {
+        for (var i = 0; i < rules.Count && i < 32; i++)
+            if (rules[i].ShowInOverview)
+                return true;
+        return false;
+    }
 
     internal static uint Blend(uint background, uint color, double alpha)
     {

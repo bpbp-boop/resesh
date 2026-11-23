@@ -20,13 +20,15 @@
       Root="HKLM"
       Key="SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\$(Arch)"
       Value="Installed"
-      Variable="VCRedistInstalled" />
+      Variable="VCRedistInstalled"
+      Bitness="always64" />
     <util:RegistrySearch
       Id="VCRedistBld"
       Root="HKLM"
       Key="SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\$(Arch)"
       Value="Bld"
-      Variable="VCRedistBld" />
+      Variable="VCRedistBld"
+      Bitness="always64" />
 
     <Chain>
       <ExePackage
