@@ -5,7 +5,7 @@ resesh is and how users see it; this file covers how to work on it.
 
 ## Project
 
-resesh is a tabbed SSH and local-terminal client for Windows: WinUI 3 (Windows App SDK 2.4),
+resesh is a tabbed SSH and local-terminal client for Windows: WinUI 3 (Windows App SDK 2.6.5),
 C#, .NET 10, unpackaged, shipped as Native AOT. SSH runs on SSH.NET; the terminal is
 libghostty-vt drawn with Direct2D/DirectWrite into a `SwapChainPanel`.
 

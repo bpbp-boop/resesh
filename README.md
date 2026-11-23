@@ -491,9 +491,6 @@ live tab ownership and cleanup. Core tests cover connection cancellation, failed
 host-key recovery, and exact workspace pane measurements. JavaScript source checks remain
 useful for UI wiring; they do not replace interactive UI tests.
 
-Open `tests/Fixtures/Terminal/webgl-resize.html` in a WebGL2-capable browser for the
-GPU canvas-resize regression. It checks rendered pixels and reports PASS/FAIL.
-
 ### Local test SSH server
 
 A throwaway echo server for exercising the terminal end to end (password auth, host keys,
@@ -528,7 +525,7 @@ tests/Terminal.Tests  terminal surface tests
 tests/*.js            JavaScript source checks (run with `node --test`)
 installer/            WiX MSI and setup bundle
 eng/                  MSBuild targets, patches and the libghostty-vt build
-tools/                TestSshServer, KeepaliveProbe, terminal benchmarks and the screenshot rig
+tools/                TestSshServer, terminal benchmarks and the screenshot rig
 website/              project website
 ```
 

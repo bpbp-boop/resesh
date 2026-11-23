@@ -26,7 +26,10 @@ if (-not (Test-Path $zig)) {
     $zip = Join-Path $BuildRoot 'zig.zip'
     Invoke-WebRequest "https://ziglang.org/download/$zigVersion/zig-x86_64-windows-$zigVersion.zip" -OutFile $zip
     $expected = $pin.zig.sha256.'x86_64-windows'
-    if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'Zig archive hash mismatch' }
+    if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLower() -ne $expected) {
+        Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+        throw 'Zig archive hash mismatch'
+    }
     Expand-Archive $zip -DestinationPath $BuildRoot
     Remove-Item $zip
 }

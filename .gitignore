@@ -11,3 +11,4 @@ installer/prereqs/
 .artifacts/
 .tmp/
 artifacts/
+release-assets/

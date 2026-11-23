@@ -61,6 +61,9 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private const int AnnotationIntervalMs = 100;
     private long _lastAnnotationsMs;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _annotationTimer;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _commandScheduleTimer;
+    private Action? _commandScheduleAction;
+    private TerminalCommandBuffer? _commandScheduleBuffer;
 
     // Rewind and recording playback: the grid is pinned to the recorded size, replays run on a
     // worker thread (the shim serializes terminal access) while rendering pauses.
@@ -327,6 +330,9 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _flashTimer.Stop();
         _toastTimer?.Stop();
         _annotationTimer?.Stop();
+        _commandScheduleTimer?.Stop();
+        _commandScheduleAction = null;
+        _commandScheduleBuffer = null;
         _autoscrollTimer?.Stop();
         _ruler.StopTimers();
         var renderExited = StopRenderThread();
@@ -1799,6 +1805,9 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         // Wait for any in-flight pass to finish and detach its markers so an orphaned worker
         // can never outlive this surface's Dispose() and call rvt_marker_free on a freed _term.
         _annotations?.Dispose(wait: true);
+        _commandScheduleTimer?.Stop();
+        _commandScheduleAction = null;
+        _commandScheduleBuffer = null;
         _commandBuffer?.Detach();
         var commandBuffer = new TerminalCommandBuffer(() => _disposed ? IntPtr.Zero : _term);
         _commandBuffer = commandBuffer;
@@ -1806,18 +1815,29 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         {
             Schedule = (delay, action) =>
             {
-                var timer = DispatcherQueue.CreateTimer();
-                timer.Interval = delay;
-                timer.IsRepeating = false;
-                timer.OnTick(() =>
+                if (_disposed)
+                    return;
+                _commandScheduleAction = action;
+                _commandScheduleBuffer = commandBuffer;
+                if (_commandScheduleTimer is null)
                 {
-                    timer.Stop();
-                    if (_disposed || _commands is null || _commandBuffer != commandBuffer)
-                        return;
-                    _commandBuffer?.Refresh();
-                    action();
-                });
-                timer.Start();
+                    _commandScheduleTimer = DispatcherQueue.CreateTimer();
+                    _commandScheduleTimer.IsRepeating = false;
+                    _commandScheduleTimer.OnTick(() =>
+                    {
+                        var pending = _commandScheduleAction;
+                        var expectedBuffer = _commandScheduleBuffer;
+                        _commandScheduleAction = null;
+                        _commandScheduleBuffer = null;
+                        if (_disposed || _commands is null || _commandBuffer != expectedBuffer || pending is null)
+                            return;
+                        _commandBuffer?.Refresh();
+                        pending();
+                    });
+                }
+                _commandScheduleTimer.Stop();
+                _commandScheduleTimer.Interval = delay;
+                _commandScheduleTimer.Start();
             },
         };
         _commands.RunningCommand += (text, exact) => CommandChanged?.Invoke(Cap(text), exact);
