@@ -93,12 +93,14 @@ internal sealed unsafe partial class TerminalRenderer
         return copy(self, destination, source, pitch) >= 0;
     }
 
-    /// <summary>Row <paramref name="y"/>'s cell backgrounds, from the bitmap.</summary>
-    private void DrawRowBackground(int cols, int y)
+    /// <summary>Rows [<paramref name="firstRow"/>, <paramref name="endRow"/>)'s cell backgrounds,
+    /// from the bitmap in one draw call.</summary>
+    private void DrawBandBackground(int cols, int firstRow, int endRow)
     {
-        float top = y * CellHeight;
-        _dc.DrawBitmap(_backgrounds!, new RawRectF(OriginX, top, OriginX + cols * CellWidth, top + CellHeight), 1f,
-            InterpolationMode.NearestNeighbor, new RawRectF(0, y, cols, y + 1), null);
+        float top = firstRow * CellHeight;
+        float bottom = endRow * CellHeight;
+        _dc.DrawBitmap(_backgrounds!, new RawRectF(OriginX, top, OriginX + cols * CellWidth, bottom), 1f,
+            InterpolationMode.NearestNeighbor, new RawRectF(0, firstRow, cols, endRow), null);
     }
 
     private void DisposeBackgrounds()

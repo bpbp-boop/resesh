@@ -94,6 +94,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private GCHandle _self;
     private TerminalCell* _cells;
     private byte* _dirty;
+    private string?[] _cellGraphemes = [];
     private int _cellCapacity;
     private int _dirtyCapacity;
     // FrameStats only: output parsed since the last drawn frame, and when that frame started.
@@ -249,7 +250,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _visible = Visibility == Visibility.Visible;
             AttachSwapChain();
             Relayout();
-            PrimeSwapChain();
+            if (_visible && !_renderingPaused)
+                PrimeSwapChain();
             RequestFrame();
         };
         Unloaded += (_, _) =>
@@ -261,16 +263,29 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _loaded = false;
             CancelPointerGesture();
             AttachSwapChain(detach: true);
+            lock (_renderGate)
+                _renderer.Trim();
         };
         RegisterPropertyChangedCallback(VisibilityProperty, (_, _) =>
         {
             _visible = Visibility == Visibility.Visible;
             ForceFull();
-            RequestFrame();
-            // A hidden surface never draws, so its buffers hold whatever was last shown.
-            // Draw before the frame that reveals it (a tab switch, a split).
-            if (Visibility == Visibility.Visible)
-                DrawFrame();
+            if (_visible)
+            {
+                if (!_renderingPaused)
+                {
+                    PrimeSwapChain();
+                    RequestFrame();
+                    // A hidden surface never draws, so its buffers hold whatever was last shown.
+                    // Draw before the frame that reveals it (a tab switch, a split).
+                    DrawFrame();
+                }
+            }
+            else
+            {
+                lock (_renderGate)
+                    _renderer.Trim();
+            }
         });
 
         PreviewKeyDown += OnKeyDown;
@@ -315,7 +330,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _earlyOutput.Clear();
             CaptureKeyframeLocked(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         }
-        StartRenderThread();
+        RegisterRenderSurface();
         CreateCommandTracker();
         Relayout();
         return Task.CompletedTask;
@@ -335,17 +350,15 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         _commandScheduleBuffer = null;
         _autoscrollTimer?.Stop();
         _ruler.StopTimers();
-        var renderExited = StopRenderThread();
+        UnregisterRenderSurface();
         _annotations?.Dispose(wait: true); // its pass may be reading the terminal freed below
         _commands?.Dispose();
         _commandBuffer?.Detach();
-        // Frames read _term under _renderGate alone, and the join above gives up after two
-        // seconds (a frame can wait on the shared device behind another surface's recovery).
-        // Freeing under _renderGate as well means a frame either finishes before the free or
-        // starts after it and sees _term zero. No deadlock: the render thread takes only
-        // _renderGate (then the device gate), and _termGate's holders off the UI thread (output
-        // parsing, replay) never take _renderGate, so nothing waits for _termGate while holding
-        // _renderGate except this thread.
+        // Frames read _term under _renderGate alone. Freeing under _renderGate as well means a
+        // frame on the shared render thread either finishes before the free or sees _term zero.
+        // No deadlock: the render thread takes only _renderGate (then the device gate), and
+        // _termGate's holders off the UI thread (output parsing, replay) never take _renderGate,
+        // so nothing waits for _termGate while holding _renderGate except this thread.
         lock (_renderGate)
         {
             lock (_termGate)
@@ -357,19 +370,18 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             _rendererRetry?.Dispose();
         }
         _compressTimer?.Dispose();
-        if (renderExited)
-            _renderWake.Dispose();
         if (_self.IsAllocated)
             _self.Free();
         _renderer.SwapChainChanged -= OnRendererSwapChainChanged;
         AttachSwapChain(detach: true);
-        lock (_renderGate) // in case the render thread outlived its join
+        lock (_renderGate)
         {
             _renderer.Dispose();
             if (_cells != null) NativeMemory.Free(_cells);
             if (_dirty != null) NativeMemory.Free(_dirty);
             _cells = null;
             _dirty = null;
+            _cellGraphemes = [];
         }
     }
 
@@ -753,7 +765,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void PrimeSwapChainLocked()
     {
-        if (_disposed || _renderer.SwapChain is not null || XamlRoot is not { } root)
+        if (_disposed || _renderingPaused || _renderer.SwapChain is not null || XamlRoot is not { } root)
             return;
         var scale = (float)root.RasterizationScale;
         var width = (int)Math.Ceiling(root.Size.Width * scale);
@@ -775,6 +787,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             var cells = (TerminalCell*)NativeMemory.AllocZeroed(checked((nuint)capacity * (nuint)sizeof(TerminalCell)));
             if (_cells != null) NativeMemory.Free(_cells);
             _cells = cells;
+            _cellGraphemes = new string?[capacity];
             _cellCapacity = capacity;
         }
         // A narrower, taller grid can need more dirty flags without needing more cells.
@@ -870,11 +883,25 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private void MarkCursorDirty() => Volatile.Write(ref _cursorRowDirty, 1);
 
     /// <summary>The grapheme text of a cell as the last frame read it, so it always matches the
-    /// cells in <see cref="_cells"/>. Shared strings: no allocation once a cluster was seen.</summary>
+    /// cells in <see cref="_cells"/>. Cached per cell until its row is read again, so the
+    /// highlighter, renderer and link scanner only cross P/Invoke once per dirty cluster.</summary>
     private string? GraphemeAt(int x, int y)
     {
-        if (_term == IntPtr.Zero)
+        if (_term == IntPtr.Zero || _cells == null || (uint)x >= (uint)Columns || (uint)y >= (uint)Rows)
             return null;
+        var index = y * Columns + x;
+        if (_cells[index].GraphemeLength <= 1)
+            return null;
+        if ((uint)index < (uint)_cellGraphemes.Length && _cellGraphemes[index] is { } cached)
+            return cached;
+        var text = ReadGrapheme(x, y);
+        if ((uint)index < (uint)_cellGraphemes.Length)
+            _cellGraphemes[index] = text;
+        return text;
+    }
+
+    private string? ReadGrapheme(int x, int y)
+    {
         var buffer = stackalloc uint[32];
         var n = GhosttyNative.rvt_frame_graphemes(_term, (ushort)x, (ushort)y, buffer, 32);
         if (n <= 32)

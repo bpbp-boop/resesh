@@ -226,6 +226,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     private static void DisposeShared()
     {
+        DisposeSharedEmojiAtlas();
         s_context?.ClearState();
         s_context?.Flush();
         s_dwrite?.Dispose();
@@ -466,15 +467,10 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         _bufferHeight = bufferHeight;
         _dc.Target = null;
         _canvasBitmap?.Dispose();
+        _canvasBitmap = null;
         _canvas?.Dispose();
-        _canvas = s_device!.CreateTexture2D(new Texture2DDescription(Format.B8G8R8A8_UNorm,
-            (uint)bufferWidth, (uint)bufferHeight, 1, 1, BindFlags.RenderTarget | BindFlags.ShaderResource));
-        using (var surface = _canvas.QueryInterface<IDXGISurface>())
-            _canvasBitmap = _dc.CreateBitmapFromDxgiSurface(surface, new BitmapProperties1(
-                new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Ignore), 96, 96,
-                BitmapOptions.Target | BitmapOptions.CannotDraw));
-        _dc.Target = _canvasBitmap;
-        _regions.InvalidateAll(); // new buffers hold nothing yet
+        _canvas = null;
+        EnsureCanvasLocked();
 
         if (_swapChain is null)
         {
@@ -496,6 +492,45 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         return false;
     }
 
+    private bool EnsureCanvasLocked()
+    {
+        if (_canvas is not null && _canvasBitmap is not null)
+            return true;
+        if (s_device is null || _dc is null || _bufferWidth <= 0 || _bufferHeight <= 0)
+            return false;
+        _canvasBitmap?.Dispose();
+        _canvas?.Dispose();
+        _canvas = s_device.CreateTexture2D(new Texture2DDescription(Format.B8G8R8A8_UNorm,
+            (uint)_bufferWidth, (uint)_bufferHeight, 1, 1, BindFlags.RenderTarget | BindFlags.ShaderResource));
+        using (var surface = _canvas.QueryInterface<IDXGISurface>())
+            _canvasBitmap = _dc.CreateBitmapFromDxgiSurface(surface, new BitmapProperties1(
+                new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Ignore), 96, 96,
+                BitmapOptions.Target | BitmapOptions.CannotDraw));
+        _dc.Target = _canvasBitmap;
+        _regions.InvalidateAll(); // new buffers hold nothing yet
+        return true;
+    }
+
+    /// <summary>Releases offscreen render targets while the surface is hidden, keeping the
+    /// swap chain so revealing the tab does not re-attach or flash.</summary>
+    public void Trim()
+    {
+        lock (DeviceGate)
+            TrimLocked();
+    }
+
+    private void TrimLocked()
+    {
+        if (_dc is not null)
+            _dc.Target = null;
+        _canvasBitmap?.Dispose();
+        _canvasBitmap = null;
+        _canvas?.Dispose();
+        _canvas = null;
+        DisposeBackgrounds();
+        ResetClusterCaches();
+    }
+
     /// <summary>Presents a frame of one color: what the chain shows before its first real draw.</summary>
     public void Clear(uint color)
     {
@@ -505,7 +540,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
 
     private void ClearLocked(uint color)
     {
-        if (_disposed || NeedsResources || _swapChain is null || _canvas is null)
+        if (_disposed || NeedsResources || _swapChain is null || !EnsureCanvasLocked())
             return;
         _dc.BeginDraw();
         SetBrush(Rgb(color));
@@ -513,7 +548,7 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         if (_dc.EndDraw().Failure)
             return; // the next real draw recovers the device
         using (var backBuffer = _swapChain.GetBuffer<ID3D11Texture2D>(0))
-            s_context!.CopyResource(backBuffer, _canvas);
+            s_context!.CopyResource(backBuffer, _canvas!);
         _swapChain.Present(1, PresentFlags.None);
         _regions.InvalidateAll(); // the other buffer still holds what was there before
     }
@@ -632,7 +667,22 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         bool cursorShown, bool focused, uint selectionColor, uint? selectionForeground, bool full)
     {
         lock (DeviceGate)
-            return DrawLocked(cells, cols, rows, dirty, info, cursorShown, focused, selectionColor, selectionForeground, full);
+        {
+            // Resources a device loss left missing, or made on a device since replaced, are rebuilt
+            // first; a renderer that missed a recovery (or whose rebuild failed) catches up here.
+            if (!EnsureResourcesLocked(notify: true) || _swapChain is null)
+                return false;
+            var observedGeneration = s_generation;
+            try
+            {
+                return DrawLocked(cells, cols, rows, dirty, info, cursorShown, focused, selectionColor, selectionForeground, full);
+            }
+            catch (SharpGen.Runtime.SharpGenException ex) when (IsDeviceLost(ex))
+            {
+                RecoverShared(observedGeneration);
+                return false;
+            }
+        }
     }
 
     /// <summary>The theme's color for selected text during the frame being drawn; null keeps
@@ -646,9 +696,11 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         bool cursorShown, bool focused, uint selectionColor, uint? selectionForeground, bool full)
     {
         _selectionForeground = selectionForeground;
-        // Resources a device loss left missing, or made on a device since replaced, are rebuilt
-        // first; a renderer that missed a recovery (or whose rebuild failed) catches up here.
-        if (!EnsureResourcesLocked(notify: true) || _swapChain is null || _canvas is null)
+        if (_swapChain is null)
+            return false;
+        if (_canvas is null)
+            full = true;
+        if (!EnsureCanvasLocked())
             return false;
         var observedGeneration = _generation;
         EnsureRunCapacity(cols, keep: 0);
@@ -706,13 +758,29 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
             DrawBottomMargin(cells + (rows - 1) * cols, cols, rows, info.DefaultBackground, extend);
             _regions.Add(rows * CellHeight, PixelHeight);
         }
+        // Pass 1: draw margins and cell backgrounds for every contiguous dirty band before
+        // drawing any glyphs, so a row's background never paints over its neighbor's descenders.
+        for (var y = 0; y < rows;)
+        {
+            if (dirty[y] == 0 && !full)
+            {
+                y++;
+                continue;
+            }
+            var first = y;
+            while (y < rows && (full || dirty[y] != 0))
+                y++;
+            DrawBandBackgrounds(cells, cols, first, y, info.DefaultBackground, selectionColor, extend);
+        }
+        // Pass 2: draw glyphs and decorations for each dirty row after all dirty backgrounds
+        // are in place.
         for (var y = 0; y < rows; y++)
         {
             if (dirty[y] == 0 && !full)
                 continue;
             dirty[y] = 0;
             rowsDrawn++;
-            DrawRow(cells + y * cols, cols, y, info.DefaultBackground, selectionColor, extend);
+            DrawRowForeground(cells + y * cols, cols, y, info.DefaultBackground, selectionColor);
             AddRowRegion(y);
         }
         if (cursorShown && info.CursorVisible != 0 && info.CursorY < rows && info.CursorX < cols)
@@ -803,25 +871,49 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     /// <summary>This frame's cell backgrounds come from the background bitmap.</summary>
     private bool _bitmapBackgrounds;
 
-    private void DrawRow(TerminalCell* row, int cols, int y, uint defaultBackground, uint selectionColor, bool extend)
+    /// <summary>Draws the left/right margins and cell backgrounds for contiguous dirty rows
+    /// [<paramref name="firstRow"/>, <paramref name="endRow"/>).</summary>
+    private void DrawBandBackgrounds(TerminalCell* cells, int cols, int firstRow, int endRow,
+        uint defaultBackground, uint selectionColor, bool extend)
     {
-        float top = y * CellHeight;
         float gridRight = OriginX + cols * CellWidth;
-        // The margins either side of the grid: the theme color, or the edge cells' when extending.
-        SetBrush(Rgb(extend && cols > 0 && MarginBackgroundOf(row[0]) is { } leftBg ? leftBg : defaultBackground));
-        _dc.FillRectangle(new Rect(0, top, OriginX, CellHeight), _brush);
+        if (OriginX > 0)
+        {
+            for (var y = firstRow; y < endRow;)
+            {
+                var bg = extend && cols > 0 && MarginBackgroundOf(cells[y * cols]) is { } leftBg ? leftBg : defaultBackground;
+                var start = y++;
+                while (y < endRow && (extend && cols > 0 && MarginBackgroundOf(cells[y * cols]) is { } nextBg ? nextBg : defaultBackground) == bg)
+                    y++;
+                SetBrush(Rgb(bg));
+                _dc.FillRectangle(new Rect(0, start * CellHeight, OriginX, (y - start) * CellHeight), _brush);
+            }
+        }
         if (gridRight < PixelWidth)
         {
-            SetBrush(Rgb(extend && cols > 0 && MarginBackgroundOf(row[cols - 1]) is { } rightBg ? rightBg : defaultBackground));
-            _dc.FillRectangle(new Rect(gridRight, top, PixelWidth - gridRight, CellHeight), _brush);
+            for (var y = firstRow; y < endRow;)
+            {
+                var bg = extend && cols > 0 && MarginBackgroundOf(cells[y * cols + cols - 1]) is { } rightBg ? rightBg : defaultBackground;
+                var start = y++;
+                while (y < endRow && (extend && cols > 0 && MarginBackgroundOf(cells[y * cols + cols - 1]) is { } nextBg ? nextBg : defaultBackground) == bg)
+                    y++;
+                SetBrush(Rgb(bg));
+                _dc.FillRectangle(new Rect(gridRight, start * CellHeight, PixelWidth - gridRight, (y - start) * CellHeight), _brush);
+            }
         }
 
         if (_bitmapBackgrounds)
-            DrawRowBackground(cols, y);
-        else
         {
-            SetBrush(Rgb(defaultBackground));
-            _dc.FillRectangle(new Rect(OriginX, top, cols * CellWidth, CellHeight), _brush);
+            DrawBandBackground(cols, firstRow, endRow);
+            return;
+        }
+
+        SetBrush(Rgb(defaultBackground));
+        _dc.FillRectangle(new Rect(OriginX, firstRow * CellHeight, cols * CellWidth, (endRow - firstRow) * CellHeight), _brush);
+        for (var y = firstRow; y < endRow; y++)
+        {
+            var row = cells + y * cols;
+            float top = y * CellHeight;
             // Background runs: selection, then find matches, override the cell background.
             for (var x = 0; x < cols;)
             {
@@ -833,7 +925,11 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 _dc.FillRectangle(new Rect(OriginX + start * CellWidth, top, (x - start) * CellWidth, CellHeight), _brush);
             }
         }
+    }
 
+    private void DrawRowForeground(TerminalCell* row, int cols, int y, uint defaultBackground, uint selectionColor)
+    {
+        float top = y * CellHeight;
         // Glyph runs: same face, style and color; every glyph advances whole cells.
         var baseline = top + _baseline;
         for (var x = 0; x < cols;)
@@ -968,65 +1064,117 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     private const ushort DecorationFlags = TerminalCell.Underline | TerminalCell.Strike | TerminalCell.Overline;
 
     /// <summary>Underlines (single, double, curly, dotted, dashed; SGR 58 colors), overlines and
-    /// strikethrough for every cell, blanks included (links and highlights underline spaces too).</summary>
+    /// strikethrough for every cell, blanks included (links and highlights underline spaces too),
+    /// coalesced into horizontal spans of matching style and color.</summary>
     private void DrawDecorations(TerminalCell* row, int cols, float top, float baseline)
     {
         float thickness = Math.Max(1, (int)Math.Round(CellHeight / 16f));
         var underlineY = Math.Min(baseline + 2, top + CellHeight - 2 * thickness);
-        for (var x = 0; x < cols; x++)
+
+        // Pass 1: Underline spans.
+        for (var x = 0; x < cols;)
         {
             ref var c = ref row[x];
-            if ((c.Flags & DecorationFlags) == 0 || c.Wide == TerminalCell.SpacerTail || (c.Flags & TerminalCell.Invisible) != 0)
+            if ((c.Flags & TerminalCell.Underline) == 0 || c.Wide == TerminalCell.SpacerTail || (c.Flags & TerminalCell.Invisible) != 0)
+            {
+                x++;
                 continue;
-            float left = OriginX + x * CellWidth;
-            float width = c.Wide == TerminalCell.WideChar ? 2 * CellWidth : CellWidth;
-            var alpha = (c.Flags & TerminalCell.Faint) != 0 ? 0.55f : 1f;
-            if ((c.Flags & TerminalCell.Underline) != 0)
+            }
+            var style = c.UnderlineStyle <= 1 ? 1 : c.UnderlineStyle;
+            var color = c.UnderlineColor == TerminalCell.DefaultUnderlineColor ? ForegroundOf(c) : c.UnderlineColor;
+            var faint = (c.Flags & TerminalCell.Faint) != 0;
+            var start = x;
+            x += c.Wide == TerminalCell.WideChar ? 2 : 1;
+            while (x < cols)
             {
-                SetBrush(Rgb(c.UnderlineColor == TerminalCell.DefaultUnderlineColor ? ForegroundOf(c) : c.UnderlineColor, alpha));
-                switch (c.UnderlineStyle)
+                ref var d = ref row[x];
+                if (d.Wide == TerminalCell.SpacerTail) { x++; continue; }
+                if ((d.Flags & TerminalCell.Underline) == 0 || (d.Flags & TerminalCell.Invisible) != 0)
+                    break;
+                var dStyle = d.UnderlineStyle <= 1 ? 1 : d.UnderlineStyle;
+                var dColor = d.UnderlineColor == TerminalCell.DefaultUnderlineColor ? ForegroundOf(d) : d.UnderlineColor;
+                var dFaint = (d.Flags & TerminalCell.Faint) != 0;
+                if (dStyle != style || dColor != color || dFaint != faint)
+                    break;
+                x += d.Wide == TerminalCell.WideChar ? 2 : 1;
+            }
+            var end = Math.Min(x, cols);
+            float left = OriginX + start * CellWidth;
+            float width = (end - start) * CellWidth;
+            SetBrush(Rgb(color, faint ? 0.55f : 1f));
+            switch (style)
+            {
+                case 2: // double
+                    _dc.FillRectangle(new Rect(left, underlineY - thickness, width, thickness), _brush);
+                    _dc.FillRectangle(new Rect(left, underlineY + thickness, width, thickness), _brush);
+                    break;
+                case 3: // curly: one wave per cell, continuous across the span
                 {
-                    case 2: // double
-                        _dc.FillRectangle(new Rect(left, underlineY - thickness, width, thickness), _brush);
-                        _dc.FillRectangle(new Rect(left, underlineY + thickness, width, thickness), _brush);
-                        break;
-                    case 3: // curly: one wave per cell, continuous across cells
+                    var amplitude = Math.Max(1f, thickness);
+                    var stepsPerCell = Math.Max(4, CellWidth / 2);
+                    var steps = (end - start) * stepsPerCell;
+                    var previous = new Vector2(left, underlineY);
+                    for (var i = 1; i <= steps; i++)
                     {
-                        var amplitude = Math.Max(1f, thickness);
-                        var steps = Math.Max(4, (int)width / 2);
-                        var previous = new Vector2(left, underlineY);
-                        for (var i = 1; i <= steps; i++)
-                        {
-                            var px = left + width * i / steps;
-                            var phase = (px - OriginX) / CellWidth * 2 * MathF.PI;
-                            var next = new Vector2(px, underlineY + amplitude * MathF.Sin(phase));
-                            _dc.DrawLine(previous, next, _brush, thickness);
-                            previous = next;
-                        }
-                        break;
+                        var px = left + width * i / steps;
+                        var phase = (px - OriginX) / CellWidth * 2 * MathF.PI;
+                        var next = new Vector2(px, underlineY + amplitude * MathF.Sin(phase));
+                        _dc.DrawLine(previous, next, _brush, thickness);
+                        previous = next;
                     }
-                    case 4: // dotted
-                        for (var dx = 0f; dx < width; dx += 2 * thickness)
-                            _dc.FillRectangle(new Rect(left + dx, underlineY, thickness, thickness), _brush);
-                        break;
-                    case 5: // dashed
-                        var dash = Math.Max(2f, CellWidth / 2f);
-                        for (var dx = 0f; dx < width; dx += CellWidth)
-                            _dc.FillRectangle(new Rect(left + dx, underlineY, Math.Min(dash, width - dx), thickness), _brush);
-                        break;
-                    default: // single
-                        _dc.FillRectangle(new Rect(left, underlineY, width, thickness), _brush);
-                        break;
+                    break;
                 }
+                case 4: // dotted
+                    for (var col = start; col < end; col++)
+                    {
+                        float cellLeft = OriginX + col * CellWidth;
+                        for (var dx = 0f; dx < CellWidth; dx += 2 * thickness)
+                            _dc.FillRectangle(new Rect(cellLeft + dx, underlineY, thickness, thickness), _brush);
+                    }
+                    break;
+                case 5: // dashed
+                    var dash = Math.Max(2f, CellWidth / 2f);
+                    for (var dx = 0f; dx < width; dx += CellWidth)
+                        _dc.FillRectangle(new Rect(left + dx, underlineY, Math.Min(dash, width - dx), thickness), _brush);
+                    break;
+                default: // single
+                    _dc.FillRectangle(new Rect(left, underlineY, width, thickness), _brush);
+                    break;
             }
-            if ((c.Flags & (TerminalCell.Strike | TerminalCell.Overline)) != 0)
+        }
+
+        // Pass 2: Strikethrough and overline spans.
+        const ushort LineMask = TerminalCell.Strike | TerminalCell.Overline;
+        for (var x = 0; x < cols;)
+        {
+            ref var c = ref row[x];
+            var lines = (ushort)(c.Flags & LineMask);
+            if (lines == 0 || c.Wide == TerminalCell.SpacerTail || (c.Flags & TerminalCell.Invisible) != 0)
             {
-                SetBrush(Rgb(ForegroundOf(c), alpha));
-                if ((c.Flags & TerminalCell.Strike) != 0)
-                    _dc.FillRectangle(new Rect(left, top + CellHeight / 2, width, thickness), _brush);
-                if ((c.Flags & TerminalCell.Overline) != 0)
-                    _dc.FillRectangle(new Rect(left, top, width, thickness), _brush);
+                x++;
+                continue;
             }
+            var fg = ForegroundOf(c);
+            var faint = (c.Flags & TerminalCell.Faint) != 0;
+            var start = x;
+            x += c.Wide == TerminalCell.WideChar ? 2 : 1;
+            while (x < cols)
+            {
+                ref var d = ref row[x];
+                if (d.Wide == TerminalCell.SpacerTail) { x++; continue; }
+                if ((d.Flags & LineMask) != lines || (d.Flags & TerminalCell.Invisible) != 0
+                    || ForegroundOf(d) != fg || ((d.Flags & TerminalCell.Faint) != 0) != faint)
+                    break;
+                x += d.Wide == TerminalCell.WideChar ? 2 : 1;
+            }
+            var end = Math.Min(x, cols);
+            float left = OriginX + start * CellWidth;
+            float width = (end - start) * CellWidth;
+            SetBrush(Rgb(fg, faint ? 0.55f : 1f));
+            if ((lines & TerminalCell.Strike) != 0)
+                _dc.FillRectangle(new Rect(left, top + CellHeight / 2, width, thickness), _brush);
+            if ((lines & TerminalCell.Overline) != 0)
+                _dc.FillRectangle(new Rect(left, top, width, thickness), _brush);
         }
     }
 
