@@ -54,12 +54,23 @@ public sealed partial class HistoryView
 {
     private const int CompareContext = 3;
 
-    // Tints read on both themes: a faint wash for the line, a stronger one for changed words.
-    private static readonly Brush RemovedLine = new SolidColorBrush(Color.FromArgb(0x30, 0xF8, 0x51, 0x49));
-    private static readonly Brush RemovedWords = new SolidColorBrush(Color.FromArgb(0x80, 0xF8, 0x51, 0x49));
-    private static readonly Brush AddedLine = new SolidColorBrush(Color.FromArgb(0x30, 0x2E, 0xA0, 0x43));
-    private static readonly Brush AddedWords = new SolidColorBrush(Color.FromArgb(0x80, 0x2E, 0xA0, 0x43));
+    private readonly record struct DiffBrushes(
+        Brush? RemovedLine,
+        Brush? RemovedWords,
+        Brush? AddedLine,
+        Brush? AddedWords,
+        Brush? WordForeground,
+        Brush Transparent);
+
     private static readonly Brush Transparent = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0));
+
+    private DiffBrushes ResolveDiffBrushes() => new(
+        ThemeResources.Brush(this, "SessionDiffRemovedLineBrush"),
+        ThemeResources.Brush(this, "SessionDiffRemovedWordBrush"),
+        ThemeResources.Brush(this, "SessionDiffAddedLineBrush"),
+        ThemeResources.Brush(this, "SessionDiffAddedWordBrush"),
+        App.IsHighContrast ? ThemeResources.Brush(this, "SessionHistoryActiveMatchForegroundBrush") : null,
+        Transparent);
 
     private IReadOnlyList<CommandHistoryEntry> _runs = [];
     private IReadOnlyDictionary<string, OutputComparison> _runChanges = new Dictionary<string, OutputComparison>();
@@ -229,6 +240,7 @@ public sealed partial class HistoryView
         var sideBySide = ReferenceEquals(CompareLayoutBar.SelectedItem, SideBySideLayoutItem);
         var context = ShowAllLinesBox.IsChecked == true ? -1 : CompareContext;
         var font = _monoFont;
+        var brushes = ResolveDiffBrushes();
         var same = older.Id == newer.Id;
 
         OutputComparison comparison;
@@ -239,8 +251,8 @@ public sealed partial class HistoryView
             {
                 var result = OutputDiff.Compare(older.Output, newer.Output, options);
                 return (result, sideBySide
-                    ? result.SideBySide(context).Select(row => SideBySideItem(row, font)).ToList()
-                    : result.Unified(context).Select(row => UnifiedItem(row, font)).ToList());
+                    ? result.SideBySide(context).Select(row => SideBySideItem(row, font, brushes)).ToList()
+                    : result.Unified(context).Select(row => UnifiedItem(row, font, brushes)).ToList());
             });
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
@@ -287,32 +299,32 @@ public sealed partial class HistoryView
         CompareWarning.IsOpen = warnings.Count > 0;
     }
 
-    private static DiffRowItem UnifiedItem(DiffRow row, FontFamily font)
+    private static DiffRowItem UnifiedItem(DiffRow row, FontFamily font, DiffBrushes brushes)
     {
         if (row.Line is not { } line)
             return Gap(row.Skipped, font);
-        var (lineBrush, wordBrush, marker) = DiffStyle(line.Kind);
+        var (lineBrush, wordBrush, marker) = DiffStyle(line.Kind, brushes);
         return new DiffRowItem
         {
             IsChange = line.Kind != DiffKind.Same,
             OldNumber = line.OldNumber?.ToString(CultureInfo.CurrentCulture) ?? "",
             NewNumber = line.NewNumber?.ToString(CultureInfo.CurrentCulture) ?? "",
             Marker = line.DiffersOnlyInIgnoredValues ? "≈" : marker,
-            Text = new HighlightedText(line.Text, line.Changed, wordBrush),
+            Text = new HighlightedText(line.Text, line.Changed, wordBrush, brushes.WordForeground),
             Background = lineBrush,
             Note = line.DiffersOnlyInIgnoredValues ? $"Differs only in ignored values. Earlier: {line.OldText}" : null,
             MonoFont = font,
         };
     }
 
-    private static DiffRowItem SideBySideItem(SideBySideRow row, FontFamily font)
+    private static DiffRowItem SideBySideItem(SideBySideRow row, FontFamily font, DiffBrushes brushes)
     {
         if (row.IsGap)
             return Gap(row.Skipped, font);
         var left = row.Left;
         var right = row.Right;
-        var (leftLine, leftWords, _) = DiffStyle(left?.Kind ?? DiffKind.Same);
-        var (rightLine, rightWords, _) = DiffStyle(right?.Kind ?? DiffKind.Same);
+        var (leftLine, leftWords, _) = DiffStyle(left?.Kind ?? DiffKind.Same, brushes);
+        var (rightLine, rightWords, _) = DiffStyle(right?.Kind ?? DiffKind.Same, brushes);
         var ignored = left?.Kind == DiffKind.Same && left.DiffersOnlyInIgnoredValues;
         return new DiffRowItem
         {
@@ -320,10 +332,10 @@ public sealed partial class HistoryView
             IsChange = left?.Kind != DiffKind.Same || right?.Kind != DiffKind.Same,
             OldNumber = left?.OldNumber?.ToString(CultureInfo.CurrentCulture) ?? "",
             NewNumber = right?.NewNumber?.ToString(CultureInfo.CurrentCulture) ?? "",
-            LeftText = left is null ? HighlightedText.Empty : new HighlightedText(left.Text, left.Changed, leftWords),
-            RightText = right is null ? HighlightedText.Empty : new HighlightedText(right.Text, right.Changed, rightWords),
-            LeftBackground = left is null ? Transparent : leftLine,
-            RightBackground = right is null ? Transparent : rightLine,
+            LeftText = left is null ? HighlightedText.Empty : new HighlightedText(left.Text, left.Changed, leftWords, brushes.WordForeground),
+            RightText = right is null ? HighlightedText.Empty : new HighlightedText(right.Text, right.Changed, rightWords, brushes.WordForeground),
+            LeftBackground = left is null ? brushes.Transparent : leftLine,
+            RightBackground = right is null ? brushes.Transparent : rightLine,
             Note = ignored ? "Differs only in ignored values" : null,
             MonoFont = font,
         };
@@ -336,11 +348,11 @@ public sealed partial class HistoryView
         MonoFont = font,
     };
 
-    private static (Brush Line, Brush? Words, string Marker) DiffStyle(DiffKind kind) => kind switch
+    private static (Brush? Line, Brush? Words, string Marker) DiffStyle(DiffKind kind, DiffBrushes brushes) => kind switch
     {
-        DiffKind.Removed => (RemovedLine, RemovedWords, "−"),
-        DiffKind.Added => (AddedLine, AddedWords, "+"),
-        _ => (Transparent, null, ""),
+        DiffKind.Removed => (brushes.RemovedLine, brushes.RemovedWords, "−"),
+        DiffKind.Added => (brushes.AddedLine, brushes.AddedWords, "+"),
+        _ => (brushes.Transparent, null, ""),
     };
 
     private void DiffList_ItemClick(object sender, ItemClickEventArgs e)

@@ -71,29 +71,36 @@ public sealed class SshKeyStore
     public SshKeyReference RegisterExternal(string path, string? name = null, bool allowMissing = false)
     {
         var normalized = NormalizePath(path);
-        SshKeyReference key;
         lock (_gate)
         {
             var existing = _keys.FirstOrDefault(key => PathsEqual(key.Path, normalized));
             if (existing is not null)
                 return existing;
+        }
 
-            SshKeyInspection? inspection = null;
-            if (File.Exists(normalized))
+        SshKeyInspection? inspection = null;
+        if (File.Exists(normalized))
+        {
+            try
             {
-                try
-                {
-                    inspection = SshKeyInspector.Inspect(normalized);
-                }
-                catch (Exception ex) when (allowMissing
-                    && (ex is IOException or UnauthorizedAccessException or ArgumentException))
-                {
-                    // Migration must preserve an existing reference even when the current
-                    // file cannot be inspected. Connection will report the exact problem.
-                }
+                inspection = SshKeyInspector.Inspect(normalized);
             }
-            else if (!allowMissing)
-                throw new FileNotFoundException("The private-key file was not found.", normalized);
+            catch (Exception ex) when (allowMissing
+                && (ex is IOException or UnauthorizedAccessException or ArgumentException))
+            {
+                // Migration must preserve an existing reference even when the current
+                // file cannot be inspected. Connection will report the exact problem.
+            }
+        }
+        else if (!allowMissing)
+            throw new FileNotFoundException("The private-key file was not found.", normalized);
+
+        SshKeyReference key;
+        lock (_gate)
+        {
+            var existing = _keys.FirstOrDefault(existingKey => PathsEqual(existingKey.Path, normalized));
+            if (existing is not null)
+                return existing;
 
             var candidate = new List<SshKeyReference>(_keys);
             key = new SshKeyReference

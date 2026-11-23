@@ -34,6 +34,11 @@ public sealed class SftpSession : IDisposable
 
     public bool IsConnected => _lifecycle.IsOpen && _client?.IsConnected == true;
 
+    /// <summary>True when <paramref name="exception"/> is an expected SSH/SFTP failure,
+    /// keeping UI callers decoupled from SSH.NET exception types.</summary>
+    public static bool IsSshError(Exception exception) =>
+        exception is SshSessionException or SshException;
+
     /// <summary>The user's home directory, resolved at connect time.</summary>
     public string HomeDirectory { get; private set; } = "/";
 

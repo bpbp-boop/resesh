@@ -83,6 +83,15 @@
                     <SolidColorBrush x:Key="SessionStatusCriticalBrush" Color="{StaticResource SessionStatusCriticalColor}" />
                     <SolidColorBrush x:Key="SessionStatusNeutralBrush" Color="{StaticResource SessionStatusNeutralColor}" />
                     <SolidColorBrush x:Key="SessionBadgeGlyphBrush" Color="#1B1B1B" />
+                    <SolidColorBrush x:Key="SessionLockOverlayBackgroundBrush" Color="#F2181818" />
+                    <SolidColorBrush x:Key="SessionLockOverlayForegroundBrush" Color="#DCDCDC" />
+                    <SolidColorBrush x:Key="SessionHistoryMatchBrush" Color="#70F2B705" />
+                    <SolidColorBrush x:Key="SessionHistoryActiveMatchBrush" Color="#FFF28C28" />
+                    <SolidColorBrush x:Key="SessionHistoryActiveMatchForegroundBrush" Color="#101010" />
+                    <SolidColorBrush x:Key="SessionDiffRemovedLineBrush" Color="#30F85149" />
+                    <SolidColorBrush x:Key="SessionDiffRemovedWordBrush" Color="#80F85149" />
+                    <SolidColorBrush x:Key="SessionDiffAddedLineBrush" Color="#302EA043" />
+                    <SolidColorBrush x:Key="SessionDiffAddedWordBrush" Color="#802EA043" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="SessionSurfaceBrush" Color="#F3F3F3" />
@@ -100,6 +109,15 @@
                     <SolidColorBrush x:Key="SessionStatusCriticalBrush" Color="{StaticResource SessionStatusCriticalColor}" />
                     <SolidColorBrush x:Key="SessionStatusNeutralBrush" Color="{StaticResource SessionStatusNeutralColor}" />
                     <SolidColorBrush x:Key="SessionBadgeGlyphBrush" Color="#1B1B1B" />
+                    <SolidColorBrush x:Key="SessionLockOverlayBackgroundBrush" Color="#F2F3F3F3" />
+                    <SolidColorBrush x:Key="SessionLockOverlayForegroundBrush" Color="#1B1B1B" />
+                    <SolidColorBrush x:Key="SessionHistoryMatchBrush" Color="#70F2B705" />
+                    <SolidColorBrush x:Key="SessionHistoryActiveMatchBrush" Color="#FFF28C28" />
+                    <SolidColorBrush x:Key="SessionHistoryActiveMatchForegroundBrush" Color="#101010" />
+                    <SolidColorBrush x:Key="SessionDiffRemovedLineBrush" Color="#30F85149" />
+                    <SolidColorBrush x:Key="SessionDiffRemovedWordBrush" Color="#80F85149" />
+                    <SolidColorBrush x:Key="SessionDiffAddedLineBrush" Color="#302EA043" />
+                    <SolidColorBrush x:Key="SessionDiffAddedWordBrush" Color="#802EA043" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <SolidColorBrush x:Key="SessionSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
@@ -119,6 +137,15 @@
                     <SolidColorBrush x:Key="SessionStatusCriticalBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="SessionStatusNeutralBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
                     <SolidColorBrush x:Key="SessionBadgeGlyphBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                    <SolidColorBrush x:Key="SessionLockOverlayBackgroundBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="SessionLockOverlayForegroundBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="SessionHistoryMatchBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="SessionHistoryActiveMatchBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="SessionHistoryActiveMatchForegroundBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                    <SolidColorBrush x:Key="SessionDiffRemovedLineBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="SessionDiffRemovedWordBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="SessionDiffAddedLineBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="SessionDiffAddedWordBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>

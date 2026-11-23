@@ -50,8 +50,7 @@ public sealed class SessionStore
     /// <summary>
     /// Raised after every successful save, whatever wrote it, so copies of sessions held
     /// elsewhere (tabs, the tree, other windows) can re-read them. Raised on the writing
-    /// thread while the store is still locked: handlers see exactly the saved state and may
-    /// read the store, but must not wait on another thread that uses it.
+    /// thread after the store's lock is released.
     /// </summary>
     public event Action? Changed;
 
@@ -165,17 +164,24 @@ public sealed class SessionStore
                 folderSettings.Add(new FolderSettings { Path = folderPath, IdentityId = identityId });
             Save(folders: WithSettingFolders(_folders, folderSettings), folderSettings: folderSettings);
         }
+        Changed?.Invoke();
     }
 
     /// <summary>Adds imported folder settings for folders that have none; local settings win.</summary>
     public void MergeFolderSettings(IEnumerable<FolderSettings> settings)
     {
+        var saved = false;
         lock (_gate)
         {
             var folderSettings = MergedFolderSettings(_folderSettings, settings);
             if (!ReferenceEquals(folderSettings, _folderSettings))
+            {
                 Save(folders: WithSettingFolders(_folders, folderSettings), folderSettings: folderSettings);
+                saved = true;
+            }
         }
+        if (saved)
+            Changed?.Invoke();
     }
 
     /// <summary><paramref name="destination"/> plus each incoming setting for a folder that has
@@ -199,10 +205,10 @@ public sealed class SessionStore
     /// inherit again. Returns the number of folders and sessions changed.</summary>
     public int DetachIdentity(Guid identityId)
     {
+        var changed = 0;
         lock (_gate)
         {
             List<FolderSettings>? folderSettings = null;
-            var changed = 0;
             if (_folderSettings.Any(f => f.IdentityId == identityId))
             {
                 folderSettings = _folderSettings.ToList();
@@ -219,8 +225,10 @@ public sealed class SessionStore
             }
             if (changed > 0)
                 Save(sessions: sessions, folderSettings: folderSettings);
-            return changed;
         }
+        if (changed > 0)
+            Changed?.Invoke();
+        return changed;
     }
 
     public Session? Find(Guid id)
@@ -239,6 +247,7 @@ public sealed class SessionStore
             sessions.Add(session);
             Save(sessions: sessions);
         }
+        Changed?.Invoke();
     }
 
     public void Update(Session session)
@@ -252,6 +261,7 @@ public sealed class SessionStore
             sessions[index] = session;
             Save(sessions: sessions);
         }
+        Changed?.Invoke();
     }
 
     /// <summary>Removes the session. Caller is responsible for deleting its credential.</summary>
@@ -264,14 +274,16 @@ public sealed class SessionStore
             var sessions = _sessions.ToList();
             sessions.RemoveAll(s => s.Id == id);
             Save(sessions: sessions);
-            return true;
         }
+        Changed?.Invoke();
+        return true;
     }
 
     // ---- Batches: one atomic write however many sessions change ----
 
     public void AddMany(IEnumerable<Session> added)
     {
+        var saved = false;
         lock (_gate)
         {
             var sessions = _sessions.ToList();
@@ -282,13 +294,19 @@ public sealed class SessionStore
                 sessions.Add(session);
             }
             if (sessions.Count != _sessions.Count)
+            {
                 Save(sessions: sessions);
+                saved = true;
+            }
         }
+        if (saved)
+            Changed?.Invoke();
     }
 
     /// <summary>Replaces saved sessions. Nothing is written when any of them is missing.</summary>
     public void UpdateMany(IEnumerable<Session> updated)
     {
+        var saved = false;
         lock (_gate)
         {
             List<Session>? sessions = null;
@@ -301,22 +319,30 @@ public sealed class SessionStore
                 sessions[index] = session;
             }
             if (sessions is not null)
+            {
                 Save(sessions: sessions);
+                saved = true;
+            }
         }
+        if (saved)
+            Changed?.Invoke();
     }
 
     /// <summary>Removes the sessions and returns the ones that existed, so the caller can
     /// delete their credentials.</summary>
     public IReadOnlyList<Session> RemoveMany(IEnumerable<Guid> ids)
     {
+        List<Session> removed;
         lock (_gate)
         {
             var remove = ids.ToHashSet();
-            var removed = _sessions.Where(s => remove.Contains(s.Id)).ToList();
+            removed = _sessions.Where(s => remove.Contains(s.Id)).ToList();
             if (removed.Count > 0)
                 Save(sessions: _sessions.Where(s => !remove.Contains(s.Id)).ToList());
-            return removed;
         }
+        if (removed.Count > 0)
+            Changed?.Invoke();
+        return removed;
     }
 
     public void MoveToFolder(Guid id, string folderPath) =>
@@ -324,6 +350,7 @@ public sealed class SessionStore
 
     public void MoveToFolder(IEnumerable<Guid> ids, string folderPath)
     {
+        var saved = false;
         lock (_gate)
         {
             var remaining = ids.ToHashSet();
@@ -346,12 +373,18 @@ public sealed class SessionStore
             }
 
             if (sessions is not null)
+            {
                 Save(sessions: sessions);
+                saved = true;
+            }
         }
+        if (saved)
+            Changed?.Invoke();
     }
 
     public void CreateFolder(string folderPath, SessionKind kind = SessionKind.Ssh)
     {
+        var saved = false;
         lock (_gate)
         {
             folderPath = FolderPaths.Normalize(folderPath);
@@ -366,8 +399,11 @@ public sealed class SessionStore
                     Save(localFolders: candidate);
                 else
                     Save(folders: candidate);
+                saved = true;
             }
         }
+        if (saved)
+            Changed?.Invoke();
     }
 
     /// <summary>
@@ -400,6 +436,7 @@ public sealed class SessionStore
             var candidateLocalFolders = UnionFolders(_localFolders, localFolders);
             Save(candidateSessions, candidateFolders, candidateLocalFolders, candidateFolderSettings);
         }
+        Changed?.Invoke();
     }
 
     private static List<string> UnionFolders(List<string> destination, IEnumerable<string> source)
@@ -453,6 +490,7 @@ public sealed class SessionStore
                 Save(sessions: sessions, folders: renamed, folderSettings: folderSettings);
             }
         }
+        Changed?.Invoke();
     }
 
     /// <summary>Moves folder settings with their folder. When the destination already has
@@ -495,13 +533,14 @@ public sealed class SessionStore
     /// </summary>
     public IReadOnlyList<Session> DeleteFolder(string folderPath, SessionKind kind = SessionKind.Ssh)
     {
+        List<Session> removed;
         lock (_gate)
         {
             folderPath = FolderPaths.Normalize(folderPath);
             if (folderPath.Length == 0)
                 return [];
 
-            var removed = _sessions.Where(s => IsInFolder(s, folderPath, kind)).ToList();
+            removed = _sessions.Where(s => IsInFolder(s, folderPath, kind)).ToList();
             var sessions = _sessions.Where(s => !IsInFolder(s, folderPath, kind)).ToList();
             var folders = FolderListOf(kind)
                 .Where(f => !FolderPaths.IsSelfOrDescendant(f, folderPath))
@@ -515,8 +554,9 @@ public sealed class SessionStore
                     .ToList();
                 Save(sessions: sessions, folders: folders, folderSettings: folderSettings);
             }
-            return removed;
         }
+        Changed?.Invoke();
+        return removed;
     }
 
     /// <summary>
@@ -526,6 +566,7 @@ public sealed class SessionStore
     /// </summary>
     public IReadOnlyList<Session> DeleteMany(IEnumerable<(string Path, SessionKind Kind)> folders, IEnumerable<Guid> sessionIds)
     {
+        List<Session> removed;
         lock (_gate)
         {
             var targets = folders
@@ -538,7 +579,7 @@ public sealed class SessionStore
             bool FolderGoes(string path, SessionKind kind) =>
                 targets.Any(folder => folder.Kind == kind && FolderPaths.IsSelfOrDescendant(path, folder.Path));
 
-            var removed = _sessions.Where(Removes).ToList();
+            removed = _sessions.Where(Removes).ToList();
             if (removed.Count == 0 && targets.Count == 0)
                 return [];
             Save(
@@ -548,8 +589,9 @@ public sealed class SessionStore
                 folderSettings: _folderSettings
                     .Where(setting => setting.Path.Length == 0 || !FolderGoes(setting.Path, SessionKind.Ssh))
                     .ToList());
-            return removed;
         }
+        Changed?.Invoke();
+        return removed;
     }
 
     private void Save(
@@ -582,7 +624,6 @@ public sealed class SessionStore
         _folders = folders;
         _localFolders = localFolders;
         _folderSettings = folderSettings;
-        Changed?.Invoke();
     }
 
     private static StoreData? Read(string path)

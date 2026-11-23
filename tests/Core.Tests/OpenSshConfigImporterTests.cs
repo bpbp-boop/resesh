@@ -106,4 +106,18 @@ public sealed class OpenSshConfigImporterTests
         Assert.Empty(result.Importable);
         Assert.Empty(result.Skipped);
     }
+
+    [Fact]
+    public void Matches_HandlesWildcardsCaseInsensitivelyWithoutBacktracking()
+    {
+        Assert.True(OpenSshConfigImporter.Matches("web-*.prod.?", "WEB-01.PROD.a"));
+        Assert.False(OpenSshConfigImporter.Matches("web-*.prod.?", "web-01.prod.ab"));
+        Assert.True(OpenSshConfigImporter.Matches("*", "anything"));
+        Assert.True(OpenSshConfigImporter.Matches("***", ""));
+
+        // Pathological pattern that triggers exponential backtracking in naive regex globs.
+        var pattern = string.Concat(Enumerable.Repeat("*a", 40)) + "*b";
+        var host = new string('a', 100) + "c";
+        Assert.False(OpenSshConfigImporter.Matches(pattern, host));
+    }
 }

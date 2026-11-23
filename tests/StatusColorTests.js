@@ -19,7 +19,20 @@ function themeDictionary(key) {
 }
 
 test("status colors are theme brushes with High Contrast variants in system colors", () => {
-  for (const key of [...statusBrushes, "SessionBadgeGlyphBrush", "SessionRecordingBrush"]) {
+  for (const key of [
+    ...statusBrushes,
+    "SessionBadgeGlyphBrush",
+    "SessionRecordingBrush",
+    "SessionLockOverlayBackgroundBrush",
+    "SessionLockOverlayForegroundBrush",
+    "SessionHistoryMatchBrush",
+    "SessionHistoryActiveMatchBrush",
+    "SessionHistoryActiveMatchForegroundBrush",
+    "SessionDiffRemovedLineBrush",
+    "SessionDiffRemovedWordBrush",
+    "SessionDiffAddedLineBrush",
+    "SessionDiffAddedWordBrush",
+  ]) {
     for (const theme of ["Dark", "Light"])
       assert.match(themeDictionary(theme), new RegExp(`x:Key="${key}"`), `${key} in ${theme}`);
     assert.match(

@@ -1,8 +1,12 @@
+using System.Text;
+
 namespace Resesh.Core.Import;
 
 /// <summary>Reads concrete Host entries from an OpenSSH client configuration file.</summary>
 public static class OpenSshConfigImporter
 {
+    private readonly record struct ConfigEntry(string Directive, string Value, IReadOnlyList<string>? HostPatterns);
+
     public static string DefaultConfigPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".ssh", "config");
 
@@ -16,27 +20,45 @@ public static class OpenSshConfigImporter
 
     public static ImportScanResult Parse(string content, string sourcePath = "config")
     {
-        var importable = new List<ImportCandidate>();
-        List<string>? aliases = null;
+        var entries = ParseEntries(content);
+        var aliases = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        void CommitBlock()
+        foreach (var entry in entries)
         {
-            if (aliases is null)
-                return;
-
-            foreach (var alias in aliases.Where(IsConcreteAlias))
+            if (entry.HostPatterns is null)
+                continue;
+            foreach (var alias in entry.HostPatterns)
             {
-                importable.Add(ResolveOptions(content, new ImportCandidate
-                {
-                    Name = alias,
-                    RelativePath = sourcePath,
-                    Host = alias,
-                    Username = Environment.UserName,
-                    Protocol = "SSH2",
-                }));
+                if (IsConcreteAlias(alias) && seen.Add(alias))
+                    aliases.Add(alias);
             }
         }
 
+        var importable = new List<ImportCandidate>(aliases.Count);
+        foreach (var alias in aliases)
+        {
+            importable.Add(ResolveOptions(entries, new ImportCandidate
+            {
+                Name = alias,
+                RelativePath = sourcePath,
+                Host = alias,
+                Username = Environment.UserName,
+                Protocol = "SSH2",
+            }));
+        }
+
+        importable.Sort((left, right) => StringComparer.OrdinalIgnoreCase.Compare(left.Name, right.Name));
+        return new ImportScanResult
+        {
+            Importable = importable,
+            Skipped = [],
+        };
+    }
+
+    private static List<ConfigEntry> ParseEntries(string content)
+    {
+        var entries = new List<ConfigEntry>();
         foreach (var rawLine in content.Split('\n'))
         {
             var line = StripComment(rawLine).Trim();
@@ -47,61 +69,37 @@ public static class OpenSshConfigImporter
             if (separator < 0)
                 continue;
 
-            var key = line[..separator];
+            var directive = line[..separator];
             var value = line[(separator + 1)..].TrimStart(' ', '\t', '=').Trim();
-            if (key.Equals("Host", StringComparison.OrdinalIgnoreCase))
-            {
-                CommitBlock();
-                aliases = SplitArguments(value).ToList();
-                continue;
-            }
-
-            if (key.Equals("Match", StringComparison.OrdinalIgnoreCase))
-            {
-                CommitBlock();
-                aliases = null;
-                continue;
-            }
+            IReadOnlyList<string>? patterns = directive.Equals("Host", StringComparison.OrdinalIgnoreCase)
+                ? SplitArguments(value).ToList()
+                : null;
+            entries.Add(new ConfigEntry(directive, value, patterns));
         }
-
-        CommitBlock();
-        return new ImportScanResult
-        {
-            Importable = importable
-                .GroupBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
-                .Select(group => group.First())
-                .OrderBy(candidate => candidate.Name, StringComparer.OrdinalIgnoreCase)
-                .ToList(),
-            Skipped = [],
-        };
+        return entries;
     }
 
     // Evaluate matching Host blocks in file order, including global and shared Host * options.
     // OpenSSH uses the first configured value; sessions currently select only the first key.
-    private static ImportCandidate ResolveOptions(string content, ImportCandidate candidate)
+    private static ImportCandidate ResolveOptions(IReadOnlyList<ConfigEntry> entries, ImportCandidate candidate)
     {
         var matches = true;
         string? hostName = null, username = null, identity = null, proxyJump = null;
         string? kex = null, ciphers = null, macs = null, hostKeys = null;
         int? port = null;
-        foreach (var rawLine in content.Split('\n'))
+        foreach (var entry in entries)
         {
-            var line = StripComment(rawLine).Trim();
-            var separator = line.IndexOfAny([' ', '\t', '=']);
-            if (separator < 0)
-                continue;
-            var directive = line[..separator];
-            var value = line[(separator + 1)..].TrimStart(' ', '\t', '=').Trim();
-            if (directive.Equals("Host", StringComparison.OrdinalIgnoreCase))
+            if (entry.HostPatterns is { } patterns)
             {
-                var patterns = SplitArguments(value).ToList();
                 matches = patterns.Any(pattern => !pattern.StartsWith('!') && Matches(pattern, candidate.Name))
                     && !patterns.Any(pattern => pattern.StartsWith('!') && Matches(pattern[1..], candidate.Name));
             }
-            else if (directive.Equals("Match", StringComparison.OrdinalIgnoreCase))
+            else if (entry.Directive.Equals("Match", StringComparison.OrdinalIgnoreCase))
                 matches = false;
             else if (matches)
             {
+                var directive = entry.Directive;
+                var value = entry.Value;
                 if (directive.Equals("HostName", StringComparison.OrdinalIgnoreCase) && hostName is null)
                     hostName = Unquote(value);
                 else if (directive.Equals("User", StringComparison.OrdinalIgnoreCase) && username is null)
@@ -126,9 +124,7 @@ public static class OpenSshConfigImporter
         }
         candidate = candidate with
         {
-            Host = string.IsNullOrWhiteSpace(hostName) ? candidate.Name
-                : System.Text.RegularExpressions.Regex.Replace(hostName, "%[%h]", match =>
-                    match.Value == "%%" ? "%" : candidate.Name),
+            Host = string.IsNullOrWhiteSpace(hostName) ? candidate.Name : ExpandHostName(hostName, candidate.Name),
             Username = string.IsNullOrWhiteSpace(username) ? Environment.UserName : username,
             Port = port ?? 22,
             JumpHostName = JumpAlias(proxyJump),
@@ -137,14 +133,68 @@ public static class OpenSshConfigImporter
         if (identity is not null)
         {
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            identity = System.Text.RegularExpressions.Regex.Replace(identity, "%[%dhru]", match => match.Value switch
-            {
-                "%%" => "%", "%d" => home, "%h" => candidate.Host,
-                "%r" => candidate.Username, "%u" => Environment.UserName, _ => match.Value,
-            });
+            identity = ExpandIdentity(identity, home, candidate.Host, candidate.Username, Environment.UserName);
             candidate = candidate with { PrivateKeyPath = ImportKeyPath.Resolve(identity) };
         }
         return candidate;
+    }
+
+    private static string ExpandHostName(string template, string alias)
+    {
+        if (!template.Contains('%'))
+            return template;
+        var builder = new StringBuilder(template.Length);
+        for (var i = 0; i < template.Length; i++)
+        {
+            if (template[i] == '%' && i + 1 < template.Length)
+            {
+                var next = template[i + 1];
+                if (next == '%')
+                {
+                    builder.Append('%');
+                    i++;
+                    continue;
+                }
+                if (next == 'h')
+                {
+                    builder.Append(alias);
+                    i++;
+                    continue;
+                }
+            }
+            builder.Append(template[i]);
+        }
+        return builder.ToString();
+    }
+
+    private static string ExpandIdentity(string template, string home, string host, string remoteUser, string localUser)
+    {
+        if (!template.Contains('%'))
+            return template;
+        var builder = new StringBuilder(template.Length);
+        for (var i = 0; i < template.Length; i++)
+        {
+            if (template[i] == '%' && i + 1 < template.Length)
+            {
+                var replacement = template[i + 1] switch
+                {
+                    '%' => "%",
+                    'd' => home,
+                    'h' => host,
+                    'r' => remoteUser,
+                    'u' => localUser,
+                    _ => null,
+                };
+                if (replacement is not null)
+                {
+                    builder.Append(replacement);
+                    i++;
+                    continue;
+                }
+            }
+            builder.Append(template[i]);
+        }
+        return builder.ToString();
     }
 
     /// <summary>The host a ProxyJump value reaches the target from: the last of a
@@ -159,10 +209,36 @@ public static class OpenSshConfigImporter
         return Models.HostPort.TrySplit(last[(last.LastIndexOf('@') + 1)..], out var host, out _) ? host : null;
     }
 
-    private static bool Matches(string pattern, string host) =>
-        System.Text.RegularExpressions.Regex.IsMatch(host,
-            "^" + System.Text.RegularExpressions.Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    /// <summary>Linear-time case-insensitive OpenSSH glob match (* and ?), avoiding regex backtracking.</summary>
+    internal static bool Matches(string pattern, string host)
+    {
+        int p = 0, h = 0, star = -1, match = 0;
+        while (h < host.Length)
+        {
+            if (p < pattern.Length && (pattern[p] == '?' || char.ToUpperInvariant(pattern[p]) == char.ToUpperInvariant(host[h])))
+            {
+                p++;
+                h++;
+            }
+            else if (p < pattern.Length && pattern[p] == '*')
+            {
+                star = p++;
+                match = h;
+            }
+            else if (star >= 0)
+            {
+                p = star + 1;
+                h = ++match;
+            }
+            else
+            {
+                return false;
+            }
+        }
+        while (p < pattern.Length && pattern[p] == '*')
+            p++;
+        return p == pattern.Length;
+    }
 
     private static ImportScanResult EmptyResult() => new()
     {
@@ -188,7 +264,7 @@ public static class OpenSshConfigImporter
 
     private static IEnumerable<string> SplitArguments(string value)
     {
-        var current = new System.Text.StringBuilder();
+        var current = new StringBuilder();
         var quoted = false;
         foreach (var character in value)
         {

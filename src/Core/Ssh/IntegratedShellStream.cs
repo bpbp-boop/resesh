@@ -40,8 +40,11 @@ internal static class IntegratedShellStream
         DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.NonPublicMethods |
         DynamicallyAccessedMemberTypes.PublicProperties;
 
-    // The channel type is internal to SSH.NET; DynamicDependency keeps its methods when the
-    // app is trimmed or compiled ahead of time, which a lookup by name cannot express.
+    // The channel type is internal to SSH.NET, and SessionProperty / ShellStream's internal
+    // constructor and _channel field are accessed by reflection. DynamicDependency keeps all
+    // of them when the app is trimmed or compiled ahead of time.
+    [DynamicDependency(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.NonPublicProperties, typeof(BaseClient))]
+    [DynamicDependency(DynamicallyAccessedMemberTypes.PublicConstructors | DynamicallyAccessedMemberTypes.NonPublicConstructors | DynamicallyAccessedMemberTypes.NonPublicFields, typeof(ShellStream))]
     [DynamicDependency(ChannelMembers, ChannelTypeName, "Renci.SshNet")]
     [DynamicDependency(ChannelMembers, "Renci.SshNet.Channels.Channel", "Renci.SshNet")]
     [UnconditionalSuppressMessage("Trimming", "IL2026", Justification = "DynamicDependency keeps the named type.")]

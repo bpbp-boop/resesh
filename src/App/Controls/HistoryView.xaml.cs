@@ -18,7 +18,7 @@ using Windows.UI;
 namespace Resesh.App.Controls;
 
 /// <summary>Text plus the character ranges to emphasize in it.</summary>
-public sealed record HighlightedText(string Text, IReadOnlyList<TextSpan> Spans, Brush? Background = null)
+public sealed record HighlightedText(string Text, IReadOnlyList<TextSpan> Spans, Brush? Background = null, Brush? Foreground = null)
 {
     public static readonly HighlightedText Empty = new("", []);
 }
@@ -33,10 +33,14 @@ public static class HistoryHighlight
     public static void SetSource(DependencyObject target, HighlightedText? value) => target.SetValue(SourceProperty, value);
     public static HighlightedText? GetSource(DependencyObject target) => (HighlightedText?)target.GetValue(SourceProperty);
 
-    /// <summary>Amber at partial opacity reads on both dark and light surfaces.</summary>
-    internal static Brush MatchBackground { get; } = new SolidColorBrush(Color.FromArgb(0x70, 0xF2, 0xB7, 0x05));
-    internal static Brush ActiveMatchBackground { get; } = new SolidColorBrush(Color.FromArgb(0xFF, 0xF2, 0x8C, 0x28));
-    internal static Brush ActiveMatchForeground { get; } = new SolidColorBrush(Color.FromArgb(0xFF, 0x10, 0x10, 0x10));
+    internal static Brush? MatchBackground(FrameworkElement element) =>
+        ThemeResources.Brush(element, "SessionHistoryMatchBrush");
+
+    internal static Brush? ActiveMatchBackground(FrameworkElement element) =>
+        ThemeResources.Brush(element, "SessionHistoryActiveMatchBrush");
+
+    internal static Brush? ActiveMatchForeground(FrameworkElement element) =>
+        ThemeResources.Brush(element, "SessionHistoryActiveMatchForegroundBrush");
 
     private static void OnChanged(DependencyObject target, DependencyPropertyChangedEventArgs args)
     {
@@ -47,7 +51,10 @@ public static class HistoryHighlight
         block.Text = source.Text;
         if (source.Spans.Count == 0)
             return;
-        var highlighter = new TextHighlighter { Background = source.Background ?? MatchBackground };
+        var highlighter = new TextHighlighter { Background = source.Background ?? MatchBackground(block) };
+        var foreground = source.Foreground ?? (App.IsHighContrast ? ActiveMatchForeground(block) : null);
+        if (foreground is not null)
+            highlighter.Foreground = foreground;
         foreach (var span in source.Spans)
         {
             if (span.End > source.Text.Length)
@@ -102,10 +109,6 @@ public sealed partial class HistoryView : UserControl
     private const int ResultLimit = 500;
     private const int MaxOutputHighlights = 5000;
 
-    private static readonly Brush SuccessBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0x2E, 0xA0, 0x43));
-    private static readonly Brush FailureBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0xF8, 0x51, 0x49));
-    private static readonly Brush UnknownBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0x9E, 0x9E, 0x9E));
-
     private int _historyCount;
     private bool _hasHits;
     private IReadOnlyList<string> _terms = [];
@@ -157,6 +160,15 @@ public sealed partial class HistoryView : UserControl
         ToolTipService.SetToolTip(PreviousChangeButton, AppShortcuts.ToolTip("Previous change", ShortcutIds.HistoryPreviousChange));
         ToolTipService.SetToolTip(NextChangeButton, AppShortcuts.ToolTip("Next change", ShortcutIds.HistoryNextChange));
         BuildKeyHints();
+        ActualThemeChanged += (_, _) =>
+        {
+            if (!IsOpen)
+                return;
+            if (_compareMode)
+                RefreshCurrent();
+            else
+                _ = LoadAsync(keepSelection: true);
+        };
         Unloaded += (_, _) => Close();
     }
 
@@ -481,12 +493,12 @@ public sealed partial class HistoryView : UserControl
 
     private static string OneLine(string text) => text.Replace('\n', ' ').Replace('\r', ' ').Replace('\t', ' ');
 
-    private static (Brush Brush, string Name) StatusOf(CommandHistoryEntry entry) =>
+    private (Brush? Brush, string Name) StatusOf(CommandHistoryEntry entry) =>
         entry.ExitCode switch
         {
-            0 => (SuccessBrush, "Succeeded"),
-            { } code => (FailureBrush, $"Failed, exit {code}"),
-            null => (UnknownBrush, "Result unknown"),
+            0 => (ThemeResources.Brush(this, "SessionStatusSuccessBrush"), "Succeeded"),
+            { } code => (ThemeResources.Brush(this, "SessionStatusCriticalBrush"), $"Failed, exit {code}"),
+            null => (ThemeResources.Brush(this, "SessionStatusNeutralBrush"), "Result unknown"),
         };
 
     private static string DayLabel(DateTime date)
@@ -662,7 +674,9 @@ public sealed partial class HistoryView : UserControl
             _outputSpans = spans.Count > MaxOutputHighlights ? spans.Take(MaxOutputHighlights).ToList() : spans;
             if (_outputSpans.Count > 0)
             {
-                var highlighter = new TextHighlighter { Background = HistoryHighlight.MatchBackground };
+                var highlighter = new TextHighlighter { Background = HistoryHighlight.MatchBackground(this) };
+                if (App.IsHighContrast && HistoryHighlight.ActiveMatchForeground(this) is { } contrastForeground)
+                    highlighter.Foreground = contrastForeground;
                 foreach (var span in _outputSpans)
                     highlighter.Ranges.Add(new TextRange { StartIndex = span.Start, Length = span.Length });
                 OutputText.TextHighlighters.Add(highlighter);
@@ -706,8 +720,8 @@ public sealed partial class HistoryView : UserControl
             OutputText.TextHighlighters.RemoveAt(OutputText.TextHighlighters.Count - 1);
         var active = new TextHighlighter
         {
-            Background = HistoryHighlight.ActiveMatchBackground,
-            Foreground = HistoryHighlight.ActiveMatchForeground,
+            Background = HistoryHighlight.ActiveMatchBackground(this),
+            Foreground = HistoryHighlight.ActiveMatchForeground(this),
         };
         active.Ranges.Add(new TextRange { StartIndex = span.Start, Length = span.Length });
         OutputText.TextHighlighters.Add(active);

@@ -423,6 +423,33 @@ public sealed class TerminalRecordingTests : IDisposable
         Assert.True(secondCompressed.Wait(TimeSpan.FromSeconds(5)));
     }
 
+    [Theory]
+    [InlineData("""{"version":"2","width":80,"height":24}""")]
+    [InlineData("""{"version":2,"width":80,"height":24,"title":123}""")]
+    [InlineData("""{"version":2,"width":80,"height":24,"timestamp":999999999999999}""")]
+    [InlineData("""{"version":2,"width":80,"height":24,"timestamp":"now"}""")]
+    public void AsciicastReaderRejectsMalformedHeaderFieldsAsInvalidData(string header)
+    {
+        Directory.CreateDirectory(_directory);
+        var path = Path.Combine(_directory, $"bad-header-{Guid.NewGuid():N}.cast");
+        File.WriteAllText(path, header + "\n");
+
+        Assert.Throws<InvalidDataException>(() => AsciicastReader.Read(path));
+    }
+
+    [Theory]
+    [InlineData("""[0.1, 42, "hello"]""")]
+    [InlineData("""[0.1, "o", 123]""")]
+    [InlineData("""[0.1, "o", null]""")]
+    public void AsciicastReaderRejectsMalformedEventTypesAsInvalidData(string eventLine)
+    {
+        Directory.CreateDirectory(_directory);
+        var path = Path.Combine(_directory, $"bad-event-{Guid.NewGuid():N}.cast");
+        File.WriteAllText(path, """{"version":2,"width":80,"height":24}""" + "\n" + eventLine + "\n");
+
+        Assert.Throws<InvalidDataException>(() => AsciicastReader.Read(path));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))
