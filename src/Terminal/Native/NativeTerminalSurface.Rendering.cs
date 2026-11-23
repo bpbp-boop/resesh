@@ -5,21 +5,26 @@ using Microsoft.UI.Xaml.Media;
 namespace Resesh.Terminal.Native;
 
 /// <summary>
-/// Frames are drawn on the surface's own render thread, as Ghostty does, so output never
-/// holds up input and layout on the UI thread. The UI thread still draws directly when layout
-/// needs a frame in the same pass (a resize, a tab shown). Both hold <see cref="_renderGate"/>
-/// while they read the grid and draw; the renderer serializes the shared device itself.
+/// Frames are drawn on one shared render thread, so output never holds up input and layout on
+/// the UI thread and multiple panes never contend on the shared Direct2D device lock from
+/// separate render threads. The UI thread still draws directly when layout needs a frame in the
+/// same pass (a resize, a tab shown). Both hold <see cref="_renderGate"/> while they read the
+/// grid and draw; the renderer serializes the shared device itself.
 /// What a frame changes in XAML (scroll bar, IME box, pointer, blink, annotations, margin)
 /// goes back to the UI thread as <see cref="FrameEffects"/>, merged until it runs.
 /// </summary>
 public sealed unsafe partial class NativeTerminalSurface
 {
+    private static readonly object s_renderListGate = new();
+    private static readonly List<NativeTerminalSurface> s_renderSurfaces = [];
+    private static readonly AutoResetEvent s_renderWake = new(false);
+    private static Thread? s_renderThread;
+
     // Guards the cell buffers, Columns/Rows as the frame sees them, the highlighter's row state,
     // the hover underline and the render-side frame state below.
     private readonly object _renderGate = new();
-    private Thread? _renderThread;
-    private readonly AutoResetEvent _renderWake = new(false);
-    private volatile bool _renderStop;
+    private int _frameRequested;
+    private int _idleReads;
 
     // XAML state the render thread can't read itself, mirrored by the UI thread.
     private volatile bool _visible = true;
@@ -106,28 +111,32 @@ public sealed unsafe partial class NativeTerminalSurface
         }
     }
 
-    private void StartRenderThread()
+    private void RegisterRenderSurface()
     {
-        if (_renderThread is not null)
-            return;
-        _renderThread = new Thread(RenderLoop, 256 * 1024)
+        lock (s_renderListGate)
         {
-            IsBackground = true,
-            Name = "Terminal render",
-            Priority = ThreadPriority.AboveNormal,
-        };
-        _renderThread.Start();
+            if (_disposed || s_renderSurfaces.Contains(this))
+                return;
+            s_renderSurfaces.Add(this);
+            if (s_renderThread is not { IsAlive: true })
+            {
+                s_renderThread = new Thread(RenderLoop, 256 * 1024)
+                {
+                    IsBackground = true,
+                    Name = "Terminal render",
+                    Priority = ThreadPriority.AboveNormal,
+                };
+                s_renderThread.Start();
+            }
+        }
     }
 
-    private bool StopRenderThread()
+    private void UnregisterRenderSurface()
     {
-        _renderStop = true;
-        try { _renderWake.Set(); } catch (ObjectDisposedException) { }
-        var joined = true;
-        if (_renderThread is { } thread && thread != Thread.CurrentThread)
-            joined = thread.Join(TimeSpan.FromSeconds(2));
-        _renderThread = null;
-        return joined;
+        Interlocked.Exchange(ref _frameRequested, 0);
+        lock (s_renderListGate)
+            s_renderSurfaces.Remove(this);
+        s_renderWake.Set();
     }
 
     /// <summary>Asks for a frame. Safe from any thread; requests before the frame coalesce.</summary>
@@ -135,42 +144,70 @@ public sealed unsafe partial class NativeTerminalSurface
     {
         if (_disposed)
             return;
-        try { _renderWake.Set(); } catch (ObjectDisposedException) { }
+        Interlocked.Exchange(ref _frameRequested, 1);
+        s_renderWake.Set();
     }
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmFlush();
 
-    private void RenderLoop()
+    private static void RenderLoop()
     {
-        var idleReads = 0;
+        var snapshot = new List<NativeTerminalSurface>();
         while (true)
         {
-            _renderWake.WaitOne();
-            if (_renderStop)
-                return;
-            FrameEffects effects;
-            lock (_renderGate)
-                effects = RenderFrameSafely();
-            // A held frame (synchronized output) is polled from here, once per composition.
-            var poll = effects.Poll;
-            effects.Poll = false;
-            if (effects.Any)
-                PostEffects(effects);
-            // At most one frame per composition: the first request after a quiet spell (a
-            // keystroke's echo) draws at once, and output that keeps coming gathers here. A read
-            // that drew nothing presented nothing, so waiting out a composition after it would
-            // only delay the next frame (an echo landing just after it); a run of them, from
-            // output that changes nothing on screen, is still paced.
-            idleReads = effects.HasInfo && !effects.Drew ? idleReads + 1 : 0;
-            var pace = effects.Drew || poll || idleReads > 1;
-            if (pace && !_renderStop && DwmFlush() < 0)
+            s_renderWake.WaitOne();
+            snapshot.Clear();
+            lock (s_renderListGate)
+            {
+                if (s_renderSurfaces.Count == 0)
+                {
+                    s_renderThread = null;
+                    return;
+                }
+                snapshot.AddRange(s_renderSurfaces);
+            }
+            var pace = false;
+            var pollAny = false;
+            foreach (var surface in snapshot)
+            {
+                if (surface._disposed || Interlocked.Exchange(ref surface._frameRequested, 0) == 0)
+                    continue;
+                var (stepPace, poll) = surface.RenderStep();
+                pace |= stepPace;
+                if (poll && !surface._disposed)
+                {
+                    Interlocked.Exchange(ref surface._frameRequested, 1);
+                    pollAny = true;
+                }
+            }
+            if (pace && DwmFlush() < 0)
                 Thread.Sleep(4);
-            if (pace)
-                idleReads = 0;
-            if (poll)
-                _renderWake.Set();
+            if (pollAny)
+                s_renderWake.Set();
         }
+    }
+
+    private (bool Pace, bool Poll) RenderStep()
+    {
+        FrameEffects effects;
+        lock (_renderGate)
+            effects = RenderFrameSafely();
+        // A held frame (synchronized output) is polled from here, once per composition.
+        var poll = effects.Poll;
+        effects.Poll = false;
+        if (effects.Any)
+            PostEffects(effects);
+        // At most one frame per composition: the first request after a quiet spell (a
+        // keystroke's echo) draws at once, and output that keeps coming gathers here. A read
+        // that drew nothing presented nothing, so waiting out a composition after it would
+        // only delay the next frame (an echo landing just after it); a run of them, from
+        // output that changes nothing on screen, is still paced.
+        _idleReads = effects.HasInfo && !effects.Drew ? _idleReads + 1 : 0;
+        var pace = effects.Drew || poll || _idleReads > 1;
+        if (pace)
+            _idleReads = 0;
+        return (pace, poll);
     }
 
     /// <summary>Draws on the UI thread now, for layout that must show the frame in the same
@@ -275,9 +312,16 @@ public sealed unsafe partial class NativeTerminalSurface
         {
             _blinkTimer.Stop(); // the next frame restarts it
             _cursorBlinkOn = true;
+            lock (_renderGate)
+                _renderer.Trim();
             return;
         }
         ForceFull();
+        if (_loaded && _visible)
+        {
+            PrimeSwapChain();
+            DrawFrame();
+        }
         RequestFrame();
     }
 
@@ -316,6 +360,14 @@ public sealed unsafe partial class NativeTerminalSurface
             if (full)
                 ForceFull();
             return new FrameEffects { Poll = true };
+        }
+        if (rows > 0)
+        {
+            for (var y = 0; y < Rows; y++)
+            {
+                if (_dirty[y] != 0 && (y + 1) * Columns <= _cellGraphemes.Length)
+                    Array.Clear(_cellGraphemes, y * Columns, Columns);
+            }
         }
         // Highlight only the rows just read: their cells are fresh, so tints never compound.
         // The alternate screen (vim, htop) is never highlighted, as in terminal.html.

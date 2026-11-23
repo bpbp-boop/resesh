@@ -3022,3 +3022,20 @@ grew back and the one gaining it shrank. Every pane now keeps the widest frame's
 side (`PaneFrameGeometry.ReservedInset`): one pixel beside a gutter, which carries the frame's
 outer pixel, and two on an outer edge. It depends only on where the pane sits, so focus and tab
 changes only recolour the frame. The cost is up to two pixels per side on panes never framed.
+
+## 2026-11-23 - Shared render thread, trimmed hidden targets, two-pass dirty bands, batched decorations
+
+- **One shared render thread** services all active `NativeTerminalSurface` instances and calls
+  `DwmFlush` once per pass across all dirty visible panes, rather than each tab owning a thread
+  and contending on `TerminalRenderer.DeviceGate`. The thread exits when the last surface is
+  disposed.
+- **Hidden surfaces trim their offscreen render targets** (`_canvas`, `_canvasBitmap`,
+  `_backgrounds`, and cached text layouts) while keeping their swap chain attached, and
+  background tabs defer `PrimeSwapChain` until shown. The 2048² color emoji atlas is shared on
+  `s_d2dDevice` across all renderers and shelf-packed by cell pixel size.
+- **Two-pass band rendering**: dirty rows draw their left/right margins and background bitmap in
+  contiguous bands first (one `DrawBitmap` per band) before drawing glyphs and decorations, so a
+  row's background never paints over its neighbor's descenders.
+- **Decorations batch into horizontal spans** of matching underline style, color, and faintness
+  (and likewise for strikethrough/overline), and multi-codepoint grapheme strings are cached per
+  cell on the surface until their row is read again.
