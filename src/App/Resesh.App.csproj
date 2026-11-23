@@ -24,6 +24,9 @@
          install is a third the size of a ReadyToRun build. Applies to dotnet publish only;
          it also turns on the trimming and AOT analyzers for this project. -->
     <PublishAot>true</PublishAot>
+    <!-- Third-party SharpGen.Runtime (via Vortice.Direct2D1) emits a collapsed IL2104
+         summary warning during Native AOT linking; keep our own IL2xxx/IL3xxx warnings as errors. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);IL2104</WarningsNotAsErrors>
     <GhosttyVtManifest>$(MSBuildThisFileDirectory)..\..\eng\ghostty-vt.json</GhosttyVtManifest>
   </PropertyGroup>
 
