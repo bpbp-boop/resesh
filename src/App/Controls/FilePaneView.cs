@@ -670,8 +670,8 @@ public sealed partial class FilePaneView : UserControl, IDisposable
             await NavigateAsync(_currentPath);
     }
 
-    private static bool IsExpected(Exception ex) => ex is SshSessionException
-        or Renci.SshNet.Common.SshException or IOException or UnauthorizedAccessException
+    private static bool IsExpected(Exception ex) => SftpSession.IsSshError(ex)
+        || ex is IOException or UnauthorizedAccessException
         or System.ComponentModel.Win32Exception or InvalidOperationException or ObjectDisposedException;
 
     private void ReportTransfer(string verb, string name, int index, int count, long done, long total)

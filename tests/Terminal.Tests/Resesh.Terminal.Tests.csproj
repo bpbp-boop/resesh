@@ -19,6 +19,7 @@
     <!-- The command tracker is plain C# over ICommandBuffer: test it without WinUI or the
          native terminal. -->
     <Compile Include="../../src/Terminal/Native/CommandTracker.cs" Link="Native/CommandTracker.cs" />
+    <Compile Include="../../src/Terminal/Native/PromptContextDetector.cs" Link="Native/PromptContextDetector.cs" />
     <Compile Include="../../src/Terminal/Native/Highlighter.cs" Link="Native/Highlighter.cs" />
     <Compile Include="../../src/Terminal/Native/TerminalCell.cs" Link="Native/TerminalCell.cs" />
     <Compile Include="../../src/Terminal/Native/GhosttyNative.cs" Link="Native/GhosttyNative.cs" />

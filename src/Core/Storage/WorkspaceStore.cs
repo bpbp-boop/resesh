@@ -78,7 +78,7 @@ public sealed class WorkspaceStore
     /// <summary>Raised after a write changes the saved workspaces or which of them have
     /// unsaved changes: what menus and rails show. Writes that only move the last layout or
     /// edit an existing draft stay quiet; they happen on every layout change. Raised on the
-    /// writer's thread.</summary>
+    /// writer's thread after the store's lock is released.</summary>
     public event Action? Changed;
 
     /// <summary>Whether saves are allowed; see <see cref="StoreLoadState"/>.</summary>
@@ -150,6 +150,7 @@ public sealed class WorkspaceStore
     /// layout is never touched: only <see cref="Update"/> changes that.</summary>
     public void SetDraft(Guid id, WorkspaceLayout? live)
     {
+        var notify = false;
         lock (_gate)
         {
             if (!_workspaces.Any(workspace => workspace.Id == id))
@@ -159,8 +160,10 @@ public sealed class WorkspaceStore
                 drafts[id] = NormalizeLayout(live);
             else if (!drafts.Remove(id))
                 return;
-            Commit(_workspaces, _lastLayout, _lastActiveWorkspaceId, drafts);
+            notify = Commit(_workspaces, _lastLayout, _lastActiveWorkspaceId, drafts);
         }
+        if (notify)
+            Changed?.Invoke();
     }
 
     internal static bool SameArrangement(WorkspaceLayout a, WorkspaceLayout b)
@@ -216,6 +219,8 @@ public sealed class WorkspaceStore
 
     public Workspace SaveAs(string name, WorkspaceLayout layout)
     {
+        Workspace workspace;
+        bool notify;
         lock (_gate)
         {
             name = ValidateName(name);
@@ -223,20 +228,23 @@ public sealed class WorkspaceStore
                 throw new InvalidOperationException($"A workspace named \"{name}\" already exists.");
 
             var normalized = NormalizeLayout(layout);
-            var workspace = new Workspace
+            workspace = new Workspace
             {
                 Id = Guid.NewGuid(),
                 Name = name,
                 Groups = normalized.Groups,
                 Layout = normalized.Layout,
             };
-            Commit([.. _workspaces, workspace]);
-            return workspace;
+            notify = Commit([.. _workspaces, workspace]);
         }
+        if (notify)
+            Changed?.Invoke();
+        return workspace;
     }
 
     public void Rename(Guid id, string name)
     {
+        bool notify;
         lock (_gate)
         {
             name = ValidateName(name);
@@ -249,12 +257,15 @@ public sealed class WorkspaceStore
             var index = FindIndex(id);
             var updated = _workspaces.ToList();
             updated[index] = updated[index] with { Name = name };
-            Commit(updated);
+            notify = Commit(updated);
         }
+        if (notify)
+            Changed?.Invoke();
     }
 
     public void Update(Guid id, WorkspaceLayout layout)
     {
+        bool notify;
         lock (_gate)
         {
             var index = FindIndex(id);
@@ -267,25 +278,32 @@ public sealed class WorkspaceStore
             };
             var drafts = new Dictionary<Guid, WorkspaceLayout>(_drafts);
             drafts.Remove(id);
-            Commit(updated, _lastLayout, _lastActiveWorkspaceId, drafts);
+            notify = Commit(updated, _lastLayout, _lastActiveWorkspaceId, drafts);
         }
+        if (notify)
+            Changed?.Invoke();
     }
 
     public bool Delete(Guid id)
     {
+        bool removed;
+        var notify = false;
         lock (_gate)
         {
             var updated = _workspaces.Where(workspace => workspace.Id != id).ToList();
-            var removed = updated.Count != _workspaces.Count;
+            removed = updated.Count != _workspaces.Count;
             if (removed)
-                Commit(updated);
-            return removed;
+                notify = Commit(updated);
         }
+        if (notify)
+            Changed?.Invoke();
+        return removed;
     }
 
     public void Reorder(IReadOnlyList<Guid> orderedIds)
     {
         ArgumentNullException.ThrowIfNull(orderedIds);
+        var notify = false;
         lock (_gate)
         {
             if (orderedIds.Count != _workspaces.Count || orderedIds.Distinct().Count() != orderedIds.Count)
@@ -297,12 +315,15 @@ public sealed class WorkspaceStore
             if (_workspaces.Select(workspace => workspace.Id).SequenceEqual(orderedIds))
                 return;
 
-            Commit(orderedIds.Select(id => byId[id]).ToList());
+            notify = Commit(orderedIds.Select(id => byId[id]).ToList());
         }
+        if (notify)
+            Changed?.Invoke();
     }
 
     public void SetAppearance(Guid id, string? icon, string? initials, bool labelIcon = false)
     {
+        bool notify;
         lock (_gate)
         {
             var index = FindIndex(id);
@@ -313,8 +334,10 @@ public sealed class WorkspaceStore
                 Initials = WorkspaceAppearance.NormalizeInitials(initials),
                 LabelIcon = labelIcon,
             };
-            Commit(updated);
+            notify = Commit(updated);
         }
+        if (notify)
+            Changed?.Invoke();
     }
 
     /// <summary>
@@ -325,6 +348,7 @@ public sealed class WorkspaceStore
     /// </summary>
     public bool RemoveSessions(IEnumerable<Guid> sessionIds)
     {
+        var notify = false;
         lock (_gate)
         {
             var removed = sessionIds.ToHashSet();
@@ -353,18 +377,23 @@ public sealed class WorkspaceStore
                 .Where(draft => workspaces.FirstOrDefault(workspace => workspace.Id == draft.WorkspaceId) is { } saved
                     && Differs(saved, draft.Layout))
                 .ToDictionary(draft => draft.WorkspaceId, draft => draft.Layout);
-            Commit(workspaces, pruned.LastLayout, _lastActiveWorkspaceId, drafts);
-            return true;
+            notify = Commit(workspaces, pruned.LastLayout, _lastActiveWorkspaceId, drafts);
         }
+        if (notify)
+            Changed?.Invoke();
+        return true;
     }
 
     /// <summary>Saves the unsaved (Home) layout and the workspace shown beside it, if any.</summary>
     public void SaveLastLayout(WorkspaceLayout layout, Guid? activeWorkspaceId = null)
     {
+        bool notify;
         lock (_gate)
         {
-            Commit(_workspaces, NormalizeLayout(layout), activeWorkspaceId);
+            notify = Commit(_workspaces, NormalizeLayout(layout), activeWorkspaceId);
         }
+        if (notify)
+            Changed?.Invoke();
     }
 
     private int FindIndex(Guid id)
@@ -383,12 +412,12 @@ public sealed class WorkspaceStore
             : throw new ArgumentException("Workspace name cannot be empty.", nameof(name));
     }
 
-    private void Commit(List<Workspace> workspaces) => Commit(workspaces, _lastLayout, _lastActiveWorkspaceId);
+    private bool Commit(List<Workspace> workspaces) => Commit(workspaces, _lastLayout, _lastActiveWorkspaceId);
 
-    private void Commit(List<Workspace> workspaces, WorkspaceLayout? lastLayout, Guid? lastActiveWorkspaceId) =>
+    private bool Commit(List<Workspace> workspaces, WorkspaceLayout? lastLayout, Guid? lastActiveWorkspaceId) =>
         Commit(workspaces, lastLayout, lastActiveWorkspaceId, _drafts);
 
-    private void Commit(
+    private bool Commit(
         List<Workspace> workspaces,
         WorkspaceLayout? lastLayout,
         Guid? lastActiveWorkspaceId,
@@ -407,8 +436,7 @@ public sealed class WorkspaceStore
         _lastLayout = lastLayout;
         _lastActiveWorkspaceId = lastActiveWorkspaceId;
         _drafts = drafts;
-        if (shownChanged)
-            Changed?.Invoke();
+        return shownChanged;
     }
 
     private static string Serialize(
@@ -520,14 +548,17 @@ public sealed class WorkspaceStore
     internal void ReplaceWithImport(WorkspaceStoreData data)
     {
         var normalized = NormalizeData(data);
+        bool notify;
         lock (_gate)
         {
-            Commit(
+            notify = Commit(
                 normalized.Workspaces!,
                 normalized.LastLayout,
                 normalized.LastActiveWorkspaceId,
                 (normalized.Drafts ?? []).ToDictionary(draft => draft.WorkspaceId, draft => draft.Layout));
         }
+        if (notify)
+            Changed?.Invoke();
     }
 
     /// <summary>Throws unless a save may replace the file now; lets an import refuse before it

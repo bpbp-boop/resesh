@@ -20,7 +20,7 @@ test("local current-folder requests rescan the live prompt before process fallba
 
 test("terminal-folder selection has the required source priority", () => {
   const start = tab.indexOf("public async Task OpenFilePaneAtCurrentFolderAsync()");
-  const end = tab.indexOf("private Interop.SshfsMount", start);
+  const end = tab.indexOf("private async Task OpenInExplorerAsync(string path)", start);
   const method = tab.slice(start, end);
   assert.ok(start >= 0 && end > start);
   // WorkingDirectoryTracker's order: the shell's report, a backend query, the prompt.
@@ -37,7 +37,7 @@ test("terminal-folder selection has the required source priority", () => {
 
 test("the native probe never writes to the interactive terminal", () => {
   const start = tab.indexOf("public async Task OpenFilePaneAtCurrentFolderAsync()");
-  const end = tab.indexOf("private Interop.SshfsMount", start);
+  const end = tab.indexOf("private async Task OpenInExplorerAsync(string path)", start);
   const method = tab.slice(start, end);
   assert.match(method, /session\.RunCommand\(RemoteWorkingDirectoryProbe\.Command\)/);
   assert.doesNotMatch(method, /_backend\?\.Write|_terminal\.InputReceived/);

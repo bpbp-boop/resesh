@@ -50,43 +50,17 @@ internal sealed class CommandTracker
     private const int HistoryIdleMs = 600;
 
     // ---- prompt shapes (terminal.html / addon-ruler.js) ----------------------------------
+    private static readonly TimeSpan RegexTimeout = PromptContextDetector.RegexTimeout;
     private const string UnixSpacedPromptBody =
         @"[^@\s$#%>]{1,100}@[^\s$#%>]{1,100}\s+[^\r\n$#%>]{1,160}?\s*[$#%>]";
     private const string CmdPromptBody =
         @"(?:PS [^\n]{0,200}>|" + UnixSpacedPromptBody + @"|(?:\[[^\]]{1,100}\]|[^\s$#%>]{0,100})[$#%>])";
-    internal static readonly Regex CmdPromptRe = new("^" + CmdPromptBody + @"\s?\S", RegexOptions.CultureInvariant);
-    internal static readonly Regex CmdSplitRe = new("^(" + CmdPromptBody + @")\s?(.*)$", RegexOptions.CultureInvariant | RegexOptions.Singleline);
-    private static readonly Regex HistoryCompactPromptRe = new(@"^[^@\s:]{1,100}@[^\s:]{1,100}:([^\s$#%>]{1,512})[$#%]$", RegexOptions.CultureInvariant);
-    internal static readonly Regex WindowsIdlePromptRe = new(@"^(?:PS )?((?:[A-Za-z]:[\\/]|\\\\)[^\r\n>]*)>\s*$", RegexOptions.CultureInvariant);
-    // PowerShell's default prompt in a provider other than the file system ("PS HKLM:\>"):
-    // a location but not a folder, reported so an older folder report is not taken for it.
-    private static readonly Regex PowerShellProviderPromptRe = new(@"^PS ([A-Za-z][A-Za-z0-9_.-]+:[\\/]?[^\r\n>]*)>\s*$", RegexOptions.CultureInvariant);
-    private static readonly Regex UnixSpacedIdlePromptRe = new(@"^[^@\s$#%>]{1,100}@[^\s$#%>]{1,100}\s+([^\r\n$#%>]{1,160}?)\s*[$#%>]\s*$", RegexOptions.CultureInvariant);
-    private static readonly Regex UnixBracketedIdlePromptRe = new(@"^\[[^@\]\s]{1,100}@[^\]\s]{1,100}\s+([^\]\r\n]{1,160}?)\]\s*[$#%>]\s*$", RegexOptions.CultureInvariant);
-    private static readonly Regex NokiaMdCliPromptRe = new(@"^[A-Z]:[^@\s]+@[^\s#]+#\s*$", RegexOptions.CultureInvariant);
-    private static readonly Regex NokiaMdCliContextRe = new(@"^(\*)?(?:\((gl|ex|pr|ro)\)\s*)?\[((?:(gl|ex|pr|ro):)?[^\]\r\n]{0,500})\]$", RegexOptions.CultureInvariant);
-    private static readonly Dictionary<string, string> NokiaMdCliModes = new()
-    {
-        ["gl"] = "global", ["ex"] = "exclusive", ["pr"] = "private", ["ro"] = "read-only",
-    };
-    private static readonly Regex JunosPromptRe = new(@"^[^@\s]+@[^\s#>]+([#>])\s*$", RegexOptions.CultureInvariant);
-    private static readonly Regex JunosEditContextRe = new(@"^(?:\{([^}\r\n]{1,100})\}\s*)?\[edit(?:\s+([^\]\r\n]{1,400}))?\]\s*$", RegexOptions.CultureInvariant);
-    private static readonly Regex JunosRoleRe = new(@"^\{((?:master|backup|primary|secondary)(?::[^}\s]+)?)\}\s*$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-    private static readonly Regex JunosBannerRe = new(@"^---\s*JUNOS\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-    private static readonly Regex CiscoIosPromptRe = new(@"^([A-Za-z0-9][A-Za-z0-9._-]{0,100})(?:\(([^()\r\n]{1,100})\))?([#>])\s*$", RegexOptions.CultureInvariant);
-    private static readonly Regex CiscoXrPromptRe = new(@"^(RP/\d+/(?:RP|RSP)\d+/CPU\d+):([^()\s#>]+)(?:\(([^()\r\n]{1,100})\))?([#>])\s*$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-    private static readonly Regex CiscoBannerRe = new(@"\b(?:Cisco IOS(?: XE| XR)? Software|Cisco Internetwork Operating System Software)\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
-    private static readonly Dictionary<string, string> CiscoSubmodeNames = new()
-    {
-        ["if"] = "interface", ["if-pre"] = "preconfigured interface", ["subif"] = "subinterface",
-        ["router"] = "routing", ["line"] = "line", ["vlan"] = "VLAN", ["vrf"] = "VRF",
-        ["std-nacl"] = "standard ACL", ["ext-nacl"] = "extended ACL", ["bgp"] = "BGP",
-        ["bgp-af"] = "BGP address family", ["bgp-nbr"] = "BGP neighbor",
-        ["bgp-nbr-af"] = "BGP neighbor address family",
-    };
-    private static readonly Regex Osc3008TypeRe = new(@"^(service|session|shell|command|vm|container|elevate|chpriv|subcontext|remote|boot|app)$", RegexOptions.CultureInvariant);
-    private static readonly Regex ControlCharsRe = new(@"[\x00-\x1f\x7f-\x9f]", RegexOptions.CultureInvariant);
-    private static readonly Regex UserHostPromptRe = new(@"^[^\s@]+@[^\s:]+(?:\s|:)", RegexOptions.CultureInvariant);
+    internal static readonly Regex CmdPromptRe = new("^" + CmdPromptBody + @"\s?\S", RegexOptions.CultureInvariant, RegexTimeout);
+    internal static readonly Regex CmdSplitRe = new("^(" + CmdPromptBody + @")\s?(.*)$", RegexOptions.CultureInvariant | RegexOptions.Singleline, RegexTimeout);
+    internal static Regex WindowsIdlePromptRe => PromptContextDetector.WindowsIdlePromptRe;
+    private static readonly Regex Osc3008TypeRe = new(@"^(service|session|shell|command|vm|container|elevate|chpriv|subcontext|remote|boot|app)$", RegexOptions.CultureInvariant, RegexTimeout);
+    private static readonly Regex ControlCharsRe = new(@"[\x00-\x1f\x7f-\x9f]", RegexOptions.CultureInvariant, RegexTimeout);
+    private static readonly Regex UserHostPromptRe = new(@"^[^\s@]+@[^\s:]+(?:\s|:)", RegexOptions.CultureInvariant, RegexTimeout);
 
     private sealed class Mark
     {
@@ -118,6 +92,7 @@ internal sealed class CommandTracker
     }
 
     private readonly ICommandBuffer _buffer;
+    private readonly PromptContextDetector _prompts;
     private readonly Func<long> _now;
     private readonly List<Mark> _marks = [];
     private readonly List<ICommandMarker> _bookmarks = [];
@@ -155,12 +130,6 @@ internal sealed class CommandTracker
     private int _historyIdleGeneration;
     private long _lastOutputMs;
 
-    // What the screen proved (a banner, a mode prompt) and what the host suggested (the
-    // session's icon, the SSH banner). Kept apart so the hint can change or be withdrawn
-    // without erasing evidence.
-    private string? _promptPlatform;
-    private string? _promptHint;
-    private string? _lastPromptSignature;
     private int _titlesSeen;
 
     // An agent owns the screen (see SetAgentRunning). _agentCommandAt is where its last
@@ -184,6 +153,7 @@ internal sealed class CommandTracker
     public CommandTracker(ICommandBuffer buffer, Func<long>? now = null)
     {
         _buffer = buffer;
+        _prompts = new PromptContextDetector(buffer);
         _now = now ?? (() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
     }
 
@@ -247,7 +217,7 @@ internal sealed class CommandTracker
                     _pending = Commit(line, null, exact: true, null, text);
                     if (_pending is not null)
                         _pending.FullText = command.Length > 0 ? Truncate(command.Trim(), HistoryMaxCommand) : CmdText(line, _promptCol, HistoryMaxCommand);
-                    if (_executionReporting && !_replaying && text.Length > 0 && !ControlCharsRe.IsMatch(text) && _executionNextId < long.MaxValue)
+                    if (_executionReporting && !_replaying && text.Length > 0 && !PromptContextDetector.SafeIsMatch(ControlCharsRe, text) && _executionNextId < long.MaxValue)
                     {
                         FinishExecution(null);
                         var execution = new TerminalCommandExecution(++_executionNextId, Truncate(text, 256), false, null);
@@ -362,7 +332,7 @@ internal sealed class CommandTracker
         _osc3008Order.Clear();
         foreach (var probe in _probes)
             probe.Osc3008Id = null;
-        _lastPromptSignature = null;
+        _prompts.ResetSignature();
         _agentCommandAt = null;
     }
 
@@ -482,7 +452,7 @@ internal sealed class CommandTracker
                 continue;
             var key = field[..separator];
             var value = field[(separator + 1)..];
-            if (start && key == "type" && Osc3008TypeRe.IsMatch(value))
+            if (start && key == "type" && PromptContextDetector.SafeIsMatch(Osc3008TypeRe, value))
                 type = value;
             else if (!start && key == "exit" && value is "success" or "failure" or "crash" or "interrupt")
                 exit = value;
@@ -511,7 +481,7 @@ internal sealed class CommandTracker
         }
         if (col < 0)
         {
-            var m = CmdSplitRe.Match(full);
+            var m = PromptContextDetector.SafeMatch(CmdSplitRe, full);
             if (!m.Success || m.Groups[2].Length == 0)
                 return "";
             col = full.Length - m.Groups[2].Length;
@@ -520,7 +490,7 @@ internal sealed class CommandTracker
         {
             // tmux can pass B through before flushing its buffered prompt, leaving B at
             // column zero. Recover only strong user@host or PowerShell prompt shapes.
-            var prompt = CmdSplitRe.Match(full);
+            var prompt = PromptContextDetector.SafeMatch(CmdSplitRe, full);
             if (prompt.Success && IsShellPrompt(prompt.Groups[1].Value))
                 col = full.Length - prompt.Groups[2].Length;
         }
@@ -531,7 +501,7 @@ internal sealed class CommandTracker
 
     /// <summary>A prompt shape only a shell draws: user@host, or PowerShell's.</summary>
     private static bool IsShellPrompt(string prompt) =>
-        UserHostPromptRe.IsMatch(prompt) || prompt.StartsWith("PS ", StringComparison.Ordinal);
+        PromptContextDetector.SafeIsMatch(UserHostPromptRe, prompt) || prompt.StartsWith("PS ", StringComparison.Ordinal);
 
     /// <summary>
     /// A persistent session is sending its screen again after a reattach. The marks in it
@@ -583,7 +553,7 @@ internal sealed class CommandTracker
     {
         if (_oscSeen || _buffer.IsAlternate)
             return;
-        _lastPromptSignature = null;
+        _prompts.ResetSignature();
         var marker = _buffer.CreateMarker(_buffer.CursorLine);
         if (marker is null)
             return;
@@ -603,7 +573,9 @@ internal sealed class CommandTracker
             while (row > 0 && _buffer.IsWrapped(row))
                 row--;
             var lineText = _buffer.LineText(row) ?? "";
-            var match = CmdPromptRe.IsMatch(lineText) ? CmdSplitRe.Match(lineText) : null;
+            var match = PromptContextDetector.SafeIsMatch(CmdPromptRe, lineText)
+                ? PromptContextDetector.SafeMatch(CmdSplitRe, lineText)
+                : null;
             if (match is not { Success: true })
                 return null;
             // An agent's editor line ("> fix it") is not a command line; a shell prompt
@@ -723,7 +695,7 @@ internal sealed class CommandTracker
     private void NotifyCommandMarked(int line)
     {
         var text = (_buffer.LineText(line) ?? "").Trim();
-        var match = CmdSplitRe.Match(text);
+        var match = PromptContextDetector.SafeMatch(CmdSplitRe, text);
         var command = match.Success ? match.Groups[2].Value : text;
         if (command.Length > 0 && !_replaying)
             CommandMarked?.Invoke(command);
@@ -845,7 +817,7 @@ internal sealed class CommandTracker
             var text = _buffer.LineText(row);
             if (text is null)
                 return null;
-            var m = CmdSplitRe.Match(text);
+            var m = PromptContextDetector.SafeMatch(CmdSplitRe, text);
             return m.Success ? m.Groups[1].Value : null;
         }
 
@@ -960,11 +932,9 @@ internal sealed class CommandTracker
         var text = (_buffer.LineText(row) ?? "").TrimEnd();
         if (text.Length == 0)
             return false;
-        var split = CmdSplitRe.Match(text);
+        var split = PromptContextDetector.SafeMatch(CmdSplitRe, text);
         return (split.Success && split.Groups[2].Length == 0)
-            || WindowsIdlePromptRe.IsMatch(text) || UnixSpacedIdlePromptRe.IsMatch(text)
-            || UnixBracketedIdlePromptRe.IsMatch(text) || CiscoIosPromptRe.IsMatch(text)
-            || CiscoXrPromptRe.IsMatch(text) || JunosPromptRe.IsMatch(text) || NokiaMdCliPromptRe.IsMatch(text);
+            || PromptContextDetector.IsKnownIdlePrompt(text);
     }
 
     private void HistoryFlush(Mark entry, bool lost)
@@ -1017,17 +987,8 @@ internal sealed class CommandTracker
         var text = _buffer.LineText(line);
         if (text is null)
             return null;
-        var split = CmdSplitRe.Match(text);
-        if (!split.Success)
-            return null;
-        var prompt = split.Groups[1].Value;
-        foreach (var re in new[] { WindowsIdlePromptRe, UnixSpacedIdlePromptRe, UnixBracketedIdlePromptRe, HistoryCompactPromptRe })
-        {
-            var m = re.Match(prompt);
-            if (m.Success)
-                return Truncate(m.Groups[1].Value.Trim(), 1024);
-        }
-        return null;
+        var split = PromptContextDetector.SafeMatch(CmdSplitRe, text);
+        return split.Success ? PromptContextDetector.ExtractDirectory(split.Groups[1].Value) : null;
     }
 
     // ---- prompt context -------------------------------------------------------------------
@@ -1037,13 +998,9 @@ internal sealed class CommandTracker
     /// non-network platform withdraws an earlier hint (the session's icon changed).</summary>
     public void SetPromptPlatform(string? platform)
     {
-        var hint = platform is "cisco" or "juniper" or "nokia" ? platform : null;
-        if (hint == _promptHint)
-            return;
-        _promptHint = hint;
-        ReportPromptContext(force: false);
+        if (_prompts.SetPlatformHint(platform))
+            ReportPromptContext(force: false);
     }
-
 
     /// <summary>Reports the current location label from a completed known prompt. The cursor
     /// line is part of the signature, so returning to the same context after a command still
@@ -1052,152 +1009,11 @@ internal sealed class CommandTracker
     {
         if (_phase == CommandPhase.Executing || _buffer.IsAlternate)
             return null;
-        var row = _buffer.CursorLine;
-        var start = row;
-        while (start > 0 && _buffer.IsWrapped(start))
-            start--;
-        var promptText = _buffer.LineText(start);
-        if (promptText is null)
+        if (_prompts.Detect(force) is not var (result, changed))
             return null;
-        for (var next = start + 1; next <= row && promptText.Length < 512; next++)
-        {
-            var text = _buffer.LineText(next);
-            if (text is null || !_buffer.IsWrapped(next))
-                break;
-            promptText += text;
-        }
-        string? label = null, platform = null;
-        Match match;
-        if ((match = WindowsIdlePromptRe.Match(promptText)).Success)
-        {
-            label = match.Groups[1].Value;
-        }
-        else if ((match = PowerShellProviderPromptRe.Match(promptText)).Success)
-        {
-            label = match.Groups[1].Value;
-        }
-        else if ((match = UnixBracketedIdlePromptRe.Match(promptText)).Success)
-        {
-            label = match.Groups[1].Value.Trim();
-        }
-        else if ((match = UnixSpacedIdlePromptRe.Match(promptText)).Success)
-        {
-            label = match.Groups[1].Value.Trim();
-        }
-        else if (NokiaMdCliPromptRe.IsMatch(promptText) && start > 0)
-        {
-            var contextText = !_buffer.IsWrapped(start - 1) ? _buffer.LineText(start - 1) ?? "" : "";
-            var context = NokiaMdCliContextRe.Match(contextText);
-            if (context.Success)
-            {
-                var modeKey = context.Groups[4].Success ? context.Groups[4].Value : context.Groups[2].Value;
-                var path = context.Groups[3].Value;
-                if (context.Groups[4].Success)
-                    path = path[(context.Groups[4].Value.Length + 1)..];
-                label = path.Length > 0 ? path : "MD-CLI";
-                if (modeKey.Length > 0)
-                    label = NokiaMdCliModes[modeKey] + (context.Groups[1].Success ? "*" : "") + " · " + label;
-                platform = "nokia";
-                _promptPlatform = platform;
-            }
-        }
-        else
-        {
-            var junos = JunosPromptRe.Match(promptText);
-            if (junos.Success)
-            {
-                var previousText = start > 0 && !_buffer.IsWrapped(start - 1) ? _buffer.LineText(start - 1) ?? "" : "";
-                var edit = JunosEditContextRe.Match(previousText);
-                if (junos.Groups[1].Value == "#" && edit.Success)
-                {
-                    var hierarchy = edit.Groups[2].Success && edit.Groups[2].Length > 0 ? "/" + edit.Groups[2].Value : "/";
-                    label = (edit.Groups[1].Success && edit.Groups[1].Length > 0 ? edit.Groups[1].Value + " · " : "")
-                        + "configure · " + hierarchy;
-                    platform = "juniper";
-                    _promptPlatform = platform;
-                }
-                else if (junos.Groups[1].Value == ">")
-                {
-                    var role = JunosRoleRe.Match(previousText);
-                    var seen = _promptPlatform == "juniper" || role.Success || RecentLineMatches(start, JunosBannerRe, 40);
-                    if (seen || _promptHint == "juniper")
-                    {
-                        label = (role.Success ? role.Groups[1].Value + " · " : "") + "operational";
-                        platform = "juniper";
-                        if (seen)
-                            _promptPlatform = platform; // only screen evidence outlives the hint
-                    }
-                }
-            }
-            if (label is null)
-            {
-                var xr = CiscoXrPromptRe.Match(promptText);
-                var ios = xr.Success ? Match.Empty : CiscoIosPromptRe.Match(promptText);
-                if (xr.Success || ios.Success)
-                {
-                    var isXr = xr.Success;
-                    var location = isXr ? xr.Groups[1].Value : "";
-                    var mode = isXr ? xr.Groups[3].Value : ios.Groups[2].Value;
-                    var terminator = isXr ? xr.Groups[4].Value : ios.Groups[3].Value;
-                    var seen = isXr || _promptPlatform == "cisco" || RecentLineMatches(start, CiscoBannerRe, 60);
-                    var known = seen || _promptHint == "cisco";
-                    // A mode suffix is safe network-CLI context; a bare EXEC prompt needs Cisco
-                    // evidence so "server#" stays an ordinary Unix root prompt.
-                    if (mode.Length > 0 || known)
-                    {
-                        var parts = CiscoModeParts(mode, terminator, isXr);
-                        if (location.Length > 0)
-                            parts.Insert(0, location);
-                        label = string.Join(" · ", parts);
-                        if (known)
-                            platform = "cisco";
-                        if (seen)
-                            _promptPlatform = platform; // only screen evidence outlives the hint
-                    }
-                }
-            }
-        }
-        if (label is null)
-            return null;
-        var signature = row + ":" + platform + ":" + label;
-        if (!force && signature == _lastPromptSignature)
-            return (label, platform);
-        _lastPromptSignature = signature;
-        PromptContext?.Invoke(label, platform);
-        return (label, platform);
-    }
-
-    private bool RecentLineMatches(int start, Regex pattern, int limit)
-    {
-        for (var scan = start - 1; scan >= Math.Max(0, start - limit); scan--)
-        {
-            if (_buffer.LineText(scan) is { } text && pattern.IsMatch(text))
-                return true;
-        }
-        return false;
-    }
-
-    private static List<string> CiscoModeParts(string mode, string terminator, bool isXr)
-    {
-        if (mode.Length == 0)
-            return [terminator == ">" ? "user EXEC" : isXr ? "EXEC" : "privileged EXEC"];
-        if (mode == "admin")
-            return ["administration"];
-        if (mode == "admin-config")
-            return ["administration", "configure"];
-        if (mode.StartsWith("admin-config-", StringComparison.Ordinal))
-        {
-            var sub = mode[13..];
-            return ["administration", "configure", CiscoSubmodeNames.GetValueOrDefault(sub) ?? sub.Replace('-', ' ')];
-        }
-        if (mode == "config")
-            return ["configure"];
-        if (mode.StartsWith("config-", StringComparison.Ordinal))
-        {
-            var sub = mode[7..];
-            return ["configure", CiscoSubmodeNames.GetValueOrDefault(sub) ?? sub.Replace('-', ' ')];
-        }
-        return [mode.Replace('-', ' ')];
+        if (changed)
+            PromptContext?.Invoke(result.Context, result.Platform);
+        return result;
     }
 
     private static string Truncate(string text, int maxLength) =>

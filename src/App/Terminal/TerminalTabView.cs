@@ -154,6 +154,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _credentials = credentials;
         _knownHosts = knownHosts;
         _sshKeys = sshKeys;
+        _sshfs = new SshfsMountCoordinator(knownHosts, sshKeys, ValidateKeyAsync, _closing.Token);
         _tmuxReservation = App.TmuxSlots.CreateOwner(tab.Session.Id);
         _resumeTmuxSlot = resumeTmuxSlot;
 
@@ -2526,9 +2527,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         return null;
     }
 
-    private Interop.SshfsMount? _sshfsMount;
-    private string? _sshfsTarget;
-    private Task<Interop.SshfsMount?>? _sshfsMounting;
+    private readonly SshfsMountCoordinator _sshfs;
     private readonly CancellationTokenSource _closing = new(); // cancelled when the tab closes (SSHFS mounts, management connections)
 
     /// <summary>Opens a local directory directly. Remote sessions mount the SFTP path
@@ -2545,107 +2544,11 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         // as edited since. Like the file pane, the mount follows the terminal.
         var live = CurrentLogin
             ?? throw new InvalidOperationException("The session is disconnected. Reconnect it to open its files in File Explorer.");
-        var session = live.Session;
-        // SSHFS-Win dials the host itself, so it cannot follow a jump host or proxy.
-        if (live.Route.Jumps.Count > 0 || session.JumpHostId is not null || JumpRoute.ActiveProxy(session) is not null)
-            throw new IOException("File Explorer connects straight to the host, so it cannot open a session "
-                + "reached through a jump host or proxy. Use the file pane instead.");
-        var mount = _sshfsMount;
-        // A mount made for another target (the session was edited and reconnected) is replaced.
-        // IsAlive probes the mounted root, which can stall on a hung remote mount, so check off the UI thread.
-        var mountAlive = mount is not null
-            && _sshfsTarget == SshfsTarget(session)
-            && await Task.Run(() => mount.IsAlive, _closing.Token);
-        if (_disposed)
+        var mount = await _sshfs.EnsureMountedAsync(live.Session, live.Secret, live.Route.Jumps.Count > 0);
+        if (mount is null || _disposed)
             return;
-        if (!mountAlive)
-        {
-            var mounting = _sshfsMounting ??= MountSshfsAsync(session, live.Secret);
-            try
-            {
-                mount = await mounting;
-            }
-            finally
-            {
-                if (ReferenceEquals(_sshfsMounting, mounting))
-                    _sshfsMounting = null;
-            }
-            if (mount is null || _disposed)
-                return; // the tab closed during the mount
-        }
-        Interop.SshfsIntegration.OpenInExplorer(mount!.Root, path);
+        Interop.SshfsIntegration.OpenInExplorer(mount.Root, path);
     }
-
-    private async Task<Interop.SshfsMount?> MountSshfsAsync(Session session, string secret)
-    {
-        var token = _closing.Token;
-        var stale = _sshfsMount;
-        _sshfsMount = null;
-        var password = session.AuthMethod == AuthMethod.Password ? secret : null;
-        Interop.SshfsMount mount;
-        try
-        {
-            // The key file is checked against its registered fingerprint, as every
-            // connection's is; the terminal's check was made when it connected.
-            var keyPath = session.AuthMethod == AuthMethod.PrivateKey ? await ValidateSshfsKeyAsync(session, token) : null;
-            // Killing a dead mount's process can wait, so it happens off the UI thread too.
-            mount = await Task.Run(() =>
-            {
-                stale?.Dispose();
-                return Interop.SshfsIntegration.Mount(session, _knownHosts, password, keyPath, token);
-            }, token);
-        }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
-        {
-            return null;
-        }
-        catch (OperationCanceledException)
-        {
-            throw new IOException("The changed SSH key was not accepted.");
-        }
-        if (_disposed)
-        {
-            // The tab closed during the mount; its Dispose could not see this process.
-            _ = Task.Run(mount.Dispose);
-            return null;
-        }
-        _sshfsMount = mount;
-        _sshfsTarget = SshfsTarget(session);
-        return mount;
-    }
-
-    /// <summary>The key file an Explorer mount logs in with, once its fingerprint is checked.</summary>
-    private async Task<string> ValidateSshfsKeyAsync(Session session, CancellationToken token)
-    {
-        const string encrypted = "The key is passphrase-protected, and sshfs cannot prompt for it. "
-            + "Use a passphrase-free key for the Explorer mount.";
-        if (session.PrivateKeyId is not { } keyId || _sshKeys.Find(keyId) is not { } registered)
-            throw new IOException("The session does not have a registered SSH key.");
-        if (registered.IsEncrypted == true)
-            throw new IOException(encrypted);
-        SshKeyReference key;
-        try
-        {
-            key = await ValidateKeyAsync(keyId, null, token);
-        }
-        catch (SshKeyPassphraseException)
-        {
-            throw new IOException(encrypted);
-        }
-        catch (InvalidDataException ex)
-        {
-            throw new IOException(ex.Message, ex);
-        }
-        if (key.IsEncrypted == true)
-            throw new IOException(encrypted);
-        return key.Path;
-    }
-
-    /// <summary>What an SSHFS mount was made for: host, port and login (the registered key,
-    /// whose current file the mount reads, not a path the session once had).</summary>
-    private static string SshfsTarget(Session session) =>
-        $"{session.Username}@{session.Host}:{SessionEndpoint.EffectivePort(session)}|{session.AuthMethod}|"
-        + (session.AuthMethod == AuthMethod.PrivateKey ? session.PrivateKeyId?.ToString() : null);
 
     /// <summary>Connect factory handed to the pane: reuses the live connection's login, secret
     /// and route and the shared host-key trust. Stops when the pane gives up (a newer
@@ -2701,13 +2604,16 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 VerticalAlignment = VerticalAlignment.Center,
                 Spacing = 12,
             };
-            panel.Children.Add(new FontIcon { Glyph = "", FontSize = 44, HorizontalAlignment = HorizontalAlignment.Center });
-            panel.Children.Add(new TextBlock
+            var icon = new FontIcon { Glyph = "", FontSize = 44, HorizontalAlignment = HorizontalAlignment.Center };
+            ThemeResources.SetBrush(icon, FontIcon.ForegroundProperty, "SessionLockOverlayForegroundBrush");
+            var label = new TextBlock
             {
                 Text = "Session locked — click to unlock",
-                Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 220, 220, 220)),
                 HorizontalAlignment = HorizontalAlignment.Center,
-            });
+            };
+            ThemeResources.SetBrush(label, TextBlock.ForegroundProperty, "SessionLockOverlayForegroundBrush");
+            panel.Children.Add(icon);
+            panel.Children.Add(label);
             // A Button so the overlay is focusable and swallows keyboard input while locked.
             _lockOverlay = new Button
             {
@@ -2716,10 +2622,10 @@ public sealed partial class TerminalTabView : Grid, IDisposable
                 VerticalAlignment = VerticalAlignment.Stretch,
                 HorizontalContentAlignment = HorizontalAlignment.Center,
                 VerticalContentAlignment = VerticalAlignment.Center,
-                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(242, 24, 24, 24)),
                 BorderThickness = new Thickness(0),
                 CornerRadius = new CornerRadius(0),
             };
+            ThemeResources.SetBrush(_lockOverlay, Control.BackgroundProperty, "SessionLockOverlayBackgroundBrush");
             _lockOverlay.Click += (_, _) => UnlockRequested?.Invoke();
             Grid.SetColumnSpan(_lockOverlay, 3); // cover the file pane and splitter too
         }
@@ -2753,15 +2659,13 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _agentPoll = null;
         _commitTick?.Stop();
         _commitTick = null;
-        var sshfsMount = _sshfsMount;
-        _sshfsMount = null;
         CleanupActions.Run(App.ReportRecoverableError,
             () => _connection.Dispose(),
             () => _closing.Cancel(), // SSHFS mounts and management connections still coming up stop
             () => _tmuxReservation.Dispose(),
             () => { if (IsFilePaneOpen) SaveFilePaneWidth(); },
             () => _filePane?.Dispose(),
-            () => { if (sshfsMount is not null) _ = Task.Run(sshfsMount.Dispose); },
+            () => _sshfs.Dispose(),
             () => _rewindPlayer?.Dispose(),
             () => _terminal.Dispose(),
             () => _capture?.Dispose());

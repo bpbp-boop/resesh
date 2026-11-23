@@ -36,7 +36,8 @@ public sealed class HighlightsStore
     private HighlightsStore() { }
 
     /// <summary>Raised after a write to the live store changes the rules, on the writer's
-    /// thread. A draft never raises it: its edits reach terminals only as a preview.</summary>
+    /// thread after the store's lock is released. A draft never raises it: its edits reach
+    /// terminals only as a preview.</summary>
     public event Action? Changed;
 
     /// <summary>Set by <see cref="Load"/> when the file was recovered or unreadable.</summary>
@@ -65,6 +66,7 @@ public sealed class HighlightsStore
         var baseline = draft._draftBaseline
             ?? throw new ArgumentException("The store is not an editing draft.", nameof(draft));
         var edited = draft.ExportBackup();
+        bool notify;
         lock (_gate)
         {
             var candidate = CopyState();
@@ -83,9 +85,11 @@ public sealed class HighlightsStore
             MergeDraftRules(custom, baseline.CustomRules, edited.CustomRules);
             candidate.Custom = custom.Values.ToList();
             MergeDraftRules(candidate.Overrides, baseline.BuiltinOverrides, edited.BuiltinOverrides);
-            Save(candidate);
+            notify = Save(candidate);
         }
         draft._draftBaseline = edited;
+        if (notify)
+            Changed?.Invoke();
     }
 
     private static void MergeDraftRules(Dictionary<string, HighlightRule> target,
@@ -199,6 +203,7 @@ public sealed class HighlightsStore
     /// </summary>
     public void MergeBackup(HighlightBackupData imported)
     {
+        bool notify;
         lock (_gate)
         {
             var candidate = CopyState();
@@ -238,14 +243,17 @@ public sealed class HighlightsStore
                     candidate.Overrides[rule.Id] = rule;
                 }
             }
-            Save(candidate);
+            notify = Save(candidate);
         }
+        if (notify)
+            Changed?.Invoke();
     }
 
     /// <summary>Sets a rule's global enabled state. For built-ins this stores a delta
     /// (removed again when it matches the shipped default); custom rules are rewritten.</summary>
     public void SetEnabled(string id, bool enabled)
     {
+        var notify = false;
         lock (_gate)
         {
             var custom = _custom.FindIndex(r => r.Id == id);
@@ -263,8 +271,10 @@ public sealed class HighlightsStore
                 if (enabled != builtin!.Enabled)
                     (enabled ? candidate.Enabled : candidate.Disabled).Add(id);
             }
-            Save(candidate);
+            notify = Save(candidate);
         }
+        if (notify)
+            Changed?.Invoke();
     }
 
     /// <summary>Adds or replaces (by id) a user-defined rule. The pattern must already be
@@ -274,6 +284,7 @@ public sealed class HighlightsStore
     {
         if (string.IsNullOrWhiteSpace(rule.Id))
             throw new ArgumentException("Custom rule needs an id.", nameof(rule));
+        bool notify;
         lock (_gate)
         {
             var candidate = CopyState();
@@ -283,20 +294,25 @@ public sealed class HighlightsStore
                 candidate.Custom[index] = rule;
             else
                 candidate.Custom.Add(rule);
-            Save(candidate);
+            notify = Save(candidate);
         }
+        if (notify)
+            Changed?.Invoke();
     }
 
     public bool RemoveCustom(string id)
     {
+        bool notify;
         lock (_gate)
         {
             if (!_custom.Any(r => r.Id == id)) return false;
             var candidate = CopyState();
             candidate.Custom.RemoveAll(r => r.Id == id);
-            Save(candidate);
-            return true;
+            notify = Save(candidate);
         }
+        if (notify)
+            Changed?.Invoke();
+        return true;
     }
 
     /// <summary>Replaces a built-in rule's definition (name, pattern, style). Enabled state
@@ -305,6 +321,7 @@ public sealed class HighlightsStore
     /// stored, same as an enabled delta that returns to the default.</summary>
     public void SaveBuiltinOverride(HighlightRule rule)
     {
+        bool notify;
         lock (_gate)
         {
             if (BuiltinHighlights.Rules.FirstOrDefault(r => r.Id == rule.Id) is not { } builtin)
@@ -315,22 +332,27 @@ public sealed class HighlightsStore
                 candidate.Overrides.Remove(builtin.Id);
             else
                 candidate.Overrides[builtin.Id] = normalized;
-            Save(candidate);
+            notify = Save(candidate);
         }
+        if (notify)
+            Changed?.Invoke();
     }
 
     /// <summary>Drops a built-in rule's definition override, restoring the shipped
     /// definition. The enabled state is untouched — that's the checkbox's job.</summary>
     public bool ResetBuiltin(string id)
     {
+        bool notify;
         lock (_gate)
         {
             if (!_overrides.ContainsKey(id)) return false;
             var candidate = CopyState();
             candidate.Overrides.Remove(id);
-            Save(candidate);
-            return true;
+            notify = Save(candidate);
         }
+        if (notify)
+            Changed?.Invoke();
+        return true;
     }
 
     /// <summary>Whether a built-in rule's definition deviates from the shipped default.</summary>
@@ -365,7 +387,7 @@ public sealed class HighlightsStore
             ? over with { Id = builtin.Id, Pack = builtin.Pack }
             : builtin;
 
-    private void Save(StoreState candidate)
+    private bool Save(StoreState candidate)
     {
         if (_file is not null)
         {
@@ -384,8 +406,7 @@ public sealed class HighlightsStore
         _disabled = candidate.Disabled;
         _custom = candidate.Custom;
         _overrides = candidate.Overrides;
-        if (_file is not null)
-            Changed?.Invoke();
+        return _file is not null;
     }
 
     private static StoreData? Read(string path)
