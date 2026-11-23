@@ -73,7 +73,7 @@ public sealed partial class TerminalTabView
         var timer = DispatcherQueue.CreateTimer();
         timer.Interval = SerialPortPollInterval;
         var checking = false;
-        timer.OnTick(async () =>
+        timer.OnTickAsync(async () =>
         {
             if (_disposed || connection.Token.IsCancellationRequested || _tab.State != TabConnectionState.Disconnected)
             {

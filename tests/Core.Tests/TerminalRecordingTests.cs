@@ -398,6 +398,31 @@ public sealed class TerminalRecordingTests : IDisposable
         Assert.Empty(renderer.Flush());
     }
 
+    [Fact]
+    public void BackgroundCompressionRecoversIfAChunkThrows()
+    {
+        var started = DateTimeOffset.UtcNow;
+        using var capture = new TerminalCapture(80, 24, startedAt: started, maximumBytes: 10 * 1024 * 1024);
+        var failedOnce = false;
+        var secondCompressed = new ManualResetEventSlim(false);
+        capture.ChunkCompressed = () =>
+        {
+            if (!failedOnce)
+            {
+                failedOnce = true;
+                throw new InvalidOperationException("simulated background failure");
+            }
+            secondCompressed.Set();
+        };
+
+        var payload = Encoding.UTF8.GetBytes(new string('a', 70 * 1024));
+        capture.CaptureKeyframe(payload, 80, 24, started.ToUnixTimeMilliseconds());
+        capture.CaptureKeyframe(payload, 80, 24, started.AddSeconds(1).ToUnixTimeMilliseconds());
+        capture.CaptureKeyframe(payload, 80, 24, started.AddSeconds(2).ToUnixTimeMilliseconds());
+
+        Assert.True(secondCompressed.Wait(TimeSpan.FromSeconds(5)));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))

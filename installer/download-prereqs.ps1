@@ -22,6 +22,17 @@ foreach ($download in $downloads) {
     Invoke-WebRequest -Uri $download.Url -OutFile $target -UseBasicParsing
 
     if ((Get-Item $target).Length -lt 100KB) {
+        Remove-Item $target -Force -ErrorAction SilentlyContinue
         throw "$($download.Name) is suspiciously small; the download likely failed."
+    }
+
+    $signature = Get-AuthenticodeSignature $target
+    if ($signature.Status -ne "Valid") {
+        Remove-Item $target -Force -ErrorAction SilentlyContinue
+        throw "$($download.Name) has invalid Authenticode status '$($signature.Status)'."
+    }
+    if ($signature.SignerCertificate.Subject -notmatch "CN=Microsoft Corporation") {
+        Remove-Item $target -Force -ErrorAction SilentlyContinue
+        throw "$($download.Name) has unexpected signer '$($signature.SignerCertificate.Subject)'."
     }
 }

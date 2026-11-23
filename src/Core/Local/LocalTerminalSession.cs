@@ -97,6 +97,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
             throw _lifecycle.CannotConnect();
         SafeFileHandle? inputRead = null, outputWrite = null;
         var attributes = IntPtr.Zero;
+        var attributesInitialized = false;
         var environment = IntPtr.Zero;
         var processThread = IntPtr.Zero;
         var published = false;
@@ -122,8 +123,10 @@ public sealed class LocalTerminalSession : ITerminalBackend
             var listSize = IntPtr.Zero;
             InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref listSize);
             attributes = Marshal.AllocHGlobal(listSize);
-            if (!InitializeProcThreadAttributeList(attributes, 1, 0, ref listSize)
-                || !UpdateProcThreadAttribute(attributes, 0, (IntPtr)PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
+            if (!InitializeProcThreadAttributeList(attributes, 1, 0, ref listSize))
+                throw new LocalSessionException("Could not prepare the process attributes.", new Win32Exception());
+            attributesInitialized = true;
+            if (!UpdateProcThreadAttribute(attributes, 0, (IntPtr)PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
                     _console, (IntPtr)IntPtr.Size, IntPtr.Zero, IntPtr.Zero))
                 throw new LocalSessionException("Could not prepare the process attributes.", new Win32Exception());
 
@@ -228,7 +231,8 @@ public sealed class LocalTerminalSession : ITerminalBackend
                 CloseHandle(processThread);
             if (attributes != IntPtr.Zero)
             {
-                DeleteProcThreadAttributeList(attributes);
+                if (attributesInitialized)
+                    DeleteProcThreadAttributeList(attributes);
                 Marshal.FreeHGlobal(attributes);
             }
             if (environment != IntPtr.Zero)
@@ -307,18 +311,22 @@ public sealed class LocalTerminalSession : ITerminalBackend
     }
 
     private readonly object _consoleGate = new();
+    private readonly object _writeGate = new();
 
     public void Write(byte[] data)
     {
-        try
+        lock (_writeGate)
         {
-            var stream = _inputStream;
-            if (stream is null || _lifecycle.IsStopped)
-                return;
-            stream.Write(data, 0, data.Length);
-            stream.Flush();
+            try
+            {
+                var stream = _inputStream;
+                if (stream is null || _lifecycle.IsStopped)
+                    return;
+                stream.Write(data, 0, data.Length);
+                stream.Flush();
+            }
+            catch (Exception e) when (e is IOException or ObjectDisposedException) { }
         }
-        catch (Exception e) when (e is IOException or ObjectDisposedException) { }
     }
 
     public bool Resize(int columns, int rows, int pixelWidth = 0, int pixelHeight = 0)
@@ -459,7 +467,11 @@ public sealed class LocalTerminalSession : ITerminalBackend
                 try
                 {
                     if (!QueryInformationJobObject(_job, JobObjectBasicProcessIdList, buffer, size, IntPtr.Zero))
+                    {
+                        if (Marshal.GetLastWin32Error() == ERROR_MORE_DATA && capacity < 512)
+                            continue; // buffer was too small for the whole tree
                         return [];
+                    }
                     var assigned = (int)(uint)Marshal.ReadInt32(buffer);
                     var returned = (int)(uint)Marshal.ReadInt32(buffer, sizeof(uint));
                     if (returned < assigned && assigned <= 512)
@@ -511,8 +523,11 @@ public sealed class LocalTerminalSession : ITerminalBackend
             }
         }
         CloseConsole();
-        try { _inputStream?.Dispose(); } catch (IOException) { }
-        _inputStream = null;
+        lock (_writeGate)
+        {
+            try { _inputStream?.Dispose(); } catch (IOException) { }
+            _inputStream = null;
+        }
         _inputWrite?.Dispose();
         _inputWrite = null;
         _outputRead?.Dispose(); // unblocks the reader thread
@@ -601,6 +616,7 @@ public sealed class LocalTerminalSession : ITerminalBackend
     private const int STARTF_USESTDHANDLES = 0x00000100;
     private const int JobObjectExtendedLimitInformation = 9;
     private const int JobObjectBasicProcessIdList = 3;
+    private const int ERROR_MORE_DATA = 234;
     private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
     private const uint INFINITE = 0xFFFFFFFF;
     private const int ProcessBasicInformation = 0;

@@ -197,6 +197,7 @@ public sealed partial class HistoryView : UserControl
         _loadVersion++;
         _searchCancellation?.Cancel();
         _searchDebounce?.Stop();
+        _feedbackTimer?.Stop();
         Visibility = Visibility.Collapsed;
         ExitCompare();
         ResultList.ItemsSource = null;

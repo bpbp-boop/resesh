@@ -45,6 +45,8 @@ public partial class App : Application
     public static Resesh.Core.History.CommandHistoryStore History { get; } =
         new(Program.StorePath("history", Resesh.Core.History.CommandHistoryStore.DefaultDirectory));
     private static AccessibilitySettings Accessibility { get; } = new();
+    private static UISettings SystemColors { get; } = new();
+    private static readonly object CrashLogGate = new();
     public static bool IsHighContrast => Accessibility.HighContrast;
 
 
@@ -67,7 +69,7 @@ public partial class App : Application
     /// <summary>Whether Windows is in light mode right now (its default app background is light).</summary>
     public static bool SystemIsLight()
     {
-        var background = new UISettings().GetColorValue(UIColorType.Background);
+        var background = SystemColors.GetColorValue(UIColorType.Background);
         var luminance = (0.2126 * background.R) + (0.7152 * background.G) + (0.0722 * background.B);
         return luminance >= 128;
     }
@@ -217,7 +219,12 @@ public partial class App : Application
         {
             var dir = Program.LogDirectory;
             Directory.CreateDirectory(dir);
-            File.AppendAllText(Path.Combine(dir, "crash.log"), $"[{DateTime.Now:O}] {ex}\n\n");
+            var bytes = System.Text.Encoding.UTF8.GetBytes($"[{DateTime.Now:O}] {ex}\n\n");
+            lock (CrashLogGate)
+            {
+                using var stream = new FileStream(Path.Combine(dir, "crash.log"), FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                stream.Write(bytes);
+            }
         }
         catch
         {
@@ -508,6 +515,8 @@ public partial class App : Application
         {
             _windows.Remove(window);
             QueuePinnedSessionsSave(); // its pinned tabs no longer reopen, unless it was the last
+            if (ReferenceEquals(_lastActiveWindow, window))
+                _lastActiveWindow = _windows.LastOrDefault();
             RefreshWindowTitles();
             RefreshWorkspaceRails(); // its workspaces are no longer open elsewhere
         };

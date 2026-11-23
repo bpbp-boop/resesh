@@ -466,19 +466,24 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
         return sb.ToString();
     }
 
+    private readonly object _writeGate = new();
+
     public void Write(byte[] data)
     {
-        try
+        lock (_writeGate)
         {
-            var shell = _shell;
-            if (shell is null || _lifecycle.IsStopped || _client?.IsConnected != true)
-                return;
-            shell.Write(data, 0, data.Length);
-            shell.Flush();
+            try
+            {
+                var shell = _shell;
+                if (shell is null || _lifecycle.IsStopped || _client?.IsConnected != true)
+                    return;
+                shell.Write(data, 0, data.Length);
+                shell.Flush();
+            }
+            catch (ObjectDisposedException) { }
+            catch (IOException) { }
+            catch (SshException) { } // remote already gone ("Client not connected."); reader loop reports it
         }
-        catch (ObjectDisposedException) { }
-        catch (IOException) { }
-        catch (SshException) { } // remote already gone ("Client not connected."); reader loop reports it
     }
 
     public bool Resize(int columns, int rows, int pixelWidth = 0, int pixelHeight = 0) =>
@@ -579,9 +584,14 @@ public sealed class SshTerminalSession : Backend.ITerminalBackend
     private void Teardown()
     {
         Interlocked.Exchange(ref _watchdog, null)?.Dispose();
-        Interlocked.Exchange(ref _readerCts, null)?.Cancel();
+        var readerCts = Interlocked.Exchange(ref _readerCts, null);
+        readerCts?.Cancel();
         try { Interlocked.Exchange(ref _shell, null)?.Dispose(); } catch (ObjectDisposedException) { }
-        try { Interlocked.Exchange(ref _readerTask, null)?.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
+        var readerTask = Interlocked.Exchange(ref _readerTask, null);
+        var readerExited = true;
+        try { readerExited = readerTask is null || readerTask.Wait(TimeSpan.FromSeconds(2)); } catch (AggregateException) { }
+        if (readerExited)
+            readerCts?.Dispose();
 
         Volatile.Read(ref _tunnels)?.Dispose(); // idempotent; kept so Tunnels still lists what ran
         var client = Interlocked.Exchange(ref _client, null);

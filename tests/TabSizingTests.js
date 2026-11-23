@@ -58,7 +58,8 @@ test("the tab strip owns its motion instead of WinUI's sequenced container trans
 });
 
 test("tab changes snapshot where tabs are drawn before the collection moves them", () => {
-  assert.match(code, /Group\.Tabs\.CollectionChanged \+= \(_, e\) =>\s*\{\s*CaptureTabMotion\(\);/);
+  assert.match(code, /Group\.Tabs\.CollectionChanged \+= GroupTabs_CollectionChanged;/);
+  assert.match(code, /private void GroupTabs_CollectionChanged\([^)]*\)\s*\{\s*CaptureTabMotion\(\);/);
 });
 
 test("a drop settles from the drag preview over the strip colour", () => {

@@ -119,20 +119,23 @@ public sealed unsafe partial class NativeTerminalSurface
         _renderThread.Start();
     }
 
-    private void StopRenderThread()
+    private bool StopRenderThread()
     {
         _renderStop = true;
-        _renderWake.Set();
+        try { _renderWake.Set(); } catch (ObjectDisposedException) { }
+        var joined = true;
         if (_renderThread is { } thread && thread != Thread.CurrentThread)
-            thread.Join(TimeSpan.FromSeconds(2));
+            joined = thread.Join(TimeSpan.FromSeconds(2));
         _renderThread = null;
+        return joined;
     }
 
     /// <summary>Asks for a frame. Safe from any thread; requests before the frame coalesce.</summary>
     private void RequestFrame()
     {
-        if (!_disposed)
-            _renderWake.Set();
+        if (_disposed)
+            return;
+        try { _renderWake.Set(); } catch (ObjectDisposedException) { }
     }
 
     [DllImport("dwmapi.dll")]
@@ -346,13 +349,13 @@ public sealed unsafe partial class NativeTerminalSurface
         _renderInfo = info;
         effects.Info = info;
         effects.CursorMoved = cursorMoved;
+        var cursorDirty = Interlocked.Exchange(ref _cursorRowDirty, 0) != 0;
+        if (rows == 0 && !full && !cursorMoved && !cursorDirty)
+            return effects;
         if (info.CursorVisible != 0 && info.CursorY < Rows)
             _dirty[info.CursorY] = 1;
         if (_lastCursorRow >= 0 && _lastCursorRow < Rows)
             _dirty[_lastCursorRow] = 1;
-        var cursorDirty = Interlocked.Exchange(ref _cursorRowDirty, 0) != 0;
-        if (rows == 0 && !full && !cursorMoved && !cursorDirty)
-            return effects;
 
         var drawStart = FrameStats.Enabled ? FrameStats.Now() : 0;
         if (!_renderer.Draw(_cells, Columns, Rows, _dirty, info, _cursorBlinkOn, _focused, _theme.Selection, _theme.SelectionForeground, full))

@@ -179,7 +179,8 @@ public static class SessionsBackup
         {
             WriteJson(zip, "manifest.json", manifest);
             WriteJson(zip, "sessions.json", sessionData);
-            WriteJson(zip, "settings.json", settings.Current);
+            if (options.Scope is null)
+                WriteJson(zip, "settings.json", settings.Current);
             WriteJson(zip, "known_hosts.json", knownHosts.Entries);
             WriteJson(zip, "highlights.json", highlights.ExportBackup());
             WriteJson(zip, "ssh-keys.json", selectedKeys);
@@ -189,10 +190,18 @@ public static class SessionsBackup
             var iconsDirectory = Path.Combine(dataDirectory, "icons");
             if (Directory.Exists(iconsDirectory))
             {
+                var scopedIcons = options.Scope is null
+                    ? null
+                    : selected.Select(session => session.Icon)
+                        .Where(icon => !string.IsNullOrEmpty(icon))
+                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
                 foreach (var iconPath in Directory.EnumerateFiles(iconsDirectory)
                              .Where(IsSupportedIcon).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
                 {
-                    var entry = zip.CreateEntry("icons/" + Path.GetFileName(iconPath), CompressionLevel.Optimal);
+                    var iconName = Path.GetFileName(iconPath);
+                    if (scopedIcons is not null && !scopedIcons.Contains(iconName))
+                        continue;
+                    var entry = zip.CreateEntry("icons/" + iconName, CompressionLevel.Optimal);
                     using var output = entry.Open();
                     using var input = File.OpenRead(iconPath);
                     input.CopyTo(output);
@@ -201,16 +210,20 @@ public static class SessionsBackup
 
             // From the store's memory like everything else: the file may be damaged, or the
             // store may be running from its .bak, and a raw copy would carry that along.
-            if (workspaces is null)
+            // Scoped folder backups carry only the selected subtree, not global workspaces.
+            if (options.Scope is null)
             {
-                workspaces = new WorkspaceStore(Path.Combine(dataDirectory, "workspaces.json"));
-                workspaces.Load();
-            }
-            if (workspaces.ExportBackup() is { } workspaceData)
-            {
-                var entry = zip.CreateEntry("workspaces.json", CompressionLevel.Optimal);
-                using var output = entry.Open();
-                output.Write(workspaceData);
+                if (workspaces is null)
+                {
+                    workspaces = new WorkspaceStore(Path.Combine(dataDirectory, "workspaces.json"));
+                    workspaces.Load();
+                }
+                if (workspaces.ExportBackup() is { } workspaceData)
+                {
+                    var entry = zip.CreateEntry("workspaces.json", CompressionLevel.Optimal);
+                    using var output = entry.Open();
+                    output.Write(workspaceData);
+                }
             }
 
             if (options.IncludeSecrets)
@@ -289,23 +302,24 @@ public static class SessionsBackup
             using var bytes = new MemoryStream(zipData, writable: false);
             using var zip = new ZipArchive(bytes, ZipArchiveMode.Read);
             ValidateArchive(zip);
-            var manifest = ReadRequired<BackupManifest>(zip, "manifest.json");
+            var budget = new ArchiveReadBudget(MaxArchiveBytes);
+            var manifest = ReadRequired<BackupManifest>(zip, "manifest.json", budget);
             if (manifest.SchemaVersion < 1 || manifest.SchemaVersion > CurrentSchemaVersion)
                 throw new InvalidDataException($"Backup schema {manifest.SchemaVersion} is not supported.");
 
             // Each store's own validation decides what it accepts, so a backup can never bring
             // in data its store would refuse to load. The archive adds only its own rules
             // (required lists, unique ids, references between files).
-            var sessionData = ReadRequired<BackupSessionData>(zip, "sessions.json");
+            var sessionData = ReadRequired<BackupSessionData>(zip, "sessions.json", budget);
             if (sessionData.Sessions is null || sessionData.Folders is null || sessionData.LocalFolders is null)
                 throw new InvalidDataException("The backup contains invalid session or folder data.");
             SessionStore.Validate(sessionData.Sessions, sessionData.Folders, sessionData.LocalFolders,
                 sessionData.FolderSettings);
             if (sessionData.Sessions.Select(s => s.Id).Distinct().Count() != sessionData.Sessions.Count)
                 throw new InvalidDataException("The backup contains duplicate session ids.");
-            var secrets = ReadSecrets(zip, "secrets.json");
-            var keySecrets = ReadSecrets(zip, "key-secrets.json");
-            var sshKeys = ReadOptional<List<SshKeyReference>>(zip, "ssh-keys.json") ?? [];
+            var secrets = ReadSecrets(zip, "secrets.json", budget);
+            var keySecrets = ReadSecrets(zip, "key-secrets.json", budget);
+            var sshKeys = ReadOptional<List<SshKeyReference>>(zip, "ssh-keys.json", budget) ?? [];
             SshKeyStore.Validate(sshKeys);
             if (sshKeys.Select(key => key.Id).Distinct().Count() != sshKeys.Count)
                 throw new InvalidDataException("The backup contains duplicate SSH key ids.");
@@ -329,31 +343,33 @@ public static class SessionsBackup
             if (manifest.IncludesSecrets && !encrypted)
                 throw new InvalidDataException("A backup that contains secrets must be encrypted.");
 
-            var identities = ReadOptional<List<Identity>>(zip, "identities.json") ?? [];
+            var identities = ReadOptional<List<Identity>>(zip, "identities.json", budget) ?? [];
             IdentityStore.Validate(identities);
             if (identities.Select(identity => identity.Id).Distinct().Count() != identities.Count)
                 throw new InvalidDataException("The backup contains duplicate identity ids.");
             if (identities.Any(identity => identity.KeyId is { } keyId && !sshKeyIds.Contains(keyId)))
                 throw new InvalidDataException("The backup contains an identity with an unknown SSH key.");
-            var identitySecrets = ReadSecrets(zip, "identity-secrets.json");
+            var identitySecrets = ReadSecrets(zip, "identity-secrets.json", budget);
             if (!manifest.IncludesSecrets && identitySecrets.Count > 0)
                 throw new InvalidDataException("The backup identity secret metadata is inconsistent.");
             var identityIds = identities.Select(identity => identity.Id).ToHashSet();
             if (identitySecrets.Keys.Any(id => !identityIds.Contains(id)))
                 throw new InvalidDataException("The backup contains a password for an unknown identity.");
             // Absent from backups made before proxy passwords were carried.
-            var proxySecrets = ReadSecrets(zip, "proxy-secrets.json");
+            var proxySecrets = ReadSecrets(zip, "proxy-secrets.json", budget);
             if (!manifest.IncludesSecrets && proxySecrets.Count > 0)
                 throw new InvalidDataException("The backup proxy secret metadata is inconsistent.");
             var sessionIds = sessionData.Sessions.Select(session => session.Id).ToHashSet();
+            if (secrets.Keys.Any(id => !sessionIds.Contains(id)))
+                throw new InvalidDataException("The backup contains a password for an unknown session.");
             if (proxySecrets.Keys.Any(id => !sessionIds.Contains(id)))
                 throw new InvalidDataException("The backup contains a proxy password for an unknown session.");
 
-            var settings = ReadOptional<AppSettings>(zip, "settings.json") ?? new AppSettings();
+            var settings = ReadOptional<AppSettings>(zip, "settings.json", budget) ?? new AppSettings();
             SettingsStore.Validate(settings);
             var knownHosts = KnownHostsStore.Validate(
-                ReadOptional<Dictionary<string, KnownHostEntry>>(zip, "known_hosts.json") ?? []);
-            var highlights = ReadOptional<HighlightBackupData>(zip, "highlights.json") ?? new HighlightBackupData();
+                ReadOptional<Dictionary<string, KnownHostEntry>>(zip, "known_hosts.json", budget) ?? []);
+            var highlights = ReadOptional<HighlightBackupData>(zip, "highlights.json", budget) ?? new HighlightBackupData();
             HighlightsStore.Validate(highlights.EnabledRules, highlights.DisabledRules,
                 highlights.CustomRules, highlights.BuiltinOverrides);
             // A list written as null means none, as a missing one does.
@@ -365,7 +381,7 @@ public static class SessionsBackup
                 BuiltinOverrides = highlights.BuiltinOverrides ?? [],
             };
             // Checked now so a damaged layout fails the preview, not the import halfway.
-            var workspaces = ReadOptionalBytes(zip, "workspaces.json");
+            var workspaces = ReadOptionalBytes(zip, "workspaces.json", budget);
             if (workspaces is not null)
                 WorkspaceStore.ParsePayload(workspaces);
 
@@ -375,7 +391,7 @@ public static class SessionsBackup
                 var name = entry.FullName["icons/".Length..];
                 if (name.Length == 0 || name != Path.GetFileName(name) || !IsSupportedIcon(name))
                     throw new InvalidDataException($"The backup contains an invalid icon path: {entry.FullName}");
-                using var stream = entry.Open();
+                using var stream = OpenBounded(entry, budget);
                 using var content = new MemoryStream();
                 stream.CopyTo(content);
                 icons.Add(name, content.ToArray());
@@ -473,16 +489,19 @@ public static class SessionsBackup
         IdentityStore? identityStore = null,
         WorkspaceStore? workspaceStore = null)
     {
+        var isScoped = !string.IsNullOrEmpty(package.Manifest.Scope);
         // Validate opaque archive content before any import-side mutation. Presence means
-        // replacement; absence intentionally leaves the target workspace file untouched.
-        var importedWorkspaceData = package.Workspaces is null
+        // replacement on a full backup; absence (or a scoped folder backup) leaves the
+        // target's global settings and workspaces untouched.
+        var importedWorkspaceData = isScoped || package.Workspaces is null
             ? null
             : WorkspaceStore.ParsePayload(package.Workspaces);
         // Every store an import saves refuses here, before anything changes, rather than
         // after the stores before it were saved: an unreadable file is never written over,
         // and a half-applied import is worse than none.
         sessionStore.EnsureWritable();
-        settingsStore.EnsureWritable();
+        if (!isScoped)
+            settingsStore.EnsureWritable();
         knownHostsStore.EnsureWritable();
         highlightsStore.EnsureWritable();
         sshKeyStore.EnsureWritable();
@@ -631,8 +650,11 @@ public static class SessionsBackup
         var remappedWorkspaceData = importedWorkspaceData is null
             ? null
             : WorkspaceStore.RemapReferences(importedWorkspaceData, idMap, validSessionIds);
-        settingsStore.Save(package.Settings.WithSessionIds(id =>
-            idMap.GetValueOrDefault(id, id) is var mapped && validSessionIds.Contains(mapped) ? mapped : null));
+        if (!isScoped)
+        {
+            settingsStore.Save(package.Settings.WithSessionIds(id =>
+                idMap.GetValueOrDefault(id, id) is var mapped && validSessionIds.Contains(mapped) ? mapped : null));
+        }
         var knownHostsAdded = knownHostsStore.Merge(package.KnownHosts);
         highlightsStore.MergeBackup(package.Highlights);
         ImportFiles(dataDirectory, package);
@@ -707,39 +729,42 @@ public static class SessionsBackup
         JsonSerializer.Serialize(stream, value, JsonOptions.Info<T>());
     }
 
-    private static T ReadRequired<T>(ZipArchive archive, string name) =>
-        ReadOptional<T>(archive, name)
+    private static T ReadRequired<T>(ZipArchive archive, string name, ArchiveReadBudget budget) =>
+        ReadOptional<T>(archive, name, budget)
         ?? throw new InvalidDataException($"The backup does not contain {name}.");
 
-    private static T? ReadOptional<T>(ZipArchive archive, string name)
+    private static T? ReadOptional<T>(ZipArchive archive, string name, ArchiveReadBudget budget)
     {
         var entry = archive.GetEntry(name);
         if (entry is null)
             return default;
-        using var stream = entry.Open();
+        using var stream = OpenBounded(entry, budget);
         return JsonSerializer.Deserialize(stream, JsonOptions.Info<T>());
     }
 
     /// <summary>Saved passwords by id. A null value would reach the credential store as a
     /// null secret, so it fails the whole backup instead.</summary>
-    private static Dictionary<Guid, string> ReadSecrets(ZipArchive archive, string name)
+    private static Dictionary<Guid, string> ReadSecrets(ZipArchive archive, string name, ArchiveReadBudget budget)
     {
-        var secrets = ReadOptional<Dictionary<Guid, string>>(archive, name) ?? [];
+        var secrets = ReadOptional<Dictionary<Guid, string>>(archive, name, budget) ?? [];
         if (secrets.Values.Any(secret => secret is null))
             throw new InvalidDataException($"The backup's {name} contains an empty entry.");
         return secrets;
     }
 
-    private static byte[]? ReadOptionalBytes(ZipArchive archive, string name)
+    private static byte[]? ReadOptionalBytes(ZipArchive archive, string name, ArchiveReadBudget budget)
     {
         var entry = archive.GetEntry(name);
         if (entry is null)
             return null;
-        using var stream = entry.Open();
+        using var stream = OpenBounded(entry, budget);
         using var result = new MemoryStream();
         stream.CopyTo(result);
         return result.ToArray();
     }
+
+    private static Stream OpenBounded(ZipArchiveEntry entry, ArchiveReadBudget budget) =>
+        new BoundedReadStream(entry.Open(), MaxEntryBytes, budget);
 
     private static void ValidateArchive(ZipArchive archive)
     {
@@ -751,8 +776,63 @@ public static class SessionsBackup
         {
             if (!names.Add(entry.FullName))
                 throw new InvalidDataException($"The backup contains duplicate file {entry.FullName}.");
-            if (entry.Length > MaxEntryBytes || (total += entry.Length) > MaxArchiveBytes)
+            if (entry.Length < 0 || entry.Length > MaxEntryBytes || (total += entry.Length) > MaxArchiveBytes)
                 throw new InvalidDataException("The expanded backup is too large.");
+        }
+    }
+
+    internal sealed class ArchiveReadBudget(long maxBytes)
+    {
+        private long _remaining = maxBytes;
+
+        public void Consume(long count)
+        {
+            if (count > _remaining)
+                throw new InvalidDataException("The expanded backup is too large.");
+            _remaining -= count;
+        }
+    }
+
+    /// <summary>Caps actual decompressed bytes read from a ZIP entry so a forged central-directory
+    /// length cannot expand a zip bomb into memory.</summary>
+    internal sealed class BoundedReadStream(Stream inner, long maxEntryBytes, ArchiveReadBudget archiveBudget) : Stream
+    {
+        private long _entryRemaining = maxEntryBytes;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            if (buffer.IsEmpty)
+                return 0;
+            // Ask for at most one byte past the remaining limit so exceeding it is detected
+            // immediately without allocating or reading arbitrarily past the cap.
+            var maxRead = (int)Math.Min(buffer.Length, Math.Min(_entryRemaining, int.MaxValue - 1) + 1);
+            var read = inner.Read(buffer[..maxRead]);
+            if (read <= 0)
+                return read;
+            if (read > _entryRemaining)
+                throw new InvalidDataException("The expanded backup is too large.");
+            _entryRemaining -= read;
+            archiveBudget.Consume(read);
+            return read;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+                inner.Dispose();
+            base.Dispose(disposing);
         }
     }
 
@@ -766,8 +846,17 @@ public static class SessionsBackup
         var nonce = RandomNumberGenerator.GetBytes(12);
         var tag = new byte[16];
         var ciphertext = new byte[plaintext.Length];
-        var key = Rfc2898DeriveBytes.Pbkdf2(
-            Encoding.UTF8.GetBytes(passphrase), salt, Pbkdf2Iterations, HashAlgorithmName.SHA256, 32);
+        var passphraseBytes = Encoding.UTF8.GetBytes(passphrase);
+        byte[] key;
+        try
+        {
+            key = Rfc2898DeriveBytes.Pbkdf2(
+                passphraseBytes, salt, Pbkdf2Iterations, HashAlgorithmName.SHA256, 32);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(passphraseBytes);
+        }
         try
         {
             using var aes = new AesGcm(key, tag.Length);
@@ -792,15 +881,24 @@ public static class SessionsBackup
 
     private static byte[] ReadEncrypted(string path, string passphrase)
     {
-        var payload = File.ReadAllBytes(path);
         var headerLength = EncryptedMagic.Length + 4 + 16 + 12 + 16;
-        if (payload.Length < headerLength || payload.Length > MaxArchiveBytes)
+        var info = new FileInfo(path);
+        if (info.Length < headerLength || info.Length > MaxArchiveBytes)
             throw new InvalidDataException("The encrypted backup is invalid or too large.");
+        var payload = File.ReadAllBytes(path);
+        if (payload.Length < headerLength || payload.Length > MaxArchiveBytes)
+        {
+            CryptographicOperations.ZeroMemory(payload);
+            throw new InvalidDataException("The encrypted backup is invalid or too large.");
+        }
         var offset = EncryptedMagic.Length;
         var iterations = BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(offset, 4));
         offset += 4;
         if (iterations is < 100_000 or > 2_000_000)
+        {
+            CryptographicOperations.ZeroMemory(payload);
             throw new InvalidDataException("The encrypted backup uses invalid key settings.");
+        }
         var salt = payload.AsSpan(offset, 16);
         offset += 16;
         var nonce = payload.AsSpan(offset, 12);
@@ -809,8 +907,17 @@ public static class SessionsBackup
         offset += 16;
         var ciphertext = payload.AsSpan(offset);
         var plaintext = new byte[ciphertext.Length];
-        var key = Rfc2898DeriveBytes.Pbkdf2(
-            Encoding.UTF8.GetBytes(passphrase), salt, iterations, HashAlgorithmName.SHA256, 32);
+        var passphraseBytes = Encoding.UTF8.GetBytes(passphrase);
+        byte[] key;
+        try
+        {
+            key = Rfc2898DeriveBytes.Pbkdf2(
+                passphraseBytes, salt, iterations, HashAlgorithmName.SHA256, 32);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(passphraseBytes);
+        }
         try
         {
             using var aes = new AesGcm(key, tag.Length);

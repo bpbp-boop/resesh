@@ -368,35 +368,57 @@ public sealed class TerminalCapture : IDisposable
 
     private void CompressPending()
     {
-        while (true)
+        var restart = false;
+        try
         {
-            RewindChunk? chunk;
-            lock (_gate)
+            while (true)
             {
-                if (_disposed || !_uncompressed.TryDequeue(out chunk))
+                RewindChunk? chunk;
+                lock (_gate)
                 {
-                    _compressing = false;
-                    return;
+                    if (_disposed || !_uncompressed.TryDequeue(out chunk))
+                    {
+                        _compressing = false;
+                        return;
+                    }
+                    if (chunk.Dropped)
+                        continue;
                 }
-                if (chunk.Dropped)
-                    continue;
-            }
 
-            if (chunk.Compress() is not { } compressed)
-                continue;
-            ChunkCompressed?.Invoke();
-
-            lock (_gate)
-            {
-                if (chunk.Dropped || _disposed)
+                if (chunk.Compress() is not { } compressed)
                     continue;
-                var change = chunk.UseCompressed(compressed);
-                if (chunk is RewindEventBlock)
-                    _eventBytes += change;
-                else if (chunk != _anchor)
-                    _keyframeBytes += change;
+                ChunkCompressed?.Invoke();
+
+                lock (_gate)
+                {
+                    if (chunk.Dropped || _disposed)
+                        continue;
+                    var change = chunk.UseCompressed(compressed);
+                    if (chunk is RewindEventBlock)
+                        _eventBytes += change;
+                    else if (chunk != _anchor)
+                        _keyframeBytes += change;
+                }
             }
         }
+        catch (Exception) when (!CompressInline)
+        {
+            // Background compression is best-effort: keep the uncompressed chunk intact rather
+            // than terminating the process from an unhandled thread-pool exception.
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                if (_compressing)
+                {
+                    _compressing = false;
+                    restart = !_disposed && !SuspendCompression && _uncompressed.Count > 0;
+                }
+            }
+        }
+        if (restart && !CompressInline)
+            StartCompression();
     }
 
     /// <summary>Opens the recording files; null opens them on disk. Tests substitute streams that fail.</summary>

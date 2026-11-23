@@ -292,7 +292,15 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 EnsureResourcesLocked(notify: true);
                 return;
             }
-            SetFontLocked(fontFamilyList, emPixels);
+            var observedGeneration = s_generation;
+            try
+            {
+                SetFontLocked(fontFamilyList, emPixels);
+            }
+            catch (SharpGen.Runtime.SharpGenException ex) when (IsDeviceLost(ex))
+            {
+                RecoverShared(observedGeneration);
+            }
         }
     }
 
@@ -417,7 +425,16 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
                 EnsureResourcesLocked(notify: true);
                 return false;
             }
-            return ResizeLocked(pixelWidth, pixelHeight, capacityWidth, capacityHeight);
+            var observedGeneration = s_generation;
+            try
+            {
+                return ResizeLocked(pixelWidth, pixelHeight, capacityWidth, capacityHeight);
+            }
+            catch (SharpGen.Runtime.SharpGenException ex) when (IsDeviceLost(ex))
+            {
+                RecoverShared(observedGeneration);
+                return false;
+            }
         }
     }
 
@@ -505,8 +522,24 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
     public void SetCompositionScale(float scaleX, float scaleY)
     {
         lock (DeviceGate)
-            SetCompositionScaleLocked(scaleX, scaleY);
+        {
+            var observedGeneration = s_generation;
+            try
+            {
+                SetCompositionScaleLocked(scaleX, scaleY);
+            }
+            catch (SharpGen.Runtime.SharpGenException ex) when (IsDeviceLost(ex))
+            {
+                RecoverShared(observedGeneration);
+            }
+        }
     }
+
+    private static bool IsDeviceLost(SharpGen.Runtime.SharpGenException exception) =>
+        exception.ResultCode == Vortice.Direct2D1.ResultCode.RecreateTarget
+        || exception.ResultCode == Vortice.DXGI.ResultCode.DeviceRemoved
+        || exception.ResultCode == Vortice.DXGI.ResultCode.DeviceReset
+        || exception.ResultCode == Vortice.DXGI.ResultCode.DeviceHung;
 
     private void SetCompositionScaleLocked(float scaleX, float scaleY)
     {
@@ -1012,21 +1045,22 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         (c.Flags & TerminalCell.DefaultBackground) != 0 ? null : c.Background;
 
     private bool IsEmojiCell(in TerminalCell c) =>
-        IsEmojiPresentation(c.Codepoint) && _isEmojiFace[Lookup(c.Codepoint, 0).Face];
+        _isEmojiFace[Lookup(c.Codepoint, StyleOf(c.Flags)).Face];
 
     private static int StyleOf(ushort flags) =>
         ((flags & TerminalCell.Bold) != 0 ? 1 : 0) | ((flags & TerminalCell.Italic) != 0 ? 2 : 0);
 
     /// <summary>Grapheme clusters and color emoji go through DirectWrite layout, centered on
     /// their cells, so shaping and color fonts work without a glyph-run path for them.</summary>
-    private void DrawCluster(int x, int y, in TerminalCell c)
+    private void DrawCluster(int x, int y, in TerminalCell c, uint? foregroundOverride = null)
     {
         var text = c.GraphemeLength > 1 ? GraphemeAt?.Invoke(x, y) : null;
         text ??= GraphemeText.Intern(c.Codepoint);
         var width = (c.Wide == TerminalCell.WideChar ? 2 : 1) * CellWidth;
-        var foreground = ForegroundOf(c);
+        var foreground = foregroundOverride ?? ForegroundOf(c);
         SetBrush(Rgb(foreground));
-        var emoji = IsEmojiPresentation(c.Codepoint) || text.Contains('️');
+        var emoji = IsEmojiPresentation(c.Codepoint) || text.Contains('\uFE0F')
+            || _isEmojiFace[Lookup(c.Codepoint, StyleOf(c.Flags)).Face];
         float left = OriginX + x * CellWidth, top = y * CellHeight;
         if (emoji)
             DrawEmoji(text, width / CellWidth, foreground, new Vortice.RawRectF(left, top, left + width, top + CellHeight));
@@ -1065,7 +1099,10 @@ internal sealed unsafe partial class TerminalRenderer : IDisposable
         var style = StyleOf(cell->Flags);
         var (face, glyph) = Lookup(cell->Codepoint, style);
         if (_isEmojiFace[face] || cell->GraphemeLength > 1)
+        {
+            DrawCluster(info.CursorX, info.CursorY, *cell, info.DefaultBackground);
             return;
+        }
         SetBrush(Rgb(info.DefaultBackground));
         float advance = width;
         DrawRun(new Vector2(left, top + _baseline), style, face, &glyph, &advance, null, 1);

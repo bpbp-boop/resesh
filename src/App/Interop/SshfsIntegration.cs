@@ -104,7 +104,8 @@ internal sealed partial class SshfsMount : IDisposable
         {
             _process.Dispose();
             _releaseDrive?.Invoke();
-            Directory.Delete(_knownHostsDirectory, recursive: true);
+            try { Directory.Delete(_knownHostsDirectory, recursive: true); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         }
     }
 }
