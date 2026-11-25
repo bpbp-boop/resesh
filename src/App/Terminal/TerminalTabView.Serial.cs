@@ -91,9 +91,20 @@ public sealed partial class TerminalTabView
             _terminal.NotifyDisconnected($"{portName} stopped working: {ex?.Message ?? "the driver closed it"}.");
         else
         {
-            _terminal.NotifyDisconnected(
-                $"{portName} was unplugged. This tab reconnects when it is plugged back in.");
-            WatchForSerialPort(portName, connection);
+            // Re-read the session after the async presence check: an edit during the settle
+            // window may have changed the COM port or switched away from serial.
+            var watchPort = Session.IsSerial ? SerialTarget.NormalizePortName(Session.Serial?.PortName) : null;
+            if (watchPort is not null)
+            {
+                _terminal.NotifyDisconnected(string.Equals(watchPort, portName, StringComparison.OrdinalIgnoreCase)
+                    ? $"{portName} was unplugged. This tab reconnects when it is plugged back in."
+                    : $"{portName} was unplugged. This tab connects when {watchPort} appears.");
+                WatchForSerialPort(watchPort, connection);
+            }
+            else
+            {
+                _terminal.NotifyDisconnected($"{portName} was unplugged.");
+            }
         }
     }
 

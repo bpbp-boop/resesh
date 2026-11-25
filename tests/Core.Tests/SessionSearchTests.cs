@@ -62,15 +62,16 @@ public sealed class SessionSearchTests
     [Fact]
     public void FilterAndRank_MatchSerialPortAndLineSettings()
     {
+        // Serial name sorts after notes-only name so alphabetical fallback cannot pass ranking.
         var console = new Session
         {
-            Name = "core-sw-1",
+            Name = "z-console",
             Kind = SessionKind.Serial,
             Serial = new SerialTarget { PortName = "COM5", BaudRate = 115200 },
         };
         var notesMention = new Session
         {
-            Name = "docs-box",
+            Name = "a-docs",
             Host = "10.0.0.2",
             Notes = "plug console into COM5",
         };
@@ -78,6 +79,6 @@ public sealed class SessionSearchTests
         Assert.True(SessionSearch.Matches(console, "115200"));
         Assert.True(SessionSearch.Matches(console, "com5 8n1"));
         var ranked = SessionSearch.Rank([notesMention, console], "COM5");
-        Assert.Equal(["core-sw-1", "docs-box"], ranked.Select(s => s.Name).ToArray());
+        Assert.Equal(["z-console", "a-docs"], ranked.Select(s => s.Name).ToArray());
     }
 }

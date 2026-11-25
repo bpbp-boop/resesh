@@ -139,6 +139,8 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
 
     private static readonly TimeSpan DefaultCloseWaitTimeout = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan DefaultZeroReadBackoff = TimeSpan.FromMilliseconds(20);
+    private static readonly TimeSpan SenderDrainPollInterval = TimeSpan.FromMilliseconds(20);
+    private static readonly TimeSpan SenderDrainLimit = TimeSpan.FromSeconds(2);
     private const int MaxConsecutiveZeroReads = 5;
 
     // Queued in place of data to send a break, compared by reference.
@@ -154,6 +156,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
     private readonly object _gate = new();
     private readonly object _closePortLock = new();
     private readonly ManualResetEventSlim _stopSignal = new(false);
+    private readonly ManualResetEventSlim _senderDone = new(true);
     private readonly BlockingCollection<byte[]> _outgoing = new();
     private ISerialPortAdapter? _port;
     private string? _portName;
@@ -163,7 +166,6 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
     private bool _portClosed;
     private int _closingPort;
     private int _closeFinished;
-    private int _writesInFlight;
 
     public SerialTerminalSession()
         : this(static (name, target) => new SystemSerialPortAdapter(name, target),
@@ -271,6 +273,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
             _port = port;
             _portName = name;
             Description = (target with { PortName = name }).Describe();
+            _senderDone.Reset();
         }
         TraceHook?.Invoke($"serial opened {Description}");
 
@@ -279,6 +282,8 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
         _reader = new Thread(() => ReadLoop(port)) { IsBackground = true, Name = "serial-reader" };
         _reader.Start();
     }
+
+    internal bool WaitForSenderExit(TimeSpan timeout) => _senderDone.Wait(timeout);
 
     public void Write(byte[] data)
     {
@@ -352,14 +357,17 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
             if (_portClosed)
                 return;
             _portClosed = true;
-            TryDiscardOutBuffer(port);
-            // If SendLoop entered Write just before _closingPort became visible, give it a
-            // moment to hit the driver and purge again so Dispose does not hang flushing it.
-            if (Volatile.Read(ref _writesInFlight) > 0)
+            // Drain SendLoop before the final purge and Dispose: purging on each tick aborts
+            // any write blocked on flow control (including one that started right as close
+            // began), and once _senderDone is set no further Write/BreakState can reach the port.
+            var deadline = Environment.TickCount64 + (long)SenderDrainLimit.TotalMilliseconds;
+            while (!_senderDone.IsSet)
             {
-                Thread.Sleep(5);
                 TryDiscardOutBuffer(port);
+                if (_senderDone.Wait(SenderDrainPollInterval) || Environment.TickCount64 >= deadline)
+                    break;
             }
+            TryDiscardOutBuffer(port);
             try { port.Dispose(); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ObjectDisposedException or InvalidOperationException) { }
             finally { Volatile.Write(ref _closeFinished, 1); }
@@ -432,6 +440,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
 
     private void SendLoop(ISerialPortAdapter port)
     {
+        Exception? failure = null;
         try
         {
             foreach (var bytes in _outgoing.GetConsumingEnumerable())
@@ -450,27 +459,27 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
                     }
                     continue;
                 }
-                Interlocked.Increment(ref _writesInFlight);
-                try
-                {
-                    if (Volatile.Read(ref _closingPort) != 0 || _lifecycle.IsStopped)
-                        break;
-                    port.Write(bytes, 0, bytes.Length);
-                }
-                finally
-                {
-                    Interlocked.Decrement(ref _writesInFlight);
-                }
+                port.Write(bytes, 0, bytes.Length);
             }
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or UnauthorizedAccessException
             or InvalidOperationException or TimeoutException)
         {
+            failure = ex;
+        }
+        finally
+        {
+            // Signal before Fail() so Close() waiting for the sender never deadlocks on
+            // _closePortLock when ReadLoop and SendLoop fail at the same time.
+            _senderDone.Set();
+        }
+        if (failure is not null)
+        {
             // A refused write or break does not always fail the reader too, so close here
             // rather than leave a connected tab whose input goes nowhere.
             if (!_lifecycle.IsStopped)
-                TraceHook?.Invoke($"serial send failed: {ex.Message}");
-            Fail(ex);
+                TraceHook?.Invoke($"serial send failed: {failure.Message}");
+            Fail(failure);
         }
     }
 }

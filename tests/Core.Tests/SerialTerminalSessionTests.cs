@@ -158,15 +158,18 @@ public sealed class SerialTerminalSessionTests
         var disposeStarted = new ManualResetEventSlim(false);
         var allowDisposeFinish = new ManualResetEventSlim(false);
         var disposeCompleted = false;
+        var writeEntered = new ManualResetEventSlim(false);
         var writeGate = new ManualResetEventSlim(false);
 
         var port = new FakeSerialPort
         {
             OnWrite = _ =>
             {
+                writeEntered.Set();
                 writeGate.Wait(TimeSpan.FromSeconds(2));
                 throw new IOException("write failed on unplug");
             },
+            OnDiscardOutBuffer = () => writeGate.Set(),
             OnDispose = () =>
             {
                 disposeStarted.Set();
@@ -188,13 +191,13 @@ public sealed class SerialTerminalSessionTests
         };
 
         session.Open(Target());
-        // Queue a write that blocks until we trigger both failures at once.
+        // Wait until SendLoop is actively inside Write before failing ReadLoop, so both
+        // threads always fail concurrently while disposal is gated.
         session.Write(Encoding.UTF8.GetBytes("x"));
+        Assert.True(writeEntered.Wait(TimeSpan.FromSeconds(2)));
         port.EnqueueReadException(new IOException("read failed on unplug"));
 
         Assert.True(disposeStarted.Wait(TimeSpan.FromSeconds(2)));
-        // Now let SendLoop fail while ReadLoop is still inside port.Dispose().
-        writeGate.Set();
         Thread.Sleep(50);
         Assert.False(closedSignal.IsSet);
 
@@ -342,8 +345,51 @@ public sealed class SerialTerminalSessionTests
 
         var started = DateTime.UtcNow;
         session.Dispose();
+        Assert.True(session.WaitForSenderExit(TimeSpan.FromSeconds(2)));
         Assert.True(port.DisposedSignal.Wait(TimeSpan.FromSeconds(2)));
         Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
+    public void Close_DrainsDelayedWriteAndPurgesBeforeDisposingPort()
+    {
+        var writeEntered = new ManualResetEventSlim(false);
+        var discardCalls = 0;
+        var writeCompleted = false;
+        var writeFinishedBeforeDispose = false;
+        var discardedAfterWrite = false;
+
+        var port = new FakeSerialPort
+        {
+            OnWrite = _ =>
+            {
+                writeEntered.Set();
+                // Simulate a write that takes longer than a brief sleep before unwinding.
+                Thread.Sleep(60);
+                Volatile.Write(ref writeCompleted, true);
+            },
+            OnDiscardOutBuffer = () =>
+            {
+                Interlocked.Increment(ref discardCalls);
+                if (Volatile.Read(ref writeCompleted))
+                    Volatile.Write(ref discardedAfterWrite, true);
+            },
+            OnDispose = () =>
+            {
+                writeFinishedBeforeDispose = Volatile.Read(ref writeCompleted);
+            },
+        };
+
+        var session = new SerialTerminalSession((_, _) => port, _ => true);
+        session.Open(Target());
+        session.Write(Encoding.UTF8.GetBytes("delayed"));
+        Assert.True(writeEntered.Wait(TimeSpan.FromSeconds(2)));
+
+        session.Dispose();
+        Assert.True(port.DisposedSignal.Wait(TimeSpan.FromSeconds(2)));
+        Assert.True(writeFinishedBeforeDispose);
+        Assert.True(discardedAfterWrite);
+        Assert.True(Volatile.Read(ref discardCalls) >= 2);
     }
 
     [Fact]
