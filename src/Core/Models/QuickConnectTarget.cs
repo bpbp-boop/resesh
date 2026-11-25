@@ -85,7 +85,7 @@ public static class QuickConnectTarget
         foreach (var part in parts.Skip(1))
         {
             if (int.TryParse(part, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var baud)
-                && baud is >= 50 and <= 4_000_000)
+                && baud is >= SerialTarget.MinBaudRate and <= SerialTarget.MaxBaudRate)
                 target = target with { BaudRate = baud };
             else if (TryParseFraming(part, target, out var framed))
                 target = framed;
@@ -121,11 +121,15 @@ public static class QuickConnectTarget
         };
         if (parity is null)
             return false;
+        var dataBits = text[0] - '0';
+        var stopBits = text[2] == '2' ? SerialStopBits.Two : SerialStopBits.One;
+        if (SerialTarget.ValidateFraming(dataBits, stopBits) is not null)
+            return false;
         framed = target with
         {
-            DataBits = text[0] - '0',
+            DataBits = dataBits,
             Parity = parity.Value,
-            StopBits = text[2] == '2' ? SerialStopBits.Two : SerialStopBits.One,
+            StopBits = stopBits,
         };
         return true;
     }

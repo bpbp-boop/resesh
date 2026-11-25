@@ -11,11 +11,26 @@ namespace Resesh.App.Terminal;
 public sealed partial class TerminalTabView
 {
     private static readonly TimeSpan SerialPortPollInterval = TimeSpan.FromSeconds(1.5);
+    // PnP can remove COMx from SERIALCOMM slightly after ReadFile fails on unplug, and
+    // create the registry entry slightly before the driver accepts CreateFile on replug.
+    private static readonly TimeSpan[] SerialUnplugSettleDelays =
+        [TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(350)];
+    private static readonly TimeSpan SerialReplugSettleDelay = TimeSpan.FromMilliseconds(250);
+    private const int MaxSerialReplugRetries = 3;
+
     private DispatcherQueueTimer? _serialPortWatch;
+    private string? _watchedSerialPort;
+    private TerminalConnectionLifetime? _watchedConnection;
+    private bool _serialConnectFromWatch;
+    private int _serialWatchRetries;
 
     private async Task ConnectSerialAsync(bool isReconnect)
     {
         var connection = _connection;
+        var fromWatch = _serialConnectFromWatch;
+        _serialConnectFromWatch = false;
+        if (!fromWatch)
+            _serialWatchRetries = 0;
         StopSerialPortWatch();
         var target = Session.Serial ?? new SerialTarget();
         var portName = SerialTarget.NormalizePortName(target.PortName) ?? target.PortName;
@@ -27,22 +42,12 @@ public sealed partial class TerminalTabView
 
             var serial = new SerialTerminalSession();
             FollowOutput(serial, connection);
-            serial.Closed += ex => DispatcherQueue.TryPost(() =>
-            {
-                if (!ConnectionEnded(connection)) return;
-                if (SerialPortList.Exists(portName))
-                    _terminal.NotifyDisconnected($"{portName} stopped working: {ex?.Message ?? "the driver closed it"}.");
-                else
-                {
-                    _terminal.NotifyDisconnected(
-                        $"{portName} was unplugged. This tab reconnects when it is plugged back in.");
-                    WatchForSerialPort(portName, connection);
-                }
-            });
+            serial.Closed += ex => DispatcherQueue.TryPostAsync(() => HandleSerialClosedAsync(connection, portName, ex));
 
             await connection.StartAsync(serial, () => serial.Open(target));
             connection.Token.ThrowIfCancellationRequested();
 
+            _serialWatchRetries = 0;
             _backend = serial;
             // No summary: the tab's endpoint already reads "serial COM5 9600 8N1".
             _tab.MarkConnected();
@@ -51,16 +56,75 @@ public sealed partial class TerminalTabView
         }
         catch (SerialSessionException ex) when (ex.PortMissing)
         {
+            _serialWatchRetries = 0;
             if (ConnectFailed(connection, $"{ex.Message} Plug in the console cable; this tab connects when {portName} appears."))
+                WatchForSerialPort(portName, connection);
+        }
+        catch (SerialSessionException ex) when (fromWatch
+            && ex.InnerException is IOException or UnauthorizedAccessException
+            && _serialWatchRetries < MaxSerialReplugRetries)
+        {
+            _serialWatchRetries++;
+            if (ConnectFailed(connection, $"{portName} is not ready yet. Retrying …"))
                 WatchForSerialPort(portName, connection);
         }
         catch (SerialSessionException ex)
         {
+            _serialWatchRetries = 0;
             ConnectFailed(connection, ex.Message);
         }
         catch (Exception ex)
         {
+            _serialWatchRetries = 0;
             ConnectFailed(connection, FailureMessage(ex));
+        }
+    }
+
+    private async Task HandleSerialClosedAsync(TerminalConnectionLifetime connection, string portName, Exception? ex)
+    {
+        if (!ConnectionEnded(connection))
+            return;
+        var present = await IsSerialPortPresentAfterFailureAsync(portName, connection.Token);
+        if (_disposed || connection.Token.IsCancellationRequested || _tab.State != TabConnectionState.Disconnected)
+            return;
+        if (present)
+            _terminal.NotifyDisconnected($"{portName} stopped working: {ex?.Message ?? "the driver closed it"}.");
+        else
+        {
+            // Re-read the session after the async presence check: an edit during the settle
+            // window may have changed the COM port or switched away from serial.
+            var watchPort = Session.IsSerial ? SerialTarget.NormalizePortName(Session.Serial?.PortName) : null;
+            if (watchPort is not null)
+            {
+                _terminal.NotifyDisconnected(string.Equals(watchPort, portName, StringComparison.OrdinalIgnoreCase)
+                    ? $"{portName} was unplugged. This tab reconnects when it is plugged back in."
+                    : $"{portName} was unplugged. This tab connects when {watchPort} appears.");
+                WatchForSerialPort(watchPort, connection);
+            }
+            else
+            {
+                _terminal.NotifyDisconnected($"{portName} was unplugged.");
+            }
+        }
+    }
+
+    private static async Task<bool> IsSerialPortPresentAfterFailureAsync(string portName, CancellationToken token)
+    {
+        try
+        {
+            if (!await Task.Run(() => SerialPortList.Exists(portName), token))
+                return false;
+            foreach (var delay in SerialUnplugSettleDelays)
+            {
+                await Task.Delay(delay, token);
+                if (!await Task.Run(() => SerialPortList.Exists(portName), token))
+                    return false;
+            }
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            return true;
         }
     }
 
@@ -88,6 +152,11 @@ public sealed partial class TerminalTabView
             {
                 if (!await Task.Run(() => SerialPortList.Exists(portName)))
                     return;
+                await Task.Delay(SerialReplugSettleDelay, connection.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
             }
             finally
             {
@@ -96,15 +165,38 @@ public sealed partial class TerminalTabView
             if (!ReferenceEquals(_serialPortWatch, timer) || _disposed || connection.Token.IsCancellationRequested)
                 return;
             StopSerialPortWatch();
+            _serialConnectFromWatch = true;
             await ConnectAsync(isReconnect: true);
         });
         _serialPortWatch = timer;
+        _watchedSerialPort = portName;
+        _watchedConnection = connection;
         timer.Start();
+    }
+
+    /// <summary>Keeps an active port watch aligned if the user edits the session's protocol or
+    /// COM port while the tab is waiting for an adapter.</summary>
+    private void OnSessionEditedForSerialWatch()
+    {
+        if (_serialPortWatch is null || _watchedConnection is not { } connection)
+            return;
+        if (!Session.IsSerial)
+        {
+            StopSerialPortWatch();
+            return;
+        }
+        var newPort = SerialTarget.NormalizePortName(Session.Serial?.PortName);
+        if (newPort is null)
+            StopSerialPortWatch();
+        else if (!string.Equals(newPort, _watchedSerialPort, StringComparison.OrdinalIgnoreCase))
+            WatchForSerialPort(newPort, connection);
     }
 
     private void StopSerialPortWatch()
     {
         _serialPortWatch?.Stop();
         _serialPortWatch = null;
+        _watchedSerialPort = null;
+        _watchedConnection = null;
     }
 }
