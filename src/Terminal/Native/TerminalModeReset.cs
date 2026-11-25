@@ -11,16 +11,13 @@ namespace Resesh.Terminal.Native;
 /// </summary>
 internal static unsafe class TerminalModeReset
 {
-    // CAN cancels any incomplete escape sequence, control string (OSC/DCS/APC) or UTF-8
-    // character so every reset sequence that follows is parsed from ground.
-    private static readonly byte[] CancelSequence = [0x18];
+    private const string Cancel = "\u0018";
 
     // Sent only while the alternate screen is active: pops its Kitty keyboard stack, then
     // leaves it (restoring the saved primary cursor when ?1049h saved it) and clears the
     // legacy alternate-screen bits. Never sent on the primary screen, where CSI ? 1049 l
     // unconditionally calls restoreCursor() and jumps to a stale saved position or (0, 0).
-    private static readonly byte[] LeaveAlternateScreen =
-        "\u001b[<99u\u001b[?1049l\u001b[?1047l\u001b[?47l"u8.ToArray();
+    private const string LeaveAlternateScreen = "\u001b[<99u\u001b[?1049l\u001b[?1047l\u001b[?47l";
 
     // Primary screen reset:
     // - CSI < 99 u: pops the entire Kitty keyboard stack (length 8 in libghostty-vt).
@@ -35,7 +32,7 @@ internal static unsafe class TerminalModeReset
     //   visibility (?2033), in-band size reports (?2048), kitty paste events (?5522).
     // - OSC 8 (close hyperlink), OSC 22 (reset pointer shape to text), OSC 110/111/112
     //   (reset dynamic foreground/background/cursor color overrides).
-    private static readonly byte[] ResetPrimaryModes = Encoding.ASCII.GetBytes(
+    private const string ResetPrimaryModes =
         "\u001b[<99u"
         + "\u001b[!p"
         + "\u001b[12h\u001b[20l"
@@ -45,23 +42,29 @@ internal static unsafe class TerminalModeReset
         + "\u001b[?2004l\u001b[?2026l\u001b[?2027h\u001b[?2031l\u001b[?2033l\u001b[?2048l\u001b[?5522l"
         + "\u001b]8;;\u001b\\"
         + "\u001b]22;\u001b\\"
-        + "\u001b]110\u001b\\\u001b]111\u001b\\\u001b]112\u001b\\");
+        + "\u001b]110\u001b\\\u001b]111\u001b\\\u001b]112\u001b\\";
+
+    private static readonly byte[] PrimarySequence = Encoding.ASCII.GetBytes(Cancel + ResetPrimaryModes);
+    private static readonly byte[] AlternateSequence = Encoding.ASCII.GetBytes(Cancel + LeaveAlternateScreen + ResetPrimaryModes);
+
+    /// <summary>The VT byte sequence that resets <paramref name="term"/> from its current screen
+    /// state. Returning it as one slice lets callers emit the same transition into recording and
+    /// rewind capture streams as into the live terminal.</summary>
+    public static ReadOnlySpan<byte> SequenceFor(IntPtr term)
+    {
+        if (term == IntPtr.Zero)
+            return [];
+        GhosttyBufferInfo info;
+        GhosttyNative.rvt_buffer_info(term, &info);
+        return info.Alternate != 0 ? AlternateSequence : PrimarySequence;
+    }
 
     public static void Apply(IntPtr term)
     {
-        if (term == IntPtr.Zero)
+        var sequence = SequenceFor(term);
+        if (sequence.IsEmpty)
             return;
-        Write(term, CancelSequence);
-        GhosttyBufferInfo info;
-        GhosttyNative.rvt_buffer_info(term, &info);
-        if (info.Alternate != 0)
-            Write(term, LeaveAlternateScreen);
-        Write(term, ResetPrimaryModes);
-    }
-
-    private static void Write(IntPtr term, byte[] data)
-    {
-        fixed (byte* p = data)
-            GhosttyNative.rvt_write(term, p, (nuint)data.Length);
+        fixed (byte* p = sequence)
+            GhosttyNative.rvt_write(term, p, (nuint)sequence.Length);
     }
 }

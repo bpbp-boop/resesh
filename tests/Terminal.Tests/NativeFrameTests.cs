@@ -718,6 +718,43 @@ public sealed unsafe class NativeFrameTests
         Assert.Equal(0, GhosttyNative.rvt_kitty_flags(terminal.Handle));
     }
 
+    [WindowsNativeFact]
+    public void ModeResetSequenceReplaysIdenticallyIntoARecordingTerminal()
+    {
+        using var live = new NativeTerminal();
+        using var replay = new NativeTerminal();
+        const string beforeDrop = "line0\r\nprompt$ \u001b[?1049h\u001b[>1u\u001b[?1000h\u001b[?1006hfullscreen";
+        const string afterReconnect = "\r\nreconnected$ ";
+
+        live.Write(beforeDrop);
+        replay.Write(beforeDrop);
+
+        var reset = TerminalModeReset.SequenceFor(live.Handle).ToArray();
+        fixed (byte* p = reset)
+        {
+            GhosttyNative.rvt_write(live.Handle, p, (nuint)reset.Length);
+            GhosttyNative.rvt_write(replay.Handle, p, (nuint)reset.Length);
+        }
+
+        live.Write(afterReconnect);
+        replay.Write(afterReconnect);
+        live.ReadFrame(forceAll: true);
+        replay.ReadFrame(forceAll: true);
+
+        Assert.Equal(0, replay.Info.Alternate);
+        Assert.Equal(0, GhosttyNative.rvt_kitty_flags(replay.Handle));
+        Assert.Equal(0, GhosttyNative.rvt_mouse_tracking(replay.Handle));
+        Assert.Equal(live.Info.CursorX, replay.Info.CursorX);
+        Assert.Equal(live.Info.CursorY, replay.Info.CursorY);
+
+        var liveBuffer = new TerminalCommandBuffer(() => live.Handle);
+        var replayBuffer = new TerminalCommandBuffer(() => replay.Handle);
+        liveBuffer.Refresh();
+        replayBuffer.Refresh();
+        Assert.Equal(liveBuffer.LineText(liveBuffer.CursorLine), replayBuffer.LineText(replayBuffer.CursorLine));
+        Assert.Equal("reconnected$", replayBuffer.LineText(replayBuffer.CursorLine));
+    }
+
     private sealed class WindowsNativeFactAttribute : FactAttribute
     {
         public WindowsNativeFactAttribute()

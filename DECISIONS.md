@@ -3062,7 +3062,9 @@ and the Kitty keyboard protocol stuck on (wheel events printed `64;x;yM`, Ctrl+C
 - Applied in `NotifyDisconnected` (before printing the disconnect banner so it is never hidden in
   the alternate screen or a synchronized-output hold) and in `TerminalTabView.ConnectAsync` before
   starting the next backend — never in `NotifyConnected`, because the new backend's reader thread
-  is already running and may have delivered persistent-session mode replay by then. Mouse reporting
-  is also gated on `_connection.IsLive`.
+  is already running and may have delivered persistent-session mode replay by then. The reset
+  sequence goes through `WriteObservedLocked` (gated by `_modesDirty` so fresh tabs and redundant
+  resets emit nothing) so rewind and `.cast` recordings see the same screen transition as the live
+  terminal. Mouse reporting is also gated on `_connection.IsLive`.
 - Exposed as **Reset Terminal** in the Session menu and Command Palette so users can also recover
   when an inner SSH hop drops or a remote TUI crashes while the outer connection stays up.

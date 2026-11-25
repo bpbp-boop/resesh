@@ -118,6 +118,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private long _keyframeBytes;
     private long _lastKeyframeMs;
     private long _lastObservedMs;
+    private bool _modesDirty; // backend output arrived since creation or last ResetModes
 
     private int _fontSize = TerminalDefaults.FontSize;
     private int _zoomDelta;
@@ -394,37 +395,46 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             return;
         lock (_termGate)
         {
-            // Replay takes the events strictly after a keyframe's time, so output must never
-            // share a millisecond with the keyframe that already contains earlier output.
-            var unixMs = Math.Max(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), _lastKeyframeMs + 1);
-            _lastObservedMs = unixMs;
-            try
-            {
-                OutputObserved?.Invoke(data, unixMs);
-            }
-            catch (Exception exception)
-            {
-                TerminalSurface.TraceHook?.Invoke($"output observer failed: {exception.Message}");
-            }
-            if (FrameStats.Enabled)
-            {
-                var parseStart = FrameStats.Now();
-                WriteToTerminal(data);
-                Interlocked.Add(ref _statsParseTicks, FrameStats.Now() - parseStart);
-                Interlocked.Add(ref _statsParsedBytes, data.Length);
-            }
-            else
-            {
-                WriteToTerminal(data);
-            }
-            if (_term == IntPtr.Zero)
-                return;
-            _keyframeBytes += data.Length;
-            var since = unixMs - _lastKeyframeMs;
-            if (since >= KeyframeMinimumMilliseconds &&
-                (_keyframeBytes >= KeyframeMinimumBytes || since >= KeyframeMaximumMilliseconds))
-                CaptureKeyframeLocked(unixMs);
+            _modesDirty = true;
+            WriteObservedLocked(data);
         }
+    }
+
+    /// <summary>Writes bytes into the terminal and emits them to <see cref="OutputObserved"/> in
+    /// the same stream order so rewind and recordings see identical transitions. Caller holds
+    /// <see cref="_termGate"/>.</summary>
+    private void WriteObservedLocked(ReadOnlySpan<byte> data)
+    {
+        // Replay takes the events strictly after a keyframe's time, so output must never
+        // share a millisecond with the keyframe that already contains earlier output.
+        var unixMs = Math.Max(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), _lastKeyframeMs + 1);
+        _lastObservedMs = unixMs;
+        try
+        {
+            OutputObserved?.Invoke(data, unixMs);
+        }
+        catch (Exception exception)
+        {
+            TerminalSurface.TraceHook?.Invoke($"output observer failed: {exception.Message}");
+        }
+        if (FrameStats.Enabled)
+        {
+            var parseStart = FrameStats.Now();
+            WriteToTerminal(data);
+            Interlocked.Add(ref _statsParseTicks, FrameStats.Now() - parseStart);
+            Interlocked.Add(ref _statsParsedBytes, data.Length);
+        }
+        else
+        {
+            WriteToTerminal(data);
+        }
+        if (_term == IntPtr.Zero)
+            return;
+        _keyframeBytes += data.Length;
+        var since = unixMs - _lastKeyframeMs;
+        if (since >= KeyframeMinimumMilliseconds &&
+            (_keyframeBytes >= KeyframeMinimumBytes || since >= KeyframeMaximumMilliseconds))
+            CaptureKeyframeLocked(unixMs);
     }
 
     /// <summary>Serializes the full screen as VT text on the parsing thread, so the keyframe
@@ -531,8 +541,13 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
         SetAutoscroll(0);
         lock (_termGate)
         {
-            if (_term != IntPtr.Zero)
-                TerminalModeReset.Apply(_term);
+            // Skip when no backend output arrived since creation or the last reset so a fresh
+            // tab or back-to-back disconnect+reconnect never emits empty reset events into capture.
+            if (_term != IntPtr.Zero && _modesDirty)
+            {
+                WriteObservedLocked(TerminalModeReset.SequenceFor(_term));
+                _modesDirty = false;
+            }
         }
         ForceFull();
         RequestFrame();
