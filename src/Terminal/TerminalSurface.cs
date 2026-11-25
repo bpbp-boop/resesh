@@ -82,6 +82,10 @@ public abstract partial class TerminalSurface : Grid, IDisposable
     public abstract void WriteOutput(ReadOnlySpan<byte> data);
     public abstract void NotifyConnected();
     public abstract void NotifyDisconnected(string message, string action = "reconnect", bool neutral = false);
+    /// <summary>Resets stuck terminal modes (mouse tracking, Kitty keyboard protocol, alternate
+    /// screen, bracketed paste, scrolling region, synchronized output, pointer shape) without
+    /// clearing scrollback or primary screen content.</summary>
+    public abstract void ResetModes();
     public abstract void WriteDivider();
     public abstract void WriteNotice(string message);
     public abstract void FocusTerminal();

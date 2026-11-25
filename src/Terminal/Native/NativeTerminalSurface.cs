@@ -118,6 +118,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     private long _keyframeBytes;
     private long _lastKeyframeMs;
     private long _lastObservedMs;
+    private bool _modesDirty; // backend output arrived since creation or last ResetModes
 
     private int _fontSize = TerminalDefaults.FontSize;
     private int _zoomDelta;
@@ -394,37 +395,46 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             return;
         lock (_termGate)
         {
-            // Replay takes the events strictly after a keyframe's time, so output must never
-            // share a millisecond with the keyframe that already contains earlier output.
-            var unixMs = Math.Max(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), _lastKeyframeMs + 1);
-            _lastObservedMs = unixMs;
-            try
-            {
-                OutputObserved?.Invoke(data, unixMs);
-            }
-            catch (Exception exception)
-            {
-                TerminalSurface.TraceHook?.Invoke($"output observer failed: {exception.Message}");
-            }
-            if (FrameStats.Enabled)
-            {
-                var parseStart = FrameStats.Now();
-                WriteToTerminal(data);
-                Interlocked.Add(ref _statsParseTicks, FrameStats.Now() - parseStart);
-                Interlocked.Add(ref _statsParsedBytes, data.Length);
-            }
-            else
-            {
-                WriteToTerminal(data);
-            }
-            if (_term == IntPtr.Zero)
-                return;
-            _keyframeBytes += data.Length;
-            var since = unixMs - _lastKeyframeMs;
-            if (since >= KeyframeMinimumMilliseconds &&
-                (_keyframeBytes >= KeyframeMinimumBytes || since >= KeyframeMaximumMilliseconds))
-                CaptureKeyframeLocked(unixMs);
+            _modesDirty = true;
+            WriteObservedLocked(data);
         }
+    }
+
+    /// <summary>Writes bytes into the terminal and emits them to <see cref="OutputObserved"/> in
+    /// the same stream order so rewind and recordings see identical transitions. Caller holds
+    /// <see cref="_termGate"/>.</summary>
+    private void WriteObservedLocked(ReadOnlySpan<byte> data)
+    {
+        // Replay takes the events strictly after a keyframe's time, so output must never
+        // share a millisecond with the keyframe that already contains earlier output.
+        var unixMs = Math.Max(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), _lastKeyframeMs + 1);
+        _lastObservedMs = unixMs;
+        try
+        {
+            OutputObserved?.Invoke(data, unixMs);
+        }
+        catch (Exception exception)
+        {
+            TerminalSurface.TraceHook?.Invoke($"output observer failed: {exception.Message}");
+        }
+        if (FrameStats.Enabled)
+        {
+            var parseStart = FrameStats.Now();
+            WriteToTerminal(data);
+            Interlocked.Add(ref _statsParseTicks, FrameStats.Now() - parseStart);
+            Interlocked.Add(ref _statsParsedBytes, data.Length);
+        }
+        else
+        {
+            WriteToTerminal(data);
+        }
+        if (_term == IntPtr.Zero)
+            return;
+        _keyframeBytes += data.Length;
+        var since = unixMs - _lastKeyframeMs;
+        if (since >= KeyframeMinimumMilliseconds &&
+            (_keyframeBytes >= KeyframeMinimumBytes || since >= KeyframeMaximumMilliseconds))
+            CaptureKeyframeLocked(unixMs);
     }
 
     /// <summary>Serializes the full screen as VT text on the parsing thread, so the keyframe
@@ -513,9 +523,34 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             commands.ResetConnection();
             commands.SetExecutionReporting(false);
         }
+        // A program that died with the connection never sent its teardown sequences; reset
+        // modes before printing the notice so it lands on the primary screen, not clipped or held.
+        ResetModes();
         WriteDisplayText(Rule() + (neutral ? "\x1b[90m" : "\x1b[1;33m") +
             (string.IsNullOrEmpty(message) ? "Disconnected." : message) +
             "\x1b[0m Press Enter to " + (string.IsNullOrEmpty(action) ? "reconnect" : action) + ".\r\n");
+    }
+
+    public override void ResetModes()
+    {
+        if (_disposed)
+            return;
+        _suppressedKey.Clear();
+        _buttonsDown = 0;
+        EndSelectionGesture(null);
+        SetAutoscroll(0);
+        lock (_termGate)
+        {
+            // Skip when no backend output arrived since creation or the last reset so a fresh
+            // tab or back-to-back disconnect+reconnect never emits empty reset events into capture.
+            if (_term != IntPtr.Zero && _modesDirty)
+            {
+                WriteObservedLocked(TerminalModeReset.SequenceFor(_term));
+                _modesDirty = false;
+            }
+        }
+        ForceFull();
+        RequestFrame();
     }
 
     public override void WriteDivider() => WriteDisplayText(Rule());
@@ -1450,7 +1485,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     /// swaps the two sides, so whichever one the mode leaves out is still a Shift away.</summary>
     private bool ReportsMouse(PointerRoutedEventArgs args, bool wheel = false)
     {
-        if (_term == IntPtr.Zero || _mouseCapture == TerminalMouseCapture.Never
+        if (_term == IntPtr.Zero || !_connection.IsLive || _mouseCapture == TerminalMouseCapture.Never
             || GhosttyNative.rvt_mouse_tracking(_term) == 0)
             return false;
         var program = _mouseCapture == TerminalMouseCapture.Always || wheel;
@@ -1459,7 +1494,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     /// <summary>True when only Shift selects, because the program gets plain clicks.</summary>
     private bool ShiftSelects =>
-        _mouseCapture == TerminalMouseCapture.Always && GhosttyNative.rvt_mouse_tracking(_term) != 0;
+        _connection.IsLive && _mouseCapture == TerminalMouseCapture.Always && GhosttyNative.rvt_mouse_tracking(_term) != 0;
 
     private void SendMouse(int action, int button, PointerRoutedEventArgs args)
     {
@@ -1469,6 +1504,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void SendMouse(int action, int button, int mods, (float X, float Y) position)
     {
+        if (!_connection.IsLive)
+            return;
         var output = stackalloc byte[64];
         var n = GhosttyNative.rvt_encode_mouse(_term, action, button, mods, position.X, position.Y, _buttonsDown != 0 ? 1 : 0, output, 64);
         if (n > 0)

@@ -1062,6 +1062,8 @@ public sealed partial class MainWindow
 
     public void SendBreak(TabViewModel tab) => (tab.View as TerminalTabView)?.SendBreak();
 
+    public void ResetTerminal(TabViewModel tab) => (tab.View as TerminalTabView)?.ResetTerminal();
+
     public void DisconnectTab(TabViewModel tab)
     {
         if (tab.View is TerminalTabView view && tab.State == TabConnectionState.Connected)

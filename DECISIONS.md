@@ -3039,3 +3039,32 @@ changes only recolour the frame. The cost is up to two pixels per side on panes 
 - **Decorations batch into horizontal spans** of matching underline style, color, and faintness
   (and likewise for strikethrough/overline), and multi-codepoint grapheme strings are cached per
   cell on the surface until their row is read again.
+
+## 2026-11-26 - Reset terminal modes on disconnect and before reconnect
+
+When an SSH connection dropped while a TUI was running (such as across laptop sleep), the remote
+program died without sending teardown sequences. Reconnecting to a fresh shell — or reattaching to
+a persistent session whose TUI had exited, since `resesh-agent`'s `TerminalFormatter` only emits
+non-default modes and non-zero Kitty keyboard flags — left `libghostty-vt` with SGR mouse tracking
+and the Kitty keyboard protocol stuck on (wheel events printed `64;x;yM`, Ctrl+C printed `9;5u`).
+
+- `TerminalModeReset.Apply` resets stuck modes non-destructively (keeping scrollback and primary
+  screen content): `CAN` (`0x18`) cancels any partial escape/control string, `CSI < 99 u` clears
+  the Kitty keyboard stack (on the alternate screen first if active, then on primary), `DECSTR`
+  (`CSI ! p`) restores standard soft-reset state, and explicit mode/OSC sequences clear everything
+  `DECSTR` omits (mouse tracking and formats, focus reporting, bracketed paste, synchronized output,
+  OSC 8 hyperlink, OSC 22 pointer shape, and dynamic color overrides) while preserving
+  `rvt_new`'s grapheme-clustering default (`?2027h`).
+- Alternate screen exit (`?1049l`/`?1047l`/`?47l`) is sent **only** when `rvt_buffer_info`
+  reports `Alternate != 0`: libghostty-vt's `switchScreenMode(.@"1049", false)` unconditionally
+  calls `restoreCursor()`, which on the primary screen would jump to a stale saved cursor or
+  `(0, 0)`.
+- Applied in `NotifyDisconnected` (before printing the disconnect banner so it is never hidden in
+  the alternate screen or a synchronized-output hold) and in `TerminalTabView.ConnectAsync` before
+  starting the next backend — never in `NotifyConnected`, because the new backend's reader thread
+  is already running and may have delivered persistent-session mode replay by then. The reset
+  sequence goes through `WriteObservedLocked` (gated by `_modesDirty` so fresh tabs and redundant
+  resets emit nothing) so rewind and `.cast` recordings see the same screen transition as the live
+  terminal. Mouse reporting is also gated on `_connection.IsLive`.
+- Exposed as **Reset Terminal** in the Session menu and Command Palette so users can also recover
+  when an inner SSH hop drops or a remote TUI crashes while the outer connection stays up.

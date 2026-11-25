@@ -54,7 +54,7 @@ public sealed partial class MainViewModel
 
     private IEnumerable<IRelayCommand> TabCommands =>
     [
-        ReconnectCommand, DisconnectCommand, SendBreakCommand, ManageRemoteSessionsCommand, ManageTunnelsCommand,
+        ReconnectCommand, DisconnectCommand, SendBreakCommand, ResetTerminalCommand, ManageRemoteSessionsCommand, ManageTunnelsCommand,
         EndRemoteSessionCommand, CloneTabCommand, TogglePinCommand, EditSessionSettingsCommand,
         CloseTabCommand, SplitRightCommand, SplitDownCommand, ToggleZoomCommand, MoveTabLeftCommand, MoveTabRightCommand,
         ToggleFilePaneCommand, ToggleCommandsPanelCommand, ToggleCompletionNotificationCommand,
@@ -103,6 +103,9 @@ public sealed partial class MainViewModel
     private bool CanSendBreak(TabViewModel? tab) =>
         Target(tab) is { AcceptsCommands: true } target
         && target.Capabilities.SendBreak && HasTerminal(target);
+
+    [RelayCommand(CanExecute = nameof(IsUnlockedTerminal))]
+    private void ResetTerminal(TabViewModel? tab) => Services.ResetTerminal(Target(tab)!);
 
     [RelayCommand(CanExecute = nameof(CanManageRemoteSessions),
         AllowConcurrentExecutions = true, FlowExceptionsToTaskScheduler = true)]

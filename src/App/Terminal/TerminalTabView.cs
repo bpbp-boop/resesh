@@ -819,6 +819,16 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             _terminal.InvokeShortcut(id);
     }
 
+    /// <summary>Resets stuck terminal modes (mouse tracking, Kitty keyboard, alternate screen,
+    /// scrolling region) without clearing scrollback.</summary>
+    public void ResetTerminal()
+    {
+        if (_disposed || _tab.IsLocked)
+            return;
+        _terminal.ResetModes();
+        _terminal.FocusTerminal();
+    }
+
     /// <summary>
     /// The view's one notion of connection phase: a connect is in flight (<c>_connecting</c>),
     /// or the tab's state says the backend is live. The tab state is moved only by this view,
@@ -852,6 +862,9 @@ public sealed partial class TerminalTabView : Grid, IDisposable
         _backend = null;
         _ssh = null;
         _liveLogin = null;
+        // Start every connection with default terminal modes; persistent reattach (zmx/tmux)
+        // replays any modes a still-running program needs on top of defaults.
+        _terminal.ResetModes();
 
         // Work that must wait until the connect has fully ended (spinner off, Reconnect
         // available again), such as asking for a replacement password.

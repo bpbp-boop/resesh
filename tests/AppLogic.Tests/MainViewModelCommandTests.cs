@@ -297,6 +297,32 @@ public sealed class MainViewModelCommandTests : IDisposable
     }
 
     [Fact]
+    public void ResetTerminalRequiresAnUnlockedLiveTerminalTab()
+    {
+        var window = Window();
+        Assert.False(window.ResetTerminalCommand.CanExecute(null));
+
+        var tab = Open(window, Ssh("prod"), TabConnectionState.Connected);
+        Assert.True(window.ResetTerminalCommand.CanExecute(null));
+        Assert.Contains(window.Commands.PaletteCommands(), d => d.Title() == "Reset Terminal");
+
+        window.ResetTerminalCommand.Execute(null);
+        Assert.Equal(["ResetTerminal prod"], _window.Calls);
+
+        // Also available while disconnected, but not when locked or on an app page.
+        tab.MarkDisconnected();
+        Assert.True(window.ResetTerminalCommand.CanExecute(null));
+
+        tab.Lock("secret");
+        Assert.False(window.ResetTerminalCommand.CanExecute(null));
+
+        var settings = TabViewModel.CreateAppPage(AppPage.Settings, Environment());
+        window.AttachTab(settings, window.FocusedGroup, 0);
+        window.FocusedGroup.SelectedTab = settings;
+        Assert.False(window.ResetTerminalCommand.CanExecute(null));
+    }
+
+    [Fact]
     public void SplitNeedsASecondTabInTheGroup()
     {
         var window = Window();
