@@ -589,6 +589,7 @@ public sealed partial class TerminalTabView : Grid, IDisposable
             {
                 ApplyPromptPlatform();
                 _terminal.SetFixed80Columns(Session.IsTelnet && Session.TelnetFixed80Columns);
+                OnSessionEditedForSerialWatch();
             }
         });
     }

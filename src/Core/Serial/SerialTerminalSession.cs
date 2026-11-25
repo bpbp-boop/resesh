@@ -13,6 +13,117 @@ public sealed class SerialSessionException(string message, bool portMissing = fa
     public bool PortMissing { get; } = portMissing;
 }
 
+/// <summary>Thin seam over <see cref="SerialPort"/> so the read/send/break/close lifecycle
+/// can be tested deterministically without serial hardware.</summary>
+internal interface ISerialPortAdapter : IDisposable
+{
+    bool IsOpen { get; }
+    bool BreakState { get; set; }
+    void Open();
+    int Read(byte[] buffer, int offset, int count);
+    void Write(byte[] buffer, int offset, int count);
+    void DiscardOutBuffer();
+}
+
+internal sealed class SystemSerialPortAdapter : ISerialPortAdapter
+{
+    private readonly SerialPort _port;
+    private Stream? _stream;
+
+    public SystemSerialPortAdapter(string name, SerialTarget target)
+    {
+        var handshake = target.FlowControl switch
+        {
+            SerialFlowControl.XonXoff => Handshake.XOnXOff,
+            SerialFlowControl.RtsCts => Handshake.RequestToSend,
+            _ => Handshake.None,
+        };
+        _port = new SerialPort(name)
+        {
+            BaudRate = target.BaudRate,
+            DataBits = target.DataBits,
+            Parity = target.Parity switch
+            {
+                SerialParity.Odd => Parity.Odd,
+                SerialParity.Even => Parity.Even,
+                SerialParity.Mark => Parity.Mark,
+                SerialParity.Space => Parity.Space,
+                _ => Parity.None,
+            },
+            StopBits = target.StopBits switch
+            {
+                SerialStopBits.OnePointFive => StopBits.OnePointFive,
+                SerialStopBits.Two => StopBits.Two,
+                _ => StopBits.One,
+            },
+            Handshake = handshake,
+            // Assert DTR and RTS in the initial DCB as PuTTY and SecureCRT do: many USB
+            // adapters and console ports send nothing until they see them, and setting them
+            // before Open avoids a low->high glitch pulse. With RTS/CTS the driver owns RTS.
+            DtrEnable = true,
+            ReadTimeout = SerialPort.InfiniteTimeout,
+            WriteTimeout = SerialPort.InfiniteTimeout,
+            ReadBufferSize = 64 * 1024,
+        };
+        if (handshake != Handshake.RequestToSend)
+            _port.RtsEnable = true;
+    }
+
+    public bool IsOpen => _port.IsOpen;
+
+    public bool BreakState
+    {
+        get => _port.BreakState;
+        set => _port.BreakState = value;
+    }
+
+    public void Open()
+    {
+        _port.Open();
+        _stream = _port.BaseStream;
+    }
+
+    public int Read(byte[] buffer, int offset, int count) => _stream!.Read(buffer, offset, count);
+
+    public void Write(byte[] buffer, int offset, int count) => _stream!.Write(buffer, offset, count);
+
+    public void DiscardOutBuffer() => _port.DiscardOutBuffer();
+
+    public void Dispose() => _port.Dispose();
+}
+
+/// <summary>Tracks background closes per COM port so an immediate Disconnect -> Reconnect
+/// (or tab close -> reopen) waits briefly for our own close thread instead of failing with
+/// "in use by another program".</summary>
+internal sealed class SerialPortCloseTracker
+{
+    public static readonly SerialPortCloseTracker Shared = new();
+
+    private readonly ConcurrentDictionary<string, Task> _pending = new(StringComparer.OrdinalIgnoreCase);
+
+    public IDisposable BeginClose(string portName)
+    {
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pending[portName] = tcs.Task;
+        return new Scope(this, portName, tcs);
+    }
+
+    public void WaitForPendingClose(string portName, TimeSpan timeout)
+    {
+        if (_pending.TryGetValue(portName, out var pending))
+            pending.Wait(timeout);
+    }
+
+    private sealed class Scope(SerialPortCloseTracker owner, string portName, TaskCompletionSource tcs) : IDisposable
+    {
+        public void Dispose()
+        {
+            owner._pending.TryRemove(new KeyValuePair<string, Task>(portName, tcs.Task));
+            tcs.TrySetResult();
+        }
+    }
+}
+
 /// <summary>
 /// One open serial port: a reader thread and a sender thread, like telnet. Sends are queued
 /// so a device holding off flow control (XOFF, CTS low) can never stall the UI, and so a
@@ -26,18 +137,59 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
     /// loader want at least a quarter second; most UARTs accept anything longer.</summary>
     public static readonly TimeSpan BreakDuration = TimeSpan.FromMilliseconds(300);
 
+    private static readonly TimeSpan DefaultCloseWaitTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan DefaultZeroReadBackoff = TimeSpan.FromMilliseconds(20);
+    private const int MaxConsecutiveZeroReads = 5;
+
     // Queued in place of data to send a break, compared by reference.
     private static readonly byte[] BreakMarker = [];
 
+    private readonly Func<string, SerialTarget, ISerialPortAdapter> _portFactory;
+    private readonly Func<string, bool> _portExists;
+    private readonly SerialPortCloseTracker _closeTracker;
+    private readonly TimeSpan _breakDuration;
+    private readonly TimeSpan _closeWaitTimeout;
+    private readonly TimeSpan _zeroReadBackoff;
+
     private readonly object _gate = new();
+    private readonly object _closePortLock = new();
+    private readonly ManualResetEventSlim _stopSignal = new(false);
     private readonly BlockingCollection<byte[]> _outgoing = new();
-    private SerialPort? _port;
-    private Stream? _stream;
+    private ISerialPortAdapter? _port;
+    private string? _portName;
     private Thread? _reader;
     private Thread? _sender;
     private readonly BackendLifecycle _lifecycle = new();
-    // A failure and a local stop can both reach for the port; only the first closes it.
-    private int _portClosed;
+    private bool _portClosed;
+    private int _closingPort;
+    private int _closeFinished;
+    private int _writesInFlight;
+
+    public SerialTerminalSession()
+        : this(static (name, target) => new SystemSerialPortAdapter(name, target),
+            SerialPortList.Exists,
+            SerialPortCloseTracker.Shared,
+            BreakDuration,
+            DefaultCloseWaitTimeout,
+            DefaultZeroReadBackoff)
+    {
+    }
+
+    internal SerialTerminalSession(
+        Func<string, SerialTarget, ISerialPortAdapter> portFactory,
+        Func<string, bool> portExists,
+        SerialPortCloseTracker? closeTracker = null,
+        TimeSpan? breakDuration = null,
+        TimeSpan? closeWaitTimeout = null,
+        TimeSpan? zeroReadBackoff = null)
+    {
+        _portFactory = portFactory;
+        _portExists = portExists;
+        _closeTracker = closeTracker ?? new SerialPortCloseTracker();
+        _breakDuration = breakDuration ?? BreakDuration;
+        _closeWaitTimeout = closeWaitTimeout ?? DefaultCloseWaitTimeout;
+        _zeroReadBackoff = zeroReadBackoff ?? DefaultZeroReadBackoff;
+    }
 
     public event TerminalOutputHandler? OutputReceived;
 
@@ -48,7 +200,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
     /// <summary>Diagnostic hook (DEBUG builds wire this to a trace log).</summary>
     public static Action<string>? TraceHook { get; set; }
 
-    public bool IsConnected => _lifecycle.IsOpen && _port is { IsOpen: true };
+    public bool IsConnected => _lifecycle.IsOpen && Volatile.Read(ref _port) is { IsOpen: true };
 
     /// <summary>The port and line settings in use, for the status bar.</summary>
     public string Description { get; private set; } = "";
@@ -78,47 +230,25 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
                 ? "No serial port set for this session."
                 : $"\"{target.PortName}\" is not a serial port name. Use a name like COM3.");
 
-        var port = new SerialPort(name)
-        {
-            BaudRate = target.BaudRate,
-            DataBits = target.DataBits,
-            Parity = target.Parity switch
-            {
-                SerialParity.Odd => Parity.Odd,
-                SerialParity.Even => Parity.Even,
-                SerialParity.Mark => Parity.Mark,
-                SerialParity.Space => Parity.Space,
-                _ => Parity.None,
-            },
-            StopBits = target.StopBits switch
-            {
-                SerialStopBits.OnePointFive => StopBits.OnePointFive,
-                SerialStopBits.Two => StopBits.Two,
-                _ => StopBits.One,
-            },
-            Handshake = target.FlowControl switch
-            {
-                SerialFlowControl.XonXoff => Handshake.XOnXOff,
-                SerialFlowControl.RtsCts => Handshake.RequestToSend,
-                _ => Handshake.None,
-            },
-            ReadTimeout = SerialPort.InfiniteTimeout,
-            WriteTimeout = SerialPort.InfiniteTimeout,
-            ReadBufferSize = 64 * 1024,
-        };
+        if (target.ValidateLineSettings() is { } settingsError)
+            throw new SerialSessionException($"{name} does not accept {target.Framing}: {settingsError}");
+
+        // Wait briefly if a previous Disconnect/close in this process is still releasing the handle.
+        _closeTracker.WaitForPendingClose(name, _closeWaitTimeout);
+        if (_lifecycle.IsStopped)
+            throw new OperationCanceledException();
+
+        ISerialPortAdapter? port = null;
         try
         {
+            port = _portFactory(name, target);
             port.Open();
-            // Assert DTR and RTS as PuTTY and SecureCRT do: many USB adapters and console
-            // ports send nothing until they see them. With RTS/CTS the driver owns RTS.
-            port.DtrEnable = true;
-            if (target.FlowControl != SerialFlowControl.RtsCts)
-                port.RtsEnable = true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
         {
-            port.Dispose();
-            var missing = !SerialPortList.Exists(name);
+            try { port?.Dispose(); }
+            catch (Exception disposeEx) when (disposeEx is IOException or UnauthorizedAccessException or ObjectDisposedException or InvalidOperationException) { }
+            var missing = !_portExists(name);
             throw new SerialSessionException(ex switch
             {
                 _ when missing => $"{name} is not connected.",
@@ -134,18 +264,19 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
             // fails here or Dispose sees the port and closes it.
             if (!_lifecycle.TryPublishOpen())
             {
-                port.Dispose();
+                try { port.Dispose(); }
+                catch (Exception disposeEx) when (disposeEx is IOException or UnauthorizedAccessException or ObjectDisposedException or InvalidOperationException) { }
                 throw new OperationCanceledException();
             }
             _port = port;
-            _stream = port.BaseStream;
+            _portName = name;
             Description = (target with { PortName = name }).Describe();
         }
         TraceHook?.Invoke($"serial opened {Description}");
 
-        _sender = new Thread(SendLoop) { IsBackground = true, Name = "serial-sender" };
+        _sender = new Thread(() => SendLoop(port)) { IsBackground = true, Name = "serial-sender" };
         _sender.Start();
-        _reader = new Thread(ReadLoop) { IsBackground = true, Name = "serial-reader" };
+        _reader = new Thread(() => ReadLoop(port)) { IsBackground = true, Name = "serial-reader" };
         _reader.Start();
     }
 
@@ -182,31 +313,62 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
         // for it rather than letting it land after the stop.
         if (!_lifecycle.BeginStop())
             return;
-        SerialPort? port;
+        Interlocked.Exchange(ref _closingPort, 1);
+        _stopSignal.Set();
+        ISerialPortAdapter? port;
+        string? portName;
         lock (_gate)
         {
             port = _port;
+            portName = _portName;
             _outgoing.CompleteAdding();
         }
-        if (port is null || Volatile.Read(ref _portClosed) != 0)
+        if (port is null || Volatile.Read(ref _closeFinished) != 0)
             return;
         // SerialPort.Dispose flushes pending output, and Windows waits for flow control
         // with no timeout: a device holding CTS low or sitting on XOFF would hang the
-        // caller (the UI thread, for Disconnect and tab close). Close on a thread of its own.
-        new Thread(() => Close(port)) { IsBackground = true, Name = "serial-close" }.Start();
+        // caller (the UI thread, for Disconnect and tab close). Close on a thread of its own,
+        // registered first so an immediate Reconnect waits for this handle to finish closing.
+        var closing = portName is null ? null : _closeTracker.BeginClose(portName);
+        new Thread(() =>
+        {
+            using (closing)
+                Close(port);
+        })
+        { IsBackground = true, Name = "serial-close" }.Start();
     }
 
     // Purge first so neither a blocked write on the sender thread nor the flush inside
-    // Dispose waits on the device. Closing a port whose adapter was unplugged throws from
-    // the driver; the handle is released either way. Once only: the failure path and a
-    // stop both get here.
-    private void Close(SerialPort? port)
+    // Dispose waits on the device. Serialized under _closePortLock so a second thread
+    // entering Fail() never raises Closed before the first has finished releasing the handle.
+    private void Close(ISerialPortAdapter? port)
     {
-        if (port is null || Interlocked.Exchange(ref _portClosed, 1) != 0)
+        if (port is null)
             return;
+        Interlocked.Exchange(ref _closingPort, 1);
+        _stopSignal.Set();
+        lock (_closePortLock)
+        {
+            if (_portClosed)
+                return;
+            _portClosed = true;
+            TryDiscardOutBuffer(port);
+            // If SendLoop entered Write just before _closingPort became visible, give it a
+            // moment to hit the driver and purge again so Dispose does not hang flushing it.
+            if (Volatile.Read(ref _writesInFlight) > 0)
+            {
+                Thread.Sleep(5);
+                TryDiscardOutBuffer(port);
+            }
+            try { port.Dispose(); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ObjectDisposedException or InvalidOperationException) { }
+            finally { Volatile.Write(ref _closeFinished, 1); }
+        }
+    }
+
+    private static void TryDiscardOutBuffer(ISerialPortAdapter port)
+    {
         try { if (port.IsOpen) port.DiscardOutBuffer(); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ObjectDisposedException or InvalidOperationException) { }
-        try { port.Dispose(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ObjectDisposedException or InvalidOperationException) { }
     }
 
@@ -215,7 +377,7 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
     /// <see cref="Closed"/> once. Raises nothing once a local stop has begun.</summary>
     private void Fail(Exception? failure)
     {
-        SerialPort? port;
+        ISerialPortAdapter? port;
         lock (_gate)
         {
             _outgoing.CompleteAdding(); // releases the sender thread
@@ -233,18 +395,30 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
         });
     }
 
-    private void ReadLoop()
+    private void ReadLoop(ISerialPortAdapter port)
     {
         var buffer = new byte[16 * 1024];
         Exception? failure = null;
+        var zeroReads = 0;
         try
         {
-            var stream = _stream!;
             while (!_lifecycle.IsStopped)
             {
-                var read = stream.Read(buffer, 0, buffer.Length);
+                var read = port.Read(buffer, 0, buffer.Length);
                 if (read <= 0)
+                {
+                    if (_lifecycle.IsStopped || !port.IsOpen)
+                        break;
+                    if (++zeroReads >= MaxConsecutiveZeroReads)
+                    {
+                        failure = new IOException("The serial port stopped responding.");
+                        break;
+                    }
+                    if (_stopSignal.Wait(_zeroReadBackoff))
+                        break;
                     continue;
+                }
+                zeroReads = 0;
                 OutputReceived?.Invoke(buffer.AsSpan(0, read));
             }
         }
@@ -256,21 +430,37 @@ public sealed class SerialTerminalSession : ITerminalBackend, IBreakSender
         Fail(failure);
     }
 
-    private void SendLoop()
+    private void SendLoop(ISerialPortAdapter port)
     {
         try
         {
             foreach (var bytes in _outgoing.GetConsumingEnumerable())
             {
+                if (Volatile.Read(ref _closingPort) != 0 || _lifecycle.IsStopped)
+                    break;
                 if (ReferenceEquals(bytes, BreakMarker))
                 {
-                    var port = _port!;
+                    TraceHook?.Invoke($"serial break ({Description})");
                     port.BreakState = true;
-                    try { Thread.Sleep(BreakDuration); }
-                    finally { port.BreakState = false; }
+                    try { _stopSignal.Wait(_breakDuration); }
+                    finally
+                    {
+                        if (Volatile.Read(ref _closingPort) == 0 && !_lifecycle.IsStopped && port.IsOpen)
+                            port.BreakState = false;
+                    }
                     continue;
                 }
-                _stream!.Write(bytes, 0, bytes.Length);
+                Interlocked.Increment(ref _writesInFlight);
+                try
+                {
+                    if (Volatile.Read(ref _closingPort) != 0 || _lifecycle.IsStopped)
+                        break;
+                    port.Write(bytes, 0, bytes.Length);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref _writesInFlight);
+                }
             }
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or UnauthorizedAccessException

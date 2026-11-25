@@ -80,7 +80,7 @@ public sealed partial class ImportCandidateVm : ImportRow
 
     /// <summary>Every term of the filter matches one of the fields, as in the session tree.</summary>
     public bool Matches(string filter) => Resesh.Core.Search.SessionSearch.MatchesAll(
-        filter, Name, Candidate.Host, Candidate.Username, Candidate.FolderPath);
+        filter, Name, Candidate.Host, Candidate.Username, Candidate.FolderPath, Candidate.Serial?.Describe());
 }
 
 /// <summary>A folder in the review list. Its checkbox covers every session below it,

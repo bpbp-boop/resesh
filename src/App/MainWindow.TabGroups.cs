@@ -970,7 +970,9 @@ public sealed partial class MainWindow
             return;
         }
         var notice = tab.State == TabConnectionState.Connected
-            ? "This tab is connected — changes to host, port, authentication, or network apply on the next connect."
+            ? current.IsSerial
+                ? "This tab is connected — changes to the serial port or line settings apply on the next connect."
+                : "This tab is connected — changes to host, port, authentication, or network apply on the next connect."
             : null;
         await OpenSessionEditorAsync(current, current.FolderPath, notice: notice, initialTarget: initialTarget);
     }

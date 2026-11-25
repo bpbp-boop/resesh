@@ -151,46 +151,51 @@
                                 Content="Refresh"
                                 AutomationProperties.Name="Refresh serial ports"
                                 Click="RefreshSerialPorts_Click" />
-                            <ComboBox
-                                x:Name="BaudBox"
-                                Grid.Column="2"
-                                VerticalAlignment="Top"
-                                Header="Speed (baud)"
-                                IsEditable="True"
-                                AutomationProperties.AutomationId="SerialBaudBox"
-                                HorizontalAlignment="Stretch" />
+                            <StackPanel Grid.Column="2" Spacing="4">
+                                <ComboBox
+                                    x:Name="BaudBox"
+                                    VerticalAlignment="Top"
+                                    Header="Speed (baud)"
+                                    IsEditable="True"
+                                    AutomationProperties.AutomationId="SerialBaudBox"
+                                    HorizontalAlignment="Stretch" />
+                                <TextBlock x:Name="SerialBaudError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+                            </StackPanel>
                         </Grid>
-                        <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <ComboBox x:Name="DataBitsBox" Grid.Column="0" Header="Data bits" SelectedIndex="3" HorizontalAlignment="Stretch">
-                                <x:String>5</x:String>
-                                <x:String>6</x:String>
-                                <x:String>7</x:String>
-                                <x:String>8</x:String>
-                            </ComboBox>
-                            <ComboBox x:Name="ParityBox" Grid.Column="1" Header="Parity" SelectedIndex="0" HorizontalAlignment="Stretch">
-                                <x:String>None</x:String>
-                                <x:String>Odd</x:String>
-                                <x:String>Even</x:String>
-                                <x:String>Mark</x:String>
-                                <x:String>Space</x:String>
-                            </ComboBox>
-                            <ComboBox x:Name="StopBitsBox" Grid.Column="2" Header="Stop bits" SelectedIndex="0" HorizontalAlignment="Stretch">
-                                <x:String>1</x:String>
-                                <x:String>1.5</x:String>
-                                <x:String>2</x:String>
-                            </ComboBox>
-                            <ComboBox x:Name="FlowControlBox" Grid.Column="3" Header="Flow control" SelectedIndex="0" HorizontalAlignment="Stretch">
-                                <x:String>None</x:String>
-                                <x:String>XON/XOFF</x:String>
-                                <x:String>RTS/CTS</x:String>
-                            </ComboBox>
-                        </Grid>
+                        <StackPanel Spacing="4">
+                            <Grid ColumnSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <ComboBox x:Name="DataBitsBox" Grid.Column="0" Header="Data bits" SelectedIndex="3" HorizontalAlignment="Stretch">
+                                    <x:String>5</x:String>
+                                    <x:String>6</x:String>
+                                    <x:String>7</x:String>
+                                    <x:String>8</x:String>
+                                </ComboBox>
+                                <ComboBox x:Name="ParityBox" Grid.Column="1" Header="Parity" SelectedIndex="0" HorizontalAlignment="Stretch">
+                                    <x:String>None</x:String>
+                                    <x:String>Odd</x:String>
+                                    <x:String>Even</x:String>
+                                    <x:String>Mark</x:String>
+                                    <x:String>Space</x:String>
+                                </ComboBox>
+                                <ComboBox x:Name="StopBitsBox" Grid.Column="2" Header="Stop bits" SelectedIndex="0" HorizontalAlignment="Stretch">
+                                    <x:String>1</x:String>
+                                    <x:String>1.5</x:String>
+                                    <x:String>2</x:String>
+                                </ComboBox>
+                                <ComboBox x:Name="FlowControlBox" Grid.Column="3" Header="Flow control" SelectedIndex="0" HorizontalAlignment="Stretch">
+                                    <x:String>None</x:String>
+                                    <x:String>XON/XOFF</x:String>
+                                    <x:String>RTS/CTS</x:String>
+                                </ComboBox>
+                            </Grid>
+                            <TextBlock x:Name="SerialFramingError" Foreground="{ThemeResource SystemFillColorCriticalBrush}" TextWrapping="Wrap" Visibility="Collapsed" AutomationProperties.LiveSetting="Polite" />
+                        </StackPanel>
                         <TextBlock
                             x:Name="SerialHint"
                             Style="{ThemeResource CaptionTextBlockStyle}"

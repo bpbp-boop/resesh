@@ -19,6 +19,7 @@ public static class SessionSearch
             || Contains(session.FolderPath, term)
             || Contains(session.Notes, term)
             || Contains(session.Local?.Executable, term)
+            || Contains(session.Serial?.Describe(), term)
             || alsoSearched.Any(text => Contains(text, term)));
 
     /// <summary>Whether every term of the query matches one of the texts. True for an empty query.</summary>
@@ -53,7 +54,7 @@ public static class SessionSearch
     {
         if (s.Name.StartsWith(q, StringComparison.OrdinalIgnoreCase)) return 0;
         if (Contains(s.Name, q)) return 1;
-        if (Contains(s.Host, q)) return 2;
+        if (Contains(s.Host, q) || Contains(s.Serial?.PortName, q)) return 2;
         return 3;
     }
 

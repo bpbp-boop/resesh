@@ -33,7 +33,7 @@ public static class SerialPortList
                 if (Models.SerialTarget.NormalizePortName(name) is { } normalized)
                     names.Add(normalized);
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or UnauthorizedAccessException or IOException)
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or UnauthorizedAccessException or IOException or System.Security.SecurityException)
         {
         }
 
@@ -42,22 +42,27 @@ public static class SerialPortList
             names.Add(name);
         return names
             .OrderBy(name => int.Parse(name.AsSpan(3), System.Globalization.CultureInfo.InvariantCulture))
-            .Select(name => new SerialPortInfo(name, descriptions.GetValueOrDefault(name)))
+            .Select(name => new SerialPortInfo(name, descriptions.GetValueOrDefault(name) is { Length: > 0 } description ? description : null))
             .ToList();
     }
 
     /// <summary>True when <paramref name="portName"/> is present now.</summary>
     public static bool Exists(string portName)
     {
+        var normalized = Models.SerialTarget.NormalizePortName(portName);
+        if (normalized is null)
+            return false;
         try
         {
-            return System.IO.Ports.SerialPort.GetPortNames()
-                .Any(name => string.Equals(Models.SerialTarget.NormalizePortName(name), portName, StringComparison.OrdinalIgnoreCase));
+            if (System.IO.Ports.SerialPort.GetPortNames()
+                .Any(name => string.Equals(Models.SerialTarget.NormalizePortName(name), normalized, StringComparison.OrdinalIgnoreCase)))
+                return true;
         }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or UnauthorizedAccessException or IOException)
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or UnauthorizedAccessException or IOException or System.Security.SecurityException)
         {
-            return false;
         }
+        // Match List(): a device exposed via SetupAPI without a SERIALCOMM entry is still present.
+        return FriendlyNames().ContainsKey(normalized);
     }
 
     /// <summary>The device friendly name for each present port, without its "(COM5)" suffix.</summary>
@@ -67,11 +72,12 @@ public static class SerialPortList
         if (!OperatingSystem.IsWindows())
             return result;
         var guid = ComPortInterface;
-        var set = SetupDiGetClassDevsW(ref guid, IntPtr.Zero, IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);
-        if (set == InvalidHandle)
-            return result;
+        var set = IntPtr.Zero;
         try
         {
+            set = SetupDiGetClassDevsW(ref guid, IntPtr.Zero, IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);
+            if (set == InvalidHandle || set == IntPtr.Zero)
+                return result;
             var buffer = new byte[1024];
             for (uint index = 0; ; index++)
             {
@@ -82,22 +88,41 @@ public static class SerialPortList
                 var portName = DevicePortName(set, ref device);
                 if (portName is null)
                     continue;
-                if (!SetupDiGetDeviceRegistryPropertyW(set, ref device, SpdrpFriendlyName, out _, buffer,
-                        (uint)buffer.Length, out var size) || size < 2)
+                if (!TryGetFriendlyName(set, ref device, ref buffer, out var size) || size < 2)
+                {
+                    result.TryAdd(portName, "");
                     continue;
+                }
                 var friendly = System.Text.Encoding.Unicode.GetString(buffer, 0, (int)size).TrimEnd('\0').Trim();
                 var suffix = $"({portName})";
                 if (friendly.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
                     friendly = friendly[..^suffix.Length].TrimEnd();
-                if (friendly.Length > 0)
-                    result[portName] = friendly;
+                result[portName] = friendly;
             }
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or UnauthorizedAccessException or IOException or System.Security.SecurityException)
+        {
         }
         finally
         {
-            SetupDiDestroyDeviceInfoList(set);
+            if (set != InvalidHandle && set != IntPtr.Zero)
+                SetupDiDestroyDeviceInfoList(set);
         }
         return result;
+    }
+
+    private static bool TryGetFriendlyName(IntPtr set, ref SpDevInfoData device, ref byte[] buffer, out uint size)
+    {
+        if (SetupDiGetDeviceRegistryPropertyW(set, ref device, SpdrpFriendlyName, out _, buffer,
+                (uint)buffer.Length, out size))
+            return true;
+        if (Marshal.GetLastWin32Error() == ErrorInsufficientBuffer && size > buffer.Length && size <= 16 * 1024)
+        {
+            buffer = new byte[size];
+            return SetupDiGetDeviceRegistryPropertyW(set, ref device, SpdrpFriendlyName, out _, buffer,
+                (uint)buffer.Length, out size);
+        }
+        return false;
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -106,9 +131,18 @@ public static class SerialPortList
         var handle = SetupDiOpenDevRegKey(set, ref device, DicsFlagGlobal, 0, DiregDev, KeyRead);
         if (handle == InvalidHandle || handle == IntPtr.Zero)
             return null;
-        using var key = RegistryKey.FromHandle(new SafeRegistryHandle(handle, ownsHandle: true));
-        return Models.SerialTarget.NormalizePortName(key.GetValue("PortName") as string);
+        try
+        {
+            using var key = RegistryKey.FromHandle(new SafeRegistryHandle(handle, ownsHandle: true));
+            return Models.SerialTarget.NormalizePortName(key.GetValue("PortName") as string);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or ObjectDisposedException or System.Security.SecurityException)
+        {
+            return null;
+        }
     }
+
+    private const int ErrorInsufficientBuffer = 122;
 
     private const uint DigcfPresent = 0x2;
     private const uint DigcfDeviceInterface = 0x10;

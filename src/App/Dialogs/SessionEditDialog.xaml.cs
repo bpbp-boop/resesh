@@ -478,6 +478,9 @@ public sealed partial class SessionEditDialog : ContentDialog
 
     // ---- serial ----
 
+    private string? _pendingSerialPortText;
+    private string? _pendingBaudText;
+
     private void PopulateSerial(SerialTarget? target)
     {
         var line = target ?? new SerialTarget();
@@ -487,7 +490,7 @@ public sealed partial class SessionEditDialog : ContentDialog
         if (BaudBox.Items.Contains(baud))
             BaudBox.SelectedItem = baud;
         else
-            SetEditableText(BaudBox, baud);
+            SetEditableText(BaudBox, baud, text => _pendingBaudText = text);
         DataBitsBox.SelectedIndex = Math.Clamp(line.DataBits - 5, 0, 3);
         ParityBox.SelectedIndex = (int)line.Parity;
         StopBitsBox.SelectedIndex = (int)line.StopBits;
@@ -495,6 +498,12 @@ public sealed partial class SessionEditDialog : ContentDialog
         RefreshSerialPorts(target?.PortName);
         SerialPortBox.SelectionChanged += (_, _) => ClearFieldError(SerialPortBox, SerialPortError);
         SerialPortBox.TextSubmitted += (_, _) => ClearFieldError(SerialPortBox, SerialPortError);
+        SerialPortBox.LostFocus += (_, _) => ClearFieldError(SerialPortBox, SerialPortError);
+        BaudBox.SelectionChanged += (_, _) => ClearFieldError(BaudBox, SerialBaudError);
+        BaudBox.TextSubmitted += (_, _) => ClearFieldError(BaudBox, SerialBaudError);
+        BaudBox.LostFocus += (_, _) => ClearFieldError(BaudBox, SerialBaudError);
+        DataBitsBox.SelectionChanged += (_, _) => ClearFieldError(StopBitsBox, SerialFramingError);
+        StopBitsBox.SelectionChanged += (_, _) => ClearFieldError(StopBitsBox, SerialFramingError);
     }
 
     private void RefreshSerialPorts_Click(object sender, RoutedEventArgs e) => RefreshSerialPorts(SelectedPortName);
@@ -510,11 +519,21 @@ public sealed partial class SessionEditDialog : ContentDialog
         SerialPortBox.PlaceholderText = ports.Count == 0 ? "No ports found. Plug in the cable, then Refresh" : "COM3";
         var match = ports.FirstOrDefault(port => string.Equals(port.PortName, keep, StringComparison.OrdinalIgnoreCase));
         if (match is not null)
+        {
+            _pendingSerialPortText = match.Label;
             SerialPortBox.SelectedItem = match.Label;
+            if (SerialPortBox.IsLoaded)
+                SerialPortBox.Text = match.Label;
+        }
         else if (!string.IsNullOrWhiteSpace(keep))
-            SetEditableText(SerialPortBox, keep);
+            SetEditableText(SerialPortBox, keep, text => _pendingSerialPortText = text);
         else if (ports.Count == 1)
+        {
+            _pendingSerialPortText = ports[0].Label;
             SerialPortBox.SelectedItem = ports[0].Label;
+            if (SerialPortBox.IsLoaded)
+                SerialPortBox.Text = ports[0].Label;
+        }
     }
 
     /// <summary>"COM5" from the picker's item ("COM5 — USB Serial Device") or typed text.</summary>
@@ -522,25 +541,41 @@ public sealed partial class SessionEditDialog : ContentDialog
     {
         get
         {
-            var text = SerialPortBox.SelectedItem as string ?? SerialPortBox.Text ?? "";
+            var text = EditableComboText(SerialPortBox, _pendingSerialPortText);
             var first = text.Split([' ', '\u2014', '-'], 2, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
             return SerialTarget.NormalizePortName(first);
         }
     }
 
     private int? SelectedBaudRate =>
-        int.TryParse((BaudBox.SelectedItem as string ?? BaudBox.Text)?.Trim(), System.Globalization.NumberStyles.None,
-            System.Globalization.CultureInfo.InvariantCulture, out var baud) && baud is >= 50 and <= 4_000_000
+        int.TryParse(EditableComboText(BaudBox, _pendingBaudText).Trim(), System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture, out var baud)
+            && baud is >= SerialTarget.MinBaudRate and <= SerialTarget.MaxBaudRate
             ? baud
             : null;
 
+    // On a loaded editable ComboBox, Text reflects what the user typed even when SelectedItem
+    // still holds an earlier pick; before Loaded, Text is not populated yet.
+    private static string EditableComboText(ComboBox box, string? pendingText) =>
+        box.IsLoaded ? box.Text ?? "" : pendingText ?? box.SelectedItem as string ?? box.Text ?? "";
+
     // An editable ComboBox resets Text set before it loads.
-    private static void SetEditableText(ComboBox box, string text)
+    private static void SetEditableText(ComboBox box, string text, Action<string?> storePending)
     {
+        storePending(text);
         if (box.IsLoaded)
+        {
+            box.SelectedItem = null;
             box.Text = text;
-        else
-            box.Loaded += (_, _) => box.Text = text;
+            return;
+        }
+        RoutedEventHandler? onLoaded = null;
+        onLoaded = (_, _) =>
+        {
+            box.Loaded -= onLoaded;
+            box.Text = text;
+        };
+        box.Loaded += onLoaded;
     }
 
     private static int DelayOf(NumberBox box) =>
@@ -600,8 +635,12 @@ public sealed partial class SessionEditDialog : ContentDialog
         Validate(HostBox, HostError, !serial && string.IsNullOrWhiteSpace(HostBox.Text), "Enter a host name or IP address.");
         var portName = SelectedPortName;
         var baud = SelectedBaudRate;
-        Validate(SerialPortBox, SerialPortError, serial && (portName is null || baud is null),
-            portName is null ? "Choose a port, or type a name such as COM3." : "Enter a speed such as 9600 or 115200.");
+        var dataBits = Math.Max(0, DataBitsBox.SelectedIndex) + 5;
+        var stopBits = (SerialStopBits)Math.Max(0, StopBitsBox.SelectedIndex);
+        var framingError = SerialTarget.ValidateFraming(dataBits, stopBits);
+        Validate(SerialPortBox, SerialPortError, serial && portName is null, "Choose a port, or type a name such as COM3.");
+        Validate(BaudBox, SerialBaudError, serial && baud is null, "Enter a speed such as 9600 or 115200.");
+        Validate(StopBitsBox, SerialFramingError, serial && framingError is not null, framingError ?? "");
         var login = !ssh ? new LoginChoice { Login = SessionLogin.Own } : SelectedLogin;
         var ownLogin = login.Login == SessionLogin.Own;
         var auth = ownLogin ? SelectedAuth : AuthMethod.Password;

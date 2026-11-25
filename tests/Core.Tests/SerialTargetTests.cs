@@ -10,6 +10,9 @@ public sealed class SerialTargetTests
     [InlineData(" com12 ", "COM12")]
     [InlineData(@"\\.\COM3", "COM3")]
     [InlineData("COM256", "COM256")]
+    [InlineData("COM5\0", "COM5")]
+    [InlineData("COM5\0garbage", "COM5")]
+    [InlineData("\0COM5", null)]
     [InlineData("COM0", null)]
     [InlineData("COM257", null)]
     [InlineData("COM", null)]
@@ -51,6 +54,45 @@ public sealed class SerialTargetTests
         using var serial = new SerialTerminalSession();
         var error = Assert.Throws<SerialSessionException>(() => serial.Open(new SerialTarget { PortName = "printer" }));
         Assert.Contains("COM3", error.Message);
+    }
+
+    [Theory]
+    [InlineData(5, SerialStopBits.One, true)]
+    [InlineData(5, SerialStopBits.OnePointFive, true)]
+    [InlineData(5, SerialStopBits.Two, false)]
+    [InlineData(6, SerialStopBits.One, true)]
+    [InlineData(6, SerialStopBits.OnePointFive, false)]
+    [InlineData(7, SerialStopBits.Two, true)]
+    [InlineData(8, SerialStopBits.One, true)]
+    [InlineData(8, SerialStopBits.OnePointFive, false)]
+    [InlineData(8, SerialStopBits.Two, true)]
+    [InlineData(4, SerialStopBits.One, false)]
+    [InlineData(9, SerialStopBits.One, false)]
+    public void ValidateFraming_EnforcesWindowsPortRules(int dataBits, SerialStopBits stopBits, bool valid)
+    {
+        var error = SerialTarget.ValidateFraming(dataBits, stopBits);
+        Assert.Equal(valid, error is null);
+    }
+
+    [Theory]
+    [InlineData(0, 8, SerialStopBits.One)]
+    [InlineData(49, 8, SerialStopBits.One)]
+    [InlineData(4_000_001, 8, SerialStopBits.One)]
+    [InlineData(9600, 8, SerialStopBits.OnePointFive)]
+    [InlineData(9600, 5, SerialStopBits.Two)]
+    [InlineData(9600, 4, SerialStopBits.One)]
+    public void Open_InvalidLineSettings_ThrowsSerialSessionException(int baud, int dataBits, SerialStopBits stopBits)
+    {
+        using var serial = new SerialTerminalSession();
+        var error = Assert.Throws<SerialSessionException>(() => serial.Open(new SerialTarget
+        {
+            PortName = "COM3",
+            BaudRate = baud,
+            DataBits = dataBits,
+            StopBits = stopBits,
+        }));
+        Assert.False(error.PortMissing);
+        Assert.Contains("does not accept", error.Message);
     }
 
     [Fact]

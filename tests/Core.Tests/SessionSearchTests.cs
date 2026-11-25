@@ -58,4 +58,26 @@ public sealed class SessionSearchTests
         var ranked = SessionSearch.Rank(sessions, "core");
         Assert.Equal(["core-sw-3", "my-core-box", "other"], ranked.Select(s => s.Name).ToArray());
     }
+
+    [Fact]
+    public void FilterAndRank_MatchSerialPortAndLineSettings()
+    {
+        var console = new Session
+        {
+            Name = "core-sw-1",
+            Kind = SessionKind.Serial,
+            Serial = new SerialTarget { PortName = "COM5", BaudRate = 115200 },
+        };
+        var notesMention = new Session
+        {
+            Name = "docs-box",
+            Host = "10.0.0.2",
+            Notes = "plug console into COM5",
+        };
+        Assert.True(SessionSearch.Matches(console, "com5"));
+        Assert.True(SessionSearch.Matches(console, "115200"));
+        Assert.True(SessionSearch.Matches(console, "com5 8n1"));
+        var ranked = SessionSearch.Rank([notesMention, console], "COM5");
+        Assert.Equal(["core-sw-1", "docs-box"], ranked.Select(s => s.Name).ToArray());
+    }
 }

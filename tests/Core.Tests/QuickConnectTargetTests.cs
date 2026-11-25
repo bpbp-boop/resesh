@@ -82,6 +82,7 @@ public sealed class QuickConnectTargetTests
     [InlineData("serial printer")]
     [InlineData("serial COM5 fast")]
     [InlineData("serial COM5 9600 8X1")]
+    [InlineData("serial COM5 9600 5N2")]
     [InlineData("serial COM5 9600 8N1 extra")]
     [InlineData("COM5")]
     public void MalformedSerialTargets_AreRejected(string input) =>
