@@ -577,6 +577,147 @@ public sealed unsafe class NativeFrameTests
         Assert.Equal(0, dragged);
     }
 
+    [WindowsNativeFact]
+    public void ModeResetClearsStuckTuiModesAndPreservesScrollback()
+    {
+        Assert.Null(GhosttyNative.TryLoad());
+        var events = t_events = [];
+        var handle = GhosttyNative.rvt_new(40, 6, 1000, &CollectEvent, IntPtr.Zero);
+        var cells = new TerminalCell[40 * 6];
+        var dirty = new byte[6];
+        try
+        {
+            void Write(string text)
+            {
+                var bytes = Encoding.UTF8.GetBytes(text);
+                fixed (byte* data = bytes)
+                    GhosttyNative.rvt_write(handle, data, (nuint)bytes.Length);
+            }
+            (int Rows, GhosttyFrameInfo Info) ReadFrame(bool forceAll = false)
+            {
+                GhosttyFrameInfo frame = default;
+                fixed (TerminalCell* c = cells)
+                fixed (byte* d = dirty)
+                    return (GhosttyNative.rvt_read_frame(handle, c, 40, 6, d, forceAll ? 1 : 0, &frame), frame);
+            }
+            string EncodeKey(int vk, int mods, string text = "", uint unshifted = 0)
+            {
+                var utf8 = Encoding.UTF8.GetBytes(text);
+                var output = stackalloc byte[64];
+                int n;
+                fixed (byte* u = utf8)
+                    n = GhosttyNative.rvt_encode_key(handle, vk, mods, GhosttyNative.KeyPress, u, (nuint)utf8.Length, unshifted, output, 64);
+                return n > 0 ? Encoding.ASCII.GetString(output, n) : "";
+            }
+            string EncodeWheelUp()
+            {
+                var output = stackalloc byte[64];
+                var n = GhosttyNative.rvt_encode_mouse(handle, GhosttyNative.MousePress, 4, 0, 20, 20, 0, output, 64);
+                return n > 0 ? Encoding.ASCII.GetString(output, n) : "";
+            }
+            string EncodeFocusIn()
+            {
+                var output = stackalloc byte[16];
+                var n = GhosttyNative.rvt_focus(handle, 1, output, 16);
+                return n > 0 ? Encoding.ASCII.GetString(output, n) : "";
+            }
+
+            GhosttyNative.rvt_resize(handle, 40, 6, 8, 16);
+            // Put content into scrollback and place the cursor below row 0, with a stale saved
+            // cursor at (0, 0) to prove primary-screen reset never invokes ?1049l/restoreCursor.
+            Write("\u001b7");
+            for (var i = 0; i < 8; i++)
+                Write($"history-{i}\r\n");
+            Write("chris@vm:~$ ");
+            var (_, beforeInfo) = ReadFrame(forceAll: true);
+            var promptCursorX = beforeInfo.CursorX;
+            var promptCursorY = beforeInfo.CursorY;
+            Assert.True(promptCursorY > 0);
+
+            // Simulate a TUI that dies mid-stream leaving modes, hyperlink, pointer shape,
+            // synchronized output and an unfinished OSC sequence behind.
+            Write("\u001b[?1000h\u001b[?1006h\u001b[>1u\u001b[>3u\u001b[?2004h\u001b[?1004h\u001b[?1h\u001b[?25l"
+                + "\u001b]22;pointer\u001b\\\u001b]8;;https://example.com\u001b\\\u001b[?2026h\u001b]2;unterminated");
+            Assert.Equal(3, GhosttyNative.rvt_kitty_flags(handle));
+            Assert.Equal(1, GhosttyNative.rvt_mouse_tracking(handle));
+            Assert.Equal(1, GhosttyNative.rvt_bracketed_paste(handle));
+            Assert.Equal("\u001b[99;5u", EncodeKey('C', GhosttyNative.ModCtrl, "c", 'c'));
+            Assert.StartsWith("\u001b[<64;", EncodeWheelUp());
+            Assert.Equal("\u001b[I", EncodeFocusIn());
+
+            events.Clear();
+            TerminalModeReset.Apply(handle);
+
+            // Resetting modes must never generate replies back to the host.
+            Assert.DoesNotContain(events, e => e.Kind == (int)GhosttyEventKind.Pty);
+
+            Assert.Equal(0, GhosttyNative.rvt_kitty_flags(handle));
+            Assert.Equal(0, GhosttyNative.rvt_mouse_tracking(handle));
+            Assert.Equal(0, GhosttyNative.rvt_bracketed_paste(handle));
+            Assert.Equal("\u0003", EncodeKey('C', GhosttyNative.ModCtrl, "c", 'c'));
+            Assert.Equal("\u001b[A", EncodeKey(0x26, 0)); // normal cursor keys, not DECCKM (\eOA)
+            Assert.Equal("", EncodeWheelUp());
+            Assert.Equal("", EncodeFocusIn());
+
+            var (rowsDrawn, afterInfo) = ReadFrame(forceAll: true);
+            Assert.True(rowsDrawn > 0);
+            Assert.Equal(0, afterInfo.RenderHeld);
+            Assert.Equal(0, afterInfo.Alternate);
+            Assert.Equal(1, afterInfo.CursorVisible);
+            Assert.Equal(GhosttyNative.MouseShapeText, afterInfo.MouseShape);
+            Assert.Equal(promptCursorX, afterInfo.CursorX);
+            Assert.Equal(promptCursorY, afterInfo.CursorY);
+
+            // Scrollback is preserved, and subsequent text lands outside the aborted OSC/hyperlink.
+            Write("ok");
+            var buffer = new TerminalCommandBuffer(() => handle);
+            buffer.Refresh();
+            Assert.Equal("history-0", buffer.LineText(0));
+            Assert.Equal("chris@vm:~$ ok", buffer.LineText(buffer.CursorLine));
+            Assert.Null(buffer.HyperlinkAt(promptCursorX, promptCursorY));
+        }
+        finally
+        {
+            GhosttyNative.rvt_free(handle);
+            t_events = null;
+        }
+    }
+
+    [WindowsNativeFact]
+    public void ModeResetLeavesAlternateScreenAndClearsBothKittyStacks()
+    {
+        using var terminal = new NativeTerminal();
+        terminal.Write("line0\r\nline1\r\nprompt$ ");
+        terminal.ReadFrame(forceAll: true);
+        var savedX = terminal.Info.CursorX;
+        var savedY = terminal.Info.CursorY;
+
+        // Push Kitty keyboard on primary, enter alternate screen with ?1049h, push Kitty keyboard
+        // again on alternate, and enable SGR mouse tracking.
+        terminal.Write("\u001b[>1u\u001b[?1049h\u001b[>7u\u001b[?1002h\u001b[?1006h\u001b[1;1Halt-tui");
+        terminal.ReadFrame(forceAll: true);
+        Assert.Equal(1, terminal.Info.Alternate);
+        Assert.Equal(7, GhosttyNative.rvt_kitty_flags(terminal.Handle));
+        Assert.Equal(1, GhosttyNative.rvt_mouse_tracking(terminal.Handle));
+
+        TerminalModeReset.Apply(terminal.Handle);
+        terminal.ReadFrame(forceAll: true);
+
+        Assert.Equal(0, terminal.Info.Alternate);
+        Assert.Equal(0, GhosttyNative.rvt_kitty_flags(terminal.Handle));
+        Assert.Equal(0, GhosttyNative.rvt_mouse_tracking(terminal.Handle));
+        Assert.Equal(savedX, terminal.Info.CursorX);
+        Assert.Equal(savedY, terminal.Info.CursorY);
+
+        var buffer = new TerminalCommandBuffer(() => terminal.Handle);
+        buffer.Refresh();
+        Assert.Equal("prompt$", buffer.LineText(buffer.CursorLine));
+
+        // Alternate screen's own Kitty keyboard stack was cleared too.
+        terminal.Write("\u001b[?1049h");
+        Assert.Equal(0, GhosttyNative.rvt_kitty_flags(terminal.Handle));
+    }
+
     private sealed class WindowsNativeFactAttribute : FactAttribute
     {
         public WindowsNativeFactAttribute()

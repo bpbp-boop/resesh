@@ -513,9 +513,29 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
             commands.ResetConnection();
             commands.SetExecutionReporting(false);
         }
+        // A program that died with the connection never sent its teardown sequences; reset
+        // modes before printing the notice so it lands on the primary screen, not clipped or held.
+        ResetModes();
         WriteDisplayText(Rule() + (neutral ? "\x1b[90m" : "\x1b[1;33m") +
             (string.IsNullOrEmpty(message) ? "Disconnected." : message) +
             "\x1b[0m Press Enter to " + (string.IsNullOrEmpty(action) ? "reconnect" : action) + ".\r\n");
+    }
+
+    public override void ResetModes()
+    {
+        if (_disposed)
+            return;
+        _suppressedKey.Clear();
+        _buttonsDown = 0;
+        EndSelectionGesture(null);
+        SetAutoscroll(0);
+        lock (_termGate)
+        {
+            if (_term != IntPtr.Zero)
+                TerminalModeReset.Apply(_term);
+        }
+        ForceFull();
+        RequestFrame();
     }
 
     public override void WriteDivider() => WriteDisplayText(Rule());
@@ -1450,7 +1470,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
     /// swaps the two sides, so whichever one the mode leaves out is still a Shift away.</summary>
     private bool ReportsMouse(PointerRoutedEventArgs args, bool wheel = false)
     {
-        if (_term == IntPtr.Zero || _mouseCapture == TerminalMouseCapture.Never
+        if (_term == IntPtr.Zero || !_connection.IsLive || _mouseCapture == TerminalMouseCapture.Never
             || GhosttyNative.rvt_mouse_tracking(_term) == 0)
             return false;
         var program = _mouseCapture == TerminalMouseCapture.Always || wheel;
@@ -1459,7 +1479,7 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     /// <summary>True when only Shift selects, because the program gets plain clicks.</summary>
     private bool ShiftSelects =>
-        _mouseCapture == TerminalMouseCapture.Always && GhosttyNative.rvt_mouse_tracking(_term) != 0;
+        _connection.IsLive && _mouseCapture == TerminalMouseCapture.Always && GhosttyNative.rvt_mouse_tracking(_term) != 0;
 
     private void SendMouse(int action, int button, PointerRoutedEventArgs args)
     {
@@ -1469,6 +1489,8 @@ public sealed unsafe partial class NativeTerminalSurface : TerminalSurface
 
     private void SendMouse(int action, int button, int mods, (float X, float Y) position)
     {
+        if (!_connection.IsLive)
+            return;
         var output = stackalloc byte[64];
         var n = GhosttyNative.rvt_encode_mouse(_term, action, button, mods, position.X, position.Y, _buttonsDown != 0 ? 1 : 0, output, 64);
         if (n > 0)

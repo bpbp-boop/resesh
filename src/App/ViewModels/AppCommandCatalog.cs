@@ -156,6 +156,8 @@ public sealed class AppCommandCatalog
             new("Tab", () => $"{vm.ActiveStopVerb} Tab", "current active session", vm.DisconnectCommand),
             new("Tab", Fixed("Send Break"), "telnet console serial break boot interrupt rommon password recovery",
                 vm.SendBreakCommand, ShortcutIds.SendBreak),
+            new("Tab", Fixed("Reset Terminal"), "modes stuck mouse keyboard kitty alternate screen sgr fix",
+                vm.ResetTerminalCommand),
             new("Tab", Fixed("Manage Remote Sessions"), "tmux persistent shells resume end close command running age",
                 vm.ManageRemoteSessionsCommand),
             new("Tab", Fixed("Tunnels"), "port forward forwarding local remote dynamic socks proxy listen ssh -L -R -D",

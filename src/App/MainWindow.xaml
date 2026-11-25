@@ -346,6 +346,11 @@
                         Visibility="{x:Bind ViewModel.ShowSendBreak, Mode=OneWay}"
                         Command="{x:Bind ViewModel.SendBreakCommand}" />
                     <MenuFlyoutItem
+                        x:Name="ResetTerminalMenuItem"
+                        Text="Reset Terminal"
+                        AutomationProperties.AutomationId="ResetTerminalMenu"
+                        Command="{x:Bind ViewModel.ResetTerminalCommand}" />
+                    <MenuFlyoutItem
                         x:Name="ManageRemoteMenuItem"
                         Text="Manage Remote Sessions…"
                         AutomationProperties.AutomationId="ManageRemoteSessionsMenu"

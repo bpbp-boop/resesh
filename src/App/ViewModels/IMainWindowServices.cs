@@ -53,6 +53,7 @@ public interface IMainWindowServices
     void ReconnectTab(TabViewModel tab);
     void DisconnectTab(TabViewModel tab);
     void SendBreak(TabViewModel tab);
+    void ResetTerminal(TabViewModel tab);
     Task ManageRemoteSessionsAsync(TabViewModel tab);
     Task ManageTunnelsAsync(TabViewModel tab);
     Task EndRemoteSessionAsync(TabViewModel tab);

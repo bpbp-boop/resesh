@@ -67,6 +67,7 @@ internal sealed class FakeMainWindowServices : IMainWindowServices
     public void ReconnectTab(TabViewModel tab) => Record($"Reconnect {tab.Header}");
     public void DisconnectTab(TabViewModel tab) => Record($"Disconnect {tab.Header}");
     public void SendBreak(TabViewModel tab) => Record($"SendBreak {tab.Header}");
+    public void ResetTerminal(TabViewModel tab) => Record($"ResetTerminal {tab.Header}");
     public Task ManageRemoteSessionsAsync(TabViewModel tab) => RecordAsync($"ManageRemote {tab.Header}");
     public Task ManageTunnelsAsync(TabViewModel tab) => RecordAsync($"ManageTunnels {tab.Header}");
     public Task EndRemoteSessionAsync(TabViewModel tab) => RecordAsync($"EndRemote {tab.Header}");
